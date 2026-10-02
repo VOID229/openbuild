@@ -13,7 +13,7 @@
 // Records: "chat:<id>", "settings" (see syncedSettings), "profile" (name, bio, picture, ...) and,
 // only when "Sync API keys" is on, "keys" (the secrets for each plan and search provider).
 import type { ConvexReactClient } from "convex/react";
-import { createStore, del, get, set } from "idb-keyval";
+import { createStore, del, get, set } from "../kv";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { chatListeners } from "../db";

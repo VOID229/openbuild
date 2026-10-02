@@ -10,7 +10,7 @@
 //
 // On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
 // (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
-import { clear, createStore, del, entries, get, set } from "idb-keyval";
+import { clear, createStore, del, entries, get, set } from "./kv";
 import { config, isHosted } from "./runtime";
 import type { Chat } from "./types";
 

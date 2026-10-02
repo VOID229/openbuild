@@ -66,6 +66,11 @@ OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed o
 - **The relay keeps nothing.** `/api/chat`, `/api/models` and `/api/verify-search` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
 - **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address. A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
 
+**iPhone / iPad with Lockdown Mode.** The site works, but it's a bit iffy: Lockdown Mode turns off IndexedDB, the browser storage the site normally uses. You have two options:
+
+- **Easiest: turn Lockdown Mode off for this site only.** In Safari, tap the page menu in the address bar → Website Settings → turn off Lockdown Mode. The rest of your phone stays in Lockdown Mode, and the site then works like it does anywhere else.
+- **Keep Lockdown Mode on.** Chats, settings and API keys are then kept in localStorage instead (about 5 MB, so a very long chat history may not fit). Sync still works, but the browser has nowhere safe to keep the sync key, so sync locks again every time you reload the page. To avoid typing your password each time, open Settings → Account and set up **Unlock with Face ID** (needs iOS 18 or later). It creates a passkey whose secret, released only by Face ID, encrypts the sync key on your phone. After each reload, tap **Unlock with Face ID** at the top right. Your password always works too.
+
 `bun run build` produces the site in Vercel's Build Output format (`.vercel/output`): the static app, the relay functions, and the routes and headers. `vercel.json` tells Vercel to install with Bun and run that build.
 
 **Domain setup** (once): in Vercel, add `openchat.shade-io.com` under the project's Settings → Domains. Then in GoDaddy's DNS for `shade-io.com`, add the `CNAME` record Vercel shows (name `openchat`, value like `cname.vercel-dns.com`). The rest of `shade-io.com` is unaffected.

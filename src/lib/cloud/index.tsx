@@ -7,7 +7,9 @@ import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { config } from "../runtime";
 import { useStore } from "../store";
+import { usingFallbackStorage } from "../kv";
 import { createDataKey, unwrapDataKey, type Credentials } from "./crypto";
+import { canSetUpPasskey, confirmPasskey, loadPasskey, rememberSession, removePasskey, setUpPasskey, unlockWithPasskey } from "./passkey";
 import { forgetAccount, loadDataKey, saveDataKey, SyncEngine, useCloud } from "./sync";
 
 export { useCloud } from "./sync";
@@ -47,24 +49,55 @@ export function useAccount() {
 export async function unlock(account: Account, creds: Credentials) {
   if (!client) throw new Error("Cloud sync isn't configured");
   let key: CryptoKey;
+  let vault: { wrappedKey: ArrayBuffer; iv: ArrayBuffer };
   if (account.vault) {
     try {
       key = await unwrapDataKey(creds.wrapKey, account.vault.wrappedKey, account.vault.iv);
     } catch {
       throw new Error("Wrong password");
     }
+    vault = account.vault;
   } else {
     const created = await createDataKey(creds.wrapKey);
     await client.mutation(api.sync.createVault, { wrappedKey: created.wrappedKey, iv: created.iv });
     key = created.key;
+    vault = created;
   }
-  await saveDataKey(scopeOf(account.username), key);
+  const scope = scopeOf(account.username);
+  // Without IndexedDB the key only lasts until a reload; keep what Face ID setup needs for this page.
+  if (usingFallbackStorage) rememberSession(scope, creds.wrapKey, vault.wrappedKey, vault.iv);
+  await saveDataKey(scope, key);
+  useCloudKey.setState((s) => ({ version: s.version + 1 }));
+}
+
+// Face ID / Touch ID unlock (see passkey.ts). Only offered where the data key can't be kept, which
+// is when the browser has no IndexedDB (iOS Lockdown Mode); elsewhere sync stays unlocked anyway.
+
+/** "on": set up; "pending": needs the second Face ID tap; "available": can be set up now; "off". */
+export async function passkeyState(username: string): Promise<"on" | "pending" | "available" | "off"> {
+  if (!usingFallbackStorage) return "off";
+  const scope = scopeOf(username);
+  const record = await loadPasskey(scope);
+  if (record?.wrapped) return "on";
+  if (!canSetUpPasskey(scope)) return "off";
+  return record ? "pending" : "available";
+}
+
+export const enablePasskey = (username: string) => setUpPasskey(scopeOf(username), username);
+export const confirmPasskeySetup = (username: string) => confirmPasskey(scopeOf(username));
+export const disablePasskey = (username: string) => removePasskey(scopeOf(username));
+
+/** Unlock sync on this device with Face ID / Touch ID. */
+export async function unlockWithFaceId(username: string) {
+  const scope = scopeOf(username);
+  await saveDataKey(scope, await unlockWithPasskey(scope));
   useCloudKey.setState((s) => ({ version: s.version + 1 }));
 }
 
 /** Stop syncing and forget this device's key and sync state. Local chats and settings stay. */
 export async function forgetDevice(username: string) {
   await forgetAccount(scopeOf(username));
+  await removePasskey(scopeOf(username));
   useCloudKey.setState((s) => ({ version: s.version + 1 }));
 }
 

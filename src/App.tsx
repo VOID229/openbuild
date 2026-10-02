@@ -1,5 +1,6 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { LockedSyncPrompt } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { IconButton } from "./components/primitives";
@@ -8,6 +9,7 @@ import { TooltipLayer } from "./components/Tooltip";
 import { Sidebar } from "./components/Sidebar";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
+import { isHosted } from "./lib/runtime";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 
@@ -187,11 +189,16 @@ function Main() {
             loadError && (
               <div className="home">
                 <div className="home-center">
-                  <p>Can't reach the OpenChat server to load your chats ({loadError}). Retrying…</p>
+                  <p>
+                    {isHosted()
+                      ? `Couldn't read your chats from this browser's storage (${loadError}). If private browsing or a privacy setting blocks site storage, turn it off for this site. Retrying…`
+                      : `Can't reach the OpenChat server to load your chats (${loadError}). Retrying…`}
+                  </p>
                 </div>
               </div>
             )
           ) : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+          {cloudConfigured() && <LockedSyncPrompt />}
         </main>
       </div>
       <SettingsModal />

@@ -5,7 +5,7 @@
 //
 // Hosted website: there's no server-side storage, so keys stay in this browser (IndexedDB) and are
 // attached to each request that needs them; the relay uses them for that request and keeps nothing.
-import { createStore, entries, get, set } from "idb-keyval";
+import { createStore, entries, get, set } from "./kv";
 import { SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { config } from "./runtime";
 

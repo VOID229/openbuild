@@ -1,8 +1,21 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth } from "convex/react";
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
-import { cloudClient, cloudConfigured, forgetDevice, unlock, useAccount, useCloud, type Account } from "../lib/cloud";
+import {
+  cloudClient,
+  cloudConfigured,
+  confirmPasskeySetup,
+  disablePasskey,
+  enablePasskey,
+  forgetDevice,
+  passkeyState,
+  unlock,
+  unlockWithFaceId,
+  useAccount,
+  useCloud,
+  type Account,
+} from "../lib/cloud";
 import { deriveCredentials, MIN_PASSWORD, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
 import { useStore } from "../lib/store";
 import { Spinner, Toggle } from "./primitives";
@@ -39,6 +52,119 @@ function AccountPanel() {
   if (!isAuthenticated || !account) return <SignInForm />;
   if (status === "locked") return <SignInForm unlockFor={account} />;
   return <SignedIn account={account} />;
+}
+
+/** Face ID unlock state for an account on this device; undefined while it's being read. */
+export function usePasskeyState(username: string | undefined) {
+  const [state, setState] = useState<Awaited<ReturnType<typeof passkeyState>>>();
+  const refresh = useCallback(() => {
+    if (username) void passkeyState(username).then(setState);
+  }, [username]);
+  useEffect(refresh, [refresh]);
+  return [state, refresh] as const;
+}
+
+/** "Unlock with Face ID", for a locked account that has it set up on this device. */
+export function FaceIdUnlockButton({ username, className = "btn" }: { username: string; className?: string }) {
+  const [state] = usePasskeyState(username);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  if (state !== "on") return null;
+  return (
+    <>
+      <button
+        type="button"
+        className={className}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(undefined);
+          try {
+            await unlockWithFaceId(username);
+          } catch (err) {
+            setError((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {busy && <Spinner size={13} />}
+        Unlock with Face ID
+      </button>
+      {error && (
+        <p className="account-error" role="alert">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** On the main screen: when sync is locked and Face ID unlock is set up, offer it right away. */
+export function LockedSyncPrompt() {
+  const account = useAccount();
+  const status = useCloud((s) => s.status);
+  if (status !== "locked" || !account?.vault) return null;
+  return (
+    <div className="sync-unlock-prompt">
+      <FaceIdUnlockButton username={account.username} className="btn btn-sm" />
+    </div>
+  );
+}
+
+function FaceIdSetting({ username }: { username: string }) {
+  const [state, refresh] = usePasskeyState(username);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  if (!state || state === "off") return null;
+
+  const run = (action: () => Promise<unknown>) => async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await action();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(false);
+      refresh();
+    }
+  };
+
+  return (
+    <div className="setting-row setting-row-top setting-row-divided">
+      <div className="setting-text">
+        <div className="setting-label">Unlock with Face ID</div>
+        <p className="setting-desc">
+          {state === "on"
+            ? "On. This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so after a reload you unlock with Face ID instead of your password. After turning it off, you can delete the \"OpenChat sync unlock\" passkey in the Passwords app."
+            : state === "pending"
+              ? "Almost done: confirm with Face ID once more to finish."
+              : "This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so you'd need your password after every reload. Set up a passkey to unlock with Face ID instead. Your password still works."}
+        </p>
+        {error && (
+          <p className="account-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+      {state === "on" ? (
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={run(() => disablePasskey(username))}>
+          Turn off
+        </button>
+      ) : state === "pending" ? (
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={run(() => confirmPasskeySetup(username))}>
+          {busy && <Spinner size={12} />}
+          Confirm with Face ID
+        </button>
+      ) : (
+        <button type="button" className="btn btn-sm" disabled={busy} onClick={run(() => enablePasskey(username))}>
+          {busy && <Spinner size={12} />}
+          Set up
+        </button>
+      )}
+    </div>
+  );
 }
 
 const authError = (err: unknown) => {
@@ -91,6 +217,11 @@ function SignInForm({ unlockFor }: { unlockFor?: Account }) {
 
   return (
     <form className="account-form" onSubmit={submit}>
+      {unlockFor && (
+        <div className="account-faceid">
+          <FaceIdUnlockButton username={unlockFor.username} />
+        </div>
+      )}
       <Note>
         {unlockFor
           ? `Enter the password for ${unlockFor.username} to start syncing on this device.`
@@ -270,6 +401,7 @@ function SignedIn({ account }: { account: Account }) {
         sync server stores only ciphertext.
       </Note>
       <SyncKeysSetting />
+      <FaceIdSetting username={account.username} />
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Delete account</div>
