@@ -118,7 +118,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = 
 };
 
 /** Order of rows in Settings → Web Search. */
-export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "x", "searxng"];
+export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x"];
 
 /** A configured search provider sent with a chat request: keys (or instance URLs) in priority order. */
 export interface SearchCredentials {
