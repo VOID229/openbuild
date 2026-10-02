@@ -1,5 +1,5 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { IconButton } from "./components/primitives";
@@ -43,7 +43,19 @@ function Home() {
   );
 }
 
+/** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
 export function App() {
+  const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  useEffect(() => {
+    if (hydrated) return;
+    const unsubscribe = useStore.persist.onFinishHydration(() => setHydrated(true));
+    if (useStore.persist.hasHydrated()) setHydrated(true);
+    return unsubscribe;
+  }, [hydrated]);
+  return hydrated ? <Main /> : null;
+}
+
+function Main() {
   useTheme();
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
@@ -51,11 +63,27 @@ export function App() {
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const { setSidebarOpen, newChat } = useStore.getState();
 
+  const [loadError, setLoadError] = useState<string>();
   useEffect(() => {
-    void loadChats().then((chats) => useStore.getState().setChats(chats));
+    // Chats come from the local server; keep trying until it answers.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = (delay: number) =>
+      loadChats().then(
+        (chats) => {
+          setLoadError(undefined);
+          useStore.getState().setChats(chats);
+        },
+        (err: Error) => {
+          console.error("Failed to load chats", err);
+          setLoadError(err.message);
+          timer = setTimeout(() => load(Math.min(delay * 2, 10_000)), delay);
+        },
+      );
+    void load(1000);
     // Load the saved keys from the server's vault, then re-detect their models (cached results stay usable meanwhile).
     ensureSelection();
     void useStore.getState().syncKeys().then(() => useStore.getState().refreshDetection());
+    return () => clearTimeout(timer);
   }, []);
 
   // Global shortcuts:
@@ -146,7 +174,15 @@ export function App() {
               <SquarePen size={17} />
             </IconButton>
           </div>
-          {!chatsLoaded ? null : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+          {!chatsLoaded ? (
+            loadError && (
+              <div className="home">
+                <div className="home-center">
+                  <p>Can't reach the OpenChat server to load your chats ({loadError}). Retrying…</p>
+                </div>
+              </div>
+            )
+          ) : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
         </main>
       </div>
       <SettingsModal />

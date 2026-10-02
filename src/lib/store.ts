@@ -1,10 +1,11 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist } from "zustand/middleware";
 import { PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { detectModels } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
+import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, Message, Settings } from "./types";
 
@@ -286,6 +287,8 @@ export const useStore = create<State>()(
     }),
     {
       name: "openchat",
+      // Saved by the local server on disk, so every port and browser sees the same settings.
+      storage: createJSONStorage(() => serverStorage),
       version: 4,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;

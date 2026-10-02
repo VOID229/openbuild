@@ -1,12 +1,14 @@
 // OpenChat server: serves the React app (bundled by Bun, with HMR in dev) and proxies
 // chat requests to Opencode. API keys are kept in the OS keychain (see vault.ts) and are never
-// sent back to the browser; requests refer to them by plan.
+// sent back to the browser; requests refer to them by plan. Chats and settings are kept on disk
+// (see storage.ts), so they don't depend on which port or browser you open the app in.
 import index from "../src/index.html";
 import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory, type PlanId, type SearchCredentials, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
 import { describeModels, detectModels } from "./catalog";
 import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
 import { searchToolkit } from "./search";
+import * as storage from "./storage";
 import * as vault from "./vault";
 
 const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
@@ -20,6 +22,11 @@ const isEdits = (e: unknown): e is KeyEdit[] =>
   Array.isArray(e) &&
   e.length <= 20 &&
   e.every((x) => x && (typeof x.id === "string" ? x.secret === undefined && x.id.length <= 64 : isKey(x.secret)));
+const isChatId = (id: unknown): id is string => typeof id === "string" && id.length > 0 && id.length <= 128;
+const isChat = (c: any): c is storage.StoredChat =>
+  !!c && typeof c === "object" && isChatId(c.id) && Number.isFinite(c.updatedAt) && Number.isFinite(c.createdAt) && Array.isArray(c.messages);
+/** The client's persisted UI state (settings, sidebar layout), stored as one JSON document. */
+const STATE_KEY = "client-state";
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 // The API holds your keys' power (it can spend them), so it only answers requests that really come
@@ -160,6 +167,45 @@ function serve(port: number) {
         }),
       },
 
+      // Chats, stored on disk. Deleting keeps a tombstone so a deleted chat can't come back.
+      "/api/chats": {
+        GET: api(() => Response.json({ chats: storage.listChats() })),
+        DELETE: api(() => {
+          storage.deleteAllChats();
+          return Response.json({ ok: true });
+        }),
+      },
+      // Chats a browser kept before they were stored on disk (IndexedDB, per port).
+      "/api/chats/import": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (!Array.isArray(body?.chats) || !body.chats.every(isChat)) return bad("Expected { chats: Chat[] }");
+          return Response.json({ imported: storage.importChats(body.chats) });
+        }),
+      },
+      "/api/chats/:id": {
+        PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
+          const chat = await readJson(req);
+          if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
+          return storage.putChat(chat) ? Response.json({ ok: true }) : bad("Chat was deleted", 410);
+        }),
+        DELETE: api((req: Bun.BunRequest<"/api/chats/:id">) => {
+          storage.deleteChat(req.params.id);
+          return Response.json({ ok: true });
+        }),
+      },
+
+      // Settings and UI layout. `state` is null until the first save.
+      "/api/state": {
+        GET: api(() => Response.json({ state: storage.getValue(STATE_KEY) ?? null })),
+        PUT: api(async (req) => {
+          const body = await readJson(req);
+          if (typeof body?.state !== "string" || body.state.length > 4_000_000) return bad("Expected { state: string }");
+          storage.setValue(STATE_KEY, body.state);
+          return Response.json({ ok: true });
+        }),
+      },
+
       "/api/*": api(() => bad("Not found", 404)),
     },
     error(err) {
@@ -175,18 +221,24 @@ const ndjsonResponse = (events: StreamEvent[]) => new Response(events.map((e) =>
 // Under `bun --hot` this module re-runs on every edit. Stop the previous server and take over its
 // port, so a reload always serves the current routes and bind address instead of leaving the old
 // server answering on the port your browser already has open.
+//
+// The port never changes on its own: if it's taken, startup fails instead of quietly moving to
+// the next one, so the app is always at the address you expect.
 const hot = globalThis as { openchatServer?: ReturnType<typeof serve> };
 const previous = hot.openchatServer;
 if (previous) previous.stop(true);
-const preferred = previous?.port ?? Number(process.env.PORT ?? 3000);
-let server: ReturnType<typeof serve> | undefined;
-for (let port = preferred; !server; port++) {
-  try {
-    server = serve(port);
-  } catch (err) {
-    if ((err as { code?: string }).code !== "EADDRINUSE" || port > preferred + 20) throw err;
-  }
+const port = previous?.port ?? Number(process.env.PORT ?? 3000);
+let server: ReturnType<typeof serve>;
+try {
+  server = serve(port);
+} catch (err) {
+  if ((err as { code?: string }).code !== "EADDRINUSE") throw err;
+  console.error(
+    `\n  Port ${port} is already in use, probably by another OpenChat that's still running.` +
+      `\n  Stop it (or find it with \`lsof -i :${port}\`) and run this again, or pick another port with PORT=<port>.\n`,
+  );
+  process.exit(1);
 }
 hot.openchatServer = server;
-if (server.port !== preferred) console.warn(`\n  Port ${preferred} is in use (another OpenChat still running?), so this one uses ${server.port}.`);
-console.log(`\n  OpenChat running at ${server.url}\n`);
+console.log(`\n  OpenChat running at ${server.url}`);
+console.log(`  Chats and settings are saved in ${storage.location()}\n`);
