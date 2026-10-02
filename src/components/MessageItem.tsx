@@ -210,8 +210,10 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
           {message.model && (
             <span className="msg-model" title={message.routed ? "Picked by the auto router" : undefined}>
               {message.routed ? <Sparkles size={13} /> : <BrandIcon id={message.model.id} />}
-              {message.model.name}
-              {message.status === "stopped" && <span className="msg-stopped">· stopped</span>}
+              <span className="msg-model-name">
+                {message.model.name}
+                {message.status === "stopped" && <span className="msg-stopped"> · stopped</span>}
+              </span>
             </span>
           )}
           {message.content && <CopyButton text={message.content} />}

@@ -73,6 +73,52 @@ interface RowProps {
   onRenameDone: () => void;
 }
 
+/**
+ * Long-press on touch screens opens the row's menu. iOS Safari never fires `contextmenu`, and
+ * Android fires it too, so whichever comes first opens the menu and the click after it is dropped.
+ */
+function useLongPress(open: (x: number, y: number) => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const start = useRef<{ x: number; y: number }>(undefined);
+  const fired = useRef(false);
+  const cancel = () => {
+    clearTimeout(timer.current);
+    start.current = undefined;
+  };
+  const fire = (x: number, y: number) => {
+    cancel();
+    if (fired.current) return;
+    fired.current = true;
+    navigator.vibrate?.(10);
+    open(x, y);
+  };
+  useEffect(() => cancel, []);
+  return {
+    pressing: () => !!start.current || fired.current,
+    fire,
+    handlers: {
+      onPointerDown: (e: React.PointerEvent) => {
+        fired.current = false;
+        if (e.pointerType !== "touch") return;
+        const { clientX: x, clientY: y } = e;
+        start.current = { x, y };
+        timer.current = setTimeout(() => fire(x, y), 450);
+      },
+      onPointerMove: (e: React.PointerEvent) => {
+        if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 8) cancel();
+      },
+      onPointerUp: cancel,
+      onPointerCancel: cancel,
+      onClickCapture: (e: React.MouseEvent) => {
+        if (!fired.current) return;
+        fired.current = false;
+        e.preventDefault();
+        e.stopPropagation();
+      },
+    },
+  };
+}
+
 const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
@@ -80,6 +126,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   const preview = useMemo(() => (hit?.snippet ? "" : previewOf(chat)), [chat, hit]);
   const [draft, setDraft] = useState(chat.title);
   const input = useRef<HTMLInputElement>(null);
+  const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
 
   useLayoutEffect(() => {
     if (!renaming) return;
@@ -120,8 +167,10 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   return (
     <div
       className={cx("history-row", active && "history-row-active")}
+      {...longPress.handlers}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (longPress.pressing()) return longPress.fire(e.clientX, e.clientY);
         // Keyboard-invoked context menus report (0, 0); anchor to the row instead.
         if (e.clientX === 0 && e.clientY === 0) {
           const r = e.currentTarget.getBoundingClientRect();
@@ -215,7 +264,7 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 220;
-    setPos({ left: Math.min(state.x, window.innerWidth - w - 8), top: Math.min(state.y, window.innerHeight - h - 8) });
+    setPos({ left: Math.max(8, Math.min(state.x, window.innerWidth - w - 8)), top: Math.max(8, Math.min(state.y, window.innerHeight - h - 8)) });
     el?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
   }, [open, mounted, state]);
 

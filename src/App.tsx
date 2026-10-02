@@ -20,6 +20,8 @@ function useTheme() {
     const apply = () => {
       const dark = theme === "dark" || (theme === "system" && mq.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
+      // Tints the browser's toolbar / status bar on phones to match the page.
+      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", dark ? "#1a1a1a" : "#ffffff");
     };
     apply();
     mq.addEventListener("change", apply);

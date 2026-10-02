@@ -728,7 +728,7 @@ function AppearanceSection() {
   return (
     <>
       <Heading>Appearance</Heading>
-      <div className="setting-row">
+      <div className="setting-row setting-row-stack">
         <div className="setting-label">Theme</div>
         <div className="segmented" role="radiogroup" aria-label="Theme">
           {(["light", "dark", "system"] as Theme[]).map((t) => (
@@ -738,7 +738,7 @@ function AppearanceSection() {
           ))}
         </div>
       </div>
-      <div className="setting-row">
+      <div className="setting-row setting-row-stack">
         <div className="setting-label">Font</div>
         <div className="segmented" role="radiogroup" aria-label="Font">
           {(["normal", "serif", "fun", "mono"] as FontStyle[]).map((f) => (
@@ -791,6 +791,11 @@ export function SettingsModal() {
   useEffect(() => {
     if (open && mounted) dialog.current?.focus({ preventScroll: true });
   }, [open, mounted]);
+
+  // On phones the tabs scroll sideways; keep the current one in view.
+  useEffect(() => {
+    if (mounted) dialog.current?.querySelector('.settings-nav-item[aria-current="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [mounted, section]);
 
   if (!mounted) return null;
   return (
