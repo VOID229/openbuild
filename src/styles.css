@@ -2991,13 +2991,17 @@ p.key-status svg {
     background: var(--bg);
     box-shadow: var(--shadow-lg);
     transform: none;
-    transition: transform 260ms var(--ease), opacity 200ms var(--ease);
+    visibility: visible;
+    transition: transform 260ms var(--ease), opacity 200ms var(--ease), visibility 0s;
   }
 
+  /* Hidden once it has slid away, so Safari doesn't sample it for the status bar color. */
   .sidebar-closed {
     width: min(300px, 84vw);
     transform: translateX(-100%);
     box-shadow: none;
+    visibility: hidden;
+    transition: transform 260ms var(--ease), opacity 200ms var(--ease), visibility 0s 260ms;
   }
 
   .sidebar-inner {
@@ -3013,12 +3017,15 @@ p.key-status svg {
     background: var(--scrim);
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--med) var(--ease);
+    visibility: hidden;
+    transition: opacity var(--med) var(--ease), visibility 0s var(--med);
   }
 
   .sidebar-scrim-visible {
     opacity: 1;
     pointer-events: auto;
+    visibility: visible;
+    transition: opacity var(--med) var(--ease), visibility 0s;
   }
 
   /* Submenus open below their row instead of off the right edge of the screen. */
@@ -3037,18 +3044,37 @@ p.key-status svg {
     border: 0;
   }
 
+  /* Page and browser chrome share one color on phones (Safari tints its bars from the page). */
+  body {
+    background: var(--surface);
+  }
+
+  /* A solid bar pinned to the top: Safari colors the status bar area from it instead of
+     drawing its own fade over the page. The soft fade into the content hangs below it. */
   .floating-tools {
+    position: fixed;
     top: 0;
     left: 0;
     right: 0;
-    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 14px max(10px, env(safe-area-inset-left));
+    padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) 4px max(10px, env(safe-area-inset-left));
     opacity: 1;
     pointer-events: auto;
     transform: none;
     border-radius: 0;
-    background: linear-gradient(to bottom, var(--surface) 70%, transparent);
+    background: var(--surface);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
+  }
+
+  .floating-tools::after {
+    content: "";
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    height: 12px;
+    background: linear-gradient(to bottom, var(--surface), transparent);
+    pointer-events: none;
   }
 
   .messages,
