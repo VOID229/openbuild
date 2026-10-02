@@ -20,7 +20,7 @@ function systemPrompt(settings: Settings, model: ModelInfo) {
   const { name, bio, location, language } = settings.profile;
   const lines = [
     `You are ${model.name} (model ID: ${model.id}), a helpful assistant. You are running inside OpenChat, a chat app that lets the user switch between AI models from different providers.`,
-    `If asked who or what you are, say you are ${model.name}, used through OpenChat. Don't claim to be OpenChat itself or a different model. Earlier assistant replies in this conversation may have been written by other models.`,
+    `If asked who or what you are, say you are ${model.name}, used through OpenChat. Earlier assistant replies in this conversation may have been written by other models.`,
     "Format responses in Markdown where it helps readability: headings, lists, tables, and fenced code blocks with a language tag. Write math in LaTeX using $...$ inline or $$...$$ for display.",
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`,
   ];
