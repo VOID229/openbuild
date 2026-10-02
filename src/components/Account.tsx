@@ -16,12 +16,13 @@ export function AccountSection() {
     return (
       <>
         <Note>
-          Sign in to sync your chats, settings and profile between devices, end-to-end encrypted. Sync needs a Convex deployment, which this OpenChat
-          server doesn't have yet.
+          Accounts sync your chats, settings and profile between devices, end-to-end encrypted. They aren't switched on for this copy of OpenChat
+          yet.
         </Note>
         <Note>
-          To set one up (free): run <code>bunx convex dev</code> in the OpenChat folder and follow the prompts, then <code>bunx @convex-dev/auth</code>, then
-          restart <code>bun run dev</code>. The README has the details.
+          To switch them on (once, free): run <code>bun run setup:cloud</code> in the OpenChat folder, log in to Convex when it asks, then restart{" "}
+          <code>bun run dev</code>. Commit the <code>shared/cloud.ts</code> it writes and every copy of OpenChat can create accounts and sign in right
+          here.
         </Note>
       </>
     );

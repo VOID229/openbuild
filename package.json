@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "bun --hot server/index.ts",
     "start": "NODE_ENV=production bun server/index.ts",
-    "setup:sync": "bun scripts/setup-sync.ts",
+    "setup:cloud": "bun scripts/setup-cloud.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit && tsc -p convex --noEmit"
   },
