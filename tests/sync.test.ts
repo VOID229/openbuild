@@ -12,10 +12,23 @@ g.document ??= { addEventListener() {}, visibilityState: "visible" };
 const ls = new Map<string, string>();
 g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v), removeItem: (k: string) => void ls.delete(k) };
 const realFetch = fetch;
-g.fetch = (input: any, init?: any) => {
+/** Stands in for the local server's key vault (OS keychain): scope -> secrets, in order. */
+const vault = new Map<string, string[]>();
+const keyIds = () => Object.fromEntries([...vault].filter(([, l]) => l.length).map(([s, l]) => [s, l.map((k) => `id-${k}`)]));
+g.fetch = async (input: any, init?: any) => {
   const url = String(input instanceof Request ? input.url : input);
-  if (url.startsWith("/api/state")) return Promise.resolve(Response.json({ state: null }));
-  if (url.startsWith("/api/")) return Promise.resolve(Response.json({ ok: true, chats: [] }));
+  if (url === "/api/keys/secrets") return Response.json({ secrets: Object.fromEntries([...vault].filter(([, l]) => l.length)) });
+  if (url === "/api/keys") return Response.json({ backend: "file", keys: keyIds() });
+  if (url.startsWith("/api/keys/") && init?.method === "PUT") {
+    const scope = url.slice("/api/keys/".length);
+    const edits = JSON.parse(init.body).keys as ({ id: string } | { secret: string })[];
+    const list = [...new Set(edits.map((e) => ("id" in e ? e.id.slice(3) : e.secret)))];
+    vault.set(scope, list);
+    return Response.json({ ids: list.map((k) => `id-${k}`) });
+  }
+  if (url.startsWith("/api/state")) return Response.json({ state: null });
+  if (url.startsWith("/api/models")) return Response.json({ plan: "go", status: "invalid", models: [], checkedAt: 0 });
+  if (url.startsWith("/api/")) return Response.json({ ok: true, chats: [] });
   return realFetch(input, init);
 };
 
@@ -149,7 +162,8 @@ describe("sync", () => {
     await settled();
 
     const keys = (await records()).map((r) => r.key).sort();
-    expect(keys).toEqual(["chat:a", "profile", "settings"]);
+    expect(keys).toEqual(["chat:a", "keys", "profile", "settings"]);
+    expect(await decrypt<Record<string, string[]>>("keys")).toEqual({}); // key sync is off by default
     for (const r of await records()) expect(new TextDecoder().decode(r.data!)).not.toContain("secret");
     expect((await decrypt<Chat>("chat:a")).messages[0]!.content).toBe("my secret prompt");
     expect((await decrypt<any>("profile")).name).toBe("Alice");
@@ -214,6 +228,47 @@ describe("sync", () => {
     // A stale device can't bring it back.
     const res = await remotePut("chat:a", chat("a", []), a!.seq);
     expect(res.deleted).toBe(true);
+  });
+
+  test("API keys sync only once turned on, encrypted", async () => {
+    vault.set("go", ["sk-laptop-1"]);
+    useStore.getState().updateSettings({ syncApiKeys: true });
+    await settled();
+    expect(await decrypt<Record<string, string[]>>("keys")).toEqual({ go: ["sk-laptop-1"] });
+    expect(new TextDecoder().decode((await recordOf("keys"))!.data!)).not.toContain("sk-laptop");
+  });
+
+  test("keys from another device arrive, and removals sync", async () => {
+    await remotePut("keys", { go: ["sk-laptop-1", "sk-phone"], exa: ["exa-1"] });
+    await settled();
+    expect(vault.get("go")).toEqual(["sk-laptop-1", "sk-phone"]);
+    expect(vault.get("exa")).toEqual(["exa-1"]);
+
+    await remotePut("keys", { go: ["sk-phone"] });
+    await settled();
+    expect(vault.get("go")).toEqual(["sk-phone"]);
+    expect(vault.get("exa") ?? []).toEqual([]);
+
+    // A key added here goes up.
+    await useStore.getState().setKeys("go", [{ id: "id-sk-phone" }, { secret: "sk-laptop-2" }]);
+    await settled();
+    expect(await decrypt<Record<string, string[]>>("keys")).toEqual({ go: ["sk-phone", "sk-laptop-2"] });
+  });
+
+  test("turning key sync off clears the account's copy; turning it on again merges, losing nothing", async () => {
+    useStore.getState().updateSettings({ syncApiKeys: false });
+    await settled();
+    expect(await decrypt<Record<string, string[]>>("keys")).toEqual({});
+    expect(vault.get("go")).toEqual(["sk-phone", "sk-laptop-2"]); // kept locally
+
+    // While off here, this device gets a new key, and another device turns sync on with its own keys.
+    vault.set("brave", ["brave-local"]);
+    await remotePut("settings", { ...(await decrypt<any>("settings")), syncApiKeys: true });
+    await remotePut("keys", { go: ["sk-tablet"] });
+    await settled();
+    expect(useStore.getState().settings.syncApiKeys).toBe(true);
+    expect(vault.get("go")).toEqual(["sk-tablet", "sk-phone", "sk-laptop-2"]);
+    expect(await decrypt<Record<string, string[]>>("keys")).toEqual({ brave: ["brave-local"], go: ["sk-tablet", "sk-phone", "sk-laptop-2"] });
   });
 
   test("users can't see each other's data", async () => {

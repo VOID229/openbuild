@@ -50,6 +50,8 @@ export interface Settings {
   search: Partial<Record<SearchProviderId, string[]>>;
   /** Automatic chat titles; an empty model list means "fastest available model". */
   naming: { enabled: boolean; models: NamingModel[] };
+  /** Account sync: also sync API keys (end-to-end encrypted). Off unless turned on. */
+  syncApiKeys?: boolean;
 }
 
 export type DetectStatus = "checking" | "valid" | "invalid" | "error";

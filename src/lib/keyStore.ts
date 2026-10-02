@@ -62,7 +62,28 @@ export async function fetchKeys(signal?: AbortSignal): Promise<KeyInventory | un
 }
 
 /** Replace a scope's ordered key list on the server; resolves to the saved ids. */
+/** Told whenever a scope's saved keys change (account key sync listens). */
+export const keyListeners = new Set<(scope: string) => void>();
+
+/** Every saved secret, per scope in priority order. Used only by account key sync, when it's on. */
+export async function allSecrets(): Promise<Record<string, string[]>> {
+  if ((await config).mode === "hosted") {
+    const out: Record<string, string[]> = {};
+    for (const [scope, list] of await entries<string, Entry[]>(browserKeys)) if (list.length) out[scope] = list.map((e) => e.secret);
+    return out;
+  }
+  const res = await fetch("/api/keys/secrets");
+  if (!res.ok) throw new Error(res.status === 404 ? STALE_SERVER : `Couldn't read keys (HTTP ${res.status})`);
+  return ((await res.json()) as { secrets: Record<string, string[]> }).secrets;
+}
+
 export async function saveKeys(scope: PlanId | SearchProviderId, keys: KeyEdit[]): Promise<string[]> {
+  const ids = await saveKeysTo(scope, keys);
+  keyListeners.forEach((fn) => fn(scope));
+  return ids;
+}
+
+async function saveKeysTo(scope: PlanId | SearchProviderId, keys: KeyEdit[]): Promise<string[]> {
   if ((await config).mode === "hosted") return browserSetKeys(scope, keys);
   const res = await fetch(`/api/keys/${scope}`, {
     method: "PUT",

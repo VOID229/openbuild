@@ -62,6 +62,12 @@ function serve(port: number) {
         GET: api(async () => Response.json({ backend: await vault.backend(), keys: await vault.listIds() } satisfies KeyInventory)),
       },
 
+      // The secrets themselves, for account key sync (Settings → Account → Sync API keys), which
+      // encrypts them in the browser before upload. Same request checks as every other API route.
+      "/api/keys/secrets": {
+        GET: api(async () => Response.json({ secrets: await vault.allSecrets() })),
+      },
+
       // Replace a scope's ordered key list: keep saved keys by id, add new ones by secret.
       "/api/keys/:scope": {
         PUT: api(async (req: Bun.BunRequest<"/api/keys/:scope">) => {

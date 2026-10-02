@@ -10,13 +10,16 @@
 //     the write is refused, that version arrives through the subscription, the two are merged
 //     (chats: messages from both sides), and the merge is written.
 //
-// Records: "chat:<id>", "settings" (see syncedSettings) and "profile" (name, bio, picture, ...).
+// Records: "chat:<id>", "settings" (see syncedSettings), "profile" (name, bio, picture, ...) and,
+// only when "Sync API keys" is on, "keys" (the secrets for each plan and search provider).
 import type { ConvexReactClient } from "convex/react";
 import { createStore, del, get, set } from "idb-keyval";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { chatListeners } from "../db";
+import { allSecrets, keyListeners, saveKeys } from "../keyStore";
 import { useStore } from "../store";
+import { PLANS, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../../shared/types";
 import type { Chat, Message, Profile, Settings } from "../types";
 import { open, seal } from "./crypto";
 
@@ -44,6 +47,11 @@ interface SyncState {
   dirty: string[];
   /** Local data has been offered to the account (done once, after the first full download). */
   initialized: boolean;
+  /**
+   * The account holds a key snapshot this device has already merged with. Until then (sync just
+   * turned on, or a new device) incoming keys are merged with this device's instead of replacing them.
+   */
+  keysJoined?: boolean;
 }
 
 export const keyStorageId = (scope: string) => `${scope}|dataKey`;
@@ -67,6 +75,18 @@ type SyncedSettings = Omit<Settings, "keys" | "search" | "profile" | "selection"
 function syncedSettings(s: Settings): SyncedSettings {
   const { keys: _k, search: _s, profile: _p, selection: _sel, ...rest } = s;
   return rest;
+}
+
+type KeySnapshot = Record<string, string[]>;
+
+const isKeyScope = (s: string): s is PlanId | SearchProviderId =>
+  s in PLANS || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as SearchProviderId].credential === "key");
+
+/** Scopes with keys, in a stable order. Empty when key sync is off. */
+async function keySnapshot(enabled: boolean): Promise<KeySnapshot> {
+  if (!enabled) return {};
+  const all = await allSecrets();
+  return Object.fromEntries(Object.keys(all).filter((s) => isKeyScope(s) && all[s]!.length).sort().map((s) => [s, all[s]!]));
 }
 
 const chatKey = (id: string) => `chat:${id}`;
@@ -107,6 +127,7 @@ export class SyncEngine {
   /** Records whose write was refused; retried once the newer version has been pulled. */
   private conflicts = new Set<string>();
   private applying = false;
+  private importingKeys = false;
   private stopped = false;
   private pullChain: Promise<void> = Promise.resolve();
   private unwatch?: () => void;
@@ -140,9 +161,15 @@ export class SyncEngine {
     chatListeners.add(onChat);
     this.cleanups.push(() => chatListeners.delete(onChat));
 
+    const onKeys = () => !this.importingKeys && useStore.getState().settings.syncApiKeys && this.markDirty("keys");
+    keyListeners.add(onKeys);
+    this.cleanups.push(() => keyListeners.delete(onKeys));
+
     this.cleanups.push(
       useStore.subscribe((st, prev) => {
         if (this.applying || st.settings === prev.settings) return;
+        // Turning key sync on uploads the keys; turning it off replaces the synced copy with nothing.
+        if (!!st.settings.syncApiKeys !== !!prev.settings.syncApiKeys) this.markDirty("keys");
         const settings = JSON.stringify(syncedSettings(st.settings));
         if (settings !== this.lastJson.get("settings")) this.markDirty("settings", 500);
         const profile = JSON.stringify(st.settings.profile);
@@ -245,7 +272,7 @@ export class SyncEngine {
   private offerLocalData() {
     for (const chat of useStore.getState().chats) if (this.state.known[chatKey(chat.id)] === undefined) this.dirty.add(chatKey(chat.id));
     // A fresh device takes the account's settings; a fresh account takes this device's.
-    for (const k of ["settings", "profile"]) if (this.state.known[k] === undefined) this.dirty.add(k);
+    for (const k of ["settings", "profile", "keys"]) if (this.state.known[k] === undefined) this.dirty.add(k);
     this.state.initialized = true;
     this.persist();
     this.schedulePush(0);
@@ -254,6 +281,7 @@ export class SyncEngine {
   private async applyRecord(r: RemoteRecord) {
     if ((this.state.known[r.key] ?? 0) >= r.seq) return; // Already have it (often our own write).
     this.state.known[r.key] = r.seq;
+    if (r.key === "keys" && r.deleted) return;
     const id = chatIdOf(r.key);
 
     if (r.deleted) {
@@ -288,10 +316,49 @@ export class SyncEngine {
       const remote = value as SyncedSettings;
       this.apply(() => useStore.getState().updateSettings(remote));
       this.lastJson.set("settings", JSON.stringify(syncedSettings(useStore.getState().settings)));
+    } else if (r.key === "keys" && (!isDirty || !this.state.keysJoined)) {
+      // Before joining, even a pending local upload merges rather than overwrites the account's keys.
+      await this.importKeys(value as KeySnapshot);
     } else if (r.key === "profile" && !isDirty) {
       this.apply(() => useStore.getState().updateProfile({ avatar: undefined, ...(value as Profile) }));
       this.lastJson.set("profile", JSON.stringify(useStore.getState().settings.profile));
     }
+  }
+
+  /**
+   * Take the account's keys. The first snapshot after joining is merged with this device's keys (and
+   * the merge written back); after that the account's snapshot is the truth, so removals sync too.
+   * An empty snapshot means key sync is off: nothing here is touched.
+   */
+  private async importKeys(remote: KeySnapshot) {
+    if (!Object.keys(remote).length) {
+      this.state.keysJoined = false;
+      this.persist();
+      return;
+    }
+    const merge = !this.state.keysJoined;
+    const local = await allSecrets();
+    let changed = false;
+    let mergedDiffers = false;
+    this.importingKeys = true;
+    try {
+      for (const scope of new Set([...Object.keys(remote), ...Object.keys(local)])) {
+        if (!isKeyScope(scope)) continue;
+        const theirs = (remote[scope] ?? []).filter((k) => typeof k === "string" && k.trim());
+        const mine = local[scope] ?? [];
+        const next = merge ? [...new Set([...theirs, ...mine])] : theirs;
+        if (merge && next.length !== theirs.length) mergedDiffers = true;
+        if (next.length === mine.length && next.every((k, i) => k === mine[i])) continue;
+        await saveKeys(scope, next.map((secret) => ({ secret })));
+        changed = true;
+      }
+    } finally {
+      this.importingKeys = false;
+    }
+    this.state.keysJoined = true;
+    this.persist();
+    if (mergedDiffers) this.markDirty("keys", 0);
+    if (changed) void useStore.getState().syncKeys().then(() => useStore.getState().refreshDetection());
   }
 
   /** Change local state without it counting as a local change. */
@@ -334,8 +401,9 @@ export class SyncEngine {
     return this.pushing;
   }
 
-  private current(key: string): unknown | undefined {
+  private async current(key: string): Promise<unknown | undefined> {
     const s = useStore.getState();
+    if (key === "keys") return keySnapshot(!!s.settings.syncApiKeys);
     const id = chatIdOf(key);
     if (id) return s.chats.find((c) => c.id === id);
     if (key === "settings") return syncedSettings(s.settings);
@@ -345,7 +413,7 @@ export class SyncEngine {
 
   private async pushRecord(key: string) {
     const version = this.version.get(key);
-    const value = this.current(key);
+    const value = await this.current(key);
     const base = this.state.known[key] ?? 0;
     const json = value === undefined ? undefined : JSON.stringify(value);
 
@@ -383,6 +451,7 @@ export class SyncEngine {
       return;
     }
     if (result.seq) this.state.known[key] = Math.max(this.state.known[key] ?? 0, result.seq);
+    if (key === "keys") this.state.keysJoined = !!value && Object.keys(value).length > 0;
     if (json === undefined) this.lastJson.delete(key);
     else this.lastJson.set(key, json);
     if (this.version.get(key) === version) this.dirty.delete(key);

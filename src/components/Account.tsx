@@ -4,7 +4,8 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { api } from "../../convex/_generated/api";
 import { cloudClient, cloudConfigured, forgetDevice, unlock, useAccount, useCloud, type Account } from "../lib/cloud";
 import { deriveCredentials, MIN_PASSWORD, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
-import { Spinner } from "./primitives";
+import { useStore } from "../lib/store";
+import { Spinner, Toggle } from "./primitives";
 
 function Note({ children }: { children: ReactNode }) {
   return <p className="setting-desc">{children}</p>;
@@ -210,6 +211,24 @@ const STATUS_TEXT: Record<string, string> = {
   off: "Not syncing",
 };
 
+function SyncKeysSetting() {
+  const on = useStore((s) => !!s.settings.syncApiKeys);
+  const update = useStore((s) => s.updateSettings);
+  return (
+    <div className="setting-row setting-row-top">
+      <div className="setting-text">
+        <div className="setting-label">Sync API keys</div>
+        <p className="setting-desc">
+          {on
+            ? "Your Opencode and search keys sync to every device on this account, encrypted with your password like everything else. Turning this off removes them from the account; each device keeps its own copy."
+            : "Off: API keys stay on each device, and you add them on every device separately. Turn on to enter them once and have them everywhere, end-to-end encrypted."}
+        </p>
+      </div>
+      <Toggle checked={on} onChange={(v) => update({ syncApiKeys: v })} label="Sync API keys" />
+    </div>
+  );
+}
+
 function SignedIn({ account }: { account: Account }) {
   const { status, error, pending } = useCloud();
   const { signOut } = useAuthActions();
@@ -247,8 +266,9 @@ function SignedIn({ account }: { account: Account }) {
       </div>
       <Note>
         Chats, settings and your profile sync live between every device signed in to this account. They're encrypted on the device before upload; the
-        sync server stores only ciphertext. API keys never leave this computer.
+        sync server stores only ciphertext.
       </Note>
+      <SyncKeysSetting />
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Delete account</div>
