@@ -1,10 +1,10 @@
 import { ArrowUp, Check, CircleAlert, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { KEY_ORDER, nearestEffort, PLANS, type PlanId } from "../../shared/types";
+import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
 import { fastTarget, findModel, isFastModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
-import type { NamedModel, NamingModel, Theme } from "../lib/types";
+import type { KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, usePresence } from "../lib/ui";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
@@ -13,6 +13,7 @@ const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
   { id: "general", label: "General" },
   { id: "keys", label: "API Keys" },
+  { id: "search", label: "Web Search" },
   { id: "appearance", label: "Appearance" },
 ];
 
@@ -346,12 +347,21 @@ function ChatNaming() {
 const MASK = "*".repeat(34);
 
 interface KeyFieldProps {
-  plan: PlanId;
+  /** Unique per list, e.g. a plan id or `search-exa`. */
+  scope: string;
+  /** Provider name, e.g. "Opencode Go" or "Exa". */
+  label: string;
+  /** "url" fields show their saved value and are edited in place instead of masked and replaced. */
+  kind?: "key" | "url";
   /** Saved key; undefined for a new, unsaved field. */
   value?: string;
   index: number;
   total: number;
   autoFocus?: boolean;
+  status?: KeyStatus;
+  onRetry?: () => void;
+  /** Return an error message to reject a draft. */
+  validate?: (draft: string) => string | undefined;
   onSave: (key: string) => void;
   onRemove?: () => void;
   onMoveUp?: () => void;
@@ -359,15 +369,15 @@ interface KeyFieldProps {
   onCancel?: () => void;
 }
 
-function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
-  const status = useStore((s) => (value ? s.detection[plan]?.keys?.[keyId(value)] : undefined));
-  const refreshDetection = useStore((s) => s.refreshDetection);
+function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, onRetry, validate, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
   const [editing, setEditing] = useState(!value);
   const [draft, setDraft] = useState("");
+  const [invalid, setInvalid] = useState<string>();
   const input = useRef<HTMLInputElement>(null);
-  const label = PLANS[plan].label;
-  const id = `key-${plan}-${index}`;
-  const actionId = `${plan}-${index}`;
+  const isUrl = kind === "url";
+  const noun = isUrl ? "URL" : "key";
+  const id = `key-${scope}-${index}`;
+  const actionId = `${scope}-${index}`;
 
   useEffect(() => {
     if (autoFocus) input.current?.focus();
@@ -376,23 +386,30 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
 
   const replace = () => {
     setEditing(true);
-    setDraft("");
-    requestAnimationFrame(() => input.current?.focus());
+    // URLs aren't secret: edit the saved value rather than retyping it.
+    setDraft(isUrl ? (value ?? "") : "");
+    requestAnimationFrame(() => (isUrl ? input.current?.select() : input.current?.focus()));
   };
   const save = () => {
-    if (!draft.trim()) return;
-    onSave(draft.trim());
+    const next = draft.trim();
+    if (!next) return;
+    const error = validate?.(next);
+    setInvalid(error);
+    if (error) return;
+    if (next !== value) onSave(next);
     setDraft("");
     if (value) setEditing(false);
   };
   const cancel = () => {
     setDraft("");
+    setInvalid(undefined);
     if (value) setEditing(false);
     else onCancel?.();
   };
 
   let line: ReactNode = null;
-  if (value && status) {
+  if (invalid) line = (<><CircleAlert size={13} className="bad" /> {invalid}</>);
+  else if (value && status && !editing) {
     if (status.status === "checking") line = (<><Spinner size={12} /> Detecting models…</>);
     else if (status.status === "valid") line = (<><Check size={13} className="ok" /> {status.models ?? 0} models available</>);
     else if (status.status === "invalid") line = (<><CircleAlert size={13} className="bad" /> Invalid API key — replace it to continue</>);
@@ -400,9 +417,11 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
       line = (
         <>
           <CircleAlert size={13} className="bad" /> {status.error ?? "Couldn't verify this key"}
-          <button type="button" className="link-btn" onClick={() => refreshDetection(plan)}>
-            <RefreshCw size={12} /> Retry
-          </button>
+          {onRetry && (
+            <button type="button" className="link-btn" onClick={onRetry}>
+              <RefreshCw size={12} /> Retry
+            </button>
+          )}
         </>
       );
   }
@@ -411,7 +430,7 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
     <div className="key-entry">
       {total > 1 && (
         <div className="key-caption">
-          Key {index + 1}
+          {isUrl ? "Instance" : "Key"} {index + 1}
           <span>{index === 0 ? "primary" : "fallback"}</span>
         </div>
       )}
@@ -420,14 +439,18 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
           ref={input}
           id={id}
           className={cx("input key-input", !editing && "key-input-masked")}
-          type={editing ? "password" : "text"}
+          type={editing && !isUrl ? "password" : "text"}
+          inputMode={isUrl ? "url" : undefined}
           readOnly={!editing}
-          value={editing ? draft : MASK}
-          placeholder={index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
-          aria-label={total > 1 ? `${label} key ${index + 1}` : `${label} key`}
+          value={editing ? draft : isUrl ? value : MASK}
+          placeholder={isUrl ? "http://192.168.1.10:8080" : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+          aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
           autoComplete="off"
           spellCheck={false}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setInvalid(undefined);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter") save();
             if (e.key === "Escape" && editing && (value || onCancel)) {
@@ -436,8 +459,9 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
             }
           }}
           onBlur={(e) => {
-            // Leaving the field without a value restores the saved key (or drops an empty new field).
-            if (!draft.trim() && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
+            // Leaving the field without a change restores the saved key (or drops an empty new field).
+            const unchanged = !draft.trim() || draft.trim() === value;
+            if (unchanged && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
           }}
           onFocus={() => !editing && replace()}
         />
@@ -448,58 +472,63 @@ function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMo
             </button>
           ) : (
             <button type="button" className="btn btn-sm" data-key-action={actionId} onClick={replace}>
-              replace
+              {isUrl ? "edit" : "replace"}
             </button>
           )}
           {onMoveUp && !editing && (
-            <IconButton label="Use before the key above" tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
+            <IconButton label={`Use before the ${isUrl ? "instance" : "key"} above`} tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
               <ArrowUp size={14} />
             </IconButton>
           )}
           {onRemove && !editing && (
-            <IconButton label="Remove key" tooltipSide="left" className="key-icon-btn key-remove" onClick={onRemove}>
+            <IconButton label={`Remove ${noun}`} tooltipSide="left" className="key-icon-btn key-remove" onClick={onRemove}>
               <Trash2 size={14} />
             </IconButton>
           )}
         </div>
       </div>
-      {line && <div className={cx("key-status", status?.status === "invalid" && "key-status-bad")}>{line}</div>}
+      {line && <div className={cx("key-status", (invalid || status?.status === "invalid") && "key-status-bad")}>{line}</div>}
     </div>
   );
 }
 
-function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
-  const keys = useStore((s) => s.settings.keys[plan]) ?? [];
-  const setKeys = useStore((s) => s.setKeys);
+interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "onRetry"> {
+  keys: string[];
+  setKeys: (keys: string[]) => void;
+  autoFocus?: boolean;
+  statusOf?: (key: string) => KeyStatus | undefined;
+}
+
+/** An ordered list of keys (primary first, then fallbacks) with "add more". */
+function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps) {
   const [adding, setAdding] = useState(false);
   const total = keys.length + (adding ? 1 : 0);
-
-  const update = (next: string[]) => setKeys(plan, next);
   return (
     <div className="key-row">
-      <div className="key-label">{PLANS[plan].label}</div>
+      <div className="key-label">{field.label}</div>
       <div className="key-fields">
         {keys.map((k, i) => (
           <KeyField
             key={keyId(k)}
-            plan={plan}
+            {...field}
             value={k}
             index={i}
             total={total}
-            onSave={(next) => update(keys.map((x, j) => (j === i ? next : x)))}
-            onRemove={() => update(keys.filter((_, j) => j !== i))}
-            onMoveUp={i > 0 ? () => update(keys.map((x, j) => (j === i - 1 ? keys[i]! : j === i ? keys[i - 1]! : x))) : undefined}
+            status={statusOf?.(k)}
+            onSave={(next) => setKeys(keys.map((x, j) => (j === i ? next : x)))}
+            onRemove={() => setKeys(keys.filter((_, j) => j !== i))}
+            onMoveUp={i > 0 ? () => setKeys(keys.map((x, j) => (j === i - 1 ? keys[i]! : j === i ? keys[i - 1]! : x))) : undefined}
           />
         ))}
         {(adding || !keys.length) && (
           <KeyField
             key={`new-${keys.length}`}
-            plan={plan}
+            {...field}
             index={keys.length}
             total={total || 1}
             autoFocus={adding || autoFocus}
             onSave={(next) => {
-              update([...keys, next]);
+              setKeys([...keys, next]);
               setAdding(false);
             }}
             onCancel={keys.length ? () => setAdding(false) : undefined}
@@ -512,6 +541,24 @@ function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
         )}
       </div>
     </div>
+  );
+}
+
+function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
+  const keys = useStore((s) => s.settings.keys[plan]) ?? [];
+  const statuses = useStore((s) => s.detection[plan]?.keys);
+  const setKeys = useStore((s) => s.setKeys);
+  const refreshDetection = useStore((s) => s.refreshDetection);
+  return (
+    <KeyList
+      scope={plan}
+      label={PLANS[plan].label}
+      keys={keys}
+      setKeys={(next) => setKeys(plan, next)}
+      autoFocus={autoFocus}
+      statusOf={(k) => statuses?.[keyId(k)]}
+      onRetry={() => refreshDetection(plan)}
+    />
   );
 }
 
@@ -533,6 +580,68 @@ function KeysSection() {
           opencode.ai
         </a>
         .
+      </p>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ Web Search
+
+function validateInstanceUrl(raw: string) {
+  const error = "Enter an address like http://192.168.1.10:8080";
+  if (/\s/.test(raw) || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) return error;
+  try {
+    // Browsers percent-encode invalid host characters instead of rejecting them.
+    const { hostname } = new URL(/^https?:\/\//i.test(raw) ? raw : `http://${raw}`);
+    return hostname && !hostname.includes("%") ? undefined : error;
+  } catch {
+    return error;
+  }
+}
+
+function SearchKeys({ provider }: { provider: SearchProviderId }) {
+  const keys = useStore((s) => s.settings.search[provider]) ?? [];
+  const setSearchKeys = useStore((s) => s.setSearchKeys);
+  const config = SEARCH_PROVIDERS[provider];
+  return (
+    <KeyList
+      scope={`search-${provider}`}
+      label={config.label}
+      kind={config.credential}
+      keys={keys}
+      setKeys={(next) => setSearchKeys(provider, next)}
+      validate={config.credential === "url" ? validateInstanceUrl : undefined}
+    />
+  );
+}
+
+function SearchSection() {
+  const enabled = useStore((s) => s.settings.webSearch);
+  const configured = useStore((s) => SEARCH_ORDER.filter((p) => s.settings.search[p]?.length).length);
+  const update = useStore((s) => s.updateSettings);
+  return (
+    <>
+      <Heading>Web Search</Heading>
+      <div className="setting-row setting-row-top">
+        <div className="setting-text">
+          <div className="setting-label">Let models search the web</div>
+          <p className="setting-desc">
+            Each provider you add becomes its own search tool. With two or more, the model picks the one that fits: SearXNG for quick, broad lookups,
+            Exa for the latest information, Tavily and Firecrawl for deep research and full pages, Kagi for high-quality technical results.
+          </p>
+        </div>
+        <Toggle checked={enabled} onChange={(v) => update({ webSearch: v })} label="Let models search the web" />
+      </div>
+      <div className="key-list">
+        {SEARCH_ORDER.map((p) => (
+          <SearchKeys key={p} provider={p} />
+        ))}
+      </div>
+      <p className="field-help keys-help">
+        {configured === 0 ? "Add a key for any provider to turn on web search. " : ""}
+        Add more than one key per provider and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. For
+        SearXNG, enter the address of an instance you already run (over LAN, Tailscale or the internet) with the JSON format enabled; OpenChat
+        doesn't start or install anything. Keys stay in this browser and are only sent to the provider through your local OpenChat server.
       </p>
     </>
   );
@@ -622,6 +731,7 @@ export function SettingsModal() {
           {section === "profile" && <ProfileSection />}
           {section === "general" && <GeneralSection />}
           {section === "keys" && <KeysSection />}
+          {section === "search" && <SearchSection />}
           {section === "appearance" && <AppearanceSection />}
         </div>
         <IconButton label="Close settings" tooltip={false} className="modal-close" onClick={close}>

@@ -1,9 +1,9 @@
-import type { Attachment, WireMessage } from "../../shared/types";
+import type { Attachment, SearchCredentials, WireMessage } from "../../shared/types";
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
 import { useStore } from "./store";
-import type { Chat, Message, ModelRef, Settings } from "./types";
+import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
 
 export const uid = () => crypto.randomUUID();
 
@@ -28,6 +28,14 @@ function systemPrompt(settings: Settings) {
   if (language.trim()) lines.push(`The user speaks: ${language.trim()}. Reply in the language the user writes in.`);
   if (bio.trim()) lines.push(`About the user, including their preferences (follow them):\n${bio.trim()}`);
   return lines.join("\n");
+}
+
+function searchCredentials(settings: Settings): SearchCredentials[] | undefined {
+  if (!settings.webSearch) return undefined;
+  const list = Object.entries(settings.search)
+    .filter(([, keys]) => keys?.length)
+    .map(([provider, keys]) => ({ provider, keys }) as SearchCredentials);
+  return list.length ? list : undefined;
 }
 
 function toWire(history: Message[], input: string[]): WireMessage[] {
@@ -171,6 +179,7 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     error: undefined,
     finish: undefined,
     notice: undefined,
+    searches: undefined,
     model: { plan: target.plan, id: target.id, name: model.name },
     routed: ref ? false : msg.routed,
     startedAt: now,
@@ -221,6 +230,7 @@ async function generate(chatId: string, messageId: string) {
   let error: string | undefined;
   let finish: string | undefined;
   let notice: string | undefined;
+  let searches: SearchCall[] = [];
   try {
     const stream = streamChat(
       {
@@ -231,6 +241,7 @@ async function generate(chatId: string, messageId: string) {
         system: systemPrompt(st.settings),
         sessionId: chatId,
         messages: toWire(chat.messages.slice(0, index), model.input),
+        search: model.tools !== false ? searchCredentials(st.settings) : undefined,
       },
       ctrl.signal,
     );
@@ -247,6 +258,10 @@ async function generate(chatId: string, messageId: string) {
         break;
       } else if (ev.t === "done") {
         finish = ev.finish;
+      } else if (ev.t === "search") {
+        const { t: _t, ...call } = ev;
+        searches = searches.some((s) => s.id === call.id) ? searches.map((s) => (s.id === call.id ? call : s)) : [...searches, call];
+        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { searches });
       } else if (ev.t === "notice") {
         // A key failed and a fallback key was used; refresh key statuses in Settings.
         notice = ev.message;
@@ -271,7 +286,17 @@ async function generate(chatId: string, messageId: string) {
   useStore.getState().patchMessage(
     chatId,
     messageId,
-    { content: text, reasoning: reasoning || undefined, reasoningMs, status: error ? "error" : status, error, finish, notice },
+    {
+      content: text,
+      reasoning: reasoning || undefined,
+      reasoningMs,
+      status: error ? "error" : status,
+      error,
+      finish,
+      notice,
+      // A search still marked running was cut off by a stop or an error.
+      searches: searches.length ? searches.map((s) => (s.status === "running" ? { ...s, status: "error" as const, error: "Stopped" } : s)) : undefined,
+    },
     true,
   );
   const st2 = useStore.getState();

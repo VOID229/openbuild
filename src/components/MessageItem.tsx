@@ -1,8 +1,9 @@
-import { Check, ChevronRight, CircleAlert, Copy, FileText, RotateCcw, Sparkles } from "lucide-react";
+import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
+import { SEARCH_PROVIDERS } from "../../shared/types";
 import { memo, useEffect, useRef, useState } from "react";
 import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
-import type { Message, ModelRef } from "../lib/types";
+import type { Message, ModelRef, SearchCall } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
 import { Markdown } from "./Markdown";
 import { ModelMenu } from "./ModelSelect";
@@ -50,6 +51,68 @@ function Reasoning({ message }: { message: Message }) {
       <div className="reasoning-body" hidden={!open}>
         {open && <Markdown content={message.reasoning ?? ""} className="markdown-muted" />}
       </div>
+    </div>
+  );
+}
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function SearchRow({ call }: { call: SearchCall }) {
+  const label = SEARCH_PROVIDERS[call.provider]?.label ?? call.provider;
+  return (
+    <li className="search-call">
+      <div className="search-call-head">
+        <span className="search-provider">{label}</span>
+        <span className={cx("search-query", call.status === "running" && "shimmer")}>{call.query || "…"}</span>
+        <span className={cx("search-meta", call.status === "error" && "bad")}>
+          {call.status === "running" ? "searching" : call.status === "error" ? (call.error ?? "failed") : `${call.results?.length ?? 0} results`}
+        </span>
+      </div>
+      {call.results?.length ? (
+        <ul className="search-results">
+          {call.results.map((r, i) => (
+            <li key={`${r.url}-${i}`}>
+              <a href={r.url} target="_blank" rel="noopener noreferrer" title={r.url}>
+                <span className="search-result-title">{r.title}</span>
+                <span className="search-result-host">{hostOf(r.url)}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </li>
+  );
+}
+
+/** Web searches the model ran for this reply. */
+function Searches({ searches }: { searches: SearchCall[] }) {
+  const [open, setOpen] = useState(false);
+  const running = searches.filter((s) => s.status === "running");
+  const sources = searches.reduce((n, s) => n + (s.results?.length ?? 0), 0);
+  const current = running[running.length - 1];
+  const summary = current
+    ? `Searching ${SEARCH_PROVIDERS[current.provider]?.label ?? "the web"}: ${current.query}`
+    : `Searched the web${searches.length > 1 ? ` ${searches.length} times` : ""} · ${sources} source${sources === 1 ? "" : "s"}`;
+  return (
+    <div className={cx("reasoning searches", open && "reasoning-open")}>
+      <button type="button" className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Globe size={13} />
+        <span className={cx("searches-summary", current && "shimmer")}>{summary}</span>
+        <ChevronRight size={14} className="reasoning-chevron" />
+      </button>
+      {open && (
+        <ul className="reasoning-body search-calls">
+          {searches.map((c) => (
+            <SearchRow key={c.id} call={c} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -119,10 +182,11 @@ function SecondOpinion({ chatId, messageId, current }: { chatId: string; message
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const streaming = message.status === "streaming";
-  const waiting = streaming && !message.content && !message.reasoning;
+  const waiting = streaming && !message.content && !message.reasoning && !message.searches?.some((s) => s.status === "running");
   return (
     <div className={cx("msg msg-assistant", isLast && "msg-last")} data-message-id={message.id}>
       {message.reasoning && <Reasoning message={message} />}
+      {message.searches?.length ? <Searches searches={message.searches} /> : null}
       {waiting && (
         <div className="typing" aria-label="Waiting for response">
           <span />

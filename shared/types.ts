@@ -63,6 +63,8 @@ export interface ModelInfo {
   /** USD per 1M output tokens, when known. */
   outputCost?: number;
   releaseDate?: string;
+  /** Supports function/tool calling (needed for web search). */
+  tools?: boolean;
 }
 
 export interface DetectResult {
@@ -91,6 +93,43 @@ export interface WireMessage {
   attachments?: Attachment[];
 }
 
+// ---------------------------------------------------------------------------------------
+// Web search
+
+export type SearchProviderId = "searxng" | "brave" | "kagi" | "exa" | "tavily" | "firecrawl";
+
+export interface SearchProviderConfig {
+  id: SearchProviderId;
+  label: string;
+  /** "url" = a self-hosted instance address rather than a secret key. */
+  credential: "key" | "url";
+  /** Where to get a key (or set up an instance). */
+  site: string;
+}
+
+export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = {
+  exa: { id: "exa", label: "Exa", credential: "key", site: "https://dashboard.exa.ai/api-keys" },
+  brave: { id: "brave", label: "Brave", credential: "key", site: "https://api-dashboard.search.brave.com/app/keys" },
+  kagi: { id: "kagi", label: "Kagi", credential: "key", site: "https://kagi.com/settings?p=api" },
+  firecrawl: { id: "firecrawl", label: "Firecrawl", credential: "key", site: "https://www.firecrawl.dev/app/api-keys" },
+  tavily: { id: "tavily", label: "Tavily", credential: "key", site: "https://app.tavily.com/home" },
+  searxng: { id: "searxng", label: "SearXNG", credential: "url", site: "https://docs.searxng.org/admin/installation.html" },
+};
+
+/** Order of rows in Settings → Web Search. */
+export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng"];
+
+/** A configured search provider sent with a chat request: keys (or instance URLs) in priority order. */
+export interface SearchCredentials {
+  provider: SearchProviderId;
+  keys: string[];
+}
+
+export interface SearchResultLink {
+  title: string;
+  url: string;
+}
+
 export interface ChatRequest {
   plan: PlanId;
   /** API keys for the plan in priority order; later keys are fallbacks. */
@@ -100,6 +139,8 @@ export interface ChatRequest {
   system?: string;
   sessionId: string;
   messages: WireMessage[];
+  /** Web search providers the model may call as tools. */
+  search?: SearchCredentials[];
 }
 
 /** NDJSON events streamed from /api/chat to the client. */
@@ -109,4 +150,14 @@ export type StreamEvent =
   | { t: "error"; message: string; status?: number }
   /** Informational, e.g. a key failed and a fallback key was used. */
   | { t: "notice"; message: string }
+  /** A web search tool call started (status "running") or finished. */
+  | {
+      t: "search";
+      id: string;
+      provider: SearchProviderId;
+      query: string;
+      status: "running" | "done" | "error";
+      results?: SearchResultLink[];
+      error?: string;
+    }
   | { t: "done"; finish?: string; usage?: { input?: number; output?: number } };

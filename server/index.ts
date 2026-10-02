@@ -1,13 +1,17 @@
 // OpenChat server: serves the React app (bundled by Bun, with HMR in dev) and proxies
 // chat requests to Opencode. API keys are supplied per request by the browser and never stored.
 import index from "../src/index.html";
-import { PLANS, type ChatRequest, type PlanId, type StreamEvent } from "../shared/types";
+import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type StreamEvent } from "../shared/types";
+import { streamReply } from "./agent";
 import { describeModels, detectModels } from "./catalog";
-import { buildUpstream, isKeyFailure, normalizeStream, upstreamError, validateMessages } from "./opencode";
+import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
+import { searchToolkit } from "./search";
 
 const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
 const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
 const isKeyList = (k: unknown): k is string[] => Array.isArray(k) && k.length > 0 && k.length <= 20 && k.every(isKey);
+const isSearchList = (s: unknown): s is SearchCredentials[] =>
+  Array.isArray(s) && s.length <= 10 && s.every((c) => c && typeof c.provider === "string" && c.provider in SEARCH_PROVIDERS && isKeyList(c.keys));
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 async function readJson(req: Request): Promise<any> {
@@ -39,23 +43,35 @@ function serve(port: number) {
           // Long generations shouldn't be cut off by the idle timeout.
           server.timeout(req, 0);
           const body = (await readJson(req)) as ChatRequest | undefined;
-          if (!body || !isPlan(body.plan) || !isKeyList(body.keys) || typeof body.model !== "string" || !validateMessages(body.messages)) {
+          if (
+            !body ||
+            !isPlan(body.plan) ||
+            !isKeyList(body.keys) ||
+            typeof body.model !== "string" ||
+            !validateMessages(body.messages) ||
+            (body.search !== undefined && !isSearchList(body.search))
+          ) {
             return bad("Malformed chat request");
           }
           const [model] = await describeModels(body.plan, [body.model]);
           if (!model) return bad(`Unknown model ${body.model}`);
 
+          // Web search runs as tools, so only for models that can call them.
+          const search = model.tools !== false && body.search?.length ? searchToolkit(body.search.map((c) => ({ ...c, keys: c.keys.map((k) => k.trim()) }))) : undefined;
+          const system = [typeof body.system === "string" ? body.system.trim() : "", search?.guidance ?? ""].filter(Boolean).join("\n\n");
           const request: ChatRequest = {
             ...body,
             keys: body.keys.map((k) => k.trim()),
             sessionId: String(body.sessionId || crypto.randomUUID()).slice(0, 128),
-            system: typeof body.system === "string" && body.system.trim() ? body.system : undefined,
+            system: system || undefined,
           };
+          const tools = search && { tools: search.specs, extra: [] };
           const label = PLANS[body.plan].label;
           const notices: StreamEvent[] = [];
           // Try the plan's keys in order; fall back to the next key when one is rejected or out of credit.
           for (let i = 0; i < request.keys.length; i++) {
-            const upstream = buildUpstream(model, { ...request, key: request.keys[i]! });
+            const key = request.keys[i]!;
+            const upstream = buildUpstream(model, { ...request, key }, tools);
             let res: Response;
             try {
               res = await fetch(upstream.url, {
@@ -69,7 +85,10 @@ function serve(port: number) {
               const message = `Couldn't reach Opencode: ${(err as Error).message}`;
               return ndjsonResponse([...notices, { t: "error", message }]);
             }
-            if (res.ok && res.body) return new Response(normalizeStream(model, res, req.signal, notices), { headers: ndjson });
+            if (res.ok && res.body) {
+              const stream = streamReply(model, { ...request, key }, res, req.signal, { prelude: notices, label, search });
+              return new Response(stream, { headers: ndjson });
+            }
 
             const event = await upstreamError(res, label);
             const message = event.t === "error" ? event.message : "";

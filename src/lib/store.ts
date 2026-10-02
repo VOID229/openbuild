@@ -1,13 +1,13 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { PlanId } from "../../shared/types";
+import type { PlanId, SearchProviderId } from "../../shared/types";
 import { detectModels } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import type { Chat, Detection, Message, Settings } from "./types";
 
-export type SettingsSection = "profile" | "general" | "keys" | "appearance";
+export type SettingsSection = "profile" | "general" | "keys" | "search" | "appearance";
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -18,6 +18,8 @@ const DEFAULT_SETTINGS: Settings = {
   prioritize: [],
   profile: { name: "", bio: "", location: "", language: "" },
   keys: {},
+  webSearch: true,
+  search: {},
   effort: "medium",
   naming: { enabled: true, models: [] },
 };
@@ -53,6 +55,8 @@ interface State {
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
   /** Replace a plan's ordered key list (empty removes the plan). */
   setKeys: (plan: PlanId, keys: string[]) => void;
+  /** Replace a search provider's ordered key (or instance URL) list. */
+  setSearchKeys: (provider: SearchProviderId, keys: string[]) => void;
   toggleSection: (section: keyof SidebarSections) => void;
   setView: (patch: Partial<SidebarView>) => void;
   refreshDetection: (plan?: PlanId) => Promise<void>;
@@ -108,6 +112,14 @@ export const useStore = create<State>()(
           });
           ensureSelection();
         }
+      },
+
+      setSearchKeys: (provider, list) => {
+        const search = { ...get().settings.search };
+        const clean = [...new Set(list.map((k) => k.trim()).filter(Boolean))];
+        if (clean.length) search[provider] = clean;
+        else delete search[provider];
+        set((s) => ({ settings: { ...s.settings, search } }));
       },
 
       refreshDetection: async (only) => {
