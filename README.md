@@ -49,15 +49,13 @@ Sign in under **Settings → Account** to sync chats, settings and your profile 
 
 **Speed.** Each device holds a live subscription to "what changed since I last looked", so changes made elsewhere show up within moments, and only changed items travel (gzipped, then encrypted). Local changes go out about 150 ms after you make them. Your local copy stays the primary one: offline edits are queued and sent when you reconnect. If two devices edit the same chat at once, both sets of messages are kept.
 
-**Setup** (once, about 2 minutes):
+**Setup** (once, by whoever hosts the sync service; users never do this):
 
 ```sh
-bunx convex dev --once   # log in (free), create a project; writes CONVEX_URL to .env.local and deploys convex/
-bun run setup:sync       # generates the sign-in signing keys on the deployment
-bun run dev              # restart, then Settings → Account → Create an account
+bun run setup:cloud   # log in to Convex (free), deploy convex/, create the sign-in keys
 ```
 
-After changing anything in `convex/`, run `bunx convex dev` again to deploy it. Each device you open OpenChat on needs a local OpenChat server pointed at the same deployment (same `.env.local`); then sign in with the same account.
+It writes the deployment's address to `shared/cloud.ts`. Commit that, and every copy of OpenChat built from the repo shows sign-up and sign-in under Settings → Account, with nothing else to configure. Run it again after changing anything in `convex/` to deploy the change (existing sign-in keys are kept). To point one server at a different deployment (say, a dev one from `bunx convex dev`), set `OPENCHAT_CLOUD_URL`.
 
 ## Web search
 

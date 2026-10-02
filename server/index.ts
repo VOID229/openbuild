@@ -3,6 +3,7 @@
 // sent back to the browser; requests refer to them by plan. Chats and settings are kept on disk
 // (see storage.ts), so they don't depend on which port or browser you open the app in.
 import index from "../src/index.html";
+import { CLOUD_URL } from "../shared/cloud";
 import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory, type PlanId, type SearchCredentials, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
 import { describeModels, detectModels } from "./catalog";
@@ -69,9 +70,10 @@ function serve(port: number) {
     routes: {
       "/*": index,
 
-      // Public client config. The Convex URL comes from .env.local, written by `bunx convex dev`.
+      // Public client config: the sync service to sign in to (shared/cloud.ts), unless
+      // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
-        GET: api(() => Response.json({ convexUrl: process.env.CONVEX_URL || null })),
+        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null })),
       },
 
       // Saved keys as opaque ids, never secrets.
