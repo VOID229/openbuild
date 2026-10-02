@@ -2,6 +2,7 @@ import { Check, ChevronDown, KeyRound, ListFilter, Sparkles } from "lucide-react
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIP_ORDER, EFFORTS, nearestEffort, PLANS, type Effort, type ModelInfo, type PlanId } from "../../shared/types";
 import { availablePlans, findModel, isAuto } from "../lib/models";
+import { parseModelQuery, searchModelGroups } from "../lib/modelSearch";
 import { fuzzyScore } from "../lib/search";
 import { useStore } from "../lib/store";
 import { arrowNav, cx } from "../lib/ui";
@@ -157,17 +158,12 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
 
   const all: ModelInfo[] = detection[chip]?.models ?? [];
   const q = query.trim();
-  const models = useMemo(
-    () =>
-      q
-        ? all
-            .map((m) => ({ m, score: fuzzyScore(`${m.name} ${m.id}`, q) }))
-            .filter((x) => x.score !== undefined)
-            .sort((a, b) => b.score! - a.score!)
-            .map((x) => x.m)
-        : all,
-    [all, q],
-  );
+  // Plan words in the query ("go deepseek", "go zen qwen") override the selected chip.
+  const parsed = useMemo(() => parseModelQuery(q), [q]);
+  const groups = useMemo(() => (q ? searchModelGroups(detection, q, CHIP_ORDER, [chip]) : [{ plan: chip, models: all }]), [detection, q, chip, all]);
+  const multi = parsed.plans.length > 0;
+  const models = groups.flatMap((g) => g.models);
+  const first = groups.find((g) => g.models.length);
   const showAuto = autoRouter && ready.length > 0 && (!q || fuzzyScore("auto router", q) !== undefined);
   const status = detection[chip]?.status;
   const checking = status === "checking";
@@ -215,14 +211,16 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
                 list.current?.querySelector<HTMLElement>(".model-row")?.focus();
-              } else if (e.key === "Enter" && models[0]) {
+              } else if (e.key === "Enter" && first?.models[0]) {
                 e.preventDefault();
-                choose(chip, models[0].id);
+                choose(first.plan, first.models[0].id);
               }
             }}
           />
           {checking && <Spinner size={12} />}
-          {!!all.length && <span className="model-count">{q ? `${models.length} of ${all.length}` : `${all.length} models`}</span>}
+          {(!!all.length || multi) && (
+            <span className="model-count">{multi ? `${models.length} match${models.length === 1 ? "" : "es"}` : q ? `${models.length} of ${all.length}` : `${all.length} models`}</span>
+          )}
         </div>
         <div className="model-cols">
           <div className="api-chips" role="tablist" aria-label="Filter models by API" onKeyDown={(e) => arrowNav(e)}>
@@ -231,7 +229,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
                 key={plan}
                 type="button"
                 role="tab"
-                aria-selected={chip === plan}
+                aria-selected={multi ? parsed.plans.includes(plan) : chip === plan}
                 className={cx("api-chip", !keys[plan] && "api-chip-empty")}
                 onClick={() => setChip(plan)}
               >
@@ -253,24 +251,29 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
               </button>
             )}
             {models.length ? (
-              models.map((m) => {
-                const selected = !auto && selection?.plan === chip && selection.id === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    className="model-row"
-                    aria-selected={selected}
-                    title={`${PLANS[chip].prefix}/${m.id}`}
-                    onClick={() => choose(chip, m.id)}
-                  >
-                    <BrandIcon id={m.id} className="model-row-icon" />
-                    <span className="model-row-name">{m.name}</span>
-                    {selected && <Check size={15} className="menu-check" />}
-                  </button>
-                );
-              })
-            ) : q && all.length ? (
+              groups.map((g) => (
+                <div key={g.plan} role="group" aria-label={PLANS[g.plan].label}>
+                  {multi && <div className="menu-label">{PLANS[g.plan].label}</div>}
+                  {g.models.map((m) => {
+                    const selected = !auto && selection?.plan === g.plan && selection.id === m.id;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className="model-row"
+                        aria-selected={selected}
+                        title={`${PLANS[g.plan].prefix}/${m.id}`}
+                        onClick={() => choose(g.plan, m.id)}
+                      >
+                        <BrandIcon id={m.id} className="model-row-icon" />
+                        <span className="model-row-name">{m.name}</span>
+                        {selected && <Check size={15} className="menu-check" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))
+            ) : q ? (
               <div className="model-empty">
                 <p>No models match “{q}”.</p>
               </div>

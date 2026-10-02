@@ -1,0 +1,68 @@
+// Model search shared by every picker. Plan words in the query ("go", "zen", "opencode plus", …)
+// filter by API key; the remaining words fuzzy-match the model: "go deepseek", "go zen qwen".
+import { PLANS, type ModelInfo, type PlanId } from "../../shared/types";
+import { fold, fuzzyScore } from "./search";
+import type { Detection } from "./types";
+
+const PLAN_WORDS = new Map<string, PlanId>((Object.keys(PLANS) as PlanId[]).map((p) => [fold(PLANS[p].chip), p]));
+
+export interface ModelQuery {
+  /** Plans named in the query; empty = no plan filter. */
+  plans: PlanId[];
+  /** The query without plan words (and without "opencode"). */
+  text: string;
+  /** The whole query, for literal matches such as "qwen plus" → "Qwen3.7 Plus". */
+  raw: string;
+}
+
+export function parseModelQuery(query: string): ModelQuery {
+  const plans: PlanId[] = [];
+  const rest: string[] = [];
+  for (const word of fold(query).split(/\s+/).filter(Boolean)) {
+    const plan = PLAN_WORDS.get(word);
+    if (plan) {
+      if (!plans.includes(plan)) plans.push(plan);
+    } else if (word !== "opencode") rest.push(word);
+  }
+  return { plans, text: rest.join(" "), raw: query.trim() };
+}
+
+/**
+ * Score a model for a parsed query on a given plan. Models on a named plan match on the
+ * remaining words; any model may also match the whole query literally (ranked lower).
+ */
+export function scoreModel(model: Pick<ModelInfo, "id" | "name">, plan: PlanId | PlanId[], q: ModelQuery): number | undefined {
+  const label = `${model.name} ${model.id}`;
+  const onPlan = q.plans.length === 0 || (Array.isArray(plan) ? plan : [plan]).some((p) => q.plans.includes(p));
+  if (onPlan) {
+    const s = q.text ? fuzzyScore(label, q.text) : 1;
+    if (s !== undefined) return s + (q.plans.length ? 1 : 0);
+  }
+  return q.plans.length ? fuzzyScore(label, q.raw) : undefined;
+}
+
+export interface ModelGroup {
+  plan: PlanId;
+  models: ModelInfo[];
+}
+
+/** Search detected models, grouped by plan in `order`; `scope` limits plans when the query names none. */
+export function searchModelGroups(detection: Partial<Record<PlanId, Detection>>, query: string, order: PlanId[], scope?: PlanId[]): ModelGroup[] {
+  const q = parseModelQuery(query);
+  const searching = q.raw.length > 0;
+  return order
+    .filter((plan) => detection[plan]?.models.length && (q.plans.length ? true : !scope || scope.includes(plan)))
+    .map((plan) => {
+      const models = detection[plan]!.models;
+      if (!searching) return { plan, models };
+      return {
+        plan,
+        models: models
+          .map((m) => ({ m, s: scoreModel(m, plan, q) }))
+          .filter((x) => x.s !== undefined)
+          .sort((a, b) => b.s! - a.s!)
+          .map((x) => x.m),
+      };
+    })
+    .filter((g) => g.models.length);
+}

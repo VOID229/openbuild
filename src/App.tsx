@@ -58,17 +58,47 @@ export function App() {
     void useStore.getState().refreshDetection();
   }, []);
 
-  // Global shortcuts: Cmd/Ctrl+, opens settings (instead of the browser's), Cmd/Ctrl+Shift+O starts a new chat.
+  // Global shortcuts:
+  //   Cmd/Ctrl+,        open settings (instead of the browser's)
+  //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
+  //   Cmd/Ctrl+Shift+O  new chat
+  //   /                 focus chat search (or the composer when the sidebar is collapsed)
+  //   Enter             focus the composer (sidebar open)
+  // "/" and Enter only apply when not typing in a field and not in Settings; Enter also leaves
+  // focused buttons/links alone so they still activate.
   useEffect(() => {
+    const focusComposer = () => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === "," && !e.shiftKey && !e.altKey) {
+      const st = useStore.getState();
+      if (e.metaKey || e.ctrlKey) {
+        const key = e.key.toLowerCase();
+        if (e.key === "," && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          st.openSettings();
+        } else if (key === "b" && !e.shiftKey && !e.altKey) {
+          e.preventDefault();
+          st.setSidebarOpen(!st.sidebarOpen);
+        } else if (e.shiftKey && key === "o") {
+          e.preventDefault();
+          newChat();
+        }
+        return;
+      }
+      if (e.altKey || e.isComposing || st.settingsOpen) return;
+      if (e.key !== "/" && e.key !== "Enter") return;
+      const el = document.activeElement as HTMLElement | null;
+      const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+      // Leave Enter alone on buttons/links/menu items so they still activate.
+      const onControl = !!el && el !== document.body && !!el.closest("button, a[href], [role='menuitem'], [role='option'], [role='tab'], [role='switch']");
+      if (typing || (e.key === "Enter" && onControl)) return;
+      if (e.key === "/") {
         e.preventDefault();
-        e.stopPropagation();
-        useStore.getState().openSettings();
-      } else if (e.shiftKey && e.key.toLowerCase() === "o") {
+        if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();
+        else focusComposer();
+      } else if (st.sidebarOpen) {
         e.preventDefault();
-        newChat();
+        focusComposer();
       }
     };
     window.addEventListener("keydown", onKey, true);

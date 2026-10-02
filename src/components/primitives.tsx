@@ -52,9 +52,13 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
           : { position: "fixed", left, top: r.bottom + 8, maxHeight },
       );
     };
-    // A fixed popover would drift away from its anchor if an ancestor scrolls.
+    // Follow the anchor when something scrolls (e.g. a chat auto-scrolling); close only once the
+    // anchor has scrolled out of view.
     const onScroll = (e: Event) => {
-      if (!ref.current?.contains(e.target as Node)) close.current();
+      if (ref.current?.contains(e.target as Node)) return;
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r || r.bottom < 0 || r.top > window.innerHeight || (r.width === 0 && r.height === 0)) close.current();
+      else place();
     };
     place();
     window.addEventListener("resize", place);

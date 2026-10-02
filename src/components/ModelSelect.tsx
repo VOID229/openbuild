@@ -3,41 +3,30 @@ import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { KEY_ORDER, PLANS, type Effort } from "../../shared/types";
 import { findModel } from "../lib/models";
-import { fuzzyScore } from "../lib/search";
+import { searchModelGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
-import { arrowNav, cx } from "../lib/ui";
+import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
 
 /** Search box + model list grouped by plan (every plan with a working key). Mounts fresh per open. */
 export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
   const [query, setQuery] = useState("");
   const list = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const detection = useStore((s) => s.detection);
 
-  const groups = useMemo(() => {
-    const q = query.trim();
-    return KEY_ORDER.filter((plan) => detection[plan]?.models.length)
-      .map((plan) => {
-        const models = detection[plan]!.models;
-        const matches = q
-          ? models
-              .map((m) => ({ m, score: fuzzyScore(`${m.name} ${m.id}`, q) }))
-              .filter((x) => x.score !== undefined)
-              .sort((a, b) => b.score! - a.score!)
-              .map((x) => x.m)
-          : models;
-        return { plan, models: matches };
-      })
-      .filter((g) => g.models.length);
-  }, [detection, query]);
+  useFocusOnShow(search);
+
+  // "go deepseek", "opencode zen", "go zen qwen": plan words filter by API key.
+  const groups = useMemo(() => searchModelGroups(detection, query, KEY_ORDER), [detection, query]);
 
   return (
     <>
       <input
-        autoFocus
+        ref={search}
         className="input input-sm"
-        placeholder="Search models…"
+        placeholder="Search models, or go / zen / plus / black…"
         value={query}
         spellCheck={false}
         onChange={(e) => setQuery(e.target.value)}

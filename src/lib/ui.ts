@@ -51,6 +51,23 @@ export function useDismiss(open: boolean, onClose: () => void, refs: RefObject<H
   }, [open]);
 }
 
+/**
+ * Focus an element inside a popover once it's positioned and visible; `autoFocus` fires while
+ * the popover is still hidden for measuring, so the focus would be lost.
+ */
+export function useFocusOnShow(ref: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [ref]);
+}
+
 export function useMediaQuery(query: string) {
   const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {

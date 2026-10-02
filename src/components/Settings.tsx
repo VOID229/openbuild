@@ -3,9 +3,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
 import { fastTarget, findModel, isFastModel } from "../lib/models";
+import { parseModelQuery, scoreModel } from "../lib/modelSearch";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
-import { arrowNav, cx, usePresence } from "../lib/ui";
+import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
 
@@ -102,13 +103,26 @@ function ProfileSection() {
 
 // ------------------------------------------------------------------ General
 
-function useAllModels(): NamedModel[] {
+/** Every detected model once, with the plans it's available on. */
+function useAllModels(): (NamedModel & { plans: PlanId[] })[] {
   const detection = useStore((s) => s.detection);
   return useMemo(() => {
-    const seen = new Map<string, NamedModel>();
-    for (const d of Object.values(detection)) for (const m of d?.models ?? []) if (!seen.has(m.id)) seen.set(m.id, { id: m.id, name: m.name });
+    const seen = new Map<string, NamedModel & { plans: PlanId[] }>();
+    for (const plan of KEY_ORDER)
+      for (const m of detection[plan]?.models ?? []) {
+        const entry = seen.get(m.id) ?? { id: m.id, name: m.name, plans: [] };
+        entry.plans.push(plan);
+        seen.set(m.id, entry);
+      }
     return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [detection]);
+}
+
+/** Search input that focuses itself each time its popover opens. */
+function PopoverSearch(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  const ref = useRef<HTMLInputElement>(null);
+  useFocusOnShow(ref);
+  return <input ref={ref} {...props} />;
 }
 
 function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: NamedModel) => void; label: string }) {
@@ -116,7 +130,18 @@ function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: Nam
   const [q, setQ] = useState("");
   const anchor = useRef<HTMLButtonElement>(null);
   const all = useAllModels();
-  const options = all.filter((m) => !exclude.includes(m.id) && (m.name + m.id).toLowerCase().includes(q.trim().toLowerCase())).slice(0, 50);
+  // Same search as the model pickers: "go deepseek" → DeepSeek models on the Go key.
+  const options = useMemo(() => {
+    const parsed = parseModelQuery(q);
+    const pool = all.filter((m) => !exclude.includes(m.id));
+    if (!parsed.raw) return pool.slice(0, 50);
+    return pool
+      .map((m) => ({ m, s: scoreModel(m, m.plans, parsed) }))
+      .filter((x) => x.s !== undefined)
+      .sort((a, b) => b.s! - a.s!)
+      .slice(0, 50)
+      .map((x) => x.m);
+  }, [all, exclude, q]);
   const add = (m: NamedModel) => {
     onAdd(m);
     setQ("");
@@ -128,10 +153,9 @@ function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: Nam
         <Plus size={14} />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu add-model drop-up" label={label} fixed="up">
-        <input
-          autoFocus
+        <PopoverSearch
           className="input input-sm"
-          placeholder="Search models…"
+          placeholder="Search models, or go / zen / plus / black…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
