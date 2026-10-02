@@ -1,6 +1,6 @@
 // Web search tools. Each configured provider becomes its own tool, with a description that
 // tells the model what that provider is good at, so it can pick the right one per query.
-import { SEARCH_PROVIDERS, type SearchCredentials, type SearchProviderId, type SearchResultLink } from "../shared/types";
+import { SEARCH_PROVIDERS, type SearchCheckResult, type SearchCredentials, type SearchProviderId, type SearchResultLink } from "../shared/types";
 import { USER_AGENT } from "./opencode";
 
 type Json = Record<string, unknown>;
@@ -350,6 +350,33 @@ const PROVIDERS: Record<SearchProviderId, Provider> = {
     },
   },
 };
+
+/**
+ * Check a key (or SearXNG address) with one small search, so Settings can say whether it works.
+ * Rejected credentials are "invalid"; anything else that fails (unreachable, rate limited) is "error".
+ */
+export async function checkSearch(id: SearchProviderId, credential: string, signal?: AbortSignal): Promise<SearchCheckResult> {
+  const provider = PROVIDERS[id];
+  const label = SEARCH_PROVIDERS[id].label;
+  // The cheapest call each provider allows: one result (X's minimum is 10), no page scraping.
+  const args: Args = { count: 1 };
+  const run =
+    id === "firecrawl"
+      ? (key: string, s: AbortSignal) =>
+          call("https://api.firecrawl.dev/v2/search", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ query: "openchat", limit: 1 }), signal: s }, "Firecrawl")
+      : (key: string, s: AbortSignal) => provider.run(key, "openchat", args, s);
+  try {
+    await run(credential, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20_000)]));
+    return { provider: id, status: "valid" };
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    const e = err as Error;
+    if (e.name === "TimeoutError") return { provider: id, status: "error", error: `${label} didn't answer within 20 seconds` };
+    const rejected = id !== "searxng" && /HTTP (401|403)\b/.test(e.message);
+    if (rejected) return { provider: id, status: "invalid", error: `${label} rejected this key` };
+    return { provider: id, status: "error", error: e.message };
+  }
+}
 
 const toolName = (id: SearchProviderId) => `search_${id}`;
 const providerOf = (name: string) => (Object.keys(PROVIDERS) as SearchProviderId[]).find((id) => toolName(id) === name);

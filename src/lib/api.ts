@@ -1,4 +1,4 @@
-import { SEARCH_PROVIDERS, type ChatRequest, type DetectResult, type PlanId, type StreamEvent } from "../../shared/types";
+import { SEARCH_PROVIDERS, type ChatRequest, type DetectResult, type PlanId, type SearchCheckResult, type SearchProviderId, type StreamEvent } from "../../shared/types";
 import { browserSecretById, browserSecrets } from "./keyStore";
 import { config } from "./runtime";
 
@@ -20,6 +20,29 @@ export async function detectModels(plan: PlanId, id: string, signal?: AbortSigna
   } catch (err) {
     if (signal?.aborted) throw err;
     return { plan, status: "error", error: "Couldn't reach the OpenChat server", models: [], checkedAt: Date.now() };
+  }
+}
+
+/**
+ * Check a search provider's saved key (by id) or SearXNG address with one small search. Like
+ * detectModels, the local server looks the key up by id; the hosted site sends it along.
+ */
+export async function verifySearch(provider: SearchProviderId, entry: string, signal?: AbortSignal): Promise<SearchCheckResult> {
+  try {
+    const hosted = (await config).mode === "hosted";
+    const body =
+      SEARCH_PROVIDERS[provider].credential === "url"
+        ? { provider, url: entry }
+        : hosted
+          ? { provider, key: await browserSecretById(provider, entry) }
+          : { provider, id: entry };
+    const res = await fetch("/api/verify-search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
+    if (res.status === 404 && !hosted) return { provider, status: "error", error: "Restart the OpenChat server (`bun dev`) to check search keys" };
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()) as SearchCheckResult;
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    return { provider, status: "error", error: "Couldn't reach the OpenChat server" };
   }
 }
 

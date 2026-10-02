@@ -385,6 +385,8 @@ interface KeyFieldProps {
   total: number;
   autoFocus?: boolean;
   status?: KeyStatus;
+  /** What the status check does: list the plan's models, or run a test search. */
+  verifies?: "models" | "search";
   onRetry?: () => void;
   /** Return an error message to reject a draft. */
   validate?: (draft: string) => string | undefined;
@@ -395,7 +397,7 @@ interface KeyFieldProps {
   onCancel?: () => void;
 }
 
-function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, onRetry, validate, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
+function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, verifies = "models", onRetry, validate, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
   const [editing, setEditing] = useState(!value);
   const [draft, setDraft] = useState("");
   const [invalid, setInvalid] = useState<string>();
@@ -436,13 +438,15 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
   let line: ReactNode = null;
   if (invalid) line = (<><CircleAlert size={13} className="bad" /> {invalid}</>);
   else if (value && status && !editing) {
-    if (status.status === "checking") line = (<><Spinner size={12} /> Detecting models…</>);
-    else if (status.status === "valid") line = (<><Check size={13} className="ok" /> {status.models ?? 0} models available</>);
-    else if (status.status === "invalid") line = (<><CircleAlert size={13} className="bad" /> Invalid API key — replace it to continue</>);
+    if (status.status === "checking") line = (<><Spinner size={12} /> {verifies === "search" ? `Checking ${isUrl ? "instance" : "key"}…` : "Detecting models…"}</>);
+    else if (status.status === "valid")
+      line = (<><Check size={13} className="ok" /> {verifies === "search" ? (isUrl ? "Instance reachable" : "Key works") : `${status.models ?? 0} models available`}</>);
+    else if (status.status === "invalid")
+      line = (<><CircleAlert size={13} className="bad" /> {verifies === "search" ? `${status.error ?? `Invalid ${noun}`}: ${isUrl ? "edit" : "replace"} it to continue` : "Invalid API key — replace it to continue"}</>);
     else
       line = (
         <>
-          <CircleAlert size={13} className="bad" /> {status.error ?? "Couldn't verify this key"}
+          <CircleAlert size={13} className="bad" /> {status.error ?? `Couldn't verify this ${noun}`}
           {onRetry && (
             <button type="button" className="link-btn" onClick={onRetry}>
               <RefreshCw size={12} /> Retry
@@ -518,17 +522,18 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
   );
 }
 
-interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "onRetry"> {
+interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "verifies"> {
   /** Saved entries: key ids (the secrets live on the server), or instance URLs. */
   keys: string[];
   /** Receives the new ordered list: saved entries as `{ id }`, a newly typed or replaced key as `{ secret }`. */
   setKeys: (keys: KeyEdit[]) => void;
   autoFocus?: boolean;
   statusOf?: (key: string) => KeyStatus | undefined;
+  onRetry?: (key: string) => void;
 }
 
 /** An ordered list of keys (primary first, then fallbacks) with "add more". */
-function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps) {
+function KeyList({ keys, setKeys, autoFocus, statusOf, onRetry, ...field }: KeyListProps) {
   const [adding, setAdding] = useState(false);
   const total = keys.length + (adding ? 1 : 0);
   const saved: KeyEdit[] = keys.map((id) => ({ id }));
@@ -544,6 +549,7 @@ function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps)
             index={i}
             total={total}
             status={statusOf?.(k)}
+            onRetry={onRetry && (() => onRetry(k))}
             onSave={(next) => setKeys(saved.map((x, j) => (j === i ? { secret: next } : x)))}
             onRemove={() => setKeys(saved.filter((_, j) => j !== i))}
             onMoveUp={i > 0 ? () => setKeys(saved.map((x, j) => (j === i - 1 ? saved[i]! : j === i ? saved[i - 1]! : x))) : undefined}
@@ -656,8 +662,14 @@ function validateInstanceUrl(raw: string) {
 
 function SearchKeys({ provider }: { provider: SearchProviderId }) {
   const keys = useStore((s) => s.settings.search[provider]) ?? [];
+  const statuses = useStore((s) => s.searchStatus[provider]);
   const setSearchKeys = useStore((s) => s.setSearchKeys);
+  const verifySearch = useStore((s) => s.verifySearch);
   const config = SEARCH_PROVIDERS[provider];
+  // Check entries saved before checks existed (or interrupted by a reload); results are kept.
+  useEffect(() => {
+    void verifySearch(provider);
+  }, [provider, verifySearch]);
   return (
     <KeyList
       scope={`search-${provider}`}
@@ -666,6 +678,9 @@ function SearchKeys({ provider }: { provider: SearchProviderId }) {
       keys={keys}
       setKeys={(next) => void setSearchKeys(provider, next)}
       validate={config.credential === "url" ? validateInstanceUrl : undefined}
+      verifies="search"
+      statusOf={(k) => statuses?.[keyId(k)]}
+      onRetry={(k) => void verifySearch(provider, [k])}
     />
   );
 }

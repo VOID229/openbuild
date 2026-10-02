@@ -1,13 +1,13 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
-import { detectModels } from "./api";
+import { detectModels, verifySearch } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
-import type { Chat, Detection, Message, Settings } from "./types";
+import type { Chat, Detection, KeyStatus, Message, Settings } from "./types";
 
 export type SettingsSection = "account" | "profile" | "general" | "keys" | "search" | "appearance";
 
@@ -43,6 +43,8 @@ export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includeP
 interface State {
   settings: Settings;
   detection: Partial<Record<PlanId, Detection>>;
+  /** Per search provider, the result of checking each saved key or instance (by keyId). */
+  searchStatus: Partial<Record<SearchProviderId, Record<string, KeyStatus>>>;
   chats: Chat[];
   chatsLoaded: boolean;
   activeChatId?: string;
@@ -70,6 +72,8 @@ interface State {
   toggleSection: (section: keyof SidebarSections) => void;
   setView: (patch: Partial<SidebarView>) => void;
   refreshDetection: (plan?: PlanId) => Promise<void>;
+  /** Check a search provider's keys: the given ones, or else those not checked yet. */
+  verifySearch: (provider: SearchProviderId, only?: string[]) => Promise<void>;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setSidebarOpen: (open: boolean) => void;
@@ -86,12 +90,14 @@ interface State {
 }
 
 const detectControllers: Partial<Record<PlanId, AbortController>> = {};
+const searchControllers = new Map<string, AbortController>();
 
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,
       detection: {},
+      searchStatus: {},
       chats: [],
       chatsLoaded: false,
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
@@ -145,7 +151,39 @@ export const useStore = create<State>()(
         const search = { ...get().settings.search };
         if (list.length) search[provider] = list;
         else delete search[provider];
-        set((s) => ({ keysError: undefined, settings: { ...s.settings, search } }));
+        set((s) => {
+          // Drop the status of removed entries; new ones get checked below.
+          const prev = s.searchStatus[provider] ?? {};
+          const kept = Object.fromEntries(list.map(keyId).filter((id) => prev[id]).map((id) => [id, prev[id]!]));
+          return { keysError: undefined, settings: { ...s.settings, search }, searchStatus: { ...s.searchStatus, [provider]: kept } };
+        });
+        void get().verifySearch(provider);
+      },
+
+      verifySearch: async (provider, only) => {
+        const list = get().settings.search[provider] ?? [];
+        const statuses = get().searchStatus[provider] ?? {};
+        const targets = list.filter((k) => (only ? only.includes(k) : !statuses[keyId(k)]));
+        const setStatus = (k: string, status: KeyStatus) =>
+          set((s) => ({ searchStatus: { ...s.searchStatus, [provider]: { ...s.searchStatus[provider], [keyId(k)]: status } } }));
+        await Promise.all(
+          targets.map(async (k) => {
+            const slot = `${provider}:${keyId(k)}`;
+            searchControllers.get(slot)?.abort();
+            const ctrl = new AbortController();
+            searchControllers.set(slot, ctrl);
+            setStatus(k, { status: "checking" });
+            try {
+              const r = await verifySearch(provider, k, ctrl.signal);
+              // The entry may have been removed while it was being checked.
+              if ((get().settings.search[provider] ?? []).includes(k)) setStatus(k, { status: r.status, error: r.error });
+            } catch {
+              // Aborted by a newer check.
+            } finally {
+              if (searchControllers.get(slot) === ctrl) searchControllers.delete(slot);
+            }
+          }),
+        );
       },
 
       syncKeys: async () => {
@@ -326,7 +364,7 @@ export const useStore = create<State>()(
         }
         return state as State;
       },
-      partialize: (s) => ({ settings: s.settings, detection: s.detection, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
+      partialize: (s) => ({ settings: s.settings, detection: s.detection, searchStatus: s.searchStatus, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
         const detection = { ...(p.detection ?? {}) };
@@ -335,10 +373,16 @@ export const useStore = create<State>()(
           const d = detection[plan]!;
           if (d.status === "checking") detection[plan] = { ...d, status: "valid", checkedAt: d.checkedAt ?? 0 };
         }
+        // A check interrupted by a reload is simply run again later.
+        const searchStatus: State["searchStatus"] = {};
+        for (const [provider, statuses] of Object.entries(p.searchStatus ?? {})) {
+          searchStatus[provider as SearchProviderId] = Object.fromEntries(Object.entries(statuses ?? {}).filter(([, v]) => v.status !== "checking"));
+        }
         return {
           ...current,
           ...p,
           detection,
+          searchStatus,
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
           sections: { ...current.sections, ...p.sections },
           view: { ...DEFAULT_VIEW, ...p.view },

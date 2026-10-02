@@ -117,6 +117,13 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = 
   searxng: { id: "searxng", label: "SearXNG", credential: "url", site: "https://docs.searxng.org/admin/installation.html" },
 };
 
+/** Whether a search provider key (or SearXNG address) works, from POST /api/verify-search. */
+export interface SearchCheckResult {
+  provider: SearchProviderId;
+  status: "valid" | "invalid" | "error";
+  error?: string;
+}
+
 /** Order of rows in Settings → Web Search. */
 export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x"];
 

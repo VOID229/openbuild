@@ -1,11 +1,11 @@
 // Request handling shared by the local Bun server (server/index.ts) and the hosted Vercel
 // functions (server/vercel/*). Only where API keys come from differs: the local server reads them
 // from the OS keychain, the hosted relay receives them with each request and keeps nothing.
-import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type StreamEvent } from "../shared/types";
+import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
 import { describeModels, detectModels } from "./catalog";
 import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
-import { searchToolkit } from "./search";
+import { checkSearch, searchToolkit } from "./search";
 
 export const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
 export const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
@@ -59,6 +59,18 @@ export async function handleModels(plan: unknown, key: string | undefined): Prom
   if (!isPlan(plan)) return bad("Expected { plan }");
   if (!key) return bad("Unknown key", 404);
   return Response.json(await detectModels(plan, key));
+}
+
+export const isSearchProvider = (p: unknown): p is SearchProviderId => typeof p === "string" && p in SEARCH_PROVIDERS;
+
+/** Check a search provider key, or a SearXNG instance address, with one small search. */
+export async function handleSearchCheck(provider: unknown, credential: string | undefined, opts: { hosted?: boolean } = {}): Promise<Response> {
+  if (!isSearchProvider(provider)) return bad("Expected { provider }");
+  if (!credential) return bad(SEARCH_PROVIDERS[provider].credential === "url" ? "Expected { url }" : "Unknown key", SEARCH_PROVIDERS[provider].credential === "url" ? 400 : 404);
+  if (SEARCH_PROVIDERS[provider].credential === "url" && opts.hosted && !isPublicUrl(credential)) {
+    return Response.json({ provider, status: "invalid", error: "On the website, a SearXNG instance must be a public https:// address" });
+  }
+  return Response.json(await checkSearch(provider, credential));
 }
 
 /** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. */

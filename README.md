@@ -63,10 +63,10 @@ It writes the deployment's address to `shared/cloud.ts`. Commit that, and every 
 OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed on Vercel from `main`). It's the same app, minus the local server's storage:
 
 - **Chats, settings and API keys stay in your browser** (IndexedDB/localStorage, marked persistent). Sign in to sync and back them up, end-to-end encrypted, like the local app. API keys sync too if you turn on Sync API keys.
-- **The relay keeps nothing.** `/api/chat` and `/api/models` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
+- **The relay keeps nothing.** `/api/chat`, `/api/models` and `/api/verify-search` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
 - **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address. A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
 
-`bun run build` produces the site in Vercel's Build Output format (`.vercel/output`): the static app, the two functions, and the routes and headers. `vercel.json` tells Vercel to install with Bun and run that build.
+`bun run build` produces the site in Vercel's Build Output format (`.vercel/output`): the static app, the relay functions, and the routes and headers. `vercel.json` tells Vercel to install with Bun and run that build.
 
 **Domain setup** (once): in Vercel, add `openchat.shade-io.com` under the project's Settings → Domains. Then in GoDaddy's DNS for `shade-io.com`, add the `CNAME` record Vercel shows (name `openchat`, value like `cname.vercel-dns.com`). The rest of `shade-io.com` is unaffected.
 

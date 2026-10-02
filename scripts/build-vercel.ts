@@ -4,7 +4,8 @@
 //   static/              the app (index.html + hashed JS/CSS/fonts), served from Vercel's CDN
 //   static/api/config.json   tells the app it's the hosted site, and which sync service to use
 //   functions/api/chat   the chat relay   ┐ Edge Functions: they forward each request with the
-//   functions/api/models key check        ┘ keys it carries, and store or log nothing
+//   functions/api/models key check        │ keys it carries, and store or log nothing
+//   functions/api/verify-search           ┘ search key / SearXNG check
 //   config.json          routes and security headers
 //
 //   bun run build
@@ -61,7 +62,7 @@ for (const css of new Bun.Glob("assets/*.css").scanSync(join(out, "static"))) {
 await Bun.write(join(out, "static", "api", "config.json"), JSON.stringify({ mode: "hosted", convexUrl: cloudUrl || null }));
 
 // 2. The relay functions, each bundled into one self-contained file.
-for (const name of ["chat", "models"]) {
+for (const name of ["chat", "models", "verify-search"]) {
   const dir = join(out, "functions", "api", `${name}.func`);
   await check(
     await Bun.build({

@@ -4,8 +4,8 @@
 // (see storage.ts), so they don't depend on which port or browser you open the app in.
 import index from "../src/index.html";
 import { CLOUD_URL } from "../shared/cloud";
-import type { ChatRequest, KeyEdit, KeyInventory } from "../shared/types";
-import { bad, handleChat, handleModels, isKey, isPlan, readJson } from "./handlers";
+import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
+import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import * as storage from "./storage";
 import * as vault from "./vault";
 
@@ -88,6 +88,18 @@ function serve(port: number) {
           const body = await readJson(req);
           if (!isPlan(body?.plan) || typeof body?.id !== "string") return bad("Expected { plan, id }");
           return handleModels(body.plan, await vault.secretById(body.plan, body.id));
+        }),
+      },
+
+      // Check a saved search key (by id), or a SearXNG address (by url), with one small search.
+      "/api/verify-search": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          const provider = body?.provider;
+          if (!isSearchProvider(provider)) return bad("Expected { provider, id } or { provider, url }");
+          if (SEARCH_PROVIDERS[provider].credential === "url") return handleSearchCheck(provider, isKey(body?.url) ? body.url.trim() : undefined);
+          if (typeof body?.id !== "string") return bad("Expected { provider, id }");
+          return handleSearchCheck(provider, await vault.secretById(provider, body.id));
         }),
       },
 
