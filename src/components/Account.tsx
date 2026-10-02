@@ -1,6 +1,8 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useConvexAuth } from "convex/react";
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { CircleHelp, LockKeyhole } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../../convex/_generated/api";
 import {
   cloudClient,
@@ -17,6 +19,7 @@ import {
   type Account,
 } from "../lib/cloud";
 import { deriveCredentials, MIN_PASSWORD, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
+import { usingFallbackStorage } from "../lib/kv";
 import { useStore } from "../lib/store";
 import { Spinner, Toggle } from "./primitives";
 
@@ -100,15 +103,76 @@ export function FaceIdUnlockButton({ username, className = "btn" }: { username: 
   );
 }
 
-/** On the main screen: when sync is locked and Face ID unlock is set up, offer it right away. */
-export function LockedSyncPrompt() {
+/**
+ * Fullscreen, can't be dismissed: in a browser that can't keep the sync key (iOS Lockdown Mode),
+ * a reload locks sync. Rather than let changes pile up locally and diverge, the app stays covered
+ * until sync is unlocked again (Face ID, or the password), or the account is signed out.
+ */
+export function SyncLockScreen() {
+  const { isLoading, isAuthenticated } = useConvexAuth();
   const account = useAccount();
   const status = useCloud((s) => s.status);
-  if (status !== "locked" || !account?.vault) return null;
-  return (
-    <div className="sync-unlock-prompt">
-      <FaceIdUnlockButton username={account.username} className="btn btn-sm" />
-    </div>
+  const [passkey] = usePasskeyState(account?.username);
+  const [info, setInfo] = useState(false);
+  const [usePassword, setUsePassword] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Signed in (or still finding out) and sync isn't running yet: "off" is the brief moment before
+  // sync reports "locked", which after a reload it always does here.
+  const signedIn = isLoading || (isAuthenticated && (account === undefined || !!account?.vault));
+  const show = usingFallbackStorage && signedIn && (status === "off" || status === "locked");
+  const ready = !!account && status === "locked" && passkey !== undefined;
+
+  useEffect(() => {
+    if (!show) return;
+    // Everything else on the page is out of reach while this is up.
+    const others = [...document.body.children].filter((el) => el !== ref.current && !el.hasAttribute("inert"));
+    others.forEach((el) => el.setAttribute("inert", ""));
+    return () => others.forEach((el) => el.removeAttribute("inert"));
+  }, [show]);
+
+  if (!show) return null;
+  const faceId = passkey === "on" && !usePassword;
+  return createPortal(
+    <div ref={ref} className="sync-lock" role="dialog" aria-modal="true" aria-labelledby="sync-lock-title">
+      <div className="sync-lock-card">
+        {!ready ? (
+          <Spinner size={18} />
+        ) : (
+          <>
+            <LockKeyhole size={28} className="sync-lock-icon" />
+            <div className="sync-lock-title">
+              <h1 id="sync-lock-title">{faceId ? "Unlock with Face ID to resync" : "Enter your password to resync"}</h1>
+              <button type="button" className="sync-lock-help" aria-label="Why?" aria-expanded={info} onClick={() => setInfo(!info)}>
+                <CircleHelp size={17} />
+              </button>
+            </div>
+            {info && (
+              <p className="setting-desc sync-lock-info">
+                Because Lockdown Mode is enabled on this iPhone, {passkey === "on" ? "it needs to sign in with the passkey" : "it needs your password"} after
+                each refresh to re-enable syncing.
+                {passkey !== "on" && " Set up Unlock with Face ID in Settings → Account to use Face ID instead."} To avoid this, disable Lockdown Mode for
+                this website only in Safari: tap the page menu in the address bar → Website Settings → turn off Lockdown Mode.
+              </p>
+            )}
+            {faceId ? (
+              <>
+                <FaceIdUnlockButton username={account.username} />
+                <div className="sync-lock-links">
+                  <button type="button" className="link-btn" onClick={() => setUsePassword(true)}>
+                    Use password instead
+                  </button>
+                  <SignOutButton username={account.username} className="link-btn" />
+                </div>
+              </>
+            ) : (
+              <SignInForm unlockFor={account} hideFaceId />
+            )}
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -177,7 +241,7 @@ const authError = (err: unknown) => {
   return "Something went wrong. Please try again.";
 };
 
-function SignInForm({ unlockFor }: { unlockFor?: Account }) {
+function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId?: boolean }) {
   const { signIn } = useAuthActions();
   const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
   const [username, setUsername] = useState(unlockFor?.username ?? "");
@@ -217,7 +281,7 @@ function SignInForm({ unlockFor }: { unlockFor?: Account }) {
 
   return (
     <form className="account-form" onSubmit={submit}>
-      {unlockFor && (
+      {unlockFor && !hideFaceId && (
         <div className="account-faceid">
           <FaceIdUnlockButton username={unlockFor.username} />
         </div>
@@ -318,12 +382,12 @@ function waitForAccount(): Promise<Account> {
   });
 }
 
-function SignOutButton({ username }: { username: string }) {
+function SignOutButton({ username, className = "btn btn-sm" }: { username: string; className?: string }) {
   const { signOut } = useAuthActions();
   return (
     <button
       type="button"
-      className="btn btn-sm"
+      className={className}
       onClick={async () => {
         await forgetDevice(username);
         await signOut();

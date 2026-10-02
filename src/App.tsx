@@ -1,6 +1,6 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { LockedSyncPrompt } from "./components/Account";
+import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { IconButton } from "./components/primitives";
@@ -200,12 +200,12 @@ function Main() {
               </div>
             )
           ) : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
-          {cloudConfigured() && <LockedSyncPrompt />}
         </main>
       </div>
       <SettingsModal />
       <TooltipLayer />
       {cloudConfigured() && <CloudSync />}
+      {cloudConfigured() && <SyncLockScreen />}
     </>
   );
 }
