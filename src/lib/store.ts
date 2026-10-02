@@ -373,7 +373,7 @@ export const useStore = create<State>()(
           const d = detection[plan]!;
           if (d.status === "checking") detection[plan] = { ...d, status: "valid", checkedAt: d.checkedAt ?? 0 };
         }
-        // A check interrupted by a reload is simply run again later.
+        // A check interrupted by a reload is dropped, not re-run: entries are only checked when saved.
         const searchStatus: State["searchStatus"] = {};
         for (const [provider, statuses] of Object.entries(p.searchStatus ?? {})) {
           searchStatus[provider as SearchProviderId] = Object.fromEntries(Object.entries(statuses ?? {}).filter(([, v]) => v.status !== "checking"));

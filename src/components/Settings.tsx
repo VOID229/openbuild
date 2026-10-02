@@ -4,6 +4,7 @@ import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type K
 import { keyId } from "../lib/keys";
 import { fastTarget, findModel, isFastModel } from "../lib/models";
 import { parseModelQuery, scoreModel } from "../lib/modelSearch";
+import { isHosted } from "../lib/runtime";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
@@ -396,9 +397,11 @@ interface KeyFieldProps {
   onMoveUp?: () => void;
   /** New fields only: discard the empty field. */
   onCancel?: () => void;
+  /** Example address shown in an empty URL field. */
+  example?: string;
 }
 
-function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, verifies = "models", onRetry, validate, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
+function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, verifies = "models", onRetry, validate, onSave, onRemove, onMoveUp, onCancel, example = "http://192.168.1.10:8080" }: KeyFieldProps) {
   const [editing, setEditing] = useState(!value);
   const [draft, setDraft] = useState("");
   const [invalid, setInvalid] = useState<string>();
@@ -474,7 +477,7 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
           inputMode={isUrl ? "url" : undefined}
           readOnly={!editing}
           value={editing ? draft : isUrl ? value : MASK}
-          placeholder={isUrl ? "http://192.168.1.10:8080" : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+          placeholder={isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
           aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
           autoComplete="off"
           spellCheck={false}
@@ -523,7 +526,7 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
   );
 }
 
-interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "verifies"> {
+interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "verifies" | "example"> {
   /** Saved entries: key ids (the secrets live on the server), or instance URLs. */
   keys: string[];
   /** Receives the new ordered list: saved entries as `{ id }`, a newly typed or replaced key as `{ secret }`. */
@@ -624,6 +627,7 @@ function VaultNotice() {
 }
 
 function KeysSection() {
+  const hosted = isHosted();
   const keys = useStore((s) => s.settings.keys);
   const firstEmpty = Object.keys(keys).length === 0;
   return (
@@ -636,8 +640,10 @@ function KeysSection() {
         ))}
       </div>
       <p className="field-help keys-help">
-        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. Keys are saved in your
-        operating system's keychain by the local OpenChat server and are never sent back to the browser. Get one at{" "}
+        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited.{" "}
+        {/* On the website, VaultNotice above says where keys are kept. */}
+        {!hosted && "Keys are saved in your operating system's keychain by the local OpenChat server and are never sent back to the browser. "}
+        Get one at{" "}
         <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer">
           opencode.ai
         </a>
@@ -648,6 +654,14 @@ function KeysSection() {
 }
 
 // ------------------------------------------------------------------ Web Search
+
+/** The hosted site's relay can only reach public https:// instances (server/handlers.ts isPublicUrl). */
+const HOSTED_EXAMPLE = "https://searx.example.com";
+
+function validateHostedInstanceUrl(raw: string) {
+  if (!/^https:\/\//i.test(raw.trim())) return `Enter a public https:// address, like ${HOSTED_EXAMPLE}`;
+  return validateInstanceUrl(raw);
+}
 
 function validateInstanceUrl(raw: string) {
   const error = "Enter an address like http://192.168.1.10:8080";
@@ -661,16 +675,13 @@ function validateInstanceUrl(raw: string) {
   }
 }
 
-function SearchKeys({ provider }: { provider: SearchProviderId }) {
+function SearchKeys({ provider, hosted }: { provider: SearchProviderId; hosted: boolean }) {
   const keys = useStore((s) => s.settings.search[provider]) ?? [];
   const statuses = useStore((s) => s.searchStatus[provider]);
   const setSearchKeys = useStore((s) => s.setSearchKeys);
   const verifySearch = useStore((s) => s.verifySearch);
   const config = SEARCH_PROVIDERS[provider];
-  // Check entries saved before checks existed (or interrupted by a reload); results are kept.
-  useEffect(() => {
-    void verifySearch(provider);
-  }, [provider, verifySearch]);
+  // Entries are checked only when saved (see setSearchKeys), never on open or reload.
   return (
     <KeyList
       scope={`search-${provider}`}
@@ -678,7 +689,8 @@ function SearchKeys({ provider }: { provider: SearchProviderId }) {
       kind={config.credential}
       keys={keys}
       setKeys={(next) => void setSearchKeys(provider, next)}
-      validate={config.credential === "url" ? validateInstanceUrl : undefined}
+      validate={config.credential === "url" ? (hosted ? validateHostedInstanceUrl : validateInstanceUrl) : undefined}
+      example={hosted ? HOSTED_EXAMPLE : undefined}
       verifies="search"
       statusOf={(k) => statuses?.[keyId(k)]}
       onRetry={(k) => void verifySearch(provider, [k])}
@@ -687,6 +699,7 @@ function SearchKeys({ provider }: { provider: SearchProviderId }) {
 }
 
 function SearchSection() {
+  const hosted = isHosted();
   const enabled = useStore((s) => s.settings.webSearch);
   const configured = useStore((s) => SEARCH_ORDER.filter((p) => s.settings.search[p]?.length).length);
   const update = useStore((s) => s.updateSettings);
@@ -707,14 +720,24 @@ function SearchSection() {
       </div>
       <div className="key-list">
         {SEARCH_ORDER.map((p) => (
-          <SearchKeys key={p} provider={p} />
+          <SearchKeys key={p} provider={p} hosted={hosted} />
         ))}
       </div>
       <p className="field-help keys-help">
         {configured === 0 ? "Add a key for any provider to turn on web search. " : ""}
-        Add more than one key per provider and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. For
-        SearXNG, enter the address of an instance you already run (over LAN, Tailscale or the internet) with the JSON format enabled; OpenChat
-        doesn't start or install anything. Keys are saved in your operating system's keychain by the local OpenChat server and are never sent back to the browser.
+        Add more than one key per provider and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited.{" "}
+        {hosted ? (
+          <>
+            For SearXNG, enter the public https:// address of an instance you already run with the JSON format enabled. The website searches from
+            the cloud, so it can't reach instances on your LAN or Tailscale; run OpenChat locally for those.
+          </>
+        ) : (
+          <>
+            For SearXNG, enter the address of an instance you already run (over LAN, Tailscale or the internet) with the JSON format enabled;
+            OpenChat doesn't start or install anything. Keys are saved in your operating system's keychain by the local OpenChat server and are
+            never sent back to the browser.
+          </>
+        )}
       </p>
     </>
   );
