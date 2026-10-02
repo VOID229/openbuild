@@ -229,9 +229,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
-.icon-btn:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-btn:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .icon-btn:active {
@@ -255,8 +257,10 @@ svg {
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
-.btn:hover:not(:disabled) {
-  background: var(--surface-2);
+@media (hover: hover) {
+  .btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
 }
 
 .btn:disabled {
@@ -282,8 +286,10 @@ svg {
   transition: color var(--fast) var(--ease);
 }
 
-.link-btn:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .link-btn:hover {
+    color: var(--text);
+  }
 }
 
 .input {
@@ -302,8 +308,10 @@ svg {
   color: var(--text-3);
 }
 
-.input:hover {
-  border-color: color-mix(in srgb, var(--text) 25%, transparent);
+@media (hover: hover) {
+  .input:hover {
+    border-color: color-mix(in srgb, var(--text) 25%, transparent);
+  }
 }
 
 .input:focus {
@@ -335,8 +343,10 @@ svg {
   transition: background-color var(--med) var(--ease), border-color var(--med) var(--ease);
 }
 
-.toggle:hover {
-  border-color: var(--border-strong);
+@media (hover: hover) {
+  .toggle:hover {
+    border-color: var(--border-strong);
+  }
 }
 
 .toggle-knob {
@@ -487,10 +497,16 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.menu-item:hover:not(:disabled),
 .menu-item:focus-visible {
   background: var(--hover);
   outline: none;
+}
+
+@media (hover: hover) {
+  .menu-item:hover:not(:disabled) {
+    background: var(--hover);
+    outline: none;
+  }
 }
 
 .menu-item:disabled {
@@ -705,8 +721,10 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.new-chat:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .new-chat:hover {
+    background: var(--hover);
+  }
 }
 
 .new-chat:active {
@@ -761,9 +779,11 @@ svg {
   color: var(--text-3);
 }
 
-.search-clear:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .search-clear:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .sidebar-divider {
@@ -796,9 +816,11 @@ svg {
   transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
-.history-heading-toggle:hover {
-  color: var(--text-2);
-  background: var(--hover);
+@media (hover: hover) {
+  .history-heading-toggle:hover {
+    color: var(--text-2);
+    background: var(--hover);
+  }
 }
 
 .history-heading-chevron {
@@ -838,14 +860,24 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.history-row:hover,
-.history-row:focus-within {
+.history-row:has(:focus-visible) {
   --row-bg: color-mix(in srgb, var(--text) 5%, var(--bg));
 }
 
-.history-row-active,
-.history-row-active:hover {
+@media (hover: hover) {
+  .history-row:hover {
+    --row-bg: color-mix(in srgb, var(--text) 5%, var(--bg));
+  }
+}
+
+.history-row-active {
   --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+}
+
+@media (hover: hover) {
+  .history-row-active:hover {
+    --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+  }
 }
 
 .history-title {
@@ -952,10 +984,16 @@ svg {
   transition: opacity var(--fast) var(--ease);
 }
 
-.history-row:hover .history-actions,
-.history-row:focus-within .history-actions {
+.history-row:has(:focus-visible) .history-actions {
   opacity: 1;
   pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .history-row:hover .history-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 .history-action {
@@ -965,8 +1003,10 @@ svg {
   color: var(--text-2);
 }
 
-.history-action:hover {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
+@media (hover: hover) {
+  .history-action:hover {
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
 }
 
 .history-rename {
@@ -1014,8 +1054,10 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.settings-btn:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .settings-btn:hover {
+    background: var(--hover);
+  }
 }
 
 .sidebar-scrim {
@@ -1108,9 +1150,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.onboarding:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .onboarding:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 @keyframes rise {
@@ -1226,10 +1270,16 @@ svg {
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
-.pill:hover:not(:disabled):not([aria-disabled="true"]),
 .pill-open {
   background: var(--hover);
   border-color: var(--border-strong);
+}
+
+@media (hover: hover) {
+  .pill:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--hover);
+    border-color: var(--border-strong);
+  }
 }
 
 .pill:disabled,
@@ -1271,9 +1321,11 @@ svg {
   transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
-.round-btn:hover:not(:disabled) {
-  background: var(--ink-hover);
-  transform: scale(1.05);
+@media (hover: hover) {
+  .round-btn:hover:not(:disabled) {
+    background: var(--ink-hover);
+    transform: scale(1.05);
+  }
 }
 
 .round-btn:active:not(:disabled) {
@@ -1357,9 +1409,14 @@ svg {
   transition: opacity var(--fast) var(--ease);
 }
 
-.attachment:hover .attachment-remove,
 .attachment-remove:focus-visible {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .attachment:hover .attachment-remove {
+    opacity: 1;
+  }
 }
 
 @media (hover: none) {
@@ -1450,8 +1507,10 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.api-chip:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .api-chip:hover {
+    background: var(--hover);
+  }
 }
 
 .api-chip[aria-selected="true"] {
@@ -1500,10 +1559,16 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.model-row:hover,
 .model-row:focus-visible {
   background: var(--hover);
   outline: none;
+}
+
+@media (hover: hover) {
+  .model-row:hover {
+    background: var(--hover);
+    outline: none;
+  }
 }
 
 .model-row[aria-selected="true"] {
@@ -1648,10 +1713,15 @@ svg {
   justify-content: flex-end;
 }
 
-.msg:hover .msg-actions,
 .msg-actions:focus-within,
 .msg-last .msg-actions {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .msg:hover .msg-actions {
+    opacity: 1;
+  }
 }
 
 @media (hover: none) {
@@ -1702,10 +1772,12 @@ svg {
   white-space: nowrap;
 }
 
-.fork-link:hover {
-  background: var(--hover);
-  border-color: var(--border-strong);
-  color: var(--text);
+@media (hover: hover) {
+  .fork-link:hover {
+    background: var(--hover);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
 }
 
 .msg-second {
@@ -1722,10 +1794,16 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.msg-second:hover,
 .msg-second[aria-expanded="true"] {
   background: var(--hover);
   color: var(--text);
+}
+
+@media (hover: hover) {
+  .msg-second:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 /* Keep the action row visible while one of its menus is open. */
@@ -1850,9 +1928,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.reasoning-toggle:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .reasoning-toggle:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .reasoning-chevron {
@@ -1940,9 +2020,11 @@ svg {
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
-.think-btn:hover {
-  background: var(--surface-2);
-  border-color: color-mix(in srgb, var(--text) 25%, transparent);
+@media (hover: hover) {
+  .think-btn:hover {
+    background: var(--surface-2);
+    border-color: color-mix(in srgb, var(--text) 25%, transparent);
+  }
 }
 
 .think-btn:active {
@@ -1976,9 +2058,11 @@ svg {
   transform: translate(-50%, 0);
 }
 
-.scroll-down:hover {
-  background: var(--surface-2);
-  color: var(--text);
+@media (hover: hover) {
+  .scroll-down:hover {
+    background: var(--surface-2);
+    color: var(--text);
+  }
 }
 
 /* ==========================================================================
@@ -2061,8 +2145,10 @@ svg {
   transition: text-decoration-color var(--fast) var(--ease);
 }
 
-.markdown a:hover {
-  text-decoration-color: currentColor;
+@media (hover: hover) {
+  .markdown a:hover {
+    text-decoration-color: currentColor;
+  }
 }
 
 .markdown strong {
@@ -2185,9 +2271,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.code-copy:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .code-copy:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .code-block pre {
@@ -2389,9 +2477,15 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.settings-nav-item:hover {
-  background: var(--hover);
-  color: var(--text);
+.settings-nav-icon {
+  display: none;
+}
+
+@media (hover: hover) {
+  .settings-nav-item:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .settings-nav-item[aria-current="true"] {
@@ -2489,9 +2583,11 @@ svg {
   transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
-.avatar-pencil:hover {
-  background: var(--surface-2);
-  transform: scale(1.06);
+@media (hover: hover) {
+  .avatar-pencil:hover {
+    background: var(--surface-2);
+    transform: scale(1.06);
+  }
 }
 
 .avatar-edit .link-btn {
@@ -2586,8 +2682,10 @@ svg {
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 
-.chip:hover {
-  background: var(--surface-2);
+@media (hover: hover) {
+  .chip:hover {
+    background: var(--surface-2);
+  }
 }
 
 .chip-x {
@@ -2600,9 +2698,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.chip-x:hover {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .chip-x:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .chip-add {
@@ -2630,8 +2730,10 @@ svg {
   font-weight: 500;
 }
 
-.chip-tag:hover {
-  background: var(--surface-3);
+@media (hover: hover) {
+  .chip-tag:hover {
+    background: var(--surface-3);
+  }
 }
 
 .chip-comma {
@@ -2714,10 +2816,16 @@ svg {
   width: 96px;
 }
 
-.select-trigger:hover:not([aria-disabled="true"]),
 .select-trigger-open {
   background: var(--hover);
   border-color: color-mix(in srgb, var(--text) 25%, transparent);
+}
+
+@media (hover: hover) {
+  .select-trigger:hover:not([aria-disabled="true"]) {
+    background: var(--hover);
+    border-color: color-mix(in srgb, var(--text) 25%, transparent);
+  }
 }
 
 .select-trigger[aria-disabled="true"] {
@@ -2787,6 +2895,7 @@ svg {
 .add-model-list {
   max-height: 240px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 /* API Keys */
@@ -2861,9 +2970,11 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.add-key:hover:not(:disabled) {
-  background: var(--hover);
-  color: var(--text);
+@media (hover: hover) {
+  .add-key:hover:not(:disabled) {
+    background: var(--hover);
+    color: var(--text);
+  }
 }
 
 .add-key:disabled {
@@ -2940,8 +3051,10 @@ p.key-status svg {
   color: var(--text-3);
 }
 
-.key-remove:hover {
-  color: var(--danger);
+@media (hover: hover) {
+  .key-remove:hover {
+    color: var(--danger);
+  }
 }
 
 .keys-help {
@@ -2966,8 +3079,10 @@ p.key-status svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 
-.segment:hover {
-  background: var(--hover);
+@media (hover: hover) {
+  .segment:hover {
+    background: var(--hover);
+  }
 }
 
 .segment[aria-checked="true"] {
@@ -3170,31 +3285,36 @@ p.key-status svg {
     transform: translateY(24px);
   }
 
+  /* On phones the sections are icons, spread evenly so they all fit without scrolling. */
   .settings-nav {
     grid-row: 1;
     grid-column: 1;
     flex-direction: row;
+    justify-content: space-between;
+    gap: 4px;
     width: auto;
     min-width: 0;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-    padding: 12px 8px 12px max(12px, env(safe-area-inset-left));
+    padding: 10px 4px 10px max(10px, env(safe-area-inset-left));
     border-right: 0;
     background: transparent;
-    /* Fade the tabs out at the edge so it's clear they scroll. */
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-  }
-
-  .settings-nav::-webkit-scrollbar {
-    display: none;
   }
 
   .settings-nav-item {
-    flex-shrink: 0;
-    height: 38px;
-    padding: 0 14px;
+    display: grid;
+    place-items: center;
+    flex: 1 1 0;
+    max-width: 52px;
+    height: 44px;
+    padding: 0;
+    border-radius: 12px;
+  }
+
+  .settings-nav-icon {
+    display: block;
+  }
+
+  .settings-nav-label {
+    display: none;
   }
 
   .modal .modal-close {
@@ -3300,14 +3420,48 @@ p.key-status svg {
   }
 }
 
-/* Touch screens: no hover-only affordances, and roomier tap targets. */
+/* Touch screens: hover styles are limited to (hover: hover) above, because a tap sets :hover and
+   it sticks until you tap elsewhere. Instead, controls light up only while pressed. */
 @media (hover: none) {
-  .round-btn:hover:not(:disabled),
-  .avatar-pencil:hover {
-    transform: none;
+  .btn:active:not(:disabled),
+  .menu-item:active:not(:disabled),
+  .settings-btn:active,
+  .onboarding:active,
+  .pill:active:not(:disabled):not([aria-disabled="true"]),
+  .api-chip:active,
+  .model-row:active,
+  .msg-second:active,
+  .reasoning-toggle:active,
+  .code-copy:active,
+  .fork-link:active,
+  .settings-nav-item:active,
+  .chip:active,
+  .select-trigger:active:not([aria-disabled="true"]),
+  .add-key:active:not(:disabled),
+  .segment:active:not([aria-checked="true"]),
+  .search-clear:active,
+  .history-heading-toggle:active,
+  .scroll-down:active,
+  .avatar-pencil:active {
+    background: var(--active);
   }
-  .round-btn:hover:not(:disabled) {
-    background: var(--ink);
+
+  .history-row:active {
+    --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
+  }
+
+  .link-btn:active {
+    color: var(--text);
+  }
+
+  .new-chat:active,
+  .settings-btn:active,
+  .icon-btn:active,
+  .pill:active:not(:disabled):not([aria-disabled="true"]),
+  .think-btn:active,
+  .chip:active,
+  .segment:active {
+    transform: scale(0.97);
   }
 }
 
@@ -3467,9 +3621,11 @@ p.key-status svg {
   text-decoration: none;
 }
 
-.search-results a:hover .search-result-title {
-  color: var(--text);
-  text-decoration: underline;
+@media (hover: hover) {
+  .search-results a:hover .search-result-title {
+    color: var(--text);
+    text-decoration: underline;
+  }
 }
 
 .search-result-title {
@@ -3516,8 +3672,10 @@ p.key-status svg {
   border-color: var(--danger);
 }
 
-.btn-danger:hover:not(:disabled) {
-  background: var(--danger-bg);
+@media (hover: hover) {
+  .btn-danger:hover:not(:disabled) {
+    background: var(--danger-bg);
+  }
 }
 
 .account-faceid {
@@ -3572,10 +3730,16 @@ p.key-status svg {
   color: var(--text-3);
 }
 
-.sync-lock-help:hover,
 .sync-lock-help[aria-expanded="true"] {
   color: var(--text);
   background: var(--surface-2);
+}
+
+@media (hover: hover) {
+  .sync-lock-help:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
 }
 
 .sync-lock-info {

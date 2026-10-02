@@ -54,9 +54,12 @@ export function useDismiss(open: boolean, onClose: () => void, refs: RefObject<H
 /**
  * Focus an element inside a popover once it's positioned and visible; `autoFocus` fires while
  * the popover is still hidden for measuring, so the focus would be lost.
+ * Skipped on touch screens: focusing a field opens the on-screen keyboard, and on iOS the page
+ * shifting under it stops the popover's list from scrolling (same rule as the composer picker).
  */
 export function useFocusOnShow(ref: RefObject<HTMLElement | null>) {
   useEffect(() => {
+    if (!window.matchMedia("(pointer: fine)").matches) return;
     let inner = 0;
     const outer = requestAnimationFrame(() => {
       inner = requestAnimationFrame(() => ref.current?.focus({ preventScroll: true }));

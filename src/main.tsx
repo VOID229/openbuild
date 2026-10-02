@@ -9,6 +9,9 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { CloudProvider, initCloud } from "./lib/cloud";
 
+// iOS Safari only applies :active (the press effect on touch screens) when a touch listener exists.
+document.addEventListener("touchstart", () => {}, { passive: true });
+
 await initCloud();
 createRoot(document.getElementById("root")!).render(
   <CloudProvider>

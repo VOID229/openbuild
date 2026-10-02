@@ -1,4 +1,4 @@
-import { ArrowUp, Check, CircleAlert, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, Plus, RefreshCw, Settings2, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
@@ -11,13 +11,14 @@ import { AccountSection } from "./Account";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
 
-const SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "profile", label: "Profile" },
-  { id: "account", label: "Account" },
-  { id: "general", label: "General" },
-  { id: "keys", label: "API Keys" },
-  { id: "search", label: "Web Search" },
-  { id: "appearance", label: "Appearance" },
+/** Icons stand in for the labels on phones, so every section fits without scrolling. */
+const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
+  { id: "profile", label: "Profile", icon: UserRound },
+  { id: "account", label: "Account", icon: CircleUser },
+  { id: "general", label: "General", icon: Settings2 },
+  { id: "keys", label: "API Keys", icon: Key },
+  { id: "search", label: "Web Search", icon: Globe },
+  { id: "appearance", label: "Appearance", icon: Palette },
 ];
 
 const Heading = ({ children }: { children: ReactNode }) => (
@@ -792,11 +793,6 @@ export function SettingsModal() {
     if (open && mounted) dialog.current?.focus({ preventScroll: true });
   }, [open, mounted]);
 
-  // On phones the tabs scroll sideways; keep the current one in view.
-  useEffect(() => {
-    if (mounted) dialog.current?.querySelector('.settings-nav-item[aria-current="true"]')?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [mounted, section]);
-
   if (!mounted) return null;
   return (
     <div className="modal-root" data-state={visible ? "open" : "closed"}>
@@ -809,9 +805,11 @@ export function SettingsModal() {
               type="button"
               className="settings-nav-item"
               aria-current={section === s.id}
+              aria-label={s.label}
               onClick={() => useStore.setState({ settingsSection: s.id })}
             >
-              {s.label}
+              <s.icon size={20} className="settings-nav-icon" aria-hidden />
+              <span className="settings-nav-label">{s.label}</span>
             </button>
           ))}
         </nav>
