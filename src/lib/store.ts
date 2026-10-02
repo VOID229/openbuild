@@ -24,6 +24,7 @@ const DEFAULT_SETTINGS: Settings = {
   search: {},
   effort: "medium",
   naming: { enabled: true, models: [] },
+  syncApiKeys: false,
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };

@@ -133,3 +133,13 @@ export function setKeys(scope: KeyScope, edits: KeyEdit[]): Promise<string[]> {
     return next.map((e) => e.id);
   });
 }
+
+/** Every stored secret, per scope in priority order. Only for account key sync, which the user turns on. */
+export async function allSecrets(): Promise<Record<KeyScope, string[]>> {
+  const out: Record<KeyScope, string[]> = {};
+  for (const scope of scopes()) {
+    const list = await secrets(scope);
+    if (list.length) out[scope] = list;
+  }
+  return out;
+}

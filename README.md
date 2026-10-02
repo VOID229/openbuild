@@ -44,7 +44,8 @@ Sign in under **Settings → Account** to sync chats, settings and your profile 
 
 - Your password is stretched on your device (PBKDF2-SHA256, 600k rounds, salted with your username) and split into two keys. One is the sign-in secret the server sees. The other unlocks a random data key that encrypts every synced item with AES-256-GCM. The server can't get from the first to the second, so it can't decrypt anything.
 - There's no email, phone or name: an account is just a username and password. The flip side is that **a forgotten password can't be reset**. The synced copy is then unreadable, but what's on your devices is untouched.
-- No analytics or telemetry, and prompts are never logged: not by the OpenChat server, and not by the sync functions (`convex/sync.ts`), which only store what they're given. API keys never sync; they stay in your OS keychain.
+- No analytics or telemetry, and prompts are never logged: not by the OpenChat server, and not by the sync functions (`convex/sync.ts`), which only store what they're given.
+- **API keys sync only if you turn it on** (Settings → Account → Sync API keys). Then they're encrypted on the device like everything else, so you enter a key once and every device has it. Off (the default), they stay on each device: in the OS keychain for the local app, in the browser on the website. Turning it off removes them from the account; devices keep their copies. Turning it on merges every device's keys, so none are lost; after that, adding or removing a key on one device does the same everywhere.
 - **Delete account** removes the account and everything synced to it from the deployment.
 
 **Speed.** Each device holds a live subscription to "what changed since I last looked", so changes made elsewhere show up within moments, and only changed items travel (gzipped, then encrypted). Local changes go out about 150 ms after you make them. Your local copy stays the primary one: offline edits are queued and sent when you reconnect. If two devices edit the same chat at once, both sets of messages are kept.
@@ -61,7 +62,7 @@ It writes the deployment's address to `shared/cloud.ts`. Commit that, and every 
 
 OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed on Vercel from `main`). It's the same app, minus the local server's storage:
 
-- **Chats, settings and API keys stay in your browser** (IndexedDB/localStorage, marked persistent). Sign in to sync and back them up, end-to-end encrypted, like the local app.
+- **Chats, settings and API keys stay in your browser** (IndexedDB/localStorage, marked persistent). Sign in to sync and back them up, end-to-end encrypted, like the local app. API keys sync too if you turn on Sync API keys.
 - **The relay keeps nothing.** `/api/chat` and `/api/models` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
 - **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address. A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
 
