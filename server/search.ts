@@ -99,7 +99,7 @@ async function call(url: string, init: RequestInit, label: string): Promise<any>
   }
   if (!res.ok) {
     const detail =
-      body?.error?.message ?? body?.error?.[0]?.msg ?? (typeof body?.error === "string" ? body.error : undefined) ?? body?.detail?.error ?? body?.detail ?? body?.message;
+      body?.error?.message ?? body?.error?.[0]?.msg ?? body?.errors?.[0]?.message ?? (typeof body?.error === "string" ? body.error : undefined) ?? body?.detail?.error ?? body?.detail ?? body?.message;
     const message = `${label} returned HTTP ${res.status}${detail ? `: ${typeof detail === "string" ? detail : JSON.stringify(detail)}` : ""}`;
     // Rejected, out of credit, or rate limited: worth trying the next key.
     throw new SearchError(message, [401, 402, 403, 429].includes(res.status) || res.status >= 500);
@@ -306,6 +306,49 @@ const PROVIDERS: Record<SearchProviderId, Provider> = {
       return { results: results.filter((x) => x.url) };
     },
   },
+
+  x: {
+    cost: 2.5,
+    timeout: 20_000,
+    perResult: 600,
+    description:
+      "Searches posts on the X (Twitter) platform from the last 7 days through the X API. " +
+      "Best for what people are saying right now: reactions and public opinion, breaking news as it unfolds, announcements posted on X, and posts from specific accounts. " +
+      "Not a general web search. The query supports X operators, e.g. `from:username`, `-is:retweet`, `lang:en`, `has:links`, `\"exact phrase\"`, `#hashtag`.",
+    properties: {
+      query: { type: "string", description: "X search query (keywords plus optional operators such as from:, -is:retweet, lang:)." },
+      sort: { type: "string", enum: ["relevancy", "recency"], description: "relevancy (default) or newest first." },
+      count: { type: "integer", description: "Number of posts (10-50, default 15)." },
+    },
+    async run(key, q, args, signal) {
+      const params = new URLSearchParams({
+        query: q,
+        max_results: String(clampInt(args.count, 10, 50, 15)),
+        sort_order: pick(args.sort, ["relevancy", "recency"] as const) ?? "relevancy",
+        "tweet.fields": "created_at,public_metrics,author_id,lang",
+        expansions: "author_id",
+        "user.fields": "username,name,verified",
+      });
+      // Accept a pasted "Bearer …" header value as well as the bare token.
+      const token = decodeURIComponent(key.replace(/^bearer\s+/i, ""));
+      const body = await call(`https://api.x.com/2/tweets/search/recent?${params}`, { headers: { authorization: `Bearer ${token}` }, signal }, "X");
+      const users = new Map<string, any>((body.includes?.users ?? []).map((u: any) => [u.id, u]));
+      const results: Result[] = (body.data ?? []).map((t: any) => {
+        const u = users.get(t.author_id);
+        const handle = u?.username ?? "i";
+        const m = t.public_metrics ?? {};
+        const text = String(t.text ?? "");
+        const stats = [`${m.like_count ?? 0} likes`, `${m.retweet_count ?? 0} reposts`, `${m.reply_count ?? 0} replies`].join(", ");
+        return {
+          title: `@${handle}: ${text.replace(/\s+/g, " ").slice(0, 90)}${text.length > 90 ? "…" : ""}`,
+          url: `https://x.com/${handle}/status/${t.id}`,
+          published: t.created_at,
+          content: `${u?.name ? `${u.name} (@${handle})` : `@${handle}`} · ${stats}\n${text}`,
+        };
+      });
+      return { results };
+    },
+  },
 };
 
 const toolName = (id: SearchProviderId) => `search_${id}`;
@@ -334,11 +377,12 @@ function format(results: Result[], answer: string | undefined, perResult: number
 /** Which providers fit each kind of search, best first (filtered to what's configured). */
 const ROUTING: { task: string; order: SearchProviderId[] }[] = [
   { task: "Quick, broad or simple lookups", order: ["searxng", "brave", "kagi", "exa", "tavily", "firecrawl"] },
-  { task: "Latest, up-to-date information and recent news", order: ["exa", "brave", "tavily", "searxng", "kagi", "firecrawl"] },
+  { task: "Latest, up-to-date information and recent news", order: ["exa", "brave", "x", "tavily", "searxng", "kagi", "firecrawl"] },
   { task: "Deep research and multi-source fact-finding", order: ["tavily", "exa", "firecrawl", "kagi", "brave", "searxng"] },
   { task: "Reading full page contents (docs, long articles, specs)", order: ["firecrawl", "exa", "tavily"] },
   { task: "Technical, programming and quality-sensitive topics", order: ["kagi", "exa", "searxng", "brave", "tavily"] },
   { task: "Finding papers, companies, repos or similar pages", order: ["exa", "kagi", "searxng", "tavily"] },
+  { task: "What people are saying on X: reactions, opinions, breaking news, posts by an account", order: ["x", "exa", "brave", "tavily"] },
 ];
 
 export interface SearchToolkit {

@@ -28,7 +28,7 @@ Open **Settings → API Keys** and paste a key for your plan. OpenChat checks th
 
 ## Web search
 
-Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl or Tavily, or the address of a SearXNG instance you already run (LAN, Tailscale, anywhere reachable from the OpenChat server; its `search.formats` must include `json`). Like plan keys, each provider can have several keys (or instances) that are tried in order.
+Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl, Tavily or X (the app Bearer token from the X developer portal; your X API plan must include post search), or the address of a SearXNG instance you already run (LAN, Tailscale, anywhere reachable from the OpenChat server; its `search.formats` must include `json`). Like plan keys, each provider can have several keys (or instances) that are tried in order.
 
 Each configured provider is exposed to the model as its own tool (`search_exa`, `search_brave`, ...). Tool descriptions and a system-prompt section tell the model what each provider is best at, so with several configured it picks per query:
 
@@ -39,5 +39,6 @@ Each configured provider is exposed to the model as its own tool (`search_exa`, 
 | Deep research, multi-source facts | Tavily → Exa → Firecrawl |
 | Full page contents (docs, long articles) | Firecrawl → Exa → Tavily |
 | Technical / quality-sensitive topics | Kagi → Exa → SearXNG |
+| What people are saying on X (reactions, breaking news, posts by an account) | X → Exa → Brave |
 
 The server runs the tool loop (`server/agent.ts`) for all four upstream protocols: it streams the model's turn, runs the searches it asked for, sends the results back, and repeats (up to 8 rounds) until the model answers. Searches show up above the reply with their result links. Models that models.dev lists as lacking tool support never get the search tools.
