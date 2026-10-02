@@ -2,13 +2,20 @@
 // server (PUT /api/keys/:scope), which keeps them in the OS keychain and hands back opaque ids.
 import { SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 
+// A server from before the key vault has no /api/keys and answers 404. That happens when an old
+// `bun dev` is still running on this port after an update: say so instead of "Not found".
+export const STALE_SERVER = "The OpenChat server on this port is out of date, so it can't save keys. Stop it, run `bun dev` again, and reload this page.";
+
+/** The saved key ids; undefined when the server is unreachable. Throws when the server is too old to have a vault. */
 export async function fetchKeys(signal?: AbortSignal): Promise<KeyInventory | undefined> {
+  let res: Response;
   try {
-    const res = await fetch("/api/keys", { signal });
-    return res.ok ? ((await res.json()) as KeyInventory) : undefined;
+    res = await fetch("/api/keys", { signal });
   } catch {
     return undefined;
   }
+  if (res.status === 404) throw new Error(STALE_SERVER);
+  return res.ok ? ((await res.json().catch(() => undefined)) as KeyInventory | undefined) : undefined;
 }
 
 /** Replace a scope's ordered key list on the server; resolves to the saved ids. */
@@ -19,6 +26,7 @@ export async function saveKeys(scope: PlanId | SearchProviderId, keys: KeyEdit[]
     body: JSON.stringify({ keys }),
   });
   const body = await res.json().catch(() => null);
+  if (res.status === 404) throw new Error(STALE_SERVER);
   if (!res.ok) throw new Error(body?.error ?? `Couldn't save the key (HTTP ${res.status})`);
   return body.ids as string[];
 }

@@ -146,7 +146,13 @@ export const useStore = create<State>()(
       },
 
       syncKeys: async () => {
-        const inventory = await fetchKeys();
+        let inventory: KeyInventory | undefined;
+        try {
+          inventory = await fetchKeys();
+        } catch (err) {
+          set({ keysError: (err as Error).message });
+          return;
+        }
         if (!inventory) return; // Server unreachable: keep the cached ids; detection will report it.
         const saved = inventory.keys;
         // Move keys an older version kept in this browser into the vault. They stay in a temporary
