@@ -1,6 +1,6 @@
 import { ArrowUp, Check, CircleAlert, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../shared/types";
+import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
 import { fastTarget, findModel, isFastModel } from "../lib/models";
 import { parseModelQuery, scoreModel } from "../lib/modelSearch";
@@ -517,8 +517,10 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
 }
 
 interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "onRetry"> {
+  /** Saved entries: key ids (the secrets live on the server), or instance URLs. */
   keys: string[];
-  setKeys: (keys: string[]) => void;
+  /** Receives the new ordered list: saved entries as `{ id }`, a newly typed or replaced key as `{ secret }`. */
+  setKeys: (keys: KeyEdit[]) => void;
   autoFocus?: boolean;
   statusOf?: (key: string) => KeyStatus | undefined;
 }
@@ -527,6 +529,7 @@ interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | 
 function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps) {
   const [adding, setAdding] = useState(false);
   const total = keys.length + (adding ? 1 : 0);
+  const saved: KeyEdit[] = keys.map((id) => ({ id }));
   return (
     <div className="key-row">
       <div className="key-label">{field.label}</div>
@@ -539,9 +542,9 @@ function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps)
             index={i}
             total={total}
             status={statusOf?.(k)}
-            onSave={(next) => setKeys(keys.map((x, j) => (j === i ? next : x)))}
-            onRemove={() => setKeys(keys.filter((_, j) => j !== i))}
-            onMoveUp={i > 0 ? () => setKeys(keys.map((x, j) => (j === i - 1 ? keys[i]! : j === i ? keys[i - 1]! : x))) : undefined}
+            onSave={(next) => setKeys(saved.map((x, j) => (j === i ? { secret: next } : x)))}
+            onRemove={() => setKeys(saved.filter((_, j) => j !== i))}
+            onMoveUp={i > 0 ? () => setKeys(saved.map((x, j) => (j === i - 1 ? saved[i]! : j === i ? saved[i - 1]! : x))) : undefined}
           />
         ))}
         {(adding || !keys.length) && (
@@ -552,7 +555,7 @@ function KeyList({ keys, setKeys, autoFocus, statusOf, ...field }: KeyListProps)
             total={total || 1}
             autoFocus={adding || autoFocus}
             onSave={(next) => {
-              setKeys([...keys, next]);
+              setKeys([...saved, { secret: next }]);
               setAdding(false);
             }}
             onCancel={keys.length ? () => setAdding(false) : undefined}
@@ -578,11 +581,30 @@ function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
       scope={plan}
       label={PLANS[plan].label}
       keys={keys}
-      setKeys={(next) => setKeys(plan, next)}
+      setKeys={(next) => void setKeys(plan, next)}
       autoFocus={autoFocus}
       statusOf={(k) => statuses?.[keyId(k)]}
       onRetry={() => refreshDetection(plan)}
     />
+  );
+}
+
+function VaultNotice() {
+  const backend = useStore((s) => s.keyBackend);
+  const error = useStore((s) => s.keysError);
+  return (
+    <>
+      {error && (
+        <p className="field-help key-status key-status-bad" role="alert">
+          <CircleAlert size={13} className="bad" /> {error}
+        </p>
+      )}
+      {backend === "file" && (
+        <p className="field-help key-status">
+          <CircleAlert size={13} className="bad" /> No OS keychain was found, so keys are stored in a private file (<code>~/.config/openchat/secrets.json</code>, readable only by you).
+        </p>
+      )}
+    </>
   );
 }
 
@@ -592,14 +614,15 @@ function KeysSection() {
   return (
     <>
       <Heading>API Keys</Heading>
+      <VaultNotice />
       <div className="key-list">
         {KEY_ORDER.map((plan, i) => (
           <PlanKeys key={plan} plan={plan} autoFocus={firstEmpty && i === 0} />
         ))}
       </div>
       <p className="field-help keys-help">
-        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. Keys stay in
-        this browser and are only sent to Opencode through your local OpenChat server. Get one at{" "}
+        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. Keys are saved in your
+        operating system's keychain by the local OpenChat server and are never sent back to the browser. Get one at{" "}
         <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer">
           opencode.ai
         </a>
@@ -633,7 +656,7 @@ function SearchKeys({ provider }: { provider: SearchProviderId }) {
       label={config.label}
       kind={config.credential}
       keys={keys}
-      setKeys={(next) => setSearchKeys(provider, next)}
+      setKeys={(next) => void setSearchKeys(provider, next)}
       validate={config.credential === "url" ? validateInstanceUrl : undefined}
     />
   );
@@ -646,6 +669,7 @@ function SearchSection() {
   return (
     <>
       <Heading>Web Search</Heading>
+      <VaultNotice />
       <div className="setting-row setting-row-top">
         <div className="setting-text">
           <div className="setting-label">Let models search the web</div>
@@ -666,7 +690,7 @@ function SearchSection() {
         {configured === 0 ? "Add a key for any provider to turn on web search. " : ""}
         Add more than one key per provider and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. For
         SearXNG, enter the address of an instance you already run (over LAN, Tailscale or the internet) with the JSON format enabled; OpenChat
-        doesn't start or install anything. Keys stay in this browser and are only sent to the provider through your local OpenChat server.
+        doesn't start or install anything. Keys are saved in your operating system's keychain by the local OpenChat server and are never sent back to the browser.
       </p>
     </>
   );

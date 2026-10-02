@@ -53,9 +53,9 @@ export function App() {
 
   useEffect(() => {
     void loadChats().then((chats) => useStore.getState().setChats(chats));
-    // Re-detect models for saved keys (cached results stay usable meanwhile).
+    // Load the saved keys from the server's vault, then re-detect their models (cached results stay usable meanwhile).
     ensureSelection();
-    void useStore.getState().refreshDetection();
+    void useStore.getState().syncKeys().then(() => useStore.getState().refreshDetection());
   }, []);
 
   // Global shortcuts:

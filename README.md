@@ -22,7 +22,8 @@ Open **Settings → API Keys** and paste a key for your plan. OpenChat checks th
 
 - `server/` is a Bun server. It serves the React app and proxies chat requests to Opencode. Each request uses the endpoint that model needs (`/chat/completions`, `/responses`, `/messages` or Gemini `:streamGenerateContent`). Every stream is converted into one NDJSON event format.
 - Model detection: `GET {baseURL}/models` with your key returns the models that key can use. A zero-cost malformed request validates the key (401 = invalid). Metadata from [models.dev](https://models.dev) supplies the protocol, reasoning-effort levels and input types.
-- Keys and chats stay in your browser (localStorage / IndexedDB). The server never stores them.
+- Chats stay in your browser (IndexedDB). API keys are stored by the local OpenChat server in your **OS keychain** (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and are never sent back to the browser: it only holds opaque key ids. If no keychain is available (headless Linux, containers), they fall back to a private file, `~/.config/openchat/secrets.json` (mode 0600), and Settings says so. Keys saved in the browser by earlier versions are moved into the keychain automatically on first load.
+- The server listens on `127.0.0.1` only and rejects API requests with a foreign `Host` or `Origin`, so other devices and websites can't spend your keys. To open OpenChat from another device, set `HOST=0.0.0.0` and `OPENCHAT_ALLOWED_HOSTS=<the name you'll browse to>`; the connection is plain HTTP, so only do this on a network you trust.
 - Each plan can have several keys, tried in order: if a key is rejected, out of credit, or rate limited, the next one is used.
 - Chats are named automatically after the first reply (Settings → General → Chat naming), using an ordered list of models with fallbacks.
 

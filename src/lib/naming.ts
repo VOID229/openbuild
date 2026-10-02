@@ -53,7 +53,7 @@ export async function autoName(chatId: string) {
     let failed = false;
     try {
       const stream = streamChat(
-        { plan: cand.plan, keys, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
+        { plan: cand.plan, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
         ctrl.signal,
       );
       for await (const ev of stream) {

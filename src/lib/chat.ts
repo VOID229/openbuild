@@ -1,4 +1,4 @@
-import type { Attachment, SearchCredentials, WireMessage } from "../../shared/types";
+import { SEARCH_PROVIDERS, type Attachment, type SearchCredentials, type SearchProviderId, type WireMessage } from "../../shared/types";
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
@@ -32,9 +32,10 @@ function systemPrompt(settings: Settings) {
 
 function searchCredentials(settings: Settings): SearchCredentials[] | undefined {
   if (!settings.webSearch) return undefined;
+  // Key-based providers are looked up server-side; only instance URLs (SearXNG) travel with the request.
   const list = Object.entries(settings.search)
     .filter(([, keys]) => keys?.length)
-    .map(([provider, keys]) => ({ provider, keys }) as SearchCredentials);
+    .map(([provider, keys]) => ({ provider, keys: SEARCH_PROVIDERS[provider as SearchProviderId].credential === "url" ? keys : undefined }) as SearchCredentials);
   return list.length ? list : undefined;
 }
 
@@ -235,7 +236,6 @@ async function generate(chatId: string, messageId: string) {
     const stream = streamChat(
       {
         plan,
-        keys,
         model: model.id,
         effort: st.settings.effort,
         system: systemPrompt(st.settings),

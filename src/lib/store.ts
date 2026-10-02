@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { PlanId, SearchProviderId } from "../../shared/types";
+import { PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { detectModels } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
+import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, Message, Settings } from "./types";
 
 export type SettingsSection = "profile" | "general" | "keys" | "search" | "appearance";
@@ -53,10 +54,16 @@ interface State {
 
   updateSettings: (patch: Partial<Settings>) => void;
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
-  /** Replace a plan's ordered key list (empty removes the plan). */
-  setKeys: (plan: PlanId, keys: string[]) => void;
-  /** Replace a search provider's ordered key (or instance URL) list. */
-  setSearchKeys: (provider: SearchProviderId, keys: string[]) => void;
+  /** Where the server keeps secrets (known once the server has answered). */
+  keyBackend?: KeyInventory["backend"];
+  /** The last failure to save a key, shown in Settings. */
+  keysError?: string;
+  /** Replace a plan's ordered key list (empty removes the plan). The secrets go to the server's vault. */
+  setKeys: (plan: PlanId, keys: KeyEdit[]) => Promise<void>;
+  /** Replace a search provider's ordered key list; for instance URLs (`{ id: url }` / `{ secret: url }`) it's kept locally. */
+  setSearchKeys: (provider: SearchProviderId, keys: KeyEdit[]) => Promise<void>;
+  /** Load the saved key ids from the server, first moving any keys a previous version left in this browser. */
+  syncKeys: () => Promise<void>;
   toggleSection: (section: keyof SidebarSections) => void;
   setView: (patch: Partial<SidebarView>) => void;
   refreshDetection: (plan?: PlanId) => Promise<void>;
@@ -96,12 +103,18 @@ export const useStore = create<State>()(
       setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),
       toggleSection: (section) => set((s) => ({ sections: { ...s.sections, [section]: !s.sections[section] } })),
 
-      setKeys: (plan, list) => {
+      setKeys: async (plan, edits) => {
+        let ids: string[];
+        try {
+          ids = await saveKeys(plan, edits);
+        } catch (err) {
+          set({ keysError: (err as Error).message });
+          return;
+        }
         const keys = { ...get().settings.keys };
-        const clean = [...new Set(list.map((k) => k.trim()).filter(Boolean))];
-        if (clean.length) keys[plan] = clean;
+        if (ids.length) keys[plan] = ids;
         else delete keys[plan];
-        set((s) => ({ settings: { ...s.settings, keys } }));
+        set((s) => ({ keysError: undefined, settings: { ...s.settings, keys } }));
         if (keys[plan]) void get().refreshDetection(plan);
         else {
           detectControllers[plan]?.abort();
@@ -114,12 +127,55 @@ export const useStore = create<State>()(
         }
       },
 
-      setSearchKeys: (provider, list) => {
+      setSearchKeys: async (provider, edits) => {
+        let list: string[];
+        if (SEARCH_PROVIDERS[provider].credential === "url") {
+          list = [...new Set(edits.map((e) => ("id" in e ? e.id : e.secret).trim()).filter(Boolean))];
+        } else {
+          try {
+            list = await saveKeys(provider, edits);
+          } catch (err) {
+            set({ keysError: (err as Error).message });
+            return;
+          }
+        }
         const search = { ...get().settings.search };
-        const clean = [...new Set(list.map((k) => k.trim()).filter(Boolean))];
-        if (clean.length) search[provider] = clean;
+        if (list.length) search[provider] = list;
         else delete search[provider];
-        set((s) => ({ settings: { ...s.settings, search } }));
+        set((s) => ({ keysError: undefined, settings: { ...s.settings, search } }));
+      },
+
+      syncKeys: async () => {
+        const inventory = await fetchKeys();
+        if (!inventory) return; // Server unreachable: keep the cached ids; detection will report it.
+        const saved = inventory.keys;
+        // Move keys an older version kept in this browser into the vault. They stay in a temporary
+        // backup until every one is saved, so a failure loses nothing.
+        const legacy = readLegacyKeys();
+        if (legacy) {
+          let complete = true;
+          for (const [scope, secrets] of Object.entries(legacy)) {
+            try {
+              saved[scope] = await saveKeys(scope as PlanId, [...(saved[scope] ?? []).map((id) => ({ id })), ...secrets.map((secret) => ({ secret }))]);
+            } catch (err) {
+              complete = false;
+              set({ keysError: `Couldn't move your saved ${scope} key into the secure store: ${(err as Error).message}` });
+            }
+          }
+          if (complete) clearLegacyKeys();
+        }
+        set((s) => {
+          const keys: Settings["keys"] = {};
+          for (const plan of Object.keys(PLANS) as PlanId[]) if (saved[plan]?.length) keys[plan] = saved[plan];
+          // Instance URLs (SearXNG) stay local; key-based providers mirror the server.
+          const search: Settings["search"] = {};
+          for (const [id, p] of Object.entries(SEARCH_PROVIDERS)) {
+            const list = p.credential === "url" ? s.settings.search[id as SearchProviderId] : saved[id];
+            if (list?.length) search[id as SearchProviderId] = list;
+          }
+          return { keyBackend: inventory.backend, settings: { ...s.settings, keys, search } };
+        });
+        ensureSelection();
       },
 
       refreshDetection: async (only) => {
@@ -224,7 +280,7 @@ export const useStore = create<State>()(
     }),
     {
       name: "openchat",
-      version: 3,
+      version: 4,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
         // v1 shipped sample router chips and Cmd+Enter / auto router on; reset those to the new defaults.
@@ -246,6 +302,16 @@ export const useStore = create<State>()(
           state.settings.keys = Object.fromEntries(
             Object.entries(old ?? {}).map(([plan, k]) => [plan, Array.isArray(k) ? k : k ? [k] : []]),
           ) as Settings["keys"];
+        }
+        // v4: API keys live in the server's keychain, not here. Anything this browser still holds is
+        // backed up until syncKeys has moved it, and only the non-secret parts stay in settings.
+        if (version < 4 && state.settings) {
+          stashLegacyKeys(state.settings);
+          const search: Settings["search"] = {};
+          for (const [id, list] of Object.entries(state.settings.search ?? {})) {
+            if (SEARCH_PROVIDERS[id as SearchProviderId]?.credential === "url") search[id as SearchProviderId] = list;
+          }
+          state.settings = { ...state.settings, keys: {}, search };
         }
         return state as State;
       },

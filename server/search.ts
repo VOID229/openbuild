@@ -396,7 +396,7 @@ export interface SearchToolkit {
 
 export function searchToolkit(creds: SearchCredentials[]): SearchToolkit | undefined {
   const configured = new Map<SearchProviderId, string[]>();
-  for (const c of creds) if (PROVIDERS[c.provider] && c.keys.length) configured.set(c.provider, c.keys);
+  for (const c of creds) if (PROVIDERS[c.provider] && c.keys?.length) configured.set(c.provider, c.keys);
   if (!configured.size) return undefined;
   const ids = [...configured.keys()].sort((a, b) => PROVIDERS[a].cost - PROVIDERS[b].cost);
 

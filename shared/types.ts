@@ -120,10 +120,25 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = 
 /** Order of rows in Settings → Web Search. */
 export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x"];
 
-/** A configured search provider sent with a chat request: keys (or instance URLs) in priority order. */
+/**
+ * A configured search provider sent with a chat request. Key-based providers carry nothing: the
+ * server reads their keys from its vault. Instance-URL providers (SearXNG) send their URLs, which
+ * aren't secret, in priority order.
+ */
 export interface SearchCredentials {
   provider: SearchProviderId;
-  keys: string[];
+  keys?: string[];
+}
+
+/** One slot of an ordered key list: keep a saved key by id, or add a new secret. */
+export type KeyEdit = { id: string } | { secret: string };
+
+/** Which keys are saved, as opaque ids in priority order. Secrets never leave the server. */
+export interface KeyInventory {
+  /** Where secrets are stored: the OS keychain, or a 0600 file when no keychain is available. */
+  backend: "keychain" | "file";
+  /** Entry ids per plan id or key-based search provider id. */
+  keys: Record<string, string[]>;
 }
 
 export interface SearchResultLink {
@@ -133,8 +148,6 @@ export interface SearchResultLink {
 
 export interface ChatRequest {
   plan: PlanId;
-  /** API keys for the plan in priority order; later keys are fallbacks. */
-  keys: string[];
   model: string;
   effort: Effort;
   system?: string;

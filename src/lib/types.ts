@@ -40,13 +40,13 @@ export interface Settings {
   avoid: NamedModel[];
   prioritize: PriorityEntry[];
   profile: Profile;
-  /** API keys per plan, in priority order (later keys are fallbacks). */
+  /** Saved key ids per plan, in priority order (later keys are fallbacks). The secrets live in the server's keychain. */
   keys: Partial<Record<PlanId, string[]>>;
   selection?: Selection;
   effort: Effort;
   /** Web search: let models call the configured search providers. */
   webSearch: boolean;
-  /** Search API keys (SearXNG: instance URLs) per provider, in priority order. */
+  /** Saved key ids per search provider in priority order (SearXNG: instance URLs, which aren't secret). */
   search: Partial<Record<SearchProviderId, string[]>>;
   /** Automatic chat titles; an empty model list means "fastest available model". */
   naming: { enabled: boolean; models: NamingModel[] };
@@ -67,7 +67,7 @@ export interface Detection {
   error?: string;
   models: ModelInfo[];
   checkedAt?: number;
-  /** Per-key results, keyed by `keyId(key)` (never the key itself). */
+  /** Per-key results, keyed by `keyId(key)` (of the saved key's id, never the key itself). */
   keys?: Record<string, KeyStatus>;
 }
 

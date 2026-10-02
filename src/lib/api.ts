@@ -1,11 +1,12 @@
 import type { ChatRequest, DetectResult, PlanId, StreamEvent } from "../../shared/types";
 
-export async function detectModels(plan: PlanId, key: string, signal?: AbortSignal): Promise<DetectResult> {
+/** Check a saved key (by id) and list its models. The secret stays on the server. */
+export async function detectModels(plan: PlanId, id: string, signal?: AbortSignal): Promise<DetectResult> {
   try {
     const res = await fetch("/api/models", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ plan, key }),
+      body: JSON.stringify({ plan, id }),
       signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
