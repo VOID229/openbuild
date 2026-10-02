@@ -13,6 +13,7 @@ export type SettingsSection = "account" | "profile" | "general" | "keys" | "sear
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
+  font: "normal",
   autoScroll: true,
   cmdEnter: false,
   autoRouter: false,

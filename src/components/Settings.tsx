@@ -5,7 +5,7 @@ import { keyId } from "../lib/keys";
 import { fastTarget, findModel, isFastModel } from "../lib/models";
 import { parseModelQuery, scoreModel } from "../lib/modelSearch";
 import { useStore, type SettingsSection } from "../lib/store";
-import type { KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
+import type { FontStyle, KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
@@ -708,6 +708,7 @@ function SearchSection() {
 
 function AppearanceSection() {
   const theme = useStore((s) => s.settings.theme);
+  const font = useStore((s) => s.settings.font) ?? "normal";
   const update = useStore((s) => s.updateSettings);
   return (
     <>
@@ -718,6 +719,16 @@ function AppearanceSection() {
           {(["light", "dark", "system"] as Theme[]).map((t) => (
             <button key={t} type="button" role="radio" aria-checked={theme === t} className="segment" onClick={() => update({ theme: t })}>
               {t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="setting-row">
+        <div className="setting-label">Font</div>
+        <div className="segmented" role="radiogroup" aria-label="Font">
+          {(["normal", "serif", "fun", "sleek", "soft", "mono"] as FontStyle[]).map((f) => (
+            <button key={f} type="button" role="radio" aria-checked={font === f} className="segment" onClick={() => update({ font: f })}>
+              {f}
             </button>
           ))}
         </div>

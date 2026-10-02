@@ -1,6 +1,7 @@
 import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
+export type FontStyle = "normal" | "fun" | "sleek" | "serif" | "soft" | "mono";
 
 export interface ModelRef {
   plan: PlanId;
@@ -34,6 +35,7 @@ export interface NamingModel extends ModelRef {
 
 export interface Settings {
   theme: Theme;
+  font: FontStyle;
   autoScroll: boolean;
   cmdEnter: boolean;
   autoRouter: boolean;

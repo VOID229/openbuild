@@ -14,7 +14,9 @@
       (function () {
         var theme = "system";
         try {
-          theme = JSON.parse(localStorage.getItem("openchat") || "{}").state.settings.theme || "system";
+          var saved = JSON.parse(localStorage.getItem("openchat") || "{}").state.settings;
+          theme = saved.theme || "system";
+          document.documentElement.dataset.font = saved.font || "normal";
         } catch (e) {}
         var dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.dataset.theme = dark ? "dark" : "light";

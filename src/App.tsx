@@ -25,6 +25,13 @@ function useTheme() {
   }, [theme]);
 }
 
+function useFont() {
+  const font = useStore((s) => s.settings.font);
+  useEffect(() => {
+    document.documentElement.dataset.font = font ?? "normal";
+  }, [font]);
+}
+
 function Home() {
   const hasKeys = useStore((s) => Object.keys(s.settings.keys).length > 0);
   const openSettings = useStore((s) => s.openSettings);
@@ -58,6 +65,7 @@ export function App() {
 
 function Main() {
   useTheme();
+  useFont();
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
