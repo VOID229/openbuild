@@ -18,5 +18,5 @@
     "noUnusedParameters": true,
     "types": ["bun"]
   },
-  "include": ["server", "shared", "src"]
+  "include": ["server", "shared", "src", "scripts", "tests"]
 }

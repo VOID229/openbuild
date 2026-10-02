@@ -9,7 +9,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, Message, Settings } from "./types";
 
-export type SettingsSection = "profile" | "general" | "keys" | "search" | "appearance";
+export type SettingsSection = "account" | "profile" | "general" | "keys" | "search" | "appearance";
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",

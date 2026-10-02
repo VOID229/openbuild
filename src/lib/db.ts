@@ -161,15 +161,22 @@ export async function loadChats(): Promise<Chat[]> {
   return [...chats.values()].map(settle).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** Listeners told about every local chat change (cloud sync uses it); null means "all chats deleted". */
+export const chatListeners = new Set<(id: string | null) => void>();
+const notify = (id: string | null) => chatListeners.forEach((fn) => fn(id));
+
 export function saveChat(chat: Chat) {
+  notify(chat.id);
   return enqueue(chat.id, { op: "put", chat, seq: ++seq });
 }
 
 export function deleteChat(id: string) {
+  notify(id);
   return enqueue(id, { op: "delete", seq: ++seq });
 }
 
 export async function deleteAllChats() {
+  notify(null);
   // Queued changes to individual chats are superseded.
   try {
     for (const [id] of await entries<string, Op>(outbox)) await del(id, outbox);

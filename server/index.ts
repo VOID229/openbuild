@@ -69,6 +69,11 @@ function serve(port: number) {
     routes: {
       "/*": index,
 
+      // Public client config. The Convex URL comes from .env.local, written by `bunx convex dev`.
+      "/api/config": {
+        GET: api(() => Response.json({ convexUrl: process.env.CONVEX_URL || null })),
+      },
+
       // Saved keys as opaque ids, never secrets.
       "/api/keys": {
         GET: api(async () => Response.json({ backend: await vault.backend(), keys: await vault.listIds() } satisfies KeyInventory)),

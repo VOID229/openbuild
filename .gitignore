@@ -6,3 +6,6 @@ dist
 # Pi project memory (auto — do not commit)
 .pi/memory/
 MEMORY.md
+
+# Convex deployment (written by `bunx convex dev`)
+.env.local

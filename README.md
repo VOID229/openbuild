@@ -7,6 +7,7 @@ bun install
 bun run dev        # http://localhost:3000 (PORT=... to change), with HMR
 bun run start      # production mode
 bun run typecheck
+bun run test
 ```
 
 Open **Settings → API Keys** and paste a key for your plan. OpenChat checks the key and lists the models it can use.
@@ -34,6 +35,29 @@ Open **Settings → API Keys** and paste a key for your plan. OpenChat checks th
 - The server listens on `127.0.0.1` only and rejects API requests with a foreign `Host` or `Origin`, so other devices and websites can't spend your keys. To open OpenChat from another device, set `HOST=0.0.0.0` and `OPENCHAT_ALLOWED_HOSTS=<the name you'll browse to>`; the connection is plain HTTP, so only do this on a network you trust.
 - Each plan can have several keys, tried in order: if a key is rejected, out of credit, or rate limited, the next one is used.
 - Chats are named automatically after the first reply (Settings → General → Chat naming), using an ordered list of models with fallbacks.
+
+## Account & sync (optional)
+
+Sign in under **Settings → Account** to sync chats, settings and your profile (name, bio, picture, ...) live between devices. It runs on [Convex](https://convex.dev); the free plan is plenty for personal use.
+
+**Privacy.** Everything is end-to-end encrypted in the browser before it's uploaded, so the Convex deployment holds only ciphertext:
+
+- Your password is stretched on your device (PBKDF2-SHA256, 600k rounds, salted with your username) and split into two keys. One is the sign-in secret the server sees. The other unlocks a random data key that encrypts every synced item with AES-256-GCM. The server can't get from the first to the second, so it can't decrypt anything.
+- There's no email, phone or name: an account is just a username and password. The flip side is that **a forgotten password can't be reset**. The synced copy is then unreadable, but what's on your devices is untouched.
+- No analytics or telemetry, and prompts are never logged: not by the OpenChat server, and not by the sync functions (`convex/sync.ts`), which only store what they're given. API keys never sync; they stay in your OS keychain.
+- **Delete account** removes the account and everything synced to it from the deployment.
+
+**Speed.** Each device holds a live subscription to "what changed since I last looked", so changes made elsewhere show up within moments, and only changed items travel (gzipped, then encrypted). Local changes go out about 150 ms after you make them. Your local copy stays the primary one: offline edits are queued and sent when you reconnect. If two devices edit the same chat at once, both sets of messages are kept.
+
+**Setup** (once, about 2 minutes):
+
+```sh
+bunx convex dev --once   # log in (free), create a project; writes CONVEX_URL to .env.local and deploys convex/
+bun run setup:sync       # generates the sign-in signing keys on the deployment
+bun run dev              # restart, then Settings → Account → Create an account
+```
+
+After changing anything in `convex/`, run `bunx convex dev` again to deploy it. Each device you open OpenChat on needs a local OpenChat server pointed at the same deployment (same `.env.local`); then sign in with the same account.
 
 ## Web search
 
