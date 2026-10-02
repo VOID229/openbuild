@@ -93,7 +93,8 @@ export interface WireMessage {
 
 export interface ChatRequest {
   plan: PlanId;
-  key: string;
+  /** API keys for the plan in priority order; later keys are fallbacks. */
+  keys: string[];
   model: string;
   effort: Effort;
   system?: string;
@@ -106,4 +107,6 @@ export type StreamEvent =
   | { t: "text"; v: string }
   | { t: "reasoning"; v: string }
   | { t: "error"; message: string; status?: number }
+  /** Informational, e.g. a key failed and a fallback key was used. */
+  | { t: "notice"; message: string }
   | { t: "done"; finish?: string; usage?: { input?: number; output?: number } };

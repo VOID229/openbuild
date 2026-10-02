@@ -1,10 +1,12 @@
-import { Check, CircleAlert, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, CircleAlert, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { KEY_ORDER, PLANS, type PlanId } from "../../shared/types";
-import { isFastModel } from "../lib/models";
+import { KEY_ORDER, nearestEffort, PLANS, type PlanId } from "../../shared/types";
+import { keyId } from "../lib/keys";
+import { fastTarget, findModel, isFastModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
-import type { NamedModel, Theme } from "../lib/types";
+import type { NamedModel, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, usePresence } from "../lib/ui";
+import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
@@ -52,7 +54,7 @@ function ProfileSection() {
     <>
       <Heading>Profile</Heading>
       <div className="avatar-edit">
-        <Avatar src={profile.avatar} size={88} />
+        <Avatar src={profile.avatar} name={profile.name} size={88} />
         <button type="button" className="avatar-pencil" aria-label="Change photo" data-tooltip="Change photo" onClick={() => file.current?.click()}>
           <Pencil size={14} />
         </button>
@@ -74,7 +76,7 @@ function ProfileSection() {
         />
       </div>
       <Field label="Name" htmlFor="profile-name">
-        <input id="profile-name" className="input" value={profile.name} placeholder="Shade" autoComplete="name" onChange={(e) => updateProfile({ name: e.target.value })} />
+        <input id="profile-name" className="input" value={profile.name} autoComplete="name" onChange={(e) => updateProfile({ name: e.target.value })} />
       </Field>
       <Field label="Bio" htmlFor="profile-bio">
         <textarea
@@ -82,16 +84,16 @@ function ProfileSection() {
           className="input textarea"
           rows={4}
           value={profile.bio}
-          placeholder={"I'm a developer, learning design and\nopen source. please use proper formatting.\nbullet points and tables. never use emojis."}
+         
           onChange={(e) => updateProfile({ bio: e.target.value })}
         />
         <p className="field-help">Shared with the model as context, so preferences here shape its answers.</p>
       </Field>
       <Field label="Location" htmlFor="profile-location">
-        <input id="profile-location" className="input" value={profile.location} placeholder="Germany, frankfrut" onChange={(e) => updateProfile({ location: e.target.value })} />
+        <input id="profile-location" className="input" value={profile.location} onChange={(e) => updateProfile({ location: e.target.value })} />
       </Field>
       <Field label="language" htmlFor="profile-language">
-        <input id="profile-language" className="input" value={profile.language} placeholder="English, German" onChange={(e) => updateProfile({ language: e.target.value })} />
+        <input id="profile-language" className="input" value={profile.language} onChange={(e) => updateProfile({ language: e.target.value })} />
       </Field>
     </>
   );
@@ -124,7 +126,7 @@ function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: Nam
       <button ref={anchor} type="button" className="chip chip-add" aria-label={label} data-tooltip={open ? undefined : label} onClick={() => setOpen((o) => !o)}>
         <Plus size={14} />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu add-model drop-down" label={label}>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu add-model drop-up" label={label} fixed="up">
         <input
           autoFocus
           className="input input-sm"
@@ -144,7 +146,7 @@ function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: Nam
           {options.map((m) => (
             <button key={m.id} type="button" className="menu-item" onClick={() => add(m)}>
               <BrandIcon id={m.id} />
-              <span>{m.name}</span>
+              <span className="menu-item-label">{m.name}</span>
             </button>
           ))}
           {!options.length && q.trim() && (
@@ -252,6 +254,89 @@ function GeneralSection() {
           </div>
         </div>
       </div>
+      <ChatNaming />
+    </>
+  );
+}
+
+function ChatNaming() {
+  const naming = useStore((s) => s.settings.naming);
+  const detection = useStore((s) => s.detection);
+  const settings = useStore((s) => s.settings);
+  const update = useStore((s) => s.updateSettings);
+  const plans = KEY_ORDER.filter((p) => detection[p]?.models.length);
+  const setModels = (models: NamingModel[]) => update({ naming: { ...naming, models } });
+
+  const addModel = () => {
+    const taken = new Set(naming.models.map((m) => `${m.plan}:${m.id}`));
+    const fast = fastTarget(detection, settings);
+    const pick =
+      fast && !taken.has(`${fast.plan}:${fast.id}`)
+        ? fast
+        : plans.flatMap((plan) => (detection[plan]?.models ?? []).map((m) => ({ plan, id: m.id }))).find((m) => !taken.has(`${m.plan}:${m.id}`));
+    if (!pick) return;
+    const model = findModel(detection, pick);
+    setModels([...naming.models, { ...pick, effort: nearestEffort(model?.reasoning.efforts ?? [], "low") ?? "low" }]);
+  };
+
+  return (
+    <>
+      <div className="setting-row setting-row-top setting-row-divided">
+        <div className="setting-text">
+          <div className="setting-label">Chat naming</div>
+          <p className="setting-desc">Name new chats automatically after the first reply. Models are tried from top to bottom; if one fails, the next one is used.</p>
+        </div>
+        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Chat naming" />
+      </div>
+      <div className={cx("router-config", !naming.enabled && "router-config-hidden")} inert={!naming.enabled}>
+        <div className="router-config-inner">
+          <div className="naming-list">
+            {!naming.models.length && <p className="naming-empty">Using the fastest available model. Add models to choose which ones name your chats.</p>}
+            {naming.models.map((entry, i) => {
+              const model = findModel(detection, entry);
+              const efforts = model?.reasoning.efforts ?? [];
+              return (
+                <div key={`${entry.plan}:${entry.id}:${i}`} className="naming-row">
+                  <span className="naming-index">{i + 1}</span>
+                  <ModelSelect
+                    label={`Naming model ${i + 1}`}
+                    value={entry}
+                    onChange={(ref) => {
+                      const next = findModel(detection, ref);
+                      setModels(naming.models.map((m, j) => (j === i ? { ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], m.effort) ?? m.effort } : m)));
+                    }}
+                  />
+                  <EffortSelect
+                    label={`Reasoning for naming model ${i + 1}`}
+                    levels={efforts}
+                    value={nearestEffort(efforts, entry.effort) ?? entry.effort}
+                    onChange={(effort) => setModels(naming.models.map((m, j) => (j === i ? { ...m, effort } : m)))}
+                  />
+                  <span className="naming-actions">
+                    {i > 0 && (
+                      <IconButton
+                        label="Try earlier"
+                        tooltipSide="left"
+                        className="key-icon-btn"
+                        onClick={() => setModels(naming.models.map((m, j) => (j === i - 1 ? naming.models[i]! : j === i ? naming.models[i - 1]! : m)))}
+                      >
+                        <ArrowUp size={14} />
+                      </IconButton>
+                    )}
+                    <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
+                      <Trash2 size={14} />
+                    </IconButton>
+                  </span>
+                </div>
+              );
+            })}
+            <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
+              <Plus size={14} /> {naming.models.length ? "add fallback" : "add model"}
+            </button>
+            {!plans.length && <p className="naming-empty">Add an API key to choose naming models.</p>}
+          </div>
+        </div>
+      </div>
     </>
   );
 }
@@ -260,45 +345,61 @@ function GeneralSection() {
 
 const MASK = "*".repeat(34);
 
-function KeyRow({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
-  const key = useStore((s) => s.settings.keys[plan]);
-  const detection = useStore((s) => s.detection[plan]);
-  const { setKey, refreshDetection } = useStore.getState();
-  const [editing, setEditing] = useState(!key);
-  const [value, setValue] = useState("");
+interface KeyFieldProps {
+  plan: PlanId;
+  /** Saved key; undefined for a new, unsaved field. */
+  value?: string;
+  index: number;
+  total: number;
+  autoFocus?: boolean;
+  onSave: (key: string) => void;
+  onRemove?: () => void;
+  onMoveUp?: () => void;
+  /** New fields only: discard the empty field. */
+  onCancel?: () => void;
+}
+
+function KeyField({ plan, value, index, total, autoFocus, onSave, onRemove, onMoveUp, onCancel }: KeyFieldProps) {
+  const status = useStore((s) => (value ? s.detection[plan]?.keys?.[keyId(value)] : undefined));
+  const refreshDetection = useStore((s) => s.refreshDetection);
+  const [editing, setEditing] = useState(!value);
+  const [draft, setDraft] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const label = PLANS[plan].label;
+  const id = `key-${plan}-${index}`;
+  const actionId = `${plan}-${index}`;
 
   useEffect(() => {
-    if (autoFocus && !key) input.current?.focus();
+    if (autoFocus) input.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const replace = () => {
     setEditing(true);
-    setValue("");
+    setDraft("");
     requestAnimationFrame(() => input.current?.focus());
   };
   const save = () => {
-    if (!value.trim()) return;
-    setKey(plan, value);
-    setValue("");
-    setEditing(false);
+    if (!draft.trim()) return;
+    onSave(draft.trim());
+    setDraft("");
+    if (value) setEditing(false);
   };
   const cancel = () => {
-    setValue("");
-    if (key) setEditing(false);
+    setDraft("");
+    if (value) setEditing(false);
+    else onCancel?.();
   };
 
-  let status: ReactNode = null;
-  if (key && detection) {
-    if (detection.status === "checking") status = (<><Spinner size={12} /> Detecting models…</>);
-    else if (detection.status === "valid") status = (<><Check size={13} className="ok" /> {detection.models.length} models available</>);
-    else if (detection.status === "invalid") status = (<><CircleAlert size={13} className="bad" /> Invalid API key — replace it to continue</>);
+  let line: ReactNode = null;
+  if (value && status) {
+    if (status.status === "checking") line = (<><Spinner size={12} /> Detecting models…</>);
+    else if (status.status === "valid") line = (<><Check size={13} className="ok" /> {status.models ?? 0} models available</>);
+    else if (status.status === "invalid") line = (<><CircleAlert size={13} className="bad" /> Invalid API key — replace it to continue</>);
     else
-      status = (
+      line = (
         <>
-          <CircleAlert size={13} className="bad" /> {detection.error ?? "Couldn't verify this key"}
+          <CircleAlert size={13} className="bad" /> {status.error ?? "Couldn't verify this key"}
           <button type="button" className="link-btn" onClick={() => refreshDetection(plan)}>
             <RefreshCw size={12} /> Retry
           </button>
@@ -307,51 +408,107 @@ function KeyRow({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
   }
 
   return (
-    <div className="key-row">
-      <label className="key-label" htmlFor={`key-${plan}`}>
-        {label}
-      </label>
-      <div className="key-field">
+    <div className="key-entry">
+      {total > 1 && (
+        <div className="key-caption">
+          Key {index + 1}
+          <span>{index === 0 ? "primary" : "fallback"}</span>
+        </div>
+      )}
+      <div className="key-entry-row">
         <input
           ref={input}
-          id={`key-${plan}`}
+          id={id}
           className={cx("input key-input", !editing && "key-input-masked")}
           type={editing ? "password" : "text"}
           readOnly={!editing}
-          value={editing ? value : MASK}
-          placeholder={`Paste your ${label} key`}
+          value={editing ? draft : MASK}
+          placeholder={index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+          aria-label={total > 1 ? `${label} key ${index + 1}` : `${label} key`}
           autoComplete="off"
           spellCheck={false}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") save();
-            if (e.key === "Escape" && key && editing) {
+            if (e.key === "Escape" && editing && (value || onCancel)) {
               e.stopPropagation();
               cancel();
             }
           }}
           onBlur={(e) => {
-            // Leaving the field without a value restores the saved key.
-            if (!value.trim() && e.relatedTarget?.getAttribute("data-key-action") !== plan) cancel();
+            // Leaving the field without a value restores the saved key (or drops an empty new field).
+            if (!draft.trim() && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
           }}
           onFocus={() => !editing && replace()}
         />
-        {status && <div className={cx("key-status", detection?.status === "invalid" && "key-status-bad")}>{status}</div>}
+        <div className="key-actions">
+          {editing ? (
+            <button type="button" className="btn btn-sm" data-key-action={actionId} disabled={!draft.trim()} onClick={save}>
+              save
+            </button>
+          ) : (
+            <button type="button" className="btn btn-sm" data-key-action={actionId} onClick={replace}>
+              replace
+            </button>
+          )}
+          {onMoveUp && !editing && (
+            <IconButton label="Use before the key above" tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
+              <ArrowUp size={14} />
+            </IconButton>
+          )}
+          {onRemove && !editing && (
+            <IconButton label="Remove key" tooltipSide="left" className="key-icon-btn key-remove" onClick={onRemove}>
+              <Trash2 size={14} />
+            </IconButton>
+          )}
+        </div>
       </div>
-      <div className="key-actions">
-        {editing ? (
-          <button type="button" className="btn btn-sm" data-key-action={plan} disabled={!value.trim()} onClick={save}>
-            save
-          </button>
-        ) : (
-          <button type="button" className="btn btn-sm" data-key-action={plan} onClick={replace}>
-            replace
-          </button>
+      {line && <div className={cx("key-status", status?.status === "invalid" && "key-status-bad")}>{line}</div>}
+    </div>
+  );
+}
+
+function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
+  const keys = useStore((s) => s.settings.keys[plan]) ?? [];
+  const setKeys = useStore((s) => s.setKeys);
+  const [adding, setAdding] = useState(false);
+  const total = keys.length + (adding ? 1 : 0);
+
+  const update = (next: string[]) => setKeys(plan, next);
+  return (
+    <div className="key-row">
+      <div className="key-label">{PLANS[plan].label}</div>
+      <div className="key-fields">
+        {keys.map((k, i) => (
+          <KeyField
+            key={keyId(k)}
+            plan={plan}
+            value={k}
+            index={i}
+            total={total}
+            onSave={(next) => update(keys.map((x, j) => (j === i ? next : x)))}
+            onRemove={() => update(keys.filter((_, j) => j !== i))}
+            onMoveUp={i > 0 ? () => update(keys.map((x, j) => (j === i - 1 ? keys[i]! : j === i ? keys[i - 1]! : x))) : undefined}
+          />
+        ))}
+        {(adding || !keys.length) && (
+          <KeyField
+            key={`new-${keys.length}`}
+            plan={plan}
+            index={keys.length}
+            total={total || 1}
+            autoFocus={adding || autoFocus}
+            onSave={(next) => {
+              update([...keys, next]);
+              setAdding(false);
+            }}
+            onCancel={keys.length ? () => setAdding(false) : undefined}
+          />
         )}
-        {key && !editing && (
-          <IconButton label="Remove key" tooltipSide="left" className="key-remove" onClick={() => setKey(plan, undefined)}>
-            <Trash2 size={14} />
-          </IconButton>
+        {keys.length > 0 && !adding && (
+          <button type="button" className="add-key" onClick={() => setAdding(true)}>
+            <Plus size={14} /> add more
+          </button>
         )}
       </div>
     </div>
@@ -366,11 +523,12 @@ function KeysSection() {
       <Heading>API Keys</Heading>
       <div className="key-list">
         {KEY_ORDER.map((plan, i) => (
-          <KeyRow key={plan} plan={plan} autoFocus={firstEmpty && i === 0} />
+          <PlanKeys key={plan} plan={plan} autoFocus={firstEmpty && i === 0} />
         ))}
       </div>
       <p className="field-help keys-help">
-        Keys stay in this browser and are only sent to Opencode through your local OpenChat server. Get one at{" "}
+        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited. Keys stay in
+        this browser and are only sent to Opencode through your local OpenChat server. Get one at{" "}
         <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer">
           opencode.ai
         </a>
@@ -439,14 +597,14 @@ export function SettingsModal() {
   }, [open, close]);
 
   useEffect(() => {
-    if (open && mounted) dialog.current?.querySelector<HTMLElement>(".settings-nav [aria-current='true']")?.focus();
+    if (open && mounted) dialog.current?.focus({ preventScroll: true });
   }, [open, mounted]);
 
   if (!mounted) return null;
   return (
     <div className="modal-root" data-state={visible ? "open" : "closed"}>
       <div className="modal-backdrop" onClick={close} aria-hidden />
-      <div ref={dialog} className="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div ref={dialog} className="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
         <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>
           {SECTIONS.map((s) => (
             <button

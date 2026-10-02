@@ -1,5 +1,6 @@
 import type { Attachment, WireMessage } from "../../shared/types";
 import { streamChat } from "./api";
+import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
 import { useStore } from "./store";
 import type { Chat, Message, ModelRef, Settings } from "./types";
@@ -105,6 +106,47 @@ export function sendMessage(text: string, attachments: Attachment[]): boolean {
   return true;
 }
 
+/**
+ * "2nd": copy the conversation up to (not including) an assistant reply into a new chat and
+ * answer that same user turn with another model. The original chat is left untouched.
+ */
+export function forkWithModel(chatId: string, messageId: string, ref: ModelRef) {
+  const st = useStore.getState();
+  const chat = st.chats.find((c) => c.id === chatId);
+  const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
+  const model = findModel(st.detection, ref);
+  if (!chat || index < 1) return;
+  if (!model) {
+    st.openSettings("keys");
+    return;
+  }
+  const now = Date.now();
+  const history = chat.messages.slice(0, index).map((m) => ({ ...m, id: uid(), status: m.status === "streaming" ? ("stopped" as const) : m.status }));
+  const assistant: Message = {
+    id: uid(),
+    role: "assistant",
+    content: "",
+    status: "streaming",
+    model: { ...ref, name: model.name },
+    createdAt: now,
+    startedAt: now,
+  };
+  const fork: Chat = {
+    id: uid(),
+    // Same title as the original; the "2nd" badge and banner mark it as a fork.
+    title: chat.title,
+    titleSource: "auto",
+    forkOf: chat.id,
+    forkMessageId: messageId,
+    createdAt: now,
+    updatedAt: now,
+    messages: [...history, assistant],
+  };
+  st.upsertChat(fork);
+  st.selectChat(fork.id);
+  void generate(fork.id, assistant.id);
+}
+
 /** Re-run an assistant turn, optionally on a different model (think harder / think faster / retry). */
 export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
   const st = useStore.getState();
@@ -128,6 +170,7 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     status: "streaming",
     error: undefined,
     finish: undefined,
+    notice: undefined,
     model: { plan: target.plan, id: target.id, name: model.name },
     routed: ref ? false : msg.routed,
     startedAt: now,
@@ -143,8 +186,9 @@ async function generate(chatId: string, messageId: string) {
   if (!chat || !msg?.model) return;
 
   const model = findModel(st.detection, msg.model);
-  const key = st.settings.keys[msg.model.plan];
-  if (!model || !key) {
+  const plan = msg.model.plan;
+  const keys = st.settings.keys[plan];
+  if (!model || !keys?.length) {
     st.patchMessage(chatId, messageId, { status: "error", error: "This model isn't available. Check your API keys in Settings." }, true);
     return;
   }
@@ -176,11 +220,12 @@ async function generate(chatId: string, messageId: string) {
 
   let error: string | undefined;
   let finish: string | undefined;
+  let notice: string | undefined;
   try {
     const stream = streamChat(
       {
-        plan: msg.model.plan,
-        key,
+        plan,
+        keys,
         model: model.id,
         effort: st.settings.effort,
         system: systemPrompt(st.settings),
@@ -202,6 +247,10 @@ async function generate(chatId: string, messageId: string) {
         break;
       } else if (ev.t === "done") {
         finish = ev.finish;
+      } else if (ev.t === "notice") {
+        // A key failed and a fallback key was used; refresh key statuses in Settings.
+        notice = ev.message;
+        void useStore.getState().refreshDetection(plan);
       }
     }
   } catch (err) {
@@ -222,9 +271,14 @@ async function generate(chatId: string, messageId: string) {
   useStore.getState().patchMessage(
     chatId,
     messageId,
-    { content: text, reasoning: reasoning || undefined, reasoningMs, status: error ? "error" : status, error, finish },
+    { content: text, reasoning: reasoning || undefined, reasoningMs, status: error ? "error" : status, error, finish, notice },
     true,
   );
-  const latest = useStore.getState().chats.find((c) => c.id === chatId);
-  if (latest) useStore.getState().upsertChat({ ...latest, updatedAt: Date.now() });
+  const st2 = useStore.getState();
+  const latest = st2.chats.find((c) => c.id === chatId);
+  if (!latest) return;
+  st2.upsertChat({ ...latest, updatedAt: Date.now(), unread: latest.unread || (!error && st2.activeChatId !== chatId) });
+  // Name the chat after its first successful exchange.
+  const replies = latest.messages.filter((m) => m.role === "assistant" && m.content.trim()).length;
+  if (!error && replies === 1 && !latest.titleSource) void autoName(chatId);
 }

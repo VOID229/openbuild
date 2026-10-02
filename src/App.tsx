@@ -1,9 +1,10 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
+import { TooltipLayer } from "./components/Tooltip";
 import { Sidebar } from "./components/Sidebar";
 import { loadChats } from "./lib/db";
 import { ensureSelection, useStore } from "./lib/store";
@@ -57,21 +58,50 @@ export function App() {
     void useStore.getState().refreshDetection();
   }, []);
 
-  // Global shortcut: Cmd/Ctrl+Shift+O starts a new chat.
+  // Global shortcuts: Cmd/Ctrl+, opens settings (instead of the browser's), Cmd/Ctrl+Shift+O starts a new chat.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === "," && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        useStore.getState().openSettings();
+      } else if (e.shiftKey && e.key.toLowerCase() === "o") {
         e.preventDefault();
         newChat();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [newChat]);
 
   useEffect(() => {
     document.title = chat ? `${chat.title} · OpenChat` : "OpenChat";
   }, [chat?.title]);
+
+  // Keep the URL (#/c/<id>) and the active chat in sync, so chats can be opened in new tabs
+  // and the back/forward buttons work.
+  const activeChatId = useStore((s) => s.activeChatId);
+  const routed = useRef(false);
+  useEffect(() => {
+    if (!chatsLoaded) return;
+    const fromHash = () => {
+      const id = /^#\/c\/(.+)$/.exec(location.hash)?.[1];
+      const st = useStore.getState();
+      if (id && st.chats.some((c) => c.id === id)) st.selectChat(id);
+      else st.newChat();
+    };
+    fromHash();
+    routed.current = true;
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, [chatsLoaded]);
+  useEffect(() => {
+    if (!routed.current) return;
+    const id = useStore.getState().activeChatId;
+    const hash = id ? `#/c/${id}` : "";
+    if (location.hash !== hash) history.pushState(null, "", hash || location.pathname + location.search);
+  }, [activeChatId]);
 
   return (
     <>
@@ -90,6 +120,7 @@ export function App() {
         </main>
       </div>
       <SettingsModal />
+      <TooltipLayer />
     </>
   );
 }

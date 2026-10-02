@@ -1,4 +1,4 @@
-import type { Attachment, DetectResult, Effort, PlanId } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -27,6 +27,11 @@ export interface Profile {
   avatar?: string;
 }
 
+/** One entry in the chat-naming model list (tried in order). */
+export interface NamingModel extends ModelRef {
+  effort: Effort;
+}
+
 export interface Settings {
   theme: Theme;
   autoScroll: boolean;
@@ -35,12 +40,32 @@ export interface Settings {
   avoid: NamedModel[];
   prioritize: PriorityEntry[];
   profile: Profile;
-  keys: Partial<Record<PlanId, string>>;
+  /** API keys per plan, in priority order (later keys are fallbacks). */
+  keys: Partial<Record<PlanId, string[]>>;
   selection?: Selection;
   effort: Effort;
+  /** Automatic chat titles; an empty model list means "fastest available model". */
+  naming: { enabled: boolean; models: NamingModel[] };
 }
 
-export type Detection = DetectResult | { plan: PlanId; status: "checking"; models: DetectResult["models"]; checkedAt?: number };
+export type DetectStatus = "checking" | "valid" | "invalid" | "error";
+
+export interface KeyStatus {
+  status: DetectStatus;
+  error?: string;
+  models?: number;
+}
+
+/** Models usable on a plan, merged across all of its keys. */
+export interface Detection {
+  plan: PlanId;
+  status: DetectStatus;
+  error?: string;
+  models: ModelInfo[];
+  checkedAt?: number;
+  /** Per-key results, keyed by `keyId(key)` (never the key itself). */
+  keys?: Record<string, KeyStatus>;
+}
 
 export interface Message {
   id: string;
@@ -56,6 +81,8 @@ export interface Message {
   finish?: string;
   startedAt?: number;
   reasoningMs?: number;
+  /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
+  notice?: string;
   createdAt: number;
 }
 
@@ -65,4 +92,14 @@ export interface Chat {
   createdAt: number;
   updatedAt: number;
   messages: Message[];
+  pinned?: boolean;
+  archived?: boolean;
+  /** "user" titles are never overwritten by automatic naming. */
+  titleSource?: "auto" | "user";
+  /** A reply finished while the chat wasn't open. */
+  unread?: boolean;
+  /** Set on chats created with "2nd": the chat they were forked from… */
+  forkOf?: string;
+  /** …and the reply in that chat they re-answer. */
+  forkMessageId?: string;
 }

@@ -1,5 +1,6 @@
 import { CircleUserRound } from "lucide-react";
 import { forwardRef, memo, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { brandSvg } from "../lib/models";
 import { cx, useDismiss, usePresence } from "../lib/ui";
 
@@ -19,41 +20,81 @@ interface PopoverProps {
   children: ReactNode;
   role?: string;
   label?: string;
-  /** Position with fixed coordinates below the anchor, escaping overflow-clipping ancestors. */
-  fixed?: boolean;
+  /**
+   * Position with fixed coordinates above/below the anchor, escaping overflow-clipping ancestors.
+   * "auto" opens toward the side with more room and caps the height to fit.
+   */
+  fixed?: "up" | "down" | "auto";
+  style?: React.CSSProperties;
 }
 
-export function Popover({ open, onClose, anchor, className, children, role = "dialog", label, fixed }: PopoverProps) {
+export function Popover({ open, onClose, anchor, className, children, role = "dialog", label, fixed, style }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { mounted, visible } = usePresence(open, 160);
-  const [pos, setPos] = useState<{ top: number; left: number }>();
+  const [pos, setPos] = useState<React.CSSProperties>();
+  const close = useRef(onClose);
+  close.current = onClose;
   useDismiss(open, onClose, [ref, anchor]);
   useLayoutEffect(() => {
-    if (!fixed || !open || !anchor.current) return;
-    const r = anchor.current.getBoundingClientRect();
-    setPos({ top: r.bottom + 8, left: r.left });
-  }, [fixed, open, anchor]);
+    if (!fixed || !open || !mounted) return;
+    const place = () => {
+      const r = anchor.current?.getBoundingClientRect();
+      if (!r) return;
+      const width = ref.current?.offsetWidth ?? 0;
+      const left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
+      const below = window.innerHeight - r.bottom - 20;
+      const above = r.top - 20;
+      const up = fixed === "up" || (fixed === "auto" && below < 320 && above > below);
+      const maxHeight = fixed === "auto" ? Math.min(420, up ? above : below) : undefined;
+      setPos(
+        up
+          ? { position: "fixed", left, bottom: window.innerHeight - r.top + 8, maxHeight }
+          : { position: "fixed", left, top: r.bottom + 8, maxHeight },
+      );
+    };
+    // A fixed popover would drift away from its anchor if an ancestor scrolls.
+    const onScroll = (e: Event) => {
+      if (!ref.current?.contains(e.target as Node)) close.current();
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [fixed, open, mounted, anchor]);
   if (!mounted) return null;
-  return (
+  const el = (
     <div
       ref={ref}
       role={role}
       aria-label={label}
-      className={cx("popover", className)}
+      className={cx("popover", fixed && "popover-portal", className)}
       data-state={visible ? "open" : "closed"}
-      style={fixed ? { top: pos?.top, left: pos?.left } : undefined}
+      // Until measured, keep it fixed and hidden so autofocus inside it can't scroll the page.
+      style={fixed ? { ...style, ...(pos ?? { position: "fixed", top: 0, left: 0, visibility: "hidden" }) } : style}
     >
       {children}
     </div>
   );
+  // Fixed popovers live in <body> so transformed or clipping ancestors can't offset or cut them.
+  return fixed ? createPortal(el, document.body) : el;
 }
 
 export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string; className?: string }) {
   return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: brandSvg(id) }} />;
 });
 
-export function Avatar({ src, size = 24, className }: { src?: string; size?: number; className?: string }) {
+export function Avatar({ src, name, size = 24, className }: { src?: string; name?: string; size?: number; className?: string }) {
   if (src) return <img className={cx("avatar", className)} src={src} alt="" width={size} height={size} style={{ width: size, height: size }} />;
+  const initial = name?.trim().charAt(0).toUpperCase();
+  if (initial)
+    return (
+      <span className={cx("avatar avatar-initial", className)} style={{ width: size, height: size, fontSize: Math.round(size * 0.44) }} aria-hidden>
+        {initial}
+      </span>
+    );
   return (
     <span className={cx("avatar avatar-empty", className)} style={{ width: size, height: size }}>
       <CircleUserRound size={size} strokeWidth={1.5} />

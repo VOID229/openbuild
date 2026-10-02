@@ -1,12 +1,34 @@
-import { ArrowDown, Lightbulb, Zap } from "lucide-react";
+import { ArrowDown, ArrowUpRight, GitFork, Lightbulb, Zap } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { regenerate } from "../lib/chat";
+import { fold } from "../lib/search";
 import { fastTarget, findModel, isFastModel, qualityTarget } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { Chat, ModelRef } from "../lib/types";
 import { cx, usePresence } from "../lib/ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
+
+/** Highlight every occurrence of `words` inside `root` using the CSS Custom Highlight API. */
+function highlightWords(root: HTMLElement, words: string[]) {
+  const registry = (globalThis.CSS as { highlights?: Map<string, unknown> } | undefined)?.highlights;
+  if (!registry || typeof Highlight === "undefined" || !words.length) return;
+  const ranges: Range[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = fold(node.textContent ?? "");
+    for (const w of words) {
+      for (let i = text.indexOf(w); i >= 0; i = text.indexOf(w, i + w.length)) {
+        const r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + w.length);
+        ranges.push(r);
+      }
+    }
+  }
+  registry.set("search", new Highlight(...ranges));
+  return () => void registry.delete("search");
+}
 
 type ThinkAction = { kind: "harder" | "faster"; target: ModelRef; targetName: string };
 
@@ -54,6 +76,39 @@ function ThinkButton({ chat }: { chat: Chat }) {
   );
 }
 
+/** Shown on "2nd" chats: links back to the original chat and the reply that was re-answered. */
+function ForkBanner({ chat }: { chat: Chat }) {
+  const original = useStore((s) => s.chats.find((c) => c.id === chat.forkOf));
+  const { selectChat, setSearchFocus } = useStore.getState();
+  return (
+    <div className="fork-banner">
+      <span className="badge badge-second">2nd</span>
+      {original ? (
+        <>
+          <span>Second opinion of</span>
+          <button
+            type="button"
+            className="fork-link"
+            data-tooltip="Open the original chat at the forked reply"
+            data-tooltip-side="bottom"
+            onClick={() => {
+              selectChat(original.id);
+              // Scroll to and flash the reply this chat re-answered.
+              if (chat.forkMessageId) setSearchFocus({ chatId: original.id, messageId: chat.forkMessageId, words: [] });
+            }}
+          >
+            <GitFork size={13} />
+            <span>{original.title}</span>
+            <ArrowUpRight size={13} />
+          </button>
+        </>
+      ) : (
+        <span>Second opinion of a chat that was deleted</span>
+      )}
+    </div>
+  );
+}
+
 export function ChatView({ chat }: { chat: Chat }) {
   const autoScroll = useStore((s) => s.settings.autoScroll);
   const scroller = useRef<HTMLDivElement>(null);
@@ -74,6 +129,20 @@ export function ChatView({ chat }: { chat: Chat }) {
     stick.current = true;
     toBottom();
   }, [chat.id]);
+
+  // Opened from a search result: bring the matching message into view and highlight the matched words.
+  const searchFocus = useStore((s) => (s.searchFocus?.chatId === chat.id ? s.searchFocus : undefined));
+  useEffect(() => {
+    if (!searchFocus) return;
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${searchFocus.messageId}"]`);
+    if (!el) return;
+    stick.current = false;
+    el.scrollIntoView({ block: "center" });
+    el.classList.remove("msg-flash");
+    void el.offsetWidth;
+    el.classList.add("msg-flash");
+    return highlightWords(scroller.current!, searchFocus.words);
+  }, [searchFocus]);
 
   // A newly sent message always scrolls into view.
   const prevUsers = useRef(userCount);
@@ -114,6 +183,7 @@ export function ChatView({ chat }: { chat: Chat }) {
         }}
       >
         <div ref={inner} className="messages-inner">
+          {chat.forkOf && <ForkBanner chat={chat} />}
           {chat.messages.map((m, i) => (
             <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} />
           ))}

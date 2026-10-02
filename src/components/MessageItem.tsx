@@ -1,11 +1,12 @@
 import { Check, ChevronRight, CircleAlert, Copy, FileText, RotateCcw, Sparkles } from "lucide-react";
-import { memo, useEffect, useState } from "react";
-import { regenerate } from "../lib/chat";
+import { memo, useEffect, useRef, useState } from "react";
+import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
-import type { Message } from "../lib/types";
+import type { Message, ModelRef } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
 import { Markdown } from "./Markdown";
-import { BrandIcon, IconButton } from "./primitives";
+import { ModelMenu } from "./ModelSelect";
+import { BrandIcon, IconButton, Popover } from "./primitives";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -55,7 +56,7 @@ function Reasoning({ message }: { message: Message }) {
 
 function UserMessage({ message }: { message: Message }) {
   return (
-    <div className="msg msg-user">
+    <div className="msg msg-user" data-message-id={message.id}>
       {message.attachments?.length ? (
         <div className="msg-attachments">
           {message.attachments.map((a) =>
@@ -83,11 +84,44 @@ function UserMessage({ message }: { message: Message }) {
   );
 }
 
+/** "2nd": fork the chat at this reply and answer the same question with another model. */
+function SecondOpinion({ chatId, messageId, current }: { chatId: string; messageId: string; current?: ModelRef }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        className="msg-second"
+        aria-label="Get a second opinion from another model"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        data-tooltip={open ? undefined : "Get a second opinion from another model"}
+        data-tooltip-side="top"
+        onClick={() => setOpen((o) => !o)}
+      >
+        2nd
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Answer with" fixed="auto">
+        <div className="menu-label menu-label-top">Get a second opinion from…</div>
+        <ModelMenu
+          selected={current}
+          onPick={(ref) => {
+            setOpen(false);
+            forkWithModel(chatId, messageId, ref);
+          }}
+        />
+      </Popover>
+    </>
+  );
+}
+
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const streaming = message.status === "streaming";
   const waiting = streaming && !message.content && !message.reasoning;
   return (
-    <div className={cx("msg msg-assistant", isLast && "msg-last")}>
+    <div className={cx("msg msg-assistant", isLast && "msg-last")} data-message-id={message.id}>
       {message.reasoning && <Reasoning message={message} />}
       {waiting && (
         <div className="typing" aria-label="Waiting for response">
@@ -106,6 +140,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
           </button>
         </div>
       )}
+      {message.notice && <div className="msg-notice">{message.notice}</div>}
       {!streaming && (
         <div className="msg-actions">
           {message.model && (
@@ -121,6 +156,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
               <RotateCcw size={15} />
             </IconButton>
           )}
+          <SecondOpinion chatId={chatId} messageId={message.id} current={message.model} />
         </div>
       )}
     </div>

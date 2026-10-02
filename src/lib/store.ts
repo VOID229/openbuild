@@ -4,6 +4,7 @@ import type { PlanId } from "../../shared/types";
 import { detectModels } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
+import { keyId } from "./keys";
 import type { Chat, Detection, Message, Settings } from "./types";
 
 export type SettingsSection = "profile" | "general" | "keys" | "appearance";
@@ -11,21 +12,27 @@ export type SettingsSection = "profile" | "general" | "keys" | "appearance";
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   autoScroll: true,
-  cmdEnter: true,
-  autoRouter: true,
-  // Defaults as drawn in the wireframe.
-  avoid: [
-    { id: "deepseek-v4.1-flash", name: "Deepseek v4.1 flash" },
-    { id: "gpt-6-luna", name: "GPT 6 Luna" },
-  ],
-  prioritize: [
-    { id: "qwen3.8-flash", name: "Qwen3.8 flash", tag: "Speed" },
-    { id: "claude-opus-5-5", name: "claude Opus 5.5", tag: "complex" },
-  ],
+  cmdEnter: false,
+  autoRouter: false,
+  avoid: [],
+  prioritize: [],
   profile: { name: "", bio: "", location: "", language: "" },
   keys: {},
   effort: "medium",
+  naming: { enabled: true, models: [] },
 };
+
+type SidebarSections = { pinned: boolean; archived: boolean };
+
+/** Sidebar list options from the filter menu. */
+export interface SidebarView {
+  sort: "updated" | "created";
+  /** Model ids to show; empty = all models. */
+  models: string[];
+  includePinned: boolean;
+}
+
+export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true };
 
 interface State {
   settings: Settings;
@@ -33,13 +40,21 @@ interface State {
   chats: Chat[];
   chatsLoaded: boolean;
   activeChatId?: string;
+  /** Set when a chat is opened from a search result, so the matching message can be highlighted. */
+  searchFocus?: { chatId: string; messageId: string; words: string[] };
   sidebarOpen: boolean;
+  /** Expanded state of the collapsible sidebar sections. */
+  sections: SidebarSections;
+  view: SidebarView;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
 
   updateSettings: (patch: Partial<Settings>) => void;
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
-  setKey: (plan: PlanId, key: string | undefined) => void;
+  /** Replace a plan's ordered key list (empty removes the plan). */
+  setKeys: (plan: PlanId, keys: string[]) => void;
+  toggleSection: (section: keyof SidebarSections) => void;
+  setView: (patch: Partial<SidebarView>) => void;
   refreshDetection: (plan?: PlanId) => Promise<void>;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
@@ -50,6 +65,9 @@ interface State {
   removeAllChats: () => void;
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
+  /** Update chat metadata (title, pinned, archived) without changing its recency. */
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread">>) => void;
+  setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }
 
@@ -63,15 +81,21 @@ export const useStore = create<State>()(
       chats: [],
       chatsLoaded: false,
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
+      sections: { pinned: true, archived: false },
+      view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
 
       updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
       updateProfile: (patch) => set((s) => ({ settings: { ...s.settings, profile: { ...s.settings.profile, ...patch } } })),
 
-      setKey: (plan, key) => {
+      setView: (patch) => set((s) => ({ view: { ...s.view, ...patch } })),
+      toggleSection: (section) => set((s) => ({ sections: { ...s.sections, [section]: !s.sections[section] } })),
+
+      setKeys: (plan, list) => {
         const keys = { ...get().settings.keys };
-        if (key?.trim()) keys[plan] = key.trim();
+        const clean = [...new Set(list.map((k) => k.trim()).filter(Boolean))];
+        if (clean.length) keys[plan] = clean;
         else delete keys[plan];
         set((s) => ({ settings: { ...s.settings, keys } }));
         if (keys[plan]) void get().refreshDetection(plan);
@@ -91,23 +115,47 @@ export const useStore = create<State>()(
         const plans = only ? [only] : (Object.keys(keys) as PlanId[]);
         await Promise.all(
           plans.map(async (plan) => {
-            const key = keys[plan];
-            if (!key) return;
+            const list = keys[plan];
+            if (!list?.length) return;
             detectControllers[plan]?.abort();
             const ctrl = (detectControllers[plan] = new AbortController());
-            set((s) => ({
-              detection: {
-                ...s.detection,
-                // Keep previously detected models usable while re-checking.
-                [plan]: { plan, status: "checking", models: s.detection[plan]?.models ?? [], checkedAt: s.detection[plan]?.checkedAt },
-              },
-            }));
+            set((s) => {
+              const prev = s.detection[plan];
+              return {
+                detection: {
+                  ...s.detection,
+                  // Keep previously detected models usable while re-checking.
+                  [plan]: {
+                    plan,
+                    status: "checking",
+                    models: prev?.models ?? [],
+                    checkedAt: prev?.checkedAt,
+                    keys: Object.fromEntries(list.map((k) => [keyId(k), { ...prev?.keys?.[keyId(k)], status: "checking" as const }])),
+                  },
+                },
+              };
+            });
             try {
-              const result = await detectModels(plan, key, ctrl.signal);
+              const results = await Promise.all(list.map((k) => detectModels(plan, k, ctrl.signal)));
+              // Merge models across the plan's keys (the first key's order wins).
+              const seen = new Set<string>();
+              const merged = results
+                .filter((r) => r.status === "valid")
+                .flatMap((r) => r.models)
+                .filter((m) => !seen.has(m.id) && seen.add(m.id));
+              const status = results.some((r) => r.status === "valid") ? "valid" : results.every((r) => r.status === "invalid") ? "invalid" : "error";
               // A transient failure shouldn't wipe a previously good model list.
               const prev = get().detection[plan];
-              const models = result.status === "error" && prev?.models.length ? prev.models : result.models;
-              set((s) => ({ detection: { ...s.detection, [plan]: { ...result, models } } }));
+              const models = status === "error" && prev?.models.length ? prev.models : merged;
+              const detection: Detection = {
+                plan,
+                status,
+                models,
+                checkedAt: Date.now(),
+                error: status === "valid" ? undefined : results.find((r) => r.error)?.error,
+                keys: Object.fromEntries(results.map((r, i) => [keyId(list[i]!), { status: r.status, error: r.error, models: r.models.length }])),
+              };
+              set((s) => ({ detection: { ...s.detection, [plan]: detection } }));
               ensureSelection();
             } catch {
               // Aborted by a newer request.
@@ -120,8 +168,11 @@ export const useStore = create<State>()(
       closeSettings: () => set({ settingsOpen: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
-      newChat: () => set({ activeChatId: undefined }),
-      selectChat: (id) => set({ activeChatId: id }),
+      newChat: () => set({ activeChatId: undefined, searchFocus: undefined }),
+      selectChat: (id) => {
+        set({ activeChatId: id, searchFocus: undefined });
+        if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
+      },
       removeChat: (id) => {
         void deleteChat(id);
         set((s) => ({ chats: s.chats.filter((c) => c.id !== id), activeChatId: s.activeChatId === id ? undefined : s.activeChatId }));
@@ -131,6 +182,12 @@ export const useStore = create<State>()(
         set({ chats: [], activeChatId: undefined });
       },
       setChats: (chats) => set({ chats, chatsLoaded: true }),
+      updateChat: (id, patch) => {
+        let updated: Chat | undefined;
+        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? (updated = { ...c, ...patch }) : c)) }));
+        if (updated) void saveChat(updated);
+      },
+      setSearchFocus: (searchFocus) => set({ searchFocus }),
       upsertChat: (chat, persist = true) => {
         set((s) => {
           const rest = s.chats.filter((c) => c.id !== chat.id);
@@ -155,8 +212,32 @@ export const useStore = create<State>()(
     }),
     {
       name: "openchat",
-      version: 1,
-      partialize: (s) => ({ settings: s.settings, detection: s.detection, sidebarOpen: s.sidebarOpen }),
+      version: 3,
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<State>;
+        // v1 shipped sample router chips and Cmd+Enter / auto router on; reset those to the new defaults.
+        if (version < 2 && state.settings) {
+          const s = state.settings;
+          const isAuto = s.selection && "auto" in s.selection;
+          state.settings = {
+            ...s,
+            cmdEnter: false,
+            autoRouter: false,
+            avoid: s.avoid.filter((m) => !["deepseek-v4.1-flash", "gpt-6-luna"].includes(m.id)),
+            prioritize: s.prioritize.filter((m) => !["qwen3.8-flash", "claude-opus-5-5"].includes(m.id)),
+            selection: isAuto ? undefined : s.selection,
+          };
+        }
+        // v3: one key per plan → an ordered list of keys.
+        if (version < 3 && state.settings) {
+          const old = state.settings.keys as unknown as Partial<Record<PlanId, string | string[]>>;
+          state.settings.keys = Object.fromEntries(
+            Object.entries(old ?? {}).map(([plan, k]) => [plan, Array.isArray(k) ? k : k ? [k] : []]),
+          ) as Settings["keys"];
+        }
+        return state as State;
+      },
+      partialize: (s) => ({ settings: s.settings, detection: s.detection, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
         const detection = { ...(p.detection ?? {}) };
@@ -170,7 +251,14 @@ export const useStore = create<State>()(
           ...p,
           detection,
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
-          settings: { ...DEFAULT_SETTINGS, ...p.settings, profile: { ...DEFAULT_SETTINGS.profile, ...p.settings?.profile } },
+          sections: { ...current.sections, ...p.sections },
+          view: { ...DEFAULT_VIEW, ...p.view },
+          settings: {
+            ...DEFAULT_SETTINGS,
+            ...p.settings,
+            profile: { ...DEFAULT_SETTINGS.profile, ...p.settings?.profile },
+            naming: { ...DEFAULT_SETTINGS.naming, ...p.settings?.naming },
+          },
         };
       },
     },

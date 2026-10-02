@@ -1,12 +1,13 @@
 // OpenChat server: serves the React app (bundled by Bun, with HMR in dev) and proxies
 // chat requests to Opencode. API keys are supplied per request by the browser and never stored.
 import index from "../src/index.html";
-import { PLANS, type ChatRequest, type PlanId } from "../shared/types";
+import { PLANS, type ChatRequest, type PlanId, type StreamEvent } from "../shared/types";
 import { describeModels, detectModels } from "./catalog";
-import { buildUpstream, normalizeStream, upstreamError, validateMessages } from "./opencode";
+import { buildUpstream, isKeyFailure, normalizeStream, upstreamError, validateMessages } from "./opencode";
 
 const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
 const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
+const isKeyList = (k: unknown): k is string[] => Array.isArray(k) && k.length > 0 && k.length <= 20 && k.every(isKey);
 const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
 async function readJson(req: Request): Promise<any> {
@@ -38,7 +39,7 @@ function serve(port: number) {
           // Long generations shouldn't be cut off by the idle timeout.
           server.timeout(req, 0);
           const body = (await readJson(req)) as ChatRequest | undefined;
-          if (!body || !isPlan(body.plan) || !isKey(body.key) || typeof body.model !== "string" || !validateMessages(body.messages)) {
+          if (!body || !isPlan(body.plan) || !isKeyList(body.keys) || typeof body.model !== "string" || !validateMessages(body.messages)) {
             return bad("Malformed chat request");
           }
           const [model] = await describeModels(body.plan, [body.model]);
@@ -46,29 +47,39 @@ function serve(port: number) {
 
           const request: ChatRequest = {
             ...body,
-            key: body.key.trim(),
+            keys: body.keys.map((k) => k.trim()),
             sessionId: String(body.sessionId || crypto.randomUUID()).slice(0, 128),
             system: typeof body.system === "string" && body.system.trim() ? body.system : undefined,
           };
-          const upstream = buildUpstream(model, request);
-          let res: Response;
-          try {
-            res = await fetch(upstream.url, {
-              method: "POST",
-              headers: upstream.headers,
-              body: JSON.stringify(upstream.body),
-              signal: req.signal,
-            });
-          } catch (err) {
-            if (req.signal.aborted) return new Response(null, { status: 499 });
-            const message = `Couldn't reach Opencode: ${(err as Error).message}`;
-            return new Response(JSON.stringify({ t: "error", message }) + "\n", { headers: ndjson });
+          const label = PLANS[body.plan].label;
+          const notices: StreamEvent[] = [];
+          // Try the plan's keys in order; fall back to the next key when one is rejected or out of credit.
+          for (let i = 0; i < request.keys.length; i++) {
+            const upstream = buildUpstream(model, { ...request, key: request.keys[i]! });
+            let res: Response;
+            try {
+              res = await fetch(upstream.url, {
+                method: "POST",
+                headers: upstream.headers,
+                body: JSON.stringify(upstream.body),
+                signal: req.signal,
+              });
+            } catch (err) {
+              if (req.signal.aborted) return new Response(null, { status: 499 });
+              const message = `Couldn't reach Opencode: ${(err as Error).message}`;
+              return ndjsonResponse([...notices, { t: "error", message }]);
+            }
+            if (res.ok && res.body) return new Response(normalizeStream(model, res, req.signal, notices), { headers: ndjson });
+
+            const event = await upstreamError(res, label);
+            const message = event.t === "error" ? event.message : "";
+            const hasNext = i < request.keys.length - 1;
+            if (!hasNext || !isKeyFailure(res.status, message)) return ndjsonResponse([...notices, event]);
+            console.warn(`[chat] ${label} key ${i + 1} failed (HTTP ${res.status}); trying key ${i + 2}`);
+            const reason = res.status === 401 ? "key rejected" : message;
+            notices.push({ t: "notice", message: `${label} key ${i + 1} failed (${reason}), so key ${i + 2} was used.` });
           }
-          if (!res.ok || !res.body) {
-            const event = await upstreamError(res, PLANS[body.plan].label);
-            return new Response(JSON.stringify(event) + "\n", { headers: ndjson });
-          }
-          return new Response(normalizeStream(model, res, req.signal), { headers: ndjson });
+          return bad("No usable API key");
         },
       },
 
@@ -82,6 +93,7 @@ function serve(port: number) {
 }
 
 const ndjson = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" };
+const ndjsonResponse = (events: StreamEvent[]) => new Response(events.map((e) => JSON.stringify(e)).join("\n") + "\n", { headers: ndjson });
 
 const preferred = Number(process.env.PORT ?? 3000);
 let server: ReturnType<typeof serve> | undefined;

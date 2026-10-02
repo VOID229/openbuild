@@ -1,7 +1,8 @@
 import { Check, ChevronDown, KeyRound, ListFilter, Sparkles } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CHIP_ORDER, EFFORTS, nearestEffort, PLANS, type Effort, type ModelInfo, type PlanId } from "../../shared/types";
 import { availablePlans, findModel, isAuto } from "../lib/models";
+import { fuzzyScore } from "../lib/search";
 import { useStore } from "../lib/store";
 import { arrowNav, cx } from "../lib/ui";
 import { BrandIcon, Popover, Spinner } from "./primitives";
@@ -23,7 +24,10 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
   const levels: Effort[] = auto ? [...EFFORTS] : (model?.reasoning.efforts ?? []);
   const supported = levels.length > 0;
   const shown = nearestEffort(levels, effort) ?? effort;
-  const tooltip = !model && !auto ? "Select a model first" : !supported ? `${model?.name} doesn't expose reasoning levels` : "Reasoning effort";
+  // Toggle-only models (thinking on/off, no levels): "medium" means "on, at the model's default".
+  const onOff = !!model && model.reasoning.mode === "none" && model.reasoning.toggle;
+  const labelOf = (e: Effort, short: boolean) => (onOff && e === "medium" ? (short ? "on" : "On") : short ? SHORT[e] : LONG[e]);
+  const tooltip = !model && !auto ? "Select a model first" : !supported ? `${model?.name} uses its default reasoning` : "Reasoning effort";
 
   return (
     <div className="picker">
@@ -31,14 +35,15 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
         ref={anchor}
         type="button"
         className={cx("pill", open && "pill-open")}
-        disabled={!supported}
+        // aria-disabled (not disabled) keeps hover working so the tooltip can explain why.
+        aria-disabled={!supported}
         aria-haspopup="listbox"
         aria-expanded={open}
         data-tooltip={open ? undefined : tooltip}
         data-tooltip-side={dropUp ? "top" : "bottom"}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => supported && setOpen((o) => !o)}
       >
-        {LONG[shown]}
+        {supported ? labelOf(shown, false) : "Default"}
         <ChevronDown size={14} className="pill-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className={cx("menu effort-menu", dropUp ? "drop-up" : "drop-down")} role="listbox" label="Reasoning effort">
@@ -60,7 +65,7 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
                   setOpen(false);
                 }}
               >
-                <span>{SHORT[level]}</span>
+                <span className="menu-item-label">{labelOf(level, true)}</span>
                 {shown === level && <Check size={15} className="menu-check" />}
               </button>
             );
@@ -119,16 +124,51 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const hasKeys = Object.keys(keys).length > 0;
   const ready = availablePlans(detection);
   const [chip, setChip] = useState<PlanId>(() => (!auto && selection?.plan) || ready[0] || "go");
+  const [query, setQuery] = useState("");
+  const [layout, setLayout] = useState<{ up: boolean; max: number }>({ up: dropUp, max: 480 });
+  const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+
+  // Open toward whichever side of the composer has room, and cap the height to fit on screen.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const rect = anchor.current?.closest(".composer-wrap")?.getBoundingClientRect();
+      if (!rect) return;
+      const below = window.innerHeight - rect.bottom - 24;
+      const above = rect.top - 24;
+      const up = dropUp ? above >= 300 || above >= below : below < 300 && above > below;
+      setLayout({ up, max: Math.max(200, Math.min(520, up ? above : below)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open, dropUp]);
 
   // When opening, jump to the chip of the selected model.
   useEffect(() => {
     if (!open) return;
+    setQuery("");
+    if (window.matchMedia("(pointer: fine)").matches) requestAnimationFrame(() => search.current?.focus());
     if (!auto && selection) setChip(selection.plan);
     else if (!keys[chip]) setChip(ready[0] ?? CHIP_ORDER.find((p) => keys[p]) ?? "go");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const models: ModelInfo[] = detection[chip]?.models ?? [];
+  const all: ModelInfo[] = detection[chip]?.models ?? [];
+  const q = query.trim();
+  const models = useMemo(
+    () =>
+      q
+        ? all
+            .map((m) => ({ m, score: fuzzyScore(`${m.name} ${m.id}`, q) }))
+            .filter((x) => x.score !== undefined)
+            .sort((a, b) => b.score! - a.score!)
+            .map((x) => x.m)
+        : all,
+    [all, q],
+  );
+  const showAuto = autoRouter && ready.length > 0 && (!q || fuzzyScore("auto router", q) !== undefined);
   const status = detection[chip]?.status;
   const checking = status === "checking";
 
@@ -153,12 +193,36 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
         <span className="pill-text">{label}</span>
         <ChevronDown size={14} className="pill-chevron" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className={cx("model-panel", dropUp ? "drop-up" : "drop-down")} label="Choose a model">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchor={anchor}
+        className={cx("model-panel", layout.up ? "drop-up" : "drop-down")}
+        style={{ maxHeight: layout.max }}
+        label="Choose a model"
+      >
         <div className="model-panel-head">
           <ListFilter size={16} />
-          <span>{PLANS[chip].label}</span>
+          <input
+            ref={search}
+            className="model-search"
+            value={query}
+            placeholder={`Search ${PLANS[chip].label} models…`}
+            aria-label="Search models"
+            spellCheck={false}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown") {
+                e.preventDefault();
+                list.current?.querySelector<HTMLElement>(".model-row")?.focus();
+              } else if (e.key === "Enter" && models[0]) {
+                e.preventDefault();
+                choose(chip, models[0].id);
+              }
+            }}
+          />
           {checking && <Spinner size={12} />}
-          {!!models.length && <span className="model-count">{models.length} models</span>}
+          {!!all.length && <span className="model-count">{q ? `${models.length} of ${all.length}` : `${all.length} models`}</span>}
         </div>
         <div className="model-cols">
           <div className="api-chips" role="tablist" aria-label="Filter models by API" onKeyDown={(e) => arrowNav(e)}>
@@ -176,8 +240,8 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
               </button>
             ))}
           </div>
-          <div className="model-list" onKeyDown={(e) => arrowNav(e)}>
-            {autoRouter && ready.length > 0 && (
+          <div ref={list} className="model-list" onKeyDown={(e) => arrowNav(e)}>
+            {showAuto && (
               <button type="button" className="model-row" aria-selected={auto} onClick={() => (updateSettings({ selection: { auto: true } }), setOpen(false))}>
                 <span className="model-row-icon">
                   <Sparkles size={15} />
@@ -206,6 +270,10 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
                   </button>
                 );
               })
+            ) : q && all.length ? (
+              <div className="model-empty">
+                <p>No models match “{q}”.</p>
+              </div>
             ) : (
               <PlanStatus plan={chip} />
             )}

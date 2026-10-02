@@ -134,7 +134,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           className="composer-input"
           value={text}
           rows={variant === "home" ? 2 : 1}
-          placeholder={variant === "dock" ? "Reply…" : undefined}
+          placeholder="Ask anything"
           aria-label="Message"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}

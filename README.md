@@ -23,3 +23,5 @@ Open **Settings → API Keys** and paste a key for your plan. OpenChat checks th
 - `server/` is a Bun server. It serves the React app and proxies chat requests to Opencode. Each request uses the endpoint that model needs (`/chat/completions`, `/responses`, `/messages` or Gemini `:streamGenerateContent`). Every stream is converted into one NDJSON event format.
 - Model detection: `GET {baseURL}/models` with your key returns the models that key can use. A zero-cost malformed request validates the key (401 = invalid). Metadata from [models.dev](https://models.dev) supplies the protocol, reasoning-effort levels and input types.
 - Keys and chats stay in your browser (localStorage / IndexedDB). The server never stores them.
+- Each plan can have several keys, tried in order: if a key is rejected, out of credit, or rate limited, the next one is used.
+- Chats are named automatically after the first reply (Settings → General → Chat naming), using an ordered list of models with fallbacks.

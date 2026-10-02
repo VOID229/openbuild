@@ -38,7 +38,11 @@ function buildChat(model: ModelInfo, req: ChatRequest, effort: Effort | undefine
     messages.push({ role: "user", content: parts });
   }
   const body: Json = { model: model.id, stream: true, messages };
-  if (effort && model.reasoning.mode === "effort") body.reasoning_effort = effort === "off" ? "none" : effort;
+  if (effort === "off") {
+    body.reasoning_effort = "none";
+    // Upstreams differ on how thinking is switched off; send both forms (unknown fields are ignored).
+    if (model.reasoning.toggle) body.thinking = { type: "disabled" };
+  } else if (effort && model.reasoning.mode === "effort") body.reasoning_effort = effort;
   return body;
 }
 
@@ -123,7 +127,7 @@ function buildGemini(model: ModelInfo, req: ChatRequest, effort: Effort | undefi
   return body;
 }
 
-export function buildUpstream(model: ModelInfo, req: ChatRequest): Upstream {
+export function buildUpstream(model: ModelInfo, req: ChatRequest & { key: string }): Upstream {
   const { baseURL } = PLANS[req.plan];
   const effort = nearestEffort(model.reasoning.efforts, req.effort);
   const headers: Record<string, string> = {
@@ -307,8 +311,17 @@ export async function upstreamError(res: Response, planLabel: string): Promise<S
   return { t: "error", status: res.status, message };
 }
 
+/**
+ * Whether a failed request should be retried with the plan's next key: the key itself is
+ * rejected, out of credit/billing, disabled, or rate/usage limited.
+ */
+export function isKeyFailure(status: number | undefined, message: string) {
+  if (status === 401 || status === 402 || status === 403 || status === 429) return true;
+  return /billing|credit|balance|quota|insufficient|payment|subscription|revoked|expired|disabled|usage limit|limit reached|exceeded/i.test(message);
+}
+
 /** Pipe an upstream SSE body into NDJSON StreamEvents. */
-export function normalizeStream(model: ModelInfo, upstream: Response, signal: AbortSignal): ReadableStream<Uint8Array> {
+export function normalizeStream(model: ModelInfo, upstream: Response, signal: AbortSignal, prelude: StreamEvent[] = []): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   const handle = handlers[model.protocol];
   return new ReadableStream({
@@ -323,6 +336,7 @@ export function normalizeStream(model: ModelInfo, upstream: Response, signal: Ab
         }
       }, 15_000);
       const state: { finish?: string; usage: Usage } = { usage: {} };
+      for (const e of prelude) send(e);
       let failed = false;
       const emit = (e: StreamEvent) => {
         if (e.t === "error") failed = true;

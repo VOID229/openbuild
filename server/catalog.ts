@@ -84,8 +84,9 @@ function deriveReasoning(m: ModelsDevModel | undefined, protocol: Protocol): Rea
   const opts = m?.reasoning_options;
   if (!m?.reasoning || !opts?.length) return none;
 
-  // Only the Anthropic transport exposes an explicit on/off switch we can drive.
-  const toggle = protocol === "messages" && opts.some((o) => o.type === "toggle");
+  // On/off switch: `thinking: {type: "disabled"}` on /messages; on /chat/completions
+  // `reasoning_effort: "none"` + `thinking: {type: "disabled"}` (verified for Qwen, DeepSeek, LongCat).
+  const toggle = (protocol === "messages" || protocol === "chat") && opts.some((o) => o.type === "toggle");
   const effort = opts.find((o): o is Extract<ReasoningOption, { type: "effort" }> => o.type === "effort");
   const budget = opts.some((o) => o.type === "budget_tokens");
 
