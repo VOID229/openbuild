@@ -1,9 +1,9 @@
 import "@fontsource-variable/inter";
 import "@fontsource/comic-neue/400.css";
 import "@fontsource/comic-neue/700.css";
-import "@fontsource-variable/space-grotesk";
+import "@fontsource-variable/exo-2";
 import "@fontsource-variable/newsreader";
-import "@fontsource-variable/nunito";
+import "@fontsource-variable/fredoka";
 import "@fontsource-variable/jetbrains-mono";
 import "katex/dist/katex.min.css";
 import "./styles.css";
