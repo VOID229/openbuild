@@ -1456,6 +1456,8 @@ svg {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+  width: 100%;
   min-height: 36px;
   padding: 0 10px;
   border-radius: 8px;
