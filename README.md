@@ -64,7 +64,7 @@ OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed o
 
 - **Chats, settings and API keys stay in your browser** (IndexedDB/localStorage, marked persistent). Sign in to sync and back them up, end-to-end encrypted, like the local app. API keys sync too if you turn on Sync API keys.
 - **The relay keeps nothing.** `/api/chat`, `/api/models` and `/api/verify-search` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
-- **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address. A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
+- **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address (the relay runs on Vercel, so it can't reach LAN or Tailscale addresses). A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
 
 **iPhone / iPad with Lockdown Mode.** The site works, but it's a bit iffy: Lockdown Mode turns off IndexedDB, the browser storage the site normally uses. You have two options:
 
@@ -77,7 +77,7 @@ OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed o
 
 ## Web search
 
-Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl, Tavily or X (the app Bearer token from the X developer portal; your X API plan must include post search), or the address of a SearXNG instance you already run (LAN, Tailscale, anywhere reachable from the OpenChat server; its `search.formats` must include `json`). Like plan keys, each provider can have several keys (or instances) that are tried in order.
+Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl, Tavily or X (the app Bearer token from the X developer portal; your X API plan must include post search), or the address of a SearXNG instance you already run (its `search.formats` must include `json`). With the local app, that can be any address the OpenChat server can reach, including LAN and Tailscale. On the website, searches run from the cloud relay, so the instance must be a public `https://` address; run OpenChat locally to use a LAN or Tailscale instance. Like plan keys, each provider can have several keys (or instances) that are tried in order. Each key or instance is checked with one small search when you save it, and not again after that (only if you press Retry after a failed check).
 
 Each configured provider is exposed to the model as its own tool (`search_exa`, `search_brave`, ...). Tool descriptions and a system-prompt section tell the model what each provider is best at, so with several configured it picks per query:
 
