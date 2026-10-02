@@ -726,7 +726,7 @@ function AppearanceSection() {
       <div className="setting-row">
         <div className="setting-label">Font</div>
         <div className="segmented" role="radiogroup" aria-label="Font">
-          {(["normal", "serif", "fun", "sleek", "soft", "mono"] as FontStyle[]).map((f) => (
+          {(["normal", "serif", "fun", "mono"] as FontStyle[]).map((f) => (
             <button key={f} type="button" role="radio" aria-checked={font === f} className="segment" onClick={() => update({ font: f })}>
               {f}
             </button>

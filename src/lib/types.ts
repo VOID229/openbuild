@@ -1,7 +1,7 @@
 import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
-export type FontStyle = "normal" | "fun" | "sleek" | "serif" | "soft" | "mono";
+export type FontStyle = "normal" | "fun" | "serif" | "mono";
 
 export interface ModelRef {
   plan: PlanId;
