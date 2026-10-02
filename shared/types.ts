@@ -135,8 +135,8 @@ export type KeyEdit = { id: string } | { secret: string };
 
 /** Which keys are saved, as opaque ids in priority order. Secrets never leave the server. */
 export interface KeyInventory {
-  /** Where secrets are stored: the OS keychain, or a 0600 file when no keychain is available. */
-  backend: "keychain" | "file";
+  /** Where secrets are stored: the OS keychain, a 0600 file when no keychain is available, or (hosted site) this browser. */
+  backend: "keychain" | "file" | "browser";
   /** Entry ids per plan id or key-based search provider id. */
   keys: Record<string, string[]>;
 }

@@ -1,0 +1,128 @@
+// Request handling shared by the local Bun server (server/index.ts) and the hosted Vercel
+// functions (server/vercel/*). Only where API keys come from differs: the local server reads them
+// from the OS keychain, the hosted relay receives them with each request and keeps nothing.
+import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type StreamEvent } from "../shared/types";
+import { streamReply } from "./agent";
+import { describeModels, detectModels } from "./catalog";
+import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
+import { searchToolkit } from "./search";
+
+export const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
+export const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
+export const isKeyList = (k: unknown): k is string[] => Array.isArray(k) && k.length > 0 && k.length <= 20 && k.every(isKey);
+const isSearchList = (s: unknown): s is SearchCredentials[] =>
+  Array.isArray(s) &&
+  s.length <= 10 &&
+  s.every((c) => c && typeof c.provider === "string" && c.provider in SEARCH_PROVIDERS && (SEARCH_PROVIDERS[c.provider as keyof typeof SEARCH_PROVIDERS].credential === "key" ? c.keys === undefined : isKeyList(c.keys)));
+
+export const bad = (error: string, status = 400) => Response.json({ error }, { status });
+
+export async function readJson(req: Request): Promise<any> {
+  try {
+    return await req.json();
+  } catch {
+    return undefined;
+  }
+}
+
+const ndjson = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" };
+const ndjsonResponse = (events: StreamEvent[]) => new Response(events.map((e) => JSON.stringify(e)).join("\n") + "\n", { headers: ndjson });
+
+/** The secrets for a plan or key-based search provider, in priority order. */
+export type KeysFor = (scope: string) => Promise<string[]>;
+
+/**
+ * Hosted only: a SearXNG instance must be a public https address, so the relay can't be used to
+ * reach private networks.
+ */
+export function isPublicUrl(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (url.protocol !== "https:") return false;
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".") && !host.includes(":")) return false;
+  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224) return false;
+  }
+  if (host.includes(":") && (host === "::1" || host === "::" || /^f[cd]/.test(host) || host.startsWith("fe80") || host.startsWith("::ffff:"))) return false;
+  return true;
+}
+
+/** Check a key and list the models it can use. */
+export async function handleModels(plan: unknown, key: string | undefined): Promise<Response> {
+  if (!isPlan(plan)) return bad("Expected { plan }");
+  if (!key) return bad("Unknown key", 404);
+  return Response.json(await detectModels(plan, key));
+}
+
+/** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. */
+export async function handleChat(req: Request, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean } = {}): Promise<Response> {
+  if (!body || !isPlan(body.plan) || typeof body.model !== "string" || !validateMessages(body.messages) || (body.search !== undefined && !isSearchList(body.search))) {
+    return bad("Malformed chat request");
+  }
+  const keys = await keysFor(body.plan);
+  if (!keys.length) return bad(`No ${PLANS[body.plan].label} API key saved. Add one in Settings → API Keys.`);
+  const [model] = await describeModels(body.plan, [body.model]);
+  if (!model) return bad(`Unknown model ${body.model}`);
+
+  // Web search runs as tools, so only for models that can call them. Key-based providers' keys come
+  // from keysFor; instance URLs (SearXNG) come with the request.
+  const creds =
+    model.tools !== false && body.search?.length
+      ? await Promise.all(
+          body.search.map(async (c) => ({
+            provider: c.provider,
+            keys: SEARCH_PROVIDERS[c.provider].credential === "key" ? await keysFor(c.provider) : (c.keys ?? []).map((k) => k.trim()).filter((k) => !opts.hosted || isPublicUrl(k)),
+          })),
+        )
+      : [];
+  const usable = creds.filter((c) => c.keys.length);
+  const search = usable.length ? searchToolkit(usable) : undefined;
+  const system = [typeof body.system === "string" ? body.system.trim() : "", search?.guidance ?? ""].filter(Boolean).join("\n\n");
+  const { secrets: _secrets, ...rest } = body as ChatRequest & { secrets?: unknown };
+  const request: ChatRequest = {
+    ...rest,
+    sessionId: String(body.sessionId || crypto.randomUUID()).slice(0, 128),
+    system: system || undefined,
+  };
+  const tools = search && { tools: search.specs, extra: [] };
+  const label = PLANS[body.plan].label;
+  const notices: StreamEvent[] = [];
+  // Try the plan's keys in order; fall back to the next key when one is rejected or out of credit.
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i]!;
+    const upstream = buildUpstream(model, { ...request, key }, tools);
+    let res: Response;
+    try {
+      res = await fetch(upstream.url, {
+        method: "POST",
+        headers: upstream.headers,
+        body: JSON.stringify(upstream.body),
+        signal: req.signal,
+      });
+    } catch (err) {
+      if (req.signal.aborted) return new Response(null, { status: 499 });
+      const message = `Couldn't reach Opencode: ${(err as Error).message}`;
+      return ndjsonResponse([...notices, { t: "error", message }]);
+    }
+    if (res.ok && res.body) {
+      const stream = streamReply(model, { ...request, key }, res, req.signal, { prelude: notices, label, search });
+      return new Response(stream, { headers: ndjson });
+    }
+
+    const event = await upstreamError(res, label);
+    const message = event.t === "error" ? event.message : "";
+    const hasNext = i < keys.length - 1;
+    if (!hasNext || !isKeyFailure(res.status, message)) return ndjsonResponse([...notices, event]);
+    if (!opts.hosted) console.warn(`[chat] ${label} key ${i + 1} failed (HTTP ${res.status}); trying key ${i + 2}`);
+    const reason = res.status === 401 ? "key rejected" : message;
+    notices.push({ t: "notice", message: `${label} key ${i + 1} failed (${reason}), so key ${i + 2} was used.` });
+  }
+  return bad("No usable API key");
+}

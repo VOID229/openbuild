@@ -57,6 +57,18 @@ bun run setup:cloud   # log in to Convex (free), deploy convex/, create the sign
 
 It writes the deployment's address to `shared/cloud.ts`. Commit that, and every copy of OpenChat built from the repo shows sign-up and sign-in under Settings → Account, with nothing else to configure. Run it again after changing anything in `convex/` to deploy the change (existing sign-in keys are kept). To point one server at a different deployment (say, a dev one from `bunx convex dev`), set `OPENCHAT_CLOUD_URL`.
 
+## Hosted website
+
+OpenChat also runs as a website at **https://openchat.shade-io.com** (deployed on Vercel from `main`). It's the same app, minus the local server's storage:
+
+- **Chats, settings and API keys stay in your browser** (IndexedDB/localStorage, marked persistent). Sign in to sync and back them up, end-to-end encrypted, like the local app.
+- **The relay keeps nothing.** `/api/chat` and `/api/models` are Edge Functions (`server/vercel/`). The browser sends the keys a request needs along with it; the relay forwards the request to Opencode (and the search providers) and stores or logs nothing.
+- **Locked down.** The relay answers only pages from its own site. A SearXNG instance must be a public `https` address. A strict Content Security Policy lets the page talk only to the site itself and the sync service, so there are no third-party scripts, fonts or images.
+
+`bun run build` produces the site in Vercel's Build Output format (`.vercel/output`): the static app, the two functions, and the routes and headers. `vercel.json` tells Vercel to install with Bun and run that build.
+
+**Domain setup** (once): in Vercel, add `openchat.shade-io.com` under the project's Settings → Domains. Then in GoDaddy's DNS for `shade-io.com`, add the `CNAME` record Vercel shows (name `openchat`, value like `cname.vercel-dns.com`). The rest of `shade-io.com` is unaffected.
+
 ## Web search
 
 Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl, Tavily or X (the app Bearer token from the X developer portal; your X API plan must include post search), or the address of a SearXNG instance you already run (LAN, Tailscale, anywhere reachable from the OpenChat server; its `search.formats` must include `json`). Like plan keys, each provider can have several keys (or instances) that are tried in order.
