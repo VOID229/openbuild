@@ -1336,8 +1336,31 @@ svg {
   opacity: 0.3;
 }
 
-.round-btn-muted {
+.round-btn-mic {
   opacity: 0.88;
+}
+
+.round-btn-listening {
+  opacity: 1;
+  background: #e5484d;
+  color: #fff;
+  animation: listening 1.6s ease-in-out infinite;
+}
+
+.round-btn-listening:hover:not(:disabled) {
+  background: #d13a40;
+}
+
+@keyframes listening {
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, #e5484d 25%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .round-btn-listening {
+    animation: none;
+  }
 }
 
 .attachments {
@@ -3410,9 +3433,9 @@ p.key-status svg {
   }
 }
 
-/* The dictation button isn't wired up yet; on the narrowest phones give its room to the model picker. */
+/* On the narrowest phones give the dictation button's room to the model picker (the keyboard has a mic). */
 @media (max-width: 374px) {
-  .composer .round-btn-muted {
+  .composer .round-btn-mic {
     display: none;
   }
   .pill-model {

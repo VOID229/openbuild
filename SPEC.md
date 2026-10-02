@@ -106,7 +106,7 @@ Composer is a **large rounded rectangle** input card. Controls (left → right a
 | **Attach (`+`)** | **Bottom-left** inside the composer card | Lucide **`plus`** icon (stroke). Opens attach / file-pick affordance. **This is the attach control** — not a circular button. |
 | **Effort / thinking level** | Bottom-right cluster, left of model | Closed pill showing **`Medium`** (default). Agent note: **reasoning / effort / thinking level**. Opens a **generic dropdown** with options: `off` / `low` / `med` / `high` / `xhigh` / `max`. Which options are enabled depends on the selected model / backend — **do not invent backend rules**; disable or hide unavailable levels via whatever the backend/model reports. Closed label may stay title-case (`Medium`) while menu items use the short labels above. |
 | **Model picker** | Right of effort | Closed pill showing **`Claude opus 5.5`**. Opens the model dropdown (§2.4). Agent note: **switch between models, or auto; implement auto later** — ship model switching now; **Auto** can be stubbed/deferred. |
-| **Mic / dictation** | Circular dark button, left of Send | **Microphone** icon (stroke, light on dark). **Kept in the UI**; dictation **backend is not implemented now** — wire the control as a visible, clickable stub (or no-op with a light disabled/tooltip state) without inventing speech-to-text. |
+| **Mic / dictation** | Circular dark button, left of Send | **Microphone** icon (stroke, light on dark). Toggles dictation via the browser's Web Speech API (in Safari on macOS/iOS this is Apple's own speech engine). Live transcript is appended to the input; button turns red and pulses while listening. Browsers without the API get a hint to use OS dictation (Fn twice on Mac, keyboard mic on iPhone). |
 | **Send** | Rightmost circular dark filled button | Up-arrow / send icon. |
 
 Both circular icon buttons (mic + send): circular, filled dark (`#1e1e1e` in diagram), light icon, `cursor: pointer`, subtle hover/scale.
@@ -431,7 +431,7 @@ Notes that look like `# Profile` / `#Name` **inside the settings content panel**
 7. **Theme default:** **`system`** (product decision / correction; diagram does not mark a filled selection).
 8. **Location typo** `frankfrut` — sample data as drawn.
 9. **Backend/API:** no auth, streaming, or persistence details in diagram — frontend may mock.
-10. **Mic / dictation:** control is drawn and stays in UI; **backend not implemented now** — no speech pipeline unless product wires it later.
+10. **Mic / dictation:** Web Speech API dictation into the input; falls back to an OS-dictation hint where unsupported.
 11. **Attach (`+`) behavior:** icon drawn; exact file-type picker / paste UX not drawn — use a standard attach file picker without inventing extra panels.
 
 ---

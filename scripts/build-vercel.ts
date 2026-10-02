@@ -104,7 +104,7 @@ const security = {
   "Content-Security-Policy": csp,
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
-  "Permissions-Policy": "camera=(), microphone=(), geolocation=(), interest-cohort=()",
+  "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), interest-cohort=()",
   "Strict-Transport-Security": "max-age=63072000; includeSubDomains",
   "Cross-Origin-Opener-Policy": "same-origin",
 };

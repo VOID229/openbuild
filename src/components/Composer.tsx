@@ -2,6 +2,7 @@ import { ArrowUp, FileText, Mic, Plus, Square, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
 import { sendMessage, stopGeneration } from "../lib/chat";
+import { dictationSupported, useDictation } from "../lib/dictation";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
@@ -9,6 +10,7 @@ import { EffortPicker, ModelPicker } from "./Pickers";
 import { IconButton } from "./primitives";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const isIOS = typeof navigator !== "undefined" && (/iPhone|iPad/.test(navigator.platform) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 
 interface Props {
   /** Home: dropdowns open below. Docked at the bottom of a chat: they open upward. */
@@ -25,6 +27,29 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
+  // Text in the box when dictation started; the live transcript is appended after it.
+  const dictationBase = useRef("");
+  const dictation = useDictation(
+    (transcript) => {
+      const base = dictationBase.current;
+      const heard = transcript.trim();
+      setText(base && heard && !/\s$/.test(base) ? `${base} ${heard}` : base + heard);
+    },
+    setNotice,
+  );
+
+  const toggleDictation = () => {
+    if (dictation.listening) return dictation.stop();
+    if (!dictationSupported) {
+      // No speech API in this browser: hand off to the OS's own dictation on the focused box.
+      textarea.current?.focus();
+      setNotice(isIOS ? "Tap the mic on the keyboard to dictate." : isMac ? "Press Fn twice (or 🎤) to dictate." : "Dictation isn't supported in this browser.");
+      return;
+    }
+    dictationBase.current = text;
+    textarea.current?.focus();
+    dictation.start();
+  };
 
   // Auto-size the textarea to its content.
   useLayoutEffect(() => {
@@ -60,6 +85,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   const submit = () => {
     if (!canSend) return;
+    dictation.stop();
     if (sendMessage(text.trim(), files)) {
       setText("");
       setFiles([]);
@@ -161,12 +187,12 @@ export function Composer({ variant, chatId, streaming }: Props) {
             <ModelPicker dropUp={variant === "dock"} />
             <button
               type="button"
-              className="round-btn round-btn-muted"
-              aria-label="Dictation (coming soon)"
-              aria-disabled
-              data-tooltip="Dictation coming soon"
+              className={cx("round-btn round-btn-mic", dictation.listening && "round-btn-listening")}
+              aria-label={dictation.listening ? "Stop dictation" : "Dictate"}
+              aria-pressed={dictation.listening}
+              data-tooltip={dictation.listening ? "Stop dictation" : "Dictate"}
               data-tooltip-side={variant === "dock" ? "top" : "bottom"}
-              onClick={() => textarea.current?.focus()}
+              onClick={toggleDictation}
             >
               <Mic size={17} />
             </button>
