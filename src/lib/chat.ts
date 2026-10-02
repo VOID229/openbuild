@@ -1,4 +1,4 @@
-import { SEARCH_PROVIDERS, type Attachment, type SearchCredentials, type SearchProviderId, type WireMessage } from "../../shared/types";
+import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentials, type SearchProviderId, type WireMessage } from "../../shared/types";
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
@@ -16,10 +16,11 @@ function makeTitle(text: string, attachments: Attachment[]) {
   return clean.length > 60 ? clean.slice(0, 57).trimEnd() + "…" : clean;
 }
 
-function systemPrompt(settings: Settings) {
+function systemPrompt(settings: Settings, model: ModelInfo) {
   const { name, bio, location, language } = settings.profile;
   const lines = [
-    "You are a helpful assistant inside OpenChat.",
+    `You are ${model.name} (model ID: ${model.id}), a helpful assistant. You are running inside OpenChat, a chat app that lets the user switch between AI models from different providers.`,
+    `If asked who or what you are, say you are ${model.name}, used through OpenChat. Don't claim to be OpenChat itself or a different model. Earlier assistant replies in this conversation may have been written by other models.`,
     "Format responses in Markdown where it helps readability: headings, lists, tables, and fenced code blocks with a language tag. Write math in LaTeX using $...$ inline or $$...$$ for display.",
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`,
   ];
@@ -238,7 +239,7 @@ async function generate(chatId: string, messageId: string) {
         plan,
         model: model.id,
         effort: st.settings.effort,
-        system: systemPrompt(st.settings),
+        system: systemPrompt(st.settings, model),
         sessionId: chatId,
         messages: toWire(chat.messages.slice(0, index), model.input),
         search: model.tools !== false ? searchCredentials(st.settings) : undefined,
