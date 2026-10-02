@@ -9,3 +9,6 @@ MEMORY.md
 
 # Convex deployment (written by `bunx convex dev`)
 .env.local
+
+# Vercel build output
+.vercel

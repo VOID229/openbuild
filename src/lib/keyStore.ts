@@ -1,6 +1,44 @@
-// Client side of key storage. The browser never keeps API key secrets: they are sent once to the
-// server (PUT /api/keys/:scope), which keeps them in the OS keychain and hands back opaque ids.
+// Client side of key storage.
+//
+// Local app: the browser never keeps API key secrets. They are sent once to the server
+// (PUT /api/keys/:scope), which keeps them in the OS keychain and hands back opaque ids.
+//
+// Hosted website: there's no server-side storage, so keys stay in this browser (IndexedDB) and are
+// attached to each request that needs them; the relay uses them for that request and keeps nothing.
+import { createStore, entries, get, set } from "idb-keyval";
 import { SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
+import { config } from "./runtime";
+
+interface Entry {
+  id: string;
+  secret: string;
+}
+const browserKeys = createStore("openchat-secrets", "keys");
+
+/** Hosted: the secrets for a plan or search provider, in priority order. */
+export async function browserSecrets(scope: string): Promise<string[]> {
+  return ((await get<Entry[]>(scope, browserKeys).catch(() => undefined)) ?? []).map((e) => e.secret);
+}
+
+/** Hosted: one stored secret by its id. */
+export async function browserSecretById(scope: string, id: string): Promise<string | undefined> {
+  return ((await get<Entry[]>(scope, browserKeys).catch(() => undefined)) ?? []).find((e) => e.id === id)?.secret;
+}
+
+async function browserSetKeys(scope: string, edits: KeyEdit[]): Promise<string[]> {
+  const current = (await get<Entry[]>(scope, browserKeys)) ?? [];
+  const next: Entry[] = [];
+  for (const edit of edits) {
+    const entry =
+      "id" in edit
+        ? current.find((e) => e.id === edit.id)
+        : (current.find((e) => e.secret === edit.secret.trim()) ?? { id: crypto.randomUUID().replace(/-/g, "").slice(0, 12), secret: edit.secret.trim() });
+    if (!entry) throw new Error("Unknown key");
+    if (!next.some((e) => e.id === entry.id)) next.push(entry);
+  }
+  await set(scope, next, browserKeys);
+  return next.map((e) => e.id);
+}
 
 // A server from before the key vault has no /api/keys and answers 404. That happens when an old
 // `bun dev` is still running on this port after an update: say so instead of "Not found".
@@ -8,6 +46,11 @@ export const STALE_SERVER = "The OpenChat server on this port is out of date, so
 
 /** The saved key ids; undefined when the server is unreachable. Throws when the server is too old to have a vault. */
 export async function fetchKeys(signal?: AbortSignal): Promise<KeyInventory | undefined> {
+  if ((await config).mode === "hosted") {
+    const keys: Record<string, string[]> = {};
+    for (const [scope, list] of await entries<string, Entry[]>(browserKeys)) if (list.length) keys[scope] = list.map((e) => e.id);
+    return { backend: "browser", keys };
+  }
   let res: Response;
   try {
     res = await fetch("/api/keys", { signal });
@@ -20,6 +63,7 @@ export async function fetchKeys(signal?: AbortSignal): Promise<KeyInventory | un
 
 /** Replace a scope's ordered key list on the server; resolves to the saved ids. */
 export async function saveKeys(scope: PlanId | SearchProviderId, keys: KeyEdit[]): Promise<string[]> {
+  if ((await config).mode === "hosted") return browserSetKeys(scope, keys);
   const res = await fetch(`/api/keys/${scope}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },

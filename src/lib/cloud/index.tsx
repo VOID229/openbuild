@@ -5,6 +5,7 @@ import { ConvexReactClient, useConvexAuth, useQuery } from "convex/react";
 import { useEffect, type ReactNode } from "react";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
+import { config } from "../runtime";
 import { useStore } from "../store";
 import { createDataKey, unwrapDataKey, type Credentials } from "./crypto";
 import { forgetAccount, loadDataKey, saveDataKey, SyncEngine, useCloud } from "./sync";
@@ -16,14 +17,11 @@ let deploymentUrl: string | undefined;
 
 /** Read the server's config and connect to the Convex deployment, if one is configured. */
 export async function initCloud() {
-  try {
-    const res = await fetch("/api/config");
-    const { convexUrl } = (await res.json()) as { convexUrl?: string | null };
-    if (convexUrl) {
-      deploymentUrl = convexUrl;
-      client = new ConvexReactClient(convexUrl);
-    }
-  } catch {}
+  const { convexUrl } = await config;
+  if (convexUrl) {
+    deploymentUrl = convexUrl;
+    client = new ConvexReactClient(convexUrl);
+  }
 }
 
 export const cloudConfigured = () => !!client;

@@ -7,8 +7,14 @@
 // outbox is retried in the background and on the next load.
 //
 // Builds before this kept chats in IndexedDB itself; those are imported once per origin.
-import { createStore, del, entries, get, set } from "idb-keyval";
+//
+// On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
+// (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
+import { clear, createStore, del, entries, get, set } from "idb-keyval";
+import { config, isHosted } from "./runtime";
 import type { Chat } from "./types";
+
+const browserChats = createStore("openchat-chats", "chats");
 
 type Op = { op: "put"; chat: Chat; seq: number } | { op: "delete"; seq: number } | { op: "clear"; seq: number };
 
@@ -147,6 +153,11 @@ const settle = (chat: Chat): Chat => ({
 
 /** Load every chat from the server. Throws when it can't be reached (the caller retries). */
 export async function loadChats(): Promise<Chat[]> {
+  if ((await config).mode === "hosted") {
+    // Ask the browser not to clear this site's storage under storage pressure.
+    void navigator.storage?.persist?.().catch(() => {});
+    return (await entries<string, Chat>(browserChats)).map(([, c]) => settle(c)).sort((a, b) => b.updatedAt - a.updatedAt);
+  }
   await flush();
   await importLegacy();
   const res = await fetch("/api/chats");
@@ -165,18 +176,23 @@ export async function loadChats(): Promise<Chat[]> {
 export const chatListeners = new Set<(id: string | null) => void>();
 const notify = (id: string | null) => chatListeners.forEach((fn) => fn(id));
 
+const logFailure = (what: string) => (err: unknown) => console.error(`Failed to ${what}`, err);
+
 export function saveChat(chat: Chat) {
   notify(chat.id);
+  if (isHosted()) return set(chat.id, chat, browserChats).catch(logFailure("save chat"));
   return enqueue(chat.id, { op: "put", chat, seq: ++seq });
 }
 
 export function deleteChat(id: string) {
   notify(id);
+  if (isHosted()) return del(id, browserChats).catch(logFailure("delete chat"));
   return enqueue(id, { op: "delete", seq: ++seq });
 }
 
 export async function deleteAllChats() {
   notify(null);
+  if (isHosted()) return clear(browserChats).catch(logFailure("delete chats"));
   // Queued changes to individual chats are superseded.
   try {
     for (const [id] of await entries<string, Op>(outbox)) await del(id, outbox);

@@ -601,6 +601,12 @@ function VaultNotice() {
           <CircleAlert size={13} className="bad" /> {error}
         </p>
       )}
+      {backend === "browser" && (
+        <p className="field-help key-status">
+          Keys are stored only in this browser. Each request sends the key it needs to the OpenChat relay, which uses it for that request and
+          never stores or logs it.
+        </p>
+      )}
       {backend === "file" && (
         <p className="field-help key-status">
           <CircleAlert size={13} className="bad" /> No OS keychain was found, so keys are stored in a private file (<code>~/.config/openchat/secrets.json</code>, readable only by you).

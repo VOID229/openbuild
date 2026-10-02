@@ -1,4 +1,5 @@
-// Where the persisted UI state (settings, sidebar layout) lives: on the local OpenChat server, in
+// Where the persisted UI state (settings, sidebar layout) lives. Hosted site: this browser's
+// localStorage. Local app: on the local OpenChat server, in
 // the same on-disk database as chats. localStorage keeps a copy only so index.html can apply the
 // theme before first paint, and as a fallback when the server can't be reached at startup.
 //
@@ -6,6 +7,7 @@
 // writes on every change, including changes made before hydration finishes, and those would
 // otherwise replace your saved settings with the defaults.
 import type { StateStorage } from "zustand/middleware";
+import { config } from "./runtime";
 
 let ready = false;
 let pending: string | undefined;
@@ -71,6 +73,8 @@ if (typeof window !== "undefined") {
 
 export const serverStorage: StateStorage = {
   getItem: async (name) => {
+    // The hosted site has no server storage: settings live in this browser (and sync when signed in).
+    if ((await config).mode === "hosted") return local.get(name);
     const saved = await fetchState();
     const cached = local.get(name);
     ready = true;
