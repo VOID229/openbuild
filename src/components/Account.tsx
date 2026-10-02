@@ -42,9 +42,10 @@ function AccountPanel() {
 }
 
 const authError = (err: unknown) => {
-  const msg = (err as Error)?.message ?? "";
-  if (/InvalidSecret|InvalidAccountId|Wrong password/i.test(msg)) return "Wrong username or password.";
-  if (/already exists/i.test(msg)) return "That username is taken.";
+  const data = (err as { data?: unknown })?.data;
+  const msg = `${typeof data === "string" ? data : ""} ${(err as Error)?.message ?? ""}`;
+  if (/InvalidCredentials|Wrong password/i.test(msg)) return "Wrong username or password.";
+  if (/UsernameTaken|already exists/i.test(msg)) return "That username is taken.";
   if (/TooManyFailedAttempts|rate/i.test(msg)) return "Too many attempts. Wait a little and try again.";
   if (/fetch|network|connect/i.test(msg)) return "Can't reach the sync server. Check your connection.";
   return "Something went wrong. Please try again.";
