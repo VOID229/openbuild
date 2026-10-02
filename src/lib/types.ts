@@ -1,4 +1,4 @@
-import type { Attachment, Effort, ModelInfo, PlanId } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 
@@ -44,6 +44,10 @@ export interface Settings {
   keys: Partial<Record<PlanId, string[]>>;
   selection?: Selection;
   effort: Effort;
+  /** Web search: let models call the configured search providers. */
+  webSearch: boolean;
+  /** Search API keys (SearXNG: instance URLs) per provider, in priority order. */
+  search: Partial<Record<SearchProviderId, string[]>>;
   /** Automatic chat titles; an empty model list means "fastest available model". */
   naming: { enabled: boolean; models: NamingModel[] };
 }
@@ -67,6 +71,16 @@ export interface Detection {
   keys?: Record<string, KeyStatus>;
 }
 
+/** A web search the model ran while answering. */
+export interface SearchCall {
+  id: string;
+  provider: SearchProviderId;
+  query: string;
+  status: "running" | "done" | "error";
+  results?: SearchResultLink[];
+  error?: string;
+}
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -81,6 +95,7 @@ export interface Message {
   finish?: string;
   startedAt?: number;
   reasoningMs?: number;
+  searches?: SearchCall[];
   /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   notice?: string;
   createdAt: number;

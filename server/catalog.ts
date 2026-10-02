@@ -16,6 +16,7 @@ interface ModelsDevModel {
   name: string;
   family?: string;
   reasoning?: boolean;
+  tool_call?: boolean;
   reasoning_options?: ReasoningOption[];
   modalities?: { input?: string[] };
   limit?: { context?: number; output?: number };
@@ -139,6 +140,8 @@ export async function describeModels(plan: PlanId, ids: string[]): Promise<Model
       outputLimit: meta?.limit?.output,
       outputCost: meta?.cost?.output,
       releaseDate: meta?.release_date,
+      // Unknown models are assumed to support tools; the upstream rejects them otherwise.
+      tools: meta?.tool_call !== false,
     });
   }
   return models.sort(compareModels);
