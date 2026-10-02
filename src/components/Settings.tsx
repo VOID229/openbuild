@@ -7,11 +7,13 @@ import { parseModelQuery, scoreModel } from "../lib/modelSearch";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
+import { AccountSection } from "./Account";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "profile", label: "Profile" },
+  { id: "account", label: "Account" },
   { id: "general", label: "General" },
   { id: "keys", label: "API Keys" },
   { id: "search", label: "Web Search" },
@@ -778,6 +780,12 @@ export function SettingsModal() {
         </nav>
         <div className="settings-content" key={section}>
           {section === "profile" && <ProfileSection />}
+          {section === "account" && (
+            <>
+              <Heading>Account</Heading>
+              <AccountSection />
+            </>
+          )}
           {section === "general" && <GeneralSection />}
           {section === "keys" && <KeysSection />}
           {section === "search" && <SearchSection />}

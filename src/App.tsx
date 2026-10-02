@@ -6,6 +6,7 @@ import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
 import { Sidebar } from "./components/Sidebar";
+import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
@@ -187,6 +188,7 @@ function Main() {
       </div>
       <SettingsModal />
       <TooltipLayer />
+      {cloudConfigured() && <CloudSync />}
     </>
   );
 }
