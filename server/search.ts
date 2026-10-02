@@ -349,7 +349,76 @@ const PROVIDERS: Record<SearchProviderId, Provider> = {
       return { results };
     },
   },
+
+  youtube: {
+    cost: 1.5,
+    timeout: 20_000,
+    perResult: 1200,
+    description:
+      "Searches YouTube videos through the YouTube Data API. Returns each video's title, channel, upload date, length, view count and description (not the transcript or what is said in it). " +
+      "Best for finding videos: tutorials and how-tos, talks and lectures, product reviews, music, trailers, explainers, and a channel's uploads. Not a general web search.",
+    properties: {
+      query: { type: "string", description: "YouTube search query. Supports `|` for OR and `-term` to exclude." },
+      order: { type: "string", enum: ["relevance", "date", "viewCount", "rating"], description: "Sort order (default relevance)." },
+      duration: { type: "string", enum: ["short", "medium", "long"], description: "short is under 4 minutes, medium 4-20 minutes, long over 20 minutes." },
+      recency: recency("Only return videos uploaded within this period."),
+      count: count(25, 8),
+    },
+    async run(key, q, args, signal) {
+      const params = new URLSearchParams({ part: "snippet", q, type: "video", maxResults: String(clampInt(args.count, 1, 25, 8)), key });
+      params.set("order", pick(args.order, ["relevance", "date", "viewCount", "rating"] as const) ?? "relevance");
+      const duration = pick(args.duration, ["short", "medium", "long"] as const);
+      if (duration) params.set("videoDuration", duration);
+      const since = sinceDate(pick(args.recency, RECENCY));
+      if (since) params.set("publishedAfter", since.replace(/\.\d+Z$/, "Z"));
+      const search = await youtube(`search?${params}`, signal);
+      const items: any[] = (search.items ?? []).filter((x: any) => x.id?.videoId);
+      if (!items.length) return { results: [] };
+      // search.list costs 100 quota units; one videos.list (1 unit) adds lengths, views and full descriptions.
+      const details = new Map<string, any>();
+      try {
+        const ids = items.map((x) => x.id.videoId).join(",");
+        const videos = await youtube(`videos?${new URLSearchParams({ part: "snippet,contentDetails,statistics", id: ids, key })}`, signal);
+        for (const v of videos.items ?? []) details.set(v.id, v);
+      } catch (err) {
+        if ((err as Error).name === "AbortError" || (err as Error).name === "TimeoutError") throw err;
+      }
+      const results: Result[] = items.map((x) => {
+        const id = x.id.videoId;
+        const v = details.get(id);
+        const snippet = v?.snippet ?? x.snippet ?? {};
+        const meta = [snippet.channelTitle, formatDuration(v?.contentDetails?.duration), v?.statistics?.viewCount && `${Number(v.statistics.viewCount).toLocaleString("en-US")} views`];
+        return {
+          title: (v ? snippet.title : stripTags(snippet.title)) || `https://www.youtube.com/watch?v=${id}`,
+          url: `https://www.youtube.com/watch?v=${id}`,
+          published: snippet.publishedAt,
+          content: [meta.filter(Boolean).join(" · "), v ? snippet.description : stripTags(snippet.description)].filter(Boolean).join("\n"),
+        };
+      });
+      return { results };
+    },
+  },
 };
+
+/** A YouTube Data API call. An invalid key is HTTP 400 there, which is still worth falling back from. */
+async function youtube(path: string, signal: AbortSignal) {
+  try {
+    return await call(`https://www.googleapis.com/youtube/v3/${path}`, { signal }, "YouTube");
+  } catch (err) {
+    if (err instanceof SearchError && /HTTP 400: API key not valid/i.test(err.message)) throw new SearchError(err.message, true);
+    throw err;
+  }
+}
+
+/** ISO 8601 "PT1H2M3S" to "1:02:03". */
+function formatDuration(iso: unknown) {
+  const m = typeof iso === "string" ? /^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/.exec(iso) : null;
+  if (!m) return undefined;
+  const h = Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0);
+  const min = Number(m[3] ?? 0);
+  const s = String(Number(m[4] ?? 0)).padStart(2, "0");
+  return h ? `${h}:${String(min).padStart(2, "0")}:${s}` : `${min}:${s}`;
+}
 
 /**
  * Check a key (or SearXNG address) with one small search, so Settings can say whether it works.
@@ -358,13 +427,16 @@ const PROVIDERS: Record<SearchProviderId, Provider> = {
 export async function checkSearch(id: SearchProviderId, credential: string, signal?: AbortSignal): Promise<SearchCheckResult> {
   const provider = PROVIDERS[id];
   const label = SEARCH_PROVIDERS[id].label;
-  // The cheapest call each provider allows: one result (X's minimum is 10), no page scraping.
+  // The cheapest call each provider allows: one result (X's minimum is 10), no page scraping, and for
+  // YouTube a 1-unit video lookup instead of a 100-unit search.
   const args: Args = { count: 1 };
   const run =
     id === "firecrawl"
       ? (key: string, s: AbortSignal) =>
           call("https://api.firecrawl.dev/v2/search", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body: JSON.stringify({ query: "openchat", limit: 1 }), signal: s }, "Firecrawl")
-      : (key: string, s: AbortSignal) => provider.run(key, "openchat", args, s);
+      : id === "youtube"
+        ? (key: string, s: AbortSignal) => youtube(`videos?${new URLSearchParams({ part: "id", id: "jNQXAC9IVRw", key })}`, s)
+        : (key: string, s: AbortSignal) => provider.run(key, "openchat", args, s);
   try {
     await run(credential, AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(20_000)]));
     return { provider: id, status: "valid" };
@@ -372,7 +444,8 @@ export async function checkSearch(id: SearchProviderId, credential: string, sign
     if (signal?.aborted) throw err;
     const e = err as Error;
     if (e.name === "TimeoutError") return { provider: id, status: "error", error: `${label} didn't answer within 20 seconds` };
-    const rejected = id !== "searxng" && /HTTP (401|403)\b/.test(e.message);
+    // YouTube rejects a bad key with HTTP 400; its 403s (quota used up, API not enabled) explain themselves.
+    const rejected = id === "youtube" ? /API key not valid/i.test(e.message) : id !== "searxng" && /HTTP (401|403)\b/.test(e.message);
     if (rejected) return { provider: id, status: "invalid", error: `${label} rejected this key` };
     return { provider: id, status: "error", error: e.message };
   }
@@ -410,6 +483,7 @@ const ROUTING: { task: string; order: SearchProviderId[] }[] = [
   { task: "Technical, programming and quality-sensitive topics", order: ["kagi", "exa", "searxng", "brave", "tavily"] },
   { task: "Finding papers, companies, repos or similar pages", order: ["exa", "kagi", "searxng", "tavily"] },
   { task: "What people are saying on X: reactions, opinions, breaking news, posts by an account", order: ["x", "exa", "brave", "tavily"] },
+  { task: "Finding videos: tutorials, talks, reviews, music, a channel's uploads", order: ["youtube"] },
 ];
 
 export interface SearchToolkit {

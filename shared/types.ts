@@ -96,7 +96,7 @@ export interface WireMessage {
 // ---------------------------------------------------------------------------------------
 // Web search
 
-export type SearchProviderId = "searxng" | "brave" | "kagi" | "exa" | "tavily" | "firecrawl" | "x";
+export type SearchProviderId = "searxng" | "brave" | "kagi" | "exa" | "tavily" | "firecrawl" | "x" | "youtube";
 
 export interface SearchProviderConfig {
   id: SearchProviderId;
@@ -114,6 +114,7 @@ export const SEARCH_PROVIDERS: Record<SearchProviderId, SearchProviderConfig> = 
   firecrawl: { id: "firecrawl", label: "Firecrawl", credential: "key", site: "https://www.firecrawl.dev/app/api-keys" },
   tavily: { id: "tavily", label: "Tavily", credential: "key", site: "https://app.tavily.com/home" },
   x: { id: "x", label: "X", credential: "key", site: "https://developer.x.com/en/portal/dashboard" },
+  youtube: { id: "youtube", label: "YouTube", credential: "key", site: "https://console.cloud.google.com/apis/library/youtube.googleapis.com" },
   searxng: { id: "searxng", label: "SearXNG", credential: "url", site: "https://docs.searxng.org/admin/installation.html" },
 };
 
@@ -125,7 +126,7 @@ export interface SearchCheckResult {
 }
 
 /** Order of rows in Settings → Web Search. */
-export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x"];
+export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x", "youtube"];
 
 /**
  * A configured search provider sent with a chat request. Key-based providers carry nothing: the
