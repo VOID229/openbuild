@@ -651,7 +651,8 @@ function SearchSection() {
           <div className="setting-label">Let models search the web</div>
           <p className="setting-desc">
             Each provider you add becomes its own search tool. With two or more, the model picks the one that fits: SearXNG for quick, broad lookups,
-            Exa for the latest information, Tavily and Firecrawl for deep research and full pages, Kagi for high-quality technical results.
+            Exa for the latest information, Tavily and Firecrawl for deep research and full pages, Kagi for high-quality technical results, X for
+            what people are saying on X.
           </p>
         </div>
         <Toggle checked={enabled} onChange={(v) => update({ webSearch: v })} label="Let models search the web" />
