@@ -172,7 +172,13 @@ function serve(port: number) {
 const ndjson = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" };
 const ndjsonResponse = (events: StreamEvent[]) => new Response(events.map((e) => JSON.stringify(e)).join("\n") + "\n", { headers: ndjson });
 
-const preferred = Number(process.env.PORT ?? 3000);
+// Under `bun --hot` this module re-runs on every edit. Stop the previous server and take over its
+// port, so a reload always serves the current routes and bind address instead of leaving the old
+// server answering on the port your browser already has open.
+const hot = globalThis as { openchatServer?: ReturnType<typeof serve> };
+const previous = hot.openchatServer;
+if (previous) previous.stop(true);
+const preferred = previous?.port ?? Number(process.env.PORT ?? 3000);
 let server: ReturnType<typeof serve> | undefined;
 for (let port = preferred; !server; port++) {
   try {
@@ -181,4 +187,6 @@ for (let port = preferred; !server; port++) {
     if ((err as { code?: string }).code !== "EADDRINUSE" || port > preferred + 20) throw err;
   }
 }
+hot.openchatServer = server;
+if (server.port !== preferred) console.warn(`\n  Port ${preferred} is in use (another OpenChat still running?), so this one uses ${server.port}.`);
 console.log(`\n  OpenChat running at ${server.url}\n`);
