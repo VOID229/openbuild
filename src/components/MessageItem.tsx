@@ -3,8 +3,10 @@ import { SEARCH_PROVIDERS } from "../../shared/types";
 import { memo, useEffect, useRef, useState } from "react";
 import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
+import { useStore } from "../lib/store";
 import type { Message, ModelRef, SearchCall } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
+import { openLightbox } from "./Lightbox";
 import { Markdown } from "./Markdown";
 import { ModelMenu } from "./ModelSelect";
 import { BrandIcon, IconButton, Popover } from "./primitives";
@@ -117,16 +119,22 @@ function Searches({ searches }: { searches: SearchCall[] }) {
   );
 }
 
-function UserMessage({ message }: { message: Message }) {
+/** Every image sent in the chat, so the preview can step through all of them. */
+function chatImages(chatId: string) {
+  const chat = useStore.getState().chats.find((c) => c.id === chatId);
+  return (chat?.messages ?? []).flatMap((m) => m.attachments?.filter((a) => a.mime.startsWith("image/")) ?? []);
+}
+
+function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
   return (
     <div className="msg msg-user" data-message-id={message.id}>
       {message.attachments?.length ? (
         <div className="msg-attachments">
           {message.attachments.map((a) =>
             a.mime.startsWith("image/") ? (
-              <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" className="msg-image">
+              <button key={a.id} type="button" className="msg-image" aria-label={`Preview ${a.name}`} onClick={() => openLightbox(chatImages(chatId), a.id)}>
                 <img src={a.dataUrl} alt={a.name} />
-              </a>
+              </button>
             ) : (
               <span key={a.id} className="attachment-file msg-file" title={a.name}>
                 <FileText size={16} />
@@ -230,5 +238,5 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
 }
 
 export const MessageItem = memo(function MessageItem({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
-  return message.role === "user" ? <UserMessage message={message} /> : <AssistantMessage message={message} chatId={chatId} isLast={isLast} />;
+  return message.role === "user" ? <UserMessage message={message} chatId={chatId} /> : <AssistantMessage message={message} chatId={chatId} isLast={isLast} />;
 });

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
+import { Lightbox, useLightbox } from "./components/Lightbox";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
@@ -72,6 +73,7 @@ function Main() {
   useFont();
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
+  const lightboxOpen = useLightbox((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -176,7 +178,7 @@ function Main() {
 
   return (
     <>
-      <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen}>
+      <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen || lightboxOpen}>
         <Sidebar />
         <main className={cx("main", !sidebarOpen && "main-full")}>
           <div className={cx("floating-tools", !sidebarOpen && "floating-tools-visible")} inert={sidebarOpen}>
@@ -203,6 +205,7 @@ function Main() {
         </main>
       </div>
       <SettingsModal />
+      <Lightbox />
       <TooltipLayer />
       {cloudConfigured() && <CloudSync />}
       {cloudConfigured() && <SyncLockScreen />}

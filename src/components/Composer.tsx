@@ -6,6 +6,7 @@ import { dictationSupported, useDictation } from "../lib/dictation";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
+import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker } from "./Pickers";
 import { IconButton } from "./primitives";
 
@@ -138,7 +139,14 @@ export function Composer({ variant, chatId, streaming }: Props) {
             {files.map((f) => (
               <div key={f.id} className="attachment" title={f.name}>
                 {f.mime.startsWith("image/") ? (
-                  <img src={f.dataUrl} alt="" />
+                  <button
+                    type="button"
+                    className="attachment-preview"
+                    aria-label={`Preview ${f.name}`}
+                    onClick={() => openLightbox(files.filter((x) => x.mime.startsWith("image/")), f.id)}
+                  >
+                    <img src={f.dataUrl} alt="" />
+                  </button>
                 ) : (
                   <span className="attachment-file">
                     <FileText size={16} />
