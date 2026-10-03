@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, ExternalLink, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
@@ -69,7 +69,7 @@ interface RowProps {
   hit?: SearchHit;
   renaming: boolean;
   onSelect: (chat: Chat, hit?: SearchHit) => void;
-  onMenu: (chatId: string, x: number, y: number) => void;
+  onMenu: (chatId: string, x: number, y: number, fromButton?: boolean) => void;
   onRenameDone: () => void;
 }
 
@@ -219,6 +219,22 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
         >
           {chat.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </IconButton>
+        {/* Touch screens only: opens the same menu as right-click / long-press. */}
+        <IconButton
+          label="More actions"
+          tooltip={false}
+          aria-haspopup="menu"
+          className="history-action history-more"
+          // Keep the menu's outside-tap dismiss (and the row's long-press) from seeing this tap,
+          // so tapping again toggles the menu closed instead of closing and reopening it.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onMenu(chat.id, r.right, r.bottom + 4, true);
+          }}
+        >
+          <Ellipsis size={16} />
+        </IconButton>
       </span>
     </div>
   );
@@ -243,6 +259,8 @@ interface MenuState {
   chatId: string;
   x: number;
   y: number;
+  /** Opened from the row's ⋯ button: right-align the menu under it. */
+  end?: boolean;
 }
 
 function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onClose: () => void; onRename: (id: string) => void }) {
@@ -264,7 +282,8 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 220;
-    setPos({ left: Math.max(8, Math.min(state.x, window.innerWidth - w - 8)), top: Math.max(8, Math.min(state.y, window.innerHeight - h - 8)) });
+    const x = state.end ? state.x - w : state.x;
+    setPos({ left: Math.max(8, Math.min(x, window.innerWidth - w - 8)), top: Math.max(8, Math.min(state.y, window.innerHeight - h - 8)) });
     el?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
   }, [open, mounted, state]);
 
@@ -550,7 +569,11 @@ export function Sidebar() {
     },
     [mobile, selectChat, setSearchFocus, setSidebarOpen],
   );
-  const onMenu = useCallback((chatId: string, x: number, y: number) => setMenu({ chatId, x, y }), []);
+  const onMenu = useCallback(
+    (chatId: string, x: number, y: number, fromButton?: boolean) =>
+      setMenu((m) => (fromButton && m?.chatId === chatId ? undefined : { chatId, x, y, end: fromButton })),
+    [],
+  );
   const onRenameDone = useCallback(() => setRenamingId(undefined), []);
 
   const row = (c: Chat, hit?: SearchHit) => (

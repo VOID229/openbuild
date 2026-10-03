@@ -1029,9 +1029,34 @@ svg {
   transform-origin: top left;
 }
 
+.history-more {
+  display: none;
+}
+
+/* Touch screens: no hover actions, just a ⋯ button that opens the row's context menu. */
 @media (hover: none) {
   .history-actions {
+    position: static;
+    align-self: center;
+    flex-shrink: 0;
+    padding: 0 4px 0 0;
+    background: none;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .history-actions .history-action {
     display: none;
+  }
+
+  .history-actions .history-more {
+    display: inline-grid;
+    width: 32px;
+    height: 32px;
+  }
+
+  .history-more:active {
+    background: var(--active);
   }
 }
 
