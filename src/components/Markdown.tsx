@@ -8,7 +8,9 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { copyText, cx } from "../lib/ui";
 
-const remarkPlugins: ComponentProps<typeof ReactMarkdown>["remarkPlugins"] = [remarkGfm, remarkMath];
+// Only ~~double~~ tildes strike through: models write a lone "~" to mean "about" ("~10 GB"), and
+// GFM's default would strike everything between two of them.
+const remarkPlugins: ComponentProps<typeof ReactMarkdown>["remarkPlugins"] = [[remarkGfm, { singleTilde: false }], remarkMath];
 const rehypePlugins: ComponentProps<typeof ReactMarkdown>["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false, strict: false }],
   [rehypeHighlight, { detect: false }],
