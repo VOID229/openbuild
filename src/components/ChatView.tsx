@@ -113,21 +113,47 @@ export function ChatView({ chat }: { chat: Chat }) {
   const autoScroll = useStore((s) => s.settings.autoScroll);
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  // Attached: following the bottom. Any manual scroll up detaches; scrolling all the way down reattaches.
   const stick = useRef(true);
+  const lastTop = useRef(0);
+  const glideFrame = useRef(0);
+  const touchY = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const last = chat.messages.at(-1);
   const streaming = last?.status === "streaming";
   const userCount = chat.messages.filter((m) => m.role === "user").length;
 
-  const toBottom = (behavior: ScrollBehavior = "auto") => {
-    const el = scroller.current;
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior });
+  const gap = (el: HTMLElement) => el.scrollHeight - el.clientHeight - el.scrollTop;
+
+  const detach = () => {
+    stick.current = false;
+    cancelAnimationFrame(glideFrame.current);
   };
+
+  // Ease toward the bottom a frame at a time, retargeting as output grows; stops the moment we detach.
+  const glide = () => {
+    cancelAnimationFrame(glideFrame.current);
+    const step = () => {
+      const el = scroller.current;
+      if (!el || !stick.current) return;
+      const g = gap(el);
+      if (g <= 1) return;
+      const before = el.scrollTop;
+      el.scrollTop += Math.max(1, Math.ceil(g * 0.2));
+      if (el.scrollTop > before) glideFrame.current = requestAnimationFrame(step);
+    };
+    glideFrame.current = requestAnimationFrame(step);
+  };
+
+  useEffect(() => () => cancelAnimationFrame(glideFrame.current), []);
 
   // Opening a chat starts at the latest message.
   useLayoutEffect(() => {
+    cancelAnimationFrame(glideFrame.current);
     stick.current = true;
-    toBottom();
+    const el = scroller.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    lastTop.current = el?.scrollTop ?? 0;
   }, [chat.id]);
 
   // Opened from a search result: bring the matching message into view and highlight the matched words.
@@ -136,7 +162,7 @@ export function ChatView({ chat }: { chat: Chat }) {
     if (!searchFocus) return;
     const el = scroller.current?.querySelector<HTMLElement>(`[data-message-id="${searchFocus.messageId}"]`);
     if (!el) return;
-    stick.current = false;
+    detach();
     el.scrollIntoView({ block: "center" });
     el.classList.remove("msg-flash");
     void el.offsetWidth;
@@ -144,22 +170,22 @@ export function ChatView({ chat }: { chat: Chat }) {
     return highlightWords(scroller.current!, searchFocus.words);
   }, [searchFocus]);
 
-  // A newly sent message always scrolls into view.
+  // With auto scroll on, sending a message reattaches and brings it into view.
   const prevUsers = useRef(userCount);
   useEffect(() => {
-    if (userCount > prevUsers.current) {
+    if (autoScroll && userCount > prevUsers.current) {
       stick.current = true;
-      toBottom("smooth");
+      glide();
     }
     prevUsers.current = userCount;
   }, [userCount]);
 
-  // Follow streaming output while pinned to the bottom (when auto scroll is enabled).
+  // Follow output while attached (only when auto scroll is enabled).
   useEffect(() => {
     const el = inner.current;
-    if (!el) return;
+    if (!el || !autoScroll) return;
     const ro = new ResizeObserver(() => {
-      if (autoScroll && stick.current) toBottom();
+      if (stick.current) glide();
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -167,9 +193,13 @@ export function ChatView({ chat }: { chat: Chat }) {
 
   const onScroll = () => {
     const el = scroller.current!;
-    const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
-    stick.current = bottom;
-    setAtBottom(bottom);
+    const g = gap(el);
+    // Our own scrolling only ever moves down, and content shrinking clamps us to the bottom,
+    // so moving up while short of the bottom means the user scrolled (scrollbar, keys, wheel, touch).
+    if (g <= 2) stick.current = true;
+    else if (el.scrollTop < lastTop.current) detach();
+    lastTop.current = el.scrollTop;
+    setAtBottom(g < 72 || (autoScroll && stick.current));
   };
 
   return (
@@ -178,8 +208,20 @@ export function ChatView({ chat }: { chat: Chat }) {
         ref={scroller}
         className="messages"
         onScroll={onScroll}
+        // Detach on intent, before the browser's own smooth scroll starts, so following never fights it.
         onWheel={(e) => {
-          if (e.deltaY < 0) stick.current = false;
+          if (e.deltaY < 0) detach();
+        }}
+        onTouchStart={(e) => {
+          touchY.current = e.touches[0]!.clientY;
+        }}
+        onTouchMove={(e) => {
+          const y = e.touches[0]!.clientY;
+          if (y > touchY.current) detach();
+          touchY.current = y;
+        }}
+        onKeyDown={(e) => {
+          if (["ArrowUp", "PageUp", "Home"].includes(e.key) || (e.key === " " && e.shiftKey)) detach();
         }}
       >
         <div ref={inner} className="messages-inner">
@@ -197,7 +239,7 @@ export function ChatView({ chat }: { chat: Chat }) {
           tabIndex={atBottom ? -1 : 0}
           onClick={() => {
             stick.current = true;
-            toBottom("smooth");
+            glide();
           }}
         >
           <ArrowDown size={16} />
