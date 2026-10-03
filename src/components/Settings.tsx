@@ -733,7 +733,7 @@ function SearchSection() {
         {hosted ? (
           <>
             For SearXNG, enter the public https:// address of an instance you already run with the JSON format enabled. The website searches from
-            the cloud, so it can't reach instances on your LAN or Tailscale; run OpenChat locally for those.
+            the cloud, so it can't reach instances on your LAN or Tailscale.
           </>
         ) : (
           <>
