@@ -52,6 +52,15 @@ describe("invite codes", () => {
     expect(users).toEqual([]);
   });
 
+  test("codes can be checked before signing up, without using them", async () => {
+    const one = await code(1);
+    expect(await t.mutation(api.invites.checkInvite, { code: one })).toBe(true);
+    expect(await t.mutation(api.invites.checkInvite, { code: one })).toBe(true);
+    expect(await t.mutation(api.invites.checkInvite, { code: "AAAA-BBBB-CCCC" })).toBe(false);
+    await signIn("signUp", "checked", { invite: one });
+    expect(await t.mutation(api.invites.checkInvite, { code: one })).toBe(false);
+  });
+
   test("a multi-use code works until it's used up", async () => {
     const shared = await code(2);
     await signIn("signUp", "first", { invite: shared });

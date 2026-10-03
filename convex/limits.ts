@@ -10,9 +10,11 @@ const WEEK = 7 * 24 * HOUR;
 export const MAX_DEVICES = 3;
 
 export const rateLimiter = new RateLimiter(components.rateLimiter, {
-  // Global: sign-up attempts (each one checks an invite code), sign-in attempts, and waitlist joins.
+  // Global: invite code checks, sign-up attempts (each re-checks the code), sign-in attempts, and
+  // waitlist joins.
   // Convex Auth separately allows only 10 wrong passwords an hour per account.
   signUp: { kind: "token bucket", rate: 30, period: HOUR, capacity: 30 },
+  inviteCheck: { kind: "token bucket", rate: 120, period: HOUR, capacity: 60 },
   signIn: { kind: "token bucket", rate: 600, period: HOUR, capacity: 300, shards: 2 },
   waitlist: { kind: "token bucket", rate: 60, period: HOUR, capacity: 60 },
   // Per account: new sign-ins (each makes a device), and signing other devices out. Enough to set up

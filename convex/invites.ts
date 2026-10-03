@@ -57,6 +57,18 @@ export const precheck = internalMutation({
 });
 
 /**
+ * Check a code before showing the rest of the sign-up form. Doesn't use it up (that happens when
+ * the account is created). Rate limited, and every unusable code gets the same answer.
+ */
+export const checkInvite = mutation({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    if (!(await rateLimiter.limit(ctx, "inviteCheck")).ok) throw new ConvexError("RateLimited");
+    return usable(await findCode(ctx, code), Date.now());
+  },
+});
+
+/**
  * Use up one claim of `code`, inside the mutation creating the account. Every reason a code can't
  * be used (never existed, used up, revoked, expired) gives the same error, so trying codes reveals
  * nothing. A waitlist address is deleted once its code is used.

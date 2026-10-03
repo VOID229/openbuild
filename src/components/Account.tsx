@@ -302,8 +302,11 @@ const WAITLIST_NOTE =
 
 function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId?: boolean }) {
   const { signIn } = useAuthActions();
-  const [mode, setMode] = useState<"signIn" | "signUp" | "waitlist">("signIn");
+  // New visitors land on sign-up, which starts with the invite code alone; the username and
+  // password fields appear once the server says the code is good.
+  const [mode, setMode] = useState<"signIn" | "signUp" | "waitlist">("signUp");
   const [invite, setInvite] = useState("");
+  const [inviteOk, setInviteOk] = useState(false);
   const [username, setUsername] = useState(unlockFor?.username ?? "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -313,6 +316,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
   const [full, setFull] = useState<Device[]>();
   const creds = useRef<{ name: string; password: string; creds: Credentials }>(undefined);
   const signUp = mode === "signUp" && !unlockFor;
+  const needsCode = signUp && !inviteOk;
 
   if (mode === "waitlist" && !unlockFor) return <WaitlistForm onDone={(m) => setMode(m)} />;
 
@@ -350,6 +354,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       if (data.code === "DeviceLimit" && Array.isArray(data.devices) && data.devices.length) {
         setFull(data.devices as Device[]);
       } else {
+        if (data.code === "InvalidInvite") setInviteOk(false);
         setError(authError(err));
       }
     } finally {
@@ -357,10 +362,23 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
     }
   };
 
+  const checkInvite = async () => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      if (await cloudClient()!.mutation(api.invites.checkInvite, { code: invite })) setInviteOk(true);
+      else setError("That invite code isn't valid.");
+    } catch (err) {
+      setError(authError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (needsCode) return checkInvite();
     const name = normalizeUsername(username);
-    if (signUp && !invite.trim()) return setError("Enter your invite code.");
     if (!USERNAME_RULE.test(name)) return setError("Usernames are 3–64 characters: letters, numbers, dots, dashes and underscores.");
     if (signUp && password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`);
     if (signUp && password !== confirm) return setError("The passwords don't match.");
@@ -417,40 +435,60 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
             autoCapitalize="characters"
             spellCheck={false}
             placeholder="XXXX-XXXX-XXXX"
+            readOnly={inviteOk}
+            autoFocus
             onChange={(e) => setInvite(e.target.value)}
           />
-          <p className="field-help">
-            No code yet?{" "}
-            <button type="button" className="link-btn" onClick={() => switchTo("waitlist")}>
-              Join the waitlist
-            </button>
-          </p>
+          {inviteOk ? (
+            <p className="field-help">
+              Code accepted. Now choose a username and password.{" "}
+              <button
+                type="button"
+                className="link-btn"
+                onClick={() => {
+                  setInviteOk(false);
+                  setError(undefined);
+                }}
+              >
+                Use a different code
+              </button>
+            </p>
+          ) : (
+            <p className="field-help">
+              No code yet?{" "}
+              <button type="button" className="link-btn" onClick={() => switchTo("waitlist")}>
+                Join the waitlist
+              </button>
+            </p>
+          )}
         </div>
       )}
-      {!unlockFor && (
+      {!unlockFor && !needsCode && (
         <div className="field">
           <label className="md-label" htmlFor="account-username">
             <span className="md-hash">#</span>
             Username
           </label>
-          <input id="account-username" className="input" value={username} autoComplete="username" autoCapitalize="none" spellCheck={false} onChange={(e) => setUsername(e.target.value)} />
+          <input id="account-username" className="input" value={username} autoFocus={signUp} autoComplete="username" autoCapitalize="none" spellCheck={false} onChange={(e) => setUsername(e.target.value)} />
         </div>
       )}
-      <div className="field">
-        <label className="md-label" htmlFor="account-password">
-          <span className="md-hash">#</span>
+      {!needsCode && (
+        <div className="field">
+          <label className="md-label" htmlFor="account-password">
+            <span className="md-hash">#</span>
             Password
-        </label>
-        <input
-          id="account-password"
-          className="input"
-          type="password"
-          value={password}
-          autoComplete={signUp ? "new-password" : "current-password"}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </div>
-      {signUp && (
+          </label>
+          <input
+            id="account-password"
+            className="input"
+            type="password"
+            value={password}
+            autoComplete={signUp ? "new-password" : "current-password"}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+      )}
+      {signUp && inviteOk && (
         <div className="field">
           <label className="md-label" htmlFor="account-confirm">
             <span className="md-hash">#</span>
@@ -468,16 +506,16 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
         </p>
       )}
       <div className="account-actions">
-        <button type="submit" className="btn" disabled={!!busy || !password || (!unlockFor && !username) || (signUp && !invite)}>
+        <button type="submit" className="btn" disabled={!!busy || (needsCode ? !invite.trim() : !password || (!unlockFor && !username))}>
           {busy && <Spinner size={13} />}
-          {unlockFor ? "Unlock" : signUp ? "Create account" : "Sign in"}
+          {unlockFor ? "Unlock" : needsCode ? "Continue" : signUp ? "Create account" : "Sign in"}
         </button>
         {unlockFor ? (
           <SignOutButton username={unlockFor.username} />
         ) : (
           <>
             <button type="button" className="link-btn" onClick={() => switchTo(signUp ? "signIn" : "signUp")}>
-              {signUp ? "I have an account" : "Create an account"}
+              {signUp ? "Already have an account?" : "Create an account"}
             </button>
             {!signUp && (
               <button type="button" className="link-btn" onClick={() => switchTo("waitlist")}>
@@ -524,7 +562,7 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
             I have a code
           </button>
           <button type="button" className="link-btn" onClick={() => onDone("signIn")}>
-            Back to sign in
+            Already have an account?
           </button>
         </div>
       </div>
@@ -561,7 +599,7 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
           I have a code
         </button>
         <button type="button" className="link-btn" onClick={() => onDone("signIn")}>
-          Sign in
+          Already have an account?
         </button>
       </div>
     </form>
