@@ -18,6 +18,7 @@ export default defineSchema({
 
   // A synced item: "chat:<id>", "settings" or "profile". Deleting keeps a tombstone (no content)
   // so other devices learn about it. Large items are kept in file storage instead of `data`.
+  // Drafts ("draft:…", "draftfile:…") have `expiresAt` and are deleted after it (crons.ts).
   records: defineTable({
     userId: v.id("users"),
     key: v.string(),
@@ -26,9 +27,11 @@ export default defineSchema({
     iv: v.optional(v.bytes()),
     data: v.optional(v.bytes()),
     file: v.optional(v.id("_storage")),
+    expiresAt: v.optional(v.number()),
   })
     .index("by_user_key", ["userId", "key"])
-    .index("by_user_seq", ["userId", "seq"]),
+    .index("by_user_seq", ["userId", "seq"])
+    .index("by_expiresAt", ["expiresAt"]),
 
   // Invite codes for sign-up (convex/invites.ts). `uses` counts accounts created with it; a code
   // stops working when used up, past `expiresAt`, or `revoked` (the kill switch for a leaked code).

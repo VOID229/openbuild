@@ -2,15 +2,21 @@
 // and is stored as-is; nothing here logs, inspects or keeps anything else.
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { DRAFT_TTL, isDraftRecord } from "../shared/drafts";
+import { internal } from "./_generated/api";
+import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { currentSession, deleteSession, requireSession } from "./devices";
 
 /** Encrypted content stored inline; bigger items go to file storage. Convex documents max out at 1 MiB. */
 const MAX_INLINE = 800 * 1024;
 /** Records returned per "changes" page. */
 const PAGE = 25;
-/** Records deleted per call when deleting an account. */
+/** Records deleted per call when deleting an account or expired drafts. */
 const DELETE_BATCH = 200;
+/** Drafts are kept a little past their expiry on devices, so a device never finds one gone early. */
+const DRAFT_KEEP = DRAFT_TTL + 60_000;
+/** Most draft attachments a draft write can keep alive. */
+const MAX_TOUCH = 50;
 
 async function userId(ctx: QueryCtx): Promise<Id<"users">> {
   return (await requireSession(ctx)).userId;
@@ -82,7 +88,8 @@ export const uploadUrl = mutation({
 /**
  * Write one record. `base` is the seq this device last saw for it: if someone else wrote it since,
  * nothing is written and the caller gets `conflict` (it will receive that write, merge, and retry).
- * A deleted record stays deleted.
+ * A deleted record stays deleted, except drafts, which come and go. `touch` lists draft
+ * attachments whose expiry a draft write pushes back.
  */
 export const put = mutation({
   args: {
@@ -92,6 +99,7 @@ export const put = mutation({
     iv: v.optional(v.bytes()),
     data: v.optional(v.bytes()),
     file: v.optional(v.id("_storage")),
+    touch: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await userId(ctx);
@@ -100,6 +108,8 @@ export const put = mutation({
     if (args.key.length > 200) throw new ConvexError("Key too long");
     if (args.data && args.data.byteLength > MAX_INLINE) throw new ConvexError("Too large; upload it as a file");
     if (!args.deleted && !args.iv) throw new ConvexError("Missing content");
+    if (args.touch && args.touch.length > MAX_TOUCH) throw new ConvexError("Too many attachments");
+    const draft = isDraftRecord(args.key);
 
     const current = await ctx.db
       .query("records")
@@ -108,7 +118,7 @@ export const put = mutation({
     const discard = async () => {
       if (args.file) await ctx.storage.delete(args.file);
     };
-    if (current?.deleted) {
+    if (current?.deleted && !draft) {
       await discard();
       return { seq: current.seq, deleted: true as const };
     }
@@ -120,11 +130,20 @@ export const put = mutation({
     const seq = vault.seq + 1;
     await ctx.db.patch(vault._id, { seq });
     const content = args.deleted ? { iv: undefined, data: undefined, file: undefined } : { iv: args.iv, data: args.file ? undefined : args.data, file: args.file };
+    const expiresAt = draft ? Date.now() + DRAFT_KEEP : undefined;
     if (current) {
       if (current.file && current.file !== content.file) await ctx.storage.delete(current.file);
-      await ctx.db.replace(current._id, { userId: user, key: args.key, seq, deleted: args.deleted, ...content });
+      await ctx.db.replace(current._id, { userId: user, key: args.key, seq, deleted: args.deleted, ...content, expiresAt });
     } else {
-      await ctx.db.insert("records", { userId: user, key: args.key, seq, deleted: args.deleted, ...content });
+      await ctx.db.insert("records", { userId: user, key: args.key, seq, deleted: args.deleted, ...content, expiresAt });
+    }
+    for (const key of args.touch ?? []) {
+      if (!key.startsWith("draftfile:")) continue;
+      const file = await ctx.db
+        .query("records")
+        .withIndex("by_user_key", (q) => q.eq("userId", user).eq("key", key))
+        .unique();
+      if (file) await ctx.db.patch(file._id, { expiresAt });
     }
     return { seq };
   },
@@ -174,5 +193,21 @@ export const deleteAccount = mutation({
     }
     await ctx.db.delete(user);
     return { done: true };
+  },
+});
+
+/** Delete drafts past their expiry (run by crons.ts). Devices drop them on their own as well. */
+export const expireDrafts = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const expired = await ctx.db
+      .query("records")
+      .withIndex("by_expiresAt", (q) => q.gt("expiresAt", 0).lt("expiresAt", Date.now()))
+      .take(DELETE_BATCH);
+    for (const r of expired) {
+      if (r.file) await ctx.storage.delete(r.file);
+      await ctx.db.delete(r._id);
+    }
+    if (expired.length === DELETE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.expireDrafts, {});
   },
 });

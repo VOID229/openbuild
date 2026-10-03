@@ -9,6 +9,7 @@
  */
 
 import type * as auth from "../auth.js";
+import type * as crons from "../crons.js";
 import type * as devices from "../devices.js";
 import type * as emailCheck from "../emailCheck.js";
 import type * as http from "../http.js";
@@ -24,6 +25,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
+  crons: typeof crons;
   devices: typeof devices;
   emailCheck: typeof emailCheck;
   http: typeof http;

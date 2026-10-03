@@ -13,11 +13,14 @@ g.addEventListener ??= () => {};
 
 // Drafts saved by "the previous page load": one fresh, one past the timeout.
 const saved = idb.createStore("openchat-drafts", "drafts");
-await idb.set("fresh", { text: "still here", files: [], updatedAt: Date.now() - 60_000 }, saved);
-await idb.set("stale", { text: "too old", files: [], updatedAt: Date.now() - 6 * 60_000 }, saved);
+await idb.set("draft:fresh", { text: "still here", fileIds: ["kept"], updatedAt: Date.now() - 60_000 }, saved);
+await idb.set("draftfile:kept", { id: "kept", name: "k.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
+await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 6 * 60_000 }, saved);
+await idb.set("draftfile:orphan", { id: "orphan", name: "o.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
 
 const { selectionFor } = await import("../src/lib/store");
-const { draftsReady, getDraft, saveDraft } = await import("../src/lib/drafts");
+// A fresh copy of the module, as a page load would have (other test files may have loaded it already).
+const { draftsReady, getDraft, saveDraft } = await import("../src/lib/drafts?reload" as string);
 import type { Chat, Detection, Settings } from "../src/lib/types";
 
 const model = (id: string) => ({ id, name: id }) as any;
@@ -57,19 +60,22 @@ describe("model selection", () => {
 describe("drafts", () => {
   test("recent drafts survive a reload; old ones are dropped", async () => {
     await draftsReady;
-    expect(getDraft("fresh")?.text).toBe("still here");
+    expect(getDraft("fresh")).toMatchObject({ text: "still here", files: [{ id: "kept" }] });
     expect(getDraft("stale")).toBeUndefined();
-    expect(await idb.get("stale", saved)).toBeUndefined();
+    expect(await idb.get("draft:stale", saved)).toBeUndefined();
+    expect(await idb.get("draftfile:orphan", saved)).toBeUndefined();
   });
   test("drafts, images included, are written to IndexedDB; emptying one removes it", async () => {
     const image = { id: "i", name: "a.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" } as any;
     saveDraft("c1", "hello", [image]);
     expect(getDraft("c1")?.files).toEqual([image]);
     await Bun.sleep(500);
-    expect(await idb.get("c1", saved)).toMatchObject({ text: "hello", files: [image] });
+    expect(await idb.get("draft:c1", saved)).toMatchObject({ text: "hello", fileIds: ["i"] });
+    expect(await idb.get("draftfile:i", saved)).toEqual(image);
     saveDraft("c1", "  ", []);
     expect(getDraft("c1")).toBeUndefined();
     await Bun.sleep(500);
-    expect(await idb.get("c1", saved)).toBeUndefined();
+    expect(await idb.get("draft:c1", saved)).toBeUndefined();
+    expect(await idb.get("draftfile:i", saved)).toBeUndefined();
   });
 });

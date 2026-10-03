@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
 import { sendMessage, stopGeneration } from "../lib/chat";
 import { dictationSupported, useDictation } from "../lib/dictation";
-import { draftsReady, getDraft, NEW_CHAT, saveDraft } from "../lib/drafts";
+import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
@@ -71,8 +71,16 @@ export function Composer({ variant, chatId, streaming }: Props) {
       setText((t) => t || d.text);
       setFiles((f) => (f.length ? f : d.files));
     });
+    // An edit from another device shows up here, unless you're typing in this box right now.
+    const off = onRemoteDraft((key) => {
+      if (key !== draftKey || (document.hasFocus() && document.activeElement === textarea.current)) return;
+      const d = getDraft(key);
+      setText(d?.text ?? "");
+      setFiles(d?.files ?? []);
+    });
     return () => {
       live = false;
+      off();
     };
   }, [draftKey]);
 

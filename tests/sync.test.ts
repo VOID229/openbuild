@@ -33,7 +33,8 @@ g.fetch = async (input: any, init?: any) => {
 };
 
 const { appTest } = await import("./convex");
-const { api } = await import("../convex/_generated/api");
+const { api, internal } = await import("../convex/_generated/api");
+const drafts = await import("../src/lib/drafts");
 const { useStore } = await import("../src/lib/store");
 const { SyncEngine, useCloud } = await import("../src/lib/cloud/sync");
 const crypto_ = await import("../src/lib/cloud/crypto");
@@ -267,6 +268,70 @@ describe("sync", () => {
     expect(useStore.getState().settings.syncApiKeys).toBe(true);
     expect(vault.get("go")).toEqual(["sk-tablet", "sk-phone", "sk-laptop-2"]);
     expect(await decrypt<Record<string, string[]>>("keys")).toEqual({ brave: ["brave-local"], go: ["sk-tablet", "sk-phone", "sk-laptop-2"] });
+  });
+
+  test("drafts sync, images apart from the text", async () => {
+    const image = { id: "img1", name: "a.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" } as any;
+    drafts.saveDraft("a", "half-written", [image]);
+    await settled();
+    expect(await decrypt<any>("draft:a")).toMatchObject({ text: "half-written", fileIds: ["img1"] });
+    expect(await decrypt<any>("draftfile:img1")).toEqual(image);
+
+    // Editing the text writes the draft only, not the image again.
+    const fileSeq = (await recordOf("draftfile:img1"))!.seq;
+    drafts.saveDraft("a", "half-written, now more", [image]);
+    await settled();
+    expect((await decrypt<any>("draft:a")).text).toBe("half-written, now more");
+    expect((await recordOf("draftfile:img1"))!.seq).toBe(fileSeq);
+  });
+
+  test("another device's newer draft arrives; sending there clears it here", async () => {
+    await remotePut("draft:a", { text: "from phone", fileIds: ["img1"], updatedAt: Date.now() + 1000 });
+    await settled();
+    expect(drafts.getDraft("a")?.text).toBe("from phone");
+    expect(drafts.getDraft("a")?.files.map((f) => f.id)).toEqual(["img1"]);
+
+    // An older one doesn't replace it.
+    await remotePut("draft:a", { text: "stale", fileIds: [], updatedAt: 5 });
+    await settled();
+    expect(drafts.getDraft("a")?.text).toBe("from phone");
+
+    await alice.mutation(api.sync.put, { key: "draft:a", base: (await recordOf("draft:a"))!.seq, deleted: true });
+    client.bump();
+    await settled();
+    expect(drafts.getDraft("a")).toBeUndefined();
+
+    // Unlike chats, a cleared draft can be written again.
+    drafts.saveDraft("a", "a new draft", []);
+    await settled();
+    expect((await recordOf("draft:a"))!.deleted).toBe(false);
+    expect((await decrypt<any>("draft:a")).text).toBe("a new draft");
+  });
+
+  test("the server deletes expired drafts; writing a draft keeps its images alive", async () => {
+    const image = { id: "img2", name: "b.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,BBB" } as any;
+    drafts.saveDraft("b", "with picture", [image]);
+    await settled();
+    const expiry = (key: string) => t.run(async (ctx: any) => (await ctx.db.query("records").collect()).find((r: any) => r.key === key)?.expiresAt);
+    const setExpiry = (key: string, at: number) =>
+      t.run(async (ctx: any) => {
+        const r = (await ctx.db.query("records").collect()).find((r: any) => r.key === key);
+        await ctx.db.patch(r._id, { expiresAt: at });
+      });
+    expect(await expiry("chat:a")).toBeNull();
+    await setExpiry("draftfile:img2", Date.now() + 1000);
+    drafts.saveDraft("b", "with picture, edited", [image]);
+    await settled();
+    expect(await expiry("draftfile:img2")).toBeGreaterThan(Date.now() + 60_000);
+
+    await setExpiry("draft:b", 1);
+    await setExpiry("draftfile:img2", 1);
+    await t.mutation(internal.sync.expireDrafts, {});
+    const keys = (await records()).map((r) => r.key);
+    expect(keys).not.toContain("draft:b");
+    expect(keys).not.toContain("draftfile:img2");
+    expect(keys).toContain("draft:a");
+    expect(keys).toContain("chat:a");
   });
 
   test("users can't see each other's data", async () => {
