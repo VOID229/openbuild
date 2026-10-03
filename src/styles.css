@@ -1043,9 +1043,9 @@ svg {
 @media (hover: none) {
   .history-actions {
     position: static;
-    align-self: center;
+    align-self: stretch;
     flex-shrink: 0;
-    padding: 0 4px 0 0;
+    padding: 0;
     background: none;
     opacity: 1;
     pointer-events: auto;
@@ -1055,14 +1055,19 @@ svg {
     display: none;
   }
 
+  /* A full-height strip down the row's right edge, so a slightly-off tap still lands on ⋯
+     instead of the chat. The pressed circle stays small and centred on the dots. */
   .history-actions .history-more {
     display: inline-grid;
-    width: 32px;
-    height: 32px;
+    width: 48px;
+    height: 100%;
+    min-height: 40px;
+    border-radius: 0 9px 9px 0;
   }
 
-  .history-more:active {
-    background: var(--active);
+  .history-actions .history-more:active {
+    background: radial-gradient(circle, var(--active) 15px, transparent 16px);
+    transform: none;
   }
 }
 
@@ -3750,7 +3755,7 @@ p.key-status svg {
     background: var(--active);
   }
 
-  .history-row:active:not(:has(.history-more:active)) {
+  .history-row:has(.history-title:active) {
     --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
   }
 
