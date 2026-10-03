@@ -1,6 +1,6 @@
 // Invite-only sign-up and the device limit, end to end through the real Convex Auth sign-in action
 // (convex-test runs it in memory, password hashing and all).
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { exportJWK, exportPKCS8, generateKeyPair } from "jose";
 import { appTest } from "./convex";
 
@@ -23,6 +23,15 @@ async function signIn(flow: "signUp" | "signIn", username: string, extra: Record
   const token = (res as { tokens: { token: string } }).tokens.token;
   const { sub } = JSON.parse(atob(token.split(".")[1]!.replace(/-/g, "+").replace(/_/g, "/")));
   return t.withIdentity({ subject: sub });
+}
+
+/** Headers for a webhook signed the way Resend (Svix) signs them. */
+async function signedHeaders(secret: string, body: string) {
+  const id = "msg_test";
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const key = await crypto.subtle.importKey("raw", Uint8Array.from(atob(secret.slice(6)), (c) => c.charCodeAt(0)), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(`${id}.${timestamp}.${body}`)));
+  return { "svix-id": id, "svix-timestamp": timestamp, "svix-signature": `v1,${btoa(String.fromCharCode(...mac))}` };
 }
 
 /** The ConvexError payload a call fails with. */
@@ -82,17 +91,66 @@ describe("invite codes", () => {
   });
 });
 
+/** DNS-over-HTTPS as the waitlist sees it: which test domains take mail. */
+function fakeDns(input: string | URL | Request, init?: RequestInit): Promise<Response> {
+  const url = new URL(String(input instanceof Request ? input.url : input));
+  if (url.hostname !== "dns.google" && url.hostname !== "cloudflare-dns.com") return realFetch(input, init);
+  const name = url.searchParams.get("name")!;
+  if (name === "unreachable.example") return Promise.reject(new Error("network down"));
+  if (name === "nomail.example") return Promise.resolve(Response.json({ Status: 3 }));
+  if (name === "nullmx.example") return Promise.resolve(Response.json({ Status: 0, Answer: [{ type: 15, data: "0 ." }] }));
+  if (name === "website-only.example") return Promise.resolve(Response.json({ Status: 0 }));
+  return Promise.resolve(Response.json({ Status: 0, Answer: [{ type: 15, data: `10 mx.${name}.` }] }));
+}
+const realFetch = globalThis.fetch;
+
 describe("waitlist", () => {
   beforeAll(async () => {
     t = await appTest();
+    globalThis.fetch = fakeDns as typeof fetch;
+  });
+  afterAll(() => {
+    globalThis.fetch = realFetch;
   });
 
   test("joining twice is one entry, and rejects things that aren't addresses", async () => {
-    await t.mutation(api.invites.joinWaitlist, { email: " Ann@Example.com " });
-    await t.mutation(api.invites.joinWaitlist, { email: "ann@example.com" });
-    await t.mutation(api.invites.joinWaitlist, { email: "ben@example.com" });
-    expect(await failure(t.mutation(api.invites.joinWaitlist, { email: "nope" }))).toBe("InvalidEmail");
+    await t.action(api.invites.joinWaitlist, { email: " Ann@Example.com " });
+    await t.action(api.invites.joinWaitlist, { email: "ann@example.com" });
+    await t.action(api.invites.joinWaitlist, { email: "ben@example.com" });
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "nope" }))).toBe("InvalidEmail");
     expect(await t.query(internal.invites.waitlistSize, {})).toEqual({ waiting: 2 });
+  });
+
+  test("addresses that can't receive mail, and throwaway inboxes, are turned away", async () => {
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "x@nomail.example" }))).toBe("InvalidEmail");
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "x@nullmx.example" }))).toBe("InvalidEmail");
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "x@website-only.example" }))).toBe("InvalidEmail");
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "x@mailinator.com" }))).toBe("DisposableEmail");
+    expect(await failure(t.action(api.invites.joinWaitlist, { email: "x@inbox.mailinator.com" }))).toBe("DisposableEmail");
+    expect(await t.query(internal.invites.waitlistSize, {})).toEqual({ waiting: 2 });
+  });
+
+  test("if DNS can't be reached, real people aren't turned away", async () => {
+    await t.action(api.invites.joinWaitlist, { email: "cat@unreachable.example" });
+    expect(await t.query(internal.invites.waitlistSize, {})).toEqual({ waiting: 3 });
+    await t.run(async (ctx) => {
+      const entry = await ctx.db.query("waitlist").withIndex("by_email", (q) => q.eq("email", "cat@unreachable.example")).unique();
+      await ctx.db.delete(entry!._id);
+    });
+  });
+
+  test("one inbox is one place in line: Gmail dots, googlemail, and +tags", async () => {
+    await t.action(api.invites.joinWaitlist, { email: "Jane.Doe@gmail.com" });
+    await t.action(api.invites.joinWaitlist, { email: "janedoe+2@googlemail.com" });
+    await t.action(api.invites.joinWaitlist, { email: "j.a.n.e.d.o.e+spam@gmail.com" });
+    await t.action(api.invites.joinWaitlist, { email: "dan+news@example.com" });
+    await t.action(api.invites.joinWaitlist, { email: "dan@example.com" });
+    const emails = await t.run(async (ctx) => (await ctx.db.query("waitlist").collect()).map((w) => w.email));
+    expect(emails).toEqual(["ann@example.com", "ben@example.com", "jane.doe@gmail.com", "dan+news@example.com"]);
+    // Out of the way of the invite-order tests below.
+    await t.run(async (ctx) => {
+      for (const w of await ctx.db.query("waitlist").collect()) if (!["ann@example.com", "ben@example.com"].includes(w.email)) await ctx.db.delete(w._id);
+    });
   });
 
   test("invites go out oldest first, and the address is deleted once its code is used", async () => {
@@ -136,10 +194,33 @@ describe("waitlist", () => {
     }
   });
 
+  test("a bounce reported by Resend revokes the code and keeps the address from rejoining", async () => {
+    process.env.RESEND_WEBHOOK_SECRET = "whsec_" + btoa("0123456789abcdef0123456789abcdef");
+    await t.action(api.invites.joinWaitlist, { email: "ghost@example.com" });
+    const res = (await t.action(internal.invites.inviteWaitlist, { count: 1 })) as { invited: { code: string }[] };
+    const ghostCode = res.invited[0]!.code;
+    const body = JSON.stringify({ type: "email.bounced", data: { to: ["ghost@example.com"] } });
+
+    // Unsigned or wrongly signed: ignored.
+    expect((await t.fetch("/resend-webhook", { method: "POST", body })).status).toBe(401);
+    const forged = await signedHeaders("whsec_" + btoa("not the real secret, not at all"), body);
+    expect((await t.fetch("/resend-webhook", { method: "POST", headers: forged, body })).status).toBe(401);
+    expect(await t.mutation(api.invites.checkInvite, { code: ghostCode })).toBe(true);
+
+    const headers = await signedHeaders(process.env.RESEND_WEBHOOK_SECRET, body);
+    expect((await t.fetch("/resend-webhook", { method: "POST", headers, body })).status).toBe(204);
+    expect(await t.mutation(api.invites.checkInvite, { code: ghostCode })).toBe(false);
+
+    // Joining again doesn't put it back in line.
+    await t.action(api.invites.joinWaitlist, { email: "ghost@example.com" });
+    expect(await t.query(internal.invites.waitlistSize, {})).toEqual({ waiting: 0 });
+    delete process.env.RESEND_WEBHOOK_SECRET;
+  });
+
   test("joining is rate limited", async () => {
     let limited: unknown;
     for (let i = 0; i < 80 && !limited; i++) {
-      limited = await t.mutation(api.invites.joinWaitlist, { email: `bot${i}@spam.example` }).then(
+      limited = await t.action(api.invites.joinWaitlist, { email: `bot${i}@spam.example` }).then(
         () => undefined,
         (err) => err.data,
       );

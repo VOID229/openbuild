@@ -9,11 +9,13 @@
 //   bunx convex run invites:revokeCode '{"code": "ABCD-EFGH-JKMN"}'   kill switch for a leaked code
 //   bunx convex run invites:waitlistSize
 // Waitlist invites are emailed when RESEND_API_KEY and INVITE_EMAIL_FROM are set on the deployment;
-// otherwise inviteWaitlist prints the codes to send yourself.
+// otherwise inviteWaitlist prints the codes to send yourself. With RESEND_WEBHOOK_SECRET set too,
+// Resend reports bounces to /resend-webhook (http.ts), which revokes codes sent to dead addresses.
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { internalAction, internalMutation, internalQuery, mutation, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { acceptsMail, canonicalEmail, isDisposable, looksLikeEmail } from "./emailCheck";
 import { rateLimiter } from "./limits";
 
 // Crockford base32: no I, L, O or U, so codes survive being read aloud or retyped.
@@ -84,21 +86,70 @@ export async function claimInvite(ctx: MutationCtx, code: unknown) {
   }
 }
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-/** Join the waitlist. Says the same thing whether or not the address was already on it. */
-export const joinWaitlist = mutation({
+/**
+ * Join the waitlist. The address is checked without sending anything: it must look like one, not
+ * be a throwaway inbox, and its domain must accept mail. Says the same thing whether or not the
+ * address (or another spelling of the same inbox) was already on the list.
+ */
+export const joinWaitlist = action({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
-    if (email.length > 254 || !EMAIL.test(email)) throw new ConvexError("InvalidEmail");
-    await rateLimiter.limit(ctx, "waitlist", { throws: true });
-    const existing = await ctx.db
+    if (!looksLikeEmail(email)) throw new ConvexError("InvalidEmail");
+    const domain = email.slice(email.lastIndexOf("@") + 1);
+    if (isDisposable(domain)) throw new ConvexError("DisposableEmail");
+    // Counted before the DNS lookup, so floods are turned away before they cost lookups.
+    if (!(await ctx.runMutation(internal.invites.countJoin, {}))) throw new ConvexError({ kind: "RateLimited", name: "waitlist" });
+    if ((await acceptsMail(domain)) === "no") throw new ConvexError("InvalidEmail");
+    await ctx.runMutation(internal.invites.addToWaitlist, { email, canonical: canonicalEmail(email) });
+    return null;
+  },
+});
+
+export const countJoin = internalMutation({
+  args: {},
+  handler: async (ctx) => (await rateLimiter.limit(ctx, "waitlist")).ok,
+});
+
+export const addToWaitlist = internalMutation({
+  args: { email: v.string(), canonical: v.string() },
+  handler: async (ctx, { email, canonical }) => {
+    const sameInbox = await ctx.db
+      .query("waitlist")
+      .withIndex("by_canonical", (q) => q.eq("canonical", canonical))
+      .first();
+    const sameAddress = await ctx.db
       .query("waitlist")
       .withIndex("by_email", (q) => q.eq("email", email))
-      .unique();
-    if (!existing) await ctx.db.insert("waitlist", { email });
-    return null;
+      .first();
+    // Already waiting, already invited, or bounced before: nothing to add.
+    if (!sameInbox && !sameAddress) await ctx.db.insert("waitlist", { email, canonical });
+  },
+});
+
+/**
+ * An invite email bounced (the address doesn't exist) or was marked as spam: revoke its unused code
+ * and keep the address as a marker, so it can't rejoin and be emailed again. Called by the Resend
+ * webhook (http.ts).
+ */
+export const markUndeliverable = internalMutation({
+  args: { emails: v.array(v.string()) },
+  handler: async (ctx, { emails }) => {
+    for (const raw of emails) {
+      const email = raw.trim().toLowerCase();
+      for (const entry of await ctx.db
+        .query("waitlist")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .take(10)) {
+        await ctx.db.patch(entry._id, { bounced: true });
+        for (const invite of await ctx.db
+          .query("inviteCodes")
+          .withIndex("by_waitlist", (q) => q.eq("waitlistId", entry._id))
+          .take(10)) {
+          if (invite.uses === 0) await ctx.db.patch(invite._id, { revoked: true });
+        }
+      }
+    }
   },
 });
 

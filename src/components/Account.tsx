@@ -258,7 +258,8 @@ const authError = (err: unknown) => {
   if (/NewDeviceLimit/.test(msg)) return `This account has signed in on too many new devices this week. Try again ${waitText(data.retryAfter)}.`;
   if (/DeviceLimit/.test(msg)) return "This account is signed in on as many devices as it can be. Sign one out first.";
   if (data.kind === "RateLimited" && data.name === "removeDevice") return `You've signed out as many devices as you can this week. Try again ${waitText(data.retryAfter)}.`;
-  if (/InvalidEmail/.test(msg)) return "That doesn't look like an email address.";
+  if (/InvalidEmail/.test(msg)) return "That address can't receive email. Check it for typos.";
+  if (/DisposableEmail/.test(msg)) return "Use a permanent email address. Throwaway inboxes can't join the waitlist.";
   if (/InvalidCredentials|Wrong password/i.test(msg)) return "Wrong username or password.";
   if (/UsernameTaken|already exists/i.test(msg)) return "That username is taken.";
   if (/TooManyFailedAttempts|rate/i.test(msg)) return "Too many attempts. Wait a little and try again.";
@@ -541,7 +542,7 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
     setBusy(true);
     setError(undefined);
     try {
-      await cloudClient()!.mutation(api.invites.joinWaitlist, { email });
+      await cloudClient()!.action(api.invites.joinWaitlist, { email });
       setJoined(email.trim());
     } catch (err) {
       setError(authError(err));

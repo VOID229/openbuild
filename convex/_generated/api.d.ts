@@ -10,6 +10,7 @@
 
 import type * as auth from "../auth.js";
 import type * as devices from "../devices.js";
+import type * as emailCheck from "../emailCheck.js";
 import type * as http from "../http.js";
 import type * as invites from "../invites.js";
 import type * as limits from "../limits.js";
@@ -24,6 +25,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   devices: typeof devices;
+  emailCheck: typeof emailCheck;
   http: typeof http;
   invites: typeof invites;
   limits: typeof limits;

@@ -41,15 +41,22 @@ export default defineSchema({
     expiresAt: v.optional(v.number()),
     note: v.optional(v.string()),
     waitlistId: v.optional(v.id("waitlist")),
-  }).index("by_code", ["code"]),
+  })
+    .index("by_code", ["code"])
+    .index("by_waitlist", ["waitlistId"]),
 
   // Addresses waiting for an invite. Only used to email the code, never linked to an account, and
   // deleted once the code sent to it is used.
+  // `canonical` is the inbox it delivers to (emailCheck.ts), so one inbox is one place in line;
+  // `bounced` marks an address whose invite bounced, kept so it can't rejoin.
   waitlist: defineTable({
     email: v.string(),
+    canonical: v.optional(v.string()),
     invitedAt: v.optional(v.number()),
+    bounced: v.optional(v.boolean()),
   })
     .index("by_email", ["email"])
+    .index("by_canonical", ["canonical"])
     .index("by_invited", ["invitedAt"]),
 
   // A name for each signed-in session ("Safari on iPhone"), for Settings → Account → Devices.
