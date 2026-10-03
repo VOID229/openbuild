@@ -28,6 +28,12 @@ const vaultOf = (ctx: QueryCtx, user: Id<"users">) =>
     .withIndex("by_user", (q) => q.eq("userId", user))
     .unique();
 
+const seqOf = (ctx: QueryCtx, user: Id<"users">) =>
+  ctx.db
+    .query("seqs")
+    .withIndex("by_user", (q) => q.eq("userId", user))
+    .unique();
+
 /** The signed-in account: its username, and its wrapped data key (null until set up). */
 export const me = query({
   args: {},
@@ -127,8 +133,11 @@ export const put = mutation({
       return { seq: current.seq, conflict: true as const };
     }
 
-    const seq = vault.seq + 1;
-    await ctx.db.patch(vault._id, { seq });
+    const counter = await seqOf(ctx, user);
+    // Accounts from before `seqs` existed continue from the vault's counter.
+    const seq = (counter?.seq ?? vault.seq) + 1;
+    if (counter) await ctx.db.patch(counter._id, { seq });
+    else await ctx.db.insert("seqs", { userId: user, seq });
     const content = args.deleted ? { iv: undefined, data: undefined, file: undefined } : { iv: args.iv, data: args.file ? undefined : args.data, file: args.file };
     const expiresAt = draft ? Date.now() + DRAFT_KEEP : undefined;
     if (current) {
@@ -173,6 +182,8 @@ export const deleteAccount = mutation({
 
     const vault = await vaultOf(ctx, user);
     if (vault) await ctx.db.delete(vault._id);
+    const counter = await seqOf(ctx, user);
+    if (counter) await ctx.db.delete(counter._id);
     for (const account of await ctx.db
       .query("authAccounts")
       .withIndex("userIdAndProvider", (q) => q.eq("userId", user))

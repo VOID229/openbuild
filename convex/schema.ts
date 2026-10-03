@@ -8,11 +8,18 @@ export default defineSchema({
   ...authTables,
 
   // One per user. `wrappedKey` is the account's data key, encrypted with a key derived from the
-  // password on the device; `seq` numbers the user's writes so devices can ask for "changes since".
+  // password on the device. `seq` is where the account's write counter started (see `seqs`).
   vaults: defineTable({
     userId: v.id("users"),
     wrappedKey: v.bytes(),
     iv: v.bytes(),
+    seq: v.number(),
+  }).index("by_user", ["userId"]),
+
+  // Numbers each user's writes so devices can ask for "changes since". Kept apart from the vault,
+  // which every device watches (sync.me): bumping it there re-ran that query on each write.
+  seqs: defineTable({
+    userId: v.id("users"),
     seq: v.number(),
   }).index("by_user", ["userId"]),
 

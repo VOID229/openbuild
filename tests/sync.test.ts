@@ -334,6 +334,23 @@ describe("sync", () => {
     expect(keys).toContain("chat:a");
   });
 
+  test("writes don't touch the vault every device watches, and carry on an existing account's count", async () => {
+    const vault = () => t.run(async (ctx: any) => ctx.db.query("vaults").first());
+    const before = await vault();
+    const last = Math.max(...(await records()).map((r) => r.seq));
+    const res = await remotePut("chat:seq", chat("seq", []));
+    expect(res.seq).toBeGreaterThan(last);
+    expect(await vault()).toEqual(before);
+
+    // An account whose counter still lives in the vault (before `seqs`) continues from it.
+    await t.run(async (ctx: any) => {
+      for (const c of await ctx.db.query("seqs").collect()) await ctx.db.delete(c._id);
+      await ctx.db.patch(before._id, { seq: res.seq + 10 });
+    });
+    expect((await remotePut("chat:seq", chat("seq", []))).seq).toBe(res.seq + 11);
+    await settled();
+  });
+
   test("users can't see each other's data", async () => {
     const bob = await signedIn("bob");
     expect(await bob.query(api.sync.changes, { since: 0 })).toEqual([]);
@@ -347,8 +364,9 @@ describe("sync", () => {
     const left = await t.run(async (ctx: any) => ({
       records: (await ctx.db.query("records").collect()).length,
       vaults: (await ctx.db.query("vaults").collect()).length,
+      seqs: (await ctx.db.query("seqs").collect()).length,
       alice: (await ctx.db.query("users").collect()).filter((u: any) => u.email === "alice").length,
     }));
-    expect(left).toEqual({ records: 0, vaults: 0, alice: 0 });
+    expect(left).toEqual({ records: 0, vaults: 0, seqs: 0, alice: 0 });
   });
 });
