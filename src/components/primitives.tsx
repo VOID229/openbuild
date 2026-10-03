@@ -106,7 +106,15 @@ export function Avatar({ src, name, size = 24, className }: { src?: string; name
   );
 }
 
-export const Spinner = ({ size = 14 }: { size?: number }) => <span className="spinner" style={{ width: size, height: size }} aria-hidden />;
+// Every spinner anchors its animation to the document timeline's origin, so all of them
+// share one phase (now mod duration) however late they mount and always spin in lockstep.
+export function Spinner({ size = 14 }: { size?: number }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    for (const a of ref.current?.getAnimations() ?? []) a.startTime = 0;
+  }, []);
+  return <span ref={ref} className="spinner" style={{ width: size, height: size }} aria-hidden />;
+}
 
 export const IconButton = forwardRef<
   HTMLButtonElement,

@@ -439,12 +439,14 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
     else onCancel?.();
   };
 
+  // Short results sit inline next to the key; errors get their own line below it.
+  let badge: ReactNode = null;
   let line: ReactNode = null;
   if (invalid) line = (<><CircleAlert size={13} className="bad" /> {invalid}</>);
   else if (value && status && !editing) {
-    if (status.status === "checking") line = (<><Spinner size={12} /> {verifies === "search" ? `Checking ${isUrl ? "instance" : "key"}…` : "Detecting models…"}</>);
+    if (status.status === "checking") badge = (<><Spinner size={12} /> {verifies === "search" ? "Checking" : "Detecting"}</>);
     else if (status.status === "valid")
-      line = (<><Check size={13} className="ok" /> {verifies === "search" ? (isUrl ? "Instance reachable" : "Key works") : `${status.models ?? 0} models available`}</>);
+      badge = (<><Check size={13} className="ok" /> {verifies === "search" ? (isUrl ? "Reachable" : "Works") : `${status.models ?? 0} models`}</>);
     else if (status.status === "invalid")
       line = (<><CircleAlert size={13} className="bad" /> {verifies === "search" ? `${status.error ?? `Invalid ${noun}`}: ${isUrl ? "edit" : "replace"} it to continue` : "Invalid API key — replace it to continue"}</>);
     else
@@ -462,43 +464,43 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
 
   return (
     <div className="key-entry">
-      {total > 1 && (
-        <div className="key-caption">
-          {isUrl ? "Instance" : "Key"} {index + 1}
-          <span>{index === 0 ? "primary" : "fallback"}</span>
-        </div>
-      )}
       <div className="key-entry-row">
-        <input
-          ref={input}
-          id={id}
-          className={cx("input key-input", !editing && "key-input-masked")}
-          type={editing && !isUrl ? "password" : "text"}
-          inputMode={isUrl ? "url" : undefined}
-          readOnly={!editing}
-          value={editing ? draft : isUrl ? value : MASK}
-          placeholder={isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
-          aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setInvalid(undefined);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") save();
-            if (e.key === "Escape" && editing && (value || onCancel)) {
-              e.stopPropagation();
-              cancel();
-            }
-          }}
-          onBlur={(e) => {
-            // Leaving the field without a change restores the saved key (or drops an empty new field).
-            const unchanged = !draft.trim() || draft.trim() === value;
-            if (unchanged && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
-          }}
-          onFocus={() => !editing && replace()}
-        />
+        <div className={cx("key-input-wrap", total > 1 && "key-input-tagged")}>
+          <input
+            ref={input}
+            id={id}
+            className={cx("input key-input", !editing && "key-input-masked")}
+            type={editing && !isUrl ? "password" : "text"}
+            inputMode={isUrl ? "url" : undefined}
+            readOnly={!editing}
+            value={editing ? draft : isUrl ? value : MASK}
+            placeholder={isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+            aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
+            autoComplete="off"
+            spellCheck={false}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setInvalid(undefined);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              if (e.key === "Escape" && editing && (value || onCancel)) {
+                e.stopPropagation();
+                cancel();
+              }
+            }}
+            onBlur={(e) => {
+              // Leaving the field without a change restores the saved key (or drops an empty new field).
+              const unchanged = !draft.trim() || draft.trim() === value;
+              if (unchanged && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
+            }}
+            onFocus={() => !editing && replace()}
+          />
+          {total > 1 && <span className="key-tag">{index === 0 ? "primary" : "fallback"}</span>}
+        </div>
+        <div className="key-badge" role="status">
+          {badge}
+        </div>
         <div className="key-actions">
           {editing ? (
             <button type="button" className="btn btn-sm" data-key-action={actionId} disabled={!draft.trim()} onClick={save}>
@@ -575,7 +577,7 @@ function KeyList({ keys, setKeys, autoFocus, statusOf, onRetry, ...field }: KeyL
         )}
         {keys.length > 0 && !adding && (
           <button type="button" className="add-key" onClick={() => setAdding(true)}>
-            <Plus size={14} /> add more
+            <Plus size={13} /> add more
           </button>
         )}
       </div>

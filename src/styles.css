@@ -2933,12 +2933,12 @@ svg {
   grid-template-columns: 132px 1fr;
   align-items: start;
   gap: 16px;
-  padding: 16px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--border);
 }
 
 .key-label {
-  padding-top: 10px;
+  padding-top: 8px;
   font-size: 14px;
   font-weight: 550;
 }
@@ -2946,7 +2946,7 @@ svg {
 .key-fields {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -2956,27 +2956,53 @@ svg {
   gap: 8px;
 }
 
-.key-entry-row .input {
+.key-input-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
 }
 
-.key-caption {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-2);
+.key-entry-row .input {
+  height: 36px;
 }
 
-.key-caption span {
+.key-input-tagged .input {
+  padding-right: 76px;
+}
+
+/* "primary" / "fallback", tucked into the input's right edge. */
+.key-tag {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
   padding: 1px 6px;
   border-radius: 6px;
   background: var(--surface-3);
-  font-weight: 400;
+  font-size: 11.5px;
   color: var(--text-3);
+  pointer-events: none;
+}
+
+/* Fixed width so inputs line up whether or not a key has a status. */
+.key-badge {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  width: 88px;
+  font-size: 12.5px;
+  white-space: nowrap;
+  color: var(--text-2);
+}
+
+.key-badge:not(:empty) {
+  animation: fade 200ms var(--ease) both;
+}
+
+.key-badge .ok {
+  flex-shrink: 0;
+  color: var(--ok);
 }
 
 .add-key {
@@ -2998,6 +3024,15 @@ svg {
     background: var(--hover);
     color: var(--text);
   }
+}
+
+.key-fields .add-key {
+  height: 26px;
+  margin-left: -8px;
+  padding: 0 8px;
+  border: none;
+  font-size: 12.5px;
+  color: var(--text-3);
 }
 
 .add-key:disabled {
@@ -3031,7 +3066,7 @@ svg {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 6px;
   font-size: 12.5px;
   color: var(--text-2);
   animation: fade 200ms var(--ease) both;
@@ -3379,7 +3414,8 @@ p.key-status svg {
     padding-top: 0;
   }
 
-  .key-actions {
+  .key-actions,
+  .key-badge {
     width: auto;
   }
 
