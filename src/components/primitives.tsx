@@ -1,5 +1,5 @@
 import { CircleUserRound } from "lucide-react";
-import { forwardRef, memo, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { brandSvg } from "../lib/models";
 import { cx, useDismiss, usePresence } from "../lib/ui";
@@ -87,7 +87,10 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
 }
 
 export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string; className?: string }) {
-  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: brandSvg(id) }} />;
+  // Gradient ids must be unique per instance: url(#id) resolves to the first match in the document,
+  // and if that copy is hidden (closed picker, collapsed sidebar) WebKit paints every copy blank.
+  const uid = useId();
+  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: brandSvg(id).replaceAll("_R_0_", uid) }} />;
 });
 
 export function Avatar({ src, name, size = 24, className }: { src?: string; name?: string; size?: number; className?: string }) {
