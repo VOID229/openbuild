@@ -451,7 +451,11 @@ function SignedIn({ account }: { account: Account }) {
     <>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">Signed in as {account.username}</div>
+          <div className="setting-label">Signed in as{" "}
+            <span className="private-text" tabIndex={0}>
+              {account.username}
+            </span>
+          </div>
           <p className="setting-desc" role="status">
             {status === "syncing" || status === "connecting" ? <Spinner size={11} /> : null} {STATUS_TEXT[status] ?? status}
             {status === "syncing" && pending > 0 ? ` (${pending} left)` : ""}

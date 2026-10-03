@@ -3045,6 +3045,24 @@ svg {
   color: var(--text-3);
 }
 
+/* Hidden until hovered (or focused, for touch) so the name isn't exposed in screenshots or over a shoulder. */
+.private-text {
+  filter: blur(5px);
+  border-radius: 4px;
+  outline: none;
+  transition: filter var(--fast) var(--ease);
+}
+
+.private-text:focus {
+  filter: none;
+}
+
+@media (hover: hover) {
+  .private-text:hover {
+    filter: none;
+  }
+}
+
 .key-input {
   font-family: var(--mono);
   font-size: 13px;
