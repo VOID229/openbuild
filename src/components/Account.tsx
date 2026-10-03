@@ -401,7 +401,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
           ? `Enter the password for ${unlockFor.username} to start syncing on this device.`
           : signUp
             ? `${WAITLIST_NOTE} Enter the invite code you were sent, then choose a username and password.`
-            : "Sync your chats, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No email, no tracking."}
+            : "Sync your chats, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No tracking. New accounts are invite-only for now."}
       </Note>
       {signUp && (
         <div className="field">
@@ -475,9 +475,16 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
         {unlockFor ? (
           <SignOutButton username={unlockFor.username} />
         ) : (
-          <button type="button" className="link-btn" onClick={() => switchTo(signUp ? "signIn" : "signUp")}>
-            {signUp ? "I have an account" : "Create an account"}
-          </button>
+          <>
+            <button type="button" className="link-btn" onClick={() => switchTo(signUp ? "signIn" : "signUp")}>
+              {signUp ? "I have an account" : "Create an account"}
+            </button>
+            {!signUp && (
+              <button type="button" className="link-btn" onClick={() => switchTo("waitlist")}>
+                Join the waitlist
+              </button>
+            )}
+          </>
         )}
       </div>
     </form>
