@@ -7,7 +7,7 @@ import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
-import type { Chat, Detection, KeyStatus, Message, Settings } from "./types";
+import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
 
 export type SettingsSection = "account" | "profile" | "general" | "keys" | "search" | "appearance";
 
@@ -48,6 +48,8 @@ interface State {
   chats: Chat[];
   chatsLoaded: boolean;
   activeChatId?: string;
+  /** A model picked in a chat without sending yet. Otherwise a chat uses the model of its last reply. Kept on this device only. */
+  selections: Record<string, Selection>;
   /** Set when a chat is opened from a search result, so the matching message can be highlighted. */
   searchFocus?: { chatId: string; messageId: string; words: string[] };
   sidebarOpen: boolean;
@@ -77,6 +79,8 @@ interface State {
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setSidebarOpen: (open: boolean) => void;
+  /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
+  setSelection: (selection: Selection) => void;
   newChat: () => void;
   selectChat: (id: string) => void;
   removeChat: (id: string) => void;
@@ -100,6 +104,7 @@ export const useStore = create<State>()(
       searchStatus: {},
       chats: [],
       chatsLoaded: false,
+      selections: {},
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
       sections: { pinned: true, archived: false },
       view: DEFAULT_VIEW,
@@ -283,6 +288,11 @@ export const useStore = create<State>()(
       closeSettings: () => set({ settingsOpen: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
+      setSelection: (selection) => {
+        const id = get().activeChatId;
+        if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
+        else get().updateSettings({ selection });
+      },
       newChat: () => set({ activeChatId: undefined, searchFocus: undefined }),
       selectChat: (id) => {
         set({ activeChatId: id, searchFocus: undefined });
@@ -290,11 +300,14 @@ export const useStore = create<State>()(
       },
       removeChat: (id) => {
         void deleteChat(id);
-        set((s) => ({ chats: s.chats.filter((c) => c.id !== id), activeChatId: s.activeChatId === id ? undefined : s.activeChatId }));
+        set((s) => {
+          const { [id]: _, ...selections } = s.selections;
+          return { chats: s.chats.filter((c) => c.id !== id), activeChatId: s.activeChatId === id ? undefined : s.activeChatId, selections };
+        });
       },
       removeAllChats: () => {
         void deleteAllChats();
-        set({ chats: [], activeChatId: undefined });
+        set({ chats: [], activeChatId: undefined, selections: {} });
       },
       setChats: (chats) => set({ chats, chatsLoaded: true }),
       updateChat: (id, patch) => {
@@ -364,7 +377,7 @@ export const useStore = create<State>()(
         }
         return state as State;
       },
-      partialize: (s) => ({ settings: s.settings, detection: s.detection, searchStatus: s.searchStatus, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
+      partialize: (s) => ({ settings: s.settings, detection: s.detection, searchStatus: s.searchStatus, selections: s.selections, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
         const detection = { ...(p.detection ?? {}) };
@@ -397,6 +410,24 @@ export const useStore = create<State>()(
     },
   ),
 );
+
+const AUTO: Selection = { auto: true };
+
+/**
+ * The model the composer sends with: in a chat, the one picked there or else the one its last reply
+ * used; on the new-chat screen (or when a chat's model isn't available anymore), the new-chat model.
+ * Returns stored objects only, so it's safe as a store selector.
+ */
+export function selectionFor(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): Selection | undefined {
+  const id = s.activeChatId;
+  if (id) {
+    const picked = s.selections[id];
+    const reply = s.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant" && m.model);
+    const sel = picked ?? (reply ? (reply.routed ? AUTO : reply.model) : undefined);
+    if (sel && (isAuto(sel) ? s.settings.autoRouter : findModel(s.detection, sel))) return sel;
+  }
+  return s.settings.selection;
+}
 
 /** Keep the composer pointed at a model that actually exists for the configured keys. */
 export function ensureSelection() {

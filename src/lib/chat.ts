@@ -2,7 +2,7 @@ import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentia
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
-import { useStore } from "./store";
+import { selectionFor, useStore } from "./store";
 import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
 
 export const uid = () => crypto.randomUUID();
@@ -79,8 +79,9 @@ export function stopAllGenerations() {
 
 /** Resolve the composer selection to a concrete model for this prompt. */
 function resolveModel(text: string, attachments: Attachment[]): { ref: ModelRef; routed: boolean } | undefined {
-  const { settings, detection } = useStore.getState();
-  const sel = settings.selection;
+  const st = useStore.getState();
+  const { settings, detection } = st;
+  const sel = selectionFor(st);
   if (isAuto(sel)) {
     const ref = routePrompt(text, attachments.some((a) => a.text == null), detection, settings);
     return ref && { ref, routed: true };
@@ -113,7 +114,9 @@ export function sendMessage(text: string, attachments: Attachment[]): boolean {
     ? { ...existing, updatedAt: now, messages: [...existing.messages, user, assistant] }
     : { id: uid(), title: makeTitle(text, attachments), createdAt: now, updatedAt: now, messages: [user, assistant] };
   st.upsertChat(chat);
-  useStore.setState({ activeChatId: chat.id });
+  // The reply now records the model, so a pick made in this chat isn't needed anymore.
+  const { [chat.id]: _, ...selections } = useStore.getState().selections;
+  useStore.setState({ activeChatId: chat.id, selections });
   void generate(chat.id, assistant.id);
   return true;
 }

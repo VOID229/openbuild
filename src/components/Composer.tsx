@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
 import { sendMessage, stopGeneration } from "../lib/chat";
 import { dictationSupported, useDictation } from "../lib/dictation";
+import { draftsReady, getDraft, NEW_CHAT, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
@@ -21,8 +22,9 @@ interface Props {
 }
 
 export function Composer({ variant, chatId, streaming }: Props) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<Attachment[]>([]);
+  const draftKey = chatId ?? NEW_CHAT;
+  const [text, setText] = useState(() => getDraft(draftKey)?.text ?? "");
+  const [files, setFiles] = useState<Attachment[]>(() => getDraft(draftKey)?.files ?? []);
   const [notice, setNotice] = useState<string>();
   const [dragging, setDragging] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
@@ -60,6 +62,27 @@ export function Composer({ variant, chatId, streaming }: Props) {
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [text]);
 
+  // Right after a reload the saved drafts may still be loading; fill them in unless typing has started.
+  useEffect(() => {
+    let live = true;
+    void draftsReady.then(() => {
+      const d = getDraft(draftKey);
+      if (!live || !d) return;
+      setText((t) => t || d.text);
+      setFiles((f) => (f.length ? f : d.files));
+    });
+    return () => {
+      live = false;
+    };
+  }, [draftKey]);
+
+  // Save the draft as it changes (not on mount, which would stamp an untouched draft as fresh).
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) saveDraft(draftKey, text, files);
+    mounted.current = true;
+  }, [text, files]);
+
   // Focus on mount / chat switch (skip on touch devices to avoid popping the keyboard).
   useEffect(() => {
     if (window.matchMedia("(pointer: fine)").matches) textarea.current?.focus();
@@ -88,6 +111,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
     if (!canSend) return;
     dictation.stop();
     if (sendMessage(text.trim(), files)) {
+      // Sending from the new-chat screen unmounts this composer before its save effect could run.
+      saveDraft(draftKey, "", []);
       setText("");
       setFiles([]);
     }

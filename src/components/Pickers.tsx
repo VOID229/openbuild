@@ -4,7 +4,7 @@ import { CHIP_ORDER, EFFORTS, nearestEffort, PLANS, type Effort, type ModelInfo,
 import { availablePlans, findModel, isAuto } from "../lib/models";
 import { parseModelQuery, searchModelGroups } from "../lib/modelSearch";
 import { fuzzyScore } from "../lib/search";
-import { useStore } from "../lib/store";
+import { selectionFor, useStore } from "../lib/store";
 import { arrowNav, cx } from "../lib/ui";
 import { BrandIcon, Popover, Spinner } from "./primitives";
 
@@ -15,7 +15,7 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const effort = useStore((s) => s.settings.effort);
-  const selection = useStore((s) => s.settings.selection);
+  const selection = useStore(selectionFor);
   const detection = useStore((s) => s.detection);
   const updateSettings = useStore((s) => s.updateSettings);
 
@@ -113,11 +113,11 @@ function PlanStatus({ plan }: { plan: PlanId }) {
 export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const selection = useStore((s) => s.settings.selection);
+  const selection = useStore(selectionFor);
   const autoRouter = useStore((s) => s.settings.autoRouter);
   const keys = useStore((s) => s.settings.keys);
   const detection = useStore((s) => s.detection);
-  const updateSettings = useStore((s) => s.updateSettings);
+  const setSelection = useStore((s) => s.setSelection);
   const openSettings = useStore((s) => s.openSettings);
 
   const auto = isAuto(selection);
@@ -171,7 +171,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const label = auto ? "Auto" : current ? current.name : !hasKeys ? "Add API key" : ready.length ? "Select model" : "Loading models…";
 
   const choose = (plan: PlanId, id: string) => {
-    updateSettings({ selection: { plan, id } });
+    setSelection({ plan, id });
     setOpen(false);
   };
 
@@ -240,7 +240,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
           </div>
           <div ref={list} className="model-list" onKeyDown={(e) => arrowNav(e)}>
             {showAuto && (
-              <button type="button" className="model-row" aria-selected={auto} onClick={() => (updateSettings({ selection: { auto: true } }), setOpen(false))}>
+              <button type="button" className="model-row" aria-selected={auto} onClick={() => (setSelection({ auto: true }), setOpen(false))}>
                 <span className="model-row-icon">
                   <Sparkles size={15} />
                 </span>
