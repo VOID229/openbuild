@@ -1025,8 +1025,14 @@ svg {
   right: auto;
   z-index: 70;
   min-width: 200px;
-  transform: scale(0.97);
+  transform: scale(0.94);
   transform-origin: top left;
+  /* Closing is a quick fade; opening eases out from the anchor with a slightly longer scale. */
+  transition: opacity 120ms ease-in, transform 120ms ease-in;
+}
+
+.context-menu[data-state="open"] {
+  transition: opacity 140ms var(--ease), transform 200ms var(--ease);
 }
 
 .history-more {
@@ -3744,7 +3750,7 @@ p.key-status svg {
     background: var(--active);
   }
 
-  .history-row:active {
+  .history-row:active:not(:has(.history-more:active)) {
     --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
   }
 

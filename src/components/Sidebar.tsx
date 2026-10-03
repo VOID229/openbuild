@@ -271,8 +271,8 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
   const chat = useStore((s) => s.chats.find((c) => c.id === current?.chatId));
   const { updateChat, removeChat } = useStore.getState();
   const open = !!state;
-  const { mounted, visible } = usePresence(open, 140);
-  const [pos, setPos] = useState<{ left: number; top: number }>();
+  const { mounted, visible } = usePresence(open, 180);
+  const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
   const [confirm, setConfirm] = useState(false);
   useDismiss(open, onClose, [ref]);
 
@@ -283,8 +283,12 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 220;
     const x = state.end ? state.x - w : state.x;
-    setPos({ left: Math.max(8, Math.min(x, window.innerWidth - w - 8)), top: Math.max(8, Math.min(state.y, window.innerHeight - h - 8)) });
-    el?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+    const top = Math.max(8, Math.min(state.y, window.innerHeight - h - 8));
+    // Grow out of the point it was opened from: the ⋯ button's corner, or the cursor / finger.
+    const origin = `${top < state.y ? "bottom" : "top"} ${state.end ? "right" : "left"}`;
+    setPos({ left: Math.max(8, Math.min(x, window.innerWidth - w - 8)), top, origin });
+    // Touch screens skip this: iOS paints the focused item as highlighted, which reads as a flicker.
+    if (window.matchMedia("(pointer: fine)").matches) el?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
   }, [open, mounted, state]);
 
   useEffect(() => {
@@ -310,7 +314,7 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
       aria-label={`Actions for ${chat.title}`}
       className="popover menu context-menu"
       data-state={visible && pos ? "open" : "closed"}
-      style={{ position: "fixed", left: pos?.left ?? state?.x, top: pos?.top ?? state?.y }}
+      style={{ position: "fixed", left: pos?.left ?? state?.x, top: pos?.top ?? state?.y, transformOrigin: pos?.origin }}
       onKeyDown={(e) => arrowNav(e)}
       onContextMenu={(e) => e.preventDefault()}
     >
