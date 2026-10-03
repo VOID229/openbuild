@@ -609,7 +609,7 @@ svg {
 
 .wordmark {
   flex: 1;
-  margin-left: 4px;
+  text-align: center;
   font-size: 19px;
   font-weight: 650;
   letter-spacing: -0.02em;

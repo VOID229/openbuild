@@ -749,7 +749,7 @@ function SearchSection() {
 
 function AppearanceSection() {
   const theme = useStore((s) => s.settings.theme);
-  const font = useStore((s) => s.settings.font) ?? "normal";
+  const font = useStore((s) => s.settings.font) ?? "fun";
   const update = useStore((s) => s.updateSettings);
   return (
     <>

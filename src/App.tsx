@@ -32,7 +32,7 @@ function useTheme() {
 function useFont() {
   const font = useStore((s) => s.settings.font);
   useEffect(() => {
-    document.documentElement.dataset.font = font ?? "normal";
+    document.documentElement.dataset.font = font ?? "fun";
   }, [font]);
 }
 
