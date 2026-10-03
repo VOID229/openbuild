@@ -211,9 +211,52 @@ export const putDraft = mutation({
   },
 });
 
+/** Most drafts (texts and attachments) liveDrafts returns. */
+const LIVE_DRAFTS = 100;
+
 /**
- * Drafts other devices saved after `since` (a `changedAt`), oldest first, and the cursor to ask
- * from next. Fetched on demand, not subscribed to, so writing a draft doesn't wake any device.
+ * Other devices' drafts, for a live subscription: one document read per draft, and nothing else,
+ * so a draft write wakes each device once. Draft texts come with their (small) content;
+ * attachments as keys only, since they never change: fetch one with draftFile when it's missing.
+ * Includes expired drafts not yet deleted; devices ignore those.
+ */
+export const liveDrafts = query({
+  args: {},
+  handler: async (ctx) => {
+    const { userId: user, sessionId } = await requireSession(ctx);
+    const rows = await ctx.db
+      .query("drafts")
+      .withIndex("by_user_key", (q) => q.eq("userId", user))
+      .take(LIVE_DRAFTS);
+    return Promise.all(
+      rows
+        .filter((d) => d.session !== sessionId)
+        .map(async (d) =>
+          d.key.startsWith("draftfile:")
+            ? { key: d.key, at: d.at, deleted: d.deleted }
+            : { key: d.key, at: d.at, deleted: d.deleted, iv: d.iv, data: d.data, url: d.file ? await ctx.storage.getUrl(d.file) : null },
+        ),
+    );
+  },
+});
+
+/** One draft attachment's content (see liveDrafts). */
+export const draftFile = query({
+  args: { key: v.string() },
+  handler: async (ctx, { key }) => {
+    const { userId: user } = await requireSession(ctx);
+    const d = await ctx.db
+      .query("drafts")
+      .withIndex("by_user_key", (q) => q.eq("userId", user).eq("key", key))
+      .unique();
+    if (!d || d.deleted || !key.startsWith("draftfile:")) return null;
+    return { iv: d.iv, data: d.data, url: d.file ? await ctx.storage.getUrl(d.file) : null };
+  },
+});
+
+/**
+ * Used by app versions before liveDrafts: drafts other devices saved after `since` (a
+ * `changedAt`), oldest first, and the cursor to ask from next.
  */
 export const draftsSince = query({
   args: { since: v.number() },

@@ -306,20 +306,23 @@ describe("sync", () => {
     expect((await draftRow("draftfile:img1")).changedAt).toBe(fileWrite);
 
     // A device isn't handed back its own drafts.
-    expect((await alice.query(api.sync.draftsSince, { since: 0 })).drafts).toEqual([]);
+    expect(await alice.query(api.sync.liveDrafts, {})).toEqual([]);
   });
 
-  test("another device's drafts are fetched when the app comes back into view; the newer edit wins", async () => {
+  test("another device's drafts arrive live, pictures included; the newer edit wins", async () => {
     const phone = await otherDevice();
-    const pull = () => {
-      (engine as any).lastDraftPull = 0;
-      return (engine as any).pullDrafts();
+    /** The live subscription updates (the fake client re-runs it), then the engine applies it. */
+    const pull = async () => {
+      client.bump();
+      await sleep(50);
+      await (engine as any).draftChain;
     };
-    await phonePut(phone, "draft:a", { text: "from phone", fileIds: ["img1"], updatedAt: Date.now() + 1000 }, Date.now() + 1000);
-    expect(drafts.getDraft("a")?.text).toBe("half-written, now more"); // nothing arrives by itself
+    const photo = { id: "img3", name: "p.jpg", mime: "image/jpeg", size: 3, dataUrl: "data:image/jpeg;base64,CCC" } as any;
+    await phonePut(phone, "draftfile:img3", photo, Date.now());
+    await phonePut(phone, "draft:a", { text: "from phone", fileIds: ["img1", "img3"], updatedAt: Date.now() + 1000 }, Date.now() + 1000);
     await pull();
     expect(drafts.getDraft("a")?.text).toBe("from phone");
-    expect(drafts.getDraft("a")?.files.map((f) => f.id)).toEqual(["img1"]);
+    expect(drafts.getDraft("a")?.files).toEqual([expect.objectContaining({ id: "img1" }), photo]);
 
     // An older one doesn't replace it (the server keeps the newer one too).
     await phonePut(phone, "draft:a", { text: "stale", fileIds: [], updatedAt: 5 }, 5);

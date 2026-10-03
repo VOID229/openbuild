@@ -144,6 +144,13 @@ export function CloudSync() {
   const hasVault = !!account?.vault;
   const lastUsername = useRef<string>(undefined);
 
+  // Ask for other devices' drafts as soon as this device is signed in, alongside the account check,
+  // instead of after it: the sync engine's subscription to the same query then starts with the result.
+  useEffect(() => {
+    if (!isAuthenticated || !client) return;
+    return client.watchQuery(api.sync.liveDrafts, {}).onUpdate(() => {});
+  }, [isAuthenticated]);
+
   // Name this device in the account's device list. And if it was signed out from another device,
   // the session is gone (the account reads as null): finish signing out here, forgetting the key.
   const removed = isAuthenticated && account === null;
