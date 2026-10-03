@@ -17,10 +17,9 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
   inviteCheck: { kind: "token bucket", rate: 120, period: HOUR, capacity: 60 },
   signIn: { kind: "token bucket", rate: 600, period: HOUR, capacity: 300, shards: 2 },
   waitlist: { kind: "token bucket", rate: 60, period: HOUR, capacity: 60 },
-  // Per account: new sign-ins (each makes a device), and signing other devices out. Enough to set up
-  // three devices and fix a mistake or two, not enough to rotate an account between many devices.
+  // Per account: new sign-ins (each makes a device). Enough to set up three devices and fix a mistake
+  // or two, not enough to rotate an account between many devices. Signing devices out is free.
   newDevice: { kind: "token bucket", rate: 3, period: WEEK, capacity: 5 },
-  removeDevice: { kind: "token bucket", rate: 3, period: WEEK, capacity: 3 },
 });
 
 /** Count a sign-in attempt against the global limit (before the slow password check). */

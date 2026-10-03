@@ -257,7 +257,6 @@ const authError = (err: unknown) => {
   if (/InvalidInvite/.test(msg)) return "That invite code isn't valid.";
   if (/NewDeviceLimit/.test(msg)) return `This account has signed in on too many new devices this week. Try again ${waitText(data.retryAfter)}.`;
   if (/DeviceLimit/.test(msg)) return "This account is signed in on as many devices as it can be. Sign one out first.";
-  if (data.kind === "RateLimited" && data.name === "removeDevice") return `You've signed out as many devices as you can this week. Try again ${waitText(data.retryAfter)}.`;
   if (/InvalidEmail/.test(msg)) return "That address can't receive email. Check it for typos.";
   if (/DisposableEmail/.test(msg)) return "Use a permanent email address. Throwaway inboxes can't join the waitlist.";
   if (/InvalidCredentials|Wrong password/i.test(msg)) return "Wrong username or password.";
@@ -391,7 +390,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       <div className="account-form">
         <Note>
           {normalizeUsername(username)} is already signed in on {full.length} devices, the most an account can be on. Sign one of them out to use this
-          one instead. You can sign out up to 3 devices a week.
+          one instead.
         </Note>
         <DeviceRows devices={full} busy={typeof busy === "string" ? busy : busy ? "-" : undefined} action="Sign out" onAction={(id) => void run(id)} />
         {error && (
@@ -706,8 +705,8 @@ function DevicesSetting() {
           </span>
         </div>
         <p className="setting-desc">
-          An account can be signed in on up to {list.max} devices. To use a new one, sign one of these out (up to 3 a week). Devices that go unused for
-          a month are signed out on their own.
+          An account can be signed in on up to {list.max} devices. To use a new one, sign one of these out. Devices that go unused for a
+          month are signed out on their own.
         </p>
         <DeviceRows devices={list.devices} busy={busy} action="Sign out" onAction={(id) => void remove(id)} />
         {error && (

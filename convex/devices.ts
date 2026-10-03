@@ -1,7 +1,7 @@
 // Devices: each sign-in is a Convex Auth session, and an account can have MAX_DEVICES of them.
 // To sign in somewhere new at the limit, sign one out (from Settings → Account on another device,
-// or from the sign-in form after entering the password). Both are rate limited (limits.ts), so an
-// account can't be passed around between lots of devices.
+// or from the sign-in form after entering the password). Signing out is unlimited; new sign-ins are
+// rate limited (limits.ts), so an account can't be passed around between lots of devices.
 import { getAuthSessionId, getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -110,7 +110,7 @@ export const register = mutation({
   },
 });
 
-/** Sign another device out of the account. Rate limited; this device signs out with "Sign out". */
+/** Sign another device out of the account; this device signs out with "Sign out". */
 export const remove = mutation({
   args: { sessionId: v.id("authSessions") },
   handler: async (ctx, { sessionId }) => {
@@ -118,7 +118,6 @@ export const remove = mutation({
     if (sessionId === me.sessionId) throw new ConvexError("ThisDevice");
     const session = await ctx.db.get(sessionId);
     if (!session || session.userId !== me.userId) throw new ConvexError("NoSuchDevice");
-    await rateLimiter.limit(ctx, "removeDevice", { key: me.userId, throws: true });
     await deleteSession(ctx, sessionId);
     return null;
   },
@@ -139,7 +138,6 @@ export const admit = internalMutation({
     let others = (await liveSessions(ctx, userId)).filter((s) => s._id !== current);
     const target = replace && others.find((s) => s._id === replace);
     if (target) {
-      await rateLimiter.limit(ctx, "removeDevice", { key: userId, throws: true });
       await deleteSession(ctx, target._id);
       others = others.filter((s) => s !== target);
     }
