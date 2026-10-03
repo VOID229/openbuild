@@ -256,17 +256,18 @@ describe("devices", () => {
     expect(await failure(phone.query(api.sync.changes, { since: 0 }))).toBe("Not signed in");
   });
 
-  test("signing out other devices is rate limited, and can't target this device", async () => {
+  test("signing out other devices is unlimited, and can't target this device", async () => {
     const list = async () => (await t.run((ctx) => ctx.db.query("authSessions").collect())).map((s) => s._id);
     const [first] = await list();
     const me = t.withIdentity({ subject: `${(await t.run((ctx) => ctx.db.get(first!)))!.userId}|${first}` });
     expect(await failure(me.mutation(api.devices.remove, { sessionId: first! }))).toBe("ThisDevice");
 
-    // One removal was used replacing the phone above; two more are allowed this week.
+    // One removal was used replacing the phone above; more keep working (the old weekly limit was 3).
     for (const id of (await list()).filter((id) => id !== first)) await me.mutation(api.devices.remove, { sessionId: id });
     const third = await signIn("signIn", "dana");
     const thirdId = (await third.query(api.devices.list, {}))!.devices.find((d) => d.current)!.id;
-    expect(await failure(me.mutation(api.devices.remove, { sessionId: thirdId as never }))).toMatchObject({ kind: "RateLimited", name: "removeDevice" });
+    await me.mutation(api.devices.remove, { sessionId: thirdId as never });
+    expect(await list()).toEqual([first!]);
   });
 
   test("new devices are rate limited per week", async () => {

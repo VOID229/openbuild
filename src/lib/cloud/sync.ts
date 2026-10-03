@@ -10,10 +10,13 @@
 //     the write is refused, that version arrives through the subscription, the two are merged
 //     (chats: messages from both sides), and the merge is written.
 //
-// Records: "chat:<id>", "settings" (see syncedSettings), "profile" (name, bio, picture, ...),
-// composer drafts ("draft:<chat id>" and "draftfile:<attachment id>", see ../drafts; the server
-// deletes them once they expire) and, only when "Sync API keys" is on, "keys" (the secrets for
-// each plan and search provider).
+// Records: "chat:<id>", "settings" (see syncedSettings), "profile" (name, bio, picture, ...) and,
+// only when "Sync API keys" is on, "keys" (the secrets for each plan and search provider).
+//
+// Composer drafts ("draft:<chat id>", "draftfile:<attachment id>", see ../drafts) go their own way,
+// since they change as you type: the device writing one uploads it once typing pauses (or right
+// away when you leave the tab), and other devices fetch drafts only when the app opens or comes
+// back into view. Nothing is pushed to devices live, so writing a draft costs a single call.
 import type { ConvexReactClient } from "convex/react";
 import { createStore, del, get, set } from "../kv";
 import { create } from "zustand";
@@ -32,8 +35,11 @@ const INLINE_LIMIT = 700 * 1024;
 const PAGE = 25;
 const PUSH_DELAY = 150;
 const PARALLEL = 6;
-/** Draft text is written once typing pauses, not on every keystroke. */
-const DRAFT_PUSH_DELAY = 1500;
+/** Drafts are uploaded once typing pauses this long (or when you leave the tab). */
+const DRAFT_PUSH_DELAY = 4000;
+/** Coming back to the tab fetches other devices' drafts, at most this often. */
+const DRAFT_PULL_GAP = 5000;
+const DRAFT_RETRY = 10_000;
 
 export type CloudStatus = "off" | "locked" | "connecting" | "syncing" | "synced" | "offline" | "error";
 
@@ -58,7 +64,22 @@ interface SyncState {
    * turned on, or a new device) incoming keys are merged with this device's instead of replacing them.
    */
   keysJoined?: boolean;
+  /** Drafts fetched up to this point (the server's `changedAt`). */
+  draftsSince?: number;
 }
+
+interface RemoteDraft {
+  key: string;
+  at: number;
+  deleted: boolean;
+  iv?: ArrayBuffer;
+  data?: ArrayBuffer;
+  url: string | null;
+}
+
+const isDraftFile = (key: string) => key.startsWith("draftfile:");
+/** Attachments before drafts, so a draft's pictures are there when its text shows up. */
+const filesFirst = (a: string, b: string) => Number(isDraftFile(b)) - Number(isDraftFile(a));
 
 export const keyStorageId = (scope: string) => `${scope}|dataKey`;
 export const loadDataKey = (scope: string) => get<CryptoKey>(keyStorageId(scope), db).catch(() => undefined);
@@ -142,6 +163,11 @@ export class SyncEngine {
   private retryDelay = 1000;
   private cleanups: (() => void)[] = [];
   private caughtUp = false;
+  private draftQueue = new Set<string>();
+  private draftTimer?: ReturnType<typeof setTimeout>;
+  private draftPushing?: Promise<void>;
+  private draftPulling?: Promise<void>;
+  private lastDraftPull = 0;
 
   constructor(
     private client: ConvexReactClient,
@@ -152,7 +178,8 @@ export class SyncEngine {
   async start() {
     const saved = await get<SyncState>(`${this.scope}|state`, db).catch(() => undefined);
     this.state = saved ?? { cursor: 0, known: {}, dirty: [], initialized: false };
-    for (const k of this.state.dirty) this.dirty.add(k);
+    // Drafts queued by an older version, when they went through records, take the draft path now.
+    for (const k of this.state.dirty) (isDraftRecord(k) ? this.draftQueue : this.dirty).add(k);
     if (this.stopped) return;
 
     const s = useStore.getState();
@@ -167,9 +194,21 @@ export class SyncEngine {
     chatListeners.add(onChat);
     this.cleanups.push(() => chatListeners.delete(onChat));
 
-    const onDraft = (record: string) => this.markDirty(record, record.startsWith("draft:") ? DRAFT_PUSH_DELAY : PUSH_DELAY);
+    const onDraft = (record: string) => {
+      this.draftQueue.add(record);
+      this.scheduleDraftPush(DRAFT_PUSH_DELAY);
+    };
     draftListeners.add(onDraft);
     this.cleanups.push(() => draftListeners.delete(onDraft));
+    // Leaving the tab (likely for another device) sends a pending draft now; coming back fetches theirs.
+    const onVisibility = () => void (document.visibilityState === "hidden" ? this.pushDrafts() : this.pullDrafts());
+    const onFocus = () => void this.pullDrafts();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+    this.cleanups.push(() => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+    });
 
     const onKeys = () => !this.importingKeys && useStore.getState().settings.syncApiKeys && this.markDirty("keys");
     keyListeners.add(onKeys);
@@ -200,10 +239,12 @@ export class SyncEngine {
 
     useCloud.setState({ status: "syncing", error: undefined });
     this.watch();
+    void this.pullDrafts();
   }
 
   stop() {
     this.stopped = true;
+    clearTimeout(this.draftTimer);
     this.unwatch?.();
     clearTimeout(this.pushTimer);
     this.cleanups.forEach((fn) => fn());
@@ -337,11 +378,102 @@ export class SyncEngine {
     }
   }
 
-  /** A draft from another device: the newer edit wins; one written here and not yet sent stays. */
+  /** A draft written to records by an older version on another device: the newer edit wins. */
   private async applyDraft(key: string, value: StoredDraft | undefined) {
-    if (this.dirty.has(key) && !value) return;
-    if (await applyDraftRecord(key, value)) this.dirty.delete(key);
-    this.persist();
+    if (value || !this.draftQueue.has(key)) await applyDraftRecord(key, value);
+  }
+
+  // ---------------------------------------------------------------- drafts
+
+  private scheduleDraftPush(delay: number) {
+    clearTimeout(this.draftTimer);
+    this.draftTimer = setTimeout(() => void this.pushDrafts(), delay);
+  }
+
+  /** Upload the drafts changed here. */
+  private pushDrafts(): Promise<void> {
+    clearTimeout(this.draftTimer);
+    if (this.stopped || !this.state?.initialized || !this.draftQueue.size) return Promise.resolve();
+    if (this.draftPushing) return this.draftPushing.then(() => this.pushDrafts());
+    const batch = [...this.draftQueue].sort(filesFirst);
+    this.draftQueue.clear();
+    this.draftPushing = (async () => {
+      try {
+        while (batch.length) {
+          await this.pushDraft(batch[0]!);
+          batch.shift();
+        }
+      } catch (err) {
+        console.warn("[sync] couldn't save a draft; retrying", err);
+        for (const key of batch) this.draftQueue.add(key);
+        this.scheduleDraftPush(DRAFT_RETRY);
+      } finally {
+        this.draftPushing = undefined;
+      }
+    })();
+    return this.draftPushing;
+  }
+
+  private async pushDraft(key: string) {
+    const value = draftRecord(key);
+    if (!value) {
+      // A removed attachment just expires; a cleared draft is cleared on the other devices too.
+      if (!isDraftFile(key)) await this.client.mutation(api.sync.putDraft, { key, at: Date.now(), deleted: true });
+      return;
+    }
+    const draft = isDraftFile(key) ? undefined : (value as StoredDraft);
+    const at = draft?.updatedAt ?? Date.now();
+    // Writing a draft keeps its attachments from expiring on the server while it's still being edited.
+    const touch = draft?.fileIds.map((id) => `draftfile:${id}`);
+    const { iv, data } = await seal(this.key, key, value);
+    if (data.byteLength > INLINE_LIMIT) {
+      const url = await this.client.mutation(api.sync.uploadUrl, {});
+      const res = await fetch(url, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: data });
+      if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`);
+      const { storageId } = (await res.json()) as { storageId: string };
+      await this.client.mutation(api.sync.putDraft, { key, at, deleted: false, iv, file: storageId as never, touch });
+    } else {
+      await this.client.mutation(api.sync.putDraft, { key, at, deleted: false, iv, data, touch });
+    }
+  }
+
+  /** Fetch the drafts other devices saved since the last fetch. */
+  private pullDrafts(): Promise<void> {
+    if (this.stopped || !this.state) return Promise.resolve();
+    if (this.draftPulling) return this.draftPulling;
+    if (Date.now() - this.lastDraftPull < DRAFT_PULL_GAP) return Promise.resolve();
+    this.lastDraftPull = Date.now();
+    this.draftPulling = (async () => {
+      try {
+        for (let more = true; more && !this.stopped; ) {
+          const page = await this.client.query(api.sync.draftsSince, { since: this.state.draftsSince ?? 0 });
+          for (const d of [...page.drafts].sort((a, b) => filesFirst(a.key, b.key))) await this.applyFetchedDraft(d);
+          this.state.draftsSince = page.cursor;
+          this.persist();
+          more = page.more;
+        }
+      } catch (err) {
+        console.warn("[sync] couldn't fetch drafts", err);
+      } finally {
+        this.draftPulling = undefined;
+      }
+    })();
+    return this.draftPulling;
+  }
+
+  private async applyFetchedDraft(d: RemoteDraft) {
+    if (d.deleted) return void (await applyDraftRecord(d.key, undefined, d.at));
+    // Skip downloading what this device already has: an attachment, or a draft edited here since.
+    const local = draftRecord(d.key);
+    if (local && (isDraftFile(d.key) || (local as StoredDraft).updatedAt >= d.at)) return;
+    let data = d.data;
+    if (d.url) {
+      const res = await fetch(d.url);
+      if (!res.ok) throw new Error(`Couldn't download a draft (HTTP ${res.status})`);
+      data = await res.arrayBuffer();
+    }
+    if (!d.iv || !data) return;
+    await applyDraftRecord(d.key, await open<StoredDraft>(this.key, d.key, d.iv, data));
   }
 
   /**
@@ -427,7 +559,6 @@ export class SyncEngine {
     if (id) return s.chats.find((c) => c.id === id);
     if (key === "settings") return syncedSettings(s.settings);
     if (key === "profile") return s.settings.profile;
-    if (isDraftRecord(key)) return draftRecord(key);
     return undefined;
   }
 
@@ -437,12 +568,9 @@ export class SyncEngine {
     const base = this.state.known[key] ?? 0;
     const json = value === undefined ? undefined : JSON.stringify(value);
 
-    // Writing a draft keeps its attachments from expiring on the server while it's still being edited.
-    const touch = key.startsWith("draft:") && value ? (value as StoredDraft).fileIds.map((id) => `draftfile:${id}`) : undefined;
     let result: { seq: number; conflict?: true; deleted?: true };
     if (value === undefined) {
-      // Never synced: nothing to delete. Unused draft attachments just expire.
-      if (!base || key.startsWith("draftfile:")) result = { seq: 0 };
+      if (!base) result = { seq: 0 }; // Never synced: nothing to delete.
       else result = await this.client.mutation(api.sync.put, { key, base, deleted: true });
     } else {
       const { iv, data } = await seal(this.key, key, value);
@@ -451,9 +579,9 @@ export class SyncEngine {
         const res = await fetch(url, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: data });
         if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`);
         const { storageId } = (await res.json()) as { storageId: string };
-        result = await this.client.mutation(api.sync.put, { key, base, deleted: false, iv, file: storageId as never, touch });
+        result = await this.client.mutation(api.sync.put, { key, base, deleted: false, iv, file: storageId as never });
       } else {
-        result = await this.client.mutation(api.sync.put, { key, base, deleted: false, iv, data, touch });
+        result = await this.client.mutation(api.sync.put, { key, base, deleted: false, iv, data });
       }
     }
 

@@ -14,6 +14,9 @@ import { IconButton } from "./primitives";
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const isIOS = typeof navigator !== "undefined" && (/iPhone|iPad/.test(navigator.platform) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 
+/** A draft from another device doesn't replace the text while you've typed within this long. */
+const TYPING_PAUSE = 3000;
+
 interface Props {
   /** Home: dropdowns open below. Docked at the bottom of a chat: they open upward. */
   variant: "home" | "dock";
@@ -23,6 +26,7 @@ interface Props {
 
 export function Composer({ variant, chatId, streaming }: Props) {
   const draftKey = chatId ?? NEW_CHAT;
+  const lastTyped = useRef(0);
   const [text, setText] = useState(() => getDraft(draftKey)?.text ?? "");
   const [files, setFiles] = useState<Attachment[]>(() => getDraft(draftKey)?.files ?? []);
   const [notice, setNotice] = useState<string>();
@@ -73,7 +77,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     });
     // An edit from another device shows up here, unless you're typing in this box right now.
     const off = onRemoteDraft((key) => {
-      if (key !== draftKey || (document.hasFocus() && document.activeElement === textarea.current)) return;
+      if (key !== draftKey || Date.now() - lastTyped.current < TYPING_PAUSE) return;
       const d = getDraft(key);
       setText(d?.text ?? "");
       setFiles(d?.files ?? []);
@@ -203,7 +207,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
           rows={variant === "home" ? 2 : 1}
           placeholder="Ask anything"
           aria-label="Message"
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            lastTyped.current = Date.now();
+            setText(e.target.value);
+          }}
           onKeyDown={onKeyDown}
           onPaste={onPaste}
         />

@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 const g = globalThis as any;
 g.window ??= globalThis;
 g.innerWidth = 1280;
-g.document ??= { addEventListener() {}, visibilityState: "visible" };
+g.document ??= { addEventListener() {}, removeEventListener() {}, visibilityState: "visible" };
 const ls = new Map<string, string>();
 g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v), removeItem: (k: string) => void ls.delete(k) };
 const realFetch = fetch;
@@ -52,6 +52,9 @@ class FakeClient {
     const result = await this.t.mutation(ref, args);
     this.bump();
     return result;
+  }
+  query(ref: any, args: any) {
+    return this.t.query(ref, args);
   }
   watchQuery(ref: any, args: any) {
     let result: unknown;
@@ -113,6 +116,21 @@ async function remotePut(key: string, value: unknown, base?: number) {
   const res = await alice.mutation(api.sync.put, { key, base: base ?? (await recordOf(key))?.seq ?? 0, deleted: false, ...sealed });
   client.bump();
   return res;
+}
+
+const draftRow = (key: string) => t.run(async (ctx: any) => (await ctx.db.query("drafts").collect()).find((d: any) => d.key === key) ?? null);
+const draftOf = async (key: string) => {
+  const d = await draftRow(key);
+  return crypto_.open<any>(dataKey, key, d.iv, d.data);
+};
+/** Alice signed in on a second device (another session of the same account). */
+async function otherDevice() {
+  const userId = (await t.run(async (ctx: any) => ctx.db.query("vaults").first())).userId;
+  const sessionId = await t.run(async (ctx: any) => ctx.db.insert("authSessions", { userId, expirationTime: Date.now() + 86_400_000 }));
+  return t.withIdentity({ subject: `${userId}|${sessionId}` });
+}
+async function phonePut(phone: any, key: string, value: unknown, at: number) {
+  await phone.mutation(api.sync.putDraft, { key, at, deleted: false, ...(await crypto_.seal(dataKey, key, value)) });
 }
 
 /** A user with a session, as Convex Auth would leave them after signing in. */
@@ -270,68 +288,77 @@ describe("sync", () => {
     expect(await decrypt<Record<string, string[]>>("keys")).toEqual({ brave: ["brave-local"], go: ["sk-tablet", "sk-phone", "sk-laptop-2"] });
   });
 
-  test("drafts sync, images apart from the text", async () => {
+  test("a draft is saved with one call, kept out of the live feed every device watches", async () => {
     const image = { id: "img1", name: "a.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" } as any;
+    const lastSeq = Math.max(...(await records()).map((r) => r.seq));
     drafts.saveDraft("a", "half-written", [image]);
-    await settled();
-    expect(await decrypt<any>("draft:a")).toMatchObject({ text: "half-written", fileIds: ["img1"] });
-    expect(await decrypt<any>("draftfile:img1")).toEqual(image);
+    await (engine as any).pushDrafts();
+    expect(await draftOf("draft:a")).toMatchObject({ text: "half-written", fileIds: ["img1"] });
+    expect(await draftOf("draftfile:img1")).toEqual(image);
+    expect(Math.max(...(await records()).map((r) => r.seq))).toBe(lastSeq);
+    expect((await records()).some((r) => r.key.startsWith("draft"))).toBe(false);
 
     // Editing the text writes the draft only, not the image again.
-    const fileSeq = (await recordOf("draftfile:img1"))!.seq;
+    const fileWrite = (await draftRow("draftfile:img1")).changedAt;
     drafts.saveDraft("a", "half-written, now more", [image]);
-    await settled();
-    expect((await decrypt<any>("draft:a")).text).toBe("half-written, now more");
-    expect((await recordOf("draftfile:img1"))!.seq).toBe(fileSeq);
+    await (engine as any).pushDrafts();
+    expect((await draftOf("draft:a")).text).toBe("half-written, now more");
+    expect((await draftRow("draftfile:img1")).changedAt).toBe(fileWrite);
+
+    // A device isn't handed back its own drafts.
+    expect((await alice.query(api.sync.draftsSince, { since: 0 })).drafts).toEqual([]);
   });
 
-  test("another device's newer draft arrives; sending there clears it here", async () => {
-    await remotePut("draft:a", { text: "from phone", fileIds: ["img1"], updatedAt: Date.now() + 1000 });
-    await settled();
+  test("another device's drafts are fetched when the app comes back into view; the newer edit wins", async () => {
+    const phone = await otherDevice();
+    const pull = () => {
+      (engine as any).lastDraftPull = 0;
+      return (engine as any).pullDrafts();
+    };
+    await phonePut(phone, "draft:a", { text: "from phone", fileIds: ["img1"], updatedAt: Date.now() + 1000 }, Date.now() + 1000);
+    expect(drafts.getDraft("a")?.text).toBe("half-written, now more"); // nothing arrives by itself
+    await pull();
     expect(drafts.getDraft("a")?.text).toBe("from phone");
     expect(drafts.getDraft("a")?.files.map((f) => f.id)).toEqual(["img1"]);
 
-    // An older one doesn't replace it.
-    await remotePut("draft:a", { text: "stale", fileIds: [], updatedAt: 5 });
-    await settled();
+    // An older one doesn't replace it (the server keeps the newer one too).
+    await phonePut(phone, "draft:a", { text: "stale", fileIds: [], updatedAt: 5 }, 5);
+    await pull();
     expect(drafts.getDraft("a")?.text).toBe("from phone");
+    expect((await draftOf("draft:a")).text).toBe("from phone");
 
-    await alice.mutation(api.sync.put, { key: "draft:a", base: (await recordOf("draft:a"))!.seq, deleted: true });
-    client.bump();
-    await settled();
+    // Sent on the phone: cleared here on the next fetch.
+    await phone.mutation(api.sync.putDraft, { key: "draft:a", at: Date.now() + 1500, deleted: true });
+    await pull();
     expect(drafts.getDraft("a")).toBeUndefined();
 
-    // Unlike chats, a cleared draft can be written again.
+    // A cleared draft can be written again.
+    await sleep(1600);
     drafts.saveDraft("a", "a new draft", []);
-    await settled();
-    expect((await recordOf("draft:a"))!.deleted).toBe(false);
-    expect((await decrypt<any>("draft:a")).text).toBe("a new draft");
+    await (engine as any).pushDrafts();
+    expect((await draftOf("draft:a")).text).toBe("a new draft");
   });
 
   test("the server deletes expired drafts; writing a draft keeps its images alive", async () => {
     const image = { id: "img2", name: "b.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,BBB" } as any;
     drafts.saveDraft("b", "with picture", [image]);
-    await settled();
-    const expiry = (key: string) => t.run(async (ctx: any) => (await ctx.db.query("records").collect()).find((r: any) => r.key === key)?.expiresAt);
-    const setExpiry = (key: string, at: number) =>
-      t.run(async (ctx: any) => {
-        const r = (await ctx.db.query("records").collect()).find((r: any) => r.key === key);
-        await ctx.db.patch(r._id, { expiresAt: at });
-      });
-    expect(await expiry("chat:a")).toBeNull();
+    await (engine as any).pushDrafts();
+    const setExpiry = async (key: string, at: number) => {
+      const { _id } = await draftRow(key);
+      await t.run((ctx: any) => ctx.db.patch(_id, { expiresAt: at }));
+    };
     await setExpiry("draftfile:img2", Date.now() + 1000);
     drafts.saveDraft("b", "with picture, edited", [image]);
-    await settled();
-    expect(await expiry("draftfile:img2")).toBeGreaterThan(Date.now() + 60_000);
+    await (engine as any).pushDrafts();
+    expect((await draftRow("draftfile:img2")).expiresAt).toBeGreaterThan(Date.now() + 60_000);
 
     await setExpiry("draft:b", 1);
     await setExpiry("draftfile:img2", 1);
     await t.mutation(internal.sync.expireDrafts, {});
-    const keys = (await records()).map((r) => r.key);
-    expect(keys).not.toContain("draft:b");
-    expect(keys).not.toContain("draftfile:img2");
-    expect(keys).toContain("draft:a");
-    expect(keys).toContain("chat:a");
+    expect(await draftRow("draft:b")).toBeNull();
+    expect(await draftRow("draftfile:img2")).toBeNull();
+    expect(await draftRow("draft:a")).not.toBeNull();
+    expect((await records()).map((r) => r.key)).toContain("chat:a");
   });
 
   test("writes don't touch the vault every device watches, and carry on an existing account's count", async () => {
@@ -365,8 +392,9 @@ describe("sync", () => {
       records: (await ctx.db.query("records").collect()).length,
       vaults: (await ctx.db.query("vaults").collect()).length,
       seqs: (await ctx.db.query("seqs").collect()).length,
+      drafts: (await ctx.db.query("drafts").collect()).length,
       alice: (await ctx.db.query("users").collect()).filter((u: any) => u.email === "alice").length,
     }));
-    expect(left).toEqual({ records: 0, vaults: 0, seqs: 0, alice: 0 });
+    expect(left).toEqual({ records: 0, vaults: 0, seqs: 0, drafts: 0, alice: 0 });
   });
 });

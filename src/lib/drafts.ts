@@ -1,7 +1,8 @@
 // Unsent composer text and attachments, one per chat (NEW_CHAT for the new-chat screen). Saved in
 // this browser's IndexedDB as you type, so they survive switching chats, reloads and quitting, and
-// (when signed in) synced to your other devices. Drafts last edited more than DRAFT_TTL ago are
-// dropped on load; the sync server deletes its copies on the same schedule.
+// (when signed in) synced to your other devices: uploaded once typing pauses, fetched by the others
+// when the app opens or comes back into view (cloud/sync.ts). Drafts last edited more than
+// DRAFT_TTL ago are dropped on load; the sync server deletes its copies on the same schedule.
 //
 // Attachments are stored apart from the draft ("draftfile:<id>"), so editing the text never
 // writes or uploads an image again.
@@ -116,10 +117,10 @@ export function draftRecord(record: string): StoredDraft | Attachment | undefine
 }
 
 /**
- * Apply a draft record from another device (undefined: it was sent or cleared there). A draft
- * replaces this device's only if it's newer. Returns whether anything changed.
+ * Apply a draft record from another device (undefined: it was sent or cleared there, at `clearedAt`).
+ * Either replaces this device's draft only if it's newer. Returns whether anything changed.
  */
-export async function applyDraftRecord(record: string, value: StoredDraft | Attachment | undefined): Promise<boolean> {
+export async function applyDraftRecord(record: string, value: StoredDraft | Attachment | undefined, clearedAt = Infinity): Promise<boolean> {
   await draftsReady;
   if (record.startsWith("draftfile:")) {
     if (!value) return false;
@@ -137,7 +138,7 @@ export async function applyDraftRecord(record: string, value: StoredDraft | Atta
     if (!fresh(remote) || (local && local.updatedAt >= remote.updatedAt)) return false;
     drafts.set(key, remote);
   } else {
-    if (!local) return false;
+    if (!local || local.updatedAt > clearedAt) return false;
     drafts.delete(key);
   }
   persist(record);

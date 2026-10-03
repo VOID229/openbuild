@@ -17,6 +17,8 @@ const DELETE_BATCH = 200;
 const DRAFT_KEEP = DRAFT_TTL + 60_000;
 /** Most draft attachments a draft write can keep alive. */
 const MAX_TOUCH = 50;
+/** Drafts returned per draftsSince page. */
+const DRAFT_PAGE = 20;
 
 async function userId(ctx: QueryCtx): Promise<Id<"users">> {
   return (await requireSession(ctx)).userId;
@@ -158,11 +160,97 @@ export const put = mutation({
   },
 });
 
+/**
+ * Save a draft (or, with `deleted`, clear it). A draft already there that was edited later (`at`)
+ * on another device is kept. `touch` lists attachments whose expiry this pushes back, so a
+ * picture stays as long as the draft it's in is still being edited.
+ */
+export const putDraft = mutation({
+  args: {
+    key: v.string(),
+    at: v.number(),
+    deleted: v.boolean(),
+    iv: v.optional(v.bytes()),
+    data: v.optional(v.bytes()),
+    file: v.optional(v.id("_storage")),
+    touch: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    const { userId: user, sessionId } = await requireSession(ctx);
+    if (!(await vaultOf(ctx, user))) throw new ConvexError("Account is not set up");
+    if (!isDraftRecord(args.key) || args.key.length > 200) throw new ConvexError("Not a draft");
+    if (args.data && args.data.byteLength > MAX_INLINE) throw new ConvexError("Too large; upload it as a file");
+    if (!args.deleted && !args.iv) throw new ConvexError("Missing content");
+    if (args.touch && args.touch.length > MAX_TOUCH) throw new ConvexError("Too many attachments");
+
+    const draftOf = (key: string) =>
+      ctx.db
+        .query("drafts")
+        .withIndex("by_user_key", (q) => q.eq("userId", user).eq("key", key))
+        .unique();
+    const current = await draftOf(args.key);
+    if (current && current.at > args.at) {
+      if (args.file) await ctx.storage.delete(args.file);
+      return;
+    }
+    const now = Date.now();
+    const expiresAt = now + DRAFT_KEEP;
+    const content = args.deleted ? {} : { iv: args.iv, data: args.file ? undefined : args.data, file: args.file };
+    const doc = { userId: user, key: args.key, session: sessionId, at: args.at, changedAt: now, deleted: args.deleted, expiresAt, ...content };
+    if (current) {
+      if (current.file && current.file !== args.file) await ctx.storage.delete(current.file);
+      await ctx.db.replace(current._id, doc);
+    } else {
+      await ctx.db.insert("drafts", doc);
+    }
+    for (const key of args.touch ?? []) {
+      if (!key.startsWith("draftfile:")) continue;
+      const file = await draftOf(key);
+      if (file) await ctx.db.patch(file._id, { expiresAt });
+    }
+  },
+});
+
+/**
+ * Drafts other devices saved after `since` (a `changedAt`), oldest first, and the cursor to ask
+ * from next. Fetched on demand, not subscribed to, so writing a draft doesn't wake any device.
+ */
+export const draftsSince = query({
+  args: { since: v.number() },
+  handler: async (ctx, { since }) => {
+    const { userId: user, sessionId } = await requireSession(ctx);
+    const page = await ctx.db
+      .query("drafts")
+      .withIndex("by_user_changedAt", (q) => q.eq("userId", user).gt("changedAt", since))
+      .take(DRAFT_PAGE);
+    const theirs = page.filter((d) => d.session !== sessionId);
+    return {
+      drafts: await Promise.all(
+        theirs.map(async (d) => ({
+          key: d.key,
+          at: d.at,
+          deleted: d.deleted,
+          iv: d.iv,
+          data: d.data,
+          url: d.file ? await ctx.storage.getUrl(d.file) : null,
+        })),
+      ),
+      cursor: page[page.length - 1]?.changedAt ?? since,
+      more: page.length === DRAFT_PAGE,
+    };
+  },
+});
+
 async function deleteRecords(ctx: MutationCtx, user: Id<"users">) {
-  const batch = await ctx.db
+  const records = await ctx.db
     .query("records")
     .withIndex("by_user_key", (q) => q.eq("userId", user))
     .take(DELETE_BATCH);
+  const drafts = await ctx.db
+    .query("drafts")
+    .withIndex("by_user_key", (q) => q.eq("userId", user))
+    .take(DELETE_BATCH - records.length);
+  const batch = [...records, ...drafts];
   for (const r of batch) {
     if (r.file) await ctx.storage.delete(r.file);
     await ctx.db.delete(r._id);
@@ -215,10 +303,14 @@ export const expireDrafts = internalMutation({
       .query("records")
       .withIndex("by_expiresAt", (q) => q.gt("expiresAt", 0).lt("expiresAt", Date.now()))
       .take(DELETE_BATCH);
-    for (const r of expired) {
+    const expiredDrafts = await ctx.db
+      .query("drafts")
+      .withIndex("by_expiresAt", (q) => q.lt("expiresAt", Date.now()))
+      .take(DELETE_BATCH);
+    for (const r of [...expired, ...expiredDrafts]) {
       if (r.file) await ctx.storage.delete(r.file);
       await ctx.db.delete(r._id);
     }
-    if (expired.length === DELETE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.expireDrafts, {});
+    if (expired.length === DELETE_BATCH || expiredDrafts.length === DELETE_BATCH) await ctx.scheduler.runAfter(0, internal.sync.expireDrafts, {});
   },
 });

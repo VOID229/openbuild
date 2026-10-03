@@ -25,7 +25,8 @@ export default defineSchema({
 
   // A synced item: "chat:<id>", "settings" or "profile". Deleting keeps a tombstone (no content)
   // so other devices learn about it. Large items are kept in file storage instead of `data`.
-  // Drafts ("draft:…", "draftfile:…") have `expiresAt` and are deleted after it (crons.ts).
+  // Drafts written here by older app versions ("draft:…", "draftfile:…") have `expiresAt` and are
+  // deleted after it (crons.ts); drafts now live in `drafts`.
   records: defineTable({
     userId: v.id("users"),
     key: v.string(),
@@ -38,6 +39,27 @@ export default defineSchema({
   })
     .index("by_user_key", ["userId", "key"])
     .index("by_user_seq", ["userId", "seq"])
+    .index("by_expiresAt", ["expiresAt"]),
+
+  // Unsent composer drafts ("draft:<chat id>") and their attachments ("draftfile:<id>"), encrypted
+  // like records. Kept out of `records` so writing one doesn't wake every device's live "changes"
+  // feed: devices fetch drafts when the app opens or comes back into view (sync.draftsSince).
+  // `at` is when the draft was edited or cleared on its device (the newer one wins); `changedAt`
+  // is when it reached the server; `session` is the device that wrote it. Deleted after `expiresAt`.
+  drafts: defineTable({
+    userId: v.id("users"),
+    key: v.string(),
+    session: v.id("authSessions"),
+    at: v.number(),
+    changedAt: v.number(),
+    deleted: v.boolean(),
+    iv: v.optional(v.bytes()),
+    data: v.optional(v.bytes()),
+    file: v.optional(v.id("_storage")),
+    expiresAt: v.number(),
+  })
+    .index("by_user_key", ["userId", "key"])
+    .index("by_user_changedAt", ["userId", "changedAt"])
     .index("by_expiresAt", ["expiresAt"]),
 
   // Invite codes for sign-up (convex/invites.ts). `uses` counts accounts created with it; a code
