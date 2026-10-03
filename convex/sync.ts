@@ -1,9 +1,9 @@
 // Sync API. Every function acts only on the signed-in user's own data. Content arrives encrypted
 // and is stored as-is; nothing here logs, inspects or keeps anything else.
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
+import { currentSession, deleteSession, requireSession } from "./devices";
 
 /** Encrypted content stored inline; bigger items go to file storage. Convex documents max out at 1 MiB. */
 const MAX_INLINE = 800 * 1024;
@@ -13,9 +13,7 @@ const PAGE = 25;
 const DELETE_BATCH = 200;
 
 async function userId(ctx: QueryCtx): Promise<Id<"users">> {
-  const id = await getAuthUserId(ctx);
-  if (!id) throw new ConvexError("Not signed in");
-  return id;
+  return (await requireSession(ctx)).userId;
 }
 
 const vaultOf = (ctx: QueryCtx, user: Id<"users">) =>
@@ -28,7 +26,8 @@ const vaultOf = (ctx: QueryCtx, user: Id<"users">) =>
 export const me = query({
   args: {},
   handler: async (ctx) => {
-    const id = await getAuthUserId(ctx);
+    // Null too when this device was signed out from another one: the app then signs out here.
+    const id = (await currentSession(ctx))?.userId;
     if (!id) return null;
     const user = await ctx.db.get(id);
     const vault = await vaultOf(ctx, id);
@@ -171,13 +170,7 @@ export const deleteAccount = mutation({
       .query("authSessions")
       .withIndex("userId", (q) => q.eq("userId", user))
       .collect()) {
-      for (const token of await ctx.db
-        .query("authRefreshTokens")
-        .withIndex("sessionId", (q) => q.eq("sessionId", session._id))
-        .collect()) {
-        await ctx.db.delete(token._id);
-      }
-      await ctx.db.delete(session._id);
+      await deleteSession(ctx, session._id);
     }
     await ctx.db.delete(user);
     return { done: true };

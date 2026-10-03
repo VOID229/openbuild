@@ -32,21 +32,11 @@ g.fetch = async (input: any, init?: any) => {
   return realFetch(input, init);
 };
 
-const { convexTest } = await import("convex-test");
-const schema = (await import("../convex/schema")).default;
+const { appTest } = await import("./convex");
 const { api } = await import("../convex/_generated/api");
 const { useStore } = await import("../src/lib/store");
 const { SyncEngine, useCloud } = await import("../src/lib/cloud/sync");
 const crypto_ = await import("../src/lib/cloud/crypto");
-
-const modules = {
-  "../convex/_generated/api.js": () => import("../convex/_generated/api.js"),
-  "../convex/_generated/server.js": () => import("../convex/_generated/server.js"),
-  "../convex/schema.ts": () => import("../convex/schema"),
-  "../convex/sync.ts": () => import("../convex/sync"),
-  "../convex/auth.ts": () => import("../convex/auth"),
-  "../convex/http.ts": () => import("../convex/http"),
-};
 
 type Chat = import("../src/lib/types").Chat;
 const msg = (id: string, content: string, createdAt: number) => ({ id, role: "user" as const, content, createdAt, status: "done" as const });
@@ -124,10 +114,18 @@ async function remotePut(key: string, value: unknown, base?: number) {
   return res;
 }
 
+/** A user with a session, as Convex Auth would leave them after signing in. */
+async function signedIn(username: string) {
+  const { userId, sessionId } = await t.run(async (ctx: any) => {
+    const userId = await ctx.db.insert("users", { email: username });
+    return { userId, sessionId: await ctx.db.insert("authSessions", { userId, expirationTime: Date.now() + 86_400_000 }) };
+  });
+  return t.withIdentity({ subject: `${userId}|${sessionId}` });
+}
+
 beforeAll(async () => {
-  t = convexTest(schema, modules);
-  const userId = await t.run((ctx: any) => ctx.db.insert("users", { email: "alice" }));
-  alice = t.withIdentity({ subject: `${userId}|session1` });
+  t = await appTest();
+  alice = await signedIn("alice");
   client = new FakeClient(alice);
   await useStore.persist.rehydrate();
 });
@@ -272,8 +270,7 @@ describe("sync", () => {
   });
 
   test("users can't see each other's data", async () => {
-    const bobId = await t.run((ctx: any) => ctx.db.insert("users", { email: "bob" }));
-    const bob = t.withIdentity({ subject: `${bobId}|s` });
+    const bob = await signedIn("bob");
     expect(await bob.query(api.sync.changes, { since: 0 })).toEqual([]);
     await expect(bob.mutation(api.sync.put, { key: "chat:x", base: 0, deleted: true })).rejects.toThrow(/not set up/);
     await expect(t.query(api.sync.changes, { since: 0 })).rejects.toThrow(/Not signed in/);

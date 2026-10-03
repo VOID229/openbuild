@@ -48,6 +48,8 @@ Sign in under **Settings → Account** to sync chats, settings and your profile 
 - **API keys sync only if you turn it on** (Settings → Account → Sync API keys). Then they're encrypted on the device like everything else, so you enter a key once and every device has it. Off (the default), they stay on each device: in the OS keychain for the local app, in the browser on the website. Turning it off removes them from the account; devices keep their copies. Turning it on merges every device's keys, so none are lost; after that, adding or removing a key on one device does the same everywhere.
 - **Delete account** removes the account and everything synced to it from the deployment.
 
+**Invites and limits.** The sync service runs on Convex's free plan, so new accounts need an invite code. No code yet? Join the waitlist under Settings → Account with an email address, and a one-time code is emailed to you when there's room. The address is used only for that: it isn't linked to your account, and it's deleted once the code is used. An account can be signed in on up to 3 devices at once. **Settings → Account → Devices** lists them; sign one out there to make room (or from the sign-in form on the new device, after entering your password). You can sign out up to 3 devices and add about 3 new ones a week, and devices that go unused for a month are signed out on their own. Sign-ups, sign-ins and waitlist joins are rate limited to keep bots from using up the free plan.
+
 **Speed.** Each device holds a live subscription to "what changed since I last looked", so changes made elsewhere show up within moments, and only changed items travel (gzipped, then encrypted). Local changes go out about 150 ms after you make them. Your local copy stays the primary one: offline edits are queued and sent when you reconnect. If two devices edit the same chat at once, both sets of messages are kept.
 
 **Setup** (once, by whoever hosts the sync service; users never do this):
@@ -57,6 +59,17 @@ bun run setup:cloud   # log in to Convex (free), deploy convex/, create the sign
 ```
 
 It writes the deployment's address to `shared/cloud.ts`. Commit that, and every copy of OpenChat built from the repo shows sign-up and sign-in under Settings → Account, with nothing else to configure. Run it again after changing anything in `convex/` to deploy the change (existing sign-in keys are kept). To point one server at a different deployment (say, a dev one from `bunx convex dev`), set `OPENCHAT_CLOUD_URL`.
+
+Invites are managed from the repo (see `convex/invites.ts`):
+
+```sh
+bunx convex run --prod invites:createCode '{"maxUses": 50, "note": "forum post"}'   # a code to hand out (default: 1 use)
+bunx convex run --prod invites:revokeCode '{"code": "ABCD-EFGH-JKMN"}'             # kill switch for a leaked code
+bunx convex run --prod invites:waitlistSize
+bunx convex run --prod invites:inviteWaitlist '{"count": 10}'                      # invite the next 10 on the waitlist
+```
+
+`inviteWaitlist` emails the codes through [Resend](https://resend.com) when `RESEND_API_KEY` and `INVITE_EMAIL_FROM` (e.g. `OpenChat <invites@your-domain>`, on a domain verified in Resend) are set on the deployment with `bunx convex env set --prod`. Without them, it prints the codes for you to send.
 
 ## Hosted website
 

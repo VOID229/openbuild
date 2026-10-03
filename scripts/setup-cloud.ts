@@ -65,5 +65,7 @@ if (existing.code === 0 && existing.out.startsWith("{")) {
 
 const url = (await Bun.file(CLOUD_FILE).text()).match(/CLOUD_URL = "(.*)"/)?.[1];
 console.log(`\n✔ Accounts are live at ${url}`);
-console.log("  Restart `bun run dev`, then Settings → Account → Create an account.");
+console.log("  New accounts need an invite code. Make one for yourself:");
+console.log("    bunx convex run --prod invites:createCode");
+console.log("  Restart `bun run dev`, then Settings → Account → Create an account, and enter it.");
 console.log("  Commit shared/cloud.ts so every copy of OpenChat uses it.\n");

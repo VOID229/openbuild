@@ -1,8 +1,8 @@
 // Cloud account wiring: the Convex client (when a deployment is configured), sign-in state, and
 // running the sync engine while signed in and unlocked.
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
+import { ConvexAuthProvider, useAuthActions } from "@convex-dev/auth/react";
 import { ConvexReactClient, useConvexAuth, useQuery } from "convex/react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { config } from "../runtime";
@@ -101,13 +101,65 @@ export async function forgetDevice(username: string) {
   useCloudKey.setState((s) => ({ version: s.version + 1 }));
 }
 
+/** What this device is called in Settings → Account → Devices, e.g. "Safari on iPhone". */
+export function deviceName() {
+  const ua = navigator.userAgent;
+  const os = /iPhone/.test(ua)
+    ? "iPhone"
+    : /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)
+      ? "iPad"
+      : /Android/.test(ua)
+        ? "Android"
+        : /Macintosh|Mac OS X/.test(ua)
+          ? "Mac"
+          : /Windows/.test(ua)
+            ? "Windows"
+            : /CrOS/.test(ua)
+              ? "ChromeOS"
+              : /Linux/.test(ua)
+                ? "Linux"
+                : "";
+  const browser = /Edg\//.test(ua)
+    ? "Edge"
+    : /OPR\//.test(ua)
+      ? "Opera"
+      : /Firefox|FxiOS/.test(ua)
+        ? "Firefox"
+        : /Chrome|CriOS/.test(ua)
+          ? "Chrome"
+          : /Safari/.test(ua)
+            ? "Safari"
+            : "Browser";
+  return os ? `${browser} on ${os}` : browser;
+}
+
 /** Runs sync while signed in and unlocked. Rendered once chats have loaded. */
 export function CloudSync() {
+  const { isAuthenticated } = useConvexAuth();
+  const { signOut } = useAuthActions();
   const account = useAccount();
   const keyVersion = useCloudKey((s) => s.version);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const username = account?.username;
   const hasVault = !!account?.vault;
+  const lastUsername = useRef<string>(undefined);
+
+  // Name this device in the account's device list. And if it was signed out from another device,
+  // the session is gone (the account reads as null): finish signing out here, forgetting the key.
+  const removed = isAuthenticated && account === null;
+  useEffect(() => {
+    if (username) {
+      lastUsername.current = username;
+      void client?.mutation(api.devices.register, { name: deviceName() }).catch(() => {});
+    } else if (removed) {
+      const last = lastUsername.current;
+      lastUsername.current = undefined;
+      void (async () => {
+        if (last) await forgetDevice(last);
+        await signOut();
+      })();
+    }
+  }, [username, removed, signOut]);
 
   useEffect(() => {
     if (!client || !chatsLoaded || !username) {

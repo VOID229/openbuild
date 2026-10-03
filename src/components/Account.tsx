@@ -1,9 +1,10 @@
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useConvexAuth } from "convex/react";
+import { useConvexAuth, useQuery } from "convex/react";
 import { CircleHelp, LockKeyhole } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import {
   cloudClient,
   cloudConfigured,
@@ -18,7 +19,7 @@ import {
   useCloud,
   type Account,
 } from "../lib/cloud";
-import { deriveCredentials, MIN_PASSWORD, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
+import { deriveCredentials, MIN_PASSWORD, type Credentials, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
 import { usingFallbackStorage } from "../lib/kv";
 import { useStore } from "../lib/store";
 import { Spinner, Toggle } from "./primitives";
@@ -231,9 +232,33 @@ function FaceIdSetting({ username }: { username: string }) {
   );
 }
 
-const authError = (err: unknown) => {
+type Device = { id: string; name: string | null; lastSeen: number; current: boolean };
+
+/** A ConvexError's payload: a string code, or an object like { code: "DeviceLimit", devices }. */
+const errorData = (err: unknown) => {
   const data = (err as { data?: unknown })?.data;
-  const msg = `${typeof data === "string" ? data : ""} ${(err as Error)?.message ?? ""}`;
+  if (typeof data === "string") return { code: data } as Record<string, unknown>;
+  return data && typeof data === "object" ? (data as Record<string, unknown>) : {};
+};
+
+/** "in 5 minutes", "in 3 hours", "in 2 days". */
+const waitText = (ms: unknown) => {
+  const minutes = Math.max(1, Math.ceil(Number(ms) / 60_000) || 1);
+  if (minutes < 90) return `in ${minutes} minute${minutes === 1 ? "" : "s"}`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) return `in ${hours} hours`;
+  return `in ${Math.ceil(hours / 24)} days`;
+};
+
+const authError = (err: unknown) => {
+  const data = errorData(err);
+  const code = String(data.code ?? data.kind ?? "");
+  const msg = `${code} ${(err as Error)?.message ?? ""}`;
+  if (/InvalidInvite/.test(msg)) return "That invite code isn't valid.";
+  if (/NewDeviceLimit/.test(msg)) return `This account has signed in on too many new devices this week. Try again ${waitText(data.retryAfter)}.`;
+  if (/DeviceLimit/.test(msg)) return "This account is signed in on as many devices as it can be. Sign one out first.";
+  if (data.kind === "RateLimited" && data.name === "removeDevice") return `You've signed out as many devices as you can this week. Try again ${waitText(data.retryAfter)}.`;
+  if (/InvalidEmail/.test(msg)) return "That doesn't look like an email address.";
   if (/InvalidCredentials|Wrong password/i.test(msg)) return "Wrong username or password.";
   if (/UsernameTaken|already exists/i.test(msg)) return "That username is taken.";
   if (/TooManyFailedAttempts|rate/i.test(msg)) return "Too many attempts. Wait a little and try again.";
@@ -241,43 +266,128 @@ const authError = (err: unknown) => {
   return "Something went wrong. Please try again.";
 };
 
+/** "Active now", "Active 3 hours ago", "Active 2 days ago". */
+const lastSeenText = (at: number) => {
+  const minutes = Math.floor((Date.now() - at) / 60_000);
+  if (minutes < 60) return "Active in the last hour";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `Active ${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `Active ${days} day${days === 1 ? "" : "s"} ago`;
+};
+
+function DeviceRows({ devices, busy, action, onAction }: { devices: Device[]; busy?: string; action: string; onAction: (id: string) => void }) {
+  return (
+    <ul className="device-list">
+      {devices.map((d) => (
+        <li key={d.id} className="device-row">
+          <div className="device-text">
+            <div className="device-name">{d.name ?? "Unknown device"}</div>
+            <div className="device-seen">{d.current ? "This device" : lastSeenText(d.lastSeen)}</div>
+          </div>
+          {!d.current && (
+            <button type="button" className="btn btn-sm" disabled={!!busy} onClick={() => onAction(d.id)}>
+              {busy === d.id && <Spinner size={12} />}
+              {action}
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const WAITLIST_NOTE =
+  "New accounts are invite-only for now: the sync server runs on a free plan with room for a limited number of people.";
+
 function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId?: boolean }) {
   const { signIn } = useAuthActions();
-  const [mode, setMode] = useState<"signIn" | "signUp">("signIn");
+  const [mode, setMode] = useState<"signIn" | "signUp" | "waitlist">("signIn");
+  const [invite, setInvite] = useState("");
   const [username, setUsername] = useState(unlockFor?.username ?? "");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | boolean>(false);
   const [error, setError] = useState<string>();
+  // At the device limit: the account's devices, to pick one to sign out in favour of this one.
+  const [full, setFull] = useState<Device[]>();
+  const creds = useRef<{ name: string; password: string; creds: Credentials }>(undefined);
   const signUp = mode === "signUp" && !unlockFor;
 
-  const submit = async (e: FormEvent) => {
-    e.preventDefault();
+  if (mode === "waitlist" && !unlockFor) return <WaitlistForm onDone={(m) => setMode(m)} />;
+
+  const switchTo = (m: typeof mode) => {
+    setMode(m);
+    setError(undefined);
+    setFull(undefined);
+  };
+
+  const run = async (replace?: string) => {
     const name = normalizeUsername(username);
-    if (!USERNAME_RULE.test(name)) return setError("Usernames are 3–64 characters: letters, numbers, dots, dashes and underscores.");
-    if (signUp && password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`);
-    if (signUp && password !== confirm) return setError("The passwords don't match.");
-    setBusy(true);
+    setBusy(replace ?? true);
     setError(undefined);
     try {
-      const creds = await deriveCredentials(name, password);
+      // Deriving is slow on purpose; don't redo it when retrying with a device to replace.
+      if (creds.current?.name !== name || creds.current.password !== password) {
+        creds.current = { name, password, creds: await deriveCredentials(name, password) };
+      }
+      const derived = creds.current.creds;
+      const params = { email: name, password: derived.authSecret, ...(replace ? { replace } : {}) };
       if (unlockFor) {
         // Setting up an account whose sign-up was interrupted: check the password with the server
         // first, so the data key can't end up locked with a different one.
-        if (!unlockFor.vault) await signIn("password", { email: name, password: creds.authSecret, flow: "signIn" });
-        await unlock(unlockFor, creds);
+        if (!unlockFor.vault) await signIn("password", { ...params, flow: "signIn" });
+        await unlock(unlockFor, derived);
       } else {
-        await signIn("password", { email: name, password: creds.authSecret, flow: mode });
+        await signIn("password", { ...params, flow: signUp ? "signUp" : "signIn", ...(signUp ? { invite } : {}) });
         // Wait for the session, then get the data key onto this device.
         const account = await waitForAccount();
-        await unlock(account, creds);
+        await unlock(account, derived);
       }
+      setFull(undefined);
     } catch (err) {
-      setError(authError(err));
+      const data = errorData(err);
+      if (data.code === "DeviceLimit" && Array.isArray(data.devices) && data.devices.length) {
+        setFull(data.devices as Device[]);
+      } else {
+        setError(authError(err));
+      }
     } finally {
       setBusy(false);
     }
   };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const name = normalizeUsername(username);
+    if (signUp && !invite.trim()) return setError("Enter your invite code.");
+    if (!USERNAME_RULE.test(name)) return setError("Usernames are 3–64 characters: letters, numbers, dots, dashes and underscores.");
+    if (signUp && password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`);
+    if (signUp && password !== confirm) return setError("The passwords don't match.");
+    await run();
+  };
+
+  if (full) {
+    return (
+      <div className="account-form">
+        <Note>
+          {normalizeUsername(username)} is already signed in on {full.length} devices, the most an account can be on. Sign one of them out to use this
+          one instead. You can sign out up to 3 devices a week.
+        </Note>
+        <DeviceRows devices={full} busy={typeof busy === "string" ? busy : busy ? "-" : undefined} action="Sign out" onAction={(id) => void run(id)} />
+        {error && (
+          <p className="account-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="account-actions">
+          <button type="button" className="link-btn" onClick={() => switchTo(mode)}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <form className="account-form" onSubmit={submit}>
@@ -289,8 +399,34 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       <Note>
         {unlockFor
           ? `Enter the password for ${unlockFor.username} to start syncing on this device.`
-          : "Sync your chats, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No email, no tracking."}
+          : signUp
+            ? `${WAITLIST_NOTE} Enter the invite code you were sent, then choose a username and password.`
+            : "Sync your chats, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No email, no tracking."}
       </Note>
+      {signUp && (
+        <div className="field">
+          <label className="md-label" htmlFor="account-invite">
+            <span className="md-hash">#</span>
+            Invite code
+          </label>
+          <input
+            id="account-invite"
+            className="input input-code"
+            value={invite}
+            autoComplete="off"
+            autoCapitalize="characters"
+            spellCheck={false}
+            placeholder="XXXX-XXXX-XXXX"
+            onChange={(e) => setInvite(e.target.value)}
+          />
+          <p className="field-help">
+            No code yet?{" "}
+            <button type="button" className="link-btn" onClick={() => switchTo("waitlist")}>
+              Join the waitlist
+            </button>
+          </p>
+        </div>
+      )}
       {!unlockFor && (
         <div className="field">
           <label className="md-label" htmlFor="account-username">
@@ -332,24 +468,94 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
         </p>
       )}
       <div className="account-actions">
-        <button type="submit" className="btn" disabled={busy || !password || (!unlockFor && !username)}>
+        <button type="submit" className="btn" disabled={!!busy || !password || (!unlockFor && !username) || (signUp && !invite)}>
           {busy && <Spinner size={13} />}
           {unlockFor ? "Unlock" : signUp ? "Create account" : "Sign in"}
         </button>
         {unlockFor ? (
           <SignOutButton username={unlockFor.username} />
         ) : (
-          <button
-            type="button"
-            className="link-btn"
-            onClick={() => {
-              setMode(signUp ? "signIn" : "signUp");
-              setError(undefined);
-            }}
-          >
+          <button type="button" className="link-btn" onClick={() => switchTo(signUp ? "signIn" : "signUp")}>
             {signUp ? "I have an account" : "Create an account"}
           </button>
         )}
+      </div>
+    </form>
+  );
+}
+
+/** Join the waitlist: an email address, to send a one-time invite code to. */
+function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [joined, setJoined] = useState<string>();
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError(undefined);
+    try {
+      await cloudClient()!.mutation(api.invites.joinWaitlist, { email });
+      setJoined(email.trim());
+    } catch (err) {
+      setError(authError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (joined) {
+    return (
+      <div className="account-form">
+        <Note>
+          You're on the waitlist. When there's room, a one-time invite code will be emailed to <strong>{joined}</strong>. Then come back here,
+          choose Create an account, and enter the code with a username and password.
+        </Note>
+        <div className="account-actions">
+          <button type="button" className="btn" onClick={() => onDone("signUp")}>
+            I have a code
+          </button>
+          <button type="button" className="link-btn" onClick={() => onDone("signIn")}>
+            Back to sign in
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form className="account-form" onSubmit={submit}>
+      <Note>
+        {WAITLIST_NOTE} Join the waitlist and you'll get a one-time invite code by email when there's room. Then come back here, enter the code, and
+        choose a username and password.
+      </Note>
+      <div className="field">
+        <label className="md-label" htmlFor="account-email">
+          <span className="md-hash">#</span>
+          Email
+        </label>
+        <input id="account-email" className="input" type="email" value={email} autoComplete="email" autoCapitalize="none" spellCheck={false} onChange={(e) => setEmail(e.target.value)} />
+        <p className="field-help">
+          Only used to send your code. It's never linked to your account, and it's deleted from the waitlist once the code is used.
+        </p>
+      </div>
+      {error && (
+        <p className="account-error" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="account-actions">
+        <button type="submit" className="btn" disabled={busy || !email.trim()}>
+          {busy && <Spinner size={13} />}
+          Join the waitlist
+        </button>
+        <button type="button" className="link-btn" onClick={() => onDone("signUp")}>
+          I have a code
+        </button>
+        <button type="button" className="link-btn" onClick={() => onDone("signIn")}>
+          Sign in
+        </button>
       </div>
     </form>
   );
@@ -425,6 +631,49 @@ function SyncKeysSetting() {
   );
 }
 
+/** Settings → Account → Devices: everywhere this account is signed in, and signing others out. */
+function DevicesSetting() {
+  const list = useQuery(api.devices.list);
+  const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState<string>();
+  if (!list) return null;
+
+  const remove = async (id: string) => {
+    setBusy(id);
+    setError(undefined);
+    try {
+      await cloudClient()!.mutation(api.devices.remove, { sessionId: id as Id<"authSessions"> });
+    } catch (err) {
+      setError(authError(err));
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  return (
+    <div className="setting-row setting-row-top setting-row-divided">
+      <div className="setting-text">
+        <div className="setting-label">
+          Devices
+          <span className="caption">
+            {list.devices.length} of {list.max}
+          </span>
+        </div>
+        <p className="setting-desc">
+          An account can be signed in on up to {list.max} devices. To use a new one, sign one of these out (up to 3 a week). Devices that go unused for
+          a month are signed out on their own.
+        </p>
+        <DeviceRows devices={list.devices} busy={busy} action="Sign out" onAction={(id) => void remove(id)} />
+        {error && (
+          <p className="account-error" role="alert">
+            {error}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SignedIn({ account }: { account: Account }) {
   const { status, error, pending } = useCloud();
   const { signOut } = useAuthActions();
@@ -469,6 +718,7 @@ function SignedIn({ account }: { account: Account }) {
         sync server stores only ciphertext.
       </Note>
       <SyncKeysSetting />
+      <DevicesSetting />
       <FaceIdSetting username={account.username} />
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
