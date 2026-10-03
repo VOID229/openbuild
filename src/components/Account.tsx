@@ -572,8 +572,8 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
   return (
     <form className="account-form" onSubmit={submit}>
       <Note>
-        {WAITLIST_NOTE} Join the waitlist and you'll get a one-time invite code by email when there's room. Then come back here, enter the code, and
-        choose a username and password.
+        Join the waitlist and you'll get a one-time invite code by email when there's room. Then come back here, enter the code, and choose a username
+        and password.
       </Note>
       <div className="field">
         <label className="md-label" htmlFor="account-email">
