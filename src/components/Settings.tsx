@@ -407,6 +407,7 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
   const [invalid, setInvalid] = useState<string>();
   const input = useRef<HTMLInputElement>(null);
   const isUrl = kind === "url";
+  const masked = !editing && !isUrl && !!value;
   const noun = isUrl ? "URL" : "key";
   const id = `key-${scope}-${index}`;
   const actionId = `${scope}-${index}`;
@@ -473,8 +474,8 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
             type={editing && !isUrl ? "password" : "text"}
             inputMode={isUrl ? "url" : undefined}
             readOnly={!editing}
-            value={editing ? draft : isUrl ? value : MASK}
-            placeholder={isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
+            value={editing ? draft : isUrl ? value : ""}
+            placeholder={masked ? undefined : isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
             aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
             autoComplete="off"
             spellCheck={false}
@@ -496,6 +497,7 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
             }}
             onFocus={() => !editing && replace()}
           />
+          {masked && <span className="key-mask" aria-hidden>{MASK}</span>}
           {total > 1 && <span className="key-tag">{index === 0 ? "primary" : "fallback"}</span>}
         </div>
         <div className="key-badge" role="status">
@@ -511,14 +513,14 @@ function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, 
               {isUrl ? "edit" : "replace"}
             </button>
           )}
-          {onMoveUp && !editing && (
-            <IconButton label={`Use before the ${isUrl ? "instance" : "key"} above`} tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
-              <ArrowUp size={14} />
-            </IconButton>
-          )}
           {onRemove && !editing && (
             <IconButton label={`Remove ${noun}`} tooltipSide="left" className="key-icon-btn key-remove" onClick={onRemove}>
               <Trash2 size={14} />
+            </IconButton>
+          )}
+          {onMoveUp && !editing && (
+            <IconButton label={`Use before the ${isUrl ? "instance" : "key"} above`} tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
+              <ArrowUp size={14} />
             </IconButton>
           )}
         </div>

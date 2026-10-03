@@ -3056,6 +3056,28 @@ svg {
   letter-spacing: 0;
 }
 
+/* The saved-key dots wrap inside a one-line box, so only whole asterisks show (no clipped one at the edge). */
+.key-mask {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 13px;
+  right: 12px;
+  height: 1lh;
+  margin: auto 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  pointer-events: none;
+}
+
+.key-input-tagged .key-mask {
+  right: 84px;
+}
+
 .key-input-masked {
   color: var(--text-2);
   background: var(--surface-2);
@@ -3529,6 +3551,7 @@ p.key-status svg {
   .input,
   .input-sm,
   .key-input,
+  .key-mask,
   .search input,
   .model-search,
   .history-rename,
