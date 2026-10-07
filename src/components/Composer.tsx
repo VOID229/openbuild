@@ -1,11 +1,11 @@
-import { ArrowUp, Check, FileText, Mic, Pencil, Plus, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, Check, FileText, GripVertical, Mic, Pencil, Plus, Square, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
 import { drainQueue, sendMessage, stopGeneration, uid } from "../lib/chat";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
-import { enqueue, queueOf, removeQueued, useQueueOf, type Queued } from "../lib/queue";
+import { enqueue, moveQueued, queueOf, removeQueued, useQueueOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
@@ -32,11 +32,33 @@ interface Editing {
   stash: { text: string; files: Attachment[] };
 }
 
-function QueuedRow({ item, onEdit, onDelete }: { item: Queued; onEdit: () => void; onDelete: () => void }) {
+interface RowProps {
+  item: Queued;
+  dragging: boolean;
+  onGrab: (e: React.PointerEvent) => void;
+  onNudge: (by: number) => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}
+
+function QueuedRow({ item, dragging, onGrab, onNudge, onEdit, onDelete }: RowProps) {
   const file = item.files[0];
   const more = item.files.length - (item.text ? 0 : 1);
   return (
-    <div className="queued">
+    <div className={cx("queued", dragging && "queued-dragging")} data-queued-id={item.id}>
+      <button
+        type="button"
+        className="queued-grip"
+        aria-label="Reorder (drag, or Alt+↑/↓)"
+        onPointerDown={onGrab}
+        onKeyDown={(e) => {
+          if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+          e.preventDefault();
+          onNudge(e.key === "ArrowUp" ? -1 : 1);
+        }}
+      >
+        <GripVertical size={14} />
+      </button>
       {file &&
         (file.mime.startsWith("image/") ? (
           <img className="queued-thumb" src={file.dataUrl} alt="" />
@@ -51,6 +73,57 @@ function QueuedRow({ item, onEdit, onDelete }: { item: Queued; onEdit: () => voi
       <IconButton label="Edit queued message" tooltipSide="top" className="queued-btn" onClick={onEdit}>
         <Pencil size={15} />
       </IconButton>
+    </div>
+  );
+}
+
+/** Queued messages, first to be sent on top. Drag a row's grip to reorder. */
+function QueueTray({ chatId, queue, onEdit }: { chatId: string; queue: Queued[]; onEdit: (item: Queued) => void }) {
+  const tray = useRef<HTMLDivElement>(null);
+  const [dragId, setDragId] = useState<string>();
+
+  const grab = (id: string) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    setDragId(id);
+    // Listen on the window: reordering moves rows in the DOM, which would drop pointer capture.
+    const move = (ev: PointerEvent) => {
+      // The slot is how many of the other rows sit above the pointer.
+      const others = Array.from(tray.current?.querySelectorAll<HTMLElement>(".queued") ?? []).filter((el) => el.dataset.queuedId !== id);
+      const to = others.filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.top + r.height / 2 < ev.clientY;
+      }).length;
+      if (queueOf(chatId).findIndex((q) => q.id === id) !== to) moveQueued(chatId, id, to);
+    };
+    const end = () => {
+      setDragId(undefined);
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", end);
+      window.removeEventListener("pointercancel", end);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", end);
+    window.addEventListener("pointercancel", end);
+  };
+
+  return (
+    <div ref={tray} className={cx("queue", dragId && "queue-dragging")} aria-label="Queued messages">
+      {queue.map((q, i) => (
+        <QueuedRow
+          key={q.id}
+          item={q}
+          dragging={q.id === dragId}
+          onGrab={grab(q.id)}
+          onNudge={(by) => {
+            moveQueued(chatId, q.id, i + by);
+            // Keep focus on the grip of the row that moved.
+            requestAnimationFrame(() => tray.current?.querySelector<HTMLElement>(`[data-queued-id="${q.id}"] .queued-grip`)?.focus());
+          }}
+          onEdit={() => onEdit(q)}
+          onDelete={() => removeQueued(chatId, q.id)}
+        />
+      ))}
     </div>
   );
 }
@@ -243,13 +316,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
-      {queue.length > 0 && (
-        <div className="queue" aria-label="Queued messages">
-          {queue.map((q) => (
-            <QueuedRow key={q.id} item={q} onEdit={() => startEdit(q)} onDelete={() => chatId && removeQueued(chatId, q.id)} />
-          ))}
-        </div>
-      )}
+      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} />}
       <div
         className={cx("composer", dragging && "composer-drag")}
         onClick={(e) => {

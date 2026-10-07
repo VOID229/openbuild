@@ -38,6 +38,15 @@ export function removeQueued(chatId: string, id: string) {
   setQueue(chatId, queueOf(chatId).filter((q) => q.id !== id));
 }
 
+/** Move a message to position `to` (first is sent first). */
+export function moveQueued(chatId: string, id: string, to: number) {
+  const list = queueOf(chatId).filter((q) => q.id !== id);
+  const item = queueOf(chatId).find((q) => q.id === id);
+  if (!item) return;
+  list.splice(Math.max(0, Math.min(to, list.length)), 0, item);
+  setQueue(chatId, list);
+}
+
 export function shiftQueue(chatId: string): Queued | undefined {
   const [next, ...rest] = queueOf(chatId);
   if (next) setQueue(chatId, rest);

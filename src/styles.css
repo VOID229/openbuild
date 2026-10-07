@@ -1310,13 +1310,54 @@ svg {
   align-items: center;
   gap: 8px;
   min-height: 34px;
-  padding: 0 6px 0 14px;
+  padding: 0 6px 0 4px;
   font-size: 13.5px;
   color: var(--text-2);
 }
 
 .queued + .queued {
   border-top: 1px solid var(--border);
+}
+
+.queued:first-child {
+  border-radius: 13px 13px 0 0;
+}
+
+.queued-dragging {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.queue-dragging,
+.queue-dragging * {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.queued-grip {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 28px;
+  margin-right: -2px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  color: var(--text-3);
+  cursor: grab;
+  touch-action: none;
+}
+
+@media (hover: hover) {
+  .queued-grip:hover {
+    color: var(--text);
+  }
+}
+
+@media (pointer: coarse) {
+  .queued-grip {
+    width: 32px;
+    height: 34px;
+  }
 }
 
 .queued-thumb {
