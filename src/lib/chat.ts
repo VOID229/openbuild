@@ -2,7 +2,7 @@ import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentia
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
-import { enqueue, shiftQueue } from "./queue";
+import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
 import { selectionFor, useStore } from "./store";
 import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
 
@@ -196,16 +196,18 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
   void generate(chatId, messageId);
 }
 
-/** Send the chat's next queued message, unless a reply is still coming in. */
+/** Send the chat's next queued message, unless a reply is still coming in or one is being edited. */
 export function drainQueue(chatId: string) {
-  if (running.has(chatId)) return;
+  if (running.has(chatId) || editingQueued(chatId)) return;
   if (!useStore.getState().chats.some((c) => c.id === chatId)) {
     while (shiftQueue(chatId));
     return;
   }
   const next = shiftQueue(chatId);
   // No usable model: put it back so it isn't lost (sendMessage opened Settings).
-  if (next && !sendMessage(next.text, next.files, chatId)) enqueue(chatId, next, 0);
+  if (next && !sendMessage(next.text, next.files, chatId)) {
+    useQueue.setState((s) => ({ queues: { ...s.queues, [chatId]: [next, ...queueOf(chatId)] } }));
+  }
 }
 
 async function generate(chatId: string, messageId: string) {

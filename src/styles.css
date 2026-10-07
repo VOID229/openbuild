@@ -1395,17 +1395,9 @@ svg {
   color: var(--text-3);
 }
 
-.round-btn.round-btn-quiet {
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border-strong);
-  box-shadow: none;
-}
-
-@media (hover: hover) {
-  .round-btn.round-btn-quiet:hover:not(:disabled) {
-    background: var(--active);
-  }
+.queued-editing {
+  padding-left: 30px;
+  color: var(--text-3);
 }
 
 .pill {

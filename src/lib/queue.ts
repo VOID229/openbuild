@@ -11,9 +11,11 @@ export interface Queued {
 interface QueueState {
   /** Per chat, oldest first. Kept in memory only, like the replies they wait on. */
   queues: Record<string, Queued[]>;
+  /** Per chat, the queued message open in the composer. It keeps its slot, and nothing is sent meanwhile. */
+  editing: Record<string, string>;
 }
 
-export const useQueue = create<QueueState>(() => ({ queues: {} }));
+export const useQueue = create<QueueState>(() => ({ queues: {}, editing: {} }));
 
 const EMPTY: Queued[] = [];
 
@@ -27,11 +29,22 @@ function setQueue(chatId: string, list: Queued[]) {
   });
 }
 
-/** Add at the end, or at `index` (putting back an item that was taken out to edit). */
-export function enqueue(chatId: string, item: Queued, index?: number) {
-  const list = [...queueOf(chatId)];
-  list.splice(index ?? list.length, 0, item);
-  setQueue(chatId, list);
+export function enqueue(chatId: string, item: Queued) {
+  setQueue(chatId, [...queueOf(chatId), item]);
+}
+
+export function updateQueued(chatId: string, id: string, patch: Pick<Queued, "text" | "files">) {
+  setQueue(chatId, queueOf(chatId).map((q) => (q.id === id ? { ...q, ...patch } : q)));
+}
+
+export const editingQueued = (chatId: string): string | undefined => useQueue.getState().editing[chatId];
+export const useEditingQueued = (chatId: string | undefined) => useQueue((s) => (chatId ? s.editing[chatId] : undefined));
+
+export function setEditingQueued(chatId: string, id: string | undefined) {
+  useQueue.setState((s) => {
+    const { [chatId]: _, ...rest } = s.editing;
+    return { editing: id ? { ...rest, [chatId]: id } : rest };
+  });
 }
 
 export function removeQueued(chatId: string, id: string) {

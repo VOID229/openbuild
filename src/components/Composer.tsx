@@ -5,7 +5,7 @@ import { drainQueue, sendMessage, stopGeneration, uid } from "../lib/chat";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
-import { enqueue, moveQueued, queueOf, removeQueued, useQueueOf, type Queued } from "../lib/queue";
+import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
@@ -25,25 +25,39 @@ interface Props {
   streaming: boolean;
 }
 
-/** A queued message taken back into the box to edit, and the draft it replaced there. */
+/** A queued message open in the box to edit, and the draft set aside meanwhile. */
 interface Editing {
-  item: Queued;
-  index: number;
+  id: string;
   stash: { text: string; files: Attachment[] };
 }
 
 interface RowProps {
   item: Queued;
+  editing: boolean;
   dragging: boolean;
   onGrab: (e: React.PointerEvent) => void;
   onNudge: (by: number) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onFinish: (save: boolean) => void;
 }
 
-function QueuedRow({ item, dragging, onGrab, onNudge, onEdit, onDelete }: RowProps) {
+function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete, onFinish }: RowProps) {
   const file = item.files[0];
   const more = item.files.length - (item.text ? 0 : 1);
+  if (editing) {
+    return (
+      <div className="queued queued-editing" data-queued-id={item.id}>
+        <span className="queued-text">Editing in composer</span>
+        <IconButton label="Save edit" tooltip="Save edit · Enter" tooltipSide="top" className="queued-btn" onClick={() => onFinish(true)}>
+          <Check size={15} />
+        </IconButton>
+        <IconButton label="Cancel edit" tooltip="Cancel edit · Esc" tooltipSide="top" className="queued-btn" onClick={() => onFinish(false)}>
+          <X size={15} />
+        </IconButton>
+      </div>
+    );
+  }
   return (
     <div className={cx("queued", dragging && "queued-dragging")} data-queued-id={item.id}>
       <button
@@ -78,8 +92,16 @@ function QueuedRow({ item, dragging, onGrab, onNudge, onEdit, onDelete }: RowPro
 }
 
 /** Queued messages, first to be sent on top. Drag a row's grip to reorder. */
-function QueueTray({ chatId, queue, onEdit }: { chatId: string; queue: Queued[]; onEdit: (item: Queued) => void }) {
+interface TrayProps {
+  chatId: string;
+  queue: Queued[];
+  onEdit: (item: Queued) => void;
+  onFinish: (save: boolean) => void;
+}
+
+function QueueTray({ chatId, queue, onEdit, onFinish }: TrayProps) {
   const tray = useRef<HTMLDivElement>(null);
+  const editingId = useEditingQueued(chatId);
   const [dragId, setDragId] = useState<string>();
 
   const grab = (id: string) => (e: React.PointerEvent) => {
@@ -113,6 +135,7 @@ function QueueTray({ chatId, queue, onEdit }: { chatId: string; queue: Queued[];
         <QueuedRow
           key={q.id}
           item={q}
+          editing={q.id === editingId}
           dragging={q.id === dragId}
           onGrab={grab(q.id)}
           onNudge={(by) => {
@@ -122,6 +145,7 @@ function QueueTray({ chatId, queue, onEdit }: { chatId: string; queue: Queued[];
           }}
           onEdit={() => onEdit(q)}
           onDelete={() => removeQueued(chatId, q.id)}
+          onFinish={onFinish}
         />
       ))}
     </div>
@@ -142,12 +166,11 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
-  // Leaving the chat mid-edit puts the message back as it was (the draft was never overwritten).
+  // Leaving the chat mid-edit keeps the message as it was (the draft was never overwritten).
   useEffect(
     () => () => {
-      const e = editingRef.current;
-      if (!e || !chatId) return;
-      enqueue(chatId, e.item, e.index);
+      if (!editingRef.current || !chatId) return;
+      setEditingQueued(chatId, undefined);
       drainQueue(chatId);
     },
     [],
@@ -245,34 +268,49 @@ export function Composer({ variant, chatId, streaming }: Props) {
     setFiles(next.files);
   };
 
+  /** Store the edit in the message's slot; an emptied message is dropped. */
+  const saveEdit = (id: string) => {
+    if (!chatId) return;
+    if (hasContent) updateQueued(chatId, id, { text: text.trim(), files });
+    else removeQueued(chatId, id);
+  };
+
   const startEdit = (item: Queued) => {
     if (!chatId) return;
     dictation.stop();
     let stash = { text, files };
     if (editing) {
       // Switching to another queued message keeps the edit made so far.
-      if (hasContent) enqueue(chatId, { ...editing.item, text: text.trim(), files }, editing.index);
+      saveEdit(editing.id);
       stash = editing.stash;
     }
-    const index = queueOf(chatId).findIndex((q) => q.id === item.id);
-    removeQueued(chatId, item.id);
-    setEditing({ item, index, stash });
+    setEditing({ id: item.id, stash });
+    setEditingQueued(chatId, item.id);
     fill(item);
     textarea.current?.focus();
   };
 
-  /** Put the message back in its place (edited, or as it was) and bring back the draft. */
+  /** Close the edit (saving it or not) and bring back the draft. */
   const finishEdit = (save: boolean) => {
     if (!editing || !chatId) return;
     dictation.stop();
-    if (!save) enqueue(chatId, editing.item, editing.index);
-    // Saving an emptied message drops it.
-    else if (hasContent) enqueue(chatId, { ...editing.item, text: text.trim(), files }, editing.index);
+    if (save) saveEdit(editing.id);
     fill(editing.stash);
     setEditing(undefined);
+    setEditingQueued(chatId, undefined);
     // The reply may have finished meanwhile.
     drainQueue(chatId);
+    textarea.current?.focus();
   };
+
+  // The message being edited was sent or deleted elsewhere (e.g. its chat was cleared): drop the edit.
+  useEffect(() => {
+    if (editing && !queue.some((q) => q.id === editing.id)) {
+      fill(editing.stash);
+      setEditing(undefined);
+      if (chatId) setEditingQueued(chatId, undefined);
+    }
+  }, [queue]);
 
   const submit = () => {
     if (editing) return finishEdit(true);
@@ -316,7 +354,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
-      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} />}
+      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} />}
       <div
         className={cx("composer", dragging && "composer-drag")}
         onClick={(e) => {
@@ -410,16 +448,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
             >
               <Mic size={17} />
             </button>
-            {editing ? (
-              <>
-                <button type="button" className="round-btn round-btn-quiet" aria-label="Cancel edit" data-tooltip="Cancel edit · Esc" data-tooltip-side="top" onClick={() => finishEdit(false)}>
-                  <X size={17} />
-                </button>
-                <button type="button" className="round-btn" aria-label="Save edit" data-tooltip="Save edit" data-tooltip-side="top" onClick={() => finishEdit(true)}>
-                  <Check size={18} strokeWidth={2.25} />
-                </button>
-              </>
-            ) : queueing && !hasContent ? (
+            {queueing && !hasContent && !editing ? (
               <button type="button" className="round-btn" aria-label="Stop generating" data-tooltip="Stop" data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
                 <Square size={13} fill="currentColor" />
               </button>
@@ -427,10 +456,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
               <button
                 type="button"
                 className="round-btn"
-                aria-label={queueing ? "Queue message" : "Send message"}
-                data-tooltip={hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
+                aria-label={editing ? "Save edit" : queueing ? "Queue message" : "Send message"}
+                data-tooltip={editing ? "Save edit" : hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
                 data-tooltip-side={variant === "dock" ? "top" : "bottom"}
-                disabled={!hasContent}
+                disabled={!hasContent && !editing}
                 onClick={submit}
               >
                 <ArrowUp size={18} strokeWidth={2.25} />
