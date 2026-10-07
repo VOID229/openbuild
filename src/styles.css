@@ -1291,6 +1291,82 @@ svg {
   min-width: 0;
 }
 
+/* Queued messages: a thin tray tucked behind the top of the composer. */
+
+.queue {
+  display: flex;
+  flex-direction: column;
+  margin: 0 22px -1px;
+  padding: 3px 0;
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--surface-2);
+  animation: rise 200ms var(--ease) both;
+}
+
+.queued {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 6px 0 14px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.queued + .queued {
+  border-top: 1px solid var(--border);
+}
+
+.queued-thumb {
+  width: 26px;
+  height: 20px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.queued-file {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.queued-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queued-more {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.queued-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.round-btn.round-btn-quiet {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  box-shadow: none;
+}
+
+@media (hover: hover) {
+  .round-btn.round-btn-quiet:hover:not(:disabled) {
+    background: var(--active);
+  }
+}
+
 .pill {
   display: inline-flex;
   align-items: center;

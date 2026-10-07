@@ -1,10 +1,11 @@
-import { ArrowUp, FileText, Mic, Plus, Square, X } from "lucide-react";
+import { ArrowUp, Check, FileText, Mic, Pencil, Plus, Square, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
-import { sendMessage, stopGeneration } from "../lib/chat";
+import { drainQueue, sendMessage, stopGeneration, uid } from "../lib/chat";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
+import { enqueue, queueOf, removeQueued, useQueueOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
@@ -24,6 +25,36 @@ interface Props {
   streaming: boolean;
 }
 
+/** A queued message taken back into the box to edit, and the draft it replaced there. */
+interface Editing {
+  item: Queued;
+  index: number;
+  stash: { text: string; files: Attachment[] };
+}
+
+function QueuedRow({ item, onEdit, onDelete }: { item: Queued; onEdit: () => void; onDelete: () => void }) {
+  const file = item.files[0];
+  const more = item.files.length - (item.text ? 0 : 1);
+  return (
+    <div className="queued">
+      {file &&
+        (file.mime.startsWith("image/") ? (
+          <img className="queued-thumb" src={file.dataUrl} alt="" />
+        ) : (
+          <FileText className="queued-file" size={15} />
+        ))}
+      <span className="queued-text">{item.text || file?.name}</span>
+      {more > 0 && <span className="queued-more">+{more}</span>}
+      <IconButton label="Delete queued message" tooltipSide="top" className="queued-btn" onClick={onDelete}>
+        <Trash2 size={15} />
+      </IconButton>
+      <IconButton label="Edit queued message" tooltipSide="top" className="queued-btn" onClick={onEdit}>
+        <Pencil size={15} />
+      </IconButton>
+    </div>
+  );
+}
+
 export function Composer({ variant, chatId, streaming }: Props) {
   const draftKey = chatId ?? NEW_CHAT;
   const lastTyped = useRef(0);
@@ -34,6 +65,20 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const textarea = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
+  const queue = useQueueOf(chatId);
+  const [editing, setEditing] = useState<Editing>();
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+  // Leaving the chat mid-edit puts the message back as it was (the draft was never overwritten).
+  useEffect(
+    () => () => {
+      const e = editingRef.current;
+      if (!e || !chatId) return;
+      enqueue(chatId, e.item, e.index);
+      drainQueue(chatId);
+    },
+    [],
+  );
   // Text in the box when dictation started; the live transcript is appended after it.
   const dictationBase = useRef("");
   const dictation = useDictation(
@@ -77,7 +122,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     });
     // An edit from another device shows up here, unless you're typing in this box right now.
     const off = onRemoteDraft((key) => {
-      if (key !== draftKey || Date.now() - lastTyped.current < TYPING_PAUSE) return;
+      if (key !== draftKey || editingRef.current || Date.now() - lastTyped.current < TYPING_PAUSE) return;
       const d = getDraft(key);
       setText(d?.text ?? "");
       setFiles(d?.files ?? []);
@@ -89,9 +134,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
   }, [draftKey]);
 
   // Save the draft as it changes (not on mount, which would stamp an untouched draft as fresh).
+  // While a queued message is being edited the box holds that message, not the draft.
   const mounted = useRef(false);
   useEffect(() => {
-    if (mounted.current) saveDraft(draftKey, text, files);
+    if (mounted.current && !editing) saveDraft(draftKey, text, files);
     mounted.current = true;
   }, [text, files]);
 
@@ -117,12 +163,54 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   };
 
-  const canSend = (text.trim().length > 0 || files.length > 0) && !streaming;
+  const hasContent = text.trim().length > 0 || files.length > 0;
+  // While a reply is coming in, sending queues the message instead.
+  const queueing = streaming && !!chatId;
+
+  const fill = (next: { text: string; files: Attachment[] }) => {
+    setText(next.text);
+    setFiles(next.files);
+  };
+
+  const startEdit = (item: Queued) => {
+    if (!chatId) return;
+    dictation.stop();
+    let stash = { text, files };
+    if (editing) {
+      // Switching to another queued message keeps the edit made so far.
+      if (hasContent) enqueue(chatId, { ...editing.item, text: text.trim(), files }, editing.index);
+      stash = editing.stash;
+    }
+    const index = queueOf(chatId).findIndex((q) => q.id === item.id);
+    removeQueued(chatId, item.id);
+    setEditing({ item, index, stash });
+    fill(item);
+    textarea.current?.focus();
+  };
+
+  /** Put the message back in its place (edited, or as it was) and bring back the draft. */
+  const finishEdit = (save: boolean) => {
+    if (!editing || !chatId) return;
+    dictation.stop();
+    if (!save) enqueue(chatId, editing.item, editing.index);
+    // Saving an emptied message drops it.
+    else if (hasContent) enqueue(chatId, { ...editing.item, text: text.trim(), files }, editing.index);
+    fill(editing.stash);
+    setEditing(undefined);
+    // The reply may have finished meanwhile.
+    drainQueue(chatId);
+  };
 
   const submit = () => {
-    if (!canSend) return;
+    if (editing) return finishEdit(true);
+    if (!hasContent) return;
     dictation.stop();
-    if (sendMessage(text.trim(), files)) {
+    if (queueing && chatId) {
+      enqueue(chatId, { id: uid(), text: text.trim(), files });
+      saveDraft(draftKey, "", []);
+      setText("");
+      setFiles([]);
+    } else if (sendMessage(text.trim(), files)) {
       // Sending from the new-chat screen unmounts this composer before its save effect could run.
       saveDraft(draftKey, "", []);
       setText("");
@@ -131,6 +219,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Escape" && editing) {
+      e.preventDefault();
+      return finishEdit(false);
+    }
     if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
     const mod = e.metaKey || e.ctrlKey;
     if (cmdEnter ? mod : !e.shiftKey && !mod) {
@@ -151,6 +243,13 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
+      {queue.length > 0 && (
+        <div className="queue" aria-label="Queued messages">
+          {queue.map((q) => (
+            <QueuedRow key={q.id} item={q} onEdit={() => startEdit(q)} onDelete={() => chatId && removeQueued(chatId, q.id)} />
+          ))}
+        </div>
+      )}
       <div
         className={cx("composer", dragging && "composer-drag")}
         onClick={(e) => {
@@ -205,7 +304,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           className="composer-input"
           value={text}
           rows={variant === "home" ? 2 : 1}
-          placeholder="Ask anything"
+          placeholder={editing ? "Edit queued message" : "Ask anything"}
           aria-label="Message"
           onChange={(e) => {
             lastTyped.current = Date.now();
@@ -244,7 +343,16 @@ export function Composer({ variant, chatId, streaming }: Props) {
             >
               <Mic size={17} />
             </button>
-            {streaming && chatId ? (
+            {editing ? (
+              <>
+                <button type="button" className="round-btn round-btn-quiet" aria-label="Cancel edit" data-tooltip="Cancel edit · Esc" data-tooltip-side="top" onClick={() => finishEdit(false)}>
+                  <X size={17} />
+                </button>
+                <button type="button" className="round-btn" aria-label="Save edit" data-tooltip="Save edit" data-tooltip-side="top" onClick={() => finishEdit(true)}>
+                  <Check size={18} strokeWidth={2.25} />
+                </button>
+              </>
+            ) : queueing && !hasContent ? (
               <button type="button" className="round-btn" aria-label="Stop generating" data-tooltip="Stop" data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
                 <Square size={13} fill="currentColor" />
               </button>
@@ -252,10 +360,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
               <button
                 type="button"
                 className="round-btn"
-                aria-label="Send message"
-                data-tooltip={canSend ? hint : undefined}
+                aria-label={queueing ? "Queue message" : "Send message"}
+                data-tooltip={hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
                 data-tooltip-side={variant === "dock" ? "top" : "bottom"}
-                disabled={!canSend}
+                disabled={!hasContent}
                 onClick={submit}
               >
                 <ArrowUp size={18} strokeWidth={2.25} />

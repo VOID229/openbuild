@@ -2,6 +2,7 @@ import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentia
 import { streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
+import { enqueue, shiftQueue } from "./queue";
 import { selectionFor, useStore } from "./store";
 import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
 
@@ -77,11 +78,11 @@ export function stopAllGenerations() {
   for (const { ctrl } of running.values()) ctrl.abort();
 }
 
-/** Resolve the composer selection to a concrete model for this prompt. */
-function resolveModel(text: string, attachments: Attachment[]): { ref: ModelRef; routed: boolean } | undefined {
+/** Resolve the chat's composer selection to a concrete model for this prompt. */
+function resolveModel(text: string, attachments: Attachment[], chatId: string | undefined): { ref: ModelRef; routed: boolean } | undefined {
   const st = useStore.getState();
   const { settings, detection } = st;
-  const sel = selectionFor(st);
+  const sel = selectionFor({ ...st, activeChatId: chatId });
   if (isAuto(sel)) {
     const ref = routePrompt(text, attachments.some((a) => a.text == null), detection, settings);
     return ref && { ref, routed: true };
@@ -89,9 +90,10 @@ function resolveModel(text: string, attachments: Attachment[]): { ref: ModelRef;
   return sel && findModel(detection, sel) ? { ref: sel, routed: false } : undefined;
 }
 
-export function sendMessage(text: string, attachments: Attachment[]): boolean {
+/** Send to `chatId` (default: the open chat, or a new one). Only the open chat is switched to. */
+export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId): boolean {
   const st = useStore.getState();
-  const resolved = resolveModel(text, attachments);
+  const resolved = resolveModel(text, attachments, chatId);
   const model = resolved && findModel(st.detection, resolved.ref);
   if (!resolved || !model) {
     st.openSettings("keys");
@@ -109,14 +111,14 @@ export function sendMessage(text: string, attachments: Attachment[]): boolean {
     createdAt: now,
     startedAt: now,
   };
-  const existing = st.chats.find((c) => c.id === st.activeChatId);
+  const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const chat: Chat = existing
     ? { ...existing, updatedAt: now, messages: [...existing.messages, user, assistant] }
     : { id: uid(), title: makeTitle(text, attachments), createdAt: now, updatedAt: now, messages: [user, assistant] };
   st.upsertChat(chat);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
-  useStore.setState({ activeChatId: chat.id, selections });
+  useStore.setState(chatId === st.activeChatId ? { activeChatId: chat.id, selections } : { selections });
   void generate(chat.id, assistant.id);
   return true;
 }
@@ -192,6 +194,18 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     startedAt: now,
   });
   void generate(chatId, messageId);
+}
+
+/** Send the chat's next queued message, unless a reply is still coming in. */
+export function drainQueue(chatId: string) {
+  if (running.has(chatId)) return;
+  if (!useStore.getState().chats.some((c) => c.id === chatId)) {
+    while (shiftQueue(chatId));
+    return;
+  }
+  const next = shiftQueue(chatId);
+  // No usable model: put it back so it isn't lost (sendMessage opened Settings).
+  if (next && !sendMessage(next.text, next.files, chatId)) enqueue(chatId, next, 0);
 }
 
 async function generate(chatId: string, messageId: string) {
@@ -313,4 +327,6 @@ async function generate(chatId: string, messageId: string) {
   // Name the chat after its first successful exchange.
   const replies = latest.messages.filter((m) => m.role === "assistant" && m.content.trim()).length;
   if (!error && replies === 1 && !latest.titleSource) void autoName(chatId);
+  // Done, stopped or failed, the chat is free again: send what was queued meanwhile.
+  drainQueue(chatId);
 }
