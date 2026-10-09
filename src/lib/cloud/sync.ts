@@ -22,6 +22,7 @@ import type { ConvexReactClient } from "convex/react";
 import { createStore, del, get, set } from "../kv";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
+import { resumeReplies } from "../chat";
 import { chatListeners } from "../db";
 import { applyDraftRecord, draftListeners, draftRecord, type StoredDraft } from "../drafts";
 import { isDraftRecord } from "../../../shared/drafts";
@@ -357,6 +358,8 @@ export class SyncEngine {
       // Local edits not yet written (or a reply still arriving) are merged in, and the merge is written back.
       const next = local && (isDirty || streaming) ? mergeChats(local, remote) : remote;
       this.apply(() => useStore.getState().upsertChat(next));
+      // A reply another device started: follow it here too, in case that device has gone away.
+      resumeReplies(id);
       if (local && isDirty) this.schedulePush(0);
     } else if (r.key === "settings" && !isDirty) {
       const remote = value as SyncedSettings;

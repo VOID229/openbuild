@@ -4,8 +4,10 @@
 // (see storage.ts), so they don't depend on which port or browser you open the app in.
 import index from "../src/index.html";
 import { CLOUD_URL } from "../shared/cloud";
+import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
+import { findRun, localRun, startRun } from "./runs";
 import * as storage from "./storage";
 import * as vault from "./vault";
 
@@ -18,6 +20,13 @@ const isChat = (c: any): c is storage.StoredChat =>
   !!c && typeof c === "object" && isChatId(c.id) && Number.isFinite(c.updatedAt) && Number.isFinite(c.createdAt) && Array.isArray(c.messages);
 /** The client's persisted UI state (settings, sidebar layout), stored as one JSON document. */
 const STATE_KEY = "client-state";
+/** Names this server (its data), so a synced reply that's running here is only picked up by apps it serves. */
+const serverId = (() => {
+  let id = storage.getValue("server-id");
+  if (!id) storage.setValue("server-id", (id = crypto.randomUUID()));
+  return id;
+})();
+const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 
 // The API holds your keys' power (it can spend them), so it only answers requests that really come
 // from this app: a loopback Host (defeats DNS rebinding) and, when the browser says, our own Origin
@@ -54,7 +63,7 @@ function serve(port: number) {
       // Public client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
-        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local" })),
+        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId })),
       },
 
       // Saved keys as opaque ids, never secrets.
@@ -103,11 +112,29 @@ function serve(port: number) {
         }),
       },
 
+      // A reply runs on its own (runs.ts): if this request's connection drops, it keeps going, and the
+      // app picks it back up from /api/chat/runs/:id. Sending the same reply id again just watches it.
       "/api/chat": {
         POST: api(async (req, server: Bun.Server<unknown>) => {
           // Long generations shouldn't be cut off by the idle timeout.
           server.timeout(req, 0);
-          return handleChat(req, (await readJson(req)) as ChatRequest | undefined, (scope) => vault.secrets(scope));
+          const body = (await readJson(req)) as ChatRequest | undefined;
+          if (!isStreamRef(body?.stream)) return handleChat(req.signal, body, (scope) => vault.secrets(scope));
+          const run = localRun(body.stream.id, () => startRun((signal) => handleChat(signal, body, (scope) => vault.secrets(scope))));
+          return new Response(run.stream(), { headers: runHeaders });
+        }),
+      },
+      "/api/chat/runs/:id": {
+        GET: api((req: Bun.BunRequest<"/api/chat/runs/:id">, server: Bun.Server<unknown>) => {
+          server.timeout(req, 0);
+          const run = isStreamId(req.params.id) ? findRun(req.params.id) : undefined;
+          return run ? new Response(run.stream(), { headers: runHeaders }) : bad("No such reply", 404);
+        }),
+      },
+      "/api/chat/runs/:id/stop": {
+        POST: api((req: Bun.BunRequest<"/api/chat/runs/:id/stop">) => {
+          if (isStreamId(req.params.id)) findRun(req.params.id)?.stop();
+          return Response.json({ ok: true });
         }),
       },
 

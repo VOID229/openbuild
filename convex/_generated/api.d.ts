@@ -15,6 +15,7 @@ import type * as emailCheck from "../emailCheck.js";
 import type * as http from "../http.js";
 import type * as invites from "../invites.js";
 import type * as limits from "../limits.js";
+import type * as streams from "../streams.js";
 import type * as sync from "../sync.js";
 
 import type {
@@ -31,6 +32,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   invites: typeof invites;
   limits: typeof limits;
+  streams: typeof streams;
   sync: typeof sync;
 }>;
 

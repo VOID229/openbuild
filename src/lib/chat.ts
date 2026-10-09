@@ -1,15 +1,17 @@
+import { newStreamKey, type ReplyStream } from "../../shared/replies";
 import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentials, type SearchProviderId, type WireMessage } from "../../shared/types";
-import { streamChat } from "./api";
+import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
 import { findModel, isAuto, routePrompt } from "./models";
 import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
+import { canResume, replyHost } from "./runtime";
 import { selectionFor, useStore } from "./store";
 import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
 
 export const uid = () => crypto.randomUUID();
 
 /** Active generation per chat. Replacing an entry orphans the old stream (its updates are dropped). */
-const running = new Map<string, { ctrl: AbortController; messageId: string }>();
+const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream }>();
 
 function makeTitle(text: string, attachments: Attachment[]) {
   const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New chat";
@@ -70,12 +72,31 @@ function toWire(history: Message[], input: string[]): WireMessage[] {
   return out;
 }
 
+/** Stop a reply: here, and on the server, where it would otherwise keep going. */
+function stopRun(run: { ctrl: AbortController; stream: ReplyStream }) {
+  run.ctrl.abort();
+  void stopReply(run.stream);
+}
+
 export function stopGeneration(chatId: string) {
-  running.get(chatId)?.ctrl.abort();
+  const run = running.get(chatId);
+  if (run) stopRun(run);
 }
 
 export function stopAllGenerations() {
-  for (const { ctrl } of running.values()) ctrl.abort();
+  for (const run of running.values()) stopRun(run);
+}
+
+/**
+ * Pick back up replies still running on the server (after a reload, or ones another device started),
+ * in every chat or just `chatId`.
+ */
+export function resumeReplies(chatId?: string) {
+  for (const chat of useStore.getState().chats) {
+    if ((chatId && chat.id !== chatId) || running.has(chat.id)) continue;
+    const msg = chat.messages.findLast((m) => m.status === "streaming" && m.stream && canResume(m.stream.via));
+    if (msg) void generate(chat.id, msg.id, true);
+  }
 }
 
 /** Resolve the chat's composer selection to a concrete model for this prompt. */
@@ -177,7 +198,7 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
   const prev = running.get(chatId);
   if (prev) {
     running.delete(chatId);
-    prev.ctrl.abort();
+    stopRun(prev);
   }
   const now = Date.now();
   st.patchMessage(chatId, messageId, {
@@ -189,6 +210,7 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     finish: undefined,
     notice: undefined,
     searches: undefined,
+    stream: undefined,
     model: { plan: target.plan, id: target.id, name: model.name },
     routed: ref ? false : msg.routed,
     startedAt: now,
@@ -210,24 +232,32 @@ export function drainQueue(chatId: string) {
   }
 }
 
-async function generate(chatId: string, messageId: string) {
+/**
+ * Stream an assistant reply into its message. `resume` picks up a reply that's already running on the
+ * server (the message has its ReplyStream) instead of starting one.
+ */
+async function generate(chatId: string, messageId: string, resume = false) {
   const st = useStore.getState();
   const chat = st.chats.find((c) => c.id === chatId);
   const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
   const msg = chat?.messages[index];
-  if (!chat || !msg?.model) return;
+  if (!chat || !msg?.model || (resume && !msg.stream)) return;
 
   const model = findModel(st.detection, msg.model);
   const plan = msg.model.plan;
   const keys = st.settings.keys[plan];
-  if (!model || !keys?.length) {
+  if (!resume && (!model || !keys?.length)) {
     st.patchMessage(chatId, messageId, { status: "error", error: "This model isn't available. Check your API keys in Settings." }, true);
     return;
   }
 
+  // Where the reply runs; saved on the message right away so a reload can find it.
+  const host = replyHost();
+  const stream: ReplyStream = resume ? msg.stream! : { id: uid(), via: host ?? "", key: host === "hosted" ? newStreamKey() : undefined };
   const ctrl = new AbortController();
-  running.set(chatId, { ctrl, messageId });
+  running.set(chatId, { ctrl, messageId, stream });
   const isCurrent = () => running.get(chatId)?.ctrl === ctrl;
+  if (!resume) st.patchMessage(chatId, messageId, { stream: host ? stream : undefined }, true);
 
   let text = "";
   let reasoning = "";
@@ -238,8 +268,9 @@ async function generate(chatId: string, messageId: string) {
   const flush = () => {
     scheduled = false;
     if (!isCurrent()) return;
-    // Persist periodically so a reload mid-stream keeps the partial answer.
-    const persist = Date.now() - savedAt > 2000;
+    // Persist periodically so a reload mid-stream keeps the partial answer. A reply picked back up
+    // is only saved once it's over (the device that started it saves along the way).
+    const persist = !resume && Date.now() - savedAt > 2000;
     if (persist) savedAt = Date.now();
     useStore.getState().patchMessage(chatId, messageId, { content: text, reasoning: reasoning || undefined, reasoningMs }, persist);
   };
@@ -254,22 +285,27 @@ async function generate(chatId: string, messageId: string) {
   let finish: string | undefined;
   let notice: string | undefined;
   let searches: SearchCall[] = [];
-  const search = model.tools !== false ? searchCredentials(st.settings) : undefined;
+  const search = model && model.tools !== false ? searchCredentials(st.settings) : undefined;
   try {
-    const stream = streamChat(
-      {
-        plan,
-        model: model.id,
-        effort: st.settings.effort,
-        system: systemPrompt(st.settings, model, !!search),
-        sessionId: chatId,
-        messages: toWire(chat.messages.slice(0, index), model.input),
-        search,
-      },
-      ctrl.signal,
-    );
-    for await (const ev of stream) {
-      if (ev.t === "text") {
+    const request = resume
+      ? undefined
+      : {
+          plan,
+          model: model!.id,
+          effort: st.settings.effort,
+          system: systemPrompt(st.settings, model!, !!search),
+          sessionId: chatId,
+          messages: toWire(chat.messages.slice(0, index), model!.input),
+          search,
+        };
+    for await (const ev of streamChat(request, stream, startedAt, ctrl.signal)) {
+      if (ev.t === "reset") {
+        // Reconnected: the reply is replayed from the start.
+        text = reasoning = "";
+        reasoningMs = finish = notice = error = undefined;
+        searches = [];
+        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { content: "", reasoning: undefined, reasoningMs: undefined, searches: undefined });
+      } else if (ev.t === "text") {
         if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
         text += ev.v;
         schedule();
@@ -298,6 +334,9 @@ async function generate(chatId: string, messageId: string) {
   // Superseded by think faster / regenerate: the new run owns this message now.
   if (!isCurrent()) return;
   running.delete(chatId);
+  // A reply picked back up may have been finished meanwhile by the device that started it.
+  const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
+  if (resume && now?.status !== "streaming") return drainQueue(chatId);
   if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
   const status: Message["status"] = error ? "error" : ctrl.signal.aborted ? "stopped" : "done";
   if (status === "done" && !text.trim()) {

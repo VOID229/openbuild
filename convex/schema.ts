@@ -91,6 +91,29 @@ export default defineSchema({
     .index("by_canonical", ["canonical"])
     .index("by_invited", ["invitedAt"]),
 
+  // Replies in progress on the hosted site, written by the relay as they stream (convex/streams.ts),
+  // so a reload or a dropped connection can pick one back up. Not tied to an account: a reply is
+  // found by its random id, and its events are encrypted with a key only the app has. Deleted an
+  // hour after the reply ends.
+  streams: defineTable({
+    streamId: v.string(),
+    seq: v.number(),
+    done: v.boolean(),
+    stopped: v.boolean(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_streamId", ["streamId"])
+    .index("by_expiresAt", ["expiresAt"]),
+
+  // A reply's events, in batches of about a second's worth (encrypted NDJSON).
+  streamChunks: defineTable({
+    streamId: v.string(),
+    seq: v.number(),
+    iv: v.bytes(),
+    data: v.bytes(),
+  }).index("by_streamId_and_seq", ["streamId", "seq"]),
+
   // A name for each signed-in session ("Safari on iPhone"), for Settings → Account → Devices.
   devices: defineTable({
     userId: v.id("users"),

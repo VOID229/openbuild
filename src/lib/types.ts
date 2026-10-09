@@ -1,3 +1,4 @@
+import type { ReplyStream } from "../../shared/replies";
 import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
@@ -102,6 +103,8 @@ export interface Message {
   searches?: SearchCall[];
   /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   notice?: string;
+  /** Where the reply runs, so it can be picked back up after a reload or a dropped connection. */
+  stream?: ReplyStream;
   createdAt: number;
 }
 

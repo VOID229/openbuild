@@ -163,6 +163,8 @@ export interface ChatRequest {
   messages: WireMessage[];
   /** Web search providers the model may call as tools. */
   search?: SearchCredentials[];
+  /** Run the reply apart from this request, so it can be picked back up (see shared/replies.ts). */
+  stream?: { id: string; key?: string };
 }
 
 /** NDJSON events streamed from /api/chat to the client. */
@@ -182,4 +184,6 @@ export type StreamEvent =
       results?: SearchResultLink[];
       error?: string;
     }
-  | { t: "done"; finish?: string; usage?: { input?: number; output?: number } };
+  | { t: "done"; finish?: string; usage?: { input?: number; output?: number } }
+  /** The reply is over (after done, an error, or a stop). A stream that ends without it was cut off. */
+  | { t: "end" };

@@ -1,6 +1,6 @@
 // Automatic chat titles: after the first reply, ask the configured naming models (in order,
 // falling back on failure) for a short title.
-import { streamChat } from "./api";
+import { streamOnce } from "./api";
 import { fastTarget, findModel } from "./models";
 import { useStore } from "./store";
 import type { NamingModel } from "./types";
@@ -52,7 +52,7 @@ export async function autoName(chatId: string) {
     let text = "";
     let failed = false;
     try {
-      const stream = streamChat(
+      const stream = streamOnce(
         { plan: cand.plan, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
         ctrl.signal,
       );

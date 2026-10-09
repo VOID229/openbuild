@@ -3,9 +3,9 @@
 //
 //   static/              the app (index.html + hashed JS/CSS/fonts), served from Vercel's CDN
 //   static/api/config.json   tells the app it's the hosted site, and which sync service to use
-//   functions/api/chat   the chat relay   ┐ Edge Functions: they forward each request with the
-//   functions/api/models key check        │ keys it carries, and store or log nothing
-//   functions/api/verify-search           ┘ search key / SearXNG check
+//   functions/api/chat   the chat relay   ┐ they forward each request with the keys it carries,
+//   functions/api/models key check        │ and log nothing; the chat relay keeps replies in
+//   functions/api/verify-search           ┘ progress, encrypted, so the app can pick them back up
 //   config.json          routes and security headers
 //
 //   bun run build
@@ -61,8 +61,10 @@ for (const css of new Bun.Glob("assets/*.css").scanSync(join(out, "static"))) {
 
 await Bun.write(join(out, "static", "api", "config.json"), JSON.stringify({ mode: "hosted", convexUrl: cloudUrl || null }));
 
-// 2. The relay functions, each bundled into one self-contained file.
-for (const name of ["chat", "models", "verify-search"]) {
+// 2. The relay functions, each bundled into one self-contained file. The chat relay is a Node.js
+// function, so a reply can keep going after the app's connection drops (see server/vercel/chat.ts);
+// 300 s is the longest the plan allows. The quick checks stay Edge Functions.
+for (const name of ["models", "verify-search"]) {
   const dir = join(out, "functions", "api", `${name}.func`);
   await check(
     await Bun.build({
@@ -76,6 +78,24 @@ for (const name of ["chat", "models", "verify-search"]) {
     `the ${name} function`,
   );
   await Bun.write(join(dir, ".vc-config.json"), JSON.stringify({ runtime: "edge", entrypoint: "index.js" }));
+}
+{
+  const dir = join(out, "functions", "api", "chat.func");
+  await check(
+    await Bun.build({
+      entrypoints: [join(root, "server", "vercel", "chat-node.ts")],
+      outdir: dir,
+      target: "node",
+      format: "esm",
+      minify: true,
+      naming: "index.mjs",
+    }),
+    "the chat function",
+  );
+  await Bun.write(
+    join(dir, ".vc-config.json"),
+    JSON.stringify({ runtime: "nodejs22.x", handler: "index.mjs", launcherType: "Nodejs", shouldAddHelpers: false, supportsResponseStreaming: true, maxDuration: 300 }),
+  );
 }
 
 // 3. Routes and headers. The CSP only lets the page talk to this site and the sync service, and

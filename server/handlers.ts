@@ -73,8 +73,8 @@ export async function handleSearchCheck(provider: unknown, credential: string | 
   return Response.json(await checkSearch(provider, credential));
 }
 
-/** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. */
-export async function handleChat(req: Request, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean } = {}): Promise<Response> {
+/** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. `signal` stops it. */
+export async function handleChat(signal: AbortSignal, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean } = {}): Promise<Response> {
   if (!body || !isPlan(body.plan) || typeof body.model !== "string" || !validateMessages(body.messages) || (body.search !== undefined && !isSearchList(body.search))) {
     return bad("Malformed chat request");
   }
@@ -97,7 +97,7 @@ export async function handleChat(req: Request, body: ChatRequest | undefined, ke
   const usable = creds.filter((c) => c.keys.length);
   const search = usable.length ? searchToolkit(usable) : undefined;
   const system = [typeof body.system === "string" ? body.system.trim() : "", search?.guidance ?? ""].filter(Boolean).join("\n\n");
-  const { secrets: _secrets, ...rest } = body as ChatRequest & { secrets?: unknown };
+  const { secrets: _secrets, stream: _stream, ...rest } = body as ChatRequest & { secrets?: unknown };
   const request: ChatRequest = {
     ...rest,
     sessionId: String(body.sessionId || crypto.randomUUID()).slice(0, 128),
@@ -116,15 +116,15 @@ export async function handleChat(req: Request, body: ChatRequest | undefined, ke
         method: "POST",
         headers: upstream.headers,
         body: JSON.stringify(upstream.body),
-        signal: req.signal,
+        signal,
       });
     } catch (err) {
-      if (req.signal.aborted) return new Response(null, { status: 499 });
+      if (signal.aborted) return new Response(null, { status: 499 });
       const message = `Couldn't reach Opencode: ${(err as Error).message}`;
       return ndjsonResponse([...notices, { t: "error", message }]);
     }
     if (res.ok && res.body) {
-      const stream = streamReply(model, { ...request, key }, res, req.signal, { prelude: notices, label, search });
+      const stream = streamReply(model, { ...request, key }, res, signal, { prelude: notices, label, search });
       return new Response(stream, { headers: ndjson });
     }
 

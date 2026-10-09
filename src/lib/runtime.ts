@@ -8,6 +8,8 @@ export interface AppConfig {
   mode: "local" | "hosted";
   /** The sync service to sign in to, if any. */
   convexUrl: string | null;
+  /** Local: names the server, so the app only picks up replies running on it (see shared/replies.ts). */
+  serverId?: string;
 }
 
 let resolved: AppConfig | undefined;
@@ -16,7 +18,7 @@ export const config: Promise<AppConfig> = (async () => {
   try {
     const res = await fetch("/api/config");
     const c = (await res.json()) as Partial<AppConfig>;
-    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null } as AppConfig;
+    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null, serverId: c.serverId } as AppConfig;
   } catch {
     return { mode: "local", convexUrl: null } as AppConfig;
   }
@@ -24,3 +26,10 @@ export const config: Promise<AppConfig> = (async () => {
 
 /** Whether this is the hosted website. Only valid once `config` has resolved (it has by the time the app renders). */
 export const isHosted = () => resolved?.mode === "hosted";
+
+/** Where replies started here run (see shared/replies.ts). */
+export const replyHost = () => (resolved?.mode === "hosted" ? "hosted" : resolved?.serverId);
+
+/** Whether this app can pick up a reply that runs at `via`: the website's, or this same local server's. */
+export const canResume = (via: string | undefined) =>
+  !!resolved && (resolved.mode === "hosted" ? via === "hosted" && !!resolved.convexUrl : !!resolved.serverId && via === resolved.serverId);

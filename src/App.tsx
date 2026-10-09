@@ -8,6 +8,7 @@ import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
 import { Sidebar } from "./components/Sidebar";
+import { resumeReplies } from "./lib/chat";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
@@ -89,6 +90,8 @@ function Main() {
         (chats) => {
           setLoadError(undefined);
           useStore.getState().setChats(chats);
+          // Replies that were still coming in when the app was closed or reloaded.
+          resumeReplies();
         },
         (err: Error) => {
           console.error("Failed to load chats", err);
