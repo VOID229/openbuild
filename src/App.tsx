@@ -12,7 +12,9 @@ import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
 import { ensureSelection, useStore } from "./lib/store";
+import type { Detection } from "./lib/types";
 import { cx } from "./lib/ui";
+import type { PlanId } from "../shared/types";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -98,7 +100,23 @@ function Main() {
     // Load the saved keys from the server's vault, then re-detect their models (cached results stay usable meanwhile).
     ensureSelection();
     void useStore.getState().syncKeys().then(() => useStore.getState().refreshDetection());
-    return () => clearTimeout(timer);
+    // A tab left open would otherwise never see newly launched models: re-check stale plans when
+    // the tab comes back into view, and periodically while it's visible.
+    const STALE = 30 * 60 * 1000;
+    const recheck = () => {
+      if (document.visibilityState !== "visible") return;
+      const { detection, refreshDetection } = useStore.getState();
+      for (const [plan, d] of Object.entries(detection) as [PlanId, Detection][]) {
+        if (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > STALE) void refreshDetection(plan);
+      }
+    };
+    const interval = setInterval(recheck, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", recheck);
+    return () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", recheck);
+    };
   }, []);
 
   // Global shortcuts:
