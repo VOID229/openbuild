@@ -15,8 +15,8 @@ import { Run, startRun } from "../runs";
 import { forbidden, secretsOf } from "./relay";
 
 /** How often the reply is written out while text flows, and at least this often while it's quiet. */
-const FLUSH = 5000;
-const IDLE = 15_000;
+const FLUSH = 1000;
+const IDLE = 5000;
 /** The function's own limit is 300 s (maxDuration); end the reply cleanly before it's cut off. */
 const LIMIT = 285_000;
 

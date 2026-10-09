@@ -22,7 +22,9 @@ export async function initCloud() {
   const { convexUrl } = await config;
   if (convexUrl) {
     deploymentUrl = convexUrl;
-    client = new ConvexReactClient(convexUrl);
+    // Convex's own "leave this site?" prompt fires whenever a sync write is in flight. Sync keeps
+    // unsent changes (its dirty set) and sends them after a reload, so the prompt isn't needed.
+    client = new ConvexReactClient(convexUrl, { unsavedChangesWarning: false });
   }
 }
 
