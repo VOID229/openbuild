@@ -1,5 +1,5 @@
 import { newStreamKey, type ReplyStream } from "../../shared/replies";
-import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type WireMessage } from "../../shared/types";
+import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type WireMessage } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
@@ -157,7 +157,7 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
  * "2nd": copy the conversation up to (not including) an assistant reply into a new chat and
  * answer that same user turn with another model. The original chat is left untouched.
  */
-export function forkWithModel(chatId: string, messageId: string, ref: ModelRef) {
+export function forkWithModel(chatId: string, messageId: string, ref: ModelRef & { effort?: Effort }) {
   const st = useStore.getState();
   const chat = st.chats.find((c) => c.id === chatId);
   const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
@@ -220,7 +220,8 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     notice: undefined,
     searches: undefined,
     stream: undefined,
-    model: { plan: target.plan, id: target.id, name: model.name },
+    // A fresh pick (think harder/faster) uses the global level; a retry keeps the level it had.
+    model: { plan: target.plan, id: target.id, name: model.name, effort: ref ? undefined : msg.model?.effort },
     routed: ref ? false : msg.routed,
     startedAt: now,
   });
@@ -301,7 +302,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
       : {
           plan,
           model: model!.id,
-          effort: st.settings.effort,
+          effort: msg.model.effort ?? st.settings.effort,
           system: systemPrompt(st.settings, model!, !!search),
           sessionId: chatId,
           messages: toWire(chat.messages.slice(0, index), model!.input),

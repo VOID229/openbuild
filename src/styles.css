@@ -1995,6 +1995,29 @@ svg {
   padding-top: 2px;
 }
 
+.second-level-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.second-back {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: -4px;
+  border-radius: 6px;
+  color: var(--text-2);
+}
+
+@media (hover: hover) {
+  .second-back:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
 .msg-action {
   width: 30px;
   height: 30px;
@@ -2176,6 +2199,7 @@ svg {
 
 .think-row {
   display: flex;
+  gap: 8px;
   margin-bottom: 10px;
   transition: opacity var(--med) var(--ease), transform var(--med) var(--ease);
 }
@@ -2209,6 +2233,16 @@ svg {
 
 .think-btn:active {
   transform: scale(0.98);
+}
+
+.think-second {
+  padding: 0 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.think-second[aria-expanded="true"] {
+  background: var(--surface-2);
 }
 
 .scroll-down {

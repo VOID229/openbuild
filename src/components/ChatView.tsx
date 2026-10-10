@@ -7,7 +7,7 @@ import { useStore } from "../lib/store";
 import type { Chat, ModelRef } from "../lib/types";
 import { cx, usePresence } from "../lib/ui";
 import { Composer } from "./Composer";
-import { MessageItem } from "./MessageItem";
+import { MessageItem, SecondOpinion } from "./MessageItem";
 
 /** Highlight every occurrence of `words` inside `root` using the CSS Custom Highlight API. */
 function highlightWords(root: HTMLElement, words: string[]) {
@@ -52,26 +52,32 @@ function useThinkAction(chat: Chat): ThinkAction | undefined {
   return { kind, target, targetName: findModel(detection, target)?.name ?? target.id };
 }
 
+/** Dock row above the composer: think harder / think faster, plus "2nd" while the reply is still streaming. */
 function ThinkButton({ chat }: { chat: Chat }) {
   const action = useThinkAction(chat);
+  const last = chat.messages.at(-1);
+  const second = !!last && last.role === "assistant" && last.status === "streaming" && chat.messages.length > 1;
   const shown = useRef(action);
   if (action) shown.current = action;
-  const { mounted, visible } = usePresence(!!action, 180);
-  const a = action ?? shown.current;
-  if (!mounted || !a) return null;
-  const last = chat.messages.at(-1)!;
+  const { mounted, visible } = usePresence(!!action || second, 180);
+  // Keep the think button's content while it fades out; never show it while only "2nd" is up.
+  const a = action ?? (second ? undefined : shown.current);
+  if (!mounted) return null;
   return (
     <div className="think-row" data-state={visible ? "open" : "closed"}>
-      <button
-        type="button"
-        className="think-btn"
-        data-tooltip={`${a.kind === "harder" ? "Resend to" : "Cancel and resend to"} ${a.targetName}`}
-        data-tooltip-side="top"
-        onClick={() => regenerate(chat.id, last.id, a.target)}
-      >
-        {a.kind === "harder" ? <Lightbulb size={16} /> : <Zap size={16} />}
-        {a.kind === "harder" ? "think harder" : "think faster"}
-      </button>
+      {a && (
+        <button
+          type="button"
+          className="think-btn"
+          data-tooltip={`${a.kind === "harder" ? "Resend to" : "Cancel and resend to"} ${a.targetName}`}
+          data-tooltip-side="top"
+          onClick={() => regenerate(chat.id, last!.id, a.target)}
+        >
+          {a.kind === "harder" ? <Lightbulb size={16} /> : <Zap size={16} />}
+          {a.kind === "harder" ? "think harder" : "think faster"}
+        </button>
+      )}
+      {second && last && <SecondOpinion chatId={chat.id} messageId={last.id} current={last.model} dock />}
     </div>
   );
 }

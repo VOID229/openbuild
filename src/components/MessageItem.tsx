@@ -1,8 +1,9 @@
-import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
-import { SEARCH_PROVIDERS } from "../../shared/types";
+import { Check, ChevronLeft, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
+import { SEARCH_PROVIDERS, type Effort } from "../../shared/types";
 import { memo, useEffect, useRef, useState } from "react";
 import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
+import { findModel } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { Message, ModelRef, SearchCall } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
@@ -155,34 +156,83 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   );
 }
 
-/** "2nd": fork the chat at this reply and answer the same question with another model. */
-function SecondOpinion({ chatId, messageId, current }: { chatId: string; messageId: string; current?: ModelRef }) {
+const EFFORT_LONG: Record<Effort, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
+
+/**
+ * "2nd": fork the chat at this reply and answer the same question with another model.
+ * Step 1 picks the model; step 2 picks its reasoning level (skipped for models without levels).
+ * `dock` renders it as a pill beside the think buttons.
+ */
+export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: string; messageId: string; current?: ModelRef; dock?: boolean }) {
   const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<ModelRef>();
   const anchor = useRef<HTMLButtonElement>(null);
+  const detection = useStore((s) => s.detection);
+  const model = picked ? findModel(detection, picked) : undefined;
+  const levels = model?.reasoning.efforts ?? [];
+  // Toggle-only models (thinking on/off, no levels): "medium" means "on, at the model's default".
+  const onOff = !!model && model.reasoning.mode === "none" && model.reasoning.toggle;
+  const close = () => {
+    setOpen(false);
+    setPicked(undefined);
+  };
   return (
     <>
       <button
         ref={anchor}
         type="button"
-        className="msg-second"
+        className={dock ? "think-btn think-second" : "msg-second"}
         aria-label="Get a second opinion from another model"
         aria-haspopup="listbox"
         aria-expanded={open}
         data-tooltip={open ? undefined : "Get a second opinion from another model"}
         data-tooltip-side="top"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         2nd
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Answer with" fixed="auto">
-        <div className="menu-label menu-label-top">Get a second opinion from…</div>
-        <ModelMenu
-          selected={current}
-          onPick={(ref) => {
-            setOpen(false);
-            forkWithModel(chatId, messageId, ref);
-          }}
-        />
+      <Popover open={open} onClose={close} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Answer with" fixed="auto">
+        {picked && model ? (
+          <>
+            <div className="menu-label menu-label-top second-level-head">
+              <button type="button" className="second-back" aria-label="Back to models" onClick={() => setPicked(undefined)}>
+                <ChevronLeft size={14} />
+              </button>
+              <span>Reasoning for {model.name}</span>
+            </div>
+            <div className="select-list" role="presentation">
+              {levels.map((level) => (
+                <button
+                  key={level}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    forkWithModel(chatId, messageId, { ...picked, effort: level });
+                  }}
+                >
+                  <span className="menu-item-label">{onOff && level === "medium" ? "On" : EFFORT_LONG[level]}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="menu-label menu-label-top">Get a second opinion from…</div>
+            <ModelMenu
+              selected={current}
+              onPick={(ref) => {
+                if (findModel(detection, ref)?.reasoning.efforts.length) setPicked(ref);
+                else {
+                  close();
+                  forkWithModel(chatId, messageId, ref);
+                }
+              }}
+            />
+          </>
+        )}
       </Popover>
     </>
   );

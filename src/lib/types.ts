@@ -100,7 +100,7 @@ export interface Message {
   reasoning?: string;
   attachments?: Attachment[];
   /** Assistant only */
-  model?: ModelRef & { name: string };
+  model?: ModelRef & { name: string; /** Set by "2nd": the reasoning level picked for that answer. */ effort?: Effort };
   routed?: boolean;
   status?: "streaming" | "done" | "error" | "stopped";
   error?: string;
