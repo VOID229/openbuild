@@ -1,6 +1,6 @@
 // "2nd" → "5th": how deep forks go and what they're called.
 import { describe, expect, test } from "bun:test";
-import { chatDepth, ordinal } from "../src/lib/forks";
+import { chatDepth, opinionWord, ordinal } from "../src/lib/forks";
 
 describe("fork depth", () => {
   test("ordinary chats are depth 1; forks without a stored depth are 2nd", () => {
@@ -11,5 +11,9 @@ describe("fork depth", () => {
 
   test("labels run 2nd through 5th", () => {
     expect([2, 3, 4, 5].map(ordinal)).toEqual(["2nd", "3rd", "4th", "5th"]);
+  });
+
+  test("the tooltip names the opinion: second, third, fourth, fifth", () => {
+    expect([2, 3, 4, 5].map(opinionWord)).toEqual(["second", "third", "fourth", "fifth"]);
   });
 });

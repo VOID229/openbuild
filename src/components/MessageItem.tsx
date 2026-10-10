@@ -3,7 +3,7 @@ import { SEARCH_PROVIDERS, type Effort } from "../../shared/types";
 import { memo, useEffect, useRef, useState } from "react";
 import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
-import { chatDepth, MAX_FORK_DEPTH, ordinal } from "../lib/forks";
+import { chatDepth, MAX_FORK_DEPTH, opinionWord, ordinal } from "../lib/forks";
 import { findModel } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { Message, ModelRef, SearchCall } from "../lib/types";
@@ -189,10 +189,10 @@ export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: st
         ref={anchor}
         type="button"
         className={dock ? "think-btn think-second" : "msg-second"}
-        aria-label="Get a second opinion from another model"
+        aria-label={`Get a ${opinionWord(depth + 1)} opinion from another model`}
         aria-haspopup="listbox"
         aria-expanded={open}
-        data-tooltip={open ? undefined : "Get a second opinion from another model"}
+        data-tooltip={open ? undefined : `Get a ${opinionWord(depth + 1)} opinion from another model`}
         data-tooltip-side="top"
         onClick={() => (open ? close() : setOpen(true))}
       >
@@ -227,7 +227,7 @@ export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: st
           </>
         ) : (
           <>
-            <div className="menu-label menu-label-top">Get a second opinion from…</div>
+            <div className="menu-label menu-label-top">Get a {opinionWord(depth + 1)} opinion from…</div>
             <ModelMenu
               selected={current}
               onPick={(ref) => {

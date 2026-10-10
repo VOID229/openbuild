@@ -12,3 +12,8 @@ export function chatDepth(chat: Pick<Chat, "forkOf" | "forkDepth">): number {
 export function ordinal(depth: number): string {
   return depth === 2 ? "2nd" : depth === 3 ? "3rd" : `${depth}th`;
 }
+
+/** "second", "third", … for the opinion a fork at this depth is: the 2nd opinion, 3rd, and so on. */
+export function opinionWord(depth: number): string {
+  return ["", "", "second", "third", "fourth", "fifth"][depth] ?? `${ordinal(depth)}`;
+}
