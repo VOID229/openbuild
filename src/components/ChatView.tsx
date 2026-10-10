@@ -86,7 +86,7 @@ function ThinkButton({ chat }: { chat: Chat }) {
 /** Shown on "2nd" chats: links back to the original chat and the reply that was re-answered. */
 function ForkBanner({ chat }: { chat: Chat }) {
   const original = useStore((s) => s.chats.find((c) => c.id === chat.forkOf));
-  const { selectChat, setSearchFocus } = useStore.getState();
+  const { selectChat } = useStore.getState();
   const depth = chatDepth(chat);
   return (
     <div className="fork-banner">
@@ -99,11 +99,7 @@ function ForkBanner({ chat }: { chat: Chat }) {
             className="fork-link"
             data-tooltip="Open the original chat at the forked reply"
             data-tooltip-side="bottom"
-            onClick={() => {
-              selectChat(original.id);
-              // Scroll to and flash the reply this chat re-answered.
-              if (chat.forkMessageId) setSearchFocus({ chatId: original.id, messageId: chat.forkMessageId, words: [] });
-            }}
+            onClick={() => selectChat(original.id)}
           >
             <GitFork size={13} />
             <span>{original.title}</span>
