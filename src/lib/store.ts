@@ -313,7 +313,11 @@ export const useStore = create<State>()(
       setChats: (chats) => set({ chats, chatsLoaded: true }),
       updateChat: (id, patch) => {
         let updated: Chat | undefined;
-        set((s) => ({ chats: s.chats.map((c) => (c.id === id ? (updated = { ...c, ...patch }) : c)) }));
+        set((s) => ({
+          chats: s.chats.map((c) => (c.id === id ? (updated = { ...c, ...patch }) : c)),
+          // Archiving the chat you're on leaves you on a new (empty) chat.
+          ...(patch.archived && s.activeChatId === id ? { activeChatId: undefined, searchFocus: undefined } : {}),
+        }));
         if (updated) void saveChat(updated);
       },
       setSearchFocus: (searchFocus) => set({ searchFocus }),
