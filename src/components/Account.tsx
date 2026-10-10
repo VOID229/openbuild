@@ -1,7 +1,7 @@
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useConvexAuth, useQuery } from "convex/react";
+import { useConvexAuth } from "convex/react";
 import { CircleHelp, LockKeyhole } from "lucide-react";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -21,6 +21,7 @@ import {
 } from "../lib/cloud";
 import { deriveCredentials, MIN_PASSWORD, type Credentials, normalizeUsername, USERNAME_RULE } from "../lib/cloud/crypto";
 import { usingFallbackStorage } from "../lib/kv";
+import { useCachedAsync, useCachedQuery } from "../lib/settingsCache";
 import { useStore } from "../lib/store";
 import { Spinner, Toggle } from "./primitives";
 
@@ -50,7 +51,8 @@ export function AccountSection() {
 
 function AccountPanel() {
   const { isLoading, isAuthenticated } = useConvexAuth();
-  const account = useAccount();
+  // Cached so coming back to this section shows the account straight away, not a spinner.
+  const account = useCachedQuery(api.sync.me, isAuthenticated ? {} : "skip");
   const status = useCloud((s) => s.status);
   if (isLoading || (isAuthenticated && account === undefined)) return <Spinner size={16} />;
   if (!isAuthenticated || !account) return <SignInForm />;
@@ -60,12 +62,7 @@ function AccountPanel() {
 
 /** Face ID unlock state for an account on this device; undefined while it's being read. */
 export function usePasskeyState(username: string | undefined) {
-  const [state, setState] = useState<Awaited<ReturnType<typeof passkeyState>>>();
-  const refresh = useCallback(() => {
-    if (username) void passkeyState(username).then(setState);
-  }, [username]);
-  useEffect(refresh, [refresh]);
-  return [state, refresh] as const;
+  return useCachedAsync(username, passkeyState);
 }
 
 /** "Unlock with Face ID", for a locked account that has it set up on this device. */
@@ -678,10 +675,9 @@ function SyncKeysSetting() {
 
 /** Settings → Account → Devices: everywhere this account is signed in, and signing others out. */
 function DevicesSetting() {
-  const list = useQuery(api.devices.list);
+  const list = useCachedQuery(api.devices.list, {});
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
-  if (!list) return null;
 
   const remove = async (id: string) => {
     setBusy(id);
@@ -701,14 +697,14 @@ function DevicesSetting() {
         <div className="setting-label">
           Devices
           <span className="caption">
-            {list.devices.length} of {list.max}
+            {list ? `${list.devices.length} of ${list.max}` : null}
           </span>
         </div>
         <p className="setting-desc">
-          An account can be signed in on up to {list.max} devices. To use a new one, sign one of these out. Devices that go unused for a
+          An account can be signed in on up to {list?.max ?? "…"} devices. To use a new one, sign one of these out. Devices that go unused for a
           month are signed out on their own.
         </p>
-        <DeviceRows devices={list.devices} busy={busy} action="Sign out" onAction={(id) => void remove(id)} />
+        <DeviceRows devices={list?.devices ?? []} busy={busy} action="Sign out" onAction={(id) => void remove(id)} />
         {error && (
           <p className="account-error" role="alert">
             {error}

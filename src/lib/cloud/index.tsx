@@ -7,6 +7,7 @@ import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { config } from "../runtime";
 import { useStore } from "../store";
+import { useCachedAsync, useCachedQuery } from "../settingsCache";
 import { usingFallbackStorage } from "../kv";
 import { createDataKey, unwrapDataKey, type Credentials } from "./crypto";
 import { canSetUpPasskey, confirmPasskey, loadPasskey, rememberSession, removePasskey, setUpPasskey, unlockWithPasskey } from "./passkey";
@@ -145,6 +146,12 @@ export function CloudSync() {
   const username = account?.username;
   const hasVault = !!account?.vault;
   const lastUsername = useRef<string>(undefined);
+
+  // Warm what Settings → Account shows, from launch on, so opening that section has it ready. These
+  // use the same queries and args as the section, so it reads the cached values straight away.
+  useCachedQuery(api.sync.me, isAuthenticated ? {} : "skip");
+  useCachedQuery(api.devices.list, username ? {} : "skip");
+  useCachedAsync(username, passkeyState);
 
   // Ask for other devices' drafts as soon as this device is signed in, alongside the account check,
   // instead of after it: the sync engine's subscription to the same query then starts with the result.
