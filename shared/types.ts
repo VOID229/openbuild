@@ -154,6 +154,13 @@ export interface SearchResultLink {
   url: string;
 }
 
+/** The model that condenses web search results before the chat model sees them ("efficient web search"). */
+export interface SearchDigestModel {
+  plan: PlanId;
+  model: string;
+  effort: Effort;
+}
+
 export interface ChatRequest {
   plan: PlanId;
   model: string;
@@ -165,6 +172,8 @@ export interface ChatRequest {
   search?: SearchCredentials[];
   /** Run the reply apart from this request, so it can be picked back up (see shared/replies.ts). */
   stream?: { id: string; key?: string };
+  /** Condense each search's results with this model, and send the chat model only the digest. */
+  digest?: SearchDigestModel;
 }
 
 /** NDJSON events streamed from /api/chat to the client. */
@@ -183,6 +192,8 @@ export type StreamEvent =
       status: "running" | "done" | "error";
       results?: SearchResultLink[];
       error?: string;
+      /** The results were condensed by the digest model before the chat model saw them. */
+      digested?: boolean;
     }
   | { t: "done"; finish?: string; usage?: { input?: number; output?: number } }
   /** The reply is over (after done, an error, or a stop). A stream that ends without it was cut off. */

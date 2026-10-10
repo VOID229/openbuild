@@ -1,5 +1,5 @@
 import type { ModelInfo, PlanId } from "../../shared/types";
-import type { Detection, ModelRef, NamedModel, PriorityEntry, Selection, Settings } from "./types";
+import type { Detection, ModelRef, NamedModel, NamingModel, PriorityEntry, Selection, Settings } from "./types";
 
 import claude from "../assets/brands/claude-color.svg" with { type: "text" };
 import gemini from "../assets/brands/gemini-color.svg" with { type: "text" };
@@ -112,6 +112,14 @@ export function fastTarget(detection: Partial<Record<PlanId, Detection>>, settin
   const pool = candidates(detection, settings.avoid, preferPlan);
   const tagged = settings.prioritize.filter((p) => p.tag === "Speed");
   return pick(pool, tagged, FAST_PREFERENCE, (c) => isFastModel(c.model, settings));
+}
+
+/** The model that condenses web search results: the one picked in Settings if usable, else the fastest. */
+export function digestModel(detection: Partial<Record<PlanId, Detection>>, settings: Settings): NamingModel | undefined {
+  const picked = settings.searchDigest.model;
+  if (picked && findModel(detection, picked) && settings.keys[picked.plan]?.length) return picked;
+  const fast = fastTarget(detection, settings);
+  return fast && settings.keys[fast.plan]?.length ? { ...fast, effort: "low" } : undefined;
 }
 
 /** Higher-quality model used by "think harder" and by the router for complex prompts. */

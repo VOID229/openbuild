@@ -2,7 +2,7 @@ import { ArrowUp, Check, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, P
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
-import { fastTarget, findModel, isFastModel } from "../lib/models";
+import { digestModel, fastTarget, findModel, isFastModel } from "../lib/models";
 import { parseModelQuery, scoreModel } from "../lib/modelSearch";
 import { isHosted } from "../lib/runtime";
 import { useStore, type SettingsSection } from "../lib/store";
@@ -743,6 +743,80 @@ function SearchSection() {
           </>
         )}
       </p>
+      <SearchDigest />
+    </>
+  );
+}
+
+function SearchDigest() {
+  const digest = useStore((s) => s.settings.searchDigest);
+  const detection = useStore((s) => s.detection);
+  const settings = useStore((s) => s.settings);
+  const update = useStore((s) => s.updateSettings);
+  const plans = KEY_ORDER.filter((p) => detection[p]?.models.length);
+  const setModel = (model: NamingModel | undefined) => update({ searchDigest: { ...digest, model } });
+  const picked = digest.model;
+  const pickedModel = findModel(detection, picked);
+  const fallback = digestModel(detection, { ...settings, searchDigest: { ...digest, model: undefined } });
+  const fallbackName = findModel(detection, fallback)?.name;
+
+  const choose = () => {
+    if (!fallback) return;
+    const model = findModel(detection, fallback);
+    setModel({ plan: fallback.plan, id: fallback.id, effort: nearestEffort(model?.reasoning.efforts ?? [], "low") ?? "low" });
+  };
+
+  return (
+    <>
+      <div className="setting-row setting-row-top setting-row-divided">
+        <div className="setting-text">
+          <div className="setting-label">Efficient web search</div>
+          <p className="setting-desc">
+            A separate model reads each search's full results and writes a dense summary with sources; the chat model only sees that summary. Long
+            chats stay cheaper and keep more room for the conversation. Short results are passed on as they are.
+          </p>
+        </div>
+        <Toggle checked={digest.enabled} onChange={(v) => update({ searchDigest: { ...digest, enabled: v } })} label="Efficient web search" />
+      </div>
+      <div className={cx("router-config", !digest.enabled && "router-config-hidden")} inert={!digest.enabled}>
+        <div className="router-config-inner">
+          <div className="naming-list">
+            {picked ? (
+              <div className="naming-row">
+                <ModelSelect
+                  label="Summarizing model"
+                  value={picked}
+                  onChange={(ref) => {
+                    const next = findModel(detection, ref);
+                    setModel({ ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], picked.effort) ?? picked.effort });
+                  }}
+                />
+                <EffortSelect
+                  label="Reasoning for the summarizing model"
+                  levels={pickedModel?.reasoning.efforts ?? []}
+                  value={nearestEffort(pickedModel?.reasoning.efforts ?? [], picked.effort) ?? picked.effort}
+                  onChange={(effort) => setModel({ ...picked, effort })}
+                />
+                <span className="naming-actions">
+                  <IconButton label="Use the fastest model" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModel(undefined)}>
+                    <Trash2 size={14} />
+                  </IconButton>
+                </span>
+              </div>
+            ) : (
+              <p className="naming-empty">
+                {fallbackName ? `Using the fastest available model (${fallbackName}). Choose a model to pick which one summarizes.` : "Add an API key to choose a summarizing model."}
+              </p>
+            )}
+            {picked && !pickedModel && <p className="naming-empty">This model isn't available right now, so the fastest available model is used.</p>}
+            {!picked && (
+              <button type="button" className="add-key" disabled={!plans.length} onClick={choose}>
+                <Plus size={14} /> choose model
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </>
   );
 }

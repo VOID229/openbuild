@@ -1,8 +1,9 @@
 // Request handling shared by the local Bun server (server/index.ts) and the hosted Vercel
 // functions (server/vercel/*). Only where API keys come from differs: the local server reads them
 // from the OS keychain, the hosted relay receives them with each request and keeps nothing.
-import { PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
+import { EFFORTS, PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
+import { searchDigest } from "./digest";
 import { describeModels, detectModels } from "./catalog";
 import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
 import { checkSearch, searchToolkit } from "./search";
@@ -14,6 +15,8 @@ const isSearchList = (s: unknown): s is SearchCredentials[] =>
   Array.isArray(s) &&
   s.length <= 10 &&
   s.every((c) => c && typeof c.provider === "string" && c.provider in SEARCH_PROVIDERS && (SEARCH_PROVIDERS[c.provider as keyof typeof SEARCH_PROVIDERS].credential === "key" ? c.keys === undefined : isKeyList(c.keys)));
+
+const isDigest = (d: any) => d && isPlan(d.plan) && typeof d.model === "string" && d.model.length < 256 && EFFORTS.includes(d.effort);
 
 export const bad = (error: string, status = 400) => Response.json({ error }, { status });
 
@@ -75,7 +78,7 @@ export async function handleSearchCheck(provider: unknown, credential: string | 
 
 /** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. `signal` stops it. */
 export async function handleChat(signal: AbortSignal, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean } = {}): Promise<Response> {
-  if (!body || !isPlan(body.plan) || typeof body.model !== "string" || !validateMessages(body.messages) || (body.search !== undefined && !isSearchList(body.search))) {
+  if (!body || !isPlan(body.plan) || typeof body.model !== "string" || !validateMessages(body.messages) || (body.search !== undefined && !isSearchList(body.search)) || (body.digest !== undefined && !isDigest(body.digest))) {
     return bad("Malformed chat request");
   }
   const keys = await keysFor(body.plan);
@@ -103,6 +106,7 @@ export async function handleChat(signal: AbortSignal, body: ChatRequest | undefi
     sessionId: String(body.sessionId || crypto.randomUUID()).slice(0, 128),
     system: system || undefined,
   };
+  const digest = search && body.digest ? await searchDigest(body.digest, await keysFor(body.digest.plan), request) : undefined;
   const tools = search && { tools: search.specs, extra: [] };
   const label = PLANS[body.plan].label;
   const notices: StreamEvent[] = [];
@@ -124,7 +128,7 @@ export async function handleChat(signal: AbortSignal, body: ChatRequest | undefi
       return ndjsonResponse([...notices, { t: "error", message }]);
     }
     if (res.ok && res.body) {
-      const stream = streamReply(model, { ...request, key }, res, signal, { prelude: notices, label, search });
+      const stream = streamReply(model, { ...request, key }, res, signal, { prelude: notices, label, search, digest });
       return new Response(stream, { headers: ndjson });
     }
 

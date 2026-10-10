@@ -50,9 +50,9 @@ export async function verifySearch(provider: SearchProviderId, entry: string, si
   }
 }
 
-/** Hosted site: the keys a chat request needs (its plan's, and key-based search providers'). */
+/** Hosted site: the keys a chat request needs (its plan's, the digest model's plan's, and key-based search providers'). */
 async function secretsFor(req: ChatRequest): Promise<Record<string, string[]>> {
-  const scopes = [req.plan, ...(req.search ?? []).filter((c) => SEARCH_PROVIDERS[c.provider].credential === "key").map((c) => c.provider)];
+  const scopes = new Set<string>([req.plan, ...(req.digest ? [req.digest.plan] : []), ...(req.search ?? []).filter((c) => SEARCH_PROVIDERS[c.provider].credential === "key").map((c) => c.provider)]);
   const secrets: Record<string, string[]> = {};
   for (const scope of scopes) {
     const list = await browserSecrets(scope);

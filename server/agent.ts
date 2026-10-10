@@ -1,7 +1,9 @@
 // Streams a chat reply as NDJSON StreamEvents. When web search is configured, runs the tool
 // loop: the model calls search tools, OpenChat runs them and sends the results back, until
-// the model answers (or the round limit forces a final answer).
-import type { ChatRequest, ModelInfo, StreamEvent } from "../shared/types";
+// the model answers (or the round limit forces a final answer). With a digest model set, each
+// search's results are condensed by that model first, and the chat model only sees the digest.
+import { SEARCH_PROVIDERS, type ChatRequest, type ModelInfo, type StreamEvent } from "../shared/types";
+import type { Digest } from "./digest";
 import { buildUpstream, finishTurn, readTurn, toolResults, upstreamError, type ToolOptions } from "./opencode";
 import type { SearchToolkit } from "./search";
 
@@ -12,7 +14,7 @@ export function streamReply(
   request: ChatRequest & { key: string },
   first: Response,
   signal: AbortSignal,
-  opts: { prelude: StreamEvent[]; label: string; search?: SearchToolkit },
+  opts: { prelude: StreamEvent[]; label: string; search?: SearchToolkit; digest?: Digest },
 ): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
   return new ReadableStream({
@@ -75,8 +77,18 @@ export function streamReply(
               } catch {}
               send({ t: "search", id, provider, query, status: "running" });
               const r = await opts.search!.run(c.name, c.args, signal);
-              send({ t: "search", id, provider: r.provider, query: r.query, status: r.error ? "error" : "done", results: r.links, error: r.error });
-              return r.text;
+              const digest = opts.digest && (await opts.digest(r, SEARCH_PROVIDERS[r.provider].label, signal));
+              send({
+                t: "search",
+                id,
+                provider: r.provider,
+                query: r.query,
+                status: r.error ? "error" : "done",
+                results: r.links,
+                error: r.error,
+                digested: digest ? true : undefined,
+              });
+              return digest ? `Digest of the search results (condensed by another model; search again with a more specific query if you need more detail):\n\n${digest}` : r.text;
             }),
           );
           tools.extra.push(...assistant, ...toolResults(model.protocol, calls, outputs));

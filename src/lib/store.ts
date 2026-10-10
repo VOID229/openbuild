@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   keys: {},
   webSearch: true,
   search: {},
+  searchDigest: { enabled: true },
   effort: "medium",
   naming: { enabled: true, models: [] },
   syncApiKeys: false,
@@ -404,6 +405,7 @@ export const useStore = create<State>()(
             ...p.settings,
             profile: { ...DEFAULT_SETTINGS.profile, ...p.settings?.profile },
             naming: { ...DEFAULT_SETTINGS.naming, ...p.settings?.naming },
+            searchDigest: { ...DEFAULT_SETTINGS.searchDigest, ...p.settings?.searchDigest },
           },
         };
       },

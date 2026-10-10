@@ -1,8 +1,8 @@
 import { newStreamKey, type ReplyStream } from "../../shared/replies";
-import { SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentials, type SearchProviderId, type WireMessage } from "../../shared/types";
+import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type ModelInfo, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type WireMessage } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
-import { findModel, isAuto, routePrompt } from "./models";
+import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
 import { canResume, replyHost } from "./runtime";
 import { selectionFor, useStore } from "./store";
@@ -43,6 +43,15 @@ function searchCredentials(settings: Settings): SearchCredentials[] | undefined 
     .filter(([, keys]) => keys?.length)
     .map(([provider, keys]) => ({ provider, keys: SEARCH_PROVIDERS[provider as SearchProviderId].credential === "url" ? keys : undefined }) as SearchCredentials);
   return list.length ? list : undefined;
+}
+
+/** Efficient web search: the model that condenses search results, when it's on and one is usable. */
+function searchDigest(settings: Settings, detection: Parameters<typeof digestModel>[0]): SearchDigestModel | undefined {
+  if (!settings.searchDigest.enabled) return undefined;
+  const ref = digestModel(detection, settings);
+  const model = findModel(detection, ref);
+  if (!ref || !model) return undefined;
+  return { plan: ref.plan, model: ref.id, effort: nearestEffort(model.reasoning.efforts, ref.effort) ?? ref.effort };
 }
 
 function toWire(history: Message[], input: string[]): WireMessage[] {
@@ -297,6 +306,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
           sessionId: chatId,
           messages: toWire(chat.messages.slice(0, index), model!.input),
           search,
+          digest: search ? searchDigest(st.settings, st.detection) : undefined,
         };
     for await (const ev of streamChat(request, stream, startedAt, ctrl.signal)) {
       if (ev.t === "reset") {

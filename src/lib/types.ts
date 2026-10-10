@@ -51,6 +51,11 @@ export interface Settings {
   webSearch: boolean;
   /** Saved key ids per search provider in priority order (SearXNG: instance URLs, which aren't secret). */
   search: Partial<Record<SearchProviderId, string[]>>;
+  /**
+   * Efficient web search: a separate model condenses each search's results and the chat model only
+   * sees that digest. No model means the fastest available one.
+   */
+  searchDigest: { enabled: boolean; model?: NamingModel };
   /** Automatic chat titles; an empty model list means "fastest available model". */
   naming: { enabled: boolean; models: NamingModel[] };
   /** Account sync: also sync API keys (end-to-end encrypted). Off unless turned on. */
@@ -84,6 +89,8 @@ export interface SearchCall {
   status: "running" | "done" | "error";
   results?: SearchResultLink[];
   error?: string;
+  /** The results were condensed by the digest model. */
+  digested?: boolean;
 }
 
 export interface Message {

@@ -73,7 +73,7 @@ function SearchRow({ call }: { call: SearchCall }) {
         <span className="search-provider">{label}</span>
         <span className={cx("search-query", call.status === "running" && "shimmer")}>{call.query || "…"}</span>
         <span className={cx("search-meta", call.status === "error" && "bad")}>
-          {call.status === "running" ? "searching" : call.status === "error" ? (call.error ?? "failed") : `${call.results?.length ?? 0} results`}
+          {call.status === "running" ? "searching" : call.status === "error" ? (call.error ?? "failed") : `${call.results?.length ?? 0} results${call.digested ? " · summarized" : ""}`}
         </span>
       </div>
       {call.results?.length ? (
