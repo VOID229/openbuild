@@ -3257,9 +3257,26 @@ svg {
 }
 
 .key-label {
-  padding-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
   font-size: 14px;
   font-weight: 550;
+}
+
+/* Show more / show fewer for a list of two or more keys, beside the provider name. */
+.key-more {
+  width: 24px;
+  height: 24px;
+  margin-left: -2px;
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+  .key-more:hover {
+    color: var(--text);
+  }
 }
 
 .key-fields {
@@ -3770,7 +3787,7 @@ p.key-status svg {
 
   .key-label {
     grid-column: 1 / -1;
-    padding-top: 0;
+    min-height: 0;
   }
 
   .key-actions,

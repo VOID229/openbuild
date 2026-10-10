@@ -1,4 +1,4 @@
-import { ArrowUp, Check, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, Plus, RefreshCw, Settings2, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, Plus, RefreshCw, Settings2, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
@@ -540,16 +540,37 @@ interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | 
   onRetry?: (key: string) => void;
 }
 
-/** An ordered list of keys (primary first, then fallbacks) with "add more". */
+/** An ordered list of keys (primary first, then fallbacks) with "add more". Two or more collapse to the primary behind a chevron. */
 function KeyList({ keys, setKeys, autoFocus, statusOf, onRetry, ...field }: KeyListProps) {
   const [adding, setAdding] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const collapsible = keys.length > 1;
+  const open = expanded || !collapsible;
+  const shown = open ? keys : keys.slice(0, 1);
   const total = keys.length + (adding ? 1 : 0);
   const saved: KeyEdit[] = keys.map((id) => ({ id }));
+  const toggle = () => {
+    setAdding(false);
+    setExpanded((v) => !v);
+  };
   return (
     <div className="key-row">
-      <div className="key-label">{field.label}</div>
+      <div className="key-label">
+        <span>{field.label}</span>
+        {collapsible && (
+          <IconButton
+            label={open ? `Hide ${field.label} fallback keys` : `Show ${keys.length - 1} more ${field.label} keys`}
+            tooltipSide="right"
+            className="key-more"
+            aria-expanded={open}
+            onClick={toggle}
+          >
+            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+          </IconButton>
+        )}
+      </div>
       <div className="key-fields">
-        {keys.map((k, i) => (
+        {shown.map((k, i) => (
           <KeyField
             key={keyId(k)}
             {...field}
@@ -577,7 +598,7 @@ function KeyList({ keys, setKeys, autoFocus, statusOf, onRetry, ...field }: KeyL
             onCancel={keys.length ? () => setAdding(false) : undefined}
           />
         )}
-        {keys.length > 0 && !adding && (
+        {open && keys.length > 0 && !adding && (
           <button type="button" className="add-key" onClick={() => setAdding(true)}>
             <Plus size={13} /> add more
           </button>
