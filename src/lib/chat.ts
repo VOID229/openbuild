@@ -2,6 +2,7 @@ import { newStreamKey, type ReplyStream } from "../../shared/replies";
 import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type WireMessage } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
+import { chatDepth, MAX_FORK_DEPTH } from "./forks";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
 import { canResume, replyHost } from "./runtime";
@@ -156,13 +157,14 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
 /**
  * "2nd": copy the conversation up to (not including) an assistant reply into a new chat and
  * answer that same user turn with another model. The original chat is left untouched.
+ * Forks can be forked again, up to MAX_FORK_DEPTH ("5th").
  */
 export function forkWithModel(chatId: string, messageId: string, ref: ModelRef & { effort?: Effort }) {
   const st = useStore.getState();
   const chat = st.chats.find((c) => c.id === chatId);
   const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
   const model = findModel(st.detection, ref);
-  if (!chat || index < 1) return;
+  if (!chat || index < 1 || chatDepth(chat) >= MAX_FORK_DEPTH) return;
   if (!model) {
     st.openSettings("keys");
     return;
@@ -185,6 +187,7 @@ export function forkWithModel(chatId: string, messageId: string, ref: ModelRef &
     titleSource: "auto",
     forkOf: chat.id,
     forkMessageId: messageId,
+    forkDepth: chatDepth(chat) + 1,
     createdAt: now,
     updatedAt: now,
     messages: [...history, assistant],

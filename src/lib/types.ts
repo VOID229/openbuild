@@ -131,4 +131,6 @@ export interface Chat {
   forkOf?: string;
   /** …and the reply in that chat they re-answer. */
   forkMessageId?: string;
+  /** 2 for a "2nd" chat, 3 for "3rd", up to 5. Missing on older forks, which are all 2nd. */
+  forkDepth?: number;
 }

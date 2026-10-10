@@ -3,6 +3,7 @@ import { SEARCH_PROVIDERS, type Effort } from "../../shared/types";
 import { memo, useEffect, useRef, useState } from "react";
 import { forkWithModel, regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
+import { chatDepth, MAX_FORK_DEPTH, ordinal } from "../lib/forks";
 import { findModel } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { Message, ModelRef, SearchCall } from "../lib/types";
@@ -168,6 +169,12 @@ export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: st
   const [picked, setPicked] = useState<ModelRef>();
   const anchor = useRef<HTMLButtonElement>(null);
   const detection = useStore((s) => s.detection);
+  const depth = useStore((s) => {
+    const chat = s.chats.find((c) => c.id === chatId);
+    return chat ? chatDepth(chat) : 1;
+  });
+  // A 5th opinion is the last one: no more forks from it.
+  if (depth >= MAX_FORK_DEPTH) return null;
   const model = picked ? findModel(detection, picked) : undefined;
   const levels = model?.reasoning.efforts ?? [];
   // Toggle-only models (thinking on/off, no levels): "medium" means "on, at the model's default".
@@ -189,7 +196,7 @@ export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: st
         data-tooltip-side="top"
         onClick={() => (open ? close() : setOpen(true))}
       >
-        2nd
+        {ordinal(depth + 1)}
       </button>
       <Popover open={open} onClose={close} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Answer with" fixed="auto">
         {picked && model ? (

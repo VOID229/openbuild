@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUpRight, GitFork, Lightbulb, Zap } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { regenerate } from "../lib/chat";
+import { chatDepth, ordinal } from "../lib/forks";
 import { fold } from "../lib/search";
 import { fastTarget, findModel, isFastModel, qualityTarget } from "../lib/models";
 import { useStore } from "../lib/store";
@@ -86,12 +87,13 @@ function ThinkButton({ chat }: { chat: Chat }) {
 function ForkBanner({ chat }: { chat: Chat }) {
   const original = useStore((s) => s.chats.find((c) => c.id === chat.forkOf));
   const { selectChat, setSearchFocus } = useStore.getState();
+  const depth = chatDepth(chat);
   return (
     <div className="fork-banner">
-      <span className="badge badge-second">2nd</span>
+      <span className="badge badge-second">{ordinal(depth)}</span>
       {original ? (
         <>
-          <span>Second opinion of</span>
+          <span>{depth === 2 ? "Second opinion of" : `${ordinal(depth)} opinion of`}</span>
           <button
             type="button"
             className="fork-link"

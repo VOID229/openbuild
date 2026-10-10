@@ -1,6 +1,7 @@
 import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
+import { chatDepth, ordinal } from "../lib/forks";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
@@ -185,8 +186,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           </span>
           <span className="history-title-text">{hit ? <Highlight text={chat.title} ranges={hit.titleRanges} /> : chat.title}</span>
           {chat.forkOf && (
-            <span className="badge badge-second" title="Second opinion forked from another chat">
-              2nd
+            <span className="badge badge-second" title="Opinion forked from another chat">
+              {ordinal(chatDepth(chat))}
             </span>
           )}
           {hit && chat.archived && <span className="badge">archived</span>}
