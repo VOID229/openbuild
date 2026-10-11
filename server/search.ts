@@ -1,7 +1,8 @@
 // Web search tools. Each configured provider becomes its own tool, with a description that
 // tells the model what that provider is good at, so it can pick the right one per query.
-import { SEARCH_PROVIDERS, type SearchCheckResult, type SearchCredentials, type SearchProviderId, type SearchResultLink } from "../shared/types";
+import { SEARCH_PROVIDERS, type SearchCheckResult, type SearchCredentials, type SearchProviderId, type SearchResultLink, type ToolId } from "../shared/types";
 import { USER_AGENT } from "./opencode";
+import { FETCH_SPEC, FETCH_TOOL, fetchPage, toolFor } from "./fetch";
 
 type Json = Record<string, unknown>;
 
@@ -13,7 +14,7 @@ export interface ToolSpec {
 }
 
 export interface SearchOutcome {
-  provider: SearchProviderId;
+  provider: ToolId;
   query: string;
   /** What the model sees. */
   text: string;
@@ -452,6 +453,16 @@ export async function checkSearch(id: SearchProviderId, credential: string, sign
 }
 
 const toolName = (id: SearchProviderId) => `search_${id}`;
+const urlArg = (rawArgs: string) => {
+  try {
+    const url = JSON.parse(rawArgs || "{}").url;
+    return typeof url === "string" ? url.trim() : "";
+  } catch {
+    return "";
+  }
+};
+/** Whether a tool is a search provider (rather than a page read). */
+export const isSearchTool = (t: ToolId): t is SearchProviderId => t in SEARCH_PROVIDERS;
 const providerOf = (name: string) => (Object.keys(PROVIDERS) as SearchProviderId[]).find((id) => toolName(id) === name);
 
 function clip(s: string | undefined, max: number) {
@@ -490,54 +501,76 @@ export interface SearchToolkit {
   specs: ToolSpec[];
   /** System prompt section explaining the tools and when to use which. */
   guidance: string;
-  /** The configured provider behind a tool name, if any. */
-  providerFor(name: string): SearchProviderId | undefined;
+  /** The tool a call runs as (for display), if any. Page reads are "fetch", or "github" for GitHub URLs. */
+  providerFor(name: string, rawArgs: string): ToolId | undefined;
   run(name: string, rawArgs: string, signal: AbortSignal): Promise<SearchOutcome>;
 }
 
-export function searchToolkit(creds: SearchCredentials[]): SearchToolkit | undefined {
+/**
+ * The tools a model may call in a chat turn: one search tool per configured provider, plus the
+ * page reader, which needs no provider. `hosted` restricts the reader to public addresses.
+ */
+export function searchToolkit(creds: SearchCredentials[], opts: { hosted?: boolean; githubToken?: string } = {}): SearchToolkit {
   const configured = new Map<SearchProviderId, string[]>();
   for (const c of creds) if (PROVIDERS[c.provider] && c.keys?.length) configured.set(c.provider, c.keys);
-  if (!configured.size) return undefined;
   const ids = [...configured.keys()].sort((a, b) => PROVIDERS[a].cost - PROVIDERS[b].cost);
 
-  const specs = ids.map((id) => ({
-    name: toolName(id),
-    description: `${SEARCH_PROVIDERS[id].label}: ${PROVIDERS[id].description}`,
-    parameters: { type: "object", properties: PROVIDERS[id].properties, required: ["query"] },
-  }));
-
-  const lines = [
-    "## Web search",
-    `You can search the web with these tools: ${ids.map(toolName).join(", ")}.`,
-    "Search when the answer depends on current events, recent releases, prices, live facts, or specifics you aren't sure about. Don't search for things you already know well (general knowledge, writing, coding help, math).",
+  const specs: ToolSpec[] = [
+    ...ids.map((id) => ({
+      name: toolName(id),
+      description: `${SEARCH_PROVIDERS[id].label}: ${PROVIDERS[id].description}`,
+      parameters: { type: "object", properties: PROVIDERS[id].properties, required: ["query"] },
+    })),
+    FETCH_SPEC,
   ];
-  if (ids.length > 1) {
-    lines.push("Pick the tool that fits the task (best first):");
-    for (const r of ROUTING) {
-      const order = r.order.filter((id) => configured.has(id));
-      if (order.length) lines.push(`- ${r.task}: ${order.map(toolName).join(" > ")}`);
+
+  const lines: string[] = [];
+  if (ids.length) {
+    lines.push(
+      "## Web search",
+      `You can search the web with these tools: ${ids.map(toolName).join(", ")}.`,
+      "Search when the answer depends on current events, recent releases, prices, live facts, or specifics you aren't sure about. Don't search for things you already know well (general knowledge, writing, coding help, math).",
+    );
+    if (ids.length > 1) {
+      lines.push("Pick the tool that fits the task (best first):");
+      for (const r of ROUTING) {
+        const order = r.order.filter((id) => configured.has(id));
+        if (order.length) lines.push(`- ${r.task}: ${order.map(toolName).join(" > ")}`);
+      }
+      lines.push("Prefer cheaper, faster tools for easy questions and save the deep tools for questions that need them. If one tool fails or returns poor results, try another.");
     }
-    lines.push("Prefer cheaper, faster tools for easy questions and save the deep tools for questions that need them. If one tool fails or returns poor results, try another.");
+    lines.push(
+      "You can run several searches, in parallel when they are independent, and refine queries based on what you find. Use specific queries.",
+      "Base your answer on the results and cite sources inline as Markdown links, e.g. [Source title](https://example.com). Never invent URLs.",
+    );
   }
   lines.push(
-    "You can run several searches, in parallel when they are independent, and refine queries based on what you find. Use specific queries.",
-    "Base your answer on the results and cite sources inline as Markdown links, e.g. [Source title](https://example.com). Never invent URLs.",
+    "## Reading pages",
+    `You can read a specific web page with ${FETCH_TOOL}, given its URL. It returns the page as text (GitHub file links return the raw file). Use it when the user gives a URL, or when you need the contents of a particular page such as docs, a README or a source file. Only fetch URLs the user gave you, that appeared in results, or that you are certain exist.`,
   );
 
   return {
     specs,
     guidance: lines.join("\n"),
-    providerFor: (name) => {
+    providerFor: (name, rawArgs) => {
+      if (name === FETCH_TOOL) return toolFor(urlArg(rawArgs));
       const id = providerOf(name);
       return id && configured.has(id) ? id : undefined;
     },
     async run(name, rawArgs, signal) {
-      const id = providerOf(name);
       let args: Args = {};
       try {
         args = rawArgs.trim() ? JSON.parse(rawArgs) : {};
       } catch {}
+      if (name === FETCH_TOOL) {
+        const url = urlArg(rawArgs);
+        const provider = toolFor(url);
+        if (!url) return { provider, query: url, text: "Error: a non-empty `url` argument is required.", links: [], error: "Missing url" };
+        const page = await fetchPage(url, signal, { hosted: opts.hosted, githubToken: opts.githubToken });
+        if (page.error) return { provider, query: url, text: `Error: ${page.error}`, links: [], error: page.error };
+        return { provider, query: url, text: `Contents of ${page.url}:\n\n${page.text}`, links: [{ title: page.url, url: page.url }] };
+      }
+      const id = providerOf(name);
       const q = typeof args.query === "string" ? args.query.trim() : "";
       const keys = id && configured.get(id);
       if (!id || !keys) return { provider: id ?? "searxng", query: q, text: `Error: unknown tool ${name}.`, links: [], error: "Unknown tool" };

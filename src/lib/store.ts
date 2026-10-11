@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { detectModels, verifySearch } from "./api";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   keys: {},
   webSearch: true,
   search: {},
+  github: [],
   searchDigest: { enabled: true },
   effort: "medium",
   naming: { enabled: true, models: [] },
@@ -70,6 +71,8 @@ interface State {
   setKeys: (plan: PlanId, keys: KeyEdit[]) => Promise<void>;
   /** Replace a search provider's ordered key list; for instance URLs (`{ id: url }` / `{ secret: url }`) it's kept locally. */
   setSearchKeys: (provider: SearchProviderId, keys: KeyEdit[]) => Promise<void>;
+  /** Replace the saved GitHub tokens (fallbacks in order). The secrets go to the server's vault. */
+  setGithubKeys: (keys: KeyEdit[]) => Promise<void>;
   /** Load the saved key ids from the server, first moving any keys a previous version left in this browser. */
   syncKeys: () => Promise<void>;
   toggleSection: (section: keyof SidebarSections) => void;
@@ -166,6 +169,15 @@ export const useStore = create<State>()(
         void get().verifySearch(provider);
       },
 
+      setGithubKeys: async (edits) => {
+        try {
+          const list = await saveKeys(GITHUB_SCOPE, edits);
+          set((s) => ({ keysError: undefined, settings: { ...s.settings, github: list } }));
+        } catch (err) {
+          set({ keysError: (err as Error).message });
+        }
+      },
+
       verifySearch: async (provider, only) => {
         const list = get().settings.search[provider] ?? [];
         const statuses = get().searchStatus[provider] ?? {};
@@ -226,7 +238,7 @@ export const useStore = create<State>()(
             const list = p.credential === "url" ? s.settings.search[id as SearchProviderId] : saved[id];
             if (list?.length) search[id as SearchProviderId] = list;
           }
-          return { keyBackend: inventory.backend, settings: { ...s.settings, keys, search } };
+          return { keyBackend: inventory.backend, settings: { ...s.settings, keys, search, github: saved[GITHUB_SCOPE] ?? [] } };
         });
         ensureSelection();
       },

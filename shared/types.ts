@@ -126,6 +126,12 @@ export interface SearchCheckResult {
 }
 
 /** Order of rows in Settings → Web Search. */
+/** The key scope for a GitHub token: it isn't a search provider, but it's stored like one. */
+export const GITHUB_SCOPE = "github";
+
+/** Which tool ran: a search provider, a web page read ("fetch"), or a GitHub read ("github"). */
+export type ToolId = SearchProviderId | "fetch" | "github";
+
 export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x", "youtube"];
 
 /**
@@ -145,7 +151,7 @@ export type KeyEdit = { id: string } | { secret: string };
 export interface KeyInventory {
   /** Where secrets are stored: the OS keychain, a 0600 file when no keychain is available, or (hosted site) this browser. */
   backend: "keychain" | "file" | "browser";
-  /** Entry ids per plan id or key-based search provider id. */
+  /** Entry ids per plan id, key-based search provider id, or the GitHub scope. */
   keys: Record<string, string[]>;
 }
 
@@ -187,7 +193,7 @@ export type StreamEvent =
   | {
       t: "search";
       id: string;
-      provider: SearchProviderId;
+      provider: ToolId;
       query: string;
       status: "running" | "done" | "error";
       results?: SearchResultLink[];

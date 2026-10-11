@@ -5,7 +5,7 @@
 import { SEARCH_PROVIDERS, type ChatRequest, type ModelInfo, type StreamEvent } from "../shared/types";
 import type { Digest } from "./digest";
 import { buildUpstream, finishTurn, readTurn, toolResults, upstreamError, type ToolOptions } from "./opencode";
-import type { SearchToolkit } from "./search";
+import { isSearchTool, type SearchToolkit } from "./search";
 
 const MAX_ROUNDS = 8;
 
@@ -67,17 +67,19 @@ export function streamReply(
 
           const outputs = await Promise.all(
             calls.map(async (c) => {
-              const provider = opts.search!.providerFor(c.name);
+              const provider = opts.search!.providerFor(c.name, c.args);
               if (!provider) return `Error: unknown tool ${c.name}.`;
               // Unique across rounds: some providers number their call ids per response.
               const id = `${round}:${c.id}`;
               let query = "";
               try {
-                query = String(JSON.parse(c.args).query ?? "");
+                const args = JSON.parse(c.args);
+                query = String(isSearchTool(provider) ? (args.query ?? "") : (args.url ?? ""));
               } catch {}
               send({ t: "search", id, provider, query, status: "running" });
               const r = await opts.search!.run(c.name, c.args, signal);
-              const digest = opts.digest && (await opts.digest(r, SEARCH_PROVIDERS[r.provider].label, signal));
+              // The digest condenses search results; page contents go to the model as they are.
+              const digest = opts.digest && isSearchTool(r.provider) && (await opts.digest(r, SEARCH_PROVIDERS[r.provider].label, signal));
               send({
                 t: "search",
                 id,

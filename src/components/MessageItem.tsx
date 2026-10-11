@@ -67,15 +67,37 @@ const hostOf = (url: string) => {
   }
 };
 
+/** Pages are read by fetch_url: plain web pages ("fetch") or GitHub's own hosts ("github"). */
+const isPage = (p: SearchCall["provider"]) => p === "fetch" || p === "github";
+const toolLabel = (p: SearchCall["provider"]) => (p === "fetch" ? "Web page" : p === "github" ? "GitHub" : (SEARCH_PROVIDERS[p]?.label ?? p));
+/** A URL for display: no scheme or "www.", and long paths cut short. */
+const shortUrl = (url: string) => {
+  const s = url.replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/$/, "");
+  return s.length > 72 ? `${s.slice(0, 71)}…` : s;
+};
+
+/** What a running tool call is doing, in plain words: "Searching Exa: …", "Fetching github.com/…". */
+const activity = (call: SearchCall) =>
+  call.provider === "github" ? `Fetching from GitHub: ${shortUrl(call.query)}` : call.provider === "fetch" ? `Fetching ${shortUrl(call.query)}` : `Searching ${toolLabel(call.provider)}: ${call.query}`;
+
 function SearchRow({ call }: { call: SearchCall }) {
-  const label = SEARCH_PROVIDERS[call.provider]?.label ?? call.provider;
+  const label = toolLabel(call.provider);
+  const page = isPage(call.provider);
   return (
     <li className="search-call">
       <div className="search-call-head">
         <span className="search-provider">{label}</span>
-        <span className={cx("search-query", call.status === "running" && "shimmer")}>{call.query || "…"}</span>
+        <span className={cx("search-query", call.status === "running" && "shimmer")}>{page ? shortUrl(call.query) : call.query || "…"}</span>
         <span className={cx("search-meta", call.status === "error" && "bad")}>
-          {call.status === "running" ? "searching" : call.status === "error" ? (call.error ?? "failed") : `${call.results?.length ?? 0} results${call.digested ? " · summarized" : ""}`}
+          {call.status === "running"
+            ? page
+              ? "fetching"
+              : "searching"
+            : call.status === "error"
+              ? (call.error ?? "failed")
+              : page
+                ? `read${call.digested ? " · summarized" : ""}`
+                : `${call.results?.length ?? 0} results${call.digested ? " · summarized" : ""}`}
         </span>
       </div>
       {call.results?.length ? (
@@ -100,9 +122,17 @@ function Searches({ searches }: { searches: SearchCall[] }) {
   const running = searches.filter((s) => s.status === "running");
   const sources = searches.reduce((n, s) => n + (s.results?.length ?? 0), 0);
   const current = running[running.length - 1];
+  const searched = searches.filter((s) => !isPage(s.provider)).length;
+  const pages = searches.filter((s) => s.provider === "fetch" && s.status !== "error").length;
+  const github = searches.filter((s) => s.provider === "github" && s.status !== "error").length;
+  const done = [
+    searched ? `Searched the web${searched > 1 ? ` ${searched} times` : ""}` : "",
+    pages ? `Read ${pages === 1 ? "a page" : `${pages} pages`}` : "",
+    github ? `Read ${github === 1 ? "from GitHub" : `${github} GitHub files`}` : "",
+  ].filter(Boolean);
   const summary = current
-    ? `Searching ${SEARCH_PROVIDERS[current.provider]?.label ?? "the web"}: ${current.query}`
-    : `Searched the web${searches.length > 1 ? ` ${searches.length} times` : ""} · ${sources} source${sources === 1 ? "" : "s"}`;
+    ? activity(current)
+    : `${done.join(" · ") || "Looked things up"}${sources ? ` · ${sources} source${sources === 1 ? "" : "s"}` : ""}`;
   return (
     <div className={cx("reasoning searches", open && "reasoning-open")}>
       <button type="button" className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>

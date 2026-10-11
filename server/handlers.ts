@@ -1,12 +1,13 @@
 // Request handling shared by the local Bun server (server/index.ts) and the hosted Vercel
 // functions (server/vercel/*). Only where API keys come from differs: the local server reads them
 // from the OS keychain, the hosted relay receives them with each request and keeps nothing.
-import { EFFORTS, PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
+import { EFFORTS, GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
 import { searchDigest } from "./digest";
 import { describeModels, detectModels } from "./catalog";
 import { buildUpstream, isKeyFailure, upstreamError, validateMessages } from "./opencode";
 import { checkSearch, searchToolkit } from "./search";
+import { isPublicUrl } from "./fetch";
 
 export const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS;
 export const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
@@ -34,28 +35,7 @@ const ndjsonResponse = (events: StreamEvent[]) => new Response(events.map((e) =>
 /** The secrets for a plan or key-based search provider, in priority order. */
 export type KeysFor = (scope: string) => Promise<string[]>;
 
-/**
- * Hosted only: a SearXNG instance must be a public https address, so the relay can't be used to
- * reach private networks.
- */
-export function isPublicUrl(raw: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(raw);
-  } catch {
-    return false;
-  }
-  if (url.protocol !== "https:") return false;
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || !host.includes(".") && !host.includes(":")) return false;
-  const v4 = host.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
-    if (a === 10 || a === 127 || a === 0 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224) return false;
-  }
-  if (host.includes(":") && (host === "::1" || host === "::" || /^f[cd]/.test(host) || host.startsWith("fe80") || host.startsWith("::ffff:"))) return false;
-  return true;
-}
+export { isPublicUrl };
 
 /** Check a key and list the models it can use. */
 export async function handleModels(plan: unknown, key: string | undefined): Promise<Response> {
@@ -86,8 +66,9 @@ export async function handleChat(signal: AbortSignal, body: ChatRequest | undefi
   const [model] = await describeModels(body.plan, [body.model]);
   if (!model) return bad(`Unknown model ${body.model}`);
 
-  // Web search runs as tools, so only for models that can call them. Key-based providers' keys come
-  // from keysFor; instance URLs (SearXNG) come with the request.
+  // Tools only go to models that can call them: web search (for configured providers; key-based
+  // providers' keys come from keysFor, instance URLs such as SearXNG come with the request) and the
+  // page reader, which needs no setup.
   const creds =
     model.tools !== false && body.search?.length
       ? await Promise.all(
@@ -98,7 +79,9 @@ export async function handleChat(signal: AbortSignal, body: ChatRequest | undefi
         )
       : [];
   const usable = creds.filter((c) => c.keys.length);
-  const search = usable.length ? searchToolkit(usable) : undefined;
+  // A GitHub token (optional) only goes to the page reader, for GitHub's own hosts.
+  const github = model.tools !== false ? await keysFor(GITHUB_SCOPE) : [];
+  const search = model.tools !== false ? searchToolkit(usable, { hosted: opts.hosted, githubToken: github[0] }) : undefined;
   const system = [typeof body.system === "string" ? body.system.trim() : "", search?.guidance ?? ""].filter(Boolean).join("\n\n");
   const { secrets: _secrets, stream: _stream, ...rest } = body as ChatRequest & { secrets?: unknown };
   const request: ChatRequest = {

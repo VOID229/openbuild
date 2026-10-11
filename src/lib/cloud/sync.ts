@@ -28,7 +28,7 @@ import { applyDraftRecord, draftListeners, draftRecord, type StoredDraft } from 
 import { isDraftRecord } from "../../../shared/drafts";
 import { allSecrets, keyListeners, saveKeys } from "../keyStore";
 import { useStore } from "../store";
-import { PLANS, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../../shared/types";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type PlanId, type SearchProviderId } from "../../../shared/types";
 import type { Attachment } from "../../../shared/types";
 import type { Chat, Message, Profile, Settings } from "../types";
 import { open, seal } from "./crypto";
@@ -106,8 +106,8 @@ function syncedSettings(s: Settings): SyncedSettings {
 
 type KeySnapshot = Record<string, string[]>;
 
-const isKeyScope = (s: string): s is PlanId | SearchProviderId =>
-  s in PLANS || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as SearchProviderId].credential === "key");
+const isKeyScope = (s: string): s is PlanId | SearchProviderId | typeof GITHUB_SCOPE =>
+  s in PLANS || s === GITHUB_SCOPE || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as SearchProviderId].credential === "key");
 
 /** Scopes with keys, in a stable order. Empty when key sync is off. */
 async function keySnapshot(enabled: boolean): Promise<KeySnapshot> {

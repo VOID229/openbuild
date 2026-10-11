@@ -8,7 +8,7 @@
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { PLANS, SEARCH_PROVIDERS } from "../shared/types";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS } from "../shared/types";
 
 const SERVICE = "openchat";
 
@@ -21,10 +21,10 @@ export interface VaultEntry {
 export type KeyEdit = { id: string } | { secret: string };
 export type VaultBackend = "keychain" | "file";
 
-/** Scopes that hold secrets: every plan, and every search provider that takes a key (not an instance URL). */
+/** Scopes that hold secrets: every plan, every search provider that takes a key (not an instance URL), and GitHub. */
 export const isScope = (s: unknown): s is KeyScope =>
-  typeof s === "string" && (s in PLANS || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as keyof typeof SEARCH_PROVIDERS].credential === "key"));
-export const scopes = (): KeyScope[] => [...Object.keys(PLANS), ...Object.values(SEARCH_PROVIDERS).filter((p) => p.credential === "key").map((p) => p.id)];
+  typeof s === "string" && (s in PLANS || s === GITHUB_SCOPE || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as keyof typeof SEARCH_PROVIDERS].credential === "key"));
+export const scopes = (): KeyScope[] => [...Object.keys(PLANS), ...Object.values(SEARCH_PROVIDERS).filter((p) => p.credential === "key").map((p) => p.id), GITHUB_SCOPE];
 
 const filePath = () => process.env.OPENCHAT_SECRETS_FILE || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "openchat", "secrets.json");
 

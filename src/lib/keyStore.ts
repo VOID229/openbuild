@@ -6,7 +6,7 @@
 // Hosted website: there's no server-side storage, so keys stay in this browser (IndexedDB) and are
 // attached to each request that needs them; the relay uses them for that request and keeps nothing.
 import { createStore, entries, get, set } from "./kv";
-import { SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
+import { GITHUB_SCOPE, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { config } from "./runtime";
 
 interface Entry {
@@ -77,13 +77,13 @@ export async function allSecrets(): Promise<Record<string, string[]>> {
   return ((await res.json()) as { secrets: Record<string, string[]> }).secrets;
 }
 
-export async function saveKeys(scope: PlanId | SearchProviderId, keys: KeyEdit[]): Promise<string[]> {
+export async function saveKeys(scope: PlanId | SearchProviderId | typeof GITHUB_SCOPE, keys: KeyEdit[]): Promise<string[]> {
   const ids = await saveKeysTo(scope, keys);
   keyListeners.forEach((fn) => fn(scope));
   return ids;
 }
 
-async function saveKeysTo(scope: PlanId | SearchProviderId, keys: KeyEdit[]): Promise<string[]> {
+async function saveKeysTo(scope: PlanId | SearchProviderId | typeof GITHUB_SCOPE, keys: KeyEdit[]): Promise<string[]> {
   if ((await config).mode === "hosted") return browserSetKeys(scope, keys);
   const res = await fetch(`/api/keys/${scope}`, {
     method: "PUT",

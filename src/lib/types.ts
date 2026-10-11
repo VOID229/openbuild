@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ToolId } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -51,6 +51,8 @@ export interface Settings {
   webSearch: boolean;
   /** Saved key ids per search provider in priority order (SearXNG: instance URLs, which aren't secret). */
   search: Partial<Record<SearchProviderId, string[]>>;
+  /** Saved GitHub token ids (the secrets live on the server). Optional: anonymous GitHub reads work without one. */
+  github: string[];
   /**
    * Efficient web search: a separate model condenses each search's results and the chat model only
    * sees that digest. No model means the fastest available one.
@@ -84,7 +86,7 @@ export interface Detection {
 /** A web search the model ran while answering. */
 export interface SearchCall {
   id: string;
-  provider: SearchProviderId;
+  provider: ToolId;
   query: string;
   status: "running" | "done" | "error";
   results?: SearchResultLink[];

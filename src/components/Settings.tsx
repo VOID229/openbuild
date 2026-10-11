@@ -1,6 +1,6 @@
 import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, Plus, RefreshCw, Settings2, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
+import { GITHUB_SCOPE, KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
 import { keyId } from "../lib/keys";
 import { digestModel, fastTarget, findModel, isFastModel } from "../lib/models";
 import { parseModelQuery, scoreModel } from "../lib/modelSearch";
@@ -764,7 +764,38 @@ function SearchSection() {
           </>
         )}
       </p>
+      <GitHubSection />
       <SearchDigest />
+    </>
+  );
+}
+
+/** An optional GitHub token for the page reader. Reads work without one, at a lower rate limit. */
+function GitHubSection() {
+  const keys = useStore((s) => s.settings.github) ?? [];
+  const setGithubKeys = useStore((s) => s.setGithubKeys);
+  return (
+    <>
+      <div className="setting-row setting-row-top setting-row-divided">
+        <div className="setting-text">
+          <div className="setting-label">GitHub</div>
+          <p className="setting-desc">
+            Lets models read GitHub directly: files, READMEs, and repository details. Without a token, GitHub's API allows about 60 requests an hour,
+            and a busy chat can use that up. A token raises the limit to 5,000 an hour. A fine-grained token with no extra permissions is enough for
+            public repositories. OpenChat only ever sends the token to GitHub.
+          </p>
+        </div>
+      </div>
+      <div className="key-list">
+        <KeyList scope={GITHUB_SCOPE} label="GitHub" keys={keys} setKeys={(next) => void setGithubKeys(next)} />
+      </div>
+      <p className="field-help keys-help">
+        Create a token at{" "}
+        <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener noreferrer">
+          github.com/settings/personal-access-tokens
+        </a>
+        .
+      </p>
     </>
   );
 }
