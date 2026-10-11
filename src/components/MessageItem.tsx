@@ -8,6 +8,7 @@ import { findModel } from "../lib/models";
 import { useStore } from "../lib/store";
 import type { Message, ModelRef, SearchCall } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
+import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
 import { Markdown } from "./Markdown";
 import { ModelMenu } from "./ModelSelect";
@@ -179,7 +180,11 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
           )}
         </div>
       ) : null}
-      {message.content && <div className="bubble">{message.content}</div>}
+      {message.content && (
+        <div className="bubble">
+          <Linkify text={message.content} />
+        </div>
+      )}
       <div className="msg-actions msg-actions-end">
         <CopyButton text={message.content} />
       </div>

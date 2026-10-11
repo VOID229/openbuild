@@ -182,8 +182,14 @@ function Main() {
     const fromHash = () => {
       const id = /^#\/c\/(.+)$/.exec(location.hash)?.[1];
       const st = useStore.getState();
-      if (id && st.chats.some((c) => c.id === id)) st.selectChat(id);
-      else st.newChat();
+      if (id && st.chats.some((c) => c.id === id)) {
+        st.selectChat(id);
+        return;
+      }
+      // Not a chat in this browser (another device, a deleted chat, or a private window): show a
+      // new chat and drop the stale address. Without this, the URL keeps the unknown id.
+      if (location.hash) history.replaceState(null, "", location.pathname + location.search);
+      st.newChat();
     };
     fromHash();
     routed.current = true;

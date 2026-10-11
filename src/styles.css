@@ -2352,16 +2352,29 @@ svg {
   color: var(--text-3);
 }
 
-.markdown a {
+/* Links in messages (Markdown and bare URLs in your own messages): the underline is always there,
+   and on hover it darkens and thickens so the link reads as clickable. */
+.link {
+  color: inherit;
   text-decoration: underline;
-  text-decoration-color: var(--border-strong);
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
-  transition: text-decoration-color var(--fast) var(--ease);
+  transition:
+    text-decoration-color var(--fast) var(--ease),
+    text-decoration-thickness var(--fast) var(--ease);
+  cursor: pointer;
+}
+
+.link:focus-visible {
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 @media (hover: hover) {
-  .markdown a:hover {
-    text-decoration-color: currentColor;
+  .link:hover {
+    text-decoration-color: var(--text);
+    text-decoration-thickness: 2px;
   }
 }
 

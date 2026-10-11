@@ -45,7 +45,7 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
 
 const components: Components = {
   pre: ({ node: _node, ...props }) => <CodeBlock {...props} />,
-  a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer" />,
+  a: ({ node: _node, className, ...props }) => <a {...props} className={cx("link", className)} target="_blank" rel="noopener noreferrer" />,
   table: ({ node: _node, ...props }) => (
     <div className="table-wrap">
       <table {...props} />
