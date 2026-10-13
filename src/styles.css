@@ -181,9 +181,9 @@ svg {
   padding: 5px 9px;
   border-radius: 7px;
   background: var(--ink);
-  color: var(--ink-fg);
+  color: color-mix(in srgb, var(--ink-fg) 55%, #000);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 1.35;
   pointer-events: none;
   box-shadow: var(--shadow-md);
