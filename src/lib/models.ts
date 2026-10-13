@@ -7,7 +7,7 @@ import deepseek from "../assets/brands/deepseek-color.svg" with { type: "text" }
 import qwen from "../assets/brands/qwen-color.svg" with { type: "text" };
 import grok from "../assets/brands/grok.svg" with { type: "text" };
 import openai from "../assets/brands/openai.svg" with { type: "text" };
-import zhipu from "../assets/brands/zhipu-color.svg" with { type: "text" };
+import zai from "../assets/brands/zai.svg" with { type: "text" };
 import kimi from "../assets/brands/kimi-color.svg" with { type: "text" };
 import minimax from "../assets/brands/minimax-color.svg" with { type: "text" };
 import meta from "../assets/brands/meta-color.svg" with { type: "text" };
@@ -30,7 +30,7 @@ const BRANDS: [RegExp, string][] = (<[RegExp, string][]>[
   [/^qwen/, qwen],
   [/^grok/, grok],
   [/^gpt|^o\d|^codex/, openai],
-  [/^glm/, zhipu],
+  [/^glm/, zai],
   [/^kimi/, kimi],
   [/^minimax/, minimax],
   [/^muse/, meta],
