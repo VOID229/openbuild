@@ -8,7 +8,7 @@ import { useStore } from "../lib/store";
 import type { Chat, ModelRef } from "../lib/types";
 import { cx, usePresence } from "../lib/ui";
 import { Composer } from "./Composer";
-import { MessageItem, SecondOpinion } from "./MessageItem";
+import { MessageItem } from "./MessageItem";
 
 /** Highlight every occurrence of `words` inside `root` using the CSS Custom Highlight API. */
 function highlightWords(root: HTMLElement, words: string[]) {
@@ -53,16 +53,15 @@ function useThinkAction(chat: Chat): ThinkAction | undefined {
   return { kind, target, targetName: findModel(detection, target)?.name ?? target.id };
 }
 
-/** Dock row above the composer: think harder / think faster, plus "2nd" while the reply is still streaming. */
+/** Dock row above the composer: think harder / think faster. */
 function ThinkButton({ chat }: { chat: Chat }) {
   const action = useThinkAction(chat);
   const last = chat.messages.at(-1);
-  const second = !!last && last.role === "assistant" && last.status === "streaming" && chat.messages.length > 1;
   const shown = useRef(action);
   if (action) shown.current = action;
-  const { mounted, visible } = usePresence(!!action || second, 180);
-  // Keep the think button's content while it fades out; never show it while only "2nd" is up.
-  const a = action ?? (second ? undefined : shown.current);
+  const { mounted, visible } = usePresence(!!action, 180);
+  // Keep the think button's content while it fades out.
+  const a = action ?? shown.current;
   if (!mounted) return null;
   return (
     <div className="think-row" data-state={visible ? "open" : "closed"}>
@@ -78,7 +77,6 @@ function ThinkButton({ chat }: { chat: Chat }) {
           {a.kind === "harder" ? "think harder" : "think faster"}
         </button>
       )}
-      {second && last && <SecondOpinion chatId={chat.id} messageId={last.id} current={last.model} dock />}
     </div>
   );
 }
@@ -230,9 +228,11 @@ export function ChatView({ chat }: { chat: Chat }) {
       >
         <div ref={inner} className="messages-inner">
           {chat.forkOf && <ForkBanner chat={chat} />}
-          {chat.messages.map((m, i) => (
-            <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} />
-          ))}
+          {chat.messages.map((m, i) => {
+            const next = chat.messages[i + 1];
+            const pending = m.role === "user" && next?.role === "assistant" && next.status === "streaming" && i + 2 === chat.messages.length;
+            return <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} streamingReplyId={pending ? next.id : undefined} />;
+          })}
         </div>
       </div>
       <div className="dock">

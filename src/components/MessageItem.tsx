@@ -158,9 +158,10 @@ function chatImages(chatId: string) {
   return (chat?.messages ?? []).flatMap((m) => m.attachments?.filter((a) => a.mime.startsWith("image/")) ?? []);
 }
 
-function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
+/** `streamingReplyId`: the reply still being written to this message; "2nd" sits here until it finishes. */
+function UserMessage({ message, chatId, streamingReplyId }: { message: Message; chatId: string; streamingReplyId?: string }) {
   return (
-    <div className="msg msg-user" data-message-id={message.id}>
+    <div className={cx("msg msg-user", streamingReplyId && "msg-user-pending")} data-message-id={message.id}>
       {message.attachments?.length ? (
         <div className="msg-attachments">
           {message.attachments.map((a) =>
@@ -187,6 +188,7 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
       )}
       <div className="msg-actions msg-actions-end">
         <CopyButton text={message.content} />
+        {streamingReplyId && <SecondOpinion chatId={chatId} messageId={streamingReplyId} />}
       </div>
     </div>
   );
@@ -197,9 +199,8 @@ const EFFORT_LONG: Record<Effort, string> = { off: "Off", low: "Low", medium: "M
 /**
  * "2nd": fork the chat at this reply and answer the same question with another model.
  * Step 1 picks the model; step 2 picks its reasoning level (skipped for models without levels).
- * `dock` renders it as a pill beside the think buttons.
  */
-export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: string; messageId: string; current?: ModelRef; dock?: boolean }) {
+export function SecondOpinion({ chatId, messageId, current }: { chatId: string; messageId: string; current?: ModelRef }) {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<ModelRef>();
   const anchor = useRef<HTMLButtonElement>(null);
@@ -223,7 +224,7 @@ export function SecondOpinion({ chatId, messageId, current, dock }: { chatId: st
       <button
         ref={anchor}
         type="button"
-        className={dock ? "think-btn think-second" : "msg-second"}
+        className="msg-second"
         aria-label={`Get a ${opinionWord(depth + 1)} opinion from another model`}
         aria-haspopup="listbox"
         aria-expanded={open}
@@ -329,6 +330,20 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
   );
 }
 
-export const MessageItem = memo(function MessageItem({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
-  return message.role === "user" ? <UserMessage message={message} chatId={chatId} /> : <AssistantMessage message={message} chatId={chatId} isLast={isLast} />;
+export const MessageItem = memo(function MessageItem({
+  message,
+  chatId,
+  isLast,
+  streamingReplyId,
+}: {
+  message: Message;
+  chatId: string;
+  isLast: boolean;
+  streamingReplyId?: string;
+}) {
+  return message.role === "user" ? (
+    <UserMessage message={message} chatId={chatId} streamingReplyId={streamingReplyId} />
+  ) : (
+    <AssistantMessage message={message} chatId={chatId} isLast={isLast} />
+  );
 });

@@ -1894,6 +1894,7 @@ svg {
 }
 
 .msg-actions:focus-within,
+.msg-user-pending .msg-actions,
 .msg-last .msg-actions {
   opacity: 1;
 }
@@ -2233,16 +2234,6 @@ svg {
 
 .think-btn:active {
   transform: scale(0.98);
-}
-
-.think-second {
-  padding: 0 16px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.think-second[aria-expanded="true"] {
-  background: var(--surface-2);
 }
 
 .scroll-down {
