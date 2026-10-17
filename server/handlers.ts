@@ -1,6 +1,5 @@
-// Request handling shared by the local Bun server (server/index.ts) and the hosted Vercel
-// functions (server/vercel/*). Only where API keys come from differs: the local server reads them
-// from the OS keychain, the hosted relay receives them with each request and keeps nothing.
+// Request handling for the local Bun server (server/index.ts), which reads API keys from the OS
+// keychain.
 import { EFFORTS, GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type ChatRequest, type PlanId, type SearchCredentials, type SearchProviderId, type StreamEvent } from "../shared/types";
 import { streamReply } from "./agent";
 import { searchDigest } from "./digest";

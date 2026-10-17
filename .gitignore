@@ -7,7 +7,8 @@ dist
 .pi/memory/
 MEMORY.md
 
-# Convex deployment (written by `bunx convex dev`)
+# Local env (`bunx convex dev` writes .env.local)
+.env
 .env.local
 
 # Vercel build output

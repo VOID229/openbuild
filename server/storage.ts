@@ -21,9 +21,9 @@ const BACKUP_KEEP = 20;
 
 export function dataDir(): string {
   if (process.env.OPENCHAT_DATA_DIR) return process.env.OPENCHAT_DATA_DIR;
-  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "OpenChat");
-  if (process.platform === "win32") return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "OpenChat");
-  return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "openchat");
+  if (process.platform === "darwin") return join(homedir(), "Library", "Application Support", "OpenBuild");
+  if (process.platform === "win32") return join(process.env.APPDATA || join(homedir(), "AppData", "Roaming"), "OpenBuild");
+  return join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "openbuild");
 }
 
 export interface StoredChat {

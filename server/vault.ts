@@ -10,7 +10,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS } from "../shared/types";
 
-const SERVICE = "openchat";
+const SERVICE = "openbuild";
 
 export type KeyScope = string;
 export interface VaultEntry {
@@ -26,7 +26,7 @@ export const isScope = (s: unknown): s is KeyScope =>
   typeof s === "string" && (s in PLANS || s === GITHUB_SCOPE || (s in SEARCH_PROVIDERS && SEARCH_PROVIDERS[s as keyof typeof SEARCH_PROVIDERS].credential === "key"));
 export const scopes = (): KeyScope[] => [...Object.keys(PLANS), ...Object.values(SEARCH_PROVIDERS).filter((p) => p.credential === "key").map((p) => p.id), GITHUB_SCOPE];
 
-const filePath = () => process.env.OPENCHAT_SECRETS_FILE || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "openchat", "secrets.json");
+const filePath = () => process.env.OPENCHAT_SECRETS_FILE || join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "openbuild", "secrets.json");
 
 let chosen: Promise<VaultBackend> | undefined;
 function pickBackend(): Promise<VaultBackend> {

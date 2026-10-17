@@ -1,4 +1,5 @@
-// Replies in progress on the hosted site. The relay (server/vercel/chat.ts) keeps nothing between
+// Replies in progress on the hosted site. Unused in OpenBuild (local-only: the hosted relay was
+// removed); kept so the Convex schema and client stay as upstream. The relay kept nothing between
 // requests, so it writes each reply here as it streams; if the app's connection to the relay drops
 // (a reload, a closed tab, a network blip), the app reads the reply from here instead, live. The
 // events are encrypted with the reply's own key, which only the app has (shared/replies.ts).

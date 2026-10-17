@@ -39,9 +39,8 @@ export function AccountSection() {
           yet.
         </Note>
         <Note>
-          To switch them on (once, free): run <code>bun run setup:cloud</code> in the OpenChat folder, log in to Convex when it asks, then restart{" "}
-          <code>bun run dev</code>. Commit the <code>shared/cloud.ts</code> it writes and every copy of OpenChat can create accounts and sign in right
-          here.
+          To switch them on, create your own Convex dev deployment (see the README), then restart <code>bun run dev</code> with{" "}
+          <code>OPENCHAT_CLOUD_URL</code> set to its address.
         </Note>
       </>
     );

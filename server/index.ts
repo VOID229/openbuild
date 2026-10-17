@@ -192,21 +192,21 @@ function serve(port: number) {
 //
 // The port never changes on its own: if it's taken, startup fails instead of quietly moving to
 // the next one, so the app is always at the address you expect.
-const hot = globalThis as { openchatServer?: ReturnType<typeof serve> };
-const previous = hot.openchatServer;
+const hot = globalThis as { openbuildServer?: ReturnType<typeof serve> };
+const previous = hot.openbuildServer;
 if (previous) previous.stop(true);
-const port = previous?.port ?? Number(process.env.PORT ?? 3000);
+const port = previous?.port ?? Number(process.env.PORT ?? 3100);
 let server: ReturnType<typeof serve>;
 try {
   server = serve(port);
 } catch (err) {
   if ((err as { code?: string }).code !== "EADDRINUSE") throw err;
   console.error(
-    `\n  Port ${port} is already in use, probably by another OpenChat that's still running.` +
+    `\n  Port ${port} is already in use, probably by another OpenBuild that's still running.` +
       `\n  Stop it (or find it with \`lsof -i :${port}\`) and run this again, or pick another port with PORT=<port>.\n`,
   );
   process.exit(1);
 }
-hot.openchatServer = server;
-console.log(`\n  OpenChat running at ${server.url}`);
+hot.openbuildServer = server;
+console.log(`\n  OpenBuild running at ${server.url}`);
 console.log(`  Chats and settings are saved in ${storage.location()}\n`);

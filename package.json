@@ -1,13 +1,11 @@
 {
-  "name": "openchat",
+  "name": "openbuild",
   "private": true,
   "type": "module",
   "packageManager": "bun@1.3.8",
   "scripts": {
     "dev": "bun --hot server/index.ts",
     "start": "NODE_ENV=production bun server/index.ts",
-    "build": "bun scripts/build-vercel.ts",
-    "setup:cloud": "bun scripts/setup-cloud.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit && tsc -p convex --noEmit"
   },
@@ -19,7 +17,6 @@
     "@fontsource-variable/jetbrains-mono": "^5.3.0",
     "@fontsource-variable/newsreader": "^5.3.0",
     "@fontsource/comic-neue": "^5.3.0",
-    "@vercel/functions": "^3.9.11",
     "convex": "1.46.0",
     "disposable-email-domains-js": "^1.26.0",
     "idb-keyval": "^6.3.0",

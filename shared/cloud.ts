@@ -1,4 +1,4 @@
-// The hosted sync service every copy of OpenChat signs in to (a Convex production deployment).
-// Written once by `bun run setup:cloud`. Empty means accounts aren't available yet.
-// It's a public address, not a secret: everything stored there is encrypted on the device first.
-export const CLOUD_URL = "https://shocking-bandicoot-943.convex.cloud";
+// The sync service (a Convex deployment) this copy signs in to by default. Empty: OpenBuild is
+// local-only and has no sync service unless OPENCHAT_CLOUD_URL points the server at your own
+// (see README). Never set this to openchat's production deployment.
+export const CLOUD_URL = "";
