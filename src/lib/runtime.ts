@@ -10,6 +10,8 @@ export interface AppConfig {
   convexUrl: string | null;
   /** Local: names the server, so the app only picks up replies running on it (see shared/replies.ts). */
   serverId?: string;
+  /** The computer the server (and Pi) runs on, e.g. "Gal's MacBook Pro". */
+  machine?: string;
 }
 
 let resolved: AppConfig | undefined;
@@ -18,7 +20,7 @@ export const config: Promise<AppConfig> = (async () => {
   try {
     const res = await fetch("/api/config");
     const c = (await res.json()) as Partial<AppConfig>;
-    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null, serverId: c.serverId } as AppConfig;
+    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null, serverId: c.serverId, machine: c.machine } as AppConfig;
   } catch {
     return { mode: "local", convexUrl: null } as AppConfig;
   }
@@ -33,3 +35,6 @@ export const replyHost = () => (resolved?.mode === "hosted" ? "hosted" : resolve
 /** Whether this app can pick up a reply that runs at `via`: the website's, or this same local server's. */
 export const canResume = (via: string | undefined) =>
   !!resolved && (resolved.mode === "hosted" ? via === "hosted" && !!resolved.convexUrl : !!resolved.serverId && via === resolved.serverId);
+
+/** The computer threads run on (once `config` has resolved). */
+export const machineName = () => resolved?.machine;

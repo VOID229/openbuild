@@ -1,12 +1,9 @@
-import { ArrowDown, ArrowUpRight, GitFork, Lightbulb, Zap } from "lucide-react";
+import { ArrowDown } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { regenerate } from "../lib/chat";
-import { chatDepth, ordinal } from "../lib/forks";
 import { fold } from "../lib/search";
-import { fastTarget, findModel, isFastModel, qualityTarget } from "../lib/models";
 import { useStore } from "../lib/store";
-import type { Chat, ModelRef } from "../lib/types";
-import { cx, usePresence } from "../lib/ui";
+import type { Chat } from "../lib/types";
+import { cx } from "../lib/ui";
 import { Composer } from "./Composer";
 import { MessageItem } from "./MessageItem";
 
@@ -29,86 +26,6 @@ function highlightWords(root: HTMLElement, words: string[]) {
   }
   registry.set("search", new Highlight(...ranges));
   return () => void registry.delete("search");
-}
-
-type ThinkAction = { kind: "harder" | "faster"; target: ModelRef; targetName: string };
-
-/**
- * Think harder: after a fast model finishes, resend the turn to a higher-quality model.
- * Think faster: while a higher-quality model is working, cancel and resend to a fast model.
- */
-function useThinkAction(chat: Chat): ThinkAction | undefined {
-  const detection = useStore((s) => s.detection);
-  const settings = useStore((s) => s.settings);
-  const last = chat.messages.at(-1);
-  if (!last || last.role !== "assistant" || !last.model) return;
-  const fast = isFastModel(last.model, settings);
-  const streaming = last.status === "streaming";
-  let kind: ThinkAction["kind"] | undefined;
-  if (streaming && !fast) kind = "faster";
-  else if (!streaming && fast && last.status !== "error" && last.content.trim()) kind = "harder";
-  if (!kind) return;
-  const target = kind === "faster" ? fastTarget(detection, settings, last.model.plan) : qualityTarget(detection, settings, last.model.plan);
-  if (!target || (target.id === last.model.id && target.plan === last.model.plan)) return;
-  return { kind, target, targetName: findModel(detection, target)?.name ?? target.id };
-}
-
-/** Dock row above the composer: think harder / think faster. */
-function ThinkButton({ chat }: { chat: Chat }) {
-  const action = useThinkAction(chat);
-  const last = chat.messages.at(-1);
-  const shown = useRef(action);
-  if (action) shown.current = action;
-  const { mounted, visible } = usePresence(!!action, 180);
-  // Keep the think button's content while it fades out.
-  const a = action ?? shown.current;
-  if (!mounted) return null;
-  return (
-    <div className="think-row" data-state={visible ? "open" : "closed"}>
-      {a && (
-        <button
-          type="button"
-          className="think-btn"
-          data-tooltip={`${a.kind === "harder" ? "Resend to" : "Cancel and resend to"} ${a.targetName}`}
-          data-tooltip-side="top"
-          onClick={() => regenerate(chat.id, last!.id, a.target)}
-        >
-          {a.kind === "harder" ? <Lightbulb size={16} /> : <Zap size={16} />}
-          {a.kind === "harder" ? "think harder" : "think faster"}
-        </button>
-      )}
-    </div>
-  );
-}
-
-/** Shown on "2nd" chats: links back to the original chat and the reply that was re-answered. */
-function ForkBanner({ chat }: { chat: Chat }) {
-  const original = useStore((s) => s.chats.find((c) => c.id === chat.forkOf));
-  const { selectChat } = useStore.getState();
-  const depth = chatDepth(chat);
-  return (
-    <div className="fork-banner">
-      <span className="badge badge-second">{ordinal(depth)}</span>
-      {original ? (
-        <>
-          <span>{depth === 2 ? "Second opinion of" : `${ordinal(depth)} opinion of`}</span>
-          <button
-            type="button"
-            className="fork-link"
-            data-tooltip="Open the original chat at the forked reply"
-            data-tooltip-side="bottom"
-            onClick={() => selectChat(original.id)}
-          >
-            <GitFork size={13} />
-            <span>{original.title}</span>
-            <ArrowUpRight size={13} />
-          </button>
-        </>
-      ) : (
-        <span>Second opinion of a chat that was deleted</span>
-      )}
-    </div>
-  );
 }
 
 export function ChatView({ chat }: { chat: Chat }) {
@@ -227,12 +144,9 @@ export function ChatView({ chat }: { chat: Chat }) {
         }}
       >
         <div ref={inner} className="messages-inner">
-          {chat.forkOf && <ForkBanner chat={chat} />}
-          {chat.messages.map((m, i) => {
-            const next = chat.messages[i + 1];
-            const pending = m.role === "user" && next?.role === "assistant" && next.status === "streaming" && i + 2 === chat.messages.length;
-            return <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} streamingReplyId={pending ? next.id : undefined} />;
-          })}
+          {chat.messages.map((m, i) => (
+            <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} />
+          ))}
         </div>
       </div>
       <div className="dock">
@@ -248,7 +162,6 @@ export function ChatView({ chat }: { chat: Chat }) {
         >
           <ArrowDown size={16} />
         </button>
-        <ThinkButton chat={chat} />
         <Composer variant="dock" chatId={chat.id} streaming={streaming} />
       </div>
     </div>

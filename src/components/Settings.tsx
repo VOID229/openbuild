@@ -1,32 +1,27 @@
-import { ArrowUp, Check, ChevronDown, ChevronUp, CircleAlert, CircleUser, Globe, Key, Palette, Pencil, Plus, RefreshCw, Settings2, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { GITHUB_SCOPE, KEY_ORDER, nearestEffort, PLANS, SEARCH_ORDER, SEARCH_PROVIDERS, type KeyEdit, type PlanId, type SearchProviderId } from "../../shared/types";
-import { keyId } from "../lib/keys";
-import { digestModel, fastTarget, findModel, isFastModel } from "../lib/models";
-import { parseModelQuery, scoreModel } from "../lib/modelSearch";
-import { isHosted } from "../lib/runtime";
+import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Settings2, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, type ReactNode } from "react";
+import { nearestEffort } from "../../shared/types";
+import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
-import type { FontStyle, KeyStatus, NamedModel, NamingModel, Theme } from "../lib/types";
-import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
+import type { FontStyle, NamingModel, Theme } from "../lib/types";
+import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
+import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
-import { Avatar, BrandIcon, IconButton, Popover, Spinner, Toggle } from "./primitives";
+import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Profile", icon: UserRound },
-  { id: "account", label: "Account", icon: CircleUser },
   { id: "general", label: "General", icon: Settings2 },
-  { id: "keys", label: "API Keys", icon: Key },
-  { id: "search", label: "Web Search", icon: Globe },
+  { id: "pi", label: "Pi", icon: SquareTerminal },
+  { id: "keys", label: "Providers", icon: Key },
+  { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "account", label: "Account", icon: CircleUser },
 ];
 
-const Heading = ({ children }: { children: ReactNode }) => (
-  <h2 className="md-h1" id="settings-title">
-    <span className="md-hash">#</span> {children}
-  </h2>
-);
+const Heading = SettingsHeading;
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
   return (
@@ -107,89 +102,6 @@ function ProfileSection() {
 
 // ------------------------------------------------------------------ General
 
-/** Every detected model once, with the plans it's available on. */
-function useAllModels(): (NamedModel & { plans: PlanId[] })[] {
-  const detection = useStore((s) => s.detection);
-  return useMemo(() => {
-    const seen = new Map<string, NamedModel & { plans: PlanId[] }>();
-    for (const plan of KEY_ORDER)
-      for (const m of detection[plan]?.models ?? []) {
-        const entry = seen.get(m.id) ?? { id: m.id, name: m.name, plans: [] };
-        entry.plans.push(plan);
-        seen.set(m.id, entry);
-      }
-    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [detection]);
-}
-
-/** Search input that focuses itself each time its popover opens. */
-function PopoverSearch(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  const ref = useRef<HTMLInputElement>(null);
-  useFocusOnShow(ref);
-  return <input ref={ref} {...props} />;
-}
-
-function AddModel({ exclude, onAdd, label }: { exclude: string[]; onAdd: (m: NamedModel) => void; label: string }) {
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const anchor = useRef<HTMLButtonElement>(null);
-  const all = useAllModels();
-  // Same search as the model pickers: "go deepseek" → DeepSeek models on the Go key.
-  const options = useMemo(() => {
-    const parsed = parseModelQuery(q);
-    const pool = all.filter((m) => !exclude.includes(m.id));
-    if (!parsed.raw) return pool.slice(0, 50);
-    return pool
-      .map((m) => ({ m, s: scoreModel(m, m.plans, parsed) }))
-      .filter((x) => x.s !== undefined)
-      .sort((a, b) => b.s! - a.s!)
-      .slice(0, 50)
-      .map((x) => x.m);
-  }, [all, exclude, q]);
-  const add = (m: NamedModel) => {
-    onAdd(m);
-    setQ("");
-    setOpen(false);
-  };
-  return (
-    <span className="picker">
-      <button ref={anchor} type="button" className="chip chip-add" aria-label={label} data-tooltip={open ? undefined : label} onClick={() => setOpen((o) => !o)}>
-        <Plus size={14} />
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu add-model drop-up" label={label} fixed="up">
-        <PopoverSearch
-          className="input input-sm"
-          placeholder="Search models, or go / zen / plus / black…"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              const first = options[0];
-              if (first) add(first);
-              else if (q.trim()) add({ id: q.trim(), name: q.trim() });
-            }
-          }}
-        />
-        <div className="add-model-list" onKeyDown={(e) => arrowNav(e)}>
-          {options.map((m) => (
-            <button key={m.id} type="button" className="menu-item" onClick={() => add(m)}>
-              <BrandIcon id={m.id} />
-              <span className="menu-item-label">{m.name}</span>
-            </button>
-          ))}
-          {!options.length && q.trim() && (
-            <button type="button" className="menu-item" onClick={() => add({ id: q.trim(), name: q.trim() })}>
-              <Plus size={14} /> Add “{q.trim()}”
-            </button>
-          )}
-          {!options.length && !q.trim() && <p className="menu-empty">Add an API key to pick from detected models.</p>}
-        </div>
-      </Popover>
-    </span>
-  );
-}
-
 function GeneralSection() {
   const s = useStore((st) => st.settings);
   const update = useStore((st) => st.updateSettings);
@@ -213,76 +125,6 @@ function GeneralSection() {
         </div>
         <Toggle checked={s.cmdEnter} onChange={(v) => update({ cmdEnter: v })} label="Require Cmd+Enter To Submit" />
       </div>
-      <div className="setting-row setting-row-top">
-        <div className="setting-text">
-          <div className="setting-label">
-            Auto model router <span className="caption">*experimental</span>
-          </div>
-          <p className="setting-desc">
-            Automatically route requests to the right model for the cheapest options that fit the quality required for the prompt.
-          </p>
-          <p className="setting-desc">
-            easier questions go to faster and cheaper models, while more complex questions such as code, math, and science related questions will be
-            routed to higher quality models.
-          </p>
-        </div>
-        <Toggle checked={s.autoRouter} onChange={(v) => update({ autoRouter: v })} label="Auto model router" />
-      </div>
-      <div className={cx("router-config", !s.autoRouter && "router-config-hidden")} inert={!s.autoRouter}>
-        <div className="router-config-inner">
-          <div className="chip-group">
-            <div className="chip-group-label">models to avoid:</div>
-            <div className="chips">
-              {s.avoid.map((m) => (
-                <span key={m.id} className="chip">
-                  {m.name}
-                  <button type="button" className="chip-x" aria-label={`Remove ${m.name}`} onClick={() => update({ avoid: s.avoid.filter((x) => x.id !== m.id) })}>
-                    <X size={12} />
-                  </button>
-                </span>
-              ))}
-              <AddModel label="Add a model to avoid" exclude={s.avoid.map((m) => m.id)} onAdd={(m) => update({ avoid: [...s.avoid, m] })} />
-            </div>
-          </div>
-          <div className="chip-group">
-            <div className="chip-group-label">models to prioritize:</div>
-            <div className="chips">
-              {s.prioritize.map((p, i) => (
-                <span key={p.id} className="chip-pair">
-                  <span className="chip">
-                    {p.name}
-                    <button
-                      type="button"
-                      className="chip-x"
-                      aria-label={`Remove ${p.name}`}
-                      onClick={() => update({ prioritize: s.prioritize.filter((x) => x.id !== p.id) })}
-                    >
-                      <X size={12} />
-                    </button>
-                  </span>
-                  <span className="chip-link" aria-hidden />
-                  <button
-                    type="button"
-                    className="chip chip-tag"
-                    data-tooltip="Click to switch between Speed and complex"
-                    onClick={() =>
-                      update({ prioritize: s.prioritize.map((x) => (x.id === p.id ? { ...x, tag: x.tag === "Speed" ? "complex" : "Speed" } : x)) })
-                    }
-                  >
-                    {p.tag}
-                  </button>
-                  {i < s.prioritize.length - 1 && <span className="chip-comma">,</span>}
-                </span>
-              ))}
-              <AddModel
-                label="Add a model to prioritize"
-                exclude={s.prioritize.map((m) => m.id)}
-                onAdd={(m) => update({ prioritize: [...s.prioritize, { ...m, tag: isFastModel(m, { prioritize: [] }) ? "Speed" : "complex" }] })}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
       <ChatNaming />
     </>
   );
@@ -293,7 +135,7 @@ function ChatNaming() {
   const detection = useStore((s) => s.detection);
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
-  const plans = KEY_ORDER.filter((p) => detection[p]?.models.length);
+  const plans = (["pi"] as const).filter((p) => detection[p]?.models.length);
   const setModels = (models: NamingModel[]) => update({ naming: { ...naming, models } });
 
   const addModel = () => {
@@ -312,15 +154,15 @@ function ChatNaming() {
     <>
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
-          <div className="setting-label">Chat naming</div>
-          <p className="setting-desc">Name new chats automatically after the first reply. Models are tried from top to bottom; if one fails, the next one is used.</p>
+          <div className="setting-label">Thread naming</div>
+          <p className="setting-desc">Name new threads automatically after the first reply. Models are tried from top to bottom; if one fails, the next one is used.</p>
         </div>
-        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Chat naming" />
+        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Thread naming" />
       </div>
       <div className={cx("router-config", !naming.enabled && "router-config-hidden")} inert={!naming.enabled}>
         <div className="router-config-inner">
           <div className="naming-list">
-            {!naming.models.length && <p className="naming-empty">Using the fastest available model. Add models to choose which ones name your chats.</p>}
+            {!naming.models.length && <p className="naming-empty">Using a fast model from Pi (or the thread's own). Add models to choose which ones name your threads.</p>}
             {naming.models.map((entry, i) => {
               const model = findModel(detection, entry);
               const efforts = model?.reasoning.efforts ?? [];
@@ -362,510 +204,7 @@ function ChatNaming() {
             <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
               <Plus size={14} /> {naming.models.length ? "add fallback" : "add model"}
             </button>
-            {!plans.length && <p className="naming-empty">Add an API key to choose naming models.</p>}
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ API Keys
-
-const MASK = "*".repeat(34);
-
-interface KeyFieldProps {
-  /** Unique per list, e.g. a plan id or `search-exa`. */
-  scope: string;
-  /** Provider name, e.g. "Opencode Go" or "Exa". */
-  label: string;
-  /** "url" fields show their saved value and are edited in place instead of masked and replaced. */
-  kind?: "key" | "url";
-  /** Saved key; undefined for a new, unsaved field. */
-  value?: string;
-  index: number;
-  total: number;
-  autoFocus?: boolean;
-  status?: KeyStatus;
-  /** What the status check does: list the plan's models, or run a test search. */
-  verifies?: "models" | "search";
-  onRetry?: () => void;
-  /** Return an error message to reject a draft. */
-  validate?: (draft: string) => string | undefined;
-  onSave: (key: string) => void;
-  onRemove?: () => void;
-  onMoveUp?: () => void;
-  /** New fields only: discard the empty field. */
-  onCancel?: () => void;
-  /** Example address shown in an empty URL field. */
-  example?: string;
-}
-
-function KeyField({ scope, label, kind = "key", value, index, total, autoFocus, status, verifies = "models", onRetry, validate, onSave, onRemove, onMoveUp, onCancel, example = "http://192.168.1.10:8080" }: KeyFieldProps) {
-  const [editing, setEditing] = useState(!value);
-  const [draft, setDraft] = useState("");
-  const [invalid, setInvalid] = useState<string>();
-  const input = useRef<HTMLInputElement>(null);
-  const isUrl = kind === "url";
-  const masked = !editing && !isUrl && !!value;
-  const noun = isUrl ? "URL" : "key";
-  const id = `key-${scope}-${index}`;
-  const actionId = `${scope}-${index}`;
-
-  useEffect(() => {
-    if (autoFocus) input.current?.focus();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const replace = () => {
-    setEditing(true);
-    // URLs aren't secret: edit the saved value rather than retyping it.
-    setDraft(isUrl ? (value ?? "") : "");
-    requestAnimationFrame(() => (isUrl ? input.current?.select() : input.current?.focus()));
-  };
-  const save = () => {
-    const next = draft.trim();
-    if (!next) return;
-    const error = validate?.(next);
-    setInvalid(error);
-    if (error) return;
-    if (next !== value) onSave(next);
-    setDraft("");
-    if (value) setEditing(false);
-  };
-  const cancel = () => {
-    setDraft("");
-    setInvalid(undefined);
-    if (value) setEditing(false);
-    else onCancel?.();
-  };
-
-  // Short results sit inline next to the key; errors get their own line below it.
-  let badge: ReactNode = null;
-  let line: ReactNode = null;
-  if (invalid) line = (<><CircleAlert size={13} className="bad" /> {invalid}</>);
-  else if (value && status && !editing) {
-    if (status.status === "checking") badge = (<><Spinner size={12} /> {verifies === "search" ? "Checking" : "Detecting"}</>);
-    else if (status.status === "valid")
-      badge = (<><Check size={13} className="ok" /> {verifies === "search" ? (isUrl ? "Reachable" : "Works") : `${status.models ?? 0} models`}</>);
-    else if (status.status === "invalid")
-      line = (<><CircleAlert size={13} className="bad" /> {verifies === "search" ? `${status.error ?? `Invalid ${noun}`}: ${isUrl ? "edit" : "replace"} it to continue` : "Invalid API key — replace it to continue"}</>);
-    else
-      line = (
-        <>
-          <CircleAlert size={13} className="bad" /> {status.error ?? `Couldn't verify this ${noun}`}
-          {onRetry && (
-            <button type="button" className="link-btn" onClick={onRetry}>
-              <RefreshCw size={12} /> Retry
-            </button>
-          )}
-        </>
-      );
-  }
-
-  return (
-    <div className="key-entry">
-      <div className="key-entry-row">
-        <div className={cx("key-input-wrap", total > 1 && "key-input-tagged")}>
-          <input
-            ref={input}
-            id={id}
-            className={cx("input key-input", !editing && "key-input-masked")}
-            type={editing && !isUrl ? "password" : "text"}
-            inputMode={isUrl ? "url" : undefined}
-            readOnly={!editing}
-            value={editing ? draft : isUrl ? value : ""}
-            placeholder={masked ? undefined : isUrl ? example : index === 0 ? `Paste your ${label} key` : `Paste another ${label} key`}
-            aria-label={total > 1 ? `${label} ${noun} ${index + 1}` : `${label} ${noun}`}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(e) => {
-              setDraft(e.target.value);
-              setInvalid(undefined);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-              if (e.key === "Escape" && editing && (value || onCancel)) {
-                e.stopPropagation();
-                cancel();
-              }
-            }}
-            onBlur={(e) => {
-              // Leaving the field without a change restores the saved key (or drops an empty new field).
-              const unchanged = !draft.trim() || draft.trim() === value;
-              if (unchanged && e.relatedTarget?.getAttribute("data-key-action") !== actionId && (value || onCancel)) cancel();
-            }}
-            onFocus={() => !editing && replace()}
-          />
-          {masked && <span className="key-mask" aria-hidden>{MASK}</span>}
-          {total > 1 && <span className="key-tag">{index === 0 ? "primary" : "fallback"}</span>}
-        </div>
-        <div className="key-badge" role="status">
-          {badge}
-        </div>
-        <div className="key-actions">
-          {editing ? (
-            <button type="button" className="btn btn-sm" data-key-action={actionId} disabled={!draft.trim()} onClick={save}>
-              save
-            </button>
-          ) : (
-            <button type="button" className="btn btn-sm" data-key-action={actionId} onClick={replace}>
-              {isUrl ? "edit" : "replace"}
-            </button>
-          )}
-          {onRemove && !editing && (
-            <IconButton label={`Remove ${noun}`} tooltipSide="left" className="key-icon-btn key-remove" onClick={onRemove}>
-              <Trash2 size={14} />
-            </IconButton>
-          )}
-          {onMoveUp && !editing && (
-            <IconButton label={`Use before the ${isUrl ? "instance" : "key"} above`} tooltipSide="left" className="key-icon-btn" onClick={onMoveUp}>
-              <ArrowUp size={14} />
-            </IconButton>
-          )}
-        </div>
-      </div>
-      {line && <div className={cx("key-status", (invalid || status?.status === "invalid") && "key-status-bad")}>{line}</div>}
-    </div>
-  );
-}
-
-interface KeyListProps extends Pick<KeyFieldProps, "scope" | "label" | "kind" | "validate" | "verifies" | "example"> {
-  /** Saved entries: key ids (the secrets live on the server), or instance URLs. */
-  keys: string[];
-  /** Receives the new ordered list: saved entries as `{ id }`, a newly typed or replaced key as `{ secret }`. */
-  setKeys: (keys: KeyEdit[]) => void;
-  autoFocus?: boolean;
-  statusOf?: (key: string) => KeyStatus | undefined;
-  onRetry?: (key: string) => void;
-}
-
-/** An ordered list of keys (primary first, then fallbacks) with "add more". Two or more collapse to the primary behind a chevron. */
-function KeyList({ keys, setKeys, autoFocus, statusOf, onRetry, ...field }: KeyListProps) {
-  const [adding, setAdding] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const collapsible = keys.length > 1;
-  const open = expanded || !collapsible;
-  const shown = open ? keys : keys.slice(0, 1);
-  const total = keys.length + (adding ? 1 : 0);
-  const saved: KeyEdit[] = keys.map((id) => ({ id }));
-  const toggle = () => {
-    setAdding(false);
-    setExpanded((v) => !v);
-  };
-  return (
-    <div className="key-row">
-      <div className="key-label">
-        <span>{field.label}</span>
-        {collapsible && (
-          <IconButton
-            label={open ? `Hide ${field.label} fallback keys` : `Show ${keys.length - 1} more ${field.label} keys`}
-            tooltipSide="right"
-            className="key-more"
-            aria-expanded={open}
-            onClick={toggle}
-          >
-            {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
-          </IconButton>
-        )}
-      </div>
-      <div className="key-fields">
-        {shown.map((k, i) => (
-          <KeyField
-            key={keyId(k)}
-            {...field}
-            value={k}
-            index={i}
-            total={total}
-            status={statusOf?.(k)}
-            onRetry={onRetry && (() => onRetry(k))}
-            onSave={(next) => setKeys(saved.map((x, j) => (j === i ? { secret: next } : x)))}
-            onRemove={() => setKeys(saved.filter((_, j) => j !== i))}
-            onMoveUp={i > 0 ? () => setKeys(saved.map((x, j) => (j === i - 1 ? saved[i]! : j === i ? saved[i - 1]! : x))) : undefined}
-          />
-        ))}
-        {(adding || !keys.length) && (
-          <KeyField
-            key={`new-${keys.length}`}
-            {...field}
-            index={keys.length}
-            total={total || 1}
-            autoFocus={adding || autoFocus}
-            onSave={(next) => {
-              setKeys([...saved, { secret: next }]);
-              setAdding(false);
-            }}
-            onCancel={keys.length ? () => setAdding(false) : undefined}
-          />
-        )}
-        {open && keys.length > 0 && !adding && (
-          <button type="button" className="add-key" onClick={() => setAdding(true)}>
-            <Plus size={13} /> add more
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PlanKeys({ plan, autoFocus }: { plan: PlanId; autoFocus: boolean }) {
-  const keys = useStore((s) => s.settings.keys[plan]) ?? [];
-  const statuses = useStore((s) => s.detection[plan]?.keys);
-  const setKeys = useStore((s) => s.setKeys);
-  const refreshDetection = useStore((s) => s.refreshDetection);
-  return (
-    <KeyList
-      scope={plan}
-      label={PLANS[plan].label}
-      keys={keys}
-      setKeys={(next) => void setKeys(plan, next)}
-      autoFocus={autoFocus}
-      statusOf={(k) => statuses?.[keyId(k)]}
-      onRetry={() => refreshDetection(plan)}
-    />
-  );
-}
-
-function VaultNotice() {
-  const backend = useStore((s) => s.keyBackend);
-  const error = useStore((s) => s.keysError);
-  return (
-    <>
-      {error && (
-        <p className="field-help key-status key-status-bad" role="alert">
-          <CircleAlert size={13} className="bad" /> {error}
-        </p>
-      )}
-      {backend === "browser" && (
-        <p className="field-help key-status">
-          Keys are stored only in this browser. Each request sends the key it needs to the OpenChat relay, which uses it for that request and
-          never stores or logs it.
-        </p>
-      )}
-      {backend === "file" && (
-        <p className="field-help key-status">
-          <CircleAlert size={13} className="bad" /> No OS keychain was found, so keys are stored in a private file (<code>~/.config/openchat/secrets.json</code>, readable only by you).
-        </p>
-      )}
-    </>
-  );
-}
-
-function KeysSection() {
-  const hosted = isHosted();
-  const keys = useStore((s) => s.settings.keys);
-  const firstEmpty = Object.keys(keys).length === 0;
-  return (
-    <>
-      <Heading>API Keys</Heading>
-      <VaultNotice />
-      <div className="key-list">
-        {KEY_ORDER.map((plan, i) => (
-          <PlanKeys key={plan} plan={plan} autoFocus={firstEmpty && i === 0} />
-        ))}
-      </div>
-      <p className="field-help keys-help">
-        Add more than one key per plan and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited.{" "}
-        {/* On the website, VaultNotice above says where keys are kept. */}
-        {!hosted && "Keys are saved in your operating system's keychain by the local OpenChat server and are never sent back to the browser. "}
-        Get one at{" "}
-        <a href="https://opencode.ai/auth" target="_blank" rel="noopener noreferrer">
-          opencode.ai
-        </a>
-        .
-      </p>
-    </>
-  );
-}
-
-// ------------------------------------------------------------------ Web Search
-
-/** The hosted site's relay can only reach public https:// instances (server/handlers.ts isPublicUrl). */
-const HOSTED_EXAMPLE = "https://searx.example.com";
-
-function validateHostedInstanceUrl(raw: string) {
-  if (!/^https:\/\//i.test(raw.trim())) return `Enter a public https:// address, like ${HOSTED_EXAMPLE}`;
-  return validateInstanceUrl(raw);
-}
-
-function validateInstanceUrl(raw: string) {
-  const error = "Enter an address like http://192.168.1.10:8080";
-  if (/\s/.test(raw) || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) && !/^https?:\/\//i.test(raw)) return error;
-  try {
-    // Browsers percent-encode invalid host characters instead of rejecting them.
-    const { hostname } = new URL(/^https?:\/\//i.test(raw) ? raw : `http://${raw}`);
-    return hostname && !hostname.includes("%") ? undefined : error;
-  } catch {
-    return error;
-  }
-}
-
-function SearchKeys({ provider, hosted }: { provider: SearchProviderId; hosted: boolean }) {
-  const keys = useStore((s) => s.settings.search[provider]) ?? [];
-  const statuses = useStore((s) => s.searchStatus[provider]);
-  const setSearchKeys = useStore((s) => s.setSearchKeys);
-  const verifySearch = useStore((s) => s.verifySearch);
-  const config = SEARCH_PROVIDERS[provider];
-  // Entries are checked only when saved (see setSearchKeys), never on open or reload.
-  return (
-    <KeyList
-      scope={`search-${provider}`}
-      label={config.label}
-      kind={config.credential}
-      keys={keys}
-      setKeys={(next) => void setSearchKeys(provider, next)}
-      validate={config.credential === "url" ? (hosted ? validateHostedInstanceUrl : validateInstanceUrl) : undefined}
-      example={hosted ? HOSTED_EXAMPLE : undefined}
-      verifies="search"
-      statusOf={(k) => statuses?.[keyId(k)]}
-      onRetry={(k) => void verifySearch(provider, [k])}
-    />
-  );
-}
-
-function SearchSection() {
-  const hosted = isHosted();
-  const enabled = useStore((s) => s.settings.webSearch);
-  const configured = useStore((s) => SEARCH_ORDER.filter((p) => s.settings.search[p]?.length).length);
-  const update = useStore((s) => s.updateSettings);
-  return (
-    <>
-      <Heading>Web Search</Heading>
-      <VaultNotice />
-      <div className="setting-row setting-row-top">
-        <div className="setting-text">
-          <div className="setting-label">Let models search the web</div>
-          <p className="setting-desc">
-            Each provider you add becomes its own search tool. With two or more, the model picks the one that fits: SearXNG for quick, broad lookups,
-            Exa for the latest information, Tavily and Firecrawl for deep research and full pages, Kagi for high-quality technical results, X for
-            what people are saying on X, YouTube for finding videos.
-          </p>
-        </div>
-        <Toggle checked={enabled} onChange={(v) => update({ webSearch: v })} label="Let models search the web" />
-      </div>
-      <div className="key-list">
-        {SEARCH_ORDER.map((p) => (
-          <SearchKeys key={p} provider={p} hosted={hosted} />
-        ))}
-      </div>
-      <p className="field-help keys-help">
-        {configured === 0 ? "Add a key for any provider to turn on web search. " : ""}
-        Add more than one key per provider and OpenChat falls back to the next one if a key is rejected, out of credit, or rate limited.{" "}
-        {hosted ? (
-          <>
-            For SearXNG, enter the public https:// address of an instance you already run with the JSON format enabled. The website searches from
-            the cloud, so it can't reach instances on your LAN or Tailscale.
-          </>
-        ) : (
-          <>
-            For SearXNG, enter the address of an instance you already run (over LAN, Tailscale or the internet) with the JSON format enabled;
-            OpenChat doesn't start or install anything. Keys are saved in your operating system's keychain by the local OpenChat server and are
-            never sent back to the browser.
-          </>
-        )}
-      </p>
-      <GitHubSection />
-      <SearchDigest />
-    </>
-  );
-}
-
-/** An optional GitHub token for the page reader. Reads work without one, at a lower rate limit. */
-function GitHubSection() {
-  const keys = useStore((s) => s.settings.github) ?? [];
-  const setGithubKeys = useStore((s) => s.setGithubKeys);
-  return (
-    <>
-      <div className="setting-row setting-row-top setting-row-divided">
-        <div className="setting-text">
-          <div className="setting-label">GitHub</div>
-          <p className="setting-desc">
-            Lets models read GitHub directly: files, READMEs, and repository details. Without a token, GitHub's API allows about 60 requests an hour,
-            and a busy chat can use that up. A token raises the limit to 5,000 an hour. A fine-grained token with no extra permissions is enough for
-            public repositories. OpenChat only ever sends the token to GitHub.
-          </p>
-        </div>
-      </div>
-      <div className="key-list">
-        <KeyList scope={GITHUB_SCOPE} label="GitHub" keys={keys} setKeys={(next) => void setGithubKeys(next)} />
-      </div>
-      <p className="field-help keys-help">
-        Create a token at{" "}
-        <a href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noopener noreferrer">
-          github.com/settings/personal-access-tokens
-        </a>
-        .
-      </p>
-    </>
-  );
-}
-
-function SearchDigest() {
-  const digest = useStore((s) => s.settings.searchDigest);
-  const detection = useStore((s) => s.detection);
-  const settings = useStore((s) => s.settings);
-  const update = useStore((s) => s.updateSettings);
-  const plans = KEY_ORDER.filter((p) => detection[p]?.models.length);
-  const setModel = (model: NamingModel | undefined) => update({ searchDigest: { ...digest, model } });
-  const picked = digest.model;
-  const pickedModel = findModel(detection, picked);
-  const fallback = digestModel(detection, { ...settings, searchDigest: { ...digest, model: undefined } });
-  const fallbackName = findModel(detection, fallback)?.name;
-
-  const choose = () => {
-    if (!fallback) return;
-    const model = findModel(detection, fallback);
-    setModel({ plan: fallback.plan, id: fallback.id, effort: nearestEffort(model?.reasoning.efforts ?? [], "low") ?? "low" });
-  };
-
-  return (
-    <>
-      <div className="setting-row setting-row-top setting-row-divided">
-        <div className="setting-text">
-          <div className="setting-label">Efficient web search</div>
-          <p className="setting-desc">
-            A separate model reads each search's full results and writes a dense summary with sources; the chat model only sees that summary. Long
-            chats stay cheaper and keep more room for the conversation. Short results are passed on as they are.
-          </p>
-        </div>
-        <Toggle checked={digest.enabled} onChange={(v) => update({ searchDigest: { ...digest, enabled: v } })} label="Efficient web search" />
-      </div>
-      <div className={cx("router-config", !digest.enabled && "router-config-hidden")} inert={!digest.enabled}>
-        <div className="router-config-inner">
-          <div className="naming-list">
-            {picked ? (
-              <div className="naming-row">
-                <ModelSelect
-                  label="Summarizing model"
-                  value={picked}
-                  onChange={(ref) => {
-                    const next = findModel(detection, ref);
-                    setModel({ ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], picked.effort) ?? picked.effort });
-                  }}
-                />
-                <EffortSelect
-                  label="Reasoning for the summarizing model"
-                  levels={pickedModel?.reasoning.efforts ?? []}
-                  value={nearestEffort(pickedModel?.reasoning.efforts ?? [], picked.effort) ?? picked.effort}
-                  onChange={(effort) => setModel({ ...picked, effort })}
-                />
-                <span className="naming-actions">
-                  <IconButton label="Use the fastest model" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModel(undefined)}>
-                    <Trash2 size={14} />
-                  </IconButton>
-                </span>
-              </div>
-            ) : (
-              <p className="naming-empty">
-                {fallbackName ? `Using the fastest available model (${fallbackName}). Choose a model to pick which one summarizes.` : "Add an API key to choose a summarizing model."}
-              </p>
-            )}
-            {picked && !pickedModel && <p className="naming-empty">This model isn't available right now, so the fastest available model is used.</p>}
-            {!picked && (
-              <button type="button" className="add-key" disabled={!plans.length} onClick={choose}>
-                <Plus size={14} /> choose model
-              </button>
-            )}
+            {!plans.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose naming models.</p>}
           </div>
         </div>
       </div>
@@ -975,8 +314,9 @@ export function SettingsModal() {
             </>
           )}
           {section === "general" && <GeneralSection />}
-          {section === "keys" && <KeysSection />}
-          {section === "search" && <SearchSection />}
+          {section === "pi" && <PiSection />}
+          {section === "keys" && <ProvidersSection />}
+          {section === "projects" && <ProjectsSection />}
           {section === "appearance" && <AppearanceSection />}
         </div>
         <IconButton label="Close settings" tooltip={false} className="modal-close" onClick={close}>

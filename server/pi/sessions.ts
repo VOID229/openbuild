@@ -1,0 +1,409 @@
+// Threads run on Pi. Each thread has its own Pi session (a JSONL file under ~/.pi/agent/sessions,
+// so `pi -r` in a terminal can open it too) and, while it's in use, its own `pi --mode rpc` process
+// running in the thread's workspace. Pi owns the conversation: a turn sends only the new message.
+//
+// The app's thread can diverge from Pi's history (a retry, an edited resend, a legacy fork). Each
+// turn says how many user messages come before it; when Pi's session has more, it's forked back to
+// that point first (Pi's `fork`), and the thread follows the new session file from then on.
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { EFFORTS, type Effort, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
+import * as storage from "../storage";
+import { PiError, PiProcess, type PiRecord } from "./rpc";
+
+/** Close a thread's Pi process after this long without use. */
+const IDLE = 20 * 60 * 1000;
+/** Tool output kept per call (head and tail), and the diff of a file change. */
+const OUTPUT_MAX = 12_000;
+const PATCH_MAX = 60_000;
+
+interface Live {
+  threadId: string;
+  proc: PiProcess;
+  ready: Promise<void>;
+  busy: boolean;
+  /** Questions from extensions still waiting for an answer, replayed to whoever watches the run. */
+  asks: Map<string, Extract<StreamEvent, { t: "ask" }>>;
+  emit?: (e: StreamEvent) => void;
+}
+
+const hot = globalThis as { openbuildPiLive?: Map<string, Live>; openbuildPiReaper?: ReturnType<typeof setInterval> };
+const live = (hot.openbuildPiLive ??= new Map());
+if (hot.openbuildPiReaper) clearInterval(hot.openbuildPiReaper);
+hot.openbuildPiReaper = setInterval(() => {
+  for (const [id, l] of live) {
+    if (l.proc.exited || (!l.busy && Date.now() - l.proc.lastUsed > IDLE)) {
+      l.proc.close();
+      live.delete(id);
+    }
+  }
+}, 60_000);
+
+interface Saved {
+  file: string;
+  cwd: string;
+}
+const savedKey = (threadId: string) => `pi-session:${threadId}`;
+function saved(threadId: string): Saved | undefined {
+  try {
+    return JSON.parse(storage.getValue(savedKey(threadId)) ?? "null") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+const save = (threadId: string, s: Saved) => storage.setValue(savedKey(threadId), JSON.stringify(s));
+
+export const isThreadId = (id: unknown): id is string => typeof id === "string" && /^[A-Za-z0-9_-]{8,64}$/.test(id);
+
+/** Pi thinking levels for the app's effort levels ("minimal" has no app equivalent). */
+const PI_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+/** Effort levels a Pi model supports, from its thinkingLevelMap (null = unsupported). */
+export function modelEfforts(model: { reasoning?: boolean; thinkingLevelMap?: Record<string, string | null> }): Effort[] {
+  if (!model.reasoning) return [];
+  const map = model.thinkingLevelMap;
+  const standard = new Set(["off", "low", "medium", "high"]);
+  return EFFORTS.filter((e) => (map?.[e] === null ? false : standard.has(e) || (map?.[e] !== undefined && map[e] !== null)));
+}
+
+function clip(text: string, max: number) {
+  if (text.length <= max) return text;
+  const half = Math.floor(max / 2);
+  return `${text.slice(0, half)}\n\n… ${text.length - max} characters not shown …\n\n${text.slice(-half)}`;
+}
+
+const textOf = (result: any): string =>
+  Array.isArray(result?.content) ? result.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n") : typeof result === "string" ? result : "";
+
+/** The thread's Pi process, started (or restarted in another directory) as needed. */
+function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
+  const existing = live.get(threadId);
+  if (existing && !existing.proc.exited && existing.proc.cwd === cwd) return existing;
+  if (existing) {
+    if (existing.busy) throw new PiError("This thread is still working in another directory");
+    existing.proc.close();
+    live.delete(threadId);
+  }
+  const s = saved(threadId);
+  const from = forkFrom ? saved(forkFrom) : undefined;
+  const args =
+    s && s.cwd === cwd && existsSync(s.file)
+      ? ["--session", s.file]
+      : from && existsSync(from.file)
+        ? ["--fork", from.file]
+        : ["--session-id", threadId];
+  const proc = new PiProcess(args, cwd);
+  const l: Live = { threadId, proc, busy: false, asks: new Map(), ready: Promise.resolve() };
+  // Extension questions can come at any time, also before a run (e.g. while starting up).
+  proc.on((r) => {
+    if (r.type !== "extension_ui_request") return;
+    if (["select", "confirm", "input", "editor"].includes(r.method)) {
+      const ask: Extract<StreamEvent, { t: "ask" }> = {
+        t: "ask",
+        id: r.id,
+        method: r.method,
+        title: String(r.title ?? "Pi asks"),
+        message: r.message,
+        options: Array.isArray(r.options) ? r.options.map(String) : undefined,
+        placeholder: r.placeholder,
+        prefill: r.prefill,
+      };
+      l.asks.set(r.id, ask);
+      l.emit?.(ask);
+      if (r.timeout) setTimeout(() => l.asks.delete(r.id) && l.emit?.({ t: "asked", id: r.id }), r.timeout).unref?.();
+    } else if (r.method === "notify" && r.message) {
+      l.emit?.({ t: "notice", message: String(r.message) });
+    }
+  });
+  l.ready = proc.send<{ sessionFile?: string }>({ type: "get_state" }, 60_000).then((st) => {
+    if (st.sessionFile) save(threadId, { file: st.sessionFile, cwd });
+  });
+  // Whoever uses the process awaits this and reports a failed start; don't also report it unhandled.
+  l.ready.catch(() => {});
+  live.set(threadId, l);
+  return l;
+}
+
+/** Answer a question an extension asked in this thread. */
+export function answer(threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }): boolean {
+  const l = live.get(threadId);
+  if (!l || !l.asks.has(askId)) return false;
+  l.asks.delete(askId);
+  const record: PiRecord = { type: "extension_ui_response", id: askId };
+  if (reply.cancelled) record.cancelled = true;
+  else if (reply.confirmed !== undefined) record.confirmed = reply.confirmed;
+  else record.value = reply.value ?? "";
+  l.proc.write(record);
+  l.emit?.({ t: "asked", id: askId, answer: reply.cancelled ? undefined : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : reply.value });
+  return true;
+}
+
+/** Run one turn and stream it as NDJSON StreamEvents. `signal` stops Pi (abort). */
+export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream<Uint8Array> {
+  const enc = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      let closed = false;
+      const send = (e: StreamEvent) => {
+        if (!closed) controller.enqueue(enc.encode(JSON.stringify(e) + "\n"));
+      };
+      const heartbeat = setInterval(() => {
+        if (!closed) controller.enqueue(enc.encode("\n"));
+      }, 15_000);
+      let l: Live | undefined;
+      let off: (() => void) | undefined;
+      const finish = () => {
+        if (closed) return;
+        clearInterval(heartbeat);
+        off?.();
+        if (l) {
+          l.busy = false;
+          l.emit = undefined;
+          l.proc.lastUsed = Date.now();
+        }
+        closed = true;
+        controller.close();
+      };
+      try {
+        l = ensure(req.threadId, req.cwd, req.forkFrom);
+        if (l.busy) throw new PiError("Pi is still working on this thread's previous message.");
+        l.busy = true;
+        const proc = l.proc;
+        l.emit = send;
+        for (const ask of l.asks.values()) send(ask);
+
+        // Everything Pi reports from here on belongs to this turn.
+        let settled!: () => void;
+        const done = new Promise<void>((r) => (settled = r));
+        let started = false;
+        let lastText = false;
+        let wroteText = false;
+        let lastError: string | undefined;
+        const usage: Usage = { input: 0, output: 0, cost: 0 };
+        const progress = new Map<string, number>();
+        off = proc.on((r) => {
+          switch (r.type) {
+            case "agent_start":
+              started = true;
+              break;
+            case "message_start":
+              if (r.message?.role === "assistant" && wroteText && lastText) send({ t: "text", v: "\n\n" });
+              break;
+            case "message_update": {
+              const ev = r.assistantMessageEvent;
+              if (ev?.type === "text_delta" && ev.delta) {
+                send({ t: "text", v: ev.delta });
+                lastText = wroteText = true;
+              } else if (ev?.type === "thinking_delta" && ev.delta) send({ t: "reasoning", v: ev.delta });
+              break;
+            }
+            case "message_end": {
+              const m = r.message;
+              if (m?.role !== "assistant") break;
+              usage.input! += m.usage?.input ?? 0;
+              usage.output! += m.usage?.output ?? 0;
+              usage.cost! += m.usage?.cost?.total ?? 0;
+              if (m.stopReason === "error") lastError = m.errorMessage || "The model returned an error.";
+              else if (m.stopReason !== "aborted") lastError = undefined;
+              break;
+            }
+            case "tool_execution_start":
+              lastText = false;
+              send({ t: "tool", id: r.toolCallId, name: r.toolName, args: r.args, status: "running" });
+              break;
+            case "tool_execution_update": {
+              // Live output (a long build or test run), at most twice a second.
+              const at = progress.get(r.toolCallId) ?? 0;
+              if (Date.now() - at < 500) break;
+              progress.set(r.toolCallId, Date.now());
+              const out = textOf(r.partialResult);
+              if (out) send({ t: "tool", id: r.toolCallId, name: r.toolName, status: "running", output: clip(out, OUTPUT_MAX) });
+              break;
+            }
+            case "tool_execution_end": {
+              const patch = r.result?.details?.patch;
+              send({
+                t: "tool",
+                id: r.toolCallId,
+                name: r.toolName,
+                status: r.isError ? "error" : "done",
+                output: clip(textOf(r.result), OUTPUT_MAX),
+                patch: typeof patch === "string" ? clip(patch, PATCH_MAX) : undefined,
+                ms: r.durationMs,
+              });
+              break;
+            }
+            case "auto_retry_start":
+              send({ t: "notice", message: `Retrying (attempt ${r.attempt} of ${r.maxAttempts}): ${r.errorMessage}` });
+              break;
+            case "auto_retry_end":
+              if (!r.success && r.finalError) lastError = r.finalError;
+              break;
+            case "compaction_start":
+              send({ t: "notice", message: r.reason === "overflow" ? "The context was full, so Pi compacted it." : "Pi compacted the context." });
+              break;
+            case "compaction_end":
+              if (r.errorMessage) send({ t: "notice", message: `Compacting failed: ${r.errorMessage}` });
+              break;
+            case "agent_settled":
+              settled();
+              break;
+            case "process_exit":
+              lastError = r.message;
+              settled();
+              break;
+          }
+        });
+        const onAbort = () => void proc.send({ type: "abort" }).catch(() => {});
+        signal.addEventListener("abort", onAbort, { once: true });
+
+        await l.ready;
+        // Cut Pi's history back to where this message goes, if the thread changed since.
+        const forkable = await proc.send<{ messages: { entryId: string }[] }>({ type: "get_fork_messages" });
+        const target = forkable.messages[req.prior];
+        if (target) {
+          const r = await proc.send<{ cancelled?: boolean }>({ type: "fork", entryId: target.entryId });
+          if (r.cancelled) throw new PiError("An extension stopped Pi from going back to that point of the thread.");
+          const st = await proc.send<{ sessionFile?: string }>({ type: "get_state" });
+          if (st.sessionFile) save(req.threadId, { file: st.sessionFile, cwd: req.cwd });
+        }
+
+        // Model and thinking level for this turn.
+        const slash = req.model.indexOf("/");
+        const provider = req.model.slice(0, slash);
+        const modelId = req.model.slice(slash + 1);
+        const state = await proc.send<{ model?: { provider: string; id: string } }>({ type: "get_state" });
+        if (state.model?.provider !== provider || state.model?.id !== modelId) await proc.send({ type: "set_model", provider, modelId });
+        const { levels } = await proc.send<{ levels: string[] }>({ type: "get_available_thinking_levels" });
+        const level = nearestLevel(levels, req.effort);
+        if (level) await proc.send({ type: "set_thinking_level", level });
+
+        if (signal.aborted) return finish();
+        const res = await proc.send<{ disposition?: string }>({ type: "prompt", message: req.message, images: req.images?.length ? req.images.map((i) => ({ type: "image", ...i })) : undefined }, 5 * 60_000);
+        if (res.disposition === "handled") {
+          // An extension command handled it. It may still start a run of its own; give it a moment.
+          await Promise.race([done, new Promise((r) => setTimeout(r, 2500))]);
+          if (!started) {
+            send({ t: "done", finish: "handled" });
+            return finish();
+          }
+        }
+        await done;
+        signal.removeEventListener("abort", onAbort);
+        if (lastError && !signal.aborted) send({ t: "error", message: lastError });
+        else {
+          const stats = await proc.send<{ contextUsage?: { tokens: number | null; contextWindow: number } }>({ type: "get_session_stats" }).catch(() => undefined);
+          if (stats?.contextUsage) {
+            usage.contextTokens = stats.contextUsage.tokens ?? undefined;
+            usage.contextWindow = stats.contextUsage.contextWindow;
+          }
+          send({ t: "done", finish: signal.aborted ? "aborted" : "stop", usage });
+        }
+      } catch (err) {
+        if (!signal.aborted) send({ t: "error", message: (err as Error).message });
+      }
+      finish();
+    },
+  });
+}
+
+/** The supported Pi level closest to the app's effort level. */
+function nearestLevel(levels: string[], effort: Effort): string | undefined {
+  if (!levels.length) return undefined;
+  if (levels.includes(effort)) return effort;
+  const at = PI_LEVELS.indexOf(effort);
+  return [...levels].sort((a, b) => Math.abs(PI_LEVELS.indexOf(a as never) - at) - Math.abs(PI_LEVELS.indexOf(b as never) - at))[0];
+}
+
+/** Run something against a short-lived Pi process that isn't tied to a thread. */
+async function withScratch<T>(cwd: string, fn: (p: PiProcess) => Promise<T>): Promise<T> {
+  const proc = new PiProcess(["--no-session"], cwd);
+  try {
+    return await fn(proc);
+  } finally {
+    proc.close();
+  }
+}
+
+// ------------------------------------------------------------------ models and commands
+
+export interface PiModels {
+  models: any[];
+  defaultModel?: string;
+  defaultThinking?: string;
+  checkedAt: number;
+}
+let modelsCache: { at: number; value: Promise<PiModels> } | undefined;
+
+/** The models configured in Pi (those with credentials), and Pi's default. Cached for a minute. */
+export function listModels(fresh = false): Promise<PiModels> {
+  if (!fresh && modelsCache && Date.now() - modelsCache.at < 60_000) return modelsCache.value;
+  const value = withScratch(homedir(), async (p) => {
+    const [{ models }, state] = await Promise.all([p.send<{ models: any[] }>({ type: "get_available_models" }), p.send<{ model?: any; thinkingLevel?: string }>({ type: "get_state" })]);
+    return { models, defaultModel: state.model ? `${state.model.provider}/${state.model.id}` : undefined, defaultThinking: state.thinkingLevel, checkedAt: Date.now() };
+  });
+  modelsCache = { at: Date.now(), value };
+  value.catch(() => modelsCache?.value === value && (modelsCache = undefined));
+  return value;
+}
+
+export const forgetModels = () => (modelsCache = undefined);
+
+const commandsCache = new Map<string, { at: number; value: Promise<PiCommand[]> }>();
+
+/** Pi's slash commands for a directory: extension commands, prompt templates and skills. */
+export function listCommands(cwd: string): Promise<PiCommand[]> {
+  const hit = commandsCache.get(cwd);
+  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.value;
+  const fetchFrom = (p: PiProcess) =>
+    p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
+      r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
+    );
+  const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !l.busy && !l.proc.exited);
+  const value = idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
+  commandsCache.set(cwd, { at: Date.now(), value });
+  value.catch(() => commandsCache.delete(cwd));
+  return value;
+}
+
+export const forgetCommands = () => commandsCache.clear();
+
+/** Compact a thread's context now (/compact). */
+export async function compact(threadId: string, instructions?: string) {
+  const s = saved(threadId);
+  if (!s) throw new PiError("This thread has no Pi session yet.");
+  const l = ensure(threadId, s.cwd);
+  if (l.busy) throw new PiError("Wait for the current reply to finish first.");
+  await l.ready;
+  return l.proc.send<{ tokensBefore: number; estimatedTokensAfter?: number }>({ type: "compact", customInstructions: instructions }, 10 * 60_000);
+}
+
+/** Stop a thread's process (its session file stays). */
+export function release(threadId: string) {
+  live.get(threadId)?.proc.close();
+  live.delete(threadId);
+}
+
+/** Restart every idle process, so changed extensions, skills or credentials take effect. */
+export function restartIdle() {
+  for (const [id, l] of live) if (!l.busy) release(id);
+  forgetModels();
+  forgetCommands();
+}
+
+/** A one-off completion with no tools or session (thread titles). */
+export async function complete(model: string, system: string, prompt: string, signal: AbortSignal): Promise<string> {
+  const { piBin, piEnv } = await import("./install");
+  const bin = piBin();
+  if (!bin) throw new PiError("Pi isn't installed.");
+  const proc = Bun.spawn(
+    [bin, "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", "--model", model, "--thinking", "off", "--system-prompt", system, "--", prompt],
+    { cwd: homedir(), stdout: "pipe", stderr: "pipe", stdin: "ignore", env: piEnv() },
+  );
+  const kill = () => proc.kill();
+  signal.addEventListener("abort", kill, { once: true });
+  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  signal.removeEventListener("abort", kill);
+  if (code !== 0) throw new PiError(err.trim().split("\n").pop() || `pi exited with code ${code}`);
+  return out.trim();
+}

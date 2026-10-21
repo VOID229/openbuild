@@ -121,7 +121,7 @@ const EXCLUDED = (id: string) => id.startsWith("jev-") || id === "test";
 
 export async function describeModels(plan: PlanId, ids: string[]): Promise<ModelInfo[]> {
   const catalog = await loadCatalog();
-  const provider = catalog[PLANS[plan].prefix];
+  const provider = catalog[PLANS[plan].prefix as keyof Catalog];
   const other = catalog[PLANS[plan].prefix === "opencode" ? "opencode-go" : "opencode"];
   const models: ModelInfo[] = [];
   for (const id of ids) {

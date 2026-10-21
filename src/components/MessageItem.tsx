@@ -1,18 +1,16 @@
-import { Check, ChevronLeft, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
-import { SEARCH_PROVIDERS, type Effort } from "../../shared/types";
-import { memo, useEffect, useRef, useState } from "react";
-import { forkWithModel, regenerate } from "../lib/chat";
+import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
+import { SEARCH_PROVIDERS } from "../../shared/types";
+import { memo, useEffect, useState } from "react";
+import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
-import { chatDepth, MAX_FORK_DEPTH, opinionWord, ordinal } from "../lib/forks";
-import { findModel } from "../lib/models";
 import { useStore } from "../lib/store";
-import type { Message, ModelRef, SearchCall } from "../lib/types";
+import type { Message, Part, SearchCall, ToolPart } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
 import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
 import { Markdown } from "./Markdown";
-import { ModelMenu } from "./ModelSelect";
-import { BrandIcon, IconButton, Popover } from "./primitives";
+import { BrandIcon, IconButton } from "./primitives";
+import { AskCard, ToolGroup } from "./ToolCalls";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -43,7 +41,8 @@ function useElapsed(since: number | undefined, active: boolean) {
 }
 
 function Reasoning({ message }: { message: Message }) {
-  const thinking = message.status === "streaming" && !message.content;
+  // Still thinking only until it writes or starts running tools.
+  const thinking = message.status === "streaming" && !message.content && !message.parts?.some((p) => p.type !== "text");
   const [open, setOpen] = useState(false);
   const elapsed = useElapsed(message.startedAt, thinking);
   const seconds = message.reasoningMs != null ? Math.max(1, Math.round(message.reasoningMs / 1000)) : elapsed;
@@ -158,10 +157,9 @@ function chatImages(chatId: string) {
   return (chat?.messages ?? []).flatMap((m) => m.attachments?.filter((a) => a.mime.startsWith("image/")) ?? []);
 }
 
-/** `streamingReplyId`: the reply still being written to this message; "2nd" sits here until it finishes. */
-function UserMessage({ message, chatId, streamingReplyId }: { message: Message; chatId: string; streamingReplyId?: string }) {
+function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
   return (
-    <div className={cx("msg msg-user", streamingReplyId && "msg-user-pending")} data-message-id={message.id}>
+    <div className="msg msg-user" data-message-id={message.id}>
       {message.attachments?.length ? (
         <div className="msg-attachments">
           {message.attachments.map((a) =>
@@ -188,102 +186,42 @@ function UserMessage({ message, chatId, streamingReplyId }: { message: Message; 
       )}
       <div className="msg-actions msg-actions-end">
         <CopyButton text={message.content} />
-        {streamingReplyId && <SecondOpinion chatId={chatId} messageId={streamingReplyId} />}
       </div>
     </div>
   );
 }
 
-const EFFORT_LONG: Record<Effort, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
-
-/**
- * "2nd": fork the chat at this reply and answer the same question with another model.
- * Step 1 picks the model; step 2 picks its reasoning level (skipped for models without levels).
- */
-export function SecondOpinion({ chatId, messageId, current }: { chatId: string; messageId: string; current?: ModelRef }) {
-  const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<ModelRef>();
-  const anchor = useRef<HTMLButtonElement>(null);
-  const detection = useStore((s) => s.detection);
-  const depth = useStore((s) => {
-    const chat = s.chats.find((c) => c.id === chatId);
-    return chat ? chatDepth(chat) : 1;
-  });
-  // A 5th opinion is the last one: no more forks from it.
-  if (depth >= MAX_FORK_DEPTH) return null;
-  const model = picked ? findModel(detection, picked) : undefined;
-  const levels = model?.reasoning.efforts ?? [];
-  // Toggle-only models (thinking on/off, no levels): "medium" means "on, at the model's default".
-  const onOff = !!model && model.reasoning.mode === "none" && model.reasoning.toggle;
-  const close = () => {
-    setOpen(false);
-    setPicked(undefined);
-  };
+/** A Pi reply in order: text, runs of tool calls, and questions. */
+function Parts({ message, chatId }: { message: Message; chatId: string }) {
+  const cwd = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace?.cwd);
+  const streaming = message.status === "streaming";
+  const blocks: (Part | ToolPart[])[] = [];
+  for (const p of message.parts ?? []) {
+    const last = blocks.at(-1);
+    if (p.type === "tool" && Array.isArray(last)) last.push(p);
+    else blocks.push(p.type === "tool" ? [p] : p);
+  }
   return (
     <>
-      <button
-        ref={anchor}
-        type="button"
-        className="msg-second"
-        aria-label={`Get a ${opinionWord(depth + 1)} opinion from another model`}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        data-tooltip={open ? undefined : `Get a ${opinionWord(depth + 1)} opinion from another model`}
-        data-tooltip-side="top"
-        onClick={() => (open ? close() : setOpen(true))}
-      >
-        {ordinal(depth + 1)}
-      </button>
-      <Popover open={open} onClose={close} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Answer with" fixed="auto">
-        {picked && model ? (
-          <>
-            <div className="menu-label menu-label-top second-level-head">
-              <button type="button" className="second-back" aria-label="Back to models" onClick={() => setPicked(undefined)}>
-                <ChevronLeft size={14} />
-              </button>
-              <span>Reasoning for {model.name}</span>
-            </div>
-            <div className="select-list" role="presentation">
-              {levels.map((level) => (
-                <button
-                  key={level}
-                  type="button"
-                  role="option"
-                  aria-selected={false}
-                  className="menu-item"
-                  onClick={() => {
-                    close();
-                    forkWithModel(chatId, messageId, { ...picked, effort: level });
-                  }}
-                >
-                  <span className="menu-item-label">{onOff && level === "medium" ? "On" : EFFORT_LONG[level]}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="menu-label menu-label-top">Get a {opinionWord(depth + 1)} opinion from…</div>
-            <ModelMenu
-              selected={current}
-              onPick={(ref) => {
-                if (findModel(detection, ref)?.reasoning.efforts.length) setPicked(ref);
-                else {
-                  close();
-                  forkWithModel(chatId, messageId, ref);
-                }
-              }}
-            />
-          </>
-        )}
-      </Popover>
+      {blocks.map((b, i) =>
+        Array.isArray(b) ? (
+          <ToolGroup key={b[0]!.id} parts={b} cwd={cwd} />
+        ) : b.type === "text" ? (
+          <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} />
+        ) : b.type === "ask" ? (
+          <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} />
+        ) : null,
+      )}
     </>
   );
 }
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const streaming = message.status === "streaming";
-  const waiting = streaming && !message.content && !message.reasoning && !message.searches?.some((s) => s.status === "running");
+  const busy = message.searches?.some((s) => s.status === "running") || message.parts?.some((p) => p.type === "tool" && p.status === "running");
+  const waiting = streaming && !message.content && !message.reasoning && !busy && !message.parts?.length;
+  // Working between steps (a tool finished, the next turn hasn't started writing yet).
+  const between = streaming && !busy && !waiting && message.parts?.at(-1)?.type === "tool";
   return (
     <div className={cx("msg msg-assistant", isLast && "msg-last")} data-message-id={message.id}>
       {message.reasoning && <Reasoning message={message} />}
@@ -295,7 +233,18 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
           <span />
         </div>
       )}
-      {message.content && <Markdown content={message.content} className={cx(streaming && "markdown-streaming")} />}
+      {message.parts?.length ? (
+        <Parts message={message} chatId={chatId} />
+      ) : (
+        message.content && <Markdown content={message.content} className={cx(streaming && "markdown-streaming")} />
+      )}
+      {between && (
+        <div className="typing typing-inline" aria-label="Working">
+          <span />
+          <span />
+          <span />
+        </div>
+      )}
       {message.status === "error" && (
         <div className="msg-error" role="alert">
           <CircleAlert size={16} />
@@ -323,7 +272,6 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
               <RotateCcw size={15} />
             </IconButton>
           )}
-          <SecondOpinion chatId={chatId} messageId={message.id} current={message.model} />
         </div>
       )}
     </div>
@@ -334,15 +282,13 @@ export const MessageItem = memo(function MessageItem({
   message,
   chatId,
   isLast,
-  streamingReplyId,
 }: {
   message: Message;
   chatId: string;
   isLast: boolean;
-  streamingReplyId?: string;
 }) {
   return message.role === "user" ? (
-    <UserMessage message={message} chatId={chatId} streamingReplyId={streamingReplyId} />
+    <UserMessage message={message} chatId={chatId} />
   ) : (
     <AssistantMessage message={message} chatId={chatId} isLast={isLast} />
   );

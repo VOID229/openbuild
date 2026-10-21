@@ -1,7 +1,7 @@
-import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
-import { chatDepth, ordinal } from "../lib/forks";
+import { removeWorktree } from "../lib/pi";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
@@ -150,7 +150,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           ref={input}
           className="history-rename"
           value={draft}
-          aria-label="Chat title"
+          aria-label="Thread title"
           maxLength={120}
           onChange={(e) => setDraft(e.target.value)}
           onBlur={commit}
@@ -185,12 +185,12 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
             {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
           </span>
           <span className="history-title-text">{hit ? <Highlight text={chat.title} ranges={hit.titleRanges} /> : chat.title}</span>
-          {chat.forkOf && (
-            <span className="badge badge-second" title="Opinion forked from another chat">
-              {ordinal(chatDepth(chat))}
+          {hit && chat.archived && <span className="badge">archived</span>}
+          {chat.workspace?.projectName && (
+            <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
+              {chat.workspace.projectName}
             </span>
           )}
-          {hit && chat.archived && <span className="badge">archived</span>}
           <span className="history-status">
             {streaming ? <Spinner size={13} /> : chat.unread ? <span className="unread-dot" aria-label="New reply" /> : null}
           </span>
@@ -336,6 +336,23 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
         {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
       </button>
+      {chat.workspace?.worktree && (
+        <button
+          type="button"
+          role="menuitem"
+          className="menu-item"
+          onClick={act(() => {
+            const ws = chat.workspace!;
+            if (!window.confirm(`Remove the worktree for ${ws.branch}? Its branch is deleted too if it was merged.`)) return;
+            removeWorktree(ws.cwd).catch((err: Error) => {
+              if (/uncommitted/.test(err.message) && window.confirm(`${err.message}. Remove it anyway, discarding them?`)) return removeWorktree(ws.cwd, true);
+              window.alert(err.message);
+            });
+          })}
+        >
+          <FolderX size={15} /> Remove worktree
+        </button>
+      )}
       <div className="menu-sep" />
       <button
         type="button"
@@ -436,7 +453,7 @@ function FilterMenu() {
     <div className="picker">
       <IconButton
         ref={anchor}
-        label="Filter chats"
+        label="Filter threads"
         aria-expanded={open}
         aria-haspopup="menu"
         tooltip={open ? false : "Sort and filter"}
@@ -446,7 +463,7 @@ function FilterMenu() {
         <ListFilter size={18} />
         {active && <span className="filter-dot" aria-hidden />}
       </IconButton>
-      <Popover open={open} onClose={close} anchor={anchor} className="menu filter-menu drop-down" role="menu" label="Sort and filter chats" fixed="down">
+      <Popover open={open} onClose={close} anchor={anchor} className="menu filter-menu drop-down" role="menu" label="Sort and filter threads" fixed="down">
         <div onKeyDown={(e) => arrowNav(e, ":scope > .filter-row > button, :scope > .filter-toggle, :scope > .filter-reset")}>
           {row(
             "sort",
@@ -603,7 +620,7 @@ export function Sidebar() {
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
               <PanelLeft size={18} />
             </IconButton>
-            <span className="wordmark">OpenChat</span>
+            <span className="wordmark">OpenBuild</span>
             <FilterMenu />
           </div>
 
@@ -618,7 +635,7 @@ export function Sidebar() {
             <span className="new-chat-icon">
               <SquarePen size={15} />
             </span>
-            New chat
+            New thread
           </button>
 
           <label className="search">
@@ -626,8 +643,8 @@ export function Sidebar() {
             <input
               type="text"
               value={query}
-              placeholder="Search your chats..."
-              aria-label="Search your chats"
+              placeholder="Search threads…"
+              aria-label="Search threads"
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Escape" && setQuery("")}
             />
@@ -640,12 +657,12 @@ export function Sidebar() {
 
           <div className="sidebar-divider" />
 
-          <nav className="history" aria-label="Chat history">
+          <nav className="history" aria-label="Thread history">
             {deferredQuery ? (
               <section className="history-group">
                 <h3 className="history-heading">{hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"}` : "Results"}</h3>
                 {hits.map((h) => row(h.chat, h))}
-                {!hits.length && <p className="history-empty">No chats match “{deferredQuery}”.</p>}
+                {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
               </section>
             ) : (
               <>
@@ -660,7 +677,7 @@ export function Sidebar() {
                     {b.chats.map((c) => row(c))}
                   </section>
                 ))}
-                {filtered && !pinned.length && !buckets.length && !archived.length && <p className="history-empty">No chats with the selected models.</p>}
+                {filtered && !pinned.length && !buckets.length && !archived.length && <p className="history-empty">No threads with the selected models.</p>}
                 {archived.length > 0 && (
                   <Collapsible label={`Archived (${archived.length})`} open={sections.archived} onToggle={() => toggleSection("archived")}>
                     {archived.map((c) => row(c))}

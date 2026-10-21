@@ -35,7 +35,7 @@ export function AccountSection() {
     return (
       <>
         <Note>
-          Accounts sync your chats, settings and profile between devices, end-to-end encrypted. They aren't switched on for this copy of OpenChat
+          Accounts sync your threads, settings and profile between devices, end-to-end encrypted. They aren't switched on for this copy of OpenBuild
           yet.
         </Note>
         <Note>
@@ -198,7 +198,7 @@ function FaceIdSetting({ username }: { username: string }) {
         <div className="setting-label">Unlock with Face ID</div>
         <p className="setting-desc">
           {state === "on"
-            ? "On. This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so after a reload you unlock with Face ID instead of your password. After turning it off, you can delete the \"OpenChat sync unlock\" passkey in the Passwords app."
+            ? "On. This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so after a reload you unlock with Face ID instead of your password. After turning it off, you can delete the \"OpenBuild sync unlock\" passkey in the Passwords app."
             : state === "pending"
               ? "Almost done: confirm with Face ID once more to finish."
               : "This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so you'd need your password after every reload. Set up a passkey to unlock with Face ID instead. Your password still works."}
@@ -415,7 +415,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
           ? `Enter the password for ${unlockFor.username} to start syncing on this device.`
           : signUp
             ? `${WAITLIST_NOTE} Enter the invite code you were sent, then choose a username and password.`
-            : "Sync your chats, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No tracking. New accounts are invite-only for now."}
+            : "Sync your threads, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No tracking. New accounts are invite-only for now."}
       </Note>
       {signUp && (
         <div className="field">
@@ -754,7 +754,7 @@ function SignedIn({ account }: { account: Account }) {
         <SignOutButton username={account.username} />
       </div>
       <Note>
-        Chats, settings and your profile sync live between every device signed in to this account. They're encrypted on the device before upload; the
+        Threads, settings and your profile sync live between every device signed in to this account. They're encrypted on the device before upload; the
         sync server stores only ciphertext.
       </Note>
       <SyncKeysSetting />
@@ -763,7 +763,7 @@ function SignedIn({ account }: { account: Account }) {
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Delete account</div>
-          <p className="setting-desc">Permanently deletes the account and everything synced to it. Chats on your devices are kept.</p>
+          <p className="setting-desc">Permanently deletes the account and everything synced to it. Threads on your devices are kept.</p>
           {confirming && (
             <div className="field account-delete">
               <label className="md-label" htmlFor="account-delete-confirm">

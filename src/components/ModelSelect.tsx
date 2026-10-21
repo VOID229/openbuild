@@ -1,15 +1,15 @@
 // Custom select controls used in Settings, styled like the composer's pickers.
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
-import { KEY_ORDER, PLANS, type Effort } from "../../shared/types";
+import { type Effort } from "../../shared/types";
 import { findModel } from "../lib/models";
-import { searchModelGroups } from "../lib/modelSearch";
+import { searchProviderGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
 
-/** Search box + model list grouped by plan (every plan with a working key). Mounts fresh per open. */
+/** Search box + Pi's models grouped by provider. Mounts fresh per open. */
 export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
   const [query, setQuery] = useState("");
   const list = useRef<HTMLDivElement>(null);
@@ -18,15 +18,15 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
 
   useFocusOnShow(search);
 
-  // "go deepseek", "opencode zen", "go zen qwen": plan words filter by API key.
-  const groups = useMemo(() => searchModelGroups(detection, query, KEY_ORDER), [detection, query]);
+  // "xai grok", "fireworks deepseek": provider words narrow to that provider.
+  const groups = useMemo(() => searchProviderGroups(detection.pi?.models ?? [], query), [detection, query]);
 
   return (
     <>
       <input
         ref={search}
         className="input input-sm"
-        placeholder="Search models, or go / zen / plus / black…"
+        placeholder="Search models or providers…"
         value={query}
         spellCheck={false}
         onChange={(e) => setQuery(e.target.value)}
@@ -37,18 +37,18 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
           } else if (e.key === "Enter") {
             e.preventDefault();
             const first = groups[0];
-            if (first?.models[0]) onPick({ plan: first.plan, id: first.models[0].id });
+            if (first?.models[0]) onPick({ plan: "pi", id: first.models[0].id });
           }
         }}
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
         {groups.map((g) => (
-          <div key={g.plan} role="group" aria-label={PLANS[g.plan].label}>
-            <div className="menu-label">{PLANS[g.plan].label}</div>
+          <div key={g.provider} role="group" aria-label={g.provider}>
+            <div className="menu-label">{g.provider}</div>
             {g.models.map((m) => {
-              const isSelected = selected?.plan === g.plan && selected.id === m.id;
+              const isSelected = selected?.plan === "pi" && selected.id === m.id;
               return (
-                <button key={m.id} type="button" role="option" aria-selected={isSelected} className="menu-item" onClick={() => onPick({ plan: g.plan, id: m.id })}>
+                <button key={m.id} type="button" role="option" aria-selected={isSelected} className="menu-item" onClick={() => onPick({ plan: "pi", id: m.id })}>
                   <BrandIcon id={m.id} />
                   <span className="menu-item-label">{m.name}</span>
                   {isSelected && <Check size={15} className="menu-check" />}
@@ -57,7 +57,7 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
             })}
           </div>
         ))}
-        {!groups.length && <p className="menu-empty">{query.trim() ? `No models match “${query.trim()}”.` : "Add an API key to choose a model."}</p>}
+        {!groups.length && <p className="menu-empty">{query.trim() ? `No models match “${query.trim()}”.` : "Sign in to a provider in Settings → Providers to choose a model."}</p>}
       </div>
     </>
   );
@@ -83,7 +83,7 @@ export function ModelSelect({ value, onChange, label }: { value: ModelRef; onCha
       >
         {current ? <BrandIcon id={current.id} /> : <CircleAlert size={15} className="bad" />}
         <span className="select-value">{current ? current.name : `${value.id} (unavailable)`}</span>
-        <span className="select-hint">{PLANS[value.plan].chip}</span>
+        <span className="select-hint">{current?.provider ?? value.plan}</span>
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">

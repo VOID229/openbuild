@@ -6,15 +6,16 @@ import "@fontsource-variable/jetbrains-mono";
 import "katex/dist/katex.min.css";
 import "./styles.css";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
-import { CloudProvider, initCloud } from "./lib/cloud";
+import { LocalAccess } from "./components/LocalAccess";
 
 // iOS Safari only applies :active (the press effect on touch screens) when a touch listener exists.
 document.addEventListener("touchstart", () => {}, { passive: true });
 
-await initCloud();
-createRoot(document.getElementById("root")!).render(
-  <CloudProvider>
-    <App />
-  </CloudProvider>,
-);
+// Importing App starts config/state hydration. Delay even those imports until unlocked.
+let application: Promise<import("react").ReactNode> | undefined;
+const load = () => application ??= (async () => {
+  const [{ App }, { CloudProvider, initCloud }] = await Promise.all([import("./App"), import("./lib/cloud")]);
+  await initCloud();
+  return <CloudProvider><App /></CloudProvider>;
+})();
+createRoot(document.getElementById("root")!).render(<LocalAccess load={load} />);

@@ -44,8 +44,54 @@ const BRANDS: [RegExp, string][] = (<[RegExp, string][]>[
 ]).map(([re, svg]) => [re, clean(svg)]);
 const FALLBACK = clean(opencode);
 
+/** A model id without its provider path: "openai-codex/gpt-6.1-sol" → "gpt-6.1-sol". */
+export const bareId = (id: string) => id.slice(id.lastIndexOf("/") + 1);
+
+/** Pi provider ids → their brand icon, when there's one. */
+const PROVIDER_ICONS: [RegExp, string][] = (<[RegExp, string][]>[
+  [/^anthropic|^claude/, claude],
+  [/^openai|^azure|^codex/, openai],
+  [/^xai|^grok/, grok],
+  [/^google|^gemini|^vertex/, gemini],
+  [/^deepseek/, deepseek],
+  [/^moonshot/, kimi],
+  [/^kimi/, kimi],
+  [/^zai|^zhipu|^glm/, zai],
+  [/^mistral/, mistral],
+  [/^minimax/, minimax],
+  [/^opencode/, opencode],
+  [/^meta/, meta],
+  [/^qwen|^alibaba|^dashscope/, qwen],
+  [/^nvidia/, nvidia],
+  [/^xiaomi|^mimo/, mimo],
+]).map(([re, svg]) => [re, clean(svg)]);
+
+export const providerSvg = (provider: string) => PROVIDER_ICONS.find(([re]) => re.test(provider.toLowerCase()))?.[1];
+
+const PROVIDER_NAMES: Record<string, string> = {
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  "openai-codex": "Codex",
+  xai: "xAI",
+  google: "Google",
+  fireworks: "Fireworks",
+  "opencode-go": "OpenCode Go",
+  opencode: "OpenCode",
+  openrouter: "OpenRouter",
+  "github-copilot": "Copilot",
+  deepseek: "DeepSeek",
+  mistral: "Mistral",
+  "kimi-coding": "Kimi",
+  moonshot: "Moonshot",
+  zai: "Z.ai",
+};
+
+/** A provider id as people read it: "openai-codex" → "Codex", "glm-local" → "Glm Local". */
+export const providerName = (provider: string) =>
+  PROVIDER_NAMES[provider] ?? provider.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+
 export function brandSvg(modelId: string): string {
-  const id = modelId.toLowerCase();
+  const id = bareId(modelId.toLowerCase());
   return BRANDS.find(([re]) => re.test(id))?.[1] ?? FALLBACK;
 }
 
@@ -60,9 +106,9 @@ export function findModel(detection: Partial<Record<PlanId, Detection>>, ref: Mo
   return detection[ref.plan]?.models.find((m) => m.id === ref.id);
 }
 
-const PLAN_PREFERENCE: PlanId[] = ["zen", "black", "go", "plus"];
+const PLAN_PREFERENCE: PlanId[] = ["pi", "zen", "black", "go", "plus"];
 
-// Hooks for the think harder/faster + auto router features. Models tagged in
+// Model preferences for the auto router and background tasks. Models tagged in
 // Settings → General → "models to prioritize" take precedence over these lists.
 const QUALITY_PREFERENCE = ["claude-opus-5-5", "gpt-6-sol", "gpt-6.1-sol", "claude-fable-5-1", "glm-5.3", "kimi-k3", "qwen3.8-max", "deepseek-v4-pro", "grok-4.7", "gemini-3.1-pro"];
 const FAST_PREFERENCE = ["qwen3.8-flash", "glm-5.3-flash", "deepseek-v4.1-flash", "gemini-3.8-flash", "claude-haiku-4-5", "gpt-6-luna", "deepseek-v4-flash", "mimo-v2.6-flash"];
@@ -70,12 +116,13 @@ const FAST_RE = /flash|lite|mini|nano|haiku|luna|tiny|turbo|lightning|fast|air\b
 
 /** Normalise ids and display names ("Qwen3.8 flash", "qwen3.8-flash") for loose matching. */
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9.]/g, "");
-const matches = (m: ModelInfo, entry: NamedModel) => norm(m.id) === norm(entry.id) || norm(m.name) === norm(entry.name);
+const matches = (m: ModelInfo, entry: NamedModel) =>
+  norm(m.id) === norm(entry.id) || norm(bareId(m.id)) === norm(bareId(entry.id)) || norm(m.name) === norm(entry.name);
 
 export function isFastModel(model: Pick<ModelInfo, "id" | "name">, settings: Pick<Settings, "prioritize">): boolean {
   const tagged = settings.prioritize.find((p) => matches(model as ModelInfo, p));
   if (tagged) return tagged.tag === "Speed";
-  return FAST_RE.test(model.id.toLowerCase());
+  return FAST_RE.test(bareId(model.id.toLowerCase()));
 }
 
 interface Candidate {
@@ -100,14 +147,14 @@ function pick(pool: Candidate[], tagged: PriorityEntry[], preference: string[], 
     if (hit) return { plan: hit.plan, id: hit.model.id };
   }
   for (const id of preference) {
-    const hit = pool.find((c) => c.model.id === id);
+    const hit = pool.find((c) => c.model.id === id || bareId(c.model.id) === id);
     if (hit) return { plan: hit.plan, id: hit.model.id };
   }
   const hit = pool.find(fallback);
   return hit && { plan: hit.plan, id: hit.model.id };
 }
 
-/** Faster model used by "think faster" and by the router for easy prompts. */
+/** Faster model used for background tasks and routing easy prompts. */
 export function fastTarget(detection: Partial<Record<PlanId, Detection>>, settings: Settings, preferPlan?: PlanId) {
   const pool = candidates(detection, settings.avoid, preferPlan);
   const tagged = settings.prioritize.filter((p) => p.tag === "Speed");
@@ -117,12 +164,14 @@ export function fastTarget(detection: Partial<Record<PlanId, Detection>>, settin
 /** The model that condenses web search results: the one picked in Settings if usable, else the fastest. */
 export function digestModel(detection: Partial<Record<PlanId, Detection>>, settings: Settings): NamingModel | undefined {
   const picked = settings.searchDigest.model;
-  if (picked && findModel(detection, picked) && settings.keys[picked.plan]?.length) return picked;
+  // Pi models carry their own credentials; Opencode plans need a saved key.
+  const usable = (plan: PlanId) => plan === "pi" || !!settings.keys[plan]?.length;
+  if (picked && findModel(detection, picked) && usable(picked.plan)) return picked;
   const fast = fastTarget(detection, settings);
-  return fast && settings.keys[fast.plan]?.length ? { ...fast, effort: "low" } : undefined;
+  return fast && usable(fast.plan) ? { ...fast, effort: "low" } : undefined;
 }
 
-/** Higher-quality model used by "think harder" and by the router for complex prompts. */
+/** Higher-quality model used by the router for complex prompts. */
 export function qualityTarget(detection: Partial<Record<PlanId, Detection>>, settings: Settings, preferPlan?: PlanId) {
   const pool = candidates(detection, settings.avoid, preferPlan);
   const tagged = settings.prioritize.filter((p) => p.tag === "complex");

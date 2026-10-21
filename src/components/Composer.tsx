@@ -1,7 +1,9 @@
-import { ArrowUp, Check, FileText, GripVertical, Mic, Pencil, Plus, Square, Trash2, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Attachment } from "../../shared/types";
+import { ArrowUp, BookOpen, Check, FileText, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, Trash2, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { Attachment, PiCommand } from "../../shared/types";
 import { drainQueue, sendMessage, stopGeneration, uid } from "../lib/chat";
+import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
+import { compactThread } from "../lib/pi";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
@@ -11,6 +13,7 @@ import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker } from "./Pickers";
 import { IconButton } from "./primitives";
+import { WorkspaceBelow, WorkspaceTop } from "./Workspace";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 const isIOS = typeof navigator !== "undefined" && (/iPhone|iPad/.test(navigator.platform) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
@@ -152,6 +155,41 @@ function QueueTray({ chatId, queue, onEdit, onFinish }: TrayProps) {
   );
 }
 
+const SOURCE_ICON = { extension: Puzzle, prompt: FileText, skill: BookOpen, openbuild: Slash } as const;
+
+/** The "/" command list, above (in a thread) or below (new thread) the composer. */
+function SlashMenu({ commands, active, dropUp, onPick, onHover }: { commands: PiCommand[]; active: number; dropUp: boolean; onPick: (c: PiCommand) => void; onHover: (i: number) => void }) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return (
+    <div ref={list} className={cx("slash-menu", dropUp ? "slash-up" : "slash-down")} role="listbox" aria-label="Commands">
+      {commands.map((c, i) => {
+        const Icon = SOURCE_ICON[c.source] ?? Slash;
+        return (
+          <button
+            key={`${c.source}:${c.name}`}
+            type="button"
+            role="option"
+            data-index={i}
+            aria-selected={i === active}
+            className="slash-item"
+            // Keep focus (and the keyboard) in the textarea.
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => onHover(i)}
+            onClick={() => onPick(c)}
+          >
+            <Icon size={14} className="slash-icon" />
+            <span className="slash-name">/{c.name}</span>
+            {c.description && <span className="slash-desc">{c.description}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Composer({ variant, chatId, streaming }: Props) {
   const draftKey = chatId ?? NEW_CHAT;
   const lastTyped = useRef(0);
@@ -259,6 +297,41 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   };
 
+  // "/" at the start (and no space yet) lists commands.
+  const workspace = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId)?.workspace : undefined));
+  const homeProject = useStore((s) => (chatId ? undefined : s.projects.find((p) => p.id === s.settings.workspace.projectId)));
+  const typedCommand = /^\/(\S*)$/.exec(text)?.[1];
+  const [slashDismissed, setSlashDismissed] = useState<string>();
+  const [slashIndex, setSlashIndex] = useState(0);
+  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, typedCommand !== undefined);
+  const slashMatches = useMemo(() => {
+    if (typedCommand === undefined || slashDismissed === text) return [];
+    const builtins = BUILTIN_COMMANDS.filter((c) => c.name !== "compact" || chatId);
+    return matchCommands([...builtins, ...(piCmds ?? [])], typedCommand).slice(0, 50);
+  }, [typedCommand, piCmds, slashDismissed, text, chatId]);
+  useEffect(() => setSlashIndex(0), [typedCommand]);
+  const pickCommand = (c: PiCommand) => {
+    setText(`/${c.name} `);
+    textarea.current?.focus();
+  };
+
+  /** Commands OpenBuild runs itself instead of sending to Pi. Returns true when handled. */
+  const runBuiltin = (line: string): boolean => {
+    const m = /^\/(compact|new)\b\s*([\s\S]*)$/.exec(line);
+    if (!m) return false;
+    if (m[1] === "new") {
+      useStore.getState().newChat();
+      return true;
+    }
+    if (!chatId) return false;
+    setNotice("Compacting…");
+    compactThread(chatId, m[2]?.trim() || undefined).then(
+      (r) => setNotice(`Compacted: ${Math.round(r.tokensBefore / 1000)}k → ${r.estimatedTokensAfter ? `~${Math.round(r.estimatedTokensAfter / 1000)}k` : "less"} tokens`),
+      (err: Error) => setNotice(err.message),
+    );
+    return true;
+  };
+
   const hasContent = text.trim().length > 0 || files.length > 0;
   // While a reply is coming in, sending queues the message instead.
   const queueing = streaming && !!chatId;
@@ -316,6 +389,11 @@ export function Composer({ variant, chatId, streaming }: Props) {
     if (editing) return finishEdit(true);
     if (!hasContent) return;
     dictation.stop();
+    if (!files.length && runBuiltin(text.trim())) {
+      saveDraft(draftKey, "", []);
+      setText("");
+      return;
+    }
     if (queueing && chatId) {
       enqueue(chatId, { id: uid(), text: text.trim(), files });
       saveDraft(draftKey, "", []);
@@ -330,6 +408,24 @@ export function Composer({ variant, chatId, streaming }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (slashMatches.length && !e.nativeEvent.isComposing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = slashMatches.length;
+        setSlashIndex((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && slashMatches[slashIndex] && `/${slashMatches[slashIndex]!.name}` !== text.trim())) {
+        e.preventDefault();
+        pickCommand(slashMatches[slashIndex]!);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setSlashDismissed(text);
+        return;
+      }
+    }
     if (e.key === "Escape" && editing) {
       e.preventDefault();
       return finishEdit(false);
@@ -354,7 +450,9 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
+      {!chatId && <WorkspaceTop />}
       {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} />}
+      {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       <div
         className={cx("composer", dragging && "composer-drag")}
         onClick={(e) => {
@@ -409,7 +507,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           className="composer-input"
           value={text}
           rows={variant === "home" ? 2 : 1}
-          placeholder={editing ? "Edit queued message" : "Ask anything"}
+          placeholder={editing ? "Edit queued message" : "Describe a task or ask a question"}
           aria-label="Message"
           onChange={(e) => {
             lastTyped.current = Date.now();
@@ -433,10 +531,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
               e.target.value = "";
             }}
           />
+          <ModelPicker dropUp={variant === "dock"} />
+          <EffortPicker dropUp={variant === "dock"} />
           {notice && <span className="composer-notice">{notice}</span>}
           <div className="composer-controls">
-            <EffortPicker dropUp={variant === "dock"} />
-            <ModelPicker dropUp={variant === "dock"} />
             <button
               type="button"
               className={cx("round-btn round-btn-mic", dictation.listening && "round-btn-listening")}
@@ -468,6 +566,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           </div>
         </div>
       </div>
+      {chatId && <WorkspaceBelow chatId={chatId} streaming={streaming} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import type { FunctionReturnType } from "convex/server";
 import { api as convexApi } from "../../convex/_generated/api";
 import { openEvents, readEvents, type ReplyStream } from "../../shared/replies";
-import { GITHUB_SCOPE, SEARCH_PROVIDERS, type ChatRequest, type DetectResult, type PlanId, type SearchCheckResult, type SearchProviderId, type StreamEvent } from "../../shared/types";
+import { GITHUB_SCOPE, SEARCH_PROVIDERS, type ChatRequest, type DetectResult, type PiChatRequest, type PlanId, type SearchCheckResult, type SearchProviderId, type StreamEvent } from "../../shared/types";
 import { cloudClient } from "./cloud";
 import { browserSecretById, browserSecrets } from "./keyStore";
 import { config } from "./runtime";
@@ -23,7 +23,7 @@ export async function detectModels(plan: PlanId, id: string, signal?: AbortSigna
     return (await res.json()) as DetectResult;
   } catch (err) {
     if (signal?.aborted) throw err;
-    return { plan, status: "error", error: "Couldn't reach the OpenChat server", models: [], checkedAt: Date.now() };
+    return { plan, status: "error", error: "Couldn't reach the OpenBuild server", models: [], checkedAt: Date.now() };
   }
 }
 
@@ -41,12 +41,12 @@ export async function verifySearch(provider: SearchProviderId, entry: string, si
           ? { provider, key: await browserSecretById(provider, entry) }
           : { provider, id: entry };
     const res = await fetch("/api/verify-search", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
-    if (res.status === 404 && !hosted) return { provider, status: "error", error: "Restart the OpenChat server (`bun dev`) to check search keys" };
+    if (res.status === 404 && !hosted) return { provider, status: "error", error: "Restart the OpenBuild server (`bun dev`) to check search keys" };
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return (await res.json()) as SearchCheckResult;
   } catch (err) {
     if (signal?.aborted) throw err;
-    return { provider, status: "error", error: "Couldn't reach the OpenChat server" };
+    return { provider, status: "error", error: "Couldn't reach the OpenBuild server" };
   }
 }
 
@@ -69,7 +69,7 @@ export async function* streamOnce(req: ChatRequest, signal: AbortSignal): AsyncG
     res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
   } catch (err) {
     if (signal.aborted) throw err;
-    yield { t: "error", message: "Couldn't reach the OpenChat server. Check your connection." };
+    yield { t: "error", message: "Couldn't reach the OpenBuild server. Check your connection." };
     return;
   }
   if (!res.ok || !res.body) {
@@ -99,7 +99,7 @@ const CLAIM_GRACE = 90_000;
  * network blip, the tab was frozen) this reconnects and replays the reply from the start, after a
  * {t:"reset"}. Ends after the reply's last event.
  */
-export async function* streamChat(req: ChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal): AsyncGenerator<ReplyEvent> {
+export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal): AsyncGenerator<ReplyEvent> {
   let posted = !req;
   /** When the current run of failed attempts began. */
   let failingSince: number | undefined;
@@ -132,7 +132,7 @@ export async function* streamChat(req: ChatRequest | undefined, stream: ReplyStr
       return;
     }
     if (outcome === "lost" && Date.now() - failingSince > (posted ? RESUME_PATIENCE : POST_PATIENCE)) {
-      yield { t: "error", message: posted ? "Lost the connection to this reply." : "Couldn't reach the OpenChat server. Check your connection." };
+      yield { t: "error", message: posted ? "Lost the connection to this reply." : "Couldn't reach the OpenBuild server. Check your connection." };
       return;
     }
     await pause(delay, signal);
@@ -167,10 +167,12 @@ async function* readReply(res: Response): AsyncGenerator<ReplyEvent, Outcome> {
   return "lost";
 }
 
-async function* post(req: ChatRequest, stream: ReplyStream, signal: AbortSignal, onPosted: () => void): AsyncGenerator<ReplyEvent, Outcome> {
-  const hosted = (await config).mode === "hosted";
-  const body = { ...req, stream: { id: stream.id, key: stream.key }, ...(hosted ? { secrets: await secretsFor(req) } : {}) };
-  const res = await fetch("/api/chat", {
+async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, signal: AbortSignal, onPosted: () => void): AsyncGenerator<ReplyEvent, Outcome> {
+  // Pi threads (they name a working directory) run on the local server's Pi.
+  const pi = "threadId" in req;
+  const hosted = !pi && (await config).mode === "hosted";
+  const body = { ...req, stream: { id: stream.id, key: pi ? undefined : stream.key }, ...(hosted ? { secrets: await secretsFor(req as ChatRequest) } : {}) };
+  const res = await fetch(pi ? "/api/pi/chat" : "/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),

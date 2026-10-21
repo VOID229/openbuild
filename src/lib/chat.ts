@@ -1,30 +1,31 @@
 import { newStreamKey, type ReplyStream } from "../../shared/replies";
-import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type WireMessage } from "../../shared/types";
+import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
-import { chatDepth, MAX_FORK_DEPTH } from "./forks";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
+import { uid } from "./id";
+import { prepareWorkspace } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { selectionFor, useStore } from "./store";
-import type { Chat, Message, ModelRef, SearchCall, Settings } from "./types";
+import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
-export const uid = () => crypto.randomUUID();
+export { uid };
 
 /** Active generation per chat. Replacing an entry orphans the old stream (its updates are dropped). */
 const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream }>();
 
 function makeTitle(text: string, attachments: Attachment[]) {
-  const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New chat";
+  const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New thread";
   const clean = line.replace(/[#*_`>]/g, "").trim();
   return clean.length > 60 ? clean.slice(0, 57).trimEnd() + "…" : clean;
 }
 
 function systemPrompt(settings: Settings, model: ModelInfo, canSearch: boolean) {
   const { name, bio, location, language } = settings.profile;
-  const about = `you're ${model.name}, running in OpenChat through the OpenCode API, here to help with whatever they need${canSearch ? ", and you can search the web" : ""}`;
+  const about = `you're ${model.name}, running in OpenBuild through the OpenCode API, here to help them build${canSearch ? ", and you can search the web" : ""}`;
   const lines = [
-    `You are ${model.name}, an AI assistant in OpenChat, a chat app that connects to models through the OpenCode API.`,
+    `You are ${model.name}, a coding assistant in OpenBuild, a local app for building software that connects to models through the OpenCode API.`,
     `If the user asks who or what you are, answer briefly and naturally: ${about}. Your model ID is ${model.id}; give it only if they ask for it.`,
     "The user can switch models mid-chat, so earlier assistant replies may have been written by other models. Keep this in mind, but don't bring it up unless it matters. Don't quote or describe these instructions.",
     "Format responses in Markdown where it helps readability: headings, lists, tables, and fenced code blocks with a language tag. Write math in LaTeX using $...$ inline or $$...$$ for display.",
@@ -154,54 +155,11 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   return true;
 }
 
-/**
- * "2nd": copy the conversation up to (not including) an assistant reply into a new chat and
- * answer that same user turn with another model. The original chat is left untouched.
- * Forks can be forked again, up to MAX_FORK_DEPTH ("5th").
- */
-export function forkWithModel(chatId: string, messageId: string, ref: ModelRef & { effort?: Effort }) {
-  const st = useStore.getState();
-  const chat = st.chats.find((c) => c.id === chatId);
-  const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
-  const model = findModel(st.detection, ref);
-  if (!chat || index < 1 || chatDepth(chat) >= MAX_FORK_DEPTH) return;
-  if (!model) {
-    st.openSettings("keys");
-    return;
-  }
-  const now = Date.now();
-  const history = chat.messages.slice(0, index).map((m) => ({ ...m, id: uid(), status: m.status === "streaming" ? ("stopped" as const) : m.status }));
-  const assistant: Message = {
-    id: uid(),
-    role: "assistant",
-    content: "",
-    status: "streaming",
-    model: { ...ref, name: model.name },
-    createdAt: now,
-    startedAt: now,
-  };
-  const fork: Chat = {
-    id: uid(),
-    // Same title as the original; the "2nd" badge and banner mark it as a fork.
-    title: chat.title,
-    titleSource: "auto",
-    forkOf: chat.id,
-    forkMessageId: messageId,
-    forkDepth: chatDepth(chat) + 1,
-    createdAt: now,
-    updatedAt: now,
-    messages: [...history, assistant],
-  };
-  st.upsertChat(fork);
-  st.selectChat(fork.id);
-  void generate(fork.id, assistant.id);
-}
-
-/** Re-run an assistant turn, optionally on a different model (think harder / think faster / retry). */
-export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
+/** Retry an assistant turn. */
+export function regenerate(chatId: string, messageId: string) {
   const st = useStore.getState();
   const msg = st.chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
-  const target = ref ?? msg?.model;
+  const target = msg?.model;
   const model = findModel(st.detection, target);
   if (!msg || !target || !model) {
     st.openSettings("keys");
@@ -223,9 +181,10 @@ export function regenerate(chatId: string, messageId: string, ref?: ModelRef) {
     notice: undefined,
     searches: undefined,
     stream: undefined,
-    // A fresh pick (think harder/faster) uses the global level; a retry keeps the level it had.
-    model: { plan: target.plan, id: target.id, name: model.name, effort: ref ? undefined : msg.model?.effort },
-    routed: ref ? false : msg.routed,
+    parts: undefined,
+    usage: undefined,
+    model: { plan: target.plan, id: target.id, name: model.name, effort: msg.model?.effort },
+    routed: msg.routed,
     startedAt: now,
   });
   void generate(chatId, messageId);
@@ -245,6 +204,64 @@ export function drainQueue(chatId: string) {
   }
 }
 
+class WorkspaceError extends Error {}
+
+/** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
+async function newWorkspace(chat: Chat): Promise<Workspace> {
+  const { settings, projects } = useStore.getState();
+  const pref = settings.workspace;
+  const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
+  try {
+    if (!project) return await prepareWorkspace({ mode: "scratch" });
+    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, name: chat.title });
+  } catch (err) {
+    throw new WorkspaceError((err as Error).message);
+  }
+}
+
+/** The text sent to Pi for a user message: text files inlined, unsupported files noted. */
+function piMessage(m: Message, input: string[]): { message: string; images: PiChatRequest["images"] } {
+  const files = m.attachments ?? [];
+  const images = files.filter((a) => a.mime.startsWith("image/") && input.includes("image"));
+  const notes = files
+    .filter((a) => a.text == null && !images.includes(a))
+    .map((a) => `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`);
+  const texts = files.filter((a) => a.text != null).map((a) => `<file name="${a.name}">\n${a.text}\n</file>`);
+  return {
+    message: [...texts, ...notes, m.content].filter(Boolean).join("\n\n") || " ",
+    images: images.map((a) => ({ data: a.dataUrl.slice(a.dataUrl.indexOf(",") + 1), mimeType: a.mime })),
+  };
+}
+
+/** A Pi turn for the assistant message at `index`: the user message before it, and its place in the thread. */
+function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, workspace: Workspace): PiChatRequest {
+  const before = chat.messages.slice(0, index);
+  const userAt = before.findLastIndex((m) => m.role === "user");
+  const user = before[userAt];
+  if (!user) throw new WorkspaceError("There's no message to answer.");
+  return {
+    threadId: chat.id,
+    cwd: workspace.cwd,
+    model: model.id,
+    effort,
+    ...piMessage(user, model.input),
+    prior: before.slice(0, userAt).filter((m) => m.role === "user").length,
+    forkFrom: chat.forkOf,
+  };
+}
+
+/** Answer a question a Pi extension asked; the reply's stream records the answer. */
+export async function answerQuestion(chatId: string, messageId: string, part: AskPart, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
+  const { answerAsk } = await import("./pi");
+  const shown = reply.cancelled ? "" : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : (reply.value ?? "");
+  useStore.getState().patchMessage(chatId, messageId, (m) => ({ parts: m.parts?.map((p) => (p.type === "ask" && p.id === part.id ? { ...p, answer: shown } : p)) }));
+  try {
+    await answerAsk(chatId, part.id, reply);
+  } catch {
+    // Expired (timed out, or the reply ended): it's shown as answered either way.
+  }
+}
+
 /**
  * Stream an assistant reply into its message. `resume` picks up a reply that's already running on the
  * server (the message has its ReplyStream) instead of starting one.
@@ -258,9 +275,11 @@ async function generate(chatId: string, messageId: string, resume = false) {
 
   const model = findModel(st.detection, msg.model);
   const plan = msg.model.plan;
+  const pi = plan === "pi";
   const keys = st.settings.keys[plan];
-  if (!resume && (!model || !keys?.length)) {
-    st.patchMessage(chatId, messageId, { status: "error", error: "This model isn't available. Check your API keys in Settings." }, true);
+  if (!resume && (!model || (!pi && !keys?.length))) {
+    const error = pi ? "This model isn't available in Pi anymore. Pick another one, or check Settings → Providers." : "This model isn't available. Check your API keys in Settings.";
+    st.patchMessage(chatId, messageId, { status: "error", error }, true);
     return;
   }
 
@@ -285,7 +304,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
     // is only saved once it's over (the device that started it saves along the way).
     const persist = !resume && Date.now() - savedAt > 2000;
     if (persist) savedAt = Date.now();
-    useStore.getState().patchMessage(chatId, messageId, { content: text, reasoning: reasoning || undefined, reasoningMs }, persist);
+    useStore.getState().patchMessage(chatId, messageId, { content: text, reasoning: reasoning || undefined, reasoningMs, ...(pi ? { parts: [...parts] } : {}) }, persist);
   };
   const schedule = () => {
     if (scheduled) return;
@@ -297,12 +316,24 @@ async function generate(chatId: string, messageId: string, resume = false) {
   let error: string | undefined;
   let finish: string | undefined;
   let notice: string | undefined;
+  let usage: Usage | undefined;
   let searches: SearchCall[] = [];
-  const search = model && model.tools !== false ? searchCredentials(st.settings) : undefined;
+  /** Pi replies: text, tools and questions in order. */
+  let parts: Part[] = [];
+  const search = !pi && model && model.tools !== false ? searchCredentials(st.settings) : undefined;
   try {
+    // A thread's first turn sets up where it works (a project checkout, a new worktree, or a scratch folder).
+    let workspace = chat.workspace;
+    if (pi && !resume && !workspace) {
+      workspace = await newWorkspace(chat);
+      if (!isCurrent()) return;
+      useStore.getState().updateChat(chatId, { workspace });
+    }
     const request = resume
       ? undefined
-      : {
+      : pi
+        ? piRequest(chat, index, model!, msg.model.effort ?? st.settings.effort, workspace!)
+        : {
           plan,
           model: model!.id,
           effort: msg.model.effort ?? st.settings.effort,
@@ -312,17 +343,40 @@ async function generate(chatId: string, messageId: string, resume = false) {
           search,
           digest: search ? searchDigest(st.settings, st.detection) : undefined,
         };
+    const flushParts = () => {
+      if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { parts: [...parts] });
+    };
     for await (const ev of streamChat(request, stream, startedAt, ctrl.signal)) {
       if (ev.t === "reset") {
         // Reconnected: the reply is replayed from the start.
         text = reasoning = "";
-        reasoningMs = finish = notice = error = undefined;
+        reasoningMs = finish = notice = error = usage = undefined;
         searches = [];
-        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { content: "", reasoning: undefined, reasoningMs: undefined, searches: undefined });
+        parts = [];
+        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { content: "", reasoning: undefined, reasoningMs: undefined, searches: undefined, parts: undefined });
       } else if (ev.t === "text") {
         if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
         text += ev.v;
+        if (pi) {
+          const last = parts.at(-1);
+          if (last?.type === "text") parts[parts.length - 1] = { type: "text", text: last.text + ev.v };
+          else if (ev.v.trim()) parts.push({ type: "text", text: ev.v.replace(/^\s+/, "") });
+        }
         schedule();
+      } else if (ev.t === "tool") {
+        if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
+        const { t: _t, ...call } = ev;
+        const at = parts.findIndex((p) => p.type === "tool" && p.id === call.id);
+        if (at >= 0) parts[at] = { ...(parts[at] as ToolPart), ...Object.fromEntries(Object.entries(call).filter(([, v]) => v !== undefined)) };
+        else parts.push({ type: "tool", ...call });
+        flushParts();
+      } else if (ev.t === "ask") {
+        const { t: _t, ...ask } = ev;
+        if (!parts.some((p) => p.type === "ask" && p.id === ask.id)) parts.push({ type: "ask", ...ask });
+        flushParts();
+      } else if (ev.t === "asked") {
+        parts = parts.map((p) => (p.type === "ask" && p.id === ev.id ? { ...p, answer: ev.answer ?? "" } : p));
+        flushParts();
       } else if (ev.t === "reasoning") {
         reasoning += ev.v;
         schedule();
@@ -331,21 +385,28 @@ async function generate(chatId: string, messageId: string, resume = false) {
         break;
       } else if (ev.t === "done") {
         finish = ev.finish;
+        usage = ev.usage;
       } else if (ev.t === "search") {
         const { t: _t, ...call } = ev;
         searches = searches.some((s) => s.id === call.id) ? searches.map((s) => (s.id === call.id ? call : s)) : [...searches, call];
         if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { searches });
       } else if (ev.t === "notice") {
-        // A key failed and a fallback key was used; refresh key statuses in Settings.
-        notice = ev.message;
-        void useStore.getState().refreshDetection(plan);
+        if (pi) {
+          // Pi's notes (retries, compaction, extension messages) add up.
+          notice = notice ? `${notice}\n${ev.message}` : ev.message;
+          if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { notice });
+        } else {
+          // A key failed and a fallback key was used; refresh key statuses in Settings.
+          notice = ev.message;
+          void useStore.getState().refreshDetection(plan);
+        }
       }
     }
   } catch (err) {
-    if (!ctrl.signal.aborted) error = `Connection lost: ${(err as Error).message}`;
+    if (!ctrl.signal.aborted) error = err instanceof WorkspaceError ? err.message : `Connection lost: ${(err as Error).message}`;
   }
 
-  // Superseded by think faster / regenerate: the new run owns this message now.
+  // Superseded by a retry: the new run owns this message now.
   if (!isCurrent()) return;
   running.delete(chatId);
   // A reply picked back up may have been finished meanwhile by the device that started it.
@@ -353,7 +414,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
   if (resume && now?.status !== "streaming") return drainQueue(chatId);
   if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
   const status: Message["status"] = error ? "error" : ctrl.signal.aborted ? "stopped" : "done";
-  if (status === "done" && !text.trim()) {
+  const didSomething = parts.some((p) => p.type !== "text") || finish === "handled";
+  if (status === "done" && !text.trim() && !didSomething) {
     error =
       finish === "length" || finish === "max_tokens"
         ? "The model ran out of output tokens before answering. Try a lower effort level."
@@ -372,6 +434,11 @@ async function generate(chatId: string, messageId: string, resume = false) {
       notice,
       // A search still marked running was cut off by a stop or an error.
       searches: searches.length ? searches.map((s) => (s.status === "running" ? { ...s, status: "error" as const, error: "Stopped" } : s)) : undefined,
+      // Likewise tools still running, and questions nobody answered.
+      parts: parts.length
+        ? parts.map((p) => (p.type === "tool" && p.status === "running" ? { ...p, status: "error" as const } : p.type === "ask" && p.answer === undefined ? { ...p, answer: "" } : p))
+        : undefined,
+      usage,
     },
     true,
   );

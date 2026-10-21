@@ -7,7 +7,8 @@
     "dev": "bun --hot server/index.ts",
     "start": "NODE_ENV=production bun server/index.ts",
     "test": "bun test",
-    "typecheck": "tsc --noEmit && tsc -p convex --noEmit"
+    "typecheck": "tsc --noEmit && tsc -p convex --noEmit",
+    "cli:install": "chmod +x bin/openbuild.ts && mkdir -p ~/.local/bin && ln -sf \"$PWD/bin/openbuild.ts\" ~/.local/bin/openbuild && echo \"Installed: ~/.local/bin/openbuild\""
   },
   "dependencies": {
     "@auth/core": "0.41.3",
@@ -40,5 +41,8 @@
     "fake-indexeddb": "^6.2.5",
     "jose": "6.2.12",
     "typescript": "^7.0.2"
+  },
+  "bin": {
+    "openbuild": "bin/openbuild.ts"
   }
 }

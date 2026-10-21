@@ -1,6 +1,7 @@
 // Types shared by the Bun server and the React client.
 
-export type PlanId = "go" | "plus" | "black" | "zen";
+/** "pi": a model configured in the installed Pi (its provider/model id). The rest are Opencode plans. */
+export type PlanId = "go" | "plus" | "black" | "zen" | "pi";
 
 export type Protocol = "chat" | "responses" | "messages" | "gemini";
 
@@ -25,7 +26,7 @@ export interface PlanConfig {
   chip: string;
   baseURL: string;
   /** Provider/model prefix, e.g. `opencode-go/glm-5.3` */
-  prefix: "opencode" | "opencode-go";
+  prefix: string;
 }
 
 // Routing table — implemented exactly as specified.
@@ -34,6 +35,7 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   go: { id: "go", label: "Opencode Go", chip: "Go", baseURL: "https://opencode.ai/zen/go/v1", prefix: "opencode-go" },
   plus: { id: "plus", label: "Opencode Plus", chip: "Plus", baseURL: "https://opencode.ai/zen/go/v1", prefix: "opencode-go" },
   black: { id: "black", label: "Opencode Black", chip: "Black", baseURL: "https://opencode.ai/zen/v1", prefix: "opencode" },
+  pi: { id: "pi", label: "Pi", chip: "Pi", baseURL: "", prefix: "pi" },
 };
 
 /** Order of rows in Settings → API Keys (as drawn). */
@@ -65,6 +67,9 @@ export interface ModelInfo {
   releaseDate?: string;
   /** Supports function/tool calling (needed for web search). */
   tools?: boolean;
+  /** Pi models: the provider id and display name (`id` is "<provider>/<model id>"). */
+  provider?: string;
+  providerName?: string;
 }
 
 export interface DetectResult {
@@ -182,6 +187,70 @@ export interface ChatRequest {
   digest?: SearchDigestModel;
 }
 
+/** Tokens and cost of a reply, and how full the thread's context is afterwards. */
+export interface Usage {
+  input?: number;
+  output?: number;
+  cost?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+}
+
+/** Where a thread works: a project's own checkout, or a git worktree of it. */
+export interface Workspace {
+  projectId: string;
+  projectName: string;
+  /** The directory Pi runs in. */
+  cwd: string;
+  branch?: string;
+  /** A worktree OpenBuild created for this thread (on its own branch). */
+  worktree?: boolean;
+  /** The branch the worktree was started from. */
+  base?: string;
+}
+
+/** A project: a directory (usually a git repository) threads can work in. */
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+  git: boolean;
+  /** Missing from disk (moved or deleted). */
+  missing?: boolean;
+}
+
+export interface GitInfo {
+  branch?: string;
+  branches: string[];
+  /** Uncommitted changes (number of changed paths). */
+  dirty: number;
+  ahead?: number;
+  behind?: number;
+}
+
+/** A turn of a thread, run by Pi in the thread's workspace. */
+export interface PiChatRequest {
+  threadId: string;
+  cwd: string;
+  /** "<provider>/<model id>" */
+  model: string;
+  effort: Effort;
+  message: string;
+  images?: { data: string; mimeType: string }[];
+  /** User messages before this one in the thread; Pi's history is cut back to match (retry, edit). */
+  prior: number;
+  /** Legacy fork source: starts from a copy of that thread's Pi session. */
+  forkFrom?: string;
+  stream?: { id: string };
+}
+
+/** A slash command from Pi: an extension command, a prompt template or a skill. */
+export interface PiCommand {
+  name: string;
+  description?: string;
+  source: "extension" | "prompt" | "skill" | "openbuild";
+}
+
 /** NDJSON events streamed from /api/chat to the client. */
 export type StreamEvent =
   | { t: "text"; v: string }
@@ -201,6 +270,23 @@ export type StreamEvent =
       /** The results were condensed by the digest model before the chat model saw them. */
       digested?: boolean;
     }
-  | { t: "done"; finish?: string; usage?: { input?: number; output?: number } }
+  /** Pi ran a tool (read, bash, edit, an extension's tool…): started, progressed or finished. */
+  | {
+      t: "tool";
+      id: string;
+      name: string;
+      args?: Record<string, unknown>;
+      status: "running" | "done" | "error";
+      /** The tool's text output (trimmed to its head and tail when long). */
+      output?: string;
+      /** Unified diff of a file change (edit/write). */
+      patch?: string;
+      ms?: number;
+    }
+  /** A Pi extension asks the user something (confirm, choose, type) and waits for the answer. */
+  | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string }
+  /** That question was answered (or cancelled, or timed out). */
+  | { t: "asked"; id: string; answer?: string }
+  | { t: "done"; finish?: string; usage?: Usage }
   /** The reply is over (after done, an error, or a stop). A stream that ends without it was cut off. */
   | { t: "end" };

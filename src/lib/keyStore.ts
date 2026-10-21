@@ -5,6 +5,7 @@
 //
 // Hosted website: there's no server-side storage, so keys stay in this browser (IndexedDB) and are
 // attached to each request that needs them; the relay uses them for that request and keeps nothing.
+import { uid } from "./id";
 import { createStore, entries, get, set } from "./kv";
 import { GITHUB_SCOPE, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
 import { config } from "./runtime";
@@ -32,7 +33,7 @@ async function browserSetKeys(scope: string, edits: KeyEdit[]): Promise<string[]
     const entry =
       "id" in edit
         ? current.find((e) => e.id === edit.id)
-        : (current.find((e) => e.secret === edit.secret.trim()) ?? { id: crypto.randomUUID().replace(/-/g, "").slice(0, 12), secret: edit.secret.trim() });
+        : (current.find((e) => e.secret === edit.secret.trim()) ?? { id: uid().replace(/-/g, "").slice(0, 12), secret: edit.secret.trim() });
     if (!entry) throw new Error("Unknown key");
     if (!next.some((e) => e.id === entry.id)) next.push(entry);
   }
@@ -42,7 +43,7 @@ async function browserSetKeys(scope: string, edits: KeyEdit[]): Promise<string[]
 
 // A server from before the key vault has no /api/keys and answers 404. That happens when an old
 // `bun dev` is still running on this port after an update: say so instead of "Not found".
-export const STALE_SERVER = "The OpenChat server on this port is out of date, so it can't save keys. Stop it, run `bun dev` again, and reload this page.";
+export const STALE_SERVER = "The OpenBuild server on this port is out of date, so it can't save keys. Stop it, run `bun dev` again, and reload this page.";
 
 /** The saved key ids; undefined when the server is unreachable. Throws when the server is too old to have a vault. */
 export async function fetchKeys(signal?: AbortSignal): Promise<KeyInventory | undefined> {

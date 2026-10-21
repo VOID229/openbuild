@@ -1,12 +1,15 @@
-// OpenChat server: serves the React app (bundled by Bun, with HMR in dev) and proxies
-// chat requests to Opencode. API keys are kept in the OS keychain (see vault.ts) and are never
-// sent back to the browser; requests refer to them by plan. Chats and settings are kept on disk
-// (see storage.ts), so they don't depend on which port or browser you open the app in.
+// OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
+// installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
+// settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
+// the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
+import { hostname as osHostname } from "node:os";
 import index from "../src/index.html";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
+import { piRoutes } from "./pi/routes";
+import { localAuth } from "./localAuth";
 import { findRun, localRun, startRun } from "./runs";
 import * as storage from "./storage";
 import * as vault from "./vault";
@@ -26,12 +29,20 @@ const serverId = (() => {
   if (!id) storage.setValue("server-id", (id = crypto.randomUUID()));
   return id;
 })();
+/** This computer's name as people know it ("Gal's MacBook Pro"), shown where threads run. */
+const machine = (() => {
+  if (process.platform === "darwin") {
+    const r = Bun.spawnSync(["scutil", "--get", "ComputerName"]);
+    const name = r.stdout.toString().trim();
+    if (r.exitCode === 0 && name) return name;
+  }
+  return osHostname().replace(/\.local$/, "");
+})();
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 
-// The API holds your keys' power (it can spend them), so it only answers requests that really come
-// from this app: a loopback Host (defeats DNS rebinding) and, when the browser says, our own Origin
-// (defeats other websites calling localhost). Serving beyond localhost is opt-in: set HOST, and list
-// the names you'll browse to in OPENCHAT_ALLOWED_HOSTS.
+// Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
+// and the local password session. Only status/login/logout omit the session check.
+// Serving beyond localhost is opt-in: set HOST and OPENCHAT_ALLOWED_HOSTS.
 const allowedHosts = new Set(["localhost", "127.0.0.1", "[::1]", ...(process.env.OPENCHAT_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)]);
 const hostname = (host: string) => host.toLowerCase().replace(/:\d+$/, "");
 function forbidden(req: Request): Response | undefined {
@@ -41,29 +52,34 @@ function forbidden(req: Request): Response | undefined {
   try {
     originHost = origin && origin !== "null" ? new URL(origin).host : undefined;
   } catch {}
-  const ok = host && allowedHosts.has(hostname(host)) && (origin === null || (originHost !== undefined && allowedHosts.has(hostname(originHost))));
+  const ok = host && allowedHosts.has(hostname(host)) && (origin === null || (originHost !== undefined && originHost.toLowerCase() === host.toLowerCase()));
   return ok ? undefined : bad("Forbidden", 403);
 }
 /** Wrap an API handler with the request check. */
 const api =
   <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) =>
   (req: R, ...rest: A) =>
-    forbidden(req) ?? handler(req, ...rest);
+    forbidden(req) ?? localAuth.authorize(req) ?? handler(req, ...rest);
 
-function serve(port: number) {
+function serve(port: number, hostname: string) {
   return Bun.serve({
     port,
-    // Loopback by default: keys are spent by anything that can reach this port.
-    hostname: process.env.HOST || "127.0.0.1",
+    // Loopback by default, even with password protection.
+    hostname,
     idleTimeout: 120,
     development: process.env.NODE_ENV !== "production" && { hmr: true, console: true },
     routes: {
       "/*": index,
 
-      // Public client config: the sync service to sign in to (shared/cloud.ts), unless
+      // Only these authentication routes are public; never allow password setup over the network.
+      "/api/auth/status": { GET: (req) => forbidden(req) ?? localAuth.status(req) },
+      "/api/auth/login": { POST: (req) => forbidden(req) ?? localAuth.login(req) },
+      "/api/auth/logout": { POST: (req) => forbidden(req) ?? localAuth.logout(req) },
+
+      // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
-        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId })),
+        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, machine })),
       },
 
       // Saved keys as opaque ids, never secrets.
@@ -177,6 +193,8 @@ function serve(port: number) {
         }),
       },
 
+      ...piRoutes(api),
+
       "/api/*": api(() => bad("Not found", 404)),
     },
     error(err) {
@@ -192,21 +210,25 @@ function serve(port: number) {
 //
 // The port never changes on its own: if it's taken, startup fails instead of quietly moving to
 // the next one, so the app is always at the address you expect.
-const hot = globalThis as { openbuildServer?: ReturnType<typeof serve> };
-const previous = hot.openbuildServer;
-if (previous) previous.stop(true);
-const port = previous?.port ?? Number(process.env.PORT ?? 3100);
-let server: ReturnType<typeof serve>;
+// HOST can list several addresses (comma-separated), e.g. localhost and a Tailscale IP.
+const hosts = (process.env.HOST || "127.0.0.1").split(",").map((h) => h.trim()).filter(Boolean);
+const hot = globalThis as { openbuildServers?: ReturnType<typeof serve>[] };
+const previous = hot.openbuildServers;
+for (const p of previous ?? []) p.stop(true);
+const port = previous?.[0]?.port ?? Number(process.env.PORT ?? 3100);
+const servers: ReturnType<typeof serve>[] = [];
 try {
-  server = serve(port);
+  for (const host of hosts) servers.push(serve(port, host));
 } catch (err) {
   if ((err as { code?: string }).code !== "EADDRINUSE") throw err;
+  for (const s of servers) s.stop(true);
   console.error(
     `\n  Port ${port} is already in use, probably by another OpenBuild that's still running.` +
       `\n  Stop it (or find it with \`lsof -i :${port}\`) and run this again, or pick another port with PORT=<port>.\n`,
   );
   process.exit(1);
 }
-hot.openbuildServer = server;
-console.log(`\n  OpenBuild running at ${server.url}`);
-console.log(`  Chats and settings are saved in ${storage.location()}\n`);
+hot.openbuildServers = servers;
+console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
+console.log(`  Threads and settings are saved in ${storage.location()}\n`);
+if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: bun bin/openbuild.ts password\n");

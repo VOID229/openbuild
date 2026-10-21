@@ -7,15 +7,15 @@ import { Lightbox, useLightbox } from "./components/Lightbox";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
+import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
 import { resumeReplies } from "./lib/chat";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
+import { findModel } from "./lib/models";
 import { ensureSelection, useStore } from "./lib/store";
-import type { Detection } from "./lib/types";
 import { cx } from "./lib/ui";
-import type { PlanId } from "../shared/types";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -41,17 +41,19 @@ function useFont() {
 }
 
 function Home() {
-  const hasKeys = useStore((s) => Object.keys(s.settings.keys).length > 0);
+  const pi = useStore((s) => s.detection.pi);
   const openSettings = useStore((s) => s.openSettings);
+  // Nothing to build with yet: Pi isn't reachable, or no provider is signed in.
+  const setup = pi && pi.status !== "checking" && !pi.models.length;
   return (
     <div className="home">
       <div className="home-center">
-        <h1 className="home-title">What's on your mind?</h1>
+        <ProjectHeading />
         <Composer variant="home" streaming={false} />
-        {!hasKeys && (
-          <button type="button" className="onboarding" onClick={() => openSettings("keys")}>
+        {setup && (
+          <button type="button" className="onboarding" onClick={() => openSettings(pi.status === "error" ? "pi" : "keys")}>
             <KeyRound size={15} />
-            Add your Opencode API key to start chatting
+            {pi.status === "error" ? "Set up Pi to start building" : "Sign in to a model provider to start building"}
           </button>
         )}
       </div>
@@ -100,18 +102,18 @@ function Main() {
         },
       );
     void load(1000);
-    // Load the saved keys from the server's vault, then re-detect their models (cached results stay usable meanwhile).
+    // Projects, and the models Pi can use (cached ones stay usable meanwhile).
     ensureSelection();
-    void useStore.getState().syncKeys().then(() => useStore.getState().refreshDetection());
-    // A tab left open would otherwise never see newly launched models: re-check stale plans when
-    // the tab comes back into view, and periodically while it's visible.
-    const STALE = 30 * 60 * 1000;
+    void useStore.getState().loadProjects();
+    void useStore.getState().refreshDetection();
+    // Re-ask Pi when the tab comes back after a while (a provider signed in elsewhere, new models).
+    const STALE = 10 * 60 * 1000;
     const recheck = () => {
       if (document.visibilityState !== "visible") return;
-      const { detection, refreshDetection } = useStore.getState();
-      for (const [plan, d] of Object.entries(detection) as [PlanId, Detection][]) {
-        if (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > STALE) void refreshDetection(plan);
-      }
+      const { detection, refreshDetection, loadProjects } = useStore.getState();
+      const d = detection.pi;
+      if (!d || (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > STALE)) void refreshDetection();
+      void loadProjects();
     };
     const interval = setInterval(recheck, 5 * 60 * 1000);
     document.addEventListener("visibilitychange", recheck);
@@ -125,7 +127,8 @@ function Main() {
   // Global shortcuts:
   //   Cmd/Ctrl+,        open settings (instead of the browser's)
   //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
-  //   Cmd/Ctrl+Shift+O  new chat
+  //   Cmd/Ctrl+Shift+O  new thread
+  //   Cmd/Ctrl+1…9      pick a starred model
   //   /                 focus chat search (or the composer when the sidebar is collapsed)
   //   Enter             focus the composer (sidebar open)
   // "/" and Enter only apply when not typing in a field and not in Settings; Enter also leaves
@@ -146,6 +149,13 @@ function Main() {
         } else if (e.shiftKey && key === "o") {
           e.preventDefault();
           newChat();
+        } else if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
+          // ⌘1–⌘9: the starred models, in order.
+          const id = st.settings.favorites[Number(e.key) - 1];
+          if (id && findModel(st.detection, { plan: "pi", id })) {
+            e.preventDefault();
+            st.setSelection({ plan: "pi", id });
+          }
         }
         return;
       }
@@ -170,7 +180,7 @@ function Main() {
   }, [newChat]);
 
   useEffect(() => {
-    document.title = chat ? `${chat.title} · OpenChat` : "OpenChat";
+    document.title = chat ? `${chat.title} · OpenBuild` : "OpenBuild";
   }, [chat?.title]);
 
   // Keep the URL (#/c/<id>) and the active chat in sync, so chats can be opened in new tabs
@@ -212,7 +222,7 @@ function Main() {
             <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
               <PanelLeft size={18} />
             </IconButton>
-            <IconButton label="New chat" tooltipSide="right" onClick={newChat}>
+            <IconButton label="New thread" tooltipSide="right" onClick={newChat}>
               <SquarePen size={17} />
             </IconButton>
           </div>
@@ -222,8 +232,8 @@ function Main() {
                 <div className="home-center">
                   <p>
                     {isHosted()
-                      ? `Couldn't read your chats from this browser's storage (${loadError}). If private browsing or a privacy setting blocks site storage, turn it off for this site. Retrying…`
-                      : `Can't reach the OpenChat server to load your chats (${loadError}). Retrying…`}
+                      ? `Couldn't read your threads from this browser's storage (${loadError}). If private browsing or a privacy setting blocks site storage, turn it off for this site. Retrying…`
+                      : `Can't reach the OpenBuild server to load your threads (${loadError}). Retrying…`}
                   </p>
                 </div>
               </div>

@@ -66,3 +66,40 @@ export function searchModelGroups(detection: Partial<Record<PlanId, Detection>>,
     })
     .filter((g) => g.models.length);
 }
+
+export interface ProviderGroup {
+  provider: string;
+  models: ModelInfo[];
+}
+
+/** Pi models grouped by provider (in the order Pi lists them). */
+export function providerGroups(models: ModelInfo[]): ProviderGroup[] {
+  const groups = new Map<string, ModelInfo[]>();
+  for (const m of models) {
+    const p = m.provider ?? m.id.split("/")[0]!;
+    groups.set(p, [...(groups.get(p) ?? []), m]);
+  }
+  return [...groups].map(([provider, list]) => ({ provider, models: list }));
+}
+
+/**
+ * Search Pi models. Words naming a provider ("xai grok", "fireworks deepseek") narrow to it; the
+ * rest fuzzy-match the model. Without a query, only `scope`'s provider is listed (if given).
+ */
+export function searchProviderGroups(models: ModelInfo[], query: string, scope?: string): ProviderGroup[] {
+  const groups = providerGroups(models);
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return scope ? groups.filter((g) => g.provider === scope) : groups;
+  const named = groups.filter((g) => words.includes(fold(g.provider)));
+  const text = words.filter((w) => !named.some((g) => fold(g.provider) === w)).join(" ");
+  return (named.length ? named : groups)
+    .map((g) => ({
+      provider: g.provider,
+      models: g.models
+        .map((m) => ({ m, s: text ? fuzzyScore(`${m.name} ${m.id}`, text) : 1 }))
+        .filter((x) => x.s !== undefined)
+        .sort((a, b) => b.s! - a.s!)
+        .map((x) => x.m),
+    }))
+    .filter((g) => g.models.length);
+}

@@ -2,11 +2,12 @@
 // falling back on failure) for a short title.
 import { streamOnce } from "./api";
 import { fastTarget, findModel } from "./models";
+import { completeOnce } from "./pi";
 import { useStore } from "./store";
 import type { NamingModel } from "./types";
 
 const NAMING_SYSTEM =
-  "You name chat conversations. Reply with only a short, specific title of 2 to 6 words in Title Case that captures the topic. " +
+  "You name coding threads and conversations. Reply with only a short, specific title of 2 to 6 words in Title Case that captures the topic. " +
   "No quotes, no trailing punctuation, no emojis, no explanation.";
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
@@ -24,13 +25,13 @@ export function cleanTitle(raw: string) {
   return t.length > 60 ? t.slice(0, 57).trimEnd() + "…" : t;
 }
 
-/** Configured naming models that are currently usable, or the fastest available model. */
-function candidates(): NamingModel[] {
+/** Configured naming models that are currently usable, else the fastest available model, else the thread's own. */
+function candidates(own?: NamingModel): NamingModel[] {
   const { settings, detection } = useStore.getState();
-  const usable = settings.naming.models.filter((m) => findModel(detection, m) && settings.keys[m.plan]?.length);
+  const usable = settings.naming.models.filter((m) => findModel(detection, m) && (m.plan === "pi" || settings.keys[m.plan]?.length));
   if (usable.length) return usable;
   const fast = fastTarget(detection, settings);
-  return fast ? [{ ...fast, effort: "low" }] : [];
+  return [...(fast ? [{ ...fast, effort: "low" as const }] : []), ...(own && own.id !== fast?.id ? [own] : [])];
 }
 
 export async function autoName(chatId: string) {
@@ -44,23 +45,27 @@ export async function autoName(chatId: string) {
   const asked = question.content.trim() || (question.attachments ?? []).map((a) => a.name).join(", ");
   const content = `Conversation to title:\n\nUser: ${clip(asked, 1500)}\n\nAssistant: ${clip(answer.content, 1500)}`;
 
-  for (const cand of candidates()) {
+  const own = answer.model && { plan: answer.model.plan, id: answer.model.id, effort: "off" as const };
+  for (const cand of candidates(own)) {
     const keys = useStore.getState().settings.keys[cand.plan];
-    if (!keys?.length) continue;
+    if (cand.plan !== "pi" && !keys?.length) continue;
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 30_000);
     let text = "";
     let failed = false;
     try {
-      const stream = streamOnce(
-        { plan: cand.plan, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
-        ctrl.signal,
-      );
-      for await (const ev of stream) {
-        if (ev.t === "text") text += ev.v;
-        else if (ev.t === "error") {
-          failed = true;
-          break;
+      if (cand.plan === "pi") text = await completeOnce(cand.id, NAMING_SYSTEM, content, ctrl.signal);
+      else {
+        const stream = streamOnce(
+          { plan: cand.plan, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
+          ctrl.signal,
+        );
+        for await (const ev of stream) {
+          if (ev.t === "text") text += ev.v;
+          else if (ev.t === "error") {
+            failed = true;
+            break;
+          }
         }
       }
     } catch {

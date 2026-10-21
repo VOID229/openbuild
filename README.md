@@ -20,7 +20,7 @@ bun run typecheck
 bun test
 ```
 
-Then open http://localhost:3100.
+Set a local access password with `bun bin/openbuild.ts password`, then open http://localhost:3100. The entire app stays behind a non-dismissible password dialog until unlocked. This is a local server password, not a cloud account.
 
 ### Environment variables (all optional)
 
@@ -35,6 +35,8 @@ The names keep upstream's `OPENCHAT_` prefix. Put them in `.env` or `.env.local`
 | `OPENCHAT_SECRETS` | keychain | `file` keeps API keys in a 0600 file instead of the OS keychain |
 | `OPENCHAT_SECRETS_FILE` | `~/.config/openbuild/secrets.json` | Path of that file |
 | `OPENCHAT_CLOUD_URL` | (none: no sync) | Your own Convex deployment for accounts & sync (see below) |
+| `PI_BIN` | `pi` on `PATH`, else `~/.local/bin/pi` | The Pi executable to run |
+| `PI_CODING_AGENT_DIR` | `~/.pi/agent` | Pi's config folder (Pi reads this too) |
 
 ### Optional: your own Convex dev deployment for sync
 
@@ -56,37 +58,57 @@ The app works fully without this; Settings → Account just says accounts aren't
 
 ## Usage
 
-Chat with the Opencode models available to your own Opencode API keys.
+OpenBuild is a front end for building software with [Pi](https://pi.dev), the coding agent installed on this computer. It doesn't bundle Pi or reimplement it: every thread runs on the `pi` you have installed, with its models, credentials, extensions, skills and prompt templates.
 
-Open **Settings → API Keys** and paste a key for your plan. OpenChat checks the key and lists the models it can use.
+1. **Pi.** Settings → Pi shows whether it's installed, its version, and whether there's an update; it installs or updates Pi for you (Pi's own installer, `curl -fsSL https://pi.dev/install.sh | sh`), and lists problems Pi reported (warnings, extension errors).
+2. **Providers.** Settings → Providers signs in to model providers through Pi (OAuth or API key, via Pi's own login flows), so credentials land in `~/.pi/agent/auth.json` exactly as `/login` in Pi would put them. The model picker lists the models Pi can use, grouped by provider; Pi's default model is picked first.
+3. **Projects.** Settings → Projects adds folders (usually git repositories). It suggests repositories it finds in your usual code folders, or browse to one.
+4. **Start a thread.** Under the composer, pick the project, then **Local** (work in the project's own checkout, optionally switching branch when nothing is uncommitted) or **Worktree** (a new git worktree on its own `openbuild/<name>` branch, started from the branch you pick). "No project" gives the thread an empty scratch folder.
 
-| Plan        | Base URL                        | Provider/model prefix |
-|-------------|---------------------------------|-----------------------|
-| Zen         | https://opencode.ai/zen/v1      | opencode/...          |
-| Go $10      | https://opencode.ai/zen/go/v1   | opencode-go/...       |
-| Go Plus $40 | https://opencode.ai/zen/go/v1   | opencode-go/...       |
-| Black       | https://opencode.ai/zen/v1      | opencode/...          |
+In a thread you see what Pi does as it does it: files it read, commands it ran (with output), and edits as diffs. When an extension asks something (a confirmation, a choice), it shows up as a card to answer. Type `/` for Pi's commands (extension commands, prompt templates, `/skill:…`), plus `/compact` and `/new` from OpenBuild. Under each reply, the context fill shows how close the thread is to compaction.
+
+Settings → Pi also manages **extensions, skills and prompt templates** (`~/.pi/agent/…` and `~/.agents/skills`): turn them off and on (Pi's exact `-path` exclusion in `settings.json`), edit their files in place, create new ones from a template, or remove them (moved to `~/.pi/agent/.openbuild-trash`, never deleted). Pi packages (npm/git) can be installed and removed there too.
+
+### The `openbuild` command
+
+`bun run cli:install` links `openbuild` into `~/.local/bin`. It runs the server in the background:
+
+```sh
+openbuild password          # set/change the local password (hidden terminal prompt)
+openbuild start             # this computer only: http://localhost:3100
+openbuild start lan         # also devices on your network (plain HTTP, this computer's LAN addresses)
+openbuild start tailscale   # your tailnet over HTTPS: https://<this-mac>.<tailnet>.ts.net
+openbuild stop              # also restart, status, logs, open
+```
+
+`start tailscale` keeps the server on `127.0.0.1` and puts `tailscale serve` (HTTPS, tailnet only) in front of it; `stop` turns that off again. If your tailnet has no HTTPS certificates, it listens on the Tailscale address over plain HTTP instead. HTTPS matters on the iPhone: dictation and the clipboard only work on secure pages, and Share → Add to Home Screen gives it a full-screen icon. The pid, mode and address are in `server.json` in the data folder, the output in `server.log`.
+
+Every device/browser must unlock the server with its local password before accessing threads, settings, credentials, or Pi. There is no close button, Escape dismissal, or usable app behind the lock dialog; the server also rejects unauthenticated API requests. LAN/Tailscale startup requires a password to be configured. Set/change it on the host with `openbuild password` (or `bun bin/openbuild.ts password`); only an Argon2id hash is saved in `access.json` in the data directory. Changing it revokes all browser sessions. Sessions expire after seven days and are also cleared on server restart. If you forget the password, run that command again on the host—no cloud recovery needed.
+
+An unlocked browser can make Pi run commands as you. Never expose this directly to the internet. **Plain LAN HTTP does not encrypt passwords or session cookies**; use Tailscale HTTPS or a trusted HTTPS reverse proxy when possible. The password is an access gate, not a sandbox for Pi.
+
+Signing in to a provider from the phone: OAuth flows that redirect to `localhost` can't complete on another device, so pick the "headless" / copy-code method when Pi offers one, or paste the address the sign-in page ends on into the box OpenBuild shows.
 
 ## How it works
 
-- `server/` is a Bun server. It serves the React app and proxies chat requests to Opencode. Each request uses the endpoint that model needs (`/chat/completions`, `/responses`, `/messages` or Gemini `:streamGenerateContent`). Every stream is converted into one NDJSON event format.
-- Model detection: `GET {baseURL}/models` with your key returns the models that key can use. A zero-cost malformed request validates the key (401 = invalid). Metadata from [models.dev](https://models.dev) supplies the protocol, reasoning-effort levels and input types.
-- API keys are stored by the local OpenChat server in your **OS keychain** (macOS Keychain, Windows Credential Manager, or libsecret on Linux) and are never sent back to the browser: it only holds opaque key ids. If no keychain is available (headless Linux, containers), they fall back to a private file, `~/.config/openbuild/secrets.json` (mode 0600), and Settings says so. Keys saved in the browser by earlier versions are moved into the keychain automatically on first load.
-- Chats and settings are saved by the local server in a SQLite database on your disk, not in the browser, so every port, browser and tab sees the same data and clearing site data loses nothing:
+- `server/pi/`: Pi integration. Each thread gets a `pi --mode rpc` process running in the thread's folder (`rpc.ts`, `sessions.ts`), started on demand and closed after 20 idle minutes. Its session is a normal Pi session under `~/.pi/agent/sessions`, so `pi -r` in a terminal can open the same thread. Pi owns the conversation: a turn sends just the new message plus how many user messages come before it, and when the thread was edited or retried, Pi's history is forked back to that point first. Pi's events are turned into the app's reply stream (text, thinking, tool calls, questions) and run apart from the request (`runs.ts`), so a reload or a dropped connection doesn't stop Pi.
+- `server/pi/helper.mjs` runs under Node with the installed Pi's SDK, for what RPC mode doesn't cover: listing providers and signing in or out. `install.ts` finds Pi (the managed installer's `~/.local/bin/pi`, an npm global install, or `PI_BIN`) and checks npm for updates. `resources.ts` manages extensions, skills and prompts.
+- `server/projects.ts`: projects, branches and worktrees. Worktrees live in OpenBuild's data folder under `worktrees/`. The thread menu in the sidebar can remove a thread's worktree (and its branch, if merged).
+- The older Opencode proxy (`/api/chat`, `server/opencode.ts`, `agent.ts`, `search.ts`) is still in the server but no longer reachable from the UI.
+- Threads and settings are saved by the local server in a SQLite database on your disk, not in the browser, so every port, browser and device sees the same data:
   - macOS: `~/Library/Application Support/OpenBuild/openchat.db`
   - Linux: `~/.local/share/openbuild/openchat.db` (or `$XDG_DATA_HOME/openbuild`)
   - Windows: `%APPDATA%\OpenBuild\openchat.db`
   - or anywhere you like with `OPENCHAT_DATA_DIR`.
 
-  Writes are synced to disk before they're acknowledged (SQLite WAL, `synchronous=FULL`). If the server is unreachable (restarting, stopped), changes wait in a queue in the browser and are sent as soon as it's back. A snapshot is copied to `backups/` next to the database at startup and every 6 hours (the newest 20 are kept); to restore one, stop OpenChat and copy it over `openchat.db`. Deleting a chat removes its content but keeps a marker, so a stale tab can't bring it back. Older versions kept chats in browser storage per port: open the app once at each address you used before (e.g. `PORT=3001 bun run dev`) and those chats are imported automatically.
-- The port never changes on its own: if it's taken (usually by an OpenChat that's still running), `bun run dev` stops with an error instead of moving to another port.
-- The server listens on `127.0.0.1` only and rejects API requests with a foreign `Host` or `Origin`, so other devices and websites can't spend your keys. To open OpenChat from another device, set `HOST=0.0.0.0` and `OPENCHAT_ALLOWED_HOSTS=<the name you'll browse to>`; the connection is plain HTTP, so only do this on a network you trust.
-- Each plan can have several keys, tried in order: if a key is rejected, out of credit, or rate limited, the next one is used.
-- **Replies keep going without you.** A reply runs on the server apart from the browser's request. Closing the tab, reloading, or a network blip (Wi-Fi switching, Tailscale restarting) only drops the connection that's watching it. The model keeps thinking, searching and writing, and the app picks the reply back up when it reconnects or reopens, replaying it from the start. Stop really stops it on the server. The local server keeps replies in memory, so restarting it loses any that are still running.- Chats are named automatically after the first reply (Settings → General → Chat naming), using an ordered list of models with fallbacks.
+  Writes are synced to disk before they're acknowledged (SQLite WAL, `synchronous=FULL`). If the server is unreachable (restarting, stopped), changes wait in a queue in the browser and are sent as soon as it's back. A snapshot is copied to `backups/` next to the database at startup and every 6 hours (the newest 20 are kept).
+- The port never changes on its own: if it's taken, `bun run dev` stops with an error instead of moving to another port.
+- The API rejects requests with a foreign `Host` or `Origin`, so other websites can't drive Pi through your browser.
+- Threads are named automatically after the first reply (Settings → General → Thread naming), with a quick no-tools Pi call.
 
 ## Account & sync (optional)
 
-Sign in under **Settings → Account** to sync chats, settings and your profile (name, bio, picture, ...) live between devices. It runs on [Convex](https://convex.dev); the free plan is plenty for personal use.
+Sign in under **Settings → Account** to sync threads, settings and your profile (name, bio, picture, ...) live between devices. It runs on [Convex](https://convex.dev); the free plan is plenty for personal use.
 
 **Privacy.** Everything is end-to-end encrypted in the browser before it's uploaded, so the Convex deployment holds only ciphertext:
 
@@ -114,22 +136,3 @@ bunx convex run invites:inviteWaitlist '{"count": 10}'                      # in
 `inviteWaitlist` emails the codes through [Resend](https://resend.com) when `RESEND_API_KEY` and `INVITE_EMAIL_FROM` (e.g. `OpenChat <invites@your-domain>`, on a domain verified in Resend) are set on the deployment with `bunx convex env set`. Without them, it prints the codes for you to send.
 
 To have bounced invites cleaned up, add a webhook in Resend (Webhooks → Add endpoint) pointing at `https://<deployment>.convex.site/resend-webhook` with the `email.bounced` and `email.complained` events, then set its signing secret with `bunx convex env set RESEND_WEBHOOK_SECRET whsec_...`. A bounced invite's code is revoked, and the address can't rejoin.
-
-## Web search
-
-Open **Settings → Web Search** and add a key for any of Exa, Brave, Kagi, Firecrawl, Tavily, X (the app Bearer token from the X developer portal; your X API plan must include post search) or YouTube (a Google Cloud API key with the YouTube Data API v3 enabled; each search uses about 101 of the free 10,000 daily quota units), or the address of a SearXNG instance you already run (its `search.formats` must include `json`). With the local app, that can be any address the OpenChat server can reach, including LAN and Tailscale. Like plan keys, each provider can have several keys (or instances) that are tried in order. Each key or instance is checked with one small search when you save it, and not again after that (only if you press Retry after a failed check).
-
-Each configured provider is exposed to the model as its own tool (`search_exa`, `search_brave`, ...). Tool descriptions and a system-prompt section tell the model what each provider is best at, so with several configured it picks per query:
-
-| Task | Preferred order |
-|------|-----------------|
-| Quick, broad lookups | SearXNG → Brave → Kagi |
-| Latest / up-to-date information | Exa → Brave → Tavily |
-| Deep research, multi-source facts | Tavily → Exa → Firecrawl |
-| Full page contents (docs, long articles) | Firecrawl → Exa → Tavily |
-| Technical / quality-sensitive topics | Kagi → Exa → SearXNG |
-| What people are saying on X (reactions, breaking news, posts by an account) | X → Exa → Brave |
-
-The server runs the tool loop (`server/agent.ts`) for all four upstream protocols: it streams the model's turn, runs the searches it asked for, sends the results back, and repeats (up to 8 rounds) until the model answers. Searches show up above the reply with their result links. Models that models.dev lists as lacking tool support never get the search tools.
-
-**Efficient web search** (Settings → Web Search, on by default): instead of handing the raw results to the chat model, each search's results first go to a separate summarizing model (`server/digest.ts`), which writes a dense digest that keeps the relevant facts, figures and source links. The chat model only sees the digest, so long chats carry far fewer tokens per search on every later turn. Pick the summarizing model and its reasoning effort in Settings; by default the fastest available model is used. Short results (under ~1,500 characters) are passed on unchanged, and if the summarizer fails, the raw results are used instead. Searches that were summarized are marked "summarized" above the reply.

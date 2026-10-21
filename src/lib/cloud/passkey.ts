@@ -102,8 +102,8 @@ export async function setUpPasskey(scope: string, username: string): Promise<"do
     cred = (await navigator.credentials.create({
       publicKey: {
         challenge: crypto.getRandomValues(new Uint8Array(32)),
-        rp: { name: "OpenChat" },
-        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: username, displayName: `OpenChat sync unlock (${username})` },
+        rp: { name: "OpenBuild" },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: username, displayName: `OpenBuild sync unlock (${username})` },
         pubKeyCredParams: [
           { type: "public-key", alg: -7 },
           { type: "public-key", alg: -257 },

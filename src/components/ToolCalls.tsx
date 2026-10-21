@@ -1,0 +1,197 @@
+// What Pi did while answering: one compact row per tool call (read a file, ran a command, edited
+// code), each opening up to its output or diff; and the questions Pi extensions ask on the way.
+import { Bot, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { useMemo, useState } from "react";
+import { answerQuestion } from "../lib/chat";
+import type { AskPart, ToolPart } from "../lib/types";
+import { cx } from "../lib/ui";
+import { Spinner } from "./primitives";
+
+const str = (v: unknown) => (typeof v === "string" ? v : undefined);
+
+/** A path as shown: relative to the thread's folder when it's inside it. */
+function shortPath(path: string | undefined, cwd?: string) {
+  if (!path) return "";
+  if (cwd && path.startsWith(cwd + "/")) return path.slice(cwd.length + 1);
+  return path.replace(/^\/Users\/[^/]+/, "~");
+}
+
+const firstLine = (s: string) => {
+  const line = s.trim().split("\n")[0] ?? "";
+  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
+};
+
+/** How a tool call reads in one line, and its icon. */
+function describe(part: ToolPart, cwd?: string): { icon: LucideIcon; verb: string; target: string; mono?: boolean } {
+  const a = part.args ?? {};
+  const path = shortPath(str(a.path) ?? str(a.file_path) ?? str(a.filePath), cwd);
+  const running = part.status === "running";
+  switch (part.name) {
+    case "read":
+      return { icon: FileText, verb: running ? "Reading" : "Read", target: path };
+    case "bash":
+      return { icon: SquareTerminal, verb: "", target: firstLine(str(a.command) ?? ""), mono: true };
+    case "edit":
+      return { icon: FilePen, verb: running ? "Editing" : "Edited", target: path };
+    case "write":
+      return { icon: FilePlus, verb: running ? "Writing" : "Wrote", target: path };
+    case "grep":
+      return { icon: Search, verb: running ? "Searching for" : "Searched for", target: str(a.pattern) ?? "" };
+    case "find":
+    case "ls":
+      return { icon: FolderSearch, verb: running ? "Looking in" : "Looked in", target: path || str(a.pattern) || "." };
+    case "web_search":
+    case "fetch":
+      return { icon: Globe, verb: running ? "Searching the web for" : "Searched the web for", target: str(a.query) ?? str(a.url) ?? "" };
+    default: {
+      if (/subagent|agent/.test(part.name)) return { icon: Bot, verb: part.name.replace(/_/g, " "), target: firstLine(str(a.task) ?? str(a.prompt) ?? "") };
+      const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
+      return { icon: Wrench, verb: part.name.replace(/_/g, " "), target: first ? firstLine(first) : "" };
+    }
+  }
+}
+
+/** Added and removed line counts of a unified diff. */
+function diffStat(patch: string) {
+  let add = 0;
+  let del = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) continue;
+    if (line.startsWith("+")) add++;
+    else if (line.startsWith("-")) del++;
+  }
+  return { add, del };
+}
+
+function Diff({ patch }: { patch: string }) {
+  const lines = useMemo(() => patch.replace(/\n$/, "").split("\n"), [patch]);
+  return (
+    <pre className="tool-diff">
+      {lines.map((line, i) => (
+        <span
+          key={i}
+          className={cx(
+            "diff-line",
+            line.startsWith("@@") ? "diff-hunk" : line.startsWith("+++") || line.startsWith("---") ? "diff-file" : line.startsWith("+") ? "diff-add" : line.startsWith("-") ? "diff-del" : undefined,
+          )}
+        >
+          {line || " "}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
+  );
+}
+
+const seconds = (ms?: number) => (ms === undefined ? "" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`);
+
+export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
+  const [open, setOpen] = useState(false);
+  const d = describe(part, cwd);
+  const Icon = d.icon;
+  // A new file (write) has no patch from Pi: show its content as all-added lines.
+  const written = part.name === "write" && !part.patch ? str(part.args?.content) : undefined;
+  const patch = part.patch ?? (written !== undefined ? written.replace(/\n$/, "").split("\n").map((l) => `+${l}`).join("\n") : undefined);
+  const stat = patch ? diffStat(patch) : undefined;
+  const command = part.name === "bash" ? str(part.args?.command) : undefined;
+  const hasBody = !!(patch || part.output?.trim() || (command && command.includes("\n")));
+  return (
+    <div className={cx("tool", open && "tool-open", part.status === "error" && "tool-error")}>
+      <button type="button" className="tool-head" aria-expanded={open} disabled={!hasBody} onClick={() => setOpen((o) => !o)}>
+        <Icon size={14} className="tool-icon" />
+        <span className={cx("tool-text", part.status === "running" && "shimmer")}>
+          {d.verb && <span className="tool-verb">{d.verb} </span>}
+          <span className={cx("tool-target", d.mono && "tool-mono")}>{d.target}</span>
+        </span>
+        {stat && (
+          <span className="tool-stat">
+            {stat.add > 0 && <span className="diff-add-n">+{stat.add}</span>}
+            {stat.del > 0 && <span className="diff-del-n">−{stat.del}</span>}
+          </span>
+        )}
+        <span className="tool-status">
+          {part.status === "running" ? <Spinner size={12} /> : part.status === "error" ? <CircleAlert size={13} className="bad" /> : <span className="tool-time">{seconds(part.ms)}</span>}
+        </span>
+        {hasBody && <ChevronRight size={14} className="tool-chevron" />}
+      </button>
+      {open && hasBody && (
+        <div className="tool-body">
+          {command && command.includes("\n") && <pre className="tool-output tool-command">{command}</pre>}
+          {patch ? <Diff patch={patch} /> : part.output?.trim() ? <pre className="tool-output">{part.output.replace(/\n+$/, "")}</pre> : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Consecutive tool calls, shown as one block. */
+export function ToolGroup({ parts, cwd }: { parts: ToolPart[]; cwd?: string }) {
+  return (
+    <div className="tools">
+      {parts.map((p) => (
+        <ToolRow key={p.id} part={p} cwd={cwd} />
+      ))}
+    </div>
+  );
+}
+
+/** A question from a Pi extension: choose, confirm or type, or dismiss. */
+export function AskCard({ part, chatId, messageId }: { part: AskPart; chatId: string; messageId: string }) {
+  const [value, setValue] = useState(part.prefill ?? "");
+  const answered = part.answer !== undefined;
+  const reply = (r: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void answerQuestion(chatId, messageId, part, r);
+  return (
+    <div className={cx("ask", answered && "ask-answered")} role="group" aria-label={part.title}>
+      <div className="ask-head">
+        <MessageCircleQuestion size={15} />
+        <span className="ask-title">{part.title}</span>
+      </div>
+      {part.message && <p className="ask-message">{part.message}</p>}
+      {answered ? (
+        <p className="ask-answer">{part.answer ? <><Check size={13} /> {part.answer}</> : <><X size={13} /> No answer</>}</p>
+      ) : part.method === "confirm" ? (
+        <div className="ask-actions">
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => reply({ confirmed: true })}>
+            Yes
+          </button>
+          <button type="button" className="btn btn-sm" onClick={() => reply({ confirmed: false })}>
+            No
+          </button>
+        </div>
+      ) : part.method === "select" ? (
+        <div className="ask-options">
+          {(part.options ?? []).map((o) => (
+            <button key={o} type="button" className="btn btn-sm ask-option" onClick={() => reply({ value: o })}>
+              {o}
+            </button>
+          ))}
+          <button type="button" className="link-btn" onClick={() => reply({ cancelled: true })}>
+            Dismiss
+          </button>
+        </div>
+      ) : (
+        <form
+          className="ask-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            reply({ value });
+          }}
+        >
+          {part.method === "editor" ? (
+            <textarea className="input textarea ask-input" rows={5} value={value} placeholder={part.placeholder} onChange={(e) => setValue(e.target.value)} />
+          ) : (
+            <input className="input ask-input" value={value} placeholder={part.placeholder} autoFocus onChange={(e) => setValue(e.target.value)} />
+          )}
+          <div className="ask-actions">
+            <button type="submit" className="btn btn-sm btn-primary">
+              Send
+            </button>
+            <button type="button" className="btn btn-sm" onClick={() => reply({ cancelled: true })}>
+              Dismiss
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}

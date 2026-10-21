@@ -1,7 +1,8 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type SearchProviderId } from "../../shared/types";
-import { detectModels, verifySearch } from "./api";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId } from "../../shared/types";
+import { verifySearch } from "./api";
+import { listProjects, piModels } from "./pi";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
@@ -9,7 +10,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
 
-export type SettingsSection = "account" | "profile" | "general" | "keys" | "search" | "appearance";
+export type SettingsSection = "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance";
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -28,6 +29,8 @@ const DEFAULT_SETTINGS: Settings = {
   effort: "medium",
   naming: { enabled: true, models: [] },
   syncApiKeys: false,
+  workspace: { mode: "local" },
+  favorites: [],
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };
@@ -60,6 +63,12 @@ interface State {
   view: SidebarView;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
+  /** Projects threads can work in (from the server). */
+  projects: Project[];
+  projectsLoaded: boolean;
+  loadProjects: () => Promise<void>;
+  /** Pi's own default model ("<provider>/<id>"), used until one is picked here. */
+  piDefault?: string;
 
   updateSettings: (patch: Partial<Settings>) => void;
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
@@ -91,8 +100,8 @@ interface State {
   removeAllChats: () => void;
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
-  /** Update chat metadata (title, pinned, archived) without changing its recency. */
-  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread">>) => void;
+  /** Update chat metadata (title, pinned, archived, workspace) without changing its recency. */
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread" | "workspace">>) => void;
   setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }
@@ -114,6 +123,15 @@ export const useStore = create<State>()(
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
+      projects: [],
+      projectsLoaded: false,
+      loadProjects: async () => {
+        try {
+          set({ projects: await listProjects(), projectsLoaded: true });
+        } catch {
+          set({ projectsLoaded: true });
+        }
+      },
 
       updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
       updateProfile: (patch) => set((s) => ({ settings: { ...s.settings, profile: { ...s.settings.profile, ...patch } } })),
@@ -132,17 +150,8 @@ export const useStore = create<State>()(
         const keys = { ...get().settings.keys };
         if (ids.length) keys[plan] = ids;
         else delete keys[plan];
+        // Opencode keys are kept (and synced) for older setups; models come from Pi.
         set((s) => ({ keysError: undefined, settings: { ...s.settings, keys } }));
-        if (keys[plan]) void get().refreshDetection(plan);
-        else {
-          detectControllers[plan]?.abort();
-          set((s) => {
-            const detection = { ...s.detection };
-            delete detection[plan];
-            return { detection };
-          });
-          ensureSelection();
-        }
       },
 
       setSearchKeys: async (provider, edits) => {
@@ -243,58 +252,22 @@ export const useStore = create<State>()(
         ensureSelection();
       },
 
-      refreshDetection: async (only) => {
-        const { keys } = get().settings;
-        const plans = only ? [only] : (Object.keys(keys) as PlanId[]);
-        await Promise.all(
-          plans.map(async (plan) => {
-            const list = keys[plan];
-            if (!list?.length) return;
-            detectControllers[plan]?.abort();
-            const ctrl = (detectControllers[plan] = new AbortController());
-            set((s) => {
-              const prev = s.detection[plan];
-              return {
-                detection: {
-                  ...s.detection,
-                  // Keep previously detected models usable while re-checking.
-                  [plan]: {
-                    plan,
-                    status: "checking",
-                    models: prev?.models ?? [],
-                    checkedAt: prev?.checkedAt,
-                    keys: Object.fromEntries(list.map((k) => [keyId(k), { ...prev?.keys?.[keyId(k)], status: "checking" as const }])),
-                  },
-                },
-              };
-            });
-            try {
-              const results = await Promise.all(list.map((k) => detectModels(plan, k, ctrl.signal)));
-              // Merge models across the plan's keys (the first key's order wins).
-              const seen = new Set<string>();
-              const merged = results
-                .filter((r) => r.status === "valid")
-                .flatMap((r) => r.models)
-                .filter((m) => !seen.has(m.id) && seen.add(m.id));
-              const status = results.some((r) => r.status === "valid") ? "valid" : results.every((r) => r.status === "invalid") ? "invalid" : "error";
-              // A transient failure shouldn't wipe a previously good model list.
-              const prev = get().detection[plan];
-              const models = status === "error" && prev?.models.length ? prev.models : merged;
-              const detection: Detection = {
-                plan,
-                status,
-                models,
-                checkedAt: Date.now(),
-                error: status === "valid" ? undefined : results.find((r) => r.error)?.error,
-                keys: Object.fromEntries(results.map((r, i) => [keyId(list[i]!), { status: r.status, error: r.error, models: r.models.length }])),
-              };
-              set((s) => ({ detection: { ...s.detection, [plan]: detection } }));
-              ensureSelection();
-            } catch {
-              // Aborted by a newer request.
-            }
-          }),
-        );
+      // Models come from the installed Pi: the ones its configured providers can use.
+      refreshDetection: async () => {
+        detectControllers.pi?.abort();
+        const ctrl = (detectControllers.pi = new AbortController());
+        set((s) => ({ detection: { pi: { plan: "pi", status: "checking", models: s.detection.pi?.models ?? [], checkedAt: s.detection.pi?.checkedAt } } }));
+        try {
+          const r = await piModels(true);
+          if (ctrl.signal.aborted) return;
+          if (!Array.isArray(r?.models)) throw new Error("Pi didn't list any models");
+          set({ detection: { pi: { plan: "pi", status: "valid", models: r.models, checkedAt: Date.now() } }, piDefault: r.defaultModel });
+        } catch (err) {
+          if (ctrl.signal.aborted) return;
+          // Keep what was known; a transient failure shouldn't empty the model picker.
+          set((s) => ({ detection: { pi: { plan: "pi", status: "error", error: (err as Error).message, models: s.detection.pi?.models ?? [], checkedAt: Date.now() } } }));
+        }
+        ensureSelection();
       },
 
       openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
@@ -422,6 +395,7 @@ export const useStore = create<State>()(
             profile: { ...DEFAULT_SETTINGS.profile, ...p.settings?.profile },
             naming: { ...DEFAULT_SETTINGS.naming, ...p.settings?.naming },
             searchDigest: { ...DEFAULT_SETTINGS.searchDigest, ...p.settings?.searchDigest },
+            workspace: { ...DEFAULT_SETTINGS.workspace, ...p.settings?.workspace },
           },
         };
       },
@@ -456,6 +430,8 @@ export function ensureSelection() {
   } else if (findModel(detection, sel)) return;
   // Don't drop a selection while its plan is still being (re)detected.
   if (sel && !isAuto(sel) && detection[sel.plan]?.status === "checking") return;
-  const next = defaultModel(detection);
+  // Pi's own default model first, then the best available one.
+  const piDefault = useStore.getState().piDefault;
+  const next = piDefault && findModel(detection, { plan: "pi", id: piDefault }) ? { plan: "pi" as const, id: piDefault } : defaultModel(detection);
   if (next || sel) updateSettings({ selection: next });
 }

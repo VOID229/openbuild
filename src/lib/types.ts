@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ToolId } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ToolId, Usage, Workspace } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -62,6 +62,17 @@ export interface Settings {
   naming: { enabled: boolean; models: NamingModel[] };
   /** Account sync: also sync API keys (end-to-end encrypted). Off unless turned on. */
   syncApiKeys?: boolean;
+  /** Where new threads work: a project (none = a scratch folder), in its checkout or a new worktree. */
+  workspace: NewWorkspace;
+  /** Starred Pi models ("<provider>/<id>"), in order; the first nine get ⌘1–⌘9. */
+  favorites: string[];
+}
+
+export interface NewWorkspace {
+  projectId?: string;
+  mode: "local" | "worktree";
+  /** Local: the branch to switch to. Worktree: the branch to start from. None = the current one. */
+  branch?: string;
 }
 
 export type DetectStatus = "checking" | "valid" | "invalid" | "error";
@@ -95,6 +106,35 @@ export interface SearchCall {
   digested?: boolean;
 }
 
+/** A tool Pi ran while answering (read a file, ran a command, edited code…). */
+export interface ToolPart {
+  type: "tool";
+  id: string;
+  name: string;
+  args?: Record<string, unknown>;
+  status: "running" | "done" | "error";
+  output?: string;
+  patch?: string;
+  ms?: number;
+}
+
+/** A question a Pi extension asked during the reply, and the answer if there is one. */
+export interface AskPart {
+  type: "ask";
+  id: string;
+  method: "select" | "confirm" | "input" | "editor";
+  title: string;
+  message?: string;
+  options?: string[];
+  placeholder?: string;
+  prefill?: string;
+  /** Answered (the answer, or "" for cancelled / timed out); missing while waiting. */
+  answer?: string;
+}
+
+/** A reply in order: what Pi wrote, the tools it ran in between, and questions it asked. */
+export type Part = { type: "text"; text: string } | ToolPart | AskPart;
+
 export interface Message {
   id: string;
   role: "user" | "assistant";
@@ -102,7 +142,7 @@ export interface Message {
   reasoning?: string;
   attachments?: Attachment[];
   /** Assistant only */
-  model?: ModelRef & { name: string; /** Set by "2nd": the reasoning level picked for that answer. */ effort?: Effort };
+  model?: ModelRef & { name: string; /** The reasoning level picked for that answer. */ effort?: Effort };
   routed?: boolean;
   status?: "streaming" | "done" | "error" | "stopped";
   error?: string;
@@ -114,6 +154,10 @@ export interface Message {
   notice?: string;
   /** Where the reply runs, so it can be picked back up after a reload or a dropped connection. */
   stream?: ReplyStream;
+  /** Pi replies: text, tool calls and questions in the order they happened (`content` is the text alone). */
+  parts?: Part[];
+  /** Tokens, cost and context fill after this reply. */
+  usage?: Usage;
   createdAt: number;
 }
 
@@ -129,10 +173,12 @@ export interface Chat {
   titleSource?: "auto" | "user";
   /** A reply finished while the chat wasn't open. */
   unread?: boolean;
-  /** Set on chats created with "2nd": the chat they were forked from… */
+  /** Legacy fork metadata, retained so existing threads keep their Pi session history. */
   forkOf?: string;
-  /** …and the reply in that chat they re-answer. */
+  /** Legacy source reply. */
   forkMessageId?: string;
-  /** 2 for a "2nd" chat, 3 for "3rd", up to 5. Missing on older forks, which are all 2nd. */
+  /** Legacy fork depth. */
   forkDepth?: number;
+  /** Where the thread works (set when it starts; a fork works where its original did). */
+  workspace?: Workspace;
 }
