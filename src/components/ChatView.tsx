@@ -127,6 +127,12 @@ export function ChatView({ chat }: { chat: Chat }) {
         ref={scroller}
         className="messages"
         onScroll={onScroll}
+        // Reading completed work is manual navigation, not new output. Detach before
+        // the disclosure changes layout so neither a pending glide nor ResizeObserver
+        // can pull the reader to the bottom (including keyboard-generated clicks).
+        onClickCapture={(e) => {
+          if ((e.target as Element).closest("[data-worked-toggle]")) detach();
+        }}
         // Detach on intent, before the browser's own smooth scroll starts, so following never fights it.
         onWheel={(e) => {
           if (e.deltaY < 0) detach();

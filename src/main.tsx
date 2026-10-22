@@ -7,9 +7,11 @@ import "katex/dist/katex.min.css";
 import "./styles.css";
 import { createRoot } from "react-dom/client";
 import { LocalAccess } from "./components/LocalAccess";
+import { lockViewport } from "./lib/viewport";
 
 // iOS Safari only applies :active (the press effect on touch screens) when a touch listener exists.
 document.addEventListener("touchstart", () => {}, { passive: true });
+lockViewport();
 
 // Importing App starts config/state hydration. Delay even those imports until unlocked.
 let application: Promise<import("react").ReactNode> | undefined;
