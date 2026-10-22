@@ -3,17 +3,20 @@ import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type Mod
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
-import { editingQueued, queueOf, shiftQueue, useQueue } from "./queue";
+import { editingQueued, moveQueued, queueOf, removeQueued, requeue, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
-import { prepareWorkspace } from "./pi";
+import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { selectionFor, useStore } from "./store";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
 export { uid };
 
-/** Active generation per chat. Replacing an entry orphans the old stream (its updates are dropped). */
-const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream }>();
+/**
+ * Active generation per chat. Replacing an entry orphans the old stream (its updates are dropped).
+ * `steers`: queued messages handed to Pi during the reply that it hasn't read yet.
+ */
+const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[] }>();
 
 function makeTitle(text: string, attachments: Attachment[]) {
   const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New thread";
@@ -94,6 +97,43 @@ export function stopGeneration(chatId: string) {
   if (run) stopRun(run);
 }
 
+/** Stop the running reply and send this queued message right after. */
+export function interruptWith(chatId: string, id: string) {
+  // Steers Pi hasn't read yet wait behind it.
+  const run = running.get(chatId);
+  if (run) {
+    requeue(chatId, run.steers);
+    run.steers = [];
+  }
+  moveQueued(chatId, id, 0);
+  stopGeneration(chatId);
+}
+
+/**
+ * Hand a queued message to Pi's running reply; Pi reads it once its current step is done. If the
+ * reply ends before Pi gets to it, it goes back to the front of the queue.
+ */
+export async function steerQueued(chatId: string, id: string) {
+  const run = running.get(chatId);
+  const item = queueOf(chatId).find((q) => q.id === id);
+  const st = useStore.getState();
+  const msg = st.chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === run?.messageId);
+  if (!run || !item || msg?.model?.plan !== "pi") return;
+  const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(st.detection, msg.model)?.input ?? ["text"]);
+  removeQueued(chatId, id);
+  run.steers.push(item);
+  try {
+    // An extension took it as input; there's nothing more to show for it.
+    if ((await steerThread(chatId, id, message, images)).handled) run.steers = run.steers.filter((q) => q !== item);
+  } catch (err) {
+    if (run.steers.includes(item)) {
+      run.steers = run.steers.filter((q) => q !== item);
+      requeue(chatId, [item]);
+    }
+    throw err;
+  }
+}
+
 export function stopAllGenerations() {
   for (const run of running.values()) stopRun(run);
 }
@@ -169,12 +209,14 @@ export function regenerate(chatId: string, messageId: string) {
   if (prev) {
     running.delete(chatId);
     stopRun(prev);
+    requeue(chatId, prev.steers);
   }
   const now = Date.now();
   st.patchMessage(chatId, messageId, {
     content: "",
     reasoning: undefined,
     reasoningMs: undefined,
+    workedMs: undefined,
     status: "streaming",
     error: undefined,
     finish: undefined,
@@ -199,9 +241,7 @@ export function drainQueue(chatId: string) {
   }
   const next = shiftQueue(chatId);
   // No usable model: put it back so it isn't lost (sendMessage opened Settings).
-  if (next && !sendMessage(next.text, next.files, chatId)) {
-    useQueue.setState((s) => ({ queues: { ...s.queues, [chatId]: [next, ...queueOf(chatId)] } }));
-  }
+  if (next && !sendMessage(next.text, next.files, chatId)) requeue(chatId, [next]);
 }
 
 class WorkspaceError extends Error {}
@@ -239,13 +279,15 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
   const userAt = before.findLastIndex((m) => m.role === "user");
   const user = before[userAt];
   if (!user) throw new WorkspaceError("There's no message to answer.");
+  // Messages steered into earlier replies are user messages in Pi's history too.
+  const steered = before.slice(0, userAt).reduce((n, m) => n + (m.parts?.filter((p) => p.type === "steer").length ?? 0), 0);
   return {
     threadId: chat.id,
     cwd: workspace.cwd,
     model: model.id,
     effort,
     ...piMessage(user, model.input),
-    prior: before.slice(0, userAt).filter((m) => m.role === "user").length,
+    prior: before.slice(0, userAt).filter((m) => m.role === "user").length + steered,
     forkFrom: chat.forkOf,
   };
 }
@@ -287,7 +329,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const host = replyHost();
   const stream: ReplyStream = resume ? msg.stream! : { id: uid(), via: host ?? "", key: host === "hosted" ? newStreamKey() : undefined };
   const ctrl = new AbortController();
-  running.set(chatId, { ctrl, messageId, stream });
+  const run = { ctrl, messageId, stream, steers: [] as Queued[] };
+  running.set(chatId, run);
   const isCurrent = () => running.get(chatId)?.ctrl === ctrl;
   if (!resume) st.patchMessage(chatId, messageId, { stream: host ? stream : undefined }, true);
 
@@ -320,6 +363,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
   let searches: SearchCall[] = [];
   /** Pi replies: text, thinking, tools and questions in order. */
   let parts: Part[] = [];
+  /** Steered messages Pi read, by id, so a replay shows them as written (with their files). */
+  const steered = new Map<string, Queued>();
   /** Pi's thinking goes in order among the parts; a thought ends once Pi writes or runs something. */
   const endThought = () => {
     const last = parts.at(-1);
@@ -385,6 +430,15 @@ async function generate(chatId: string, messageId: string, resume = false) {
       } else if (ev.t === "asked") {
         parts = parts.map((p) => (p.type === "ask" && p.id === ev.id ? { ...p, answer: ev.answer ?? "" } : p));
         flushParts();
+      } else if (ev.t === "steer") {
+        const item = (ev.id && steered.get(ev.id)) || run.steers.find((q) => q.id === ev.id);
+        if (item) {
+          steered.set(item.id, item);
+          run.steers = run.steers.filter((q) => q !== item);
+        }
+        endThought();
+        parts.push({ type: "steer", id: ev.id, text: item ? item.text : ev.text, attachments: item?.files.length ? item.files : undefined });
+        flushParts();
       } else if (ev.t === "reasoning") {
         if (pi) {
           const last = parts.at(-1);
@@ -421,6 +475,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
   // Superseded by a retry: the new run owns this message now.
   if (!isCurrent()) return;
   running.delete(chatId);
+  // Steers Pi didn't get to are sent next, as ordinary messages.
+  requeue(chatId, run.steers);
   // A reply picked back up may have been finished meanwhile by the device that started it.
   const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
   if (resume && now?.status !== "streaming") return drainQueue(chatId);
@@ -441,6 +497,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
       content: text,
       reasoning: reasoning || undefined,
       reasoningMs,
+      workedMs: pi ? Date.now() - startedAt : undefined,
       status: error ? "error" : status,
       error,
       finish,

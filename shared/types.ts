@@ -287,6 +287,8 @@ export type StreamEvent =
   | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string }
   /** That question was answered (or cancelled, or timed out). */
   | { t: "asked"; id: string; answer?: string }
+  /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). */
+  | { t: "steer"; id?: string; text: string }
   | { t: "done"; finish?: string; usage?: Usage }
   /** The reply is over (after done, an error, or a stop). A stream that ends without it was cut off. */
   | { t: "end" };

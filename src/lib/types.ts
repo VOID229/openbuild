@@ -39,6 +39,8 @@ export interface Settings {
   font: FontStyle;
   autoScroll: boolean;
   cmdEnter: boolean;
+  /** Opt-in transcription on the server's private Whisper endpoint. */
+  dictation?: { enabled: boolean; connection: "lan" | "tailscale" };
   autoRouter: boolean;
   avoid: NamedModel[];
   prioritize: PriorityEntry[];
@@ -141,8 +143,16 @@ export interface ThoughtPart {
   ms?: number;
 }
 
-/** A reply in order: what Pi wrote and thought, the tools it ran in between, and questions it asked. */
-export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart;
+/** A message the user steered into the reply while Pi was working, where Pi read it. */
+export interface SteerPart {
+  type: "steer";
+  id?: string;
+  text: string;
+  attachments?: Attachment[];
+}
+
+/** A reply in order: what Pi wrote and thought, the tools it ran in between, questions it asked, and messages steered in. */
+export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart | SteerPart;
 
 export interface Message {
   id: string;
@@ -158,6 +168,8 @@ export interface Message {
   finish?: string;
   startedAt?: number;
   reasoningMs?: number;
+  /** Pi replies: how long the whole turn took, from sending to done. */
+  workedMs?: number;
   searches?: SearchCall[];
   /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   notice?: string;

@@ -22,6 +22,10 @@ interface Live {
   proc: PiProcess;
   ready: Promise<void>;
   busy: boolean;
+  /** Settles once the running turn is over. */
+  idle: Promise<void>;
+  /** The running turn: whether Pi has taken its prompt (only then can it be steered), and the steers it hasn't read yet. */
+  turn?: { taking: boolean; steers: string[] };
   /** Questions from extensions still waiting for an answer, replayed to whoever watches the run. */
   asks: Map<string, Extract<StreamEvent, { t: "ask" }>>;
   emit?: (e: StreamEvent) => void;
@@ -99,7 +103,7 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
         ? ["--fork", from.file]
         : ["--session-id", threadId];
   const proc = new PiProcess(args, cwd);
-  const l: Live = { threadId, proc, busy: false, asks: new Map(), ready: Promise.resolve() };
+  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), ready: Promise.resolve() };
   // Extension questions can come at any time, also before a run (e.g. while starting up).
   proc.on((r) => {
     if (r.type !== "extension_ui_request") return;
@@ -144,6 +148,25 @@ export function answer(threadId: string, askId: string, reply: { value?: string;
   return true;
 }
 
+/** Hand Pi a message while it works on a turn; it reads it once its current step is done. */
+export async function steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  const l: Live | undefined = live.get(threadId);
+  const turn = l?.turn;
+  if (!l || !turn) throw new PiError("Pi isn't working on this thread anymore.");
+  if (!turn.taking) throw new PiError("Pi hasn't started on this reply yet. Try again in a moment.");
+  turn.steers.push(steerId);
+  const drop = () => (turn.steers = turn.steers.filter((id) => id !== steerId));
+  try {
+    const r = await l.proc.send<{ disposition?: string }>({ type: "steer", message, images: images?.length ? images.map((i) => ({ type: "image", ...i })) : undefined });
+    // An extension's input handler took it; Pi won't read it as a message.
+    if (r.disposition === "handled") drop();
+    return { handled: r.disposition === "handled" };
+  } catch (err) {
+    drop();
+    throw err;
+  }
+}
+
 /** Run one turn and stream it as NDJSON StreamEvents. `signal` stops Pi (abort). */
 export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
@@ -158,22 +181,30 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
       }, 15_000);
       let l: Live | undefined;
       let off: (() => void) | undefined;
+      let free: (() => void) | undefined;
       const finish = () => {
         if (closed) return;
         clearInterval(heartbeat);
         off?.();
-        if (l) {
+        if (l && free) {
           l.busy = false;
+          l.turn = undefined;
           l.emit = undefined;
           l.proc.lastUsed = Date.now();
+          free();
         }
         closed = true;
         controller.close();
       };
       try {
         l = ensure(req.threadId, req.cwd, req.forkFrom);
+        // A reply that was just interrupted may still be winding down.
+        if (l.busy) await Promise.race([l.idle, new Promise((r) => setTimeout(r, 15_000))]);
         if (l.busy) throw new PiError("Pi is still working on this thread's previous message.");
         l.busy = true;
+        l.idle = new Promise<void>((r) => (free = r));
+        const turn: NonNullable<Live["turn"]> = { taking: false, steers: [] };
+        l.turn = turn;
         const proc = l.proc;
         l.emit = send;
         for (const ask of l.asks.values()) send(ask);
@@ -195,6 +226,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               break;
             case "message_start":
               if (r.message?.role === "assistant" && wroteText && lastText) send({ t: "text", v: "\n\n" });
+              else if (r.message?.role === "user") {
+                // The first is this turn's prompt; any later one is a message steered in meanwhile.
+                if (!turn.taking) turn.taking = true;
+                else {
+                  const c = r.message.content;
+                  send({ t: "steer", id: turn.steers.shift(), text: typeof c === "string" ? c : textOf(r.message) });
+                  lastText = lastThought = false;
+                }
+              }
               break;
             case "message_update": {
               const ev = r.assistantMessageEvent;
@@ -304,6 +344,8 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         }
         await done;
         signal.removeEventListener("abort", onAbort);
+        // Steers Pi never got to (it was stopped, or finished first) mustn't turn up in a later turn.
+        if (turn.steers.length) await proc.send({ type: "clear_queue" }).catch(() => {});
         if (lastError && !signal.aborted) send({ t: "error", message: lastError });
         else {
           const stats = await proc.send<{ contextUsage?: { tokens: number | null; contextWindow: number } }>({ type: "get_session_stats" }).catch(() => undefined);

@@ -12,7 +12,7 @@ import { status } from "./install";
 import { currentJob, jobStream, startJob } from "./jobs";
 import * as resources from "./resources";
 import { problems } from "./rpc";
-import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn } from "./sessions";
+import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn, steer } from "./sessions";
 import { piBin } from "./install";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
@@ -50,9 +50,12 @@ function isPiChat(b: any): b is PiChatRequest {
     Number.isInteger(b.prior) &&
     b.prior >= 0 &&
     (b.forkFrom === undefined || isThreadId(b.forkFrom)) &&
-    (b.images === undefined || (Array.isArray(b.images) && b.images.length <= 20 && b.images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100))))
+    validImages(b.images)
   );
 }
+
+const validImages = (images: any) =>
+  images === undefined || (Array.isArray(images) && images.length <= 20 && images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100)));
 
 /** A run that produces its events itself (no upstream response to read). */
 function startStream(produce: (signal: AbortSignal) => ReadableStream<Uint8Array>): Run {
@@ -147,6 +150,19 @@ export function piRoutes(api: Api) {
         if (!isThreadId(req.params.id) || !str(body?.askId, 128)) return bad("Expected { askId, value | confirmed | cancelled }");
         const ok = answer(req.params.id, body.askId, { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true });
         return ok ? Response.json({ ok }) : bad("That question isn't waiting anymore", 410);
+      }),
+    },
+    "/api/pi/threads/:id/steer": {
+      POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/steer">) => {
+        const body = await readJson(req);
+        if (!isThreadId(req.params.id) || !str(body?.steerId, 128) || typeof body?.message !== "string" || body.message.length >= 2_000_000 || !validImages(body.images)) {
+          return bad("Expected { steerId, message, images? }");
+        }
+        try {
+          return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
+        } catch (err) {
+          return fail(err, 409);
+        }
       }),
     },
     "/api/pi/threads/:id/compact": {

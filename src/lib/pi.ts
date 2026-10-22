@@ -62,6 +62,9 @@ export const piCommands = (cwd?: string) => get<{ commands: PiCommand[] }>(`/api
 export const answerAsk = (threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) =>
   send(`/api/pi/threads/${encodeURIComponent(threadId)}/answer`, "POST", { askId, ...reply });
 
+export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[]) =>
+  send<{ handled: boolean }>(`/api/pi/threads/${encodeURIComponent(threadId)}/steer`, "POST", { steerId, message, images });
+
 export const compactThread = (threadId: string, instructions?: string) =>
   send<{ tokensBefore: number; estimatedTokensAfter?: number }>(`/api/pi/threads/${encodeURIComponent(threadId)}/compact`, "POST", { instructions });
 

@@ -60,6 +60,11 @@ export function moveQueued(chatId: string, id: string, to: number) {
   setQueue(chatId, list);
 }
 
+/** Put messages back at the front, e.g. ones steered into a reply that ended before Pi read them. */
+export function requeue(chatId: string, items: Queued[]) {
+  if (items.length) setQueue(chatId, [...items, ...queueOf(chatId).filter((q) => !items.includes(q))]);
+}
+
 export function shiftQueue(chatId: string): Queued | undefined {
   const [next, ...rest] = queueOf(chatId);
   if (next) setQueue(chatId, rest);
