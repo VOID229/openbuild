@@ -4,7 +4,7 @@ import { memo, useEffect, useState } from "react";
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
-import type { Message, Part, SearchCall, ToolPart } from "../lib/types";
+import type { Message, Part, SearchCall, ThoughtPart, ToolPart } from "../lib/types";
 import { copyText, cx } from "../lib/ui";
 import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
@@ -191,21 +191,23 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   );
 }
 
-/** A Pi reply in order: text, runs of tool calls, and questions. */
+/** A Pi reply in order: text, runs of tool calls and thinking, and questions. */
 function Parts({ message, chatId }: { message: Message; chatId: string }) {
   const cwd = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace?.cwd);
   const streaming = message.status === "streaming";
-  const blocks: (Part | ToolPart[])[] = [];
+  // Thinking shares a block with the tools around it, like in flash.
+  const blocks: (Part | (ToolPart | ThoughtPart)[])[] = [];
   for (const p of message.parts ?? []) {
     const last = blocks.at(-1);
-    if (p.type === "tool" && Array.isArray(last)) last.push(p);
-    else blocks.push(p.type === "tool" ? [p] : p);
+    const grouped = p.type === "tool" || p.type === "thought";
+    if (grouped && Array.isArray(last)) last.push(p);
+    else blocks.push(grouped ? [p] : p);
   }
   return (
     <>
       {blocks.map((b, i) =>
         Array.isArray(b) ? (
-          <ToolGroup key={b[0]!.id} parts={b} cwd={cwd} />
+          <ToolGroup key={`g${i}`} parts={b} cwd={cwd} live={streaming} />
         ) : b.type === "text" ? (
           <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} />
         ) : b.type === "ask" ? (

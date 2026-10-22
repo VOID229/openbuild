@@ -132,8 +132,17 @@ export interface AskPart {
   answer?: string;
 }
 
-/** A reply in order: what Pi wrote, the tools it ran in between, and questions it asked. */
-export type Part = { type: "text"; text: string } | ToolPart | AskPart;
+/** A stretch of Pi's thinking, between the text and tools around it. */
+export interface ThoughtPart {
+  type: "thought";
+  text: string;
+  startedAt?: number;
+  /** How long it thought; missing while it still is. */
+  ms?: number;
+}
+
+/** A reply in order: what Pi wrote and thought, the tools it ran in between, and questions it asked. */
+export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart;
 
 export interface Message {
   id: string;

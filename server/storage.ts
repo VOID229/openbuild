@@ -68,6 +68,12 @@ export function listChats(): StoredChat[] {
   return out;
 }
 
+/** Read one current chat, excluding deletion tombstones. */
+export function getChat(id: string): StoredChat | undefined {
+  const row = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL").get(id);
+  try { return row ? JSON.parse(row.data) : undefined; } catch { return undefined; }
+}
+
 /** Save a chat. Returns false when it was deleted (it stays deleted). */
 export function putChat(chat: StoredChat): boolean {
   const row = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM chats WHERE id = ?").get(chat.id);
@@ -109,6 +115,11 @@ export function deleteAllChats() {
 
 export function getValue(key: string): string | undefined {
   return db.query<{ value: string }, [string]>("SELECT value FROM kv WHERE key = ?").get(key)?.value;
+}
+
+/** Server-owned metadata with a literal key prefix. */
+export function listValues(prefix: string): [string, string][] {
+  return db.query<{ key: string; value: string }, [string]>("SELECT key, value FROM kv WHERE substr(key, 1, length(?1)) = ?1").all(prefix).map((r) => [r.key, r.value]);
 }
 
 export function setValue(key: string, value: string) {

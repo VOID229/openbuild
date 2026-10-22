@@ -43,6 +43,12 @@ interface Saved {
   file: string;
   cwd: string;
 }
+/** Discovery must not replace a thread while OpenBuild owns its RPC process. */
+export const isSessionLive = (threadId: string) => {
+  const l = live.get(threadId);
+  return !!l && !l.proc.exited;
+};
+
 const savedKey = (threadId: string) => `pi-session:${threadId}`;
 function saved(threadId: string): Saved | undefined {
   try {
@@ -178,6 +184,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         let started = false;
         let lastText = false;
         let wroteText = false;
+        let lastThought = false;
         let lastError: string | undefined;
         const usage: Usage = { input: 0, output: 0, cost: 0 };
         const progress = new Map<string, number>();
@@ -194,7 +201,14 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               if (ev?.type === "text_delta" && ev.delta) {
                 send({ t: "text", v: ev.delta });
                 lastText = wroteText = true;
-              } else if (ev?.type === "thinking_delta" && ev.delta) send({ t: "reasoning", v: ev.delta });
+                lastThought = false;
+              } else if (ev?.type === "thinking_start") {
+                // Back-to-back thinking blocks read as separate paragraphs of the same thought.
+                if (lastThought) send({ t: "reasoning", v: "\n\n" });
+              } else if (ev?.type === "thinking_delta" && ev.delta) {
+                send({ t: "reasoning", v: ev.delta });
+                lastThought = true;
+              }
               break;
             }
             case "message_end": {
@@ -208,7 +222,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               break;
             }
             case "tool_execution_start":
-              lastText = false;
+              lastText = lastThought = false;
               send({ t: "tool", id: r.toolCallId, name: r.toolName, args: r.args, status: "running" });
               break;
             case "tool_execution_update": {

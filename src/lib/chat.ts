@@ -318,8 +318,13 @@ async function generate(chatId: string, messageId: string, resume = false) {
   let notice: string | undefined;
   let usage: Usage | undefined;
   let searches: SearchCall[] = [];
-  /** Pi replies: text, tools and questions in order. */
+  /** Pi replies: text, thinking, tools and questions in order. */
   let parts: Part[] = [];
+  /** Pi's thinking goes in order among the parts; a thought ends once Pi writes or runs something. */
+  const endThought = () => {
+    const last = parts.at(-1);
+    if (last?.type === "thought" && last.ms === undefined) parts[parts.length - 1] = { ...last, ms: Date.now() - (last.startedAt ?? startedAt) };
+  };
   const search = !pi && model && model.tools !== false ? searchCredentials(st.settings) : undefined;
   try {
     // A thread's first turn sets up where it works (a project checkout, a new worktree, or a scratch folder).
@@ -358,6 +363,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
         text += ev.v;
         if (pi) {
+          if (ev.v.trim()) endThought();
           const last = parts.at(-1);
           if (last?.type === "text") parts[parts.length - 1] = { type: "text", text: last.text + ev.v };
           else if (ev.v.trim()) parts.push({ type: "text", text: ev.v.replace(/^\s+/, "") });
@@ -366,19 +372,25 @@ async function generate(chatId: string, messageId: string, resume = false) {
       } else if (ev.t === "tool") {
         if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
         const { t: _t, ...call } = ev;
+        endThought();
         const at = parts.findIndex((p) => p.type === "tool" && p.id === call.id);
         if (at >= 0) parts[at] = { ...(parts[at] as ToolPart), ...Object.fromEntries(Object.entries(call).filter(([, v]) => v !== undefined)) };
         else parts.push({ type: "tool", ...call });
         flushParts();
       } else if (ev.t === "ask") {
         const { t: _t, ...ask } = ev;
+        endThought();
         if (!parts.some((p) => p.type === "ask" && p.id === ask.id)) parts.push({ type: "ask", ...ask });
         flushParts();
       } else if (ev.t === "asked") {
         parts = parts.map((p) => (p.type === "ask" && p.id === ev.id ? { ...p, answer: ev.answer ?? "" } : p));
         flushParts();
       } else if (ev.t === "reasoning") {
-        reasoning += ev.v;
+        if (pi) {
+          const last = parts.at(-1);
+          if (last?.type === "thought") parts[parts.length - 1] = { ...last, text: last.text + ev.v };
+          else if (ev.v.trim()) parts.push({ type: "thought", text: ev.v.replace(/^\s+/, ""), startedAt: Date.now() });
+        } else reasoning += ev.v;
         schedule();
       } else if (ev.t === "error") {
         error = ev.message;
@@ -413,6 +425,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
   if (resume && now?.status !== "streaming") return drainQueue(chatId);
   if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
+  endThought();
   const status: Message["status"] = error ? "error" : ctrl.signal.aborted ? "stopped" : "done";
   const didSomething = parts.some((p) => p.type !== "text") || finish === "handled";
   if (status === "done" && !text.trim() && !didSomething) {

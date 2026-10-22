@@ -4302,6 +4302,17 @@ p.key-status svg {
   animation: rise 160ms var(--ease) both;
 }
 
+.tool-thought-body {
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  background: transparent;
+}
+
+.tool-thought-body .markdown-muted {
+  font-size: 13.5px;
+}
+
 .tool-output,
 .tool-diff {
   margin: 0;

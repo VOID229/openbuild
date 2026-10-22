@@ -1,10 +1,11 @@
 // What Pi did while answering: one compact row per tool call (read a file, ran a command, edited
 // code), each opening up to its output or diff; and the questions Pi extensions ask on the way.
-import { Bot, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { answerQuestion } from "../lib/chat";
-import type { AskPart, ToolPart } from "../lib/types";
+import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
 import { cx } from "../lib/ui";
+import { Markdown } from "./Markdown";
 import { Spinner } from "./primitives";
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
@@ -124,13 +125,44 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
   );
 }
 
-/** Consecutive tool calls, shown as one block. */
-export function ToolGroup({ parts, cwd }: { parts: ToolPart[]; cwd?: string }) {
+/** The first line of a thought's paragraph, without its markdown (summaries often open with a bold heading). */
+const plainLine = (paragraph: string) => firstLine(paragraph.replace(/^#+\s*/, "").replace(/\*\*|__|`/g, ""));
+
+/**
+ * A stretch of thinking, in its place among the tools. Folded by default: while live it shows the
+ * paragraph it's on, once done the one it started with; open it for the whole thought.
+ */
+export function ThoughtRow({ part, live }: { part: ThoughtPart; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const paragraphs = part.text.split(/\n\s*\n/).filter((p) => p.trim());
+  const preview = plainLine((live ? paragraphs.at(-1) : paragraphs[0]) ?? "");
+  return (
+    <div className={cx("tool tool-thought", open && "tool-open")}>
+      <button type="button" className="tool-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <Brain size={14} className="tool-icon" />
+        <span className={cx("tool-text", live && "shimmer")}>
+          <span className="tool-verb">{live ? "Thinking" : "Thought"} </span>
+          <span className="tool-target">{preview}</span>
+        </span>
+        <span className="tool-status">{live ? <Spinner size={12} /> : part.ms !== undefined && part.ms >= 1000 && <span className="tool-time">{seconds(part.ms)}</span>}</span>
+        <ChevronRight size={14} className="tool-chevron" />
+      </button>
+      {open && (
+        <div className="tool-body tool-thought-body">
+          <Markdown content={part.text} className="markdown-muted" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Consecutive tool calls and the thinking between them, shown as one block. */
+export function ToolGroup({ parts, cwd, live }: { parts: (ToolPart | ThoughtPart)[]; cwd?: string; /** The reply is still streaming. */ live?: boolean }) {
   return (
     <div className="tools">
-      {parts.map((p) => (
-        <ToolRow key={p.id} part={p} cwd={cwd} />
-      ))}
+      {parts.map((p, i) =>
+        p.type === "thought" ? <ThoughtRow key={`th${i}`} part={p} live={!!live && p.ms === undefined} /> : <ToolRow key={p.id} part={p} cwd={cwd} />,
+      )}
     </div>
   );
 }

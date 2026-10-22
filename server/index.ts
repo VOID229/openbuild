@@ -9,6 +9,7 @@ import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
+import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
 import { findRun, localRun, startRun } from "./runs";
 import * as storage from "./storage";
@@ -156,7 +157,10 @@ function serve(port: number, hostname: string) {
 
       // Chats, stored on disk. Deleting keeps a tombstone so a deleted chat can't come back.
       "/api/chats": {
-        GET: api(() => Response.json({ chats: storage.listChats() })),
+        GET: api(async () => {
+          await discoverSessions();
+          return Response.json({ chats: storage.listChats() });
+        }),
         DELETE: api(() => {
           storage.deleteAllChats();
           return Response.json({ ok: true });

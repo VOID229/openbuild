@@ -124,6 +124,40 @@ function Main() {
     };
   }, []);
 
+  // Discover sessions created/continued in terminals or other Pi clients while this tab is open.
+  useEffect(() => {
+    if (!chatsLoaded || isHosted()) return;
+    let disposed = false;
+    let pending = false;
+    const refresh = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      const before = new Map(useStore.getState().chats.map((c) => [c.id, c]));
+      try {
+        const incoming = await loadChats();
+        if (disposed) return;
+        const current = useStore.getState().chats;
+        const byId = new Map(current.map((c) => [c.id, c]));
+        for (const chat of incoming) {
+          const original = before.get(chat.id);
+          const now = byId.get(chat.id);
+          // A local edit, delete or streamed delta happened during the request: leave it alone.
+          if (now !== original || now?.messages.some((m) => m.status === "streaming")) continue;
+          if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);
+        }
+        useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
+      } catch { /* Keep the current view offline; the next poll retries. */ }
+      finally { pending = false; }
+    };
+    const timer = setInterval(() => void refresh(), 5000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [chatsLoaded]);
+
   // Global shortcuts:
   //   Cmd/Ctrl+,        open settings (instead of the browser's)
   //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)

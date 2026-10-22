@@ -143,7 +143,7 @@ export function scratchWorkspace(): Workspace {
   return { projectId: "", projectName: "", cwd: realpathSync(dir) };
 }
 
-/** Whether a directory is somewhere threads may run: a project, or a worktree or scratch folder OpenBuild made. */
+/** A registered project, an OpenBuild workspace, or the exact cwd of a discovered Pi session. */
 export function allowedCwd(cwd: string): boolean {
   let real: string;
   try {
@@ -153,6 +153,13 @@ export function allowedCwd(cwd: string): boolean {
   }
   const inside = (root: string) => real === root || real.startsWith(root + sep);
   if (stored().some((p) => inside(p.path))) return true;
+  // Only server-discovered bindings authorize these folders, never a client-supplied workspace.
+  for (const [, value] of storage.listValues("pi-session:")) {
+    try {
+      const session = JSON.parse(value);
+      if (existsSync(session.file) && realpathSync(session.cwd) === real) return true;
+    } catch {}
+  }
   for (const dir of [worktreesDir(), scratchDir()]) {
     try {
       if (inside(realpathSync(dir))) return true;
