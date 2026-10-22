@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { dataDir } from "./paths";
 
 const COOKIE = "openbuild_session";
-const SESSION_SECONDS = 7 * 24 * 60 * 60;
+const SESSION_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SESSIONS = 1000;
 const WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 10;
@@ -80,19 +80,45 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
   let attempts: number[] = [];
   let verifying = 0;
 
+  // Credentials and hashed session tokens share one atomic file, so changing the
+  // password also durably revokes every session. Raw bearer tokens never reach disk.
+  function persist(hash: string): void {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    const temporary = `${file}.${randomBytes(16).toString("hex")}.tmp`;
+    let fd: number | undefined;
+    try {
+      fd = openSync(temporary, "wx", 0o600);
+      const value = sessions.size ? { hash, sessions: [...sessions] } : { hash };
+      writeFileSync(fd, JSON.stringify(value) + "\n");
+      fsyncSync(fd);
+      closeSync(fd);
+      fd = undefined;
+      renameSync(temporary, file);
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+      try { unlinkSync(temporary); } catch { /* Renamed or never created. */ }
+    }
+  }
+
   // Read on every request: another process may replace or remove the credential.
   // Errors and malformed files fail closed and revoke all existing sessions.
   function refresh(): string | undefined {
     let hash: string | undefined;
     try {
-      if (statSync(file).size > 16_384) throw new Error("Invalid credential file");
+      if (statSync(file).size > 262_144) throw new Error("Invalid credential file");
       const value = JSON.parse(readFileSync(file, "utf8"));
-      if (typeof value?.hash === "string" && value.hash.startsWith("$argon2id$")) hash = value.hash;
-    } catch { /* Unconfigured, including unreadable files. */ }
-    if (hash !== knownHash) {
+      if (typeof value?.hash !== "string" || !value.hash.startsWith("$argon2id$")) throw new Error("Invalid credential hash");
+      const saved = value.sessions ?? [];
+      if (!Array.isArray(saved) || saved.length > MAX_SESSIONS || saved.some((entry: unknown) =>
+        !Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== "string" ||
+        !/^[a-f0-9]{64}$/.test(entry[0]) || !Number.isSafeInteger(entry[1]) || entry[1] < 0
+      )) throw new Error("Invalid sessions");
       sessions.clear();
-      knownHash = hash;
-    }
+      for (const [key, expires] of saved) if (expires > now()) sessions.set(key, expires);
+      hash = value.hash;
+    } catch { /* Unconfigured, including unreadable files. */ }
+    if (!hash) sessions.clear();
+    knownHash = hash;
     return hash;
   }
 
@@ -105,7 +131,12 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     if (!refresh()) return false;
     prune();
     const token = requestToken(req);
-    return token !== undefined && sessions.has(tokenKey(token));
+    if (token === undefined || !sessions.has(tokenKey(token))) return false;
+    // Sliding expiry: both disk state and the browser cookie are renewed on use.
+    sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
+    try { persist(knownHash!); }
+    catch { sessions.clear(); return false; }
+    return true;
   }
 
   return {
@@ -118,21 +149,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
         throw new Error("Password must contain 12–1024 characters");
       }
       const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      const temporary = `${file}.${randomBytes(16).toString("hex")}.tmp`;
-      let fd: number | undefined;
-      try {
-        fd = openSync(temporary, "wx", 0o600);
-        writeFileSync(fd, JSON.stringify({ hash }) + "\n");
-        fsyncSync(fd);
-        closeSync(fd);
-        fd = undefined;
-        renameSync(temporary, file);
-      } finally {
-        if (fd !== undefined) closeSync(fd);
-        try { unlinkSync(temporary); } catch { /* Renamed or never created. */ }
-      }
       sessions.clear();
+      persist(hash);
       knownHash = hash;
     },
 
@@ -140,9 +158,19 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
     },
 
+    async protect(req: Request, handler: () => Response | Promise<Response>): Promise<Response> {
+      if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      const token = requestToken(req)!;
+      const response = await handler();
+      const headers = new Headers(response.headers);
+      headers.append("Set-Cookie", cookie(req, token, SESSION_SECONDS));
+      return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+    },
+
     status(req: Request): Response {
       const authenticatedSession = authenticated(req);
-      return json({ configured: knownHash !== undefined, authenticated: authenticatedSession });
+      return json({ configured: knownHash !== undefined, authenticated: authenticatedSession }, 200,
+        authenticatedSession ? { "Set-Cookie": cookie(req, requestToken(req)!, SESSION_SECONDS) } : undefined);
     },
 
     async login(req: Request): Promise<Response> {
@@ -172,13 +200,18 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
       const token = randomBytes(32).toString("hex");
       sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
+      try { persist(hash); }
+      catch { sessions.clear(); return json({ error: "Could not save session" }, 503); }
       return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS) });
     },
 
     logout(req: Request): Response {
-      refresh();
+      const hash = refresh();
       const token = requestToken(req);
-      if (token) sessions.delete(tokenKey(token));
+      if (hash && token && sessions.delete(tokenKey(token))) {
+        try { persist(hash); }
+        catch { return json({ error: "Could not revoke session" }, 503); }
+      }
       return json({ authenticated: false }, 200, { "Set-Cookie": cookie(req, "", 0) });
     },
   };

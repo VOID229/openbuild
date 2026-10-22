@@ -80,7 +80,7 @@ describe("local password authentication", () => {
     const response = await auth.login(loginRequest());
     const cookie = session(response);
     expect(cookie).toMatch(/^openbuild_session=[a-f0-9]{64}$/);
-    expect(response.headers.get("set-cookie")).toContain("HttpOnly; SameSite=Strict; Path=/; Max-Age=604800");
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000");
     expect(response.headers.get("set-cookie")).not.toContain("Secure");
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(auth.authorize(request(cookie))).toBeUndefined();
@@ -114,14 +114,36 @@ describe("local password authentication", () => {
     expect(auth.authorize(request(second))).toBeUndefined();
   });
 
-  test("expires sessions exactly seven days after issuance without sliding renewal", async () => {
+  test("expires sessions after exactly thirty idle days", async () => {
     const { auth, advance } = fixture();
     await auth.setPassword(PASSWORD);
     const cookie = session(await auth.login(loginRequest()));
-    advance(604800_000 - 1);
-    expect(auth.authorize(request(cookie))).toBeUndefined();
-    advance(1);
+    advance(2592000_000);
     expect(auth.authorize(request(cookie))?.status).toBe(401);
+    expect(auth.status(request(cookie)).headers.get("set-cookie")).toBeNull();
+  });
+
+  test("activity renews disk expiry and browser cookie, including status checks", async () => {
+    const { auth, advance, directory } = fixture();
+    await auth.setPassword(PASSWORD);
+    const cookie = session(await auth.login(loginRequest(PASSWORD, "https://localhost/login")));
+    advance(2592000_000 - 1);
+    const response = await auth.protect(request(cookie, "https://localhost/api/config"),
+      () => Response.json({ ok: true }));
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.get("set-cookie")).toContain(`${cookie}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000; Secure`);
+    advance(1);
+    const status = auth.status(request(cookie));
+    expect(await status.json()).toEqual({ configured: true, authenticated: true });
+    expect(status.headers.get("set-cookie")).toContain("Max-Age=2592000");
+    const expires = JSON.parse(readFileSync(join(directory, "access.json"), "utf8")).sessions[0][1];
+    expect(expires).toBe(1_000_000 + 2 * 2592000_000);
+    const restarted = createLocalAuth({ directory, now: () => expires });
+    let called = false;
+    const denied = await restarted.protect(request(cookie), () => { called = true; return new Response(); });
+    expect(denied.status).toBe(401);
+    expect(denied.headers.get("set-cookie")).toBeNull();
+    expect(called).toBe(false);
   });
 
   test("password reset revokes sessions, including a reset to the same password", async () => {
@@ -172,9 +194,37 @@ describe("local password authentication", () => {
     expect(response.status).toBe(401);
     expect(response.headers.get("set-cookie")).toBeNull();
     const cookie = session(await auth.login(loginRequest("replacement password")));
-    const restarted = createLocalAuth({ directory });
+    const restarted = createLocalAuth({ directory, now: () => 1_000_000 });
     expect(restarted.configured()).toBe(true);
-    expect(restarted.authorize(request(cookie))?.status).toBe(401);
+    expect(restarted.authorize(request(cookie))).toBeUndefined();
+  });
+
+  test("persists only token hashes and preserves logout across restarts", async () => {
+    const { auth, directory } = fixture();
+    await auth.setPassword(PASSWORD);
+    const cookie = session(await auth.login(loginRequest(PASSWORD, "https://localhost/login")));
+    const stored = readFileSync(join(directory, "access.json"), "utf8");
+    expect(stored).not.toContain(cookie.split("=")[1]!);
+    expect(stored).not.toContain(PASSWORD);
+    expect(JSON.parse(stored).sessions).toHaveLength(1);
+    expect(statSync(join(directory, "access.json")).mode & 0o777).toBe(0o600);
+    const restarted = createLocalAuth({ directory, now: () => 1_000_000 });
+    expect(restarted.authorize(request(cookie))).toBeUndefined();
+    restarted.logout(request(cookie));
+    expect(auth.authorize(request(cookie))?.status).toBe(401);
+    expect(createLocalAuth({ directory, now: () => 1_000_000 }).authorize(request(cookie))?.status).toBe(401);
+  });
+
+  test("rejects corrupt persisted sessions without trusting their contents", async () => {
+    const { auth, directory } = fixture();
+    await auth.setPassword(PASSWORD);
+    const cookie = session(await auth.login(loginRequest()));
+    const file = join(directory, "access.json");
+    const stored = JSON.parse(readFileSync(file, "utf8"));
+    stored.sessions = [[cookie.split("=")[1], "never"]];
+    writeFileSync(file, JSON.stringify(stored));
+    expect(auth.authorize(request(cookie))?.status).toBe(401);
+    expect(createLocalAuth({ directory }).authorize(request(cookie))?.status).toBe(401);
   });
 
   test("limits all attempts globally, ignoring spoofed IP headers, and recovers", async () => {
