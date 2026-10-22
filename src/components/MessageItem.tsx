@@ -1,6 +1,6 @@
 import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
-import { SEARCH_PROVIDERS } from "../../shared/types";
-import { memo, useEffect, useState } from "react";
+import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
@@ -154,31 +154,36 @@ function Searches({ searches }: { searches: SearchCall[] }) {
 /** Every image sent in the chat, so the preview can step through all of them. */
 function chatImages(chatId: string) {
   const chat = useStore.getState().chats.find((c) => c.id === chatId);
-  return (chat?.messages ?? []).flatMap((m) => m.attachments?.filter((a) => a.mime.startsWith("image/")) ?? []);
+  const files = (chat?.messages ?? []).flatMap((m) => [...(m.attachments ?? []), ...(m.parts ?? []).flatMap((p) => (p.type === "steer" && p.attachments) || [])]);
+  return files.filter((a) => a.mime.startsWith("image/"));
+}
+
+function Attachments({ files, chatId }: { files: Attachment[]; chatId: string }) {
+  return (
+    <div className="msg-attachments">
+      {files.map((a) =>
+        a.mime.startsWith("image/") ? (
+          <button key={a.id} type="button" className="msg-image" aria-label={`Preview ${a.name}`} onClick={() => openLightbox(chatImages(chatId), a.id)}>
+            <img src={a.dataUrl} alt={a.name} />
+          </button>
+        ) : (
+          <span key={a.id} className="attachment-file msg-file" title={a.name}>
+            <FileText size={16} />
+            <span>
+              <span className="attachment-name">{a.name}</span>
+              <span className="attachment-meta">{formatBytes(a.size)}</span>
+            </span>
+          </span>
+        ),
+      )}
+    </div>
+  );
 }
 
 function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
   return (
     <div className="msg msg-user" data-message-id={message.id}>
-      {message.attachments?.length ? (
-        <div className="msg-attachments">
-          {message.attachments.map((a) =>
-            a.mime.startsWith("image/") ? (
-              <button key={a.id} type="button" className="msg-image" aria-label={`Preview ${a.name}`} onClick={() => openLightbox(chatImages(chatId), a.id)}>
-                <img src={a.dataUrl} alt={a.name} />
-              </button>
-            ) : (
-              <span key={a.id} className="attachment-file msg-file" title={a.name}>
-                <FileText size={16} />
-                <span>
-                  <span className="attachment-name">{a.name}</span>
-                  <span className="attachment-meta">{formatBytes(a.size)}</span>
-                </span>
-              </span>
-            ),
-          )}
-        </div>
-      ) : null}
+      {message.attachments?.length ? <Attachments files={message.attachments} chatId={chatId} /> : null}
       {message.content && (
         <div className="bubble">
           <Linkify text={message.content} />
@@ -191,31 +196,68 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   );
 }
 
+type Block = Part | (ToolPart | ThoughtPart)[];
+
+/** Once a reply is done, everything Pi did before its final answer folds into one line. */
+function Worked({ message, children }: { message: Message; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  // Older replies have no turn time: count what the tools and thinking took.
+  const ms = message.workedMs ?? (message.parts ?? []).reduce((n, p) => n + ((p.type === "tool" || p.type === "thought") && p.ms ? p.ms : 0), 0);
+  return (
+    <div className={cx("reasoning worked", open && "reasoning-open")}>
+      <button type="button" data-worked-toggle className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span>{`Worked for ${Math.max(1, Math.round(ms / 1000))}s`}</span>
+        <ChevronRight size={14} className="reasoning-chevron" />
+      </button>
+      {open && <div className="worked-body">{children}</div>}
+    </div>
+  );
+}
+
 /** A Pi reply in order: text, runs of tool calls and thinking, and questions. */
 function Parts({ message, chatId }: { message: Message; chatId: string }) {
   const cwd = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace?.cwd);
   const streaming = message.status === "streaming";
   // Thinking shares a block with the tools around it, like in flash.
-  const blocks: (Part | (ToolPart | ThoughtPart)[])[] = [];
+  const blocks: Block[] = [];
   for (const p of message.parts ?? []) {
     const last = blocks.at(-1);
     const grouped = p.type === "tool" || p.type === "thought";
     if (grouped && Array.isArray(last)) last.push(p);
     else blocks.push(grouped ? [p] : p);
   }
-  return (
-    <>
-      {blocks.map((b, i) =>
-        Array.isArray(b) ? (
-          <ToolGroup key={`g${i}`} parts={b} cwd={cwd} live={streaming} />
-        ) : b.type === "text" ? (
-          <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} />
-        ) : b.type === "ask" ? (
-          <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} />
-        ) : null,
-      )}
-    </>
-  );
+  const render = (b: Block, i: number, all: Block[]) =>
+    Array.isArray(b) ? (
+      <ToolGroup key={`g${i}`} parts={b} cwd={cwd} live={streaming} />
+    ) : b.type === "text" ? (
+      <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === all.length - 1 && "markdown-streaming")} />
+    ) : b.type === "ask" ? (
+      <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} />
+    ) : b.type === "steer" ? (
+      // Sent while Pi worked, shown where Pi read it.
+      <div key={`s${i}`} className="msg-user msg-steer">
+        {b.attachments?.length ? <Attachments files={b.attachments} chatId={chatId} /> : null}
+        {b.text && (
+          <div className="bubble">
+            <Linkify text={b.text} />
+          </div>
+        )}
+      </div>
+    ) : null;
+  // Done and it ran tools or thought: fold all of that (and what it wrote along the way) behind
+  // "Worked for Xs", leaving the final answer out in the open.
+  if (message.status === "done" && blocks.some(Array.isArray)) {
+    const last = blocks.at(-1);
+    const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
+    const work = final ? blocks.slice(0, -1) : blocks;
+    return (
+      <>
+        <Worked message={message}>{work.map((b, i) => render(b, i, blocks))}</Worked>
+        {final && render(final, blocks.length - 1, blocks)}
+      </>
+    );
+  }
+  return <>{blocks.map((b, i) => render(b, i, blocks))}</>;
 }
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
