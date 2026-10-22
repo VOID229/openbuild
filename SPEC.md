@@ -1,4 +1,6 @@
-# OpenChat — Frontend Implementation SPEC
+# OpenChat — Frontend Implementation SPEC (upstream reference)
+
+> This document preserves the original openchat UI specification, not OpenBuild's product scope. **openchat** is the hosted chatting app at https://openchat.shade-io.com, with accounts and Convex cloud syncing. **OpenBuild** is its self-hosted coding-focused fork, powered by Pi, accessed over localhost, LAN, or Tailscale at the user's choice. OpenBuild offers no cloud accounts or cloud syncing. See `README.md` for the current product and setup.
 
 > Source of truth: Excalidraw wireframe (parsed). Implement layout **1:1** with the diagram.
 > Do **not** invent features that are not in the diagram. Ambiguities are flagged explicitly.
