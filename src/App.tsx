@@ -1,5 +1,5 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
@@ -16,6 +16,7 @@ import { isHosted } from "./lib/runtime";
 import { findModel } from "./lib/models";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
+import { startRouting } from "./lib/routes";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -217,35 +218,15 @@ function Main() {
     document.title = chat ? `${chat.title} · OpenBuild` : "OpenBuild";
   }, [chat?.title]);
 
-  // Keep the URL (#/c/<id>) and the active chat in sync, so chats can be opened in new tabs
-  // and the back/forward buttons work.
-  const activeChatId = useStore((s) => s.activeChatId);
-  const routed = useRef(false);
+  // The server serves the app at every client route, including on reload.
   useEffect(() => {
-    if (!chatsLoaded) return;
-    const fromHash = () => {
-      const id = /^#\/c\/(.+)$/.exec(location.hash)?.[1];
-      const st = useStore.getState();
-      if (id && st.chats.some((c) => c.id === id)) {
-        st.selectChat(id);
-        return;
-      }
-      // Not a chat in this browser (another device, a deleted chat, or a private window): show a
-      // new chat and drop the stale address. Without this, the URL keeps the unknown id.
-      if (location.hash) history.replaceState(null, "", location.pathname + location.search);
-      st.newChat();
-    };
-    fromHash();
-    routed.current = true;
-    window.addEventListener("hashchange", fromHash);
-    return () => window.removeEventListener("hashchange", fromHash);
+    if (chatsLoaded) return startRouting({
+      getState: useStore.getState,
+      setState: useStore.setState,
+      subscribe: useStore.subscribe,
+      selectChat: useStore.getState().selectChat,
+    });
   }, [chatsLoaded]);
-  useEffect(() => {
-    if (!routed.current) return;
-    const id = useStore.getState().activeChatId;
-    const hash = id ? `#/c/${id}` : "";
-    if (location.hash !== hash) history.pushState(null, "", hash || location.pathname + location.search);
-  }, [activeChatId]);
 
   return (
     <>

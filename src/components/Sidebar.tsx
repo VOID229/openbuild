@@ -2,6 +2,7 @@ import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
+import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
@@ -49,7 +50,7 @@ function previewOf(chat: Chat) {
 /** The model of the chat's latest reply. */
 const modelOf = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
 
-const chatUrl = (id: string) => `${location.pathname}#/c/${id}`;
+const chatUrl = threadPath;
 
 function Highlight({ text, ranges }: { text: string; ranges: Range[] }) {
   if (!ranges.length) return <>{text}</>;
@@ -560,6 +561,7 @@ export function Sidebar() {
 
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
+  const [archiveView, setArchiveView] = useState(false);
 
   const view = useStore((s) => s.view);
 
@@ -664,6 +666,12 @@ export function Sidebar() {
                 {hits.map((h) => row(h.chat, h))}
                 {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
               </section>
+            ) : archiveView ? (
+              <section className="history-group">
+                <h3 className="history-heading">{`Archived (${archived.length})`}</h3>
+                {archived.map((c) => row(c))}
+                {!archived.length && <p className="history-empty">No archived threads.</p>}
+              </section>
             ) : (
               <>
                 {pinned.length > 0 && (
@@ -687,10 +695,22 @@ export function Sidebar() {
             )}
           </nav>
 
-          <button type="button" className="settings-btn" onClick={() => openSettings()}>
-            <Avatar src={avatar} name={name} size={26} />
-            Settings
-          </button>
+          <div className="settings-row">
+            <button type="button" className="settings-btn" onClick={() => openSettings()}>
+              <Avatar src={avatar} name={name} size={26} />
+              Settings
+            </button>
+            <button
+              type="button"
+              className={`archive-toggle${archiveView ? " active" : ""}`}
+              aria-label={archiveView ? "Back to threads" : "Show archived threads"}
+              aria-pressed={archiveView}
+              title={archiveView ? "Back to threads" : "Archived threads"}
+              onClick={() => setArchiveView((v) => !v)}
+            >
+              <Archive size={18} />
+            </button>
+          </div>
         </div>
       </aside>
       <ChatContextMenu state={menu} onClose={closeMenu} onRename={setRenamingId} />
