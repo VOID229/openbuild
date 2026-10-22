@@ -1,7 +1,7 @@
-import { ArrowUp, BookOpen, Check, FileText, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand } from "../../shared/types";
-import { drainQueue, sendMessage, stopGeneration, uid } from "../lib/chat";
+import { drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
 import { dictationSupported, useDictation } from "../lib/dictation";
@@ -43,9 +43,13 @@ interface RowProps {
   onEdit: () => void;
   onDelete: () => void;
   onFinish: (save: boolean) => void;
+  /** While a reply is coming in: stop it and send this now. */
+  onInterrupt?: () => void;
+  /** While Pi is working: hand this to it now, without stopping. */
+  onSteer?: () => void;
 }
 
-function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete, onFinish }: RowProps) {
+function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete, onFinish, onInterrupt, onSteer }: RowProps) {
   const file = item.files[0];
   const more = item.files.length - (item.text ? 0 : 1);
   if (editing) {
@@ -90,6 +94,16 @@ function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete,
       <IconButton label="Edit queued message" tooltipSide="top" className="queued-btn" onClick={onEdit}>
         <Pencil size={15} />
       </IconButton>
+      {onSteer && (
+        <IconButton label="Steer" tooltip="Steer · Pi reads it after its current step" tooltipSide="top" className="queued-btn queued-steer" onClick={onSteer}>
+          <CornerUpLeft size={15} />
+        </IconButton>
+      )}
+      {onInterrupt && (
+        <IconButton label="Send now" tooltip="Send now · stops the reply" tooltipSide="top" className="queued-btn queued-steer" onClick={onInterrupt}>
+          <ArrowUp size={15} />
+        </IconButton>
+      )}
     </div>
   );
 }
@@ -100,9 +114,12 @@ interface TrayProps {
   queue: Queued[];
   onEdit: (item: Queued) => void;
   onFinish: (save: boolean) => void;
+  /** A reply is coming in, so a message can interrupt it, or (Pi) steer it. */
+  live?: "pi" | "other";
+  onError: (message: string) => void;
 }
 
-function QueueTray({ chatId, queue, onEdit, onFinish }: TrayProps) {
+function QueueTray({ chatId, queue, onEdit, onFinish, live, onError }: TrayProps) {
   const tray = useRef<HTMLDivElement>(null);
   const editingId = useEditingQueued(chatId);
   const [dragId, setDragId] = useState<string>();
@@ -149,6 +166,8 @@ function QueueTray({ chatId, queue, onEdit, onFinish }: TrayProps) {
           onEdit={() => onEdit(q)}
           onDelete={() => removeQueued(chatId, q.id)}
           onFinish={onFinish}
+          onInterrupt={live ? () => interruptWith(chatId, q.id) : undefined}
+          onSteer={live === "pi" ? () => steerQueued(chatId, q.id).catch((err: Error) => onError(err.message)) : undefined}
         />
       ))}
     </div>
@@ -201,6 +220,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const picker = useRef<HTMLInputElement>(null);
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
+  const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.at(-1)?.model?.plan === "pi");
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -215,18 +235,27 @@ export function Composer({ variant, chatId, streaming }: Props) {
   );
   // Text in the box when dictation started; the live transcript is appended after it.
   const dictationBase = useRef("");
+  const dictationSettings = useStore((s) => s.settings.dictation);
   const dictation = useDictation(
     (transcript) => {
       const base = dictationBase.current;
       const heard = transcript.trim();
-      setText(base && heard && !/\s$/.test(base) ? `${base} ${heard}` : base + heard);
+      if (dictationSettings?.enabled) {
+        // Whisper returns once, after recording; preserve anything typed while it transcribed.
+        if (heard) setText((current) => current && !/\s$/.test(current) ? `${current} ${heard}` : current + heard);
+      } else {
+        setText(base && heard && !/\s$/.test(base) ? `${base} ${heard}` : base + heard);
+      }
     },
     setNotice,
+    dictationSettings,
   );
+  useEffect(() => { dictation.cancel(); }, [draftKey]);
 
   const toggleDictation = () => {
     if (dictation.listening) return dictation.stop();
-    if (!dictationSupported) {
+    if (dictation.busy) return;
+    if (!dictationSettings?.enabled && !dictationSupported) {
       // No speech API in this browser: hand off to the OS's own dictation on the focused box.
       textarea.current?.focus();
       setNotice(isIOS ? "Tap the mic on the keyboard to dictate." : isMac ? "Press Fn twice (or 🎤) to dictate." : "Dictation isn't supported in this browser.");
@@ -350,7 +379,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   const startEdit = (item: Queued) => {
     if (!chatId) return;
-    dictation.stop();
+    dictation.cancel();
     let stash = { text, files };
     if (editing) {
       // Switching to another queued message keeps the edit made so far.
@@ -366,7 +395,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   /** Close the edit (saving it or not) and bring back the draft. */
   const finishEdit = (save: boolean) => {
     if (!editing || !chatId) return;
-    dictation.stop();
+    dictation.cancel();
     if (save) saveEdit(editing.id);
     fill(editing.stash);
     setEditing(undefined);
@@ -388,7 +417,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const submit = () => {
     if (editing) return finishEdit(true);
     if (!hasContent) return;
-    dictation.stop();
+    dictation.cancel();
     if (!files.length && runBuiltin(text.trim())) {
       saveDraft(draftKey, "", []);
       setText("");
@@ -451,7 +480,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} />}
+      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       <div
         className={cx("composer", dragging && "composer-drag")}
@@ -538,9 +567,12 @@ export function Composer({ variant, chatId, streaming }: Props) {
             <button
               type="button"
               className={cx("round-btn round-btn-mic", dictation.listening && "round-btn-listening")}
-              aria-label={dictation.listening ? "Stop dictation" : "Dictate"}
+              disabled={dictation.busy}
+              aria-busy={dictation.busy}
+              data-local-dictation={dictationSettings?.enabled || undefined}
+              aria-label={dictation.busy ? "Transcribing…" : dictation.listening ? "Stop dictation" : "Dictate"}
               aria-pressed={dictation.listening}
-              data-tooltip={dictation.listening ? "Stop dictation" : "Dictate"}
+              data-tooltip={dictation.busy ? "Transcribing…" : dictation.listening ? "Stop dictation" : "Dictate"}
               data-tooltip-side={variant === "dock" ? "top" : "bottom"}
               onClick={toggleDictation}
             >

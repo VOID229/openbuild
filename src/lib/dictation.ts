@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useWhisperDictation } from "./useWhisperDictation";
+import type { Settings } from "./types";
 
 /**
  * Dictation via the Web Speech API. A web page can't open the OS dictation UI itself, but in Safari
@@ -45,7 +47,8 @@ const ERRORS: Record<string, string> = {
  * `onText(transcript)` is called with everything heard so far in the current session (interim
  * results included), so the caller can splice it after whatever was in the box when it started.
  */
-export function useDictation(onText: (transcript: string) => void, onError: (message: string) => void) {
+export function useDictation(onText: (transcript: string) => void, onError: (message: string) => void, options?: Settings["dictation"]) {
+  const whisper = useWhisperDictation(onText, onError, options?.connection ?? "lan");
   const [listening, setListening] = useState(false);
   const rec = useRef<Recognition | null>(null);
   const handlers = useRef({ onText, onError });
@@ -81,7 +84,9 @@ export function useDictation(onText: (transcript: string) => void, onError: (mes
     }
   }, []);
 
+  const cancel = useCallback(() => { rec.current?.abort(); rec.current = null; setListening(false); }, []);
+  useEffect(() => { cancel(); whisper.cancel(); }, [options?.enabled]);
   useEffect(() => () => rec.current?.abort(), []);
 
-  return { listening, start, stop };
+  return options?.enabled ? whisper : { listening, start, stop, cancel, busy: false };
 }

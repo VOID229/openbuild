@@ -11,6 +11,7 @@ import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSear
 import { piRoutes } from "./pi/routes";
 import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
+import { checkWhisper, transcribe } from "./dictation";
 import { findRun, localRun, startRun } from "./runs";
 import * as storage from "./storage";
 import * as vault from "./vault";
@@ -60,7 +61,7 @@ function forbidden(req: Request): Response | undefined {
 const api =
   <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) =>
   (req: R, ...rest: A) =>
-    forbidden(req) ?? localAuth.authorize(req) ?? handler(req, ...rest);
+    forbidden(req) ?? localAuth.protect(req, () => handler(req, ...rest));
 
 function serve(port: number, hostname: string) {
   return Bun.serve({
@@ -82,6 +83,9 @@ function serve(port: number, hostname: string) {
       "/api/config": {
         GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, machine })),
       },
+
+      "/api/dictation/check": { GET: api(checkWhisper) },
+      "/api/dictation/transcribe": { POST: api(transcribe) },
 
       // Saved keys as opaque ids, never secrets.
       "/api/keys": {

@@ -30,7 +30,7 @@ test("server gates every device API and only unlocks with a local session", asyn
     for (const [path, method] of [
       ["/api/config", "GET"], ["/api/chats", "GET"], ["/api/state", "PUT"],
       ["/api/keys/secrets", "GET"], ["/api/pi/chat", "POST"], ["/api/pi/providers", "GET"],
-      ["/api/unknown", "GET"],
+      ["/api/unknown", "GET"], ["/api/dictation/check", "GET"], ["/api/dictation/transcribe", "POST"],
     ]) expect((await call(path!, { method })).status).toBe(401);
     const login = await call("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password: "test-only-password-123" }) });
     expect(login.status).toBe(200);
