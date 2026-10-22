@@ -1092,6 +1092,42 @@ svg {
   color: var(--text-3);
 }
 
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.settings-row .settings-btn {
+  flex: 1;
+  min-width: 0;
+  margin-top: 0;
+}
+
+.archive-toggle {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 11px;
+  color: var(--text-3);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.archive-toggle.active {
+  background: var(--hover);
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .archive-toggle:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
 .settings-btn {
   display: flex;
   align-items: center;
@@ -1176,7 +1212,7 @@ svg {
   max-width: var(--content-w);
   padding-top: max(80px, 24vh);
   padding-bottom: 48px;
-  animation: rise 360ms var(--ease) both;
+  animation: rise 360ms var(--ease) backwards;
 }
 
 .home-title {
@@ -1408,6 +1444,10 @@ svg {
   border-radius: 7px;
   flex-shrink: 0;
   color: var(--text-3);
+}
+
+.queued-steer {
+  color: var(--text-2);
 }
 
 .queued-editing {
@@ -1863,6 +1903,12 @@ svg {
   line-height: 1.55;
 }
 
+.msg-steer {
+  display: flex;
+  flex-direction: column;
+  margin: 14px 0;
+}
+
 .msg-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -2068,6 +2114,12 @@ svg {
   border-left: 2px solid var(--border-strong);
   max-height: 420px;
   overflow-y: auto;
+  animation: rise 200ms var(--ease) both;
+}
+
+/* A finished Pi reply: what it did before the answer, folded into one line. */
+.worked-body {
+  margin: 6px 0 4px;
   animation: rise 200ms var(--ease) both;
 }
 
@@ -3760,13 +3812,84 @@ p.key-status svg {
   }
 }
 
-/* On the narrowest phones give the dictation button's room to the model picker (the keyboard has a mic). */
+/* The keyboard replaces browser dictation on narrow phones, but can't replace private Whisper. */
 @media (max-width: 374px) {
-  .composer .round-btn-mic {
+  .composer .round-btn-mic:not([data-local-dictation]) {
     display: none;
   }
   .pill-model {
     max-width: 112px;
+  }
+}
+
+/* Touch screens: a fixed, app-like screen. The page itself never scrolls, bounces or zooms; only
+   the panels inside it scroll. --app-h is the height above the keyboard (see lib/viewport.ts). */
+@media (pointer: coarse) {
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  .app {
+    height: var(--app-h, 100dvh);
+  }
+
+  .sidebar {
+    bottom: auto;
+    height: var(--app-h, 100dvh);
+  }
+
+  /* 16px or larger, or iOS zooms the page in on focus and leaves it zoomed. */
+  input,
+  textarea,
+  select,
+  .composer-input {
+    font-size: max(16px, 1em);
+  }
+
+  .messages,
+  .sidebar-inner,
+  .settings-content {
+    overscroll-behavior: contain;
+  }
+
+  /* The keyboard covers the home indicator, so its inset is just a gap there. */
+  [data-keyboard] .dock {
+    padding-bottom: 8px;
+  }
+
+  [data-keyboard] .sidebar-inner {
+    padding-bottom: 10px;
+  }
+}
+
+/* Phones: the model picker is a tall sheet along the bottom of the screen. Dropping from the pill
+   left it only the few hundred pixels around the composer, too short to scroll comfortably. */
+@media (max-width: 768px) {
+  .mp.popover {
+    position: fixed;
+    top: auto !important;
+    left: max(8px, env(safe-area-inset-left)) !important;
+    right: max(8px, env(safe-area-inset-right));
+    bottom: max(8px, env(safe-area-inset-bottom)) !important;
+    z-index: 60;
+    width: auto;
+    max-width: none;
+    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px));
+    max-height: none !important;
+    border-radius: 20px;
+    transform: translateY(12px);
+    transform-origin: bottom center;
+  }
+
+  [data-keyboard] .mp.popover {
+    bottom: 8px !important;
+  }
+
+  .mp.popover[data-state="open"] {
+    transform: none;
   }
 }
 

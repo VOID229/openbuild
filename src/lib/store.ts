@@ -10,7 +10,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
 
-export type SettingsSection = "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance";
+export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance";
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS: Settings = {
   effort: "medium",
   naming: { enabled: true, models: [] },
   syncApiKeys: false,
-  workspace: { mode: "local" },
+  workspace: { mode: "worktree" },
   favorites: [],
 };
 

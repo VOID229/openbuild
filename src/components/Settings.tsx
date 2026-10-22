@@ -1,11 +1,13 @@
-import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Settings2, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { nearestEffort } from "../../shared/types";
+import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
+import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
@@ -18,6 +20,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "keys", label: "Providers", icon: Key },
   { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "security", label: "Security", icon: Shield },
   { id: "account", label: "Account", icon: CircleUser },
 ];
 
@@ -125,6 +128,7 @@ function GeneralSection() {
         </div>
         <Toggle checked={s.cmdEnter} onChange={(v) => update({ cmdEnter: v })} label="Require Cmd+Enter To Submit" />
       </div>
+      <DictationSettings />
       <ChatNaming />
     </>
   );
@@ -245,11 +249,31 @@ function AppearanceSection() {
   );
 }
 
+// ------------------------------------------------------------------ Security
+
+function SecuritySection() {
+  return (
+    <>
+      <Heading>Security</Heading>
+      <div className="field">
+        <div className="setting-label">Instance password</div>
+        <p className="setting-desc">This instance is protected by a server password, not a cloud account. Unlocked browsers can run Pi as the server user.</p>
+        <p className="field-help">To set or change the password, run this in a terminal on the host computer:</p>
+        <code>bun bin/openbuild.ts password</code>
+        <p className="field-help">Changing the password signs out all existing browser sessions.</p>
+      </div>
+    </>
+  );
+}
+
 // ------------------------------------------------------------------ Modal
 
 export function SettingsModal() {
   const open = useStore((s) => s.settingsOpen);
-  const section = useStore((s) => s.settingsSection);
+  const requestedSection = useStore((s) => s.settingsSection);
+  const hasCloud = cloudConfigured();
+  const sections = SECTIONS.filter((s) => s.id !== "account" || hasCloud);
+  const section = requestedSection === "account" && !hasCloud ? "profile" : requestedSection;
   const close = useStore((s) => s.closeSettings);
   const { mounted, visible } = usePresence(open, 220);
   const dialog = useRef<HTMLDivElement>(null);
@@ -291,7 +315,7 @@ export function SettingsModal() {
       <div className="modal-backdrop" onClick={close} aria-hidden />
       <div ref={dialog} className="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
         <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>
-          {SECTIONS.map((s) => (
+          {sections.map((s) => (
             <button
               key={s.id}
               type="button"
@@ -307,7 +331,8 @@ export function SettingsModal() {
         </nav>
         <div className="settings-content" key={section}>
           {section === "profile" && <ProfileSection />}
-          {section === "account" && (
+          {section === "security" && <SecuritySection />}
+          {hasCloud && section === "account" && (
             <>
               <Heading>Account</Heading>
               <AccountSection />
