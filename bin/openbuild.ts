@@ -72,11 +72,12 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string; err: stri
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() || (r.error?.message ?? "") };
 }
 
+const tailscaleArgs = (args: string[]) => process.env.OPENBUILD_TAILSCALE_SOCKET ? [`--socket=${process.env.OPENBUILD_TAILSCALE_SOCKET}`, ...args] : args;
 const tailscaleBin = () => Bun.which("tailscale") ?? ["/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"].find(existsSync);
 
 /** This machine on the tailnet, from its Tailscale daemon; undefined when the daemon can't be reached. */
 function tailscaleSelf(bin: string): { name: string; ips: string[]; https: boolean } | undefined {
-  const r = run(bin, ["status", "--json"]);
+  const r = run(bin, tailscaleArgs(["status", "--json"]));
   if (!r.ok) return undefined;
   const s = JSON.parse(r.out);
   if (s.BackendState !== "Running") fail(`Tailscale is ${s.BackendState ?? "not running"}. Sign in / connect it first.`);
@@ -125,7 +126,7 @@ async function waitForServer(url: string, pid: number): Promise<boolean> {
 
 /** The `tailscale serve` HTTPS port to use: 443 unless something else already serves there. */
 function freeServePort(bin: string): number {
-  const r = run(bin, ["serve", "status", "--json"]);
+  const r = run(bin, tailscaleArgs(["serve", "status", "--json"]));
   try {
     const cfg = JSON.parse(r.out || "{}");
     const used = Object.keys(cfg.TCP ?? {}).map(Number);
@@ -182,9 +183,11 @@ async function start(mode: Mode) {
       notes.push("No access to the Tailscale daemon here, so no HTTPS (that needs `tailscale serve`, run as its owner).");
     } else if (self.https) {
       // Served on this computer only; Tailscale terminates HTTPS on the tailnet and forwards here.
-      // Localhost for Tailscale's HTTPS proxy, plus the Tailscale IP itself (only reachable over the tailnet).
+      // Userspace Tailscale has no bindable interface; Serve still reaches loopback.
+      // Include a direct Tailscale listener only when the OS actually owns that address.
       const ip = self.ips.find((a) => a.includes("."));
-      env.HOST = ["127.0.0.1", ...(ip ? [ip] : [])].join(",");
+      const bindable = ip && Object.values(networkInterfaces()).flat().some((a) => a?.address === ip);
+      env.HOST = ["127.0.0.1", ...(bindable ? [ip] : [])].join(",");
       env.OPENCHAT_ALLOWED_HOSTS = [self.name, ...(ip ? [ip] : [])].join(",");
     } else {
       // No HTTPS certificates on this tailnet: listen on the Tailscale address itself, plain HTTP.
@@ -212,15 +215,15 @@ async function start(mode: Mode) {
 
   if (tailscale && tailscale.self && tailscale.self.https) {
     servePort = freeServePort(tailscale.bin);
-    const r = run(tailscale.bin, ["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${PORT}`]);
+    const r = run(tailscale.bin, tailscaleArgs(["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${PORT}`]));
     if (!r.ok) {
       process.kill(pid);
       fail(`tailscale serve failed: ${r.err || r.out}\nHTTPS may need enabling for your tailnet: https://tailscale.com/kb/1153/enabling-https`);
     }
     urls.push(`https://${tailscale.self.name}${servePort === 443 ? "" : `:${servePort}`}`);
-    // The server also listens on the Tailscale IP (plain HTTP), for when the name doesn't resolve.
+    // Advertise the plain HTTP fallback only if there's a real Tailscale interface listener.
     const ip = tailscale.self.ips.find((a) => a.includes("."));
-    if (ip) urls.push(`http://${ip}:${PORT}`);
+    if (ip && env.HOST!.split(",").includes(ip)) urls.push(`http://${ip}:${PORT}`);
   }
 
   const state: State = { pid, mode, port: PORT, urls, servePort, startedAt: Date.now() };
@@ -241,8 +244,8 @@ async function stop(quiet = false) {
     return;
   }
   const bin = s.servePort || s.serveHttpPort ? tailscaleBin() : undefined;
-  if (bin && s.servePort) run(bin, ["serve", `--https=${s.servePort}`, "off"]);
-  if (bin && s.serveHttpPort) run(bin, ["serve", `--http=${s.serveHttpPort}`, "off"]);
+  if (bin && s.servePort) run(bin, tailscaleArgs(["serve", `--https=${s.servePort}`, "off"]));
+  if (bin && s.serveHttpPort) run(bin, tailscaleArgs(["serve", `--http=${s.serveHttpPort}`, "off"]));
   process.kill(s.pid, "SIGTERM");
   for (let i = 0; i < 40 && alive(s.pid); i++) await Bun.sleep(100);
   if (alive(s.pid)) process.kill(s.pid, "SIGKILL");
