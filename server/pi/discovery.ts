@@ -11,6 +11,14 @@ import { isSessionLive, isThreadId } from "./sessions";
 const textOf = (content: any): string => typeof content === "string" ? content : Array.isArray(content)
   ? content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") : "";
 
+// Pi appends its own notes about attached images to the prompt ("[Image: original 2048x1298, displayed
+// at …]", "[Image converted from …]"). They're for the model, not the bubble.
+const IMAGE_NOTE = /^\[Image(?::| converted| omitted)[^\n]*\]$/gm;
+const promptText = (content: any): string => {
+  const text = textOf(content);
+  return Array.isArray(content) && content.some((b: any) => b.type === "image") ? text.replace(IMAGE_NOTE, "").trim() : text;
+};
+
 /** Raw active branch, including pre-compaction history (not the shortened model context). */
 export function projectSession(source: string, file: string, modified: number): Chat | undefined {
   const records: any[] = [];
@@ -48,7 +56,7 @@ export function projectSession(source: string, file: string, modified: number): 
       const attachments = Array.isArray(m.content) ? m.content.filter((b: any) => b.type === "image").map((b: any, i: number) => ({
         id: `${entry.id}-image-${i}`, name: "Image", mime: b.mimeType, dataUrl: `data:${b.mimeType};base64,${b.data}`, size: Math.floor(b.data.length * 3 / 4),
       })) : [];
-      messages.push({ id: entry.id || `user-${messages.length}`, role: "user", content: textOf(m.content), createdAt: at, ...(attachments.length ? { attachments } : {}) });
+      messages.push({ id: entry.id || `user-${messages.length}`, role: "user", content: promptText(m.content), createdAt: at, ...(attachments.length ? { attachments } : {}) });
     } else if (m.role === "assistant") {
       if (!reply) {
         reply = { id: entry.id || `reply-${messages.length}`, role: "assistant", content: "", parts: [], status: "done", createdAt: at, usage: { input: 0, output: 0, cost: 0 } };
