@@ -8,6 +8,7 @@ import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { arrowNav, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner } from "./primitives";
+import { PluginSlot } from "../lib/plugins";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -665,6 +666,7 @@ export function Sidebar() {
             <span className="wordmark">OpenBuild</span>
             <FilterMenu />
           </div>
+          <PluginSlot name="sidebar:header" />
 
           <button
             type="button"
@@ -740,6 +742,8 @@ export function Sidebar() {
               </>
             )}
           </nav>
+
+          <PluginSlot name="sidebar:footer" />
 
           <div className="settings-row">
             <button type="button" className="settings-btn" onClick={() => openSettings()}>

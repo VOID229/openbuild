@@ -1,0 +1,11 @@
+{
+  "id": "daily-note",
+  "name": "Daily note",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Adds a composer button that asks the OpenBuild server for today's note prompt, then puts it in the box. A small example of a UI slot, a server route and a settings page.",
+  "client": "client.tsx",
+  "server": "server.ts",
+  "styles": "styles.css",
+  "slots": ["composer:toolbar"]
+}

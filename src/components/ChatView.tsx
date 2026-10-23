@@ -5,6 +5,7 @@ import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { cx } from "../lib/ui";
 import { Composer } from "./Composer";
+import { PluginSlot } from "../lib/plugins";
 import { MessageItem } from "./MessageItem";
 
 /** Highlight every occurrence of `words` inside `root` using the CSS Custom Highlight API. */
@@ -264,6 +265,7 @@ export function ChatView({ chat }: { chat: Chat }) {
 
   return (
     <div className="chat">
+      <PluginSlot name="chat:header" context={{ chat }} />
       <div
         ref={scroller}
         className="messages"
@@ -291,6 +293,7 @@ export function ChatView({ chat }: { chat: Chat }) {
         }}
       >
         <div ref={inner} className="messages-inner">
+          <PluginSlot name="chat:before-messages" context={{ chat }} />
           {chat.messages.map((m, i) => (
             <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} />
           ))}

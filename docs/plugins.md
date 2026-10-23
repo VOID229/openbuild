@@ -1,0 +1,165 @@
+# Plugins
+
+OpenBuild can be extended without editing its source. A plugin is a folder with a `plugin.json` manifest and optional `client.tsx`, `server.ts` and `styles.css`:
+
+```
+plugins/my-plugin/
+  plugin.json     manifest (required)
+  client.tsx      UI: slots, settings page, custom tool rows
+  server.ts       authenticated routes and chat hooks (loaded at startup)
+  styles.css      CSS for both
+```
+
+Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in `openbuild.config.ts`, or the data folder's `plugins/` as a fallback. `Settings → Plugins` lists everything found, including broken plugins, and turns each on or off without deleting it.
+
+The folder ships two examples: `daily-note` (a composer button + server route + settings page) and `quiet-ui` (manifest-only tokens and CSS, off by default).
+
+## Manifest
+
+```json
+{
+  "id": "daily-note",
+  "name": "Daily note",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "What it does, shown in Settings.",
+  "client": "client.tsx",
+  "server": "server.ts",
+  "styles": "styles.css",
+  "slots": ["composer:toolbar"],
+  "tokens": { "--content-w": "820px" },
+  "hide": [".sidebar-divider"],
+  "defaultEnabled": true
+}
+```
+
+- `id`: lowercase letters, numbers, dots, dashes or underscores. Also the URL segment under `/api/plugins/<id>/`.
+- `apiVersion`: currently `1`.
+- File paths are relative to the plugin folder and may not escape it.
+- `tokens` are CSS custom properties applied while the plugin is enabled; `hide` selectors are `display: none !important`.
+- `defaultEnabled: false` ships a plugin turned off until enabled in Settings.
+- A manifest-only plugin (no `client.tsx`/`server.ts`) can restyle the app or set tokens.
+
+## Client modules
+
+`client.tsx` is a normal ES module. `react` and `openbuild` are resolved to the host's instances, so no dependencies or build step are needed, and hooks/context work across the app and plugins.
+
+```tsx
+import { useState } from "react";
+import { insertComposerText } from "openbuild";
+
+function NoteButton() {
+  return <button onClick={() => insertComposerText("Hello from a plugin")}>Note</button>;
+}
+
+export default {
+  slots: { "composer:toolbar": NoteButton },
+  settings: { label: "My plugin", component: SettingsPage },
+  toolRenderers: { bash: BashRow },
+  tokens: { "--content-w": "900px" },
+  hide: [".sidebar-divider"],
+  dispose() {},
+};
+```
+
+`plugin` in the SDK is `{ id, name }` for the module being evaluated.
+
+### Slots
+
+Components receive the slot's context as props.
+
+| Slot | Rendered | Context |
+|---|---|---|
+| `app:before` | before the app shell | — |
+| `app:overlay` | above the app, below tooltips | — |
+| `home:above-composer` / `home:below-composer` | new-thread screen | — |
+| `sidebar:header` / `sidebar:footer` | sidebar | — |
+| `chat:header` | above the messages | `{ chat }` |
+| `chat:before-messages` | first item in the message list | `{ chat }` |
+| `composer:above` / `composer:below` | around the composer | `{ variant, chatId }` |
+| `composer:toolbar` | controls row in the composer | `{ variant, chatId }` |
+| `message:actions` | assistant reply actions | `{ message, chatId }` |
+| `message:user-actions` | user message actions | `{ message, chatId }` |
+| `settings:appearance:after` | Appearance settings page | — |
+
+`toolRenderers` is keyed by Pi tool name (`bash`, `edit`, …). A registered renderer replaces the built-in tool row and receives `{ part, cwd }`.
+
+### SDK
+
+```ts
+import {
+  React,              // the host's React
+  useStore,           // OpenBuild's zustand store
+  getState,           // useStore.getState()
+  subscribe,          // useStore.subscribe
+  insertComposerText, // append text to the composer
+  openSettings,       // openSettings("plugins")
+  fetch,              // same-origin authenticated fetch
+  plugin,             // { id, name } of the current module
+} from "openbuild";
+```
+
+## Server modules
+
+`server.ts` runs in the OpenBuild process with the same permissions. It is loaded at startup only when the plugin is enabled.
+
+```ts
+export default {
+  onStart({ id, dir, dataDir, log }) {
+    log("started in", dir);
+  },
+
+  // Every path must start with /api/plugins/<id>/. `api` marks a handler for the
+  // host/Origin/password checks (OpenBuild also wraps them, so this can't be bypassed).
+  routes: (api) => ({
+    "/api/plugins/my-plugin/echo": {
+      POST: api(async (req) => Response.json(await req.json())),
+    },
+  }),
+
+  // Adjust a Pi turn before it starts. Return the request (it is re-validated), or nothing to leave it alone.
+  beforeChat(req) {
+    return { ...req, message: `[plugin] ${req.message}` };
+  },
+};
+```
+
+Server modules can import Node/Bun APIs and OpenBuild files relative to the plugin folder. They are not restarted by the plugin watcher: restart OpenBuild after changing `server.ts`.
+
+## Config
+
+Copy `openbuild.config.example.ts` to `openbuild.config.ts` (repo root or data folder) to change the plugin folder or global CSS:
+
+```ts
+export default {
+  pluginsDir: "plugins",
+  customCss: "custom.css", // applied after the app's styles
+  safeMode: false,         // or OPENBUILD_SAFE=1
+  disabledPlugins: [],
+};
+```
+
+`customCss` defaults to `<data dir>/custom.css` when that file exists. `?safe` disables plugins for one browser session.
+
+## How loading works
+
+- The server validates manifests, imports enabled `server.ts` modules before assembling HTTP routes, and calls `onStart`.
+- The browser loads `/api/plugins` after unlock, then imports each enabled `client.js`. The server builds it with Bun, marking `react`, `react/jsx-runtime`, `react-dom` and `openbuild` as host modules. There is exactly one React instance.
+- A plugin's client module is wrapped in an error boundary. A crash is shown in `Settings → Plugins`; it doesn't take the app down.
+- A file watcher polls the plugin folder. Changes to `plugin.json`, `client.tsx`, `styles.css` and `custom.css` broadcast over SSE; every open browser unloads and re-imports enabled plugins without a page reload. Adding a new client plugin also works live. New `server.ts` files and server toggles need a restart.
+- Disable state is stored in OpenBuild's database, not the browser, so every device sees it.
+
+## Security
+
+Plugins are trusted code, in the same trust boundary as Pi and OpenBuild itself: a server plugin can run anything the server can, and a client plugin runs in the page with access to the app's data. Only install plugins you write or have reviewed. They are behind the same local password and same-origin checks as the rest of the app, but the password is an access gate, not a sandbox.
+
+The safe escape hatch is `OPENBUILD_SAFE=1` (or `?safe`): the app starts with no plugins. For a plugin that breaks the shell, that is also available if you get locked out.
+
+## Limits (prototype)
+
+- No plugin dependency installation; import from Bun's available packages (they get bundled into the client module) or keep to `react`/`openbuild`.
+- No versioned API beyond `apiVersion: 1`.
+- No remote install or registry; plugins are folders on disk.
+- Only the built-in slots above; new ones are added in the components that render `<PluginSlot>`.
+- Plugin sections stay selected after a plugin is disabled; pick another section.
+- `plugins/` example files are not typechecked by `bun run typecheck`.

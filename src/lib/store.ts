@@ -12,7 +12,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
 
-export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance";
+export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
