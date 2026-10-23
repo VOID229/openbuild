@@ -3883,7 +3883,7 @@ p.key-status svg {
     z-index: 60;
     width: auto;
     max-width: none;
-    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px));
+    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
     max-height: none !important;
     border-radius: 20px;
     transform: translateY(12px);
@@ -5809,6 +5809,7 @@ a.btn-primary {
   min-height: 0;
   padding: 4px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 

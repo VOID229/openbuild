@@ -257,7 +257,8 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
-  // Open right at the pill, toward whichever side has room, as tall as the screen allows.
+  // Open right at the pill, toward whichever side has room. The height is fixed (not sized to the
+  // list) so switching providers or searching doesn't make the panel jump.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -287,7 +288,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
       setLayout({
         up,
-        max: Math.max(220, Math.min(680, up ? above : below)),
+        max: Math.max(220, Math.min(480, up ? above : below)),
         pos,
       });
     };
@@ -356,7 +357,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
         onClose={() => setOpen(false)}
         anchor={anchor}
         className={cx("mp", layout.up ? "drop-up" : "drop-down")}
-        style={{ ...layout.pos, maxHeight: layout.max }}
+        style={{ ...layout.pos, height: layout.max }}
         label="Choose a model"
       >
         <div
