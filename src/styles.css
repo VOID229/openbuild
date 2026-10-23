@@ -1915,15 +1915,15 @@ svg {
 
 .msg-image {
   display: block;
-  border-radius: 14px;
+  border-radius: 12px;
   cursor: zoom-in;
 }
 
 .msg-image img {
   display: block;
-  max-width: 240px;
-  max-height: 200px;
-  border-radius: 14px;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
   border: 1px solid var(--border);
   object-fit: cover;
 }
@@ -3641,10 +3641,6 @@ p.key-status svg {
 
   .bubble {
     max-width: 88%;
-  }
-
-  .msg-image img {
-    max-width: min(240px, 70vw);
   }
 
   .markdown h1,
