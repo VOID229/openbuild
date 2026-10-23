@@ -43,7 +43,8 @@ const machine = (() => {
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
-// and the local password session. Only status/login/logout omit the session check.
+// and the local password session. Only status/login/logout omit the session check
+// (verify/password check it themselves).
 // Serving beyond localhost is opt-in: set HOST and OPENCHAT_ALLOWED_HOSTS.
 const allowedHosts = new Set(["localhost", "127.0.0.1", "[::1]", ...(process.env.OPENCHAT_ALLOWED_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean)]);
 const hostname = (host: string) => host.toLowerCase().replace(/:\d+$/, "");
@@ -73,10 +74,13 @@ function serve(port: number, hostname: string) {
     routes: {
       "/*": index,
 
-      // Only these authentication routes are public; never allow password setup over the network.
+      // Only these authentication routes are public; never allow first-time password setup over the network.
       "/api/auth/status": { GET: (req) => forbidden(req) ?? localAuth.status(req) },
       "/api/auth/login": { POST: (req) => forbidden(req) ?? localAuth.login(req) },
       "/api/auth/logout": { POST: (req) => forbidden(req) ?? localAuth.logout(req) },
+      // Signed-in browsers only, and the current password is re-checked.
+      "/api/auth/verify": { POST: (req) => forbidden(req) ?? localAuth.verify(req) },
+      "/api/auth/password": { POST: (req) => forbidden(req) ?? localAuth.change(req) },
 
       // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
@@ -239,4 +243,4 @@ try {
 hot.openbuildServers = servers;
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
-if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: bun bin/openbuild.ts password\n");
+if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");

@@ -5,6 +5,7 @@
 //   openbuild start lan         also other devices on your network (plain HTTP)
 //   openbuild start tailscale   your tailnet, over HTTPS via `tailscale serve`
 //   openbuild stop | restart | status | logs | open
+//   openbuild set pass <password>   set/change the local access password
 //
 // The server's pid, mode and address are kept in <data dir>/server.json, its output in
 // <data dir>/server.log. PORT changes the port (default 3100).
@@ -137,7 +138,7 @@ function freeServePort(bin: string): number {
 }
 
 async function start(mode: Mode) {
-  if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild password");
+  if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
   const current = running();
   if (current) {
     if (current.mode === mode) {
@@ -267,7 +268,8 @@ function help() {
   openbuild start             this computer only (http://localhost:${PORT})
   openbuild start lan         also devices on your local network (plain HTTP)
   openbuild start tailscale   your tailnet, over HTTPS (tailscale serve)
-  openbuild password          set/change the local access password (hidden prompt)
+  openbuild set pass <pw>     set/change the local access password
+  openbuild password          the same, typed at a hidden prompt instead
   openbuild stop              stop the server
   openbuild restart           restart in the same mode
   openbuild status            is it running, and where
@@ -277,8 +279,21 @@ function help() {
   PORT=…  use another port (default 3100). Data: ${DATA}`);
 }
 
-const [cmd, arg] = process.argv.slice(2);
+async function savePassword(password: string) {
+  try { await localAuth.setPassword(password); }
+  catch (err) { fail((err as Error).message); }
+  console.log("Local password saved. All existing browser sessions have been revoked.");
+}
+
+const [cmd, arg, ...rest] = process.argv.slice(2);
 switch (cmd) {
+  case "set": {
+    if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>`);
+    // Everything after `pass`, so a password with spaces works unquoted too.
+    if (!rest.length) fail("usage: openbuild set pass <password>");
+    await savePassword(rest.join(" "));
+    break;
+  }
   case "password": {
     if (!process.stdin.isTTY) fail("run this command in a terminal to enter the password privately.");
     // The password never appears in process arguments, shell history, or logs.
@@ -291,9 +306,7 @@ switch (cmd) {
     };
     const password = prompt("New local password (at least 12 characters): ");
     if (password !== prompt("Confirm password: ")) fail("passwords don't match.");
-    try { await localAuth.setPassword(password); }
-    catch (err) { fail((err as Error).message); }
-    console.log("Local password saved. All existing browser sessions have been revoked.");
+    await savePassword(password);
     break;
   }
   case "start": {

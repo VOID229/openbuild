@@ -34,7 +34,7 @@ function cookie(req: Request, token: string, maxAge: number): string {
   return `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${new URL(req.url).protocol === "https:" ? "; Secure" : ""}`;
 }
 
-async function passwordBody(req: Request): Promise<string> {
+async function jsonBody(req: Request): Promise<Record<string, unknown>> {
   const length = req.headers.get("content-length");
   if (length !== null && (!/^\d+$/.test(length) || Number(length) > MAX_BODY)) {
     void req.body?.cancel().catch(() => {});
@@ -65,10 +65,17 @@ async function passwordBody(req: Request): Promise<string> {
     offset += chunk.byteLength;
   }
   const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-  if (!value || typeof value.password !== "string" || value.password.length < 1 || value.password.length > 1024) {
-    throw new Error("Invalid password");
-  }
-  return value.password;
+  if (!value || typeof value !== "object") throw new Error("Invalid body");
+  return value;
+}
+
+function passwordField(value: unknown): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 1024) throw new Error("Invalid password");
+  return value;
+}
+
+async function passwordBody(req: Request): Promise<string> {
+  return passwordField((await jsonBody(req)).password);
 }
 
 export function createLocalAuth(options: { directory?: string; now?: () => number } = {}) {
@@ -122,6 +129,47 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     return hash;
   }
 
+  // Instance-wide rather than IP-based: forwarded/client IPs are not trusted.
+  function throttled(): Response | undefined {
+    const time = now();
+    attempts = attempts.filter((attempt) => attempt > time - WINDOW_MS);
+    if (attempts.length >= MAX_ATTEMPTS) {
+      return json({ error: "Too many attempts" }, 429, {
+        "Retry-After": String(Math.max(1, Math.ceil((attempts[0]! + WINDOW_MS - time) / 1000))),
+      });
+    }
+    attempts.push(time);
+  }
+
+  /** Whether `password` matches `hash`; undefined when too many verifications are already running. */
+  async function matches(password: string, hash: string): Promise<boolean | undefined> {
+    if (verifying >= 2) return undefined;
+    verifying++;
+    try { return await Bun.password.verify(password, hash); }
+    catch { return false; /* Invalid hash or verification failure: never authenticate. */ }
+    finally { verifying--; }
+  }
+
+  function issue(req: Request, hash: string): Response {
+    prune();
+    if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
+    const token = randomBytes(32).toString("hex");
+    sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
+    try { persist(hash); }
+    catch { sessions.clear(); return json({ error: "Could not save session" }, 503); }
+    return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS) });
+  }
+
+  async function setPassword(password: string): Promise<void> {
+    if (typeof password !== "string" || password.length < 12 || password.length > 1024) {
+      throw new Error("Password must contain 12–1024 characters");
+    }
+    const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
+    sessions.clear();
+    persist(hash);
+    knownHash = hash;
+  }
+
   function prune(): void {
     const time = now();
     for (const [key, expires] of sessions) if (expires <= time) sessions.delete(key);
@@ -144,15 +192,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       return refresh() !== undefined;
     },
 
-    async setPassword(password: string): Promise<void> {
-      if (typeof password !== "string" || password.length < 12 || password.length > 1024) {
-        throw new Error("Password must contain 12–1024 characters");
-      }
-      const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
-      sessions.clear();
-      persist(hash);
-      knownHash = hash;
-    },
+    setPassword,
 
     authorize(req: Request): Response | undefined {
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
@@ -176,33 +216,53 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     async login(req: Request): Promise<Response> {
       const hash = refresh();
       if (!hash) return json({ error: "Password not configured" }, 503);
-      const time = now();
-      // Instance-wide rather than IP-based: forwarded/client IPs are not trusted.
-      attempts = attempts.filter((attempt) => attempt > time - WINDOW_MS);
-      if (attempts.length >= MAX_ATTEMPTS) {
-        return json({ error: "Too many attempts" }, 429, {
-          "Retry-After": String(Math.max(1, Math.ceil((attempts[0]! + WINDOW_MS - time) / 1000))),
-        });
-      }
-      attempts.push(time);
+      const limited = throttled();
+      if (limited) return limited;
       let password: string;
       try { password = await passwordBody(req); }
       catch { return json({ error: "Invalid login body" }, 400); }
-      if (verifying >= 2) return json({ error: "Login busy" }, 429, { "Retry-After": "1" });
-      verifying++;
-      let valid = false;
-      try { valid = await Bun.password.verify(password, hash); }
-      catch { /* Invalid hash or verification failure: never authenticate. */ }
-      finally { verifying--; }
+      const valid = await matches(password, hash);
+      if (valid === undefined) return json({ error: "Login busy" }, 429, { "Retry-After": "1" });
       // Do not issue a session for a password replaced while verification ran.
       if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 401);
-      prune();
-      if (sessions.size >= MAX_SESSIONS) sessions.delete(sessions.keys().next().value!);
-      const token = randomBytes(32).toString("hex");
-      sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
-      try { persist(hash); }
-      catch { sessions.clear(); return json({ error: "Could not save session" }, 503); }
-      return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS) });
+      return issue(req, hash);
+    },
+
+    /** Check the current password for a signed-in browser (the first step of changing it). */
+    async verify(req: Request): Promise<Response> {
+      if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      const limited = throttled();
+      if (limited) return limited;
+      let password: string;
+      try { password = await passwordBody(req); }
+      catch { return json({ error: "Invalid body" }, 400); }
+      const valid = await matches(password, knownHash!);
+      if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
+      return valid ? json({ ok: true }) : json({ error: "Invalid credentials" }, 403);
+    },
+
+    /**
+     * Change the password from a signed-in browser, re-checking the current one. Every
+     * session is revoked, then this browser gets a fresh one so it stays unlocked.
+     */
+    async change(req: Request): Promise<Response> {
+      if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      const hash = knownHash!;
+      const limited = throttled();
+      if (limited) return limited;
+      let current: string, next: string;
+      try {
+        const body = await jsonBody(req);
+        current = passwordField(body.current);
+        next = passwordField(body.password);
+      } catch { return json({ error: "Invalid body" }, 400); }
+      if (next.length < 12) return json({ error: "Password must contain 12–1024 characters" }, 400);
+      const valid = await matches(current, hash);
+      if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
+      if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 403);
+      try { await setPassword(next); }
+      catch { return json({ error: "Could not save password" }, 503); }
+      return issue(req, knownHash!);
     },
 
     logout(req: Request): Response {

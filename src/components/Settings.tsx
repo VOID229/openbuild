@@ -1,5 +1,5 @@
 import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
@@ -25,6 +25,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
 ];
 
 const Heading = SettingsHeading;
+const MIN_LOCAL_PASSWORD = 12;
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
   return (
@@ -268,15 +269,109 @@ function AppearanceSection() {
 // ------------------------------------------------------------------ Security
 
 function SecuritySection() {
+  // Closed → check the current password → choose the new one twice.
+  const [step, setStep] = useState<"closed" | "current" | "new">("closed");
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
+
+  const reset = (to: typeof step = "closed") => {
+    setStep(to);
+    setCurrent("");
+    setNext("");
+    setConfirm("");
+    setError(undefined);
+  };
+
+  const post = async (path: string, body: object) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      if (res.ok) return true;
+      setError(res.status === 403 ? "That isn't the current password." : res.status === 429 ? "Too many attempts. Wait a minute and try again." : "Couldn't reach the server. Try again.");
+    } catch {
+      setError("Couldn't reach the server. Try again.");
+    } finally {
+      setBusy(false);
+    }
+    return false;
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (step === "current") {
+      if (await post("/api/auth/verify", { password: current })) setStep("new");
+      return;
+    }
+    if (next.length < MIN_LOCAL_PASSWORD) return setError(`Use at least ${MIN_LOCAL_PASSWORD} characters.`);
+    if (next !== confirm) return setError("The new passwords don't match.");
+    if (await post("/api/auth/password", { current, password: next })) {
+      reset();
+      setSaved(true);
+    }
+  };
+
   return (
     <>
       <Heading>Security</Heading>
       <div className="field">
         <div className="setting-label">Instance password</div>
         <p className="setting-desc">This instance is protected by a server password, not a cloud account. Unlocked browsers can run Pi as the server user.</p>
-        <p className="field-help">To set or change the password, run this in a terminal on the host computer:</p>
-        <code>bun bin/openbuild.ts password</code>
-        <p className="field-help">Changing the password signs out all existing browser sessions.</p>
+        {step === "closed" ? (
+          <>
+            <div className="account-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setSaved(false);
+                  reset("current");
+                }}
+              >
+                Change password
+              </button>
+              {saved && <span className="field-help" role="status">Password changed.</span>}
+            </div>
+            <p className="field-help">
+              Changing the password signs out every other browser. On the host computer you can also run <code>openbuild set pass &lt;password&gt;</code>.
+            </p>
+          </>
+        ) : (
+          <form className="account-form" onSubmit={submit}>
+            {step === "current" ? (
+              <Field label="Current password" htmlFor="security-current">
+                <input id="security-current" className="input" type="password" autoComplete="current-password" autoFocus maxLength={1024} value={current} onChange={(e) => setCurrent(e.target.value)} />
+              </Field>
+            ) : (
+              <>
+                <Field label="New password" htmlFor="security-new">
+                  <input id="security-new" className="input" type="password" autoComplete="new-password" autoFocus maxLength={1024} value={next} onChange={(e) => setNext(e.target.value)} />
+                </Field>
+                <Field label="Confirm new password" htmlFor="security-confirm">
+                  <input id="security-confirm" className="input" type="password" autoComplete="new-password" maxLength={1024} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+                  <p className="field-help">At least {MIN_LOCAL_PASSWORD} characters. Every other browser will be signed out.</p>
+                </Field>
+              </>
+            )}
+            {error && (
+              <p className="account-error" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="account-actions">
+              <button type="submit" className="btn" disabled={busy || (step === "current" ? !current : !next || !confirm)}>
+                {step === "current" ? "Continue" : "Confirm"}
+              </button>
+              <button type="button" className="link-btn" onClick={() => reset()}>
+                Cancel
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </>
   );

@@ -80,7 +80,7 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
             <input id="local-password" type="password" autoComplete="current-password" autoFocus required maxLength={1024} value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby={error ? "local-access-error" : undefined} />
             <button type="submit" disabled={busy || !password}>{busy ? "Unlocking…" : "Unlock"}</button>
           </form>
-        ) : status ? <p>Set a password in a terminal on the host computer:<br /><code>bun bin/openbuild.ts password</code></p> : <p role="status">Connecting to the server…</p>}
+        ) : status ? <p>Set a password in a terminal on the host computer:<br /><code>openbuild set pass &lt;password&gt;</code></p> : <p role="status">Connecting to the server…</p>}
         {error && <p id="local-access-error" className="local-access-error" role="alert">{error}</p>}
       </dialog>
     </div>
