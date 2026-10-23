@@ -2591,28 +2591,19 @@ svg {
 .lightbox-slide {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: in a grid cell the image's max-height: 100% has no definite height to resolve
+     against, so tall screenshots overflowed the screen. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
-  opacity: 0;
-  /* The outgoing image holds until the incoming one (on top) has faded in, so nothing dips. */
-  transition: opacity 160ms var(--ease) 140ms, transform 280ms var(--ease);
-  will-change: opacity, transform;
-}
-
-.lightbox-slide[data-pos="before"] {
-  transform: translateX(-28px);
-}
-
-.lightbox-slide[data-pos="after"] {
-  transform: translateX(28px);
+  /* Switching images is instant: the other slides are simply hidden. */
+  visibility: hidden;
 }
 
 .lightbox-slide[data-pos="current"] {
   z-index: 1;
-  opacity: 1;
-  transform: none;
-  transition: opacity 160ms var(--ease), transform 280ms var(--ease);
+  visibility: visible;
 }
 
 .lightbox-image {
@@ -3883,7 +3874,7 @@ p.key-status svg {
     z-index: 60;
     width: auto;
     max-width: none;
-    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px));
+    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
     max-height: none !important;
     border-radius: 20px;
     transform: translateY(12px);
@@ -5809,6 +5800,7 @@ a.btn-primary {
   min-height: 0;
   padding: 4px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
 
