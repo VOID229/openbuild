@@ -414,21 +414,22 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   }, [queue]);
 
-  const submit = () => {
+  /** Send the composer's text, or `line` instead of it (a command picked from the "/" menu). */
+  const submit = (line = text.trim()) => {
     if (editing) return finishEdit(true);
-    if (!hasContent) return;
+    if (!line && !files.length) return;
     dictation.cancel();
-    if (!files.length && runBuiltin(text.trim())) {
+    if (!files.length && runBuiltin(line)) {
       saveDraft(draftKey, "", []);
       setText("");
       return;
     }
     if (queueing && chatId) {
-      enqueue(chatId, { id: uid(), text: text.trim(), files });
+      enqueue(chatId, { id: uid(), text: line, files });
       saveDraft(draftKey, "", []);
       setText("");
       setFiles([]);
-    } else if (sendMessage(text.trim(), files)) {
+    } else if (sendMessage(line, files)) {
       // Sending from the new-chat screen unmounts this composer before its save effect could run.
       saveDraft(draftKey, "", []);
       setText("");
@@ -444,9 +445,17 @@ export function Composer({ variant, chatId, streaming }: Props) {
         setSlashIndex((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && slashMatches[slashIndex] && `/${slashMatches[slashIndex]!.name}` !== text.trim())) {
+      // Tab completes the command so arguments can follow; Enter runs it straight away.
+      if (e.key === "Tab" && slashMatches[slashIndex]) {
         e.preventDefault();
         pickCommand(slashMatches[slashIndex]!);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && slashMatches[slashIndex]) {
+        e.preventDefault();
+        // A queued message being edited only gets the command written in.
+        if (editing) pickCommand(slashMatches[slashIndex]!);
+        else submit(`/${slashMatches[slashIndex]!.name}`);
         return;
       }
       if (e.key === "Escape") {
@@ -590,7 +599,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
                 data-tooltip={editing ? "Save edit" : hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
                 data-tooltip-side={variant === "dock" ? "top" : "bottom"}
                 disabled={!hasContent && !editing}
-                onClick={submit}
+                onClick={() => submit()}
               >
                 <ArrowUp size={18} strokeWidth={2.25} />
               </button>
