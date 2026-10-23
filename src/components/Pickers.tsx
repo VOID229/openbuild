@@ -8,7 +8,8 @@ import {
 } from "../../shared/types";
 import { findModel, isAuto, providerName } from "../lib/models";
 import { providerGroups, searchProviderGroups } from "../lib/modelSearch";
-import { selectionFor, useStore } from "../lib/store";
+import { composerEffort, selectionFor, useStore } from "../lib/store";
+import { effortFor } from "../lib/effort";
 import { arrowNav, cx } from "../lib/ui";
 import { Popover, ProviderIcon, Spinner } from "./primitives";
 
@@ -32,10 +33,10 @@ const LONG: Record<Effort, string> = {
 export function EffortPicker({ dropUp }: { dropUp: boolean }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const effort = useStore((s) => s.settings.effort);
+  const effort = useStore(composerEffort);
   const selection = useStore(selectionFor);
   const detection = useStore((s) => s.detection);
-  const updateSettings = useStore((s) => s.updateSettings);
+  const setEffort = useStore((s) => s.setEffort);
 
   const auto = isAuto(selection);
   const model = auto ? undefined : findModel(detection, selection);
@@ -105,7 +106,7 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
                     : `Not supported by ${model?.name ?? "this model"}`
                 }
                 onClick={() => {
-                  updateSettings({ effort: level });
+                  setEffort(level);
                   setOpen(false);
                 }}
               >
@@ -185,8 +186,8 @@ export function toggleFavorite(id: string) {
 
 /** Thinking levels of the selected model, as a row of choices (in the model picker's footer). */
 function ThinkingRow({ model }: { model?: ModelInfo }) {
-  const effort = useStore((s) => s.settings.effort);
-  const updateSettings = useStore((s) => s.updateSettings);
+  const effort = useStore((s) => effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), model ? { plan: "pi", id: model.id } : undefined));
+  const setEffort = useStore((s) => s.setEffort);
   const levels = model?.reasoning.efforts ?? [];
   const shown = nearestEffort(levels, effort) ?? effort;
   return (
@@ -205,7 +206,7 @@ function ThinkingRow({ model }: { model?: ModelInfo }) {
               role="radio"
               aria-checked={l === shown}
               className="mp-level"
-              onClick={() => updateSettings({ effort: l })}
+              onClick={() => model && setEffort(l, { plan: "pi", id: model.id })}
             >
               {SHORT[l]}
             </button>

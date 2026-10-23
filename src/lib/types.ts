@@ -49,6 +49,8 @@ export interface Settings {
   keys: Partial<Record<PlanId, string[]>>;
   selection?: Selection;
   effort: Effort;
+  /** Per-model reasoning defaults on the new-thread screen. */
+  modelEfforts?: Record<string, Effort>;
   /** Web search: let models call the configured search providers. */
   webSearch: boolean;
   /** Saved key ids per search provider in priority order (SearXNG: instance URLs, which aren't secret). */
@@ -185,6 +187,8 @@ export interface Message {
 }
 
 export interface Chat {
+  /** Reasoning preferences keyed by model identity (including the auto router). */
+  efforts?: Record<string, Effort>;
   id: string;
   title: string;
   createdAt: number;

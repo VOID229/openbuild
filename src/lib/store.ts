@@ -6,6 +6,8 @@ import { listProjects, piModels } from "./pi";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
+import { effortFor, effortKey } from "./effort";
+import type { Effort } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
@@ -94,6 +96,7 @@ interface State {
   setSidebarOpen: (open: boolean) => void;
   /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
   setSelection: (selection: Selection) => void;
+  setEffort: (effort: Effort, selection?: Selection) => void;
   newChat: () => void;
   selectChat: (id: string) => void;
   removeChat: (id: string) => void;
@@ -279,6 +282,19 @@ export const useStore = create<State>()(
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
         else get().updateSettings({ selection });
       },
+      setEffort: (effort, selection = selectionFor(get())) => {
+        if (!selection) return;
+        const s = get();
+        const key = effortKey(selection);
+        const chat = s.chats.find((c) => c.id === s.activeChatId);
+        if (chat) {
+          const updated = { ...chat, efforts: { ...chat.efforts, [key]: effort } };
+          set({ chats: s.chats.map((c) => c.id === chat.id ? updated : c) });
+          void saveChat(updated);
+        } else {
+          s.updateSettings({ modelEfforts: { ...s.settings.modelEfforts, [key]: effort } });
+        }
+      },
       newChat: () => set((s) => ({
         activeChatId: undefined,
         searchFocus: undefined,
@@ -408,6 +424,10 @@ export const useStore = create<State>()(
     },
   ),
 );
+
+export function composerEffort(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): Effort {
+  return effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), selectionFor(s));
+}
 
 const AUTO: Selection = { auto: true };
 
