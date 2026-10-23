@@ -1,5 +1,9 @@
 # OpenBuild
 
+## Working on the iMac server
+
+When making changes to OpenBuild, do **not** stop or restart the OpenBuild server running on my iMac unless I explicitly ask you to. Leave the server running while you work.
+
 ## OpenBuild and openchat
 
 OpenBuild is a fork of [openchat](https://openchat.shade-io.com), with a different purpose:
