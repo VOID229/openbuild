@@ -198,15 +198,34 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
 
 type Block = Part | (ToolPart | ThoughtPart)[];
 
-/** Once a reply is done, everything Pi did before its final answer folds into one line. */
+/** A duration in its two largest units: "45s", "7m 9s", "1hr 2m", "1d 3hr". */
+function duration(ms: number) {
+  const total = Math.max(1, Math.round(ms / 1000));
+  const units: [string, number][] = [
+    ["d", Math.floor(total / 86400)],
+    ["hr", Math.floor(total / 3600) % 24],
+    ["m", Math.floor(total / 60) % 60],
+    ["s", total % 60],
+  ];
+  const first = units.findIndex(([, n]) => n > 0);
+  return units
+    .slice(first, first + 2)
+    .filter(([, n]) => n > 0)
+    .map(([u, n]) => `${n}${u}`)
+    .join(" ");
+}
+
+/** Everything Pi did before its final answer, folded into one line. */
 function Worked({ message, children }: { message: Message; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  // Older replies have no turn time: count what the tools and thinking took.
-  const ms = message.workedMs ?? (message.parts ?? []).reduce((n, p) => n + ((p.type === "tool" || p.type === "thought") && p.ms ? p.ms : 0), 0);
+  const streaming = message.status === "streaming";
+  const elapsed = useElapsed(message.startedAt, streaming);
+  // Still writing: the time so far. Older replies didn't record how long they took.
+  const ms = streaming ? elapsed * 1000 : message.workedMs;
   return (
     <div className={cx("reasoning worked", open && "reasoning-open")}>
       <button type="button" data-worked-toggle className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span>{`Worked for ${Math.max(1, Math.round(ms / 1000))}s`}</span>
+        <span>{ms ? `Worked for ${duration(ms)}` : "Worked"}</span>
         <ChevronRight size={14} className="reasoning-chevron" />
       </button>
       {open && <div className="worked-body">{children}</div>}
@@ -244,11 +263,12 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
         )}
       </div>
     ) : null;
-  // Done and it ran tools or thought: fold all of that (and what it wrote along the way) behind
-  // "Worked for Xs", leaving the final answer out in the open.
-  if (message.status === "done" && blocks.some(Array.isArray)) {
-    const last = blocks.at(-1);
-    const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
+  // It ran tools or thought: fold all of that (and what it wrote along the way) behind "Worked for
+  // Xs", leaving the answer out in the open. While streaming that happens as soon as Pi starts
+  // writing after its work; if it goes back to work, the fold opens up again.
+  const last = blocks.at(-1);
+  const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
+  if ((message.status === "done" || (streaming && final)) && blocks.some(Array.isArray)) {
     const work = final ? blocks.slice(0, -1) : blocks;
     return (
       <>

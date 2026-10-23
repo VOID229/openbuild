@@ -29,7 +29,7 @@ const DEFAULT_SETTINGS: Settings = {
   effort: "medium",
   naming: { enabled: true, models: [] },
   syncApiKeys: false,
-  workspace: { mode: "worktree" },
+  workspace: { mode: "worktree", defaultMode: "worktree" },
   favorites: [],
 };
 
@@ -279,7 +279,13 @@ export const useStore = create<State>()(
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
         else get().updateSettings({ selection });
       },
-      newChat: () => set({ activeChatId: undefined, searchFocus: undefined }),
+      newChat: () => set((s) => ({
+        activeChatId: undefined,
+        searchFocus: undefined,
+        settings: s.settings.workspace.defaultMode === "last-used"
+          ? s.settings
+          : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },
+      })),
       selectChat: (id) => {
         set({ activeChatId: id, searchFocus: undefined });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });

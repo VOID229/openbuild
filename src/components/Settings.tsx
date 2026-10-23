@@ -9,7 +9,7 @@ import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
-import { EffortSelect, ModelSelect } from "./ModelSelect";
+import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
@@ -111,6 +111,22 @@ function GeneralSection() {
   return (
     <>
       <Heading>General</Heading>
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-label">Default workspace</div>
+          <p className="setting-desc">Choose where new threads start. You can still change this above the composer.</p>
+        </div>
+        <OptionSelect
+          label="Default workspace for new threads"
+          value={s.workspace.defaultMode ?? "worktree"}
+          options={[
+            { value: "local", label: "Current checkout" },
+            { value: "worktree", label: "New worktree" },
+            { value: "last-used", label: "Last used" },
+          ]}
+          onChange={(defaultMode) => update({ workspace: { ...s.workspace, defaultMode } })}
+        />
+      </div>
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Enable Auto Scroll</div>

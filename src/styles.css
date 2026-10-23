@@ -3125,6 +3125,10 @@ svg {
   width: 96px;
 }
 
+.select-trigger-md {
+  width: 180px;
+}
+
 .select-trigger-open {
   background: var(--hover);
   border-color: color-mix(in srgb, var(--text) 25%, transparent);

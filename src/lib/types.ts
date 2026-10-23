@@ -73,6 +73,8 @@ export interface Settings {
 export interface NewWorkspace {
   projectId?: string;
   mode: "local" | "worktree";
+  /** Default workspace mode for new threads; last-used preserves the mode picker selection. */
+  defaultMode?: "local" | "worktree" | "last-used";
   /** Local: the branch to switch to. Worktree: the branch to start from. None = the current one. */
   branch?: string;
 }

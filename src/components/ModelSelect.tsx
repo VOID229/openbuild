@@ -146,3 +146,46 @@ export function EffortSelect({ value, levels, onChange, label }: { value: Effort
     </span>
   );
 }
+
+/** Themed dropdown for a short fixed list of options. */
+export function OptionSelect<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const current = options.find((o) => o.value === value);
+  return (
+    <span className="select-wrap">
+      <button
+        ref={anchor}
+        type="button"
+        className={cx("select-trigger select-trigger-md", open && "select-trigger-open")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={label}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="select-value">{current?.label ?? value}</span>
+        <ChevronDown size={14} className="select-chevron" />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu" role="listbox" label={label} fixed="auto">
+        <div onKeyDown={(e) => arrowNav(e)}>
+          {options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="option"
+              aria-selected={value === o.value}
+              className="menu-item"
+              onClick={() => {
+                onChange(o.value);
+                setOpen(false);
+              }}
+            >
+              <span className="menu-item-label">{o.label}</span>
+              {value === o.value && <Check size={15} className="menu-check" />}
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </span>
+  );
+}
