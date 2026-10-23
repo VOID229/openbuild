@@ -28,7 +28,7 @@ bun run typecheck
 bun test
 ```
 
-Set a local access password with `bun bin/openbuild.ts password`, then open http://localhost:3100. The entire app stays behind a non-dismissible password dialog until unlocked. This is a local server password, not a cloud account.
+Set a local access password with `openbuild set pass <password>` (or `bun bin/openbuild.ts set pass <password>`), then open http://localhost:3100. The entire app stays behind a non-dismissible password dialog until unlocked. This is a local server password, not a cloud account.
 
 ### Environment variables (all optional)
 
@@ -79,7 +79,8 @@ Use HTTPS (or localhost) to open OpenBuild: browsers block microphone access on 
 `bun run cli:install` links `openbuild` into `~/.local/bin`. It runs the server in the background:
 
 ```sh
-openbuild password          # set/change the local password (hidden terminal prompt)
+openbuild set pass <pw>     # set/change the local password
+openbuild password          # the same, at a hidden terminal prompt
 openbuild start             # this computer only: http://localhost:3100
 openbuild start lan         # also devices on your network (plain HTTP, this computer's LAN addresses)
 openbuild start tailscale   # your tailnet over HTTPS: https://<this-mac>.<tailnet>.ts.net
@@ -88,7 +89,7 @@ openbuild stop              # also restart, status, logs, open
 
 `start tailscale` keeps the server on `127.0.0.1` and puts `tailscale serve` (HTTPS, tailnet only) in front of it; `stop` turns that off again. If your tailnet has no HTTPS certificates, it listens on the Tailscale address over plain HTTP instead. HTTPS matters on the iPhone: dictation and the clipboard only work on secure pages, and Share → Add to Home Screen gives it a full-screen icon. The pid, mode and address are in `server.json` in the data folder, the output in `server.log`.
 
-Every device/browser must unlock the server with its local password before accessing threads, settings, credentials, or Pi. There is no close button, Escape dismissal, or usable app behind the lock dialog; the server also rejects unauthenticated API requests. LAN/Tailscale startup requires a password to be configured. Set/change it on the host with `openbuild password` (or `bun bin/openbuild.ts password`); only an Argon2id password hash and hashed session tokens are saved in the private `access.json` file in the data directory—never the password or raw login tokens. Changing the password revokes all browser sessions. Browser logins survive server restarts and expire only after 30 days of inactivity. Each authenticated API request (including an unlock-status check) resets the server expiry and browser cookie to another 30 days; background requests while the app is open also count as activity. Logging out revokes that browser's session immediately. Remembered logins use ordinary first-party HttpOnly, SameSite=Strict cookies (also Secure over HTTPS), without requiring a Lockdown Mode exemption. Clearing website data or using a new/private browser requires signing in again. If you forget the password, run that command again on the host—no cloud recovery needed.
+Every device/browser must unlock the server with its local password before accessing threads, settings, credentials, or Pi. There is no close button, Escape dismissal, or usable app behind the lock dialog; the server also rejects unauthenticated API requests. LAN/Tailscale startup requires a password to be configured. Set/change it on the host with `openbuild set pass <password>` (or `openbuild password` to type it at a hidden prompt), or from an unlocked browser in Settings → Security, which asks for the current password first; only an Argon2id password hash and hashed session tokens are saved in the private `access.json` file in the data directory—never the password or raw login tokens. Changing the password revokes all other browser sessions (the browser that changed it stays unlocked). Browser logins survive server restarts and expire only after 30 days of inactivity. Each authenticated API request (including an unlock-status check) resets the server expiry and browser cookie to another 30 days; background requests while the app is open also count as activity. Logging out revokes that browser's session immediately. Remembered logins use ordinary first-party HttpOnly, SameSite=Strict cookies (also Secure over HTTPS), without requiring a Lockdown Mode exemption. Clearing website data or using a new/private browser requires signing in again. If you forget the password, run that command again on the host—no cloud recovery needed.
 
 An unlocked browser can make Pi run commands as you. Never expose this directly to the internet. **Plain LAN HTTP does not encrypt passwords or session cookies**; use Tailscale HTTPS or a trusted HTTPS reverse proxy when possible. The password is an access gate, not a sandbox for Pi.
 

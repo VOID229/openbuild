@@ -159,6 +159,31 @@ describe("local password authentication", () => {
     expect((await auth.login(loginRequest("a different password"))).status).toBe(200);
   });
 
+  test("signed-in browsers change the password only with the current one, and stay signed in", async () => {
+    const { auth } = fixture();
+    await auth.setPassword(PASSWORD);
+    const cookie = session(await auth.login(loginRequest()));
+    const other = session(await auth.login(loginRequest()));
+    const post = (path: string, body: object, cookie?: string) =>
+      new Request(`http://localhost${path}`, { method: "POST", headers: cookie ? { cookie } : {}, body: JSON.stringify(body) });
+
+    expect((await auth.verify(post("/verify", { password: PASSWORD }))).status).toBe(401);
+    expect((await auth.verify(post("/verify", { password: "wrong password" }, cookie))).status).toBe(403);
+    expect((await auth.verify(post("/verify", { password: PASSWORD }, cookie))).status).toBe(200);
+
+    expect((await auth.change(post("/password", { current: PASSWORD, password: "a brand new password" }))).status).toBe(401);
+    expect((await auth.change(post("/password", { current: "wrong password", password: "a brand new password" }, cookie))).status).toBe(403);
+    expect((await auth.change(post("/password", { current: PASSWORD, password: "too short" }, cookie))).status).toBe(400);
+    expect(auth.authorize(request(cookie))).toBeUndefined();
+
+    const fresh = session(await auth.change(post("/password", { current: PASSWORD, password: "a brand new password" }, cookie)));
+    expect(auth.authorize(request(fresh))).toBeUndefined();
+    expect(auth.authorize(request(cookie))?.status).toBe(401);
+    expect(auth.authorize(request(other))?.status).toBe(401);
+    expect((await auth.login(loginRequest())).status).toBe(401);
+    expect((await auth.login(loginRequest("a brand new password"))).status).toBe(200);
+  });
+
   test("observes external process changes and never restores revoked sessions", async () => {
     const { auth, directory } = fixture();
     await auth.setPassword(PASSWORD);
