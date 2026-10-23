@@ -84,9 +84,11 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
         open={open}
         onClose={() => setOpen(false)}
         anchor={anchor}
-        className={cx("menu effort-menu", dropUp ? "drop-up" : "drop-down")}
+        className="menu effort-menu"
         role="listbox"
         label="Reasoning effort"
+        // Portaled and flipped to whichever side has room, so it never runs off the screen.
+        fixed={dropUp ? "up" : "auto"}
       >
         <div className="menu-label">Thinking level</div>
         <div onKeyDown={(e) => arrowNav(e)}>
