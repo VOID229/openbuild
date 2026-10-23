@@ -146,10 +146,10 @@ function splitBlocks(md: string): string[] {
   }
 }
 
-export const Markdown = memo(function Markdown({ content, className }: { content: string; className?: string }) {
+export const Markdown = memo(function Markdown({ content, className, block }: { content: string; className?: string; /** Its place in a Pi reply. */ block?: number }) {
   const blocks = useMemo(() => splitBlocks(prepare(content)), [content]);
   return (
-    <div className={cx("markdown", className)}>
+    <div className={cx("markdown", className)} data-block={block}>
       {blocks.map((b, i) => (
         <Block key={i} source={b} />
       ))}

@@ -1,6 +1,6 @@
 import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
 import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
-import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
@@ -8,6 +8,7 @@ import type { Message, Part, SearchCall, ThoughtPart, ToolPart } from "../lib/ty
 import { copyText, cx, duration } from "../lib/ui";
 import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
+import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { BrandIcon, IconButton } from "./primitives";
 import { AskCard, WorkRun } from "./ToolCalls";
@@ -52,9 +53,9 @@ function Reasoning({ message }: { message: Message }) {
         <span className={cx(thinking && "shimmer")}>{thinking ? "Thinking" : `Thought for ${seconds}s`}</span>
         <ChevronRight size={14} className="reasoning-chevron" />
       </button>
-      <div className="reasoning-body" hidden={!open}>
-        {open && <Markdown content={message.reasoning ?? ""} className="markdown-muted" />}
-      </div>
+      <Fold open={open} className="reasoning-body">
+        <Markdown content={message.reasoning ?? ""} className="markdown-muted" />
+      </Fold>
     </div>
   );
 }
@@ -140,13 +141,11 @@ function Searches({ searches }: { searches: SearchCall[] }) {
         <span className={cx("searches-summary", current && "shimmer")}>{summary}</span>
         <ChevronRight size={14} className="reasoning-chevron" />
       </button>
-      {open && (
-        <ul className="reasoning-body search-calls">
-          {searches.map((c) => (
-            <SearchRow key={c.id} call={c} />
-          ))}
-        </ul>
-      )}
+      <Fold open={open} as="ul" className="reasoning-body search-calls">
+        {searches.map((c) => (
+          <SearchRow key={c.id} call={c} />
+        ))}
+      </Fold>
     </div>
   );
 }
@@ -198,18 +197,21 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
 
 type Block = Part | (ToolPart | ThoughtPart)[];
 
-/** Everything Pi did before its final answer, folded into one line. */
-function Worked({ message, children }: { message: Message; children: ReactNode }) {
+/** Everything Pi did before its final answer, folded into one line. `folding`: it was just on screen
+ *  (the reply finished in front of the reader), so it folds away instead of starting shut. */
+function Worked({ message, folding, children }: { message: Message; folding: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   // Older replies didn't record how long they took.
   const ms = message.workedMs;
   return (
     <div className={cx("reasoning worked", open && "reasoning-open")}>
-      <button type="button" data-worked-toggle className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+      <button type="button" className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <span>{ms ? `Worked for ${duration(ms)}` : "Worked"}</span>
         <ChevronRight size={14} className="reasoning-chevron" />
       </button>
-      {open && <div className="worked-body">{children}</div>}
+      <Fold open={open} initiallyOpen={folding} className="worked-body">
+        {children}
+      </Fold>
     </div>
   );
 }
@@ -218,6 +220,9 @@ function Worked({ message, children }: { message: Message; children: ReactNode }
 function Parts({ message, chatId }: { message: Message; chatId: string }) {
   const cwd = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace?.cwd);
   const streaming = message.status === "streaming";
+  // Seen streaming here, so the fold below happens in front of the reader and should animate.
+  const watched = useRef(streaming);
+  if (streaming) watched.current = true;
   // Thinking shares a block with the tools around it, like in flash.
   const blocks: Block[] = [];
   for (const p of message.parts ?? []) {
@@ -228,14 +233,14 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   }
   const render = (b: Block, i: number) =>
     Array.isArray(b) ? (
-      <WorkRun key={`g${i}`} parts={b} cwd={cwd} live={streaming && i === blocks.length - 1} />
+      <WorkRun key={`g${i}`} parts={b} cwd={cwd} live={streaming && i === blocks.length - 1} block={i} />
     ) : b.type === "text" ? (
-      <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} />
+      <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} block={i} />
     ) : b.type === "ask" ? (
-      <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} />
+      <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} block={i} />
     ) : b.type === "steer" ? (
       // Sent while Pi worked, shown where Pi read it.
-      <div key={`s${i}`} className="msg-user msg-steer">
+      <div key={`s${i}`} className="msg-user msg-steer" data-block={i}>
         {b.attachments?.length ? <Attachments files={b.attachments} chatId={chatId} /> : null}
         {b.text?.trim() && (
           <div className="bubble">
@@ -251,7 +256,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
   if (message.status === "done" && blocks.some(Array.isArray)) {
     const work = final ? blocks.slice(0, -1) : blocks;
-    return <>{[<Worked key="worked" message={message}>{work.map(render)}</Worked>, final && render(final, blocks.length - 1)]}</>;
+    return <>{[<Worked key="worked" message={message} folding={watched.current}>{work.map(render)}</Worked>, final && render(final, blocks.length - 1)]}</>;
   }
   return <>{blocks.map(render)}</>;
 }
