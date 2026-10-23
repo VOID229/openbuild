@@ -8,6 +8,7 @@ import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { selectionFor, useStore } from "./store";
+import { effortFor } from "./effort";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
 export { uid };
@@ -178,7 +179,7 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
     role: "assistant",
     content: "",
     status: "streaming",
-    model: { ...resolved.ref, name: model.name },
+    model: { ...resolved.ref, name: model.name, effort: effortFor(st.settings, st.chats.find((c) => c.id === chatId), resolved.routed ? { auto: true } : resolved.ref) },
     routed: resolved.routed,
     createdAt: now,
     startedAt: now,
@@ -186,7 +187,7 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const chat: Chat = existing
     ? { ...existing, updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), createdAt: now, updatedAt: now, messages: [user, assistant] };
+    : { id: uid(), title: makeTitle(text, attachments), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts } };
   st.upsertChat(chat);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
@@ -382,11 +383,11 @@ async function generate(chatId: string, messageId: string, resume = false) {
     const request = resume
       ? undefined
       : pi
-        ? piRequest(chat, index, model!, msg.model.effort ?? st.settings.effort, workspace!)
+        ? piRequest(chat, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), workspace!)
         : {
           plan,
           model: model!.id,
-          effort: msg.model.effort ?? st.settings.effort,
+          effort: msg.model.effort ?? effortFor(st.settings, chat, msg.model),
           system: systemPrompt(st.settings, model!, !!search),
           sessionId: chatId,
           messages: toWire(chat.messages.slice(0, index), model!.input),
