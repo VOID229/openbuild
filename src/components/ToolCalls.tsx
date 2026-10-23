@@ -308,6 +308,35 @@ export function AskCard({ part, chatId, messageId }: { part: AskPart; chatId: st
             No
           </button>
         </div>
+      ) : part.method === "select" && part.other ? (
+        // question_ask: lettered choices, or the user's own words.
+        <>
+          {!!part.options?.length && (
+            <div className="ask-choices">
+              {part.options.map((o, i) => (
+                <button key={o} type="button" className="ask-choice" onClick={() => reply({ value: o })}>
+                  <span className="ask-letter">{i < 26 ? String.fromCharCode(65 + i) : i + 1}</span>
+                  <span>{o}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            className="ask-form ask-other"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (value.trim()) reply({ value: value.trim() });
+            }}
+          >
+            <input className="input ask-input" value={value} placeholder={part.options?.length ? "Other…" : "Your answer"} onChange={(e) => setValue(e.target.value)} />
+            <button type="submit" className="btn btn-sm btn-primary" disabled={!value.trim()}>
+              Send
+            </button>
+            <button type="button" className="link-btn" onClick={() => reply({ cancelled: true })}>
+              Dismiss
+            </button>
+          </form>
+        </>
       ) : part.method === "select" ? (
         <div className="ask-options">
           {(part.options ?? []).map((o) => (

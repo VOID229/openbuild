@@ -4628,6 +4628,68 @@ p.key-status svg {
   margin-top: 10px;
 }
 
+/* question_ask: lettered choices, then a box for the user's own words */
+
+.ask-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.ask-choice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13.5px;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .ask-choice:hover {
+    background: var(--hover);
+    border-color: var(--border-strong);
+  }
+}
+
+.ask-choice:active {
+  background: var(--active);
+}
+
+.ask-letter {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ask-other {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ask-other .ask-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+}
+
+.ask-other .btn {
+  height: 34px;
+}
+
 .ask-input {
   font-size: 14px;
 }

@@ -286,7 +286,7 @@ export type StreamEvent =
       ms?: number;
     }
   /** A Pi extension asks the user something (confirm, choose, type) and waits for the answer. */
-  | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string }
+  | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string; other?: boolean }
   /** That question was answered (or cancelled, or timed out). */
   | { t: "asked"; id: string; answer?: string }
   /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). */

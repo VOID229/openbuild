@@ -134,6 +134,8 @@ export interface AskPart {
   options?: string[];
   placeholder?: string;
   prefill?: string;
+  /** A select that also takes the user's own words (question_ask's "Other"). */
+  other?: boolean;
   /** Answered (the answer, or "" for cancelled / timed out); missing while waiting. */
   answer?: string;
 }

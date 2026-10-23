@@ -7,8 +7,10 @@
 // that point first (Pi's `fork`), and the thread follows the new session file from then on.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { EFFORTS, type Effort, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
 import { PiError, PiProcess, type PiRecord } from "./rpc";
 
 /** Close a thread's Pi process after this long without use. */
@@ -16,6 +18,8 @@ const IDLE = 20 * 60 * 1000;
 /** Tool output kept per call (head and tail), and the diff of a file change. */
 const OUTPUT_MAX = 12_000;
 const PATCH_MAX = 60_000;
+/** OpenBuild's own extension, loaded into every thread: the question_ask tool. */
+const EXTENSIONS = [join(import.meta.dir, "extensions", "question-ask.ts")];
 
 interface Live {
   threadId: string;
@@ -28,6 +32,8 @@ interface Live {
   turn?: { taking: boolean; steers: string[] };
   /** Questions from extensions still waiting for an answer, replayed to whoever watches the run. */
   asks: Map<string, Extract<StreamEvent, { t: "ask" }>>;
+  /** Running question_ask calls and their questions, to tell their dialogs from other extensions'. */
+  questions: Map<string, string>;
   emit?: (e: StreamEvent) => void;
 }
 
@@ -102,10 +108,15 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
       : from && existsSync(from.file)
         ? ["--fork", from.file]
         : ["--session-id", threadId];
-  const proc = new PiProcess(args, cwd);
-  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), ready: Promise.resolve() };
+  const proc = new PiProcess([...args, ...EXTENSIONS.flatMap((e) => ["-e", e])], cwd);
+  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), questions: new Map(), ready: Promise.resolve() };
   // Extension questions can come at any time, also before a run (e.g. while starting up).
   proc.on((r) => {
+    if (r.toolName === QUESTION_TOOL) {
+      if (r.type === "tool_execution_start") l.questions.set(r.toolCallId, String(r.args?.question ?? "").trim());
+      else if (r.type === "tool_execution_end") l.questions.delete(r.toolCallId);
+      return;
+    }
     if (r.type !== "extension_ui_request") return;
     if (["select", "confirm", "input", "editor"].includes(r.method)) {
       const ask: Extract<StreamEvent, { t: "ask" }> = {
@@ -117,6 +128,8 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
         options: Array.isArray(r.options) ? r.options.map(String) : undefined,
         placeholder: r.placeholder,
         prefill: r.prefill,
+        // question_ask's dialog takes the user's own words too.
+        other: r.method === "select" && [...l.questions.values()].includes(r.title) ? true : undefined,
       };
       l.asks.set(r.id, ask);
       l.emit?.(ask);
@@ -263,10 +276,13 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             }
             case "tool_execution_start":
               lastText = lastThought = false;
+              // Its question card stands for it; only a failure shows as a tool call.
+              if (r.toolName === QUESTION_TOOL) break;
               send({ t: "tool", id: r.toolCallId, name: r.toolName, args: r.args, status: "running" });
               break;
             case "tool_execution_update": {
               // Live output (a long build or test run), at most twice a second.
+              if (r.toolName === QUESTION_TOOL) break;
               const at = progress.get(r.toolCallId) ?? 0;
               if (Date.now() - at < 500) break;
               progress.set(r.toolCallId, Date.now());
@@ -275,6 +291,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               break;
             }
             case "tool_execution_end": {
+              if (r.toolName === QUESTION_TOOL && !r.isError) break;
               const patch = r.result?.details?.patch;
               send({
                 t: "tool",

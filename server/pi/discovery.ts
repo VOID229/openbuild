@@ -2,8 +2,9 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
-import type { Chat, Message, ToolPart } from "../../src/lib/types";
+import type { AskPart, Chat, Message, ToolPart } from "../../src/lib/types";
 import * as storage from "../storage";
+import { TOOL as QUESTION_TOOL, cleanOptions } from "./extensions/question-ask";
 import { agentDir } from "./install";
 import { isSessionLive, isThreadId } from "./sessions";
 
@@ -36,6 +37,7 @@ export function projectSession(source: string, file: string, modified: number): 
   const createdAt = Date.parse(header.timestamp) || modified;
   const messages: Message[] = [];
   const tools = new Map<string, ToolPart>();
+  const asks = new Map<string, AskPart>();
   let reply: Message | undefined;
   for (const entry of branch) {
     const m = entry.type === "message" ? entry.message : undefined;
@@ -62,7 +64,12 @@ export function projectSession(source: string, file: string, modified: number): 
           reply.content += block.text;
           reply.parts!.push({ type: "text", text: block.text });
         } else if (block.type === "thinking" && block.thinking) reply.parts!.push({ type: "thought", text: block.thinking });
-        else if (block.type === "toolCall") {
+        else if (block.type === "toolCall" && block.name === QUESTION_TOOL) {
+          // A question_ask call reads as its question card.
+          const ask: AskPart = { type: "ask", id: block.id, method: "select", title: String(block.arguments?.question ?? ""), options: cleanOptions(block.arguments?.options), other: true };
+          asks.set(ask.id, ask);
+          reply.parts!.push(ask);
+        } else if (block.type === "toolCall") {
           const tool: ToolPart = { type: "tool", id: block.id, name: block.name, args: block.arguments, status: "running" };
           tools.set(tool.id, tool);
           reply.parts!.push(tool);
@@ -74,10 +81,14 @@ export function projectSession(source: string, file: string, modified: number): 
       reply.status = m.stopReason === "error" ? "error" : m.stopReason === "aborted" ? "stopped" : "done";
       reply.error = m.errorMessage;
     } else if (m.role === "toolResult") {
+      const ask = asks.get(m.toolCallId);
+      if (ask) ask.answer = m.isError ? "" : String(m.details?.answer ?? "");
       const tool = tools.get(m.toolCallId);
       if (tool) { tool.status = m.isError ? "error" : "done"; tool.output = textOf(m.content).slice(0, 12000); }
     }
   }
+  // Never answered (the reply was stopped): nothing is waiting for it anymore.
+  for (const ask of asks.values()) ask.answer ??= "";
   const name = entries.filter((e) => e.type === "session_info" && typeof e.name === "string").at(-1)?.name;
   const id = isThreadId(header.id) ? header.id : `pi-${createHash("sha256").update(file).digest("hex").slice(0, 32)}`;
   return {
