@@ -13,6 +13,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 
@@ -254,6 +255,29 @@ async function stop(quiet = false) {
   if (!quiet) console.log("OpenBuild stopped.");
 }
 
+/** Is something OpenBuild-shaped answering on the port? A server started outside `openbuild start` (systemd, `bun dev`) writes no state file. */
+async function serving(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/auth/status`, { signal: AbortSignal.timeout(1000) });
+    if (!res.ok) return false;
+    const body = (await res.json()) as { configured?: unknown };
+    return typeof body?.configured === "boolean";
+  } catch {
+    return false;
+  }
+}
+
+/** Ask on the terminal; Enter takes the default. */
+async function confirm(question: string, fallback = true): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(`${question} ${fallback ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
+    return answer ? answer === "y" || answer === "yes" : fallback;
+  } finally {
+    rl.close();
+  }
+}
+
 function status() {
   const s = running();
   if (!s) return console.log("OpenBuild isn't running. Start it with: openbuild start [lan|tailscale]");
@@ -271,7 +295,7 @@ function help() {
   openbuild set pass <pw>     set/change the local access password
   openbuild password          the same, typed at a hidden prompt instead
   openbuild stop              stop the server
-  openbuild restart           restart in the same mode
+  openbuild restart [--yes]   restart in the same mode (asks first; that ends running Pi threads)
   openbuild status            is it running, and where
   openbuild logs              follow the server log
   openbuild open              open it in the browser
@@ -285,11 +309,15 @@ async function savePassword(password: string) {
   console.log("Local password saved. All existing browser sessions have been revoked.");
 }
 
-const [cmd, arg, ...rest] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const assumeYes = args.includes("--yes") || args.includes("-y");
+const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y");
 switch (cmd) {
   case "set": {
     if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>`);
     // Everything after `pass`, so a password with spaces works unquoted too.
+    // Taken unfiltered: a password may well be "-y".
+    const rest = args.slice(2);
     if (!rest.length) fail("usage: openbuild set pass <password>");
     await savePassword(rest.join(" "));
     break;
@@ -319,8 +347,24 @@ switch (cmd) {
     await stop();
     break;
   case "restart": {
-    const mode = (arg as Mode | undefined) ?? readState()?.mode ?? "local";
-    await stop(true);
+    const state = readState();
+    const owned = !!state && alive(state.pid);
+    const port = state?.port ?? PORT;
+    const mode = (arg as Mode | undefined) ?? state?.mode ?? "local";
+    // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
+    if (!owned && (await serving(port)))
+      fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
+    // A restart ends the server process, and with it the `pi --mode rpc` process of every thread it
+    // has open: a reply being written right now is lost and has to be asked for again. The session
+    // files stay on disk, so the threads themselves are still there afterwards.
+    if (owned && !assumeYes) {
+      if (!process.stdin.isTTY) fail("restarting ends the Pi threads working in it, and there is no terminal to confirm in. Add --yes to restart anyway.");
+      if (!(await confirm("Restarting OpenBuild will stop working Pi threads in it, proceed?"))) {
+        console.log("restart canceled");
+        break;
+      }
+    }
+    if (owned) await stop(true);
     await start(mode);
     break;
   }
