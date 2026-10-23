@@ -2591,8 +2591,11 @@ svg {
 .lightbox-slide {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: in a grid cell the image's max-height: 100% has no definite height to resolve
+     against, so tall screenshots overflowed the screen. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   pointer-events: none;
   opacity: 0;
   /* The outgoing image holds until the incoming one (on top) has faded in, so nothing dips. */
