@@ -1657,7 +1657,9 @@ svg {
 /* Effort menu */
 
 .effort-menu {
+  right: auto;
   min-width: 150px;
+  overflow-y: auto;
 }
 
 /* Model picker panel */
