@@ -184,7 +184,7 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   return (
     <div className="msg msg-user" data-message-id={message.id}>
       {message.attachments?.length ? <Attachments files={message.attachments} chatId={chatId} /> : null}
-      {message.content && (
+      {message.content.trim() && (
         <div className="bubble">
           <Linkify text={message.content} />
         </div>
@@ -237,7 +237,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
       // Sent while Pi worked, shown where Pi read it.
       <div key={`s${i}`} className="msg-user msg-steer">
         {b.attachments?.length ? <Attachments files={b.attachments} chatId={chatId} /> : null}
-        {b.text && (
+        {b.text?.trim() && (
           <div className="bubble">
             <Linkify text={b.text} />
           </div>
