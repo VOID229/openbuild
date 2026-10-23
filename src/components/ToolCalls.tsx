@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
 import { cx, duration } from "../lib/ui";
+import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { Spinner } from "./primitives";
 
@@ -140,12 +141,10 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
         </span>
         {hasBody && <ChevronRight size={14} className="tool-chevron" />}
       </button>
-      {open && hasBody && (
-        <div className="tool-body">
-          {command && command.includes("\n") && <pre className="tool-output tool-command">{command}</pre>}
-          {patch ? <Diff patch={patch} /> : part.output?.trim() ? <pre className="tool-output">{part.output.replace(/\n+$/, "")}</pre> : null}
-        </div>
-      )}
+      <Fold open={open && hasBody} className="tool-body">
+        {command && command.includes("\n") && <pre className="tool-output tool-command">{command}</pre>}
+        {patch ? <Diff patch={patch} /> : part.output?.trim() ? <pre className="tool-output">{part.output.replace(/\n+$/, "")}</pre> : null}
+      </Fold>
     </div>
   );
 }
@@ -172,11 +171,9 @@ export function ThoughtRow({ part, live }: { part: ThoughtPart; live: boolean })
         <span className="tool-status">{live ? <Spinner size={12} /> : part.ms !== undefined && part.ms >= 1000 && <span className="tool-time">{seconds(part.ms)}</span>}</span>
         <ChevronRight size={14} className="tool-chevron" />
       </button>
-      {open && (
-        <div className="tool-body tool-thought-body">
-          <Markdown content={part.text} className="markdown-muted" />
-        </div>
-      )}
+      <Fold open={open} className="tool-body tool-thought-body">
+        <Markdown content={part.text} className="markdown-muted" />
+      </Fold>
     </div>
   );
 }
@@ -248,7 +245,19 @@ export function summarize(parts: Work[]) {
  * opening to a row per call. While Pi is still on this run, what it's doing right now shows under
  * that line: the calls running, the thought it's on, or that it's working out the next step.
  */
-export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /** Pi is working on this run right now. */ live: boolean }) {
+export function WorkRun({
+  parts,
+  cwd,
+  live,
+  block,
+}: {
+  parts: Work[];
+  cwd?: string;
+  /** Pi is working on this run right now. */
+  live: boolean;
+  /** Its place in the reply, so the chat can keep the reader's place when the reply folds. */
+  block?: number;
+}) {
   const [open, setOpen] = useState(false);
   const last = parts.at(-1);
   const thought = live && last?.type === "thought" && last.ms === undefined ? last : undefined;
@@ -258,9 +267,9 @@ export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /**
   const row = (p: Work) =>
     p.type === "thought" ? <ThoughtRow key={`th${parts.indexOf(p)}`} part={p} live={p === thought} /> : <ToolRow key={p.id} part={p} cwd={cwd} />;
   return (
-    <div className={cx("reasoning work", open && "reasoning-open")}>
+    <div className={cx("reasoning work", open && "reasoning-open")} data-block={block}>
       {summary && (
-        <button type="button" data-worked-toggle className="reasoning-toggle work-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <button type="button" className="reasoning-toggle work-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <span className="work-summary">{summary.text}</span>
           {(summary.add > 0 || summary.del > 0) && (
             <span className="tool-stat">
@@ -271,27 +280,23 @@ export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /**
           <ChevronRight size={14} className="reasoning-chevron" />
         </button>
       )}
-      {open && summary && <div className="tools work-body">{done.map(row)}</div>}
-      {live && (
-        <div className="work-live">
-          {current.length ? (
-            current.map(row)
-          ) : (
-            <div className="work-working shimmer">Working</div>
-          )}
-        </div>
-      )}
+      <Fold open={open && !!summary} className="tools work-body">
+        {done.map(row)}
+      </Fold>
+      <Fold open={live} settle className="work-live">
+        {current.length ? current.map(row) : <div className="work-working shimmer">Working</div>}
+      </Fold>
     </div>
   );
 }
 
 /** A question from a Pi extension: choose, confirm or type, or dismiss. */
-export function AskCard({ part, chatId, messageId }: { part: AskPart; chatId: string; messageId: string }) {
+export function AskCard({ part, chatId, messageId, block }: { part: AskPart; chatId: string; messageId: string; block?: number }) {
   const [value, setValue] = useState(part.prefill ?? "");
   const answered = part.answer !== undefined;
   const reply = (r: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void answerQuestion(chatId, messageId, part, r);
   return (
-    <div className={cx("ask", answered && "ask-answered")} role="group" aria-label={part.title}>
+    <div className={cx("ask", answered && "ask-answered")} role="group" aria-label={part.title} data-block={block}>
       <div className="ask-head">
         <MessageCircleQuestion size={15} />
         <span className="ask-title">{part.title}</span>

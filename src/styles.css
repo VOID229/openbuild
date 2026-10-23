@@ -2120,13 +2120,19 @@ svg {
   border-left: 2px solid var(--border-strong);
   max-height: 420px;
   overflow-y: auto;
-  animation: rise 200ms var(--ease) both;
+}
+
+/* A disclosure's body (Fold): it animates its own height, so it holds its children's margins. */
+.fold {
+  display: flow-root;
 }
 
 /* A finished Pi reply: what it did before the answer, folded into one line. */
 .worked-body {
+  /* Laid out like the reply it came from, so folding it doesn't shift anything first. */
+  display: flex;
+  flex-direction: column;
   margin: 6px 0 4px;
-  animation: rise 200ms var(--ease) both;
 }
 
 .shimmer {
@@ -4433,7 +4439,6 @@ p.key-status svg {
 .tool-body {
   border-top: 1px solid var(--border);
   background: var(--code-bg);
-  animation: rise 160ms var(--ease) both;
 }
 
 .tool-thought-body {
@@ -4519,7 +4524,6 @@ p.key-status svg {
 
 .work-body {
   margin: 6px 0 4px;
-  animation: rise 200ms var(--ease) both;
 }
 
 /* The calls running now sit bare, aligned with the summary above them, their spinner by the text. */
