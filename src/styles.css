@@ -4537,6 +4537,19 @@ p.key-status svg {
   flex: 0 1 auto;
 }
 
+/* The shimmer says it's live; no spinner on top of it. */
+.work-live .spinner {
+  display: none;
+}
+
+/* Between steps: just the word, in line with the summary. */
+.work-working {
+  display: inline-block;
+  padding: 0 8px;
+  line-height: 28px;
+  font-size: 13.5px;
+}
+
 .work-live .tool-body {
   margin: 2px 8px 6px;
   border: 1px solid var(--border);

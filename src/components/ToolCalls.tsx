@@ -1,7 +1,7 @@
 // What Pi did while answering: each run of tool calls folded into one line ("Read 3 files, ran 2
 // commands") that opens to a row per call and its output or diff, with what Pi is doing right now
 // under it; and the questions Pi extensions ask on the way.
-import { Bot, Brain, Check, ChevronRight, CircleAlert, Ellipsis, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -277,13 +277,7 @@ export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /**
           {current.length ? (
             current.map(row)
           ) : (
-            <div className="tool-head">
-              <Ellipsis size={14} className="tool-icon" />
-              <span className="tool-text shimmer">Working</span>
-              <span className="tool-status">
-                <Spinner size={12} />
-              </span>
-            </div>
+            <div className="work-working shimmer">Working</div>
           )}
         </div>
       )}
