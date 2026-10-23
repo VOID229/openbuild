@@ -12,6 +12,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 
@@ -253,6 +254,17 @@ async function stop(quiet = false) {
   if (!quiet) console.log("OpenBuild stopped.");
 }
 
+/** Ask on the terminal; Enter takes the default. */
+async function confirm(question: string, fallback = true): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question(`${question} ${fallback ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
+    return answer ? answer === "y" || answer === "yes" : fallback;
+  } finally {
+    rl.close();
+  }
+}
+
 function status() {
   const s = running();
   if (!s) return console.log("OpenBuild isn't running. Start it with: openbuild start [lan|tailscale]");
@@ -269,7 +281,7 @@ function help() {
   openbuild start tailscale   your tailnet, over HTTPS (tailscale serve)
   openbuild password          set/change the local access password (hidden prompt)
   openbuild stop              stop the server
-  openbuild restart           restart in the same mode
+  openbuild restart [--yes]   restart in the same mode (asks first; that ends running Pi threads)
   openbuild status            is it running, and where
   openbuild logs              follow the server log
   openbuild open              open it in the browser
@@ -277,7 +289,9 @@ function help() {
   PORT=…  use another port (default 3100). Data: ${DATA}`);
 }
 
-const [cmd, arg] = process.argv.slice(2);
+const args = process.argv.slice(2);
+const assumeYes = args.includes("--yes") || args.includes("-y");
+const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y");
 switch (cmd) {
   case "password": {
     if (!process.stdin.isTTY) fail("run this command in a terminal to enter the password privately.");
@@ -306,7 +320,18 @@ switch (cmd) {
     await stop();
     break;
   case "restart": {
-    const mode = (arg as Mode | undefined) ?? readState()?.mode ?? "local";
+    const state = readState();
+    const mode = (arg as Mode | undefined) ?? state?.mode ?? "local";
+    // A restart ends the server process, and with it the `pi --mode rpc` process of every thread it
+    // has open: a reply being written right now is lost and has to be asked for again. The session
+    // files stay on disk, so the threads themselves are still there afterwards.
+    if (state && alive(state.pid) && !assumeYes) {
+      if (!process.stdin.isTTY) fail("restarting ends the Pi threads working in it, and there is no terminal to confirm in. Add --yes to restart anyway.");
+      if (!(await confirm("Restarting OpenBuild will stop working Pi threads in it, proceed?"))) {
+        console.log("restart canceled");
+        break;
+      }
+    }
     await stop(true);
     await start(mode);
     break;
