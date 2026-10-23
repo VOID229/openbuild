@@ -13,8 +13,10 @@ export function PluginsSection() {
   const loading = usePlugins((s) => s.loading);
   const runtimeErrors = usePlugins((s) => s.errors);
   const reload = usePlugins((s) => s.reload);
+  const setSystemEnabled = usePlugins((s) => s.setSystemEnabled);
   const setEnabled = usePlugins((s) => s.setEnabled);
   const disabled = new Set(info?.disabled ?? []);
+  const systemEnabled = !!info?.enabled && !info?.safe;
 
   return (
     <>
@@ -24,6 +26,23 @@ export function PluginsSection() {
         A plugin can fill slots (composer, sidebar, messages, settings), add a settings page, render custom tool rows,
         restyle the app, or add authenticated <code>/api/plugins/&lt;id&gt;/…</code> routes.
       </p>
+
+      <div className={`plugin-master${systemEnabled ? " plugin-master-on" : ""}`}>
+        <div className="plugin-master-copy">
+          <div className="plugin-master-title">Enable plugins</div>
+          <p className="plugin-master-hint">
+            {systemEnabled
+              ? "Plugins are on. Only the plugins enabled below load."
+              : "Plugins are off. Nothing from the plugin folder loads — no UI slots, styles, server routes or hooks. This is the default."}
+          </p>
+        </div>
+        <Toggle
+          checked={systemEnabled}
+          disabled={!info || !!info.safe}
+          onChange={(next) => void setSystemEnabled(next)}
+          label="Enable plugins"
+        />
+      </div>
 
       {info?.safe && (
         <div className="plugin-notice">
@@ -49,8 +68,9 @@ export function PluginsSection() {
         {(info?.plugins ?? []).map((plugin) => {
           const problem = plugin.error ?? runtimeErrors[plugin.id];
           const enabled = !disabled.has(plugin.id);
+          const active = systemEnabled && enabled && !problem;
           return (
-            <div className={`plugin-row${enabled && !problem ? "" : " plugin-row-off"}`} key={plugin.id}>
+            <div className={`plugin-row${active ? "" : " plugin-row-off"}`} key={plugin.id}>
               <div className="plugin-mark" aria-hidden>
                 <Puzzle size={17} />
               </div>
@@ -77,7 +97,12 @@ export function PluginsSection() {
                   </div>
                 )}
               </div>
-              <Toggle checked={enabled && !info?.safe} onChange={(next) => void setEnabled(plugin.id, next)} label={`Enable ${plugin.name}`} />
+              <Toggle
+                checked={enabled}
+                disabled={!systemEnabled || !!problem}
+                onChange={(next) => void setEnabled(plugin.id, next)}
+                label={`Enable ${plugin.name}`}
+              />
             </div>
           );
         })}
@@ -98,7 +123,7 @@ export function PluginsSection() {
 
       <p className="settings-hint">
         Edits to <code>client.tsx</code>, <code>styles.css</code> and <code>plugin.json</code> reload automatically while a browser is open.
-        Changes to <code>server.ts</code> and toggling a server plugin take effect after restarting OpenBuild.
+        The master switch and plugin toggles apply immediately; changing <code>server.ts</code> needs an OpenBuild restart.
       </p>
     </>
   );

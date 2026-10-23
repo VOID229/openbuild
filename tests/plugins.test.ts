@@ -76,9 +76,21 @@ test("plugins are served, built against the host React, and can be disabled", as
     const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
     const authed = (path: string, init: RequestInit = {}) => call(path, { ...init, headers: { ...init.headers, cookie } });
 
+    // The whole plugin system is off on first run: manifests are listed, nothing runs.
+    const off = await (await authed("/api/plugins")).json();
+    expect(off).toMatchObject({ enabled: false, safe: false });
+    expect(off.plugins).toHaveLength(1);
+    expect(off.plugins[0]).toMatchObject({ id: "example", client: true, server: true, styles: true, serverLoaded: false });
+    expect((await authed("/api/plugins/example/client.js")).status).toBe(404);
+    expect((await authed("/api/plugins/example/hello")).status).toBe(404);
+
+    // Turning it on starts the server module immediately (no restart) and opens the client routes.
+    const on = await authed("/api/plugins/system", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true }) });
+    expect(on.status).toBe(200);
+    expect(await on.json()).toEqual({ ok: true, enabled: true });
     const list = await (await authed("/api/plugins")).json();
-    expect(list.plugins).toHaveLength(1);
-    expect(list.plugins[0]).toMatchObject({ id: "example", client: true, server: true, styles: true, serverLoaded: true });
+    expect(list).toMatchObject({ enabled: true });
+    expect(list.plugins[0]).toMatchObject({ id: "example", serverLoaded: true });
 
     const client = await (await authed("/api/plugins/example/client.js")).text();
     expect(client).toContain("globalThis.__OPENBUILD__.JSXRuntime");
@@ -91,9 +103,15 @@ test("plugins are served, built against the host React, and can be disabled", as
     expect(hello.status).toBe(200);
     expect(await hello.json()).toEqual({ hello: "plugin" });
 
-    // Disabling takes the client and styles away, and remembers the choice.
+    // Disabling one plugin takes its client and server route away, and remembers the choice.
     expect((await authed("/api/plugins/example", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
-    expect((await authed("/api/plugins")).json()).resolves.toMatchObject({ disabled: ["example"] });
+    expect((await authed("/api/plugins")).json()).resolves.toMatchObject({ enabled: true, disabled: ["example"] });
+    expect((await authed("/api/plugins/example/client.js")).status).toBe(404);
+    expect((await authed("/api/plugins/example/hello")).status).toBe(404);
+
+    // The master switch turns everything off again, and the choice survives a reload of the state.
+    expect((await authed("/api/plugins/system", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
+    expect((await authed("/api/plugins")).json()).resolves.toMatchObject({ enabled: false });
     expect((await authed("/api/plugins/example/client.js")).status).toBe(404);
   } finally {
     clearTimeout(timeout);

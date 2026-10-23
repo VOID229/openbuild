@@ -73,15 +73,21 @@ let signature = "";
 
 // ------------------------------------------------------------------ state
 
-function storedState(): { disabled: string[]; enabled: string[] } {
+function storedState(): { disabled: string[]; enabled: string[]; system: boolean } {
   try {
     const raw = storage.getValue(STATE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as { disabled?: unknown; enabled?: unknown }) : undefined;
+    const parsed = raw ? (JSON.parse(raw) as { disabled?: unknown; enabled?: unknown; system?: unknown }) : undefined;
     const list = (value: unknown) => (Array.isArray(value) ? value.filter(isPluginId) : []);
-    return { disabled: list(parsed?.disabled), enabled: list(parsed?.enabled) };
+    // Off on first run. Turning the whole system on is an explicit choice in Settings.
+    return { disabled: list(parsed?.disabled), enabled: list(parsed?.enabled), system: parsed?.system === true };
   } catch {
-    return { disabled: [], enabled: [] };
+    return { disabled: [], enabled: [], system: false };
   }
+}
+
+/** The master switch: off on first run, and always off in safe mode. */
+export function systemEnabled(): boolean {
+  return !safeMode && storedState().system;
 }
 
 /** Whether a plugin is off: the config's fixed list, a Settings choice, or the plugin's own default. */
@@ -99,7 +105,7 @@ function disabledIds(): string[] {
   return loaded.filter((p) => isDisabled(p.info.id)).map((p) => p.info.id);
 }
 
-export function setPluginEnabled(id: string, enabled: boolean): boolean {
+export async function setPluginEnabled(id: string, enabled: boolean): Promise<boolean> {
   if (!loaded.some((p) => p.info.id === id)) return false;
   const state = storedState();
   const disabled = new Set(state.disabled);
@@ -111,15 +117,26 @@ export function setPluginEnabled(id: string, enabled: boolean): boolean {
     disabled.add(id);
     enabledList.delete(id);
   }
-  storage.setValue(STATE_KEY, JSON.stringify({ disabled: [...disabled], enabled: [...enabledList] }));
+  storage.setValue(STATE_KEY, JSON.stringify({ disabled: [...disabled], enabled: [...enabledList], system: state.system }));
+  await syncServerPlugins();
   broadcast("reload");
   return true;
+}
+
+/** Turn the whole plugin system on or off. Server plugins start/stop without a restart. */
+export async function setSystemEnabled(enabled: boolean): Promise<void> {
+  if (safeMode) return;
+  const state = storedState();
+  storage.setValue(STATE_KEY, JSON.stringify({ ...state, system: enabled }));
+  await syncServerPlugins();
+  broadcast("reload");
 }
 
 /** All known plugins, including ones with a broken manifest. */
 export function pluginInfo(): PluginsResponse {
   return {
     dir: pluginsDir,
+    enabled: systemEnabled(),
     safe: safeMode,
     customCss: !!customCssPath,
     disabled: disabledIds(),
@@ -430,8 +447,8 @@ export async function loadPlugins(): Promise<void> {
       mkdirSync(pluginsDir, { recursive: true, mode: 0o700 });
     } catch {}
   }
+  await clearServerRuns();
   loaded = [];
-  serverRuns.clear();
   const seen = new Set<string>();
   let names: string[] = [];
   try {
@@ -447,33 +464,80 @@ export async function loadPlugins(): Promise<void> {
     }
     seen.add(plugin.info.id);
     loaded.push(plugin);
-    if (!plugin.info.server || plugin.info.error || safeMode || isDisabled(plugin.info.id)) continue;
-    try {
-      // Bun imports TypeScript directly; the query busts the module cache across `bun --hot` restarts.
-      const mod = (await import(`${pathToFileURL(join(plugin.dir, plugin.manifest.server!)).href}?v=${Date.now()}`)) as { default?: ServerPluginModule };
-      plugin.serverModule = mod.default;
-      if (plugin.serverModule) {
-        serverRuns.set(plugin.info.id, plugin.serverModule);
-        await plugin.serverModule.onStart?.({
-          id: plugin.info.id,
-          dir: plugin.dir,
-          dataDir: dataDir(),
-          log: (...args: unknown[]) => console.log(`[plugin:${plugin.info.id}]`, ...args),
-        });
-      }
-    } catch (err) {
-      const message = `server.ts failed to load: ${(err as Error).message}`;
-      plugin.info.error = message;
-      console.error(`[plugins] ${plugin.info.id}:`, err);
-    }
   }
+  await syncServerPlugins();
   beginWatching();
-  const enabled = loaded.filter((p) => !p.info.error && !isDisabled(p.info.id) && !safeMode);
+  const active = loaded.filter((p) => !p.info.error && !isDisabled(p.info.id) && systemEnabled());
   console.log(
-    `  Plugins: ${enabled.length ? enabled.map((p) => p.info.name).join(", ") : "none"}` +
+    `  Plugins: ${systemEnabled() ? (active.length ? active.map((p) => p.info.name).join(", ") : "none") : "off (enable in Settings → Plugins)"}` +
       (safeMode ? " (safe mode)" : "") +
       ` — ${pluginsDir}`,
   );
+}
+
+// ------------------------------------------------------------------ server modules
+
+function pluginContext(plugin: Loaded) {
+  return {
+    id: plugin.info.id,
+    dir: plugin.dir,
+    dataDir: dataDir(),
+    log: (...args: unknown[]) => console.log(`[plugin:${plugin.info.id}]`, ...args),
+  };
+}
+
+async function clearServerRuns() {
+  for (const [id, plugin] of serverRuns) {
+    try {
+      await plugin.onStop?.();
+    } catch (err) {
+      console.error(`[plugin:${id}] onStop failed:`, err);
+    }
+  }
+  serverRuns.clear();
+  pluginRouteTable.clear();
+}
+
+/**
+ * Bring the running server plugins in line with the master switch and the per-plugin switches.
+ * `onStart` runs when a plugin becomes active and `onStop` when it stops; modules are imported once
+ * and cached, so toggling doesn't re-read server.ts.
+ */
+async function syncServerPlugins(): Promise<void> {
+  const active = new Set<string>();
+  if (systemEnabled()) {
+    for (const plugin of loaded) {
+      if (plugin.info.server && !plugin.info.error && !isDisabled(plugin.info.id)) active.add(plugin.info.id);
+    }
+  }
+  for (const [id, plugin] of [...serverRuns]) {
+    if (active.has(id)) continue;
+    serverRuns.delete(id);
+    try {
+      await plugin.onStop?.();
+    } catch (err) {
+      console.error(`[plugin:${id}] onStop failed:`, err);
+    }
+  }
+  for (const plugin of loaded) {
+    const id = plugin.info.id;
+    if (!active.has(id) || serverRuns.has(id)) continue;
+    try {
+      if (!plugin.serverModule) {
+        // Bun imports TypeScript directly; the query busts the module cache across `bun --hot` restarts.
+        const mod = (await import(`${pathToFileURL(join(plugin.dir, plugin.manifest.server!)).href}?v=${Date.now()}`)) as { default?: ServerPluginModule };
+        plugin.serverModule = mod.default;
+      }
+      if (!plugin.serverModule) continue;
+      serverRuns.set(id, plugin.serverModule);
+      await plugin.serverModule.onStart?.(pluginContext(plugin));
+    } catch (err) {
+      serverRuns.delete(id);
+      plugin.info.error = `server.ts failed to load: ${(err as Error).message}`;
+      console.error(`[plugins] ${id}:`, err);
+    }
+  }
+  rebuildRouteTable();
 }
 
 /** Run every enabled server plugin's `beforeChat`, in load order. */
@@ -496,6 +560,46 @@ export const hasChatHooks = () => [...serverRuns.values()].some((p) => typeof p.
 // ------------------------------------------------------------------ HTTP
 
 type Api = PluginApiWrapper;
+type RouteHandler = (req: Request, ...rest: unknown[]) => Response | Promise<Response>;
+
+/** Server plugin paths, rebuilt whenever a plugin starts or stops. */
+const pluginRouteTable = new Map<string, Record<string, RouteHandler>>();
+
+/** Server plugin `routes()` sees a pass-through: OpenBuild wraps every handler in `api` once, in dispatch. */
+const passthrough = (<R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => handler) as Api;
+
+function rebuildRouteTable() {
+  pluginRouteTable.clear();
+  if (!systemEnabled()) return;
+  for (const [id, plugin] of serverRuns) {
+    if (typeof plugin.routes !== "function") continue;
+    let handlers: Record<string, unknown> | undefined;
+    try {
+      handlers = plugin.routes(passthrough) as Record<string, unknown>;
+    } catch (err) {
+      console.error(`[plugin:${id}] routes() failed:`, err);
+      continue;
+    }
+    for (const [path, methods] of Object.entries(handlers ?? {})) {
+      if (!path.startsWith(`/api/plugins/${id}/`)) {
+        console.warn(`[plugin:${id}] ignored route ${path}: it must start with /api/plugins/${id}/`);
+        continue;
+      }
+      if (!methods || typeof methods !== "object") continue;
+      const merged = pluginRouteTable.get(path) ?? {};
+      for (const [method, handler] of Object.entries(methods as Record<string, unknown>)) {
+        if (typeof handler !== "function") continue;
+        const key = method.toUpperCase();
+        if (merged[key]) {
+          console.warn(`[plugin:${id}] ignored duplicate ${key} ${path}`);
+          continue;
+        }
+        merged[key] = handler as RouteHandler;
+      }
+      pluginRouteTable.set(path, merged);
+    }
+  }
+}
 
 /** Route handlers for the plugin API, plus the routes contributed by server plugins. */
 export function pluginRoutes(api: Api) {
@@ -526,7 +630,7 @@ export function pluginRoutes(api: Api) {
     "/api/plugins/:id/client.js": {
       GET: api(async (req: Bun.BunRequest<"/api/plugins/:id/client.js">) => {
         const plugin = loaded.find((p) => p.info.id === req.params.id);
-        if (!plugin || safeMode || isDisabled(plugin.info.id) || !plugin.info.client) return bad("No such plugin", 404);
+        if (!plugin || !systemEnabled() || isDisabled(plugin.info.id) || !plugin.info.client) return bad("No such plugin", 404);
         try {
           return new Response(await compileClient(plugin), { headers: { "content-type": "application/javascript; charset=utf-8", "cache-control": "no-store" } });
         } catch (err) {
@@ -538,7 +642,7 @@ export function pluginRoutes(api: Api) {
     "/api/plugins/:id/styles.css": {
       GET: api((req: Bun.BunRequest<"/api/plugins/:id/styles.css">) => {
         const plugin = loaded.find((p) => p.info.id === req.params.id);
-        if (!plugin || !plugin.info.styles || !plugin.manifest.styles) return bad("No such styles", 404);
+        if (!plugin || !systemEnabled() || isDisabled(plugin.info.id) || !plugin.info.styles || !plugin.manifest.styles) return bad("No such styles", 404);
         try {
           return new Response(readFileSync(join(plugin.dir, plugin.manifest.styles)), { headers: { "content-type": "text/css; charset=utf-8", "cache-control": "no-store" } });
         } catch {
@@ -546,44 +650,34 @@ export function pluginRoutes(api: Api) {
         }
       }),
     },
+    "/api/plugins/system": {
+      PUT: api(async (req) => {
+        const body = await readJson(req);
+        if (typeof body?.enabled !== "boolean") return bad("Expected { enabled: boolean }");
+        if (safeMode) return bad("OpenBuild is in safe mode", 409);
+        await setSystemEnabled(body.enabled);
+        return Response.json({ ok: true, enabled: systemEnabled() });
+      }),
+    },
     "/api/plugins/:id": {
       PUT: api(async (req: Bun.BunRequest<"/api/plugins/:id">) => {
         const body = await readJson(req);
         if (!isPluginId(req.params.id) || typeof body?.enabled !== "boolean") return bad("Expected { enabled: boolean }");
         if (safeMode) return bad("OpenBuild is in safe mode", 409);
-        return setPluginEnabled(req.params.id, body.enabled) ? Response.json({ ok: true }) : bad("No such plugin", 404);
+        return (await setPluginEnabled(req.params.id, body.enabled)) ? Response.json({ ok: true }) : bad("No such plugin", 404);
       }),
     },
   };
 
-  // Routes contributed by server plugins. Every path must stay under /api/plugins/<id>/, and every
-  // method is wrapped in `api` here too, so a plugin can't accidentally serve an unauthenticated route.
-  for (const [id, plugin] of serverRuns) {
-    if (typeof plugin.routes !== "function") continue;
-    let handlers: Record<string, unknown> | undefined;
-    try {
-      handlers = plugin.routes(api) as Record<string, unknown>;
-    } catch (err) {
-      console.error(`[plugin:${id}] routes() failed:`, err);
-      continue;
-    }
-    for (const [path, methods] of Object.entries(handlers ?? {})) {
-      if (!path.startsWith(`/api/plugins/${id}/`)) {
-        console.warn(`[plugin:${id}] ignored route ${path}: it must start with /api/plugins/${id}/`);
-        continue;
-      }
-      if (!methods || typeof methods !== "object") continue;
-      const merged = (routes[path] as Record<string, unknown> | undefined) ?? {};
-      for (const [method, handler] of Object.entries(methods as Record<string, unknown>)) {
-        if (typeof handler !== "function") continue;
-        if (merged[method]) {
-          console.warn(`[plugin:${id}] ignored duplicate ${method} ${path}`);
-          continue;
-        }
-        merged[method] = api(handler as (req: Request, ...rest: unknown[]) => Response | Promise<Response>);
-      }
-      routes[path] = merged;
-    }
-  }
+  // Server plugin routes are dispatched from a table that can change when the master switch or a
+  // plugin toggle changes, instead of being fixed when the server starts.
+  rebuildRouteTable();
+  const dispatch = async (req: Request, ...rest: unknown[]) => {
+    const path = new URL(req.url).pathname;
+    const handler = pluginRouteTable.get(path)?.[req.method.toUpperCase()];
+    return handler ? handler(req, ...rest) : bad("Not found", 404);
+  };
+  const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"] as const;
+  routes["/api/plugins/:id/*"] = Object.fromEntries(methods.map((method) => [method, api(dispatch)]));
   return routes;
 }

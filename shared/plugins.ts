@@ -68,6 +68,8 @@ export interface PluginInfo {
 export interface PluginsResponse {
   /** The folder plugins are read from (shown in Settings). */
   dir: string;
+  /** The master switch. Off on first run; also false in safe mode. */
+  enabled: boolean;
   /** OPENBUILD_SAFE=1 or `?safe`: the app loads with no plugins. */
   safe: boolean;
   /** A custom.css file is being served at /api/plugins/custom.css. */
@@ -153,6 +155,8 @@ export interface ServerPluginModule {
   routes?: (api: PluginApiWrapper) => Record<string, unknown>;
   /** Before a Pi turn starts: return a modified request, or nothing to leave it alone. */
   beforeChat?: (req: unknown) => unknown | Promise<unknown>;
+  /** Called when the plugin becomes inactive (system off, plugin disabled, or shutdown). */
+  onStop?: () => void | Promise<void>;
 }
 
 export type PluginApiWrapper = <R extends Request, A extends unknown[]>(

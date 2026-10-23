@@ -11,9 +11,17 @@ export const SettingsHeading = ({ children }: { children: ReactNode }) => (
   </h2>
 );
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className="toggle" onClick={() => onChange(!checked)}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={cx("toggle", disabled && "toggle-disabled")}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
       <span className="toggle-knob" />
     </button>
   );

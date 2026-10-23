@@ -92,6 +92,8 @@ interface PluginStore {
   version: number;
   errors: Record<string, string>;
   refresh: (force?: boolean) => Promise<void>;
+  /** The master switch for the whole plugin system. Off on first run. */
+  setSystemEnabled: (enabled: boolean) => Promise<void>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
   reload: () => Promise<void>;
 }
@@ -113,6 +115,20 @@ export const usePlugins = create<PluginStore>((set, get) => ({
       set({ error: (err as Error).message || "Couldn't reach the OpenBuild server" });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  setSystemEnabled: async (enabled) => {
+    try {
+      const res = await fetch("/api/plugins/system", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
+      await get().refresh(true);
+    } catch (err) {
+      set({ error: (err as Error).message });
     }
   },
 
@@ -267,13 +283,17 @@ const importModule = new Function("url", "return import(url)") as (url: string) 
 async function loadAll(info: PluginsResponse) {
   const current = ++generation;
   unloadAll();
-  applyCustomCss(info);
   usePlugins.setState({ info });
 
-  if (info.safe) {
+  // The master switch, off by default. Nothing runs — not even custom CSS — until it's on.
+  if (info.safe || !info.enabled) {
+    customCss?.remove();
+    customCss = undefined;
     bump();
     return;
   }
+
+  applyCustomCss(info);
 
   for (const plugin of info.plugins) {
     if (plugin.error || info.disabled.includes(plugin.id)) continue;

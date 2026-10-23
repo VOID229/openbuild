@@ -10,7 +10,9 @@ plugins/my-plugin/
   styles.css      CSS for both
 ```
 
-Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in `openbuild.config.ts`, or the data folder's `plugins/` as a fallback. `Settings → Plugins` lists everything found, including broken plugins, and turns each on or off without deleting it.
+Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in `openbuild.config.ts`, or the data folder's `plugins/` as a fallback.
+
+The whole plugin system is **off by default**. `Settings → Plugins` has the master switch: until it's on, nothing from the folder runs — no UI slots, styles, server routes or hooks. With it on, the same page lists everything found (including broken plugins) and turns each one on or off without deleting it.
 
 The folder ships two examples: `daily-note` (a composer button + server route + settings page) and `quiet-ui` (manifest-only tokens and CSS, off by default).
 
@@ -101,7 +103,7 @@ import {
 
 ## Server modules
 
-`server.ts` runs in the OpenBuild process with the same permissions. It is loaded at startup only when the plugin is enabled.
+`server.ts` runs in the OpenBuild process with the same permissions. It is loaded when the plugin becomes active: after the master switch is on and the plugin is enabled. Toggling either one starts or stops it immediately, without restarting OpenBuild.
 
 ```ts
 export default {
@@ -124,7 +126,7 @@ export default {
 };
 ```
 
-Server modules can import Node/Bun APIs and OpenBuild files relative to the plugin folder. They are not restarted by the plugin watcher: restart OpenBuild after changing `server.ts`.
+Server modules can import Node/Bun APIs and OpenBuild files relative to the plugin folder. `onStart` runs when a plugin becomes active and `onStop` when it is disabled or the master switch goes off. They are not restarted by the plugin watcher: restart OpenBuild after changing `server.ts`.
 
 ## Config
 
@@ -143,11 +145,11 @@ export default {
 
 ## How loading works
 
-- The server validates manifests, imports enabled `server.ts` modules before assembling HTTP routes, and calls `onStart`.
+- The server always discovers and validates manifests. Only when the master switch is on does it import enabled `server.ts` modules, call `onStart`, and add their routes and `beforeChat` hook. Server routes are dispatched from a table rebuilt on every toggle, so no restart is needed.
 - The browser loads `/api/plugins` after unlock, then imports each enabled `client.js`. The server builds it with Bun, marking `react`, `react/jsx-runtime`, `react-dom` and `openbuild` as host modules. There is exactly one React instance.
 - A plugin's client module is wrapped in an error boundary. A crash is shown in `Settings → Plugins`; it doesn't take the app down.
-- A file watcher polls the plugin folder. Changes to `plugin.json`, `client.tsx`, `styles.css` and `custom.css` broadcast over SSE; every open browser unloads and re-imports enabled plugins without a page reload. Adding a new client plugin also works live. New `server.ts` files and server toggles need a restart.
-- Disable state is stored in OpenBuild's database, not the browser, so every device sees it.
+- A file watcher polls the plugin folder. Changes to `plugin.json`, `client.tsx`, `styles.css` and `custom.css` broadcast over SSE; every open browser unloads and re-imports enabled plugins without a page reload. Adding a new client plugin also works live. New `server.ts` files (and edits to existing ones) need a restart; on/off toggles do not.
+- The master switch and per-plugin state are stored in OpenBuild's database, not the browser, so every device sees them. On first run the whole system is off.
 
 ## Security
 

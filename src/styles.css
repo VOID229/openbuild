@@ -6060,3 +6060,14 @@ a.btn-primary {
 /* Plugin slot content in a toolbar: match the surrounding controls instead of looking foreign. */
 .composer-bar > .plugin-slot-button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }
 .composer-bar > .plugin-slot-button:hover { background: var(--hover); color: var(--text); }
+
+/* The master switch: off by default, above the per-plugin list. */
+.plugin-master { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.plugin-master-on { background: var(--surface); }
+.plugin-master-copy { min-width: 0; }
+.plugin-master-title { font-size: 14px; font-weight: 550; color: var(--text); }
+.plugin-master-hint { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--text-2); }
+.toggle:disabled { opacity: 0.45; cursor: default; }
+@media (hover: hover) {
+  .toggle:disabled:hover { border-color: var(--border); }
+}
