@@ -68,22 +68,43 @@ export function listChats(): StoredChat[] {
   return out;
 }
 
+/** A chat's version: changes whenever its stored content does, so browsers can cache chats by it. */
+export const versionOf = (data: string) => Bun.hash(data).toString(36);
+
+/** Every current chat's id and version, newest first. */
+export function chatIndex(): { id: string; v: string }[] {
+  return db.query<{ id: string; data: string }, []>("SELECT id, data FROM chats WHERE deleted_at IS NULL ORDER BY updated_at DESC").all()
+    .map((r) => ({ id: r.id, v: versionOf(r.data) }));
+}
+
+/** The stored JSON of the given current chats, with their versions. */
+export function chatsById(ids: string[]): { id: string; v: string; data: string }[] {
+  const find = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL");
+  const out: { id: string; v: string; data: string }[] = [];
+  for (const id of ids) {
+    const row = find.get(id);
+    if (row) out.push({ id, v: versionOf(row.data), data: row.data });
+  }
+  return out;
+}
+
 /** Read one current chat, excluding deletion tombstones. */
 export function getChat(id: string): StoredChat | undefined {
   const row = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL").get(id);
   try { return row ? JSON.parse(row.data) : undefined; } catch { return undefined; }
 }
 
-/** Save a chat. Returns false when it was deleted (it stays deleted). */
-export function putChat(chat: StoredChat): boolean {
+/** Save a chat. Returns its new version, or false when it was deleted (it stays deleted). */
+export function putChat(chat: StoredChat): string | false {
   const row = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM chats WHERE id = ?").get(chat.id);
   if (row?.deleted_at) return false;
+  const data = JSON.stringify(chat);
   db.query("INSERT INTO chats (id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET data = ?2, updated_at = ?3").run(
     chat.id,
-    JSON.stringify(chat),
+    data,
     chat.updatedAt,
   );
-  return true;
+  return versionOf(data);
 }
 
 /**

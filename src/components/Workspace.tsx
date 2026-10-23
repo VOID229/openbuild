@@ -2,9 +2,9 @@
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, and how full its
 // context is.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, Plus, Search, X } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GitInfo, Workspace } from "../../shared/types";
+import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { useStore } from "../lib/store";
@@ -257,15 +257,52 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
   );
 }
 
-/** New thread: checkout or worktree, and branch, right above the composer (git projects only). */
+const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands, extensions, or steering. Runtime is fixed once a thread starts.";
+
+/** Runtime is chosen before the first send, independently of the project's checkout. */
+function RuntimeMenu() {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const runtime = useStore((s) => s.settings.threadRuntime ?? "pi");
+  const updateSettings = useStore((s) => s.updateSettings);
+  const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
+    { runtime: "pi", label: "Pi", desc: "Pi tools, extensions and slash commands" },
+    { runtime: "durable", label: "Durable", desc: "Durable execution; no Pi extensions or slash commands" },
+  ];
+  return (
+    <>
+      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${runtime === "durable" ? "Durable" : "Pi"}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "Runtime for this new thread; fixed after the first send"} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
+        <span className="ws-pill-text">{runtime === "durable" ? "Durable" : "Pi"}</span>
+        <ChevronDown size={13} className="pill-chevron" />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
+        <div onKeyDown={(e) => arrowNav(e)}>
+          {options.map((o) => (
+            <button key={o.runtime} type="button" role="option" aria-selected={o.runtime === runtime} className="menu-item ws-option" onClick={() => { updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}>
+              <span className="ws-option-text">
+                <span className="menu-item-label">{o.label}</span>
+                <span className="ws-option-path">{o.desc}</span>
+              </span>
+              {o.runtime === runtime && <Check size={15} className="menu-check" />}
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
+/** New thread: runtime, checkout or worktree, and branch, right above the composer. */
 export function WorkspaceTop() {
   const { project, pref, info, loading } = useNewWorkspace();
-  if (!project?.git) return null;
   return (
     <div className="ws-top">
-      {pref.mode === "local" && !!info?.dirty && <span className="ws-dirty">{info.dirty} changed</span>}
-      <BranchMenu info={info} loading={loading} />
-      <ModeMenu />
+      {project?.git && <>
+        {pref.mode === "local" && !!info?.dirty && <span className="ws-dirty">{info.dirty} changed</span>}
+        <BranchMenu info={info} loading={loading} />
+        <ModeMenu />
+      </>}
+      <RuntimeMenu />
     </div>
   );
 }
@@ -273,13 +310,13 @@ export function WorkspaceTop() {
 // ------------------------------------------------------------------ thread (below the composer)
 
 /** How full the context is: a small ring and a percentage. */
-function ContextRing({ tokens, window }: { tokens: number; window: number }) {
+function ContextRing({ tokens, window, runtime }: { tokens: number; window: number; runtime: ThreadRuntime }) {
   const pct = Math.min(100, Math.round((tokens / window) * 100));
   const r = 7;
   const c = 2 * Math.PI * r;
   const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
   return (
-    <span className={cx("ctx", pct >= 80 && "ctx-high")} data-tooltip={`${k(tokens)} of ${k(window)} tokens in context. Pi compacts it when it's nearly full (or type /compact).`} data-tooltip-side="top">
+    <span className={cx("ctx", pct >= 80 && "ctx-high")} data-tooltip={`${k(tokens)} of ${k(window)} tokens in context.${runtime === "pi" ? " Pi compacts it when it's nearly full (or type /compact)." : ""}`} data-tooltip-side="top">
       <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
         <circle cx="9" cy="9" r={r} className="ctx-track" />
         <circle cx="9" cy="9" r={r} className="ctx-fill" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 9 9)" />
@@ -291,6 +328,7 @@ function ContextRing({ tokens, window }: { tokens: number; window: number }) {
 
 function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; workspace?: Workspace; streaming: boolean }) {
   const [info, setInfo] = useState<GitInfo>();
+  const runtime = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime ?? "pi");
   const usage = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant" && m.usage?.contextWindow)?.usage);
   // Refresh after each reply (Pi may have committed or switched branches) and on coming back.
   useEffect(() => {
@@ -306,9 +344,11 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
     };
   }, [workspace?.cwd, workspace?.branch, streaming]);
   const branch = info?.branch ?? workspace?.branch;
-  if (!workspace && !usage) return null;
   return (
     <div className="ws-bottom">
+      <span className="ws-chip" data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
+        <LockKeyhole size={13} /> {runtime === "durable" ? "Durable" : "Pi"}
+      </span>
       {workspace && (
         <span className="ws-where" title={workspace.cwd}>
           <span className="ws-chip">
@@ -325,7 +365,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
           {!!info?.ahead && <span className="ws-dirty">↑{info.ahead}</span>}
         </span>
       )}
-      {usage?.contextTokens && usage.contextWindow ? <ContextRing tokens={usage.contextTokens} window={usage.contextWindow} /> : null}
+      {usage?.contextTokens && usage.contextWindow ? <ContextRing tokens={usage.contextTokens} window={usage.contextWindow} runtime={runtime} /> : null}
     </div>
   );
 }

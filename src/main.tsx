@@ -16,8 +16,8 @@ lockViewport();
 // Importing App starts config/state hydration. Delay even those imports until unlocked.
 let application: Promise<import("react").ReactNode> | undefined;
 const load = () => application ??= (async () => {
-  const [{ App }, { CloudProvider, initCloud }] = await Promise.all([import("./App"), import("./lib/cloud")]);
-  await initCloud();
+  const [{ App, preloadApp }, { CloudProvider, initCloud }] = await Promise.all([import("./App"), import("./lib/cloud")]);
+  await Promise.all([initCloud(), preloadApp()]);
   return <CloudProvider><App /></CloudProvider>;
 })();
 createRoot(document.getElementById("root")!).render(<LocalAccess load={load} />);

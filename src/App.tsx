@@ -9,11 +9,11 @@ import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
+import { EXTERNAL_VIA } from "../shared/replies";
 import { resumeReplies } from "./lib/chat";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
-import { findModel } from "./lib/models";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
@@ -62,6 +62,26 @@ function Home() {
   );
 }
 
+/**
+ * Settings, threads and projects, fetched together before the app first renders so it appears in
+ * one piece instead of the sidebar filling in afterwards. A slow server doesn't hold it back for
+ * long: past the deadline the app renders and whatever's missing fills in when it arrives.
+ */
+export async function preloadApp() {
+  const hydrated = new Promise<void>((resolve) => {
+    if (useStore.persist.hasHydrated()) return resolve();
+    const off = useStore.persist.onFinishHydration(() => { off(); resolve(); });
+  });
+  const chats = Promise.all([hydrated, loadChats()]).then(([, chats]) => {
+    if (useStore.getState().chatsLoaded) return;
+    useStore.getState().setChats(chats);
+    // Replies that were still coming in when the app was closed or reloaded.
+    resumeReplies();
+  }, () => { /* Main keeps retrying and shows the error. */ });
+  const all = Promise.all([hydrated, chats, useStore.getState().loadProjects()]);
+  await Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
+}
+
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
 export function App() {
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
@@ -102,10 +122,11 @@ function Main() {
           timer = setTimeout(() => load(Math.min(delay * 2, 10_000)), delay);
         },
       );
-    void load(1000);
+    // Usually already loaded by preloadApp.
+    if (!useStore.getState().chatsLoaded) void load(1000);
     // Projects, and the models Pi can use (cached ones stay usable meanwhile).
     ensureSelection();
-    void useStore.getState().loadProjects();
+    if (!useStore.getState().projectsLoaded) void useStore.getState().loadProjects();
     void useStore.getState().refreshDetection();
     // Re-ask Pi when the tab comes back after a while (a provider signed in elsewhere, new models).
     const STALE = 10 * 60 * 1000;
@@ -143,7 +164,10 @@ function Main() {
           const original = before.get(chat.id);
           const now = byId.get(chat.id);
           // A local edit, delete or streamed delta happened during the request: leave it alone.
-          if (now !== original || now?.messages.some((m) => m.status === "streaming")) continue;
+          // Pi running outside OpenBuild only changes here, so keep taking it.
+          if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
+          // Unchanged chats come back as the same object from the chat cache.
+          if (now === chat) continue;
           if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);
         }
         useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
@@ -163,7 +187,6 @@ function Main() {
   //   Cmd/Ctrl+,        open settings (instead of the browser's)
   //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
   //   Cmd/Ctrl+Shift+O  new thread
-  //   Cmd/Ctrl+1…9      pick a starred model
   //   /                 focus chat search (or the composer when the sidebar is collapsed)
   //   Enter             focus the composer (sidebar open)
   // "/" and Enter only apply when not typing in a field and not in Settings; Enter also leaves
@@ -184,13 +207,6 @@ function Main() {
         } else if (e.shiftKey && key === "o") {
           e.preventDefault();
           newChat();
-        } else if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
-          // ⌘1–⌘9: the starred models, in order.
-          const id = st.settings.favorites[Number(e.key) - 1];
-          if (id && findModel(st.detection, { plan: "pi", id })) {
-            e.preventDefault();
-            st.setSelection({ plan: "pi", id });
-          }
         }
         return;
       }

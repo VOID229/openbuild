@@ -15,6 +15,8 @@ import { checkWhisper, transcribe } from "./dictation";
 import { findRun, localRun, startRun } from "./runs";
 import * as storage from "./storage";
 import * as vault from "./vault";
+import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
+import * as durable from "./durable";
 
 const isEdits = (e: unknown): e is KeyEdit[] =>
   Array.isArray(e) &&
@@ -150,26 +152,33 @@ function serve(port: number, hostname: string) {
         }),
       },
       "/api/chat/runs/:id": {
-        GET: api((req: Bun.BunRequest<"/api/chat/runs/:id">, server: Bun.Server<unknown>) => {
+        GET: api(async (req: Bun.BunRequest<"/api/chat/runs/:id">, server: Bun.Server<unknown>) => {
           server.timeout(req, 0);
-          const run = isStreamId(req.params.id) ? findRun(req.params.id) : undefined;
+          const run = isStreamId(req.params.id) ? findRun(req.params.id) ?? await durable.findRun(req.params.id) : undefined;
           return run ? new Response(run.stream(), { headers: runHeaders }) : bad("No such reply", 404);
         }),
       },
       "/api/chat/runs/:id/stop": {
-        POST: api((req: Bun.BunRequest<"/api/chat/runs/:id/stop">) => {
-          if (isStreamId(req.params.id)) findRun(req.params.id)?.stop();
+        POST: api(async (req: Bun.BunRequest<"/api/chat/runs/:id/stop">) => {
+          if (isStreamId(req.params.id)) {
+            const run = findRun(req.params.id);
+            if (run) run.stop();
+            else await durable.stopRun(req.params.id);
+          }
           return Response.json({ ok: true });
         }),
       },
 
       // Chats, stored on disk. Deleting keeps a tombstone so a deleted chat can't come back.
+      // `?index`: only ids and versions, so browsers fetch just the chats their cache lacks.
       "/api/chats": {
-        GET: api(async () => {
+        GET: api(async (req) => {
           await discoverSessions();
+          if (new URL(req.url).searchParams.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
         }),
-        DELETE: api(() => {
+        DELETE: api(async () => {
+          await Promise.all(storage.listChats().filter((chat) => threadRuntime(chat.id) === "durable").map((chat) => durable.stopThread(chat.id)));
           storage.deleteAllChats();
           return Response.json({ ok: true });
         }),
@@ -182,13 +191,27 @@ function serve(port: number, hostname: string) {
           return Response.json({ imported: storage.importChats(body.chats) });
         }),
       },
+      // The given chats as stored, spliced in raw rather than parsed and serialized again.
+      "/api/chats/fetch": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (!Array.isArray(body?.ids) || !body.ids.every((id: unknown) => typeof id === "string")) return bad("Expected { ids: string[] }");
+          const rows = storage.chatsById(body.ids);
+          return new Response(`{"chats":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      },
       "/api/chats/:id": {
         PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
-          return storage.putChat(chat) ? Response.json({ ok: true }) : bad("Chat was deleted", 410);
+          if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
+          const v = storage.putChat(chat);
+          return v ? Response.json({ ok: true, v }) : bad("Chat was deleted", 410);
         }),
-        DELETE: api((req: Bun.BunRequest<"/api/chats/:id">) => {
+        DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
+          if (threadRuntime(req.params.id) === "durable") await durable.stopThread(req.params.id);
           storage.deleteChat(req.params.id);
           return Response.json({ ok: true });
         }),
@@ -241,6 +264,8 @@ try {
   process.exit(1);
 }
 hot.openbuildServers = servers;
+// Recover before any browser reconnects; attach also awaits this same recovery barrier.
+void durable.recover().catch((err) => console.error("[durable] Startup recovery failed:", err));
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");

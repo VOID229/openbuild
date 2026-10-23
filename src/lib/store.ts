@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: Settings = {
   syncApiKeys: false,
   workspace: { mode: "worktree", defaultMode: "worktree" },
   favorites: [],
+  threadRuntime: "pi",
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };
@@ -43,9 +44,11 @@ export interface SidebarView {
   /** Model ids to show; empty = all models. */
   models: string[];
   includePinned: boolean;
+  /** Also list threads subagents ran. */
+  subagents: boolean;
 }
 
-export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true };
+export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true, subagents: false };
 
 interface State {
   settings: Settings;
