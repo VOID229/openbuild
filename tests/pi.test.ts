@@ -38,6 +38,14 @@ describe("Pi model search", () => {
     expect(groups[0]!.models[0]!.name).toBe("Grok 4.7");
   });
 
+  test("providers Pi doesn't ship with share one Custom group, listed last", () => {
+    const custom = [{ ...model("genesis", "code-fast", "Genesis code"), custom: true }, ...models, { ...model("glm-local", "glm-5.3", "GLM 5.3"), custom: true }];
+    const groups = providerGroups(custom);
+    expect(groups.map((g) => g.provider)).toEqual(["fireworks", "xai", "openai-codex", "custom"]);
+    expect(groups[3]!.models.map((m) => m.name)).toEqual(["Genesis code", "GLM 5.3"]);
+    expect(searchProviderGroups(custom, "custom glm").flatMap((g) => g.models.map((m) => m.name))).toEqual(["GLM 5.3"]);
+  });
+
   test("without a query, lists only the selected provider", () => {
     expect(searchProviderGroups(models, "", "openai-codex").flatMap((g) => g.models.map((m) => m.name))).toEqual(["GPT-6.1 Sol"]);
   });

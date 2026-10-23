@@ -87,6 +87,19 @@ export async function providers(): Promise<PiProvider[]> {
   return (await once<{ providers: PiProvider[] }>(["providers"])).providers;
 }
 
+let builtinsCache: { root: string; value: Promise<Set<string>> } | undefined;
+
+/** The ids of the providers Pi ships with; the rest come from models.json or extensions. */
+export function builtinProviders(): Promise<Set<string>> {
+  const root = packageRoot() ?? "";
+  if (builtinsCache?.root !== root) {
+    const value = once<{ ids: string[] }>(["builtins"]).then((r) => new Set(r.ids));
+    builtinsCache = { root, value };
+    value.catch(() => builtinsCache?.value === value && (builtinsCache = undefined));
+  }
+  return builtinsCache.value;
+}
+
 export async function logout(provider: string) {
   await once(["logout", provider]);
   restartIdle();

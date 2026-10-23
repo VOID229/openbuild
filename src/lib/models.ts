@@ -68,6 +68,12 @@ const PROVIDER_ICONS: [RegExp, string][] = (<[RegExp, string][]>[
 
 export const providerSvg = (provider: string) => PROVIDER_ICONS.find(([re]) => re.test(provider.toLowerCase()))?.[1];
 
+/** The group that collects every provider Pi doesn't ship with (models.json, extensions). */
+export const CUSTOM_PROVIDER = "custom";
+
+/** The provider group a Pi model is listed under: its provider, or Custom. */
+export const providerOf = (m: Pick<ModelInfo, "id" | "provider" | "custom">) => (m.custom ? CUSTOM_PROVIDER : (m.provider ?? m.id.split("/")[0]!));
+
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
   openai: "OpenAI",
@@ -84,6 +90,7 @@ const PROVIDER_NAMES: Record<string, string> = {
   "kimi-coding": "Kimi",
   moonshot: "Moonshot",
   zai: "Z.ai",
+  [CUSTOM_PROVIDER]: "Custom",
 };
 
 /** A provider id as people read it: "openai-codex" → "Codex", "glm-local" → "Glm Local". */

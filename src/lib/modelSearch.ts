@@ -1,6 +1,7 @@
 // Model search shared by every picker. Plan words in the query ("go", "zen", "opencode plus", …)
 // filter by API key; the remaining words fuzzy-match the model: "go deepseek", "go zen qwen".
 import { PLANS, type ModelInfo, type PlanId } from "../../shared/types";
+import { CUSTOM_PROVIDER, providerOf } from "./models";
 import { fold, fuzzyScore } from "./search";
 import type { Detection } from "./types";
 
@@ -72,12 +73,18 @@ export interface ProviderGroup {
   models: ModelInfo[];
 }
 
-/** Pi models grouped by provider (in the order Pi lists them). */
+/** Pi models grouped by provider (in the order Pi lists them), with non-built-in providers as one Custom group. */
 export function providerGroups(models: ModelInfo[]): ProviderGroup[] {
   const groups = new Map<string, ModelInfo[]>();
   for (const m of models) {
-    const p = m.provider ?? m.id.split("/")[0]!;
+    const p = providerOf(m);
     groups.set(p, [...(groups.get(p) ?? []), m]);
+  }
+  const custom = groups.get(CUSTOM_PROVIDER);
+  // Custom goes last, after the providers Pi ships with.
+  if (custom) {
+    groups.delete(CUSTOM_PROVIDER);
+    groups.set(CUSTOM_PROVIDER, custom);
   }
   return [...groups].map(([provider, list]) => ({ provider, models: list }));
 }

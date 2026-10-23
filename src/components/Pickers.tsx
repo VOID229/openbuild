@@ -6,7 +6,7 @@ import {
   type Effort,
   type ModelInfo,
 } from "../../shared/types";
-import { findModel, isAuto, providerName } from "../lib/models";
+import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { providerGroups, searchProviderGroups } from "../lib/modelSearch";
 import { composerEffort, selectionFor, useStore } from "../lib/store";
 import { effortFor } from "../lib/effort";
@@ -303,7 +303,9 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
     setTab(
       favModels.length
         ? RAIL_FAV
-        : (current?.provider ?? providers[0] ?? RAIL_FAV),
+        : current
+          ? providerOf(current)
+          : (providers[0] ?? RAIL_FAV),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -312,7 +314,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const rows: ModelInfo[] = useMemo(() => {
     if (q) return searchProviderGroups(all, q).flatMap((g) => g.models);
     if (tab === RAIL_FAV) return favModels;
-    return all.filter((m) => m.provider === tab);
+    return all.filter((m) => providerOf(m) === tab);
   }, [all, q, tab, favModels]);
   const checking = detection.pi?.status === "checking";
   const label = current

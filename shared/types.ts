@@ -70,6 +70,8 @@ export interface ModelInfo {
   /** Pi models: the provider id and display name (`id` is "<provider>/<model id>"). */
   provider?: string;
   providerName?: string;
+  /** Pi models from a provider Pi doesn't ship with (models.json, extensions). */
+  custom?: boolean;
 }
 
 export interface DetectResult {

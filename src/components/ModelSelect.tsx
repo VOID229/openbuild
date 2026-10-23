@@ -2,7 +2,7 @@
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { type Effort } from "../../shared/types";
-import { findModel } from "../lib/models";
+import { findModel, providerName } from "../lib/models";
 import { searchProviderGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
@@ -43,8 +43,8 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
         {groups.map((g) => (
-          <div key={g.provider} role="group" aria-label={g.provider}>
-            <div className="menu-label">{g.provider}</div>
+          <div key={g.provider} role="group" aria-label={providerName(g.provider)}>
+            <div className="menu-label">{providerName(g.provider)}</div>
             {g.models.map((m) => {
               const isSelected = selected?.plan === "pi" && selected.id === m.id;
               return (

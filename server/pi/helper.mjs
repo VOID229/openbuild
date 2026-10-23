@@ -5,12 +5,14 @@
 //   node helper.mjs <pi package dir> providers
 //   node helper.mjs <pi package dir> login <provider> <api_key|oauth>
 //   node helper.mjs <pi package dir> logout <provider>
+//   node helper.mjs <pi package dir> builtins
 //
 // Output is JSONL. During a login, prompts go out as {type:"prompt", id, prompt} and answers come
 // back on stdin as {id, value} or {id, cancel:true}; {type:"event"} records are for display.
+import { existsSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const [root, command, ...args] = process.argv.slice(2);
 const out = (record) => process.stdout.write(JSON.stringify(record) + "\n");
@@ -38,6 +40,13 @@ try {
       models: runtime.getModels(p.id).length,
     }));
     out({ type: "providers", providers });
+  } else if (command === "builtins") {
+    // The providers Pi ships with, as opposed to ones from models.json or extensions. pi-ai doesn't
+    // export this to the coding agent's dependents, so find it the way Node would from Pi's package.
+    let dir = root;
+    while (!existsSync(join(dir, "node_modules", "@earendil-works", "pi-ai", "package.json")) && dirname(dir) !== dir) dir = dirname(dir);
+    const catalog = await import(pathToFileURL(join(dir, "node_modules", "@earendil-works", "pi-ai", "dist", "providers", "all.js")).href);
+    out({ type: "builtins", ids: catalog.builtinProviders().map((p) => p.id) });
   } else if (command === "logout") {
     await runtime.logout(args[0]);
     out({ type: "done" });

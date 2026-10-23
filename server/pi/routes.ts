@@ -23,7 +23,7 @@ const fail = (err: unknown, status = 400) => bad((err as Error).message || Strin
 const str = (v: unknown, max = 4096): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 
 /** A Pi model as the app's ModelInfo; its id is "<provider>/<model id>". */
-function toModelInfo(m: any): ModelInfo {
+function toModelInfo(m: any, builtins?: Set<string>): ModelInfo {
   return {
     id: `${m.provider}/${m.id}`,
     name: m.name || m.id,
@@ -35,6 +35,7 @@ function toModelInfo(m: any): ModelInfo {
     outputCost: m.cost?.output,
     tools: true,
     provider: m.provider,
+    custom: builtins && !builtins.has(m.provider) ? true : undefined,
   };
 }
 
@@ -113,8 +114,9 @@ export function piRoutes(api: Api) {
     "/api/pi/models": {
       GET: api(async (req) => {
         try {
-          const r = await listModels(new URL(req.url).searchParams.has("fresh"));
-          return Response.json({ models: r.models.map(toModelInfo), defaultModel: r.defaultModel, checkedAt: r.checkedAt });
+          // Without the built-in list, every provider keeps its own group.
+          const [r, builtins] = await Promise.all([listModels(new URL(req.url).searchParams.has("fresh")), auth.builtinProviders().catch(() => undefined)]);
+          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins)), defaultModel: r.defaultModel, checkedAt: r.checkedAt });
         } catch (err) {
           return fail(err, 502);
         }
