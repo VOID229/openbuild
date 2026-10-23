@@ -2054,14 +2054,17 @@ svg {
   border-radius: 50%;
   background: var(--text-3);
   animation: pulse 1.2s ease-in-out infinite;
+  /* Negative delays only: the loop is already in progress on mount (see Typing), and no dot waits
+     un-animated at full size before its first beat. 1.05s/0.9s = 0.15s/0.3s behind dot one. */
+  animation-delay: var(--typing-phase, 0s);
 }
 
 .typing span:nth-child(2) {
-  animation-delay: 0.15s;
+  animation-delay: calc(var(--typing-phase, 0s) - 1.05s);
 }
 
 .typing span:nth-child(3) {
-  animation-delay: 0.3s;
+  animation-delay: calc(var(--typing-phase, 0s) - 0.9s);
 }
 
 @keyframes pulse {

@@ -1,6 +1,6 @@
 import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
 import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
@@ -256,6 +256,21 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   return <>{blocks.map(render)}</>;
 }
 
+const PULSE_MS = 1200;
+
+/** The waiting dots, phased off the page clock so a remount (e.g. switching threads) continues the loop
+ *  mid-beat instead of restarting it. */
+function Typing() {
+  const [phase] = useState(() => -(performance.now() % PULSE_MS));
+  return (
+    <div className="typing" aria-label="Waiting for response" style={{ "--typing-phase": `${phase}ms` } as CSSProperties}>
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const streaming = message.status === "streaming";
   const busy = message.searches?.some((s) => s.status === "running") || message.parts?.some((p) => p.type === "tool" && p.status === "running");
@@ -265,11 +280,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
       {message.reasoning && <Reasoning message={message} />}
       {message.searches?.length ? <Searches searches={message.searches} /> : null}
       {waiting && (
-        <div className="typing" aria-label="Waiting for response">
-          <span />
-          <span />
-          <span />
-        </div>
+        <Typing />
       )}
       {message.parts?.length ? (
         <Parts message={message} chatId={chatId} />
