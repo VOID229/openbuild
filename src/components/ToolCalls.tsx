@@ -1,10 +1,11 @@
-// What Pi did while answering: one compact row per tool call (read a file, ran a command, edited
-// code), each opening up to its output or diff; and the questions Pi extensions ask on the way.
-import { Bot, Brain, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+// What Pi did while answering: each run of tool calls folded into one line ("Read 3 files, ran 2
+// commands") that opens to a row per call and its output or diff, with what Pi is doing right now
+// under it; and the questions Pi extensions ask on the way.
+import { Bot, Brain, Check, ChevronRight, CircleAlert, Ellipsis, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
-import { cx } from "../lib/ui";
+import { cx, duration } from "../lib/ui";
 import { Markdown } from "./Markdown";
 import { Spinner } from "./primitives";
 
@@ -31,7 +32,7 @@ function describe(part: ToolPart, cwd?: string): { icon: LucideIcon; verb: strin
     case "read":
       return { icon: FileText, verb: running ? "Reading" : "Read", target: path };
     case "bash":
-      return { icon: SquareTerminal, verb: "", target: firstLine(str(a.command) ?? ""), mono: true };
+      return { icon: SquareTerminal, verb: running ? "Running" : "", target: firstLine(str(a.command) ?? ""), mono: true };
     case "edit":
       return { icon: FilePen, verb: running ? "Editing" : "Edited", target: path };
     case "write":
@@ -86,13 +87,28 @@ function Diff({ patch }: { patch: string }) {
 
 const seconds = (ms?: number) => (ms === undefined ? "" : ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`);
 
+/** What a call changed, as a diff. A new file (write) has no patch from Pi: its content, as all-added lines. */
+function patchOf(part: ToolPart) {
+  const written = part.name === "write" && !part.patch ? str(part.args?.content) : undefined;
+  return part.patch ?? (written !== undefined ? written.replace(/\n$/, "").split("\n").map((l) => `+${l}`).join("\n") : undefined);
+}
+
+/** How long a call has been running, once it's been a few seconds (a long build or test run). */
+function RunningFor() {
+  const [start] = useState(Date.now);
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return now - start >= 3000 ? <span className="tool-time">{duration(now - start)}</span> : null;
+}
+
 export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
   const [open, setOpen] = useState(false);
   const d = describe(part, cwd);
   const Icon = d.icon;
-  // A new file (write) has no patch from Pi: show its content as all-added lines.
-  const written = part.name === "write" && !part.patch ? str(part.args?.content) : undefined;
-  const patch = part.patch ?? (written !== undefined ? written.replace(/\n$/, "").split("\n").map((l) => `+${l}`).join("\n") : undefined);
+  const patch = patchOf(part);
   const stat = patch ? diffStat(patch) : undefined;
   const command = part.name === "bash" ? str(part.args?.command) : undefined;
   const hasBody = !!(patch || part.output?.trim() || (command && command.includes("\n")));
@@ -111,7 +127,16 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
           </span>
         )}
         <span className="tool-status">
-          {part.status === "running" ? <Spinner size={12} /> : part.status === "error" ? <CircleAlert size={13} className="bad" /> : <span className="tool-time">{seconds(part.ms)}</span>}
+          {part.status === "running" ? (
+            <>
+              <RunningFor />
+              <Spinner size={12} />
+            </>
+          ) : part.status === "error" ? (
+            <CircleAlert size={13} className="bad" />
+          ) : (
+            <span className="tool-time">{seconds(part.ms)}</span>
+          )}
         </span>
         {hasBody && <ChevronRight size={14} className="tool-chevron" />}
       </button>
@@ -156,12 +181,111 @@ export function ThoughtRow({ part, live }: { part: ThoughtPart; live: boolean })
   );
 }
 
-/** Consecutive tool calls and the thinking between them, shown as one block. */
-export function ToolGroup({ parts, cwd, live }: { parts: (ToolPart | ThoughtPart)[]; cwd?: string; /** The reply is still streaming. */ live?: boolean }) {
+type Work = ToolPart | ThoughtPart;
+
+const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+/** Tools that read the same in a summary. */
+const kindOf = (name: string) =>
+  name === "grep" || name === "find" ? "search" : name === "web_search" || name === "fetch" ? "web" : /subagent|agent/.test(name) ? "agent" : name;
+
+/**
+ * A run of work in one line: "Read 3 files, ran 2 commands, edited 1 file", with the lines its edits
+ * added and removed. Thinking only counts when that's all it did ("Thought for 4s").
+ */
+export function summarize(parts: Work[]) {
+  const tools = parts.filter((p): p is ToolPart => p.type === "tool");
+  let add = 0;
+  let del = 0;
+  if (!tools.length) {
+    const ms = parts.reduce((n, p) => n + (p.ms ?? 0), 0);
+    return { text: ms >= 1000 ? `Thought for ${duration(ms)}` : "Thought", add, del };
+  }
+  // Each kind of call in the order it first came up, with the files (or folders) it touched.
+  const kinds = new Map<string, { n: number; targets: Set<string> }>();
+  for (const t of tools) {
+    const kind = kindOf(t.name);
+    const k = kinds.get(kind) ?? { n: 0, targets: new Set<string>() };
+    kinds.set(kind, k);
+    k.n++;
+    k.targets.add(str(t.args?.path) ?? str(t.args?.file_path) ?? str(t.args?.filePath) ?? t.id);
+    const patch = patchOf(t);
+    if (patch) {
+      const s = diffStat(patch);
+      add += s.add;
+      del += s.del;
+    }
+  }
+  const text = [...kinds]
+    .map(([kind, { n, targets }]) => {
+      switch (kind) {
+        case "read":
+          return `read ${count(targets.size, "file")}`;
+        case "edit":
+          return `edited ${count(targets.size, "file")}`;
+        case "write":
+          return `wrote ${count(targets.size, "file")}`;
+        case "ls":
+          return `listed ${count(targets.size, "folder")}`;
+        case "bash":
+          return `ran ${count(n, "command")}`;
+        case "search":
+          return `searched ${times(n)}`;
+        case "web":
+          return `searched the web${n > 1 ? ` ${times(n)}` : ""}`;
+        case "agent":
+          return `ran ${count(n, "subagent")}`;
+        default:
+          return `used ${kind.replace(/_/g, " ")}${n > 1 ? ` ${times(n)}` : ""}`;
+      }
+    })
+    .join(", ");
+  return { text: text.charAt(0).toUpperCase() + text.slice(1), add, del };
+}
+
+/**
+ * Consecutive tool calls and the thinking between them. What's finished is one line summing it up,
+ * opening to a row per call. While Pi is still on this run, what it's doing right now shows under
+ * that line: the calls running, the thought it's on, or that it's working out the next step.
+ */
+export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /** Pi is working on this run right now. */ live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const last = parts.at(-1);
+  const thought = live && last?.type === "thought" && last.ms === undefined ? last : undefined;
+  const current = live ? parts.filter((p) => p === thought || (p.type === "tool" && p.status === "running")) : [];
+  const done = current.length ? parts.filter((p) => !current.includes(p)) : parts;
+  const summary = done.length ? summarize(done) : undefined;
+  const row = (p: Work) =>
+    p.type === "thought" ? <ThoughtRow key={`th${parts.indexOf(p)}`} part={p} live={p === thought} /> : <ToolRow key={p.id} part={p} cwd={cwd} />;
   return (
-    <div className="tools">
-      {parts.map((p, i) =>
-        p.type === "thought" ? <ThoughtRow key={`th${i}`} part={p} live={!!live && p.ms === undefined} /> : <ToolRow key={p.id} part={p} cwd={cwd} />,
+    <div className={cx("reasoning work", open && "reasoning-open")}>
+      {summary && (
+        <button type="button" data-worked-toggle className="reasoning-toggle work-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <span className="work-summary">{summary.text}</span>
+          {(summary.add > 0 || summary.del > 0) && (
+            <span className="tool-stat">
+              {summary.add > 0 && <span className="diff-add-n">+{summary.add}</span>}
+              {summary.del > 0 && <span className="diff-del-n">−{summary.del}</span>}
+            </span>
+          )}
+          <ChevronRight size={14} className="reasoning-chevron" />
+        </button>
+      )}
+      {open && summary && <div className="tools work-body">{done.map(row)}</div>}
+      {live && (
+        <div className="work-live">
+          {current.length ? (
+            current.map(row)
+          ) : (
+            <div className="tool-head">
+              <Ellipsis size={14} className="tool-icon" />
+              <span className="tool-text shimmer">Working</span>
+              <span className="tool-status">
+                <Spinner size={12} />
+              </span>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

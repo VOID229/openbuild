@@ -5,12 +5,12 @@ import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
 import type { Message, Part, SearchCall, ThoughtPart, ToolPart } from "../lib/types";
-import { copyText, cx } from "../lib/ui";
+import { copyText, cx, duration } from "../lib/ui";
 import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
 import { Markdown } from "./Markdown";
 import { BrandIcon, IconButton } from "./primitives";
-import { AskCard, ToolGroup } from "./ToolCalls";
+import { AskCard, WorkRun } from "./ToolCalls";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -198,30 +198,11 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
 
 type Block = Part | (ToolPart | ThoughtPart)[];
 
-/** A duration in its two largest units: "45s", "7m 9s", "1hr 2m", "1d 3hr". */
-function duration(ms: number) {
-  const total = Math.max(1, Math.round(ms / 1000));
-  const units: [string, number][] = [
-    ["d", Math.floor(total / 86400)],
-    ["hr", Math.floor(total / 3600) % 24],
-    ["m", Math.floor(total / 60) % 60],
-    ["s", total % 60],
-  ];
-  const first = units.findIndex(([, n]) => n > 0);
-  return units
-    .slice(first, first + 2)
-    .filter(([, n]) => n > 0)
-    .map(([u, n]) => `${n}${u}`)
-    .join(" ");
-}
-
 /** Everything Pi did before its final answer, folded into one line. */
 function Worked({ message, children }: { message: Message; children: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const streaming = message.status === "streaming";
-  const elapsed = useElapsed(message.startedAt, streaming);
-  // Still writing: the time so far. Older replies didn't record how long they took.
-  const ms = streaming ? elapsed * 1000 : message.workedMs;
+  // Older replies didn't record how long they took.
+  const ms = message.workedMs;
   return (
     <div className={cx("reasoning worked", open && "reasoning-open")}>
       <button type="button" data-worked-toggle className="reasoning-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -245,11 +226,11 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
     if (grouped && Array.isArray(last)) last.push(p);
     else blocks.push(grouped ? [p] : p);
   }
-  const render = (b: Block, i: number, all: Block[]) =>
+  const render = (b: Block, i: number) =>
     Array.isArray(b) ? (
-      <ToolGroup key={`g${i}`} parts={b} cwd={cwd} live={streaming} />
+      <WorkRun key={`g${i}`} parts={b} cwd={cwd} live={streaming && i === blocks.length - 1} />
     ) : b.type === "text" ? (
-      <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === all.length - 1 && "markdown-streaming")} />
+      <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} />
     ) : b.type === "ask" ? (
       <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} />
     ) : b.type === "steer" ? (
@@ -263,29 +244,22 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
         )}
       </div>
     ) : null;
-  // It ran tools or thought: fold all of that (and what it wrote along the way) behind "Worked for
-  // Xs", leaving the answer out in the open. While streaming that happens as soon as Pi starts
-  // writing after its work; if it goes back to work, the fold opens up again.
+  // Done, and it ran tools or thought: fold all of that (and what it wrote along the way) behind
+  // "Worked for Xs", leaving the answer out in the open. Only once it's over: while Pi works, what
+  // it writes stays where it is, and the answer keeps its key so it isn't redrawn when the rest folds.
   const last = blocks.at(-1);
   const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
-  if ((message.status === "done" || (streaming && final)) && blocks.some(Array.isArray)) {
+  if (message.status === "done" && blocks.some(Array.isArray)) {
     const work = final ? blocks.slice(0, -1) : blocks;
-    return (
-      <>
-        <Worked message={message}>{work.map((b, i) => render(b, i, blocks))}</Worked>
-        {final && render(final, blocks.length - 1, blocks)}
-      </>
-    );
+    return <>{[<Worked key="worked" message={message}>{work.map(render)}</Worked>, final && render(final, blocks.length - 1)]}</>;
   }
-  return <>{blocks.map((b, i) => render(b, i, blocks))}</>;
+  return <>{blocks.map(render)}</>;
 }
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const streaming = message.status === "streaming";
   const busy = message.searches?.some((s) => s.status === "running") || message.parts?.some((p) => p.type === "tool" && p.status === "running");
   const waiting = streaming && !message.content && !message.reasoning && !busy && !message.parts?.length;
-  // Working between steps (a tool finished, the next turn hasn't started writing yet).
-  const between = streaming && !busy && !waiting && message.parts?.at(-1)?.type === "tool";
   return (
     <div className={cx("msg msg-assistant", isLast && "msg-last")} data-message-id={message.id}>
       {message.reasoning && <Reasoning message={message} />}
@@ -301,13 +275,6 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
         <Parts message={message} chatId={chatId} />
       ) : (
         message.content && <Markdown content={message.content} className={cx(streaming && "markdown-streaming")} />
-      )}
-      {between && (
-        <div className="typing typing-inline" aria-label="Working">
-          <span />
-          <span />
-          <span />
-        </div>
       )}
       {message.status === "error" && (
         <div className="msg-error" role="alert">

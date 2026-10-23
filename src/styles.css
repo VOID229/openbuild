@@ -2104,7 +2104,8 @@ svg {
   transition: transform var(--med) var(--ease);
 }
 
-.reasoning-open .reasoning-chevron {
+/* Its own toggle only: work runs sit inside an open "Worked for" fold. */
+.reasoning-open > .reasoning-toggle > .reasoning-chevron {
   transform: rotate(90deg);
 }
 
@@ -4404,6 +4405,7 @@ p.key-status svg {
   display: inline-flex;
   flex: none;
   align-items: center;
+  gap: 6px;
   font-size: 11.5px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -4489,8 +4491,59 @@ p.key-status svg {
   font-weight: 600;
 }
 
-.typing-inline {
-  margin: -4px 0 8px 4px;
+/* A run of Pi's work: one line summing up what's finished, and what it's doing right now. */
+
+.work {
+  margin: 6px 0 12px;
+}
+
+.work-toggle {
+  max-width: 100%;
+}
+
+.work-summary {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.work-toggle .tool-stat {
+  margin-left: 4px;
+}
+
+.work-body {
+  margin: 6px 0 4px;
+  animation: rise 200ms var(--ease) both;
+}
+
+/* The calls running now sit bare, aligned with the summary above them, their spinner by the text. */
+.work-live {
+  margin: 0 -8px;
+}
+
+.work-live .tool-head {
+  min-height: 28px;
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+.work-live .tool-text {
+  flex: 0 1 auto;
+}
+
+.work-live .tool-body {
+  margin: 2px 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.work-live .tool-thought-body {
+  border: 0;
+  border-left: 2px solid var(--border-strong);
+  border-radius: 0;
+  padding: 2px 0 2px 14px;
 }
 
 /* Questions from Pi extensions */
@@ -5176,6 +5229,10 @@ p.pi-empty {
 
   .tool-head {
     min-height: 40px;
+  }
+
+  .work-live .tool-head {
+    min-height: 36px;
   }
 
   .slash-item {

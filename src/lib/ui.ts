@@ -2,6 +2,23 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
+/** A duration in its two largest units: "45s", "7m 9s", "1hr 2m", "1d 3hr". */
+export function duration(ms: number) {
+  const total = Math.max(1, Math.round(ms / 1000));
+  const units: [string, number][] = [
+    ["d", Math.floor(total / 86400)],
+    ["hr", Math.floor(total / 3600) % 24],
+    ["m", Math.floor(total / 60) % 60],
+    ["s", total % 60],
+  ];
+  const first = units.findIndex(([, n]) => n > 0);
+  return units
+    .slice(first, first + 2)
+    .filter(([, n]) => n > 0)
+    .map(([u, n]) => `${n}${u}`)
+    .join(" ");
+}
+
 /** Keep an element mounted through its exit transition. `visible` drives the CSS state. */
 export function usePresence(open: boolean, exitMs = 180) {
   const [mounted, setMounted] = useState(open);
