@@ -1,7 +1,7 @@
-import { CircleUserRound } from "lucide-react";
+import { Boxes, CircleUserRound } from "lucide-react";
 import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { brandSvg, providerName, providerSvg } from "../lib/models";
+import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
 import { cx, useDismiss, usePresence } from "../lib/ui";
 
 /** A Settings section's "# Title" heading. */
@@ -103,6 +103,12 @@ export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string
 /** A Pi provider's icon: its brand mark, or its initial on a tile. */
 export const ProviderIcon = memo(function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
   const uid = useId();
+  if (provider === CUSTOM_PROVIDER)
+    return (
+      <span className={cx("brand-icon", className)} aria-hidden>
+        <Boxes />
+      </span>
+    );
   const svg = providerSvg(provider);
   if (svg) return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) }} />;
   return (
