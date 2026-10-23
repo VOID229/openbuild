@@ -2,7 +2,7 @@
 // commands") that opens to a row per call and its output or diff, with what Pi is doing right now
 // under it; and the questions Pi extensions ask on the way.
 import { Bot, Brain, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
 import { cx, duration } from "../lib/ui";
@@ -183,6 +183,9 @@ export function ThoughtRow({ part, live }: { part: ThoughtPart; live: boolean })
 
 type Work = ToolPart | ThoughtPart;
 
+/** How long a call or thought has to be going before it shows as what Pi is doing. */
+const SETTLE_MS = 500;
+
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 /** Tools that read the same in a summary. */
@@ -255,6 +258,21 @@ export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /**
   const current = live ? parts.filter((p) => p === thought || (p.type === "tool" && p.status === "running")) : [];
   const done = current.length ? parts.filter((p) => !current.includes(p)) : parts;
   const summary = done.length ? summarize(done) : undefined;
+  // Most calls are over in a few milliseconds: only one still going after a moment takes the live
+  // line, so quick ones don't flash past "Working" on their way into the summary.
+  const keyOf = (p: Work) => (p.type === "tool" ? p.id : `th${parts.indexOf(p)}`);
+  const since = useRef(new Map<string, number>());
+  const now = Date.now();
+  for (const p of current) if (!since.current.has(keyOf(p))) since.current.set(keyOf(p), now);
+  const shown = current.filter((p) => now - since.current.get(keyOf(p))! >= SETTLE_MS);
+  const [, tick] = useState(0);
+  const waiting = current.length > shown.length;
+  useEffect(() => {
+    if (!waiting) return;
+    const next = Math.min(...current.filter((p) => !shown.includes(p)).map((p) => since.current.get(keyOf(p))! + SETTLE_MS));
+    const t = setTimeout(() => tick((n) => n + 1), Math.max(0, next - Date.now()));
+    return () => clearTimeout(t);
+  });
   const row = (p: Work) =>
     p.type === "thought" ? <ThoughtRow key={`th${parts.indexOf(p)}`} part={p} live={p === thought} /> : <ToolRow key={p.id} part={p} cwd={cwd} />;
   return (
@@ -274,8 +292,8 @@ export function WorkRun({ parts, cwd, live }: { parts: Work[]; cwd?: string; /**
       {open && summary && <div className="tools work-body">{done.map(row)}</div>}
       {live && (
         <div className="work-live">
-          {current.length ? (
-            current.map(row)
+          {shown.length ? (
+            shown.map(row)
           ) : (
             <div className="work-working shimmer">Working</div>
           )}
