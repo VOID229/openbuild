@@ -391,13 +391,7 @@ svg {
   border-radius: 50%;
   border: 2px solid var(--border-strong);
   border-top-color: var(--text-2);
-  animation: spin 0.7s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  /* Spun from script (Spinner in primitives.tsx) so every spinner shares one phase. */
 }
 
 .avatar {

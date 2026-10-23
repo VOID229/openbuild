@@ -134,12 +134,20 @@ export function Avatar({ src, name, size = 24, className }: { src?: string; name
   );
 }
 
+const SPIN_MS = 700;
+
 // Every spinner anchors its animation to the document timeline's origin, so all of them
 // share one phase (now mod duration) however late they mount and always spin in lockstep.
+// It's a script animation, not a CSS one: a CSS animation restarts at 0° whenever its
+// element is moved (the thread list reorders) or re-shown, knocking it out of phase.
 export function Spinner({ size = 14 }: { size?: number }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
-    for (const a of ref.current?.getAnimations() ?? []) a.startTime = 0;
+    const el = ref.current;
+    if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const a = el.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: SPIN_MS, iterations: Infinity });
+    a.startTime = 0;
+    return () => a.cancel();
   }, []);
   return <span ref={ref} className="spinner" style={{ width: size, height: size }} aria-hidden />;
 }
