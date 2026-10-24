@@ -96,7 +96,13 @@ openbuild start lan         # also devices on your network (plain HTTP, this com
 openbuild start tailscale   # your tailnet over HTTPS: https://<this-mac>.<tailnet>.ts.net
 openbuild stop              # also restart, status, logs, open
 openbuild restart           # asks first: a restart ends the Pi threads working in it
+openbuild pair --host       # let another OpenBuild use this computer (prints a code)
+openbuild pair --client     # add another computer's OpenBuild (asks for its code)
 ```
+
+### Paired devices
+
+One OpenBuild can use another computer's projects, worktrees, Pi turns and shell commands. On the computer to be used, run `openbuild pair --host`: name it, pick Tailscale or LAN, and it starts (or reuses) its headless server and prints a short code. On the computer whose UI you use, run `openbuild pair --client`, pick the same transport, and enter the code; it finds the waiting host on the tailnet or LAN. The other device's projects then appear in Settings → Projects (with a device picker for adding new ones) and in the project menu under the composer, labelled `@<device>`. Threads whose project lives on a paired device run there: this server proxies their API and streams, while the UI, chats and settings stay on the server you opened. Unpair from Settings → Projects. Pairing stores a token on the client and only its hash on the host, in owner-only files next to the database.
 
 A restart (and a stop) kills the server process. **Durable threads automatically resume unfinished work when OpenBuild starts again**, without needing a browser to reconnect. No work executes while the server is stopped. Ordinary **Pi** threads still stop mid-reply and have to be asked for again. The thread and its Pi session file stay on disk, so nothing is lost from the conversation. `openbuild restart` asks `Restarting stops ordinary Pi replies; Durable threads resume after startup. Proceed? [Y/n]` when a server it started is running; a server started some other way (systemd, `bun dev`) keeps no `server.json`, so `openbuild restart` refuses with an explanation instead of guessing — restart it where it is managed; `openbuild restart --yes` skips the question (needed when there is no terminal, e.g. from a script).
 

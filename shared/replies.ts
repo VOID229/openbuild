@@ -13,6 +13,8 @@ export interface ReplyStream {
   id: string;
   /** Where it runs: "hosted" (the website's relay) or the local server's id (see /api/config). */
   via: string;
+  /** A paired device it runs on. Absent: this server. */
+  deviceId?: string;
   /** Hosted only: the key its saved copy is encrypted with (base64url, 32 bytes). */
   key?: string;
 }

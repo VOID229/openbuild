@@ -2,7 +2,6 @@
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
 // the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
-import { hostname as osHostname } from "node:os";
 import index from "../src/index.html";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
@@ -18,6 +17,7 @@ import * as storage from "./storage";
 import * as vault from "./vault";
 import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
 import * as durable from "./durable";
+import * as devices from "./devices";
 
 const isEdits = (e: unknown): e is KeyEdit[] =>
   Array.isArray(e) &&
@@ -29,20 +29,9 @@ const isChat = (c: any): c is storage.StoredChat =>
 /** The client's persisted UI state (settings, sidebar layout), stored as one JSON document. */
 const STATE_KEY = "client-state";
 /** Names this server (its data), so a synced reply that's running here is only picked up by apps it serves. */
-const serverId = (() => {
-  let id = storage.getValue("server-id");
-  if (!id) storage.setValue("server-id", (id = crypto.randomUUID()));
-  return id;
-})();
-/** This computer's name as people know it ("Gal's MacBook Pro"), shown where threads run. */
-const machine = (() => {
-  if (process.platform === "darwin") {
-    const r = Bun.spawnSync(["scutil", "--get", "ComputerName"]);
-    const name = r.stdout.toString().trim();
-    if (r.exitCode === 0 && name) return name;
-  }
-  return osHostname().replace(/\.local$/, "");
-})();
+const serverId = devices.serverId();
+/** This device's name (chosen when pairing, else the computer name), read per request so a rename shows up. */
+const machine = () => devices.deviceName();
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
@@ -61,11 +50,81 @@ function forbidden(req: Request): Response | undefined {
   const ok = host && allowedHosts.has(hostname(host)) && (origin === null || (originHost !== undefined && originHost.toLowerCase() === host.toLowerCase()));
   return ok ? undefined : bad("Forbidden", 403);
 }
-/** Wrap an API handler with the request check. */
+/**
+ * What a paired device may do: work in projects and run Pi there. It can't read saved keys,
+ * change this device's password, manage plugins, or list other devices.
+ */
+const devicePathAllowed = (path: string) =>
+  path === "/api/config" ||
+  /^\/api\/chat\/runs\//.test(path) ||
+  /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
+  /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
+  /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path);
+
+/** Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser session. */
 const api =
   <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) =>
-  (req: R, ...rest: A) =>
-    forbidden(req) ?? localAuth.protect(req, () => handler(req, ...rest));
+  (req: R, ...rest: A) => {
+    const denied = forbidden(req);
+    if (denied) return denied;
+    if (devices.authenticateDevice(req)) {
+      if (!devicePathAllowed(new URL(req.url).pathname)) return bad("Forbidden", 403);
+      return handler(req, ...rest);
+    }
+    return localAuth.protect(req, () => handler(req, ...rest));
+  };
+
+/** Headers from a proxied remote response that are safe to pass back to the browser. */
+const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after"];
+
+/**
+ * Forward a request to a paired device's server. The browser never sees the device token: it is
+ * added here, and the device's session cookie is not forwarded either way. Response bodies stream
+ * through, so replies and shell output keep arriving as they are produced.
+ */
+async function proxyDevice(req: Request, id: string): Promise<Response> {
+  const device = devices.deviceCredentials(id);
+  if (!device) return bad("No such device. Pair it again with `openbuild pair --client`.", 404);
+  const url = new URL(req.url);
+  const prefix = `/api/devices/${encodeURIComponent(id)}`;
+  const path = url.pathname.slice(prefix.length) || "/";
+  if (!path.startsWith("/api/")) return bad("Not found", 404);
+  const headers = new Headers();
+  for (const name of ["content-type", "accept", "range", "if-range", "if-none-match"]) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+  headers.set("authorization", `Bearer ${device.token}`);
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+  let lastError = "the device didn't answer";
+  for (const base of device.urls) {
+    const target = `${base.replace(/\/$/, "")}${path}${url.search}`;
+    try {
+      const res = await fetch(target, { method: req.method, headers, body, signal: req.signal });
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        lastError = `the device answered HTTP ${res.status}`;
+        void res.body?.cancel().catch(() => {});
+        continue;
+      }
+      devices.touchDevice(id, true);
+      const out = new Headers();
+      for (const name of PROXY_RESPONSE_HEADERS) {
+        const value = res.headers.get(name);
+        if (value) out.set(name, value);
+      }
+      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+    } catch (err) {
+      lastError = (err as Error).message;
+    }
+  }
+  return bad(`Couldn't reach ${device.name}: ${lastError}`, 502);
+}
+
+const proxyRoute = async (req: Bun.BunRequest<"/api/devices/:id/*">, server: Bun.Server<unknown>) => {
+  // Replies and shell output stream for as long as they run.
+  server.timeout(req, 0);
+  return proxyDevice(req, req.params.id);
+};
 
 function serve(port: number, hostname: string) {
   return Bun.serve({
@@ -88,7 +147,58 @@ function serve(port: number, hostname: string) {
       // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
-        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, machine })),
+        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine() })),
+      },
+
+      // Pairing: public, because the other device has no session yet. The code is the credential,
+      // and it only exists while `openbuild pair --host` is waiting.
+      "/api/pair/info": {
+        GET: (req) => forbidden(req) ?? Response.json(devices.pairingInfo()),
+      },
+      "/api/pair/claim": {
+        POST: async (req) => {
+          const denied = forbidden(req);
+          if (denied) return denied;
+          const body = await readJson(req);
+          if (typeof body?.code !== "string" || !body.code.trim() || body.code.length > 40) return bad("Expected { code }");
+          const claimed = devices.claimPairing(body.code, typeof body.name === "string" ? body.name : "");
+          return claimed ? Response.json(claimed) : bad("That pairing code isn't valid anymore. Run `openbuild pair --host` again on the other device.", 403);
+        },
+      },
+
+      // Paired devices this server's UI can use (tokens stay on the server).
+      "/api/devices": {
+        GET: api(async () => {
+          const list = devices.listDevices();
+          const probes = await Promise.all(
+            list.map(async (device) => {
+              for (const base of device.urls) {
+                try {
+                  const res = await fetch(`${base.replace(/\/$/, "")}/api/auth/status`, { signal: AbortSignal.timeout(1500) });
+                  if (res.ok) {
+                    devices.touchDevice(device.id, true);
+                    return { ...device, online: true, lastSeenAt: Date.now() };
+                  }
+                } catch {}
+              }
+              return { ...device, online: false };
+            }),
+          );
+          return Response.json({ devices: probes });
+        }),
+      },
+      "/api/devices/:id": {
+        DELETE: api((req: Bun.BunRequest<"/api/devices/:id">) => (devices.removeDevice(req.params.id) ? Response.json({ ok: true }) : bad("No such device", 404))),
+      },
+      // Everything the UI needs on that device: /api/devices/<id>/api/projects, /api/pi/chat, …
+      "/api/devices/:id/*": {
+        GET: api(proxyRoute),
+        POST: api(proxyRoute),
+        PUT: api(proxyRoute),
+        PATCH: api(proxyRoute),
+        DELETE: api(proxyRoute),
+        HEAD: api(proxyRoute),
+        OPTIONS: api(proxyRoute),
       },
 
       "/api/dictation/check": { GET: api(checkWhisper) },

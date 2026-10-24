@@ -261,6 +261,8 @@ export interface Workspace {
   projectName: string;
   /** The directory Pi runs in. */
   cwd: string;
+  /** The paired device this workspace lives on. Absent: the server this app is open on. */
+  deviceId?: string;
   branch?: string;
   /** A worktree OpenBuild created for this thread (on its own branch). */
   worktree?: boolean;
@@ -276,6 +278,30 @@ export interface Project {
   git: boolean;
   /** Missing from disk (moved or deleted). */
   missing?: boolean;
+  /** A paired device this project lives on. Absent: this server. `id` is namespaced as `<deviceId>::<id>` on the client. */
+  deviceId?: string;
+  /** That device's display name, for the "@device" label. */
+  deviceName?: string;
+}
+
+/** Another OpenBuild server this one can use, paired over Tailscale or the local network. */
+export interface Device {
+  /** The device's server id (its OpenBuild data), also used as the proxy path segment. */
+  id: string;
+  /** The remote server's own id, which its reply streams mark as `via`. */
+  serverId?: string;
+  /** The name chosen when pairing. */
+  name: string;
+  /** The computer name, e.g. "Gal's MacBook Pro". */
+  machine?: string;
+  mode: "lan" | "tailscale";
+  urls: string[];
+  pairedAt?: number;
+  lastSeenAt?: number;
+  /** Reachable right now (checked when the device list is loaded). */
+  online?: boolean;
+  /** This server (always shown first in device pickers). */
+  local?: boolean;
 }
 
 export interface GitInfo {
