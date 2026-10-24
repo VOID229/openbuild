@@ -6,11 +6,11 @@ import { createLocalAuth } from "../server/localAuth";
 
 const PASSWORD = "correct horse battery staple";
 const directories: string[] = [];
-function fixture() {
+function fixture(options: { httpsHosts?: string[] } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "openbuild-auth-"));
   directories.push(directory);
   let time = 1_000_000;
-  const auth = createLocalAuth({ directory, now: () => time });
+  const auth = createLocalAuth({ directory, now: () => time, httpsHosts: options.httpsHosts });
   return { auth, directory, advance: (ms: number) => { time += ms; } };
 }
 function request(cookie?: string, url = "http://localhost/api") {
@@ -93,7 +93,7 @@ describe("local password authentication", () => {
     expect(another).not.toBe(cookie);
   });
 
-  test("sets Secure only from the request URL, including logout", async () => {
+  test("sets Secure from the request URL, including logout", async () => {
     const { auth } = fixture();
     await auth.setPassword(PASSWORD);
     const insecure = await auth.login(loginRequest(PASSWORD, "http://localhost/login", { "x-forwarded-proto": "https" }));
@@ -101,6 +101,17 @@ describe("local password authentication", () => {
     const secure = await auth.login(loginRequest(PASSWORD, "https://localhost/login", { "x-forwarded-proto": "http" }));
     expect(secure.headers.get("set-cookie")).toContain("; Secure");
     expect(auth.logout(request(session(secure), "https://localhost/logout")).headers.get("set-cookie")).toContain("Max-Age=0; Secure");
+  });
+
+  test("sets Secure behind a declared HTTPS proxy host, but not on plain HTTP hosts", async () => {
+    const { auth } = fixture({ httpsHosts: ["box.tailnet.ts.net"] });
+    await auth.setPassword(PASSWORD);
+    const proxied = await auth.login(loginRequest(PASSWORD, "http://box.tailnet.ts.net/login"));
+    expect(proxied.headers.get("set-cookie")).toContain("; Secure");
+    expect(auth.status(request(session(proxied), "http://box.tailnet.ts.net/api/auth/status")).headers.get("set-cookie")).toContain("; Secure");
+    // A forwarded-proto header alone never grants Secure, and other hosts stay plain HTTP.
+    const spoofed = await auth.login(loginRequest(PASSWORD, "http://localhost/login", { "x-forwarded-proto": "https" }));
+    expect(spoofed.headers.get("set-cookie")).not.toContain("Secure");
   });
 
   test("logout revokes only that session and clears the cookie", async () => {

@@ -191,6 +191,9 @@ async function start(mode: Mode) {
       const bindable = ip && Object.values(networkInterfaces()).flat().some((a) => a?.address === ip);
       env.HOST = ["127.0.0.1", ...(bindable ? [ip] : [])].join(",");
       env.OPENCHAT_ALLOWED_HOSTS = [self.name, ...(ip ? [ip] : [])].join(",");
+      // The browser reaches us over HTTPS here, but the backend sees plain HTTP from tailscale
+      // serve. Mark the public name so session cookies get Secure (direct IP HTTP stays plain).
+      env.OPENBUILD_PUBLIC_HTTPS = self.name;
     } else {
       // No HTTPS certificates on this tailnet: listen on the Tailscale address itself, plain HTTP.
       env.HOST = self.ips.find((ip) => ip.includes(".")) ?? fail("This computer has no Tailscale IPv4 address.");

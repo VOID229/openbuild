@@ -30,8 +30,26 @@ function requestToken(req: Request): string | undefined {
   return /^[a-f0-9]{64}$/.test(token) ? token : undefined;
 }
 
-function cookie(req: Request, token: string, maxAge: number): string {
-  return `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${new URL(req.url).protocol === "https:" ? "; Secure" : ""}`;
+function hostnameOf(host: string): string {
+  const value = host.trim().toLowerCase();
+  return value.startsWith("[") ? value.slice(0, value.indexOf("]") + 1) : value.replace(/:\d+$/, "");
+}
+
+/**
+ * HTTPS can end at a local TLS proxy (`tailscale serve` in front of 127.0.0.1), where the request
+ * URL itself is still http. Such deployments declare their public HTTPS hostname explicitly, so
+ * unlike a forwarded header this cannot be spoofed by a plain-HTTP LAN client to break its cookie.
+ */
+function isSecure(req: Request, httpsHosts: string[]): boolean {
+  let url: URL | undefined;
+  try { url = new URL(req.url); } catch { /* Fall back to Host only. */ }
+  if (url?.protocol === "https:") return true;
+  const host = req.headers.get("host") ?? url?.host;
+  return !!host && httpsHosts.includes(hostnameOf(host));
+}
+
+function cookie(req: Request, token: string, maxAge: number, httpsHosts: string[]): string {
+  return `${COOKIE}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${isSecure(req, httpsHosts) ? "; Secure" : ""}`;
 }
 
 async function jsonBody(req: Request): Promise<Record<string, unknown>> {
@@ -78,10 +96,12 @@ async function passwordBody(req: Request): Promise<string> {
   return passwordField((await jsonBody(req)).password);
 }
 
-export function createLocalAuth(options: { directory?: string; now?: () => number } = {}) {
+export function createLocalAuth(options: { directory?: string; now?: () => number; httpsHosts?: string[] } = {}) {
   const directory = options.directory ?? dataDir();
   const file = join(directory, "access.json");
   const now = options.now ?? Date.now;
+  const httpsHosts = (options.httpsHosts ?? (process.env.OPENBUILD_PUBLIC_HTTPS ?? "").split(","))
+    .map(hostnameOf).filter(Boolean);
   const sessions = new Map<string, number>();
   let knownHash: string | undefined;
   let attempts: number[] = [];
@@ -157,7 +177,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
     try { persist(hash); }
     catch { sessions.clear(); return json({ error: "Could not save session" }, 503); }
-    return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS) });
+    return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS, httpsHosts) });
   }
 
   async function setPassword(password: string): Promise<void> {
@@ -203,14 +223,14 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       const token = requestToken(req)!;
       const response = await handler();
       const headers = new Headers(response.headers);
-      headers.append("Set-Cookie", cookie(req, token, SESSION_SECONDS));
+      headers.append("Set-Cookie", cookie(req, token, SESSION_SECONDS, httpsHosts));
       return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
     },
 
     status(req: Request): Response {
       const authenticatedSession = authenticated(req);
       return json({ configured: knownHash !== undefined, authenticated: authenticatedSession }, 200,
-        authenticatedSession ? { "Set-Cookie": cookie(req, requestToken(req)!, SESSION_SECONDS) } : undefined);
+        authenticatedSession ? { "Set-Cookie": cookie(req, requestToken(req)!, SESSION_SECONDS, httpsHosts) } : undefined);
     },
 
     async login(req: Request): Promise<Response> {
@@ -272,7 +292,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
         try { persist(hash); }
         catch { return json({ error: "Could not revoke session" }, 503); }
       }
-      return json({ authenticated: false }, 200, { "Set-Cookie": cookie(req, "", 0) });
+      return json({ authenticated: false }, 200, { "Set-Cookie": cookie(req, "", 0, httpsHosts) });
     },
   };
 }
