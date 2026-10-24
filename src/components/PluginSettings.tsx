@@ -1,6 +1,67 @@
-import { FolderOpen, Puzzle, RefreshCw, TriangleAlert } from "lucide-react";
+import { FolderOpen, Puzzle, RefreshCw, Trash2, TriangleAlert } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import type { PluginInfo } from "../../shared/plugins";
 import { usePlugins } from "../lib/plugins";
-import { SettingsHeading as Heading, Toggle } from "./primitives";
+import { IconButton, SettingsHeading as Heading, Toggle } from "./primitives";
+
+// "Don't ask again" is a browser preference: deleting is local to this device, like the UI itself.
+const SKIP_DELETE_CONFIRM = "openbuild.plugins.skipDeleteConfirm";
+
+function skipDeleteConfirm(): boolean {
+  try {
+    return localStorage.getItem(SKIP_DELETE_CONFIRM) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function rememberSkipDeleteConfirm(skip: boolean) {
+  try {
+    if (skip) localStorage.setItem(SKIP_DELETE_CONFIRM, "1");
+    else localStorage.removeItem(SKIP_DELETE_CONFIRM);
+  } catch {}
+}
+
+function DeletePluginDialog({ plugin, busy, onCancel, onConfirm }: { plugin: PluginInfo; busy: boolean; onCancel: () => void; onConfirm: (skipNextTime: boolean) => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [skipNextTime, setSkipNextTime] = useState(skipDeleteConfirm);
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="plugin-confirm-dialog"
+      aria-labelledby="plugin-delete-title"
+      aria-describedby="plugin-delete-description"
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onCancel();
+      }}
+    >
+      <h2 id="plugin-delete-title">Delete “{plugin.name}”?</h2>
+      <p id="plugin-delete-description">
+        This permanently removes the <code>{plugin.id}</code> folder from <code>plugins/</code>, including its manifest, client and
+        server files. It can't be undone from OpenBuild.
+      </p>
+      <label className="plugin-confirm-skip">
+        <input type="checkbox" checked={skipNextTime} onChange={(event) => setSkipNextTime(event.target.checked)} />
+        Don't ask again
+      </label>
+      <div className="plugin-confirm-actions">
+        <button type="button" className="btn btn-sm" onClick={onCancel} disabled={busy} autoFocus>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-sm btn-danger" onClick={() => onConfirm(skipNextTime)} disabled={busy}>
+          <Trash2 size={14} />
+          {busy ? "Deleting…" : "Delete plugin"}
+        </button>
+      </div>
+    </dialog>
+  );
+}
 
 /**
  * Settings → Plugins. Lists every folder the server found (including broken ones), lets each be
@@ -15,8 +76,28 @@ export function PluginsSection() {
   const reload = usePlugins((s) => s.reload);
   const setSystemEnabled = usePlugins((s) => s.setSystemEnabled);
   const setEnabled = usePlugins((s) => s.setEnabled);
+  const remove = usePlugins((s) => s.remove);
+  const [pendingDelete, setPendingDelete] = useState<PluginInfo>();
+  const [deleting, setDeleting] = useState(false);
   const disabled = new Set(info?.disabled ?? []);
   const systemEnabled = !!info?.enabled && !info?.safe;
+
+  const deletePlugin = async (plugin: PluginInfo, skipNextTime: boolean) => {
+    if (deleting) return;
+    setDeleting(true);
+    const ok = await remove(plugin.id);
+    setDeleting(false);
+    rememberSkipDeleteConfirm(skipNextTime);
+    if (ok) setPendingDelete(undefined);
+    // A failure (or the error banner) still leaves a way to retry.
+    else setPendingDelete(plugin);
+  };
+
+  const requestDelete = (plugin: PluginInfo) => {
+    // Delete immediately when the confirmation was turned off earlier.
+    if (skipDeleteConfirm()) void deletePlugin(plugin, true);
+    else setPendingDelete(plugin);
+  };
 
   return (
     <>
@@ -97,16 +178,37 @@ export function PluginsSection() {
                   </div>
                 )}
               </div>
-              <Toggle
-                checked={enabled}
-                disabled={!systemEnabled || !!problem}
-                onChange={(next) => void setEnabled(plugin.id, next)}
-                label={`Enable ${plugin.name}`}
-              />
+              <div className="plugin-actions">
+                <Toggle
+                  checked={enabled}
+                  disabled={!systemEnabled || !!problem}
+                  onChange={(next) => void setEnabled(plugin.id, next)}
+                  label={`Enable ${plugin.name}`}
+                />
+                <IconButton
+                  label={`Delete ${plugin.name}`}
+                  tooltip="Delete plugin"
+                  tooltipSide="left"
+                  className="plugin-delete"
+                  disabled={deleting}
+                  onClick={() => requestDelete(plugin)}
+                >
+                  <Trash2 size={15} />
+                </IconButton>
+              </div>
             </div>
           );
         })}
       </div>
+
+      {pendingDelete && (
+        <DeletePluginDialog
+          plugin={pendingDelete}
+          busy={deleting}
+          onCancel={() => setPendingDelete(undefined)}
+          onConfirm={(skip) => void deletePlugin(pendingDelete, skip)}
+        />
+      )}
 
       <div className="plugin-footer">
         <button type="button" className="btn btn-sm" onClick={() => void reload()} disabled={loading}>
@@ -121,10 +223,6 @@ export function PluginsSection() {
         )}
       </div>
 
-      <p className="settings-hint">
-        Edits to <code>client.tsx</code>, <code>styles.css</code>, <code>server.ts</code> and <code>plugin.json</code> reload automatically,
-        including new plugin folders. The master switch and plugin toggles apply immediately. Changes to OpenBuild's own code still need a restart.
-      </p>
     </>
   );
 }

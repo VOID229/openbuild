@@ -161,6 +161,7 @@ export default {
 - A plugin's client module is wrapped in an error boundary. A crash is shown in `Settings → Plugins`; it doesn't take the app down.
 - A file watcher polls the plugin folder (and `custom.css`). Every change re-scans the folders, reloads any `server.ts` whose source changed, and broadcasts over SSE; every open browser unloads and re-imports enabled plugins without a page reload. New and removed plugin folders work live, and so do `server.ts` edits (the module is re-imported with `onStop`/`onStart`). Only changes to OpenBuild's own app code need a restart.
 - The master switch and per-plugin state are stored in OpenBuild's database, not the browser, so every device sees them. On first run the whole system is off.
+- Each plugin has a delete button next to its toggle, with a confirmation step. Deleting removes the plugin folder from disk; "Don't ask again" is remembered per browser.
 
 ## Security
 

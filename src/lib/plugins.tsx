@@ -105,6 +105,8 @@ interface PluginStore {
   /** The master switch for the whole plugin system. Off on first run. */
   setSystemEnabled: (enabled: boolean) => Promise<void>;
   setEnabled: (id: string, enabled: boolean) => Promise<void>;
+  /** Delete a plugin's folder from disk. Resolves false when the server refused. */
+  remove: (id: string) => Promise<boolean>;
   reload: () => Promise<void>;
 }
 
@@ -153,6 +155,18 @@ export const usePlugins = create<PluginStore>((set, get) => ({
       await get().refresh(true);
     } catch (err) {
       set({ error: (err as Error).message });
+    }
+  },
+
+  remove: async (id) => {
+    try {
+      const res = await fetch(`/api/plugins/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error ?? `HTTP ${res.status}`);
+      await get().refresh(true);
+      return true;
+    } catch (err) {
+      set({ error: (err as Error).message || `Couldn't delete ${id}` });
+      return false;
     }
   },
 

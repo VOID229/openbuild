@@ -14,7 +14,7 @@
 //
 // Client modules are bundled by Bun with React (and the `openbuild` SDK) left as references to the
 // host's instances, so a plugin can't accidentally load a second React copy.
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import * as React from "react";
 import * as JSXRuntime from "react/jsx-runtime";
@@ -126,6 +126,32 @@ export async function setPluginEnabled(id: string, enabled: boolean): Promise<bo
   storage.setValue(STATE_KEY, JSON.stringify({ disabled: [...disabled], enabled: [...enabledList], system: state.system }));
   await syncServerPlugins();
   broadcast("reload");
+  return true;
+}
+
+/**
+ * Delete a plugin's folder and forget any enable/disable choice for it. Only folders directly
+ * inside the plugins directory can be removed. Returns false when there is no such plugin.
+ */
+export async function deletePlugin(id: string): Promise<boolean> {
+  if (!isPluginId(id)) return false;
+  const plugin = loaded.find((p) => p.info.id === id);
+  if (!plugin) return false;
+  const dir = resolve(plugin.dir);
+  // Never delete anything outside the plugins folder, or a nested file inside a plugin.
+  if (dirname(dir) !== resolve(pluginsDir)) return false;
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (err) {
+    throw new Error(`Couldn't remove ${dir}: ${(err as Error).message}`);
+  }
+  // A removed plugin should come back enabled if its folder is added again.
+  const state = storedState();
+  storage.setValue(
+    STATE_KEY,
+    JSON.stringify({ ...state, disabled: state.disabled.filter((x) => x !== id), enabled: state.enabled.filter((x) => x !== id) }),
+  );
+  await reloadFromDisk();
   return true;
 }
 
@@ -762,6 +788,15 @@ export function pluginRoutes(api: Api) {
         if (!isPluginId(req.params.id) || typeof body?.enabled !== "boolean") return bad("Expected { enabled: boolean }");
         if (safeMode) return bad("OpenBuild is in safe mode", 409);
         return (await setPluginEnabled(req.params.id, body.enabled)) ? Response.json({ ok: true }) : bad("No such plugin", 404);
+      }),
+      DELETE: api(async (req: Bun.BunRequest<"/api/plugins/:id">) => {
+        if (!isPluginId(req.params.id)) return bad("Expected a plugin id");
+        if (safeMode) return bad("OpenBuild is in safe mode", 409);
+        try {
+          return (await deletePlugin(req.params.id)) ? Response.json({ ok: true }) : bad("No such plugin", 404);
+        } catch (err) {
+          return bad((err as Error).message, 500);
+        }
       }),
     },
   };

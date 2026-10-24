@@ -156,6 +156,12 @@ test("plugins are served, built against the host React, and can be disabled", as
     expect((await authed("/api/plugins/example/client.js")).status).toBe(404);
     expect((await authed("/api/plugins/example/hello")).status).toBe(404);
 
+    // Deleting removes the folder even while the plugin is off, and forgets the disabled choice.
+    expect((await authed("/api/plugins/example", { method: "DELETE" })).status).toBe(200);
+    expect(existsSync(pluginDir)).toBe(false);
+    expect((await authed("/api/plugins")).json()).resolves.toMatchObject({ enabled: true, disabled: [], plugins: [] });
+    expect((await authed("/api/plugins/example", { method: "DELETE" })).status).toBe(404);
+
     // The master switch turns everything off again, and the choice survives a reload of the state.
     expect((await authed("/api/plugins/system", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false }) })).status).toBe(200);
     expect((await authed("/api/plugins")).json()).resolves.toMatchObject({ enabled: false });
