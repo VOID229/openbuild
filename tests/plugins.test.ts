@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateManifest, type PluginManifest } from "../shared/plugins";
 import { createLocalAuth } from "../server/localAuth";
 import openrouterDeepseek from "../plugins/openrouter-deepseek/client";
 import piClaude from "../plugins/pi-claude/client";
+import codexMulti from "../plugins/codex-multi/client";
 import { providerOf, providerName } from "../src/lib/models";
 import { clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
 
@@ -43,6 +44,27 @@ test("provider overrides move pi-claude out of Custom and into Claude", () => {
     expect(providerName("claude")).toBe("Claude");
     const other = { id: "someone/other-model", provider: "someone", custom: true } as const;
     expect(providerOf(other)).toBe("custom");
+  } finally {
+    clearProviderOverrides();
+  }
+});
+
+test("the codex-multi plugin gives the second Codex login its own Codex group", () => {
+  try {
+    setProviderOverrides(codexMulti.providers);
+    const second = { id: "openai-codex-2/gpt-5.6-luna", provider: "openai-codex-2", custom: true } as const;
+    expect(providerOf(second)).toBe("openai-codex-2");
+    expect(providerName("openai-codex-2")).toBe("Codex (2)");
+    const first = { id: "openai-codex/gpt-5.6-luna", provider: "openai-codex", custom: false } as const;
+    expect(providerOf(first)).toBe("openai-codex");
+    expect(providerName("openai-codex")).toBe("Codex");
+
+    const icon = codexMulti.icons.providers["openai-codex-2"];
+    expect(icon).toContain("<svg");
+    expect(icon).toContain('fill="currentColor"');
+    // The "2" badge is cut out with two masks whose ids the host makes unique per instance.
+    expect(icon).toContain("codex2-two-_R_0_");
+    expect(icon).toContain("codex2-cut-_R_0_");
   } finally {
     clearProviderOverrides();
   }

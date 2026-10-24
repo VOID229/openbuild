@@ -14,7 +14,7 @@ Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in 
 
 The whole plugin system is **off by default**. `Settings → Plugins` has the master switch: until it's on, nothing from the folder runs — no UI slots, styles, server routes or hooks. With it on, the same page lists everything found (including broken plugins) and turns each one on or off without deleting it.
 
-The folder ships four examples: `daily-note` (a composer button + server route + settings page), `openrouter-deepseek` (icon overrides), `pi-claude` (provider grouping) and `quiet-ui` (manifest-only tokens and CSS, off by default).
+The folder ships five examples: `daily-note` (a composer button + server route + settings page), `openrouter-deepseek` (icon overrides), `pi-claude` and `codex-multi` (provider grouping and a badged provider icon) and `quiet-ui` (manifest-only tokens and CSS, off by default).
 
 ## Manifest
 
@@ -95,7 +95,7 @@ Components receive the slot's context as props.
 
 `icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are bare model id prefixes (longest match wins, so `deepseek` matches `deepseek/deepseek-v4.1-flash`). The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme. `plugins/openrouter-deepseek` is a working example.
 
-`providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group. `plugins/pi-claude` is a working example.
+`providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group. `plugins/pi-claude` and `plugins/codex-multi` are working examples.
 
 ### SDK
 
