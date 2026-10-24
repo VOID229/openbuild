@@ -105,4 +105,5 @@ try {
   out({ type: "error", message: err?.message ?? String(err) });
   process.exitCode = 1;
 }
-process.exit();
+// Once stdout is flushed: exiting right away cuts a large answer short when it's a pipe.
+process.stdout.write("", () => process.exit());
