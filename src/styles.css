@@ -1508,6 +1508,15 @@ svg {
   color: var(--text-2);
 }
 
+.queued-steering {
+  padding: 0 12px 0 10px;
+}
+
+.queued-status {
+  flex-shrink: 0;
+  font-size: 12.5px;
+}
+
 .queued-editing {
   padding-left: 30px;
   color: var(--text-3);

@@ -3,7 +3,7 @@ import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type Mod
 import { stopReply, streamChat } from "./api";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
-import { editingQueued, moveQueued, queueOf, removeQueued, requeue, shiftQueue, type Queued } from "./queue";
+import { editingQueued, moveQueued, queueOf, removeQueued, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
@@ -19,7 +19,21 @@ export { uid };
  * Active generation per chat. Replacing an entry orphans the old stream (its updates are dropped).
  * `steers`: queued messages handed to Pi during the reply that it hasn't read yet.
  */
-const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[] }>();
+const running = new Map<string, Run>();
+type Run = { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[] };
+
+/** Update a run's unread steers, and what the queue tray shows as steering while it's the chat's reply. */
+function setSteers(chatId: string, run: Run, list: Queued[]) {
+  run.steers = list;
+  if (running.get(chatId) === run) setSteering(chatId, list);
+}
+
+/** Put a run's unread steers back in the queue, as it ends or is replaced. */
+function requeueSteers(chatId: string, run: Run) {
+  requeue(chatId, run.steers);
+  run.steers = [];
+  setSteering(chatId, []);
+}
 
 export function makeTitle(text: string, attachments: Attachment[]) {
   const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New thread";
@@ -105,10 +119,7 @@ export function stopGeneration(chatId: string) {
 export function interruptWith(chatId: string, id: string) {
   // Steers Pi hasn't read yet wait behind it.
   const run = running.get(chatId);
-  if (run) {
-    requeue(chatId, run.steers);
-    run.steers = [];
-  }
+  if (run) requeueSteers(chatId, run);
   moveQueued(chatId, id, 0);
   stopGeneration(chatId);
 }
@@ -126,13 +137,13 @@ export async function steerQueued(chatId: string, id: string) {
   if (!run || !item || msg?.model?.plan !== "pi" || chat?.runtime === "durable") return;
   const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(st.detection, msg.model)?.input ?? ["text"]);
   removeQueued(chatId, id);
-  run.steers.push(item);
+  setSteers(chatId, run, [...run.steers, item]);
   try {
     // An extension took it as input; there's nothing more to show for it.
-    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId)).handled) run.steers = run.steers.filter((q) => q !== item);
+    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId)).handled) setSteers(chatId, run, run.steers.filter((q) => q !== item));
   } catch (err) {
     if (run.steers.includes(item)) {
-      run.steers = run.steers.filter((q) => q !== item);
+      setSteers(chatId, run, run.steers.filter((q) => q !== item));
       requeue(chatId, [item]);
     }
     throw err;
@@ -222,7 +233,7 @@ export function regenerate(chatId: string, messageId: string) {
   if (prev) {
     running.delete(chatId);
     stopRun(prev);
-    requeue(chatId, prev.steers);
+    requeueSteers(chatId, prev);
   }
   const now = Date.now();
   st.patchMessage(chatId, messageId, {
@@ -360,7 +371,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
     ? msg.stream!
     : { id: uid(), via: via ?? "", deviceId: plannedDevice, key: host === "hosted" ? newStreamKey() : undefined };
   const ctrl = new AbortController();
-  const run = { ctrl, messageId, stream, steers: [] as Queued[] };
+  const run: Run = { ctrl, messageId, stream, steers: [] };
   running.set(chatId, run);
   const isCurrent = () => running.get(chatId)?.ctrl === ctrl;
   if (!resume) st.patchMessage(chatId, messageId, { stream: host ? stream : undefined }, true);
@@ -470,7 +481,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         const item = (ev.id && steered.get(ev.id)) || run.steers.find((q) => q.id === ev.id);
         if (item) {
           steered.set(item.id, item);
-          run.steers = run.steers.filter((q) => q !== item);
+          setSteers(chatId, run, run.steers.filter((q) => q !== item));
         }
         endThought();
         parts.push({ type: "steer", id: ev.id, text: item ? item.text : ev.text, attachments: item?.files.length ? item.files : undefined });
@@ -516,7 +527,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
   if (!isCurrent()) return;
   running.delete(chatId);
   // Steers Pi didn't get to are sent next, as ordinary messages.
-  requeue(chatId, run.steers);
+  requeueSteers(chatId, run);
   // A reply picked back up may have been finished meanwhile by the device that started it.
   const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
   if (resume && now?.status !== "streaming") return drainQueue(chatId);

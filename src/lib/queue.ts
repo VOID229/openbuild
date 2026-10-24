@@ -13,9 +13,11 @@ interface QueueState {
   queues: Record<string, Queued[]>;
   /** Per chat, the queued message open in the composer. It keeps its slot, and nothing is sent meanwhile. */
   editing: Record<string, string>;
+  /** Per chat, messages steered into the running reply that Pi hasn't read yet. */
+  steering: Record<string, Queued[]>;
 }
 
-export const useQueue = create<QueueState>(() => ({ queues: {}, editing: {} }));
+export const useQueue = create<QueueState>(() => ({ queues: {}, editing: {}, steering: {} }));
 
 const EMPTY: Queued[] = [];
 
@@ -26,6 +28,15 @@ function setQueue(chatId: string, list: Queued[]) {
   useQueue.setState((s) => {
     const { [chatId]: _, ...rest } = s.queues;
     return { queues: list.length ? { ...rest, [chatId]: list } : rest };
+  });
+}
+
+export const useSteeringOf = (chatId: string | undefined) => useQueue((s) => (chatId && s.steering[chatId]) || EMPTY);
+
+export function setSteering(chatId: string, list: Queued[]) {
+  useQueue.setState((s) => {
+    const { [chatId]: _, ...rest } = s.steering;
+    return { steering: list.length ? { ...rest, [chatId]: list } : rest };
   });
 }
 

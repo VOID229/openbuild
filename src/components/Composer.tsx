@@ -9,7 +9,7 @@ import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../li
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
-import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, type Queued } from "../lib/queue";
+import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
 import { cx } from "../lib/ui";
@@ -111,10 +111,32 @@ function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete,
   );
 }
 
+/** A message handed to Pi that it hasn't read yet; it shows in the thread once Pi does. */
+function SteeringRow({ item }: { item: Queued }) {
+  const file = item.files[0];
+  const more = item.files.length - (item.text ? 0 : 1);
+  return (
+    <div className="queued queued-steering" data-queued-id={item.id}>
+      <CornerUpLeft className="queued-file" size={14} />
+      {file &&
+        (file.mime.startsWith("image/") ? (
+          <img className="queued-thumb" src={file.dataUrl} alt="" />
+        ) : (
+          <FileText className="queued-file" size={15} />
+        ))}
+      <span className="queued-text">{item.text || file?.name}</span>
+      {more > 0 && <span className="queued-more">+{more}</span>}
+      <span className="queued-status shimmer">Steering</span>
+    </div>
+  );
+}
+
 /** Queued messages, first to be sent on top. Drag a row's grip to reorder. */
 interface TrayProps {
   chatId: string;
   queue: Queued[];
+  /** Steered into the reply, waiting for Pi to read them. */
+  steering: Queued[];
   onEdit: (item: Queued) => void;
   onFinish: (save: boolean) => void;
   /** A reply is coming in, so a message can interrupt it, or (Pi) steer it. */
@@ -122,7 +144,7 @@ interface TrayProps {
   onError: (message: string) => void;
 }
 
-function QueueTray({ chatId, queue, onEdit, onFinish, live, onError }: TrayProps) {
+function QueueTray({ chatId, queue, steering, onEdit, onFinish, live, onError }: TrayProps) {
   const tray = useRef<HTMLDivElement>(null);
   const editingId = useEditingQueued(chatId);
   const [dragId, setDragId] = useState<string>();
@@ -134,7 +156,7 @@ function QueueTray({ chatId, queue, onEdit, onFinish, live, onError }: TrayProps
     // Listen on the window: reordering moves rows in the DOM, which would drop pointer capture.
     const move = (ev: PointerEvent) => {
       // The slot is how many of the other rows sit above the pointer.
-      const others = Array.from(tray.current?.querySelectorAll<HTMLElement>(".queued") ?? []).filter((el) => el.dataset.queuedId !== id);
+      const others = Array.from(tray.current?.querySelectorAll<HTMLElement>(".queued:not(.queued-steering)") ?? []).filter((el) => el.dataset.queuedId !== id);
       const to = others.filter((el) => {
         const r = el.getBoundingClientRect();
         return r.top + r.height / 2 < ev.clientY;
@@ -154,6 +176,9 @@ function QueueTray({ chatId, queue, onEdit, onFinish, live, onError }: TrayProps
 
   return (
     <div ref={tray} className={cx("queue", dragId && "queue-dragging")} aria-label="Queued messages">
+      {steering.map((q) => (
+        <SteeringRow key={q.id} item={q} />
+      ))}
       {queue.map((q, i) => (
         <QueuedRow
           key={q.id}
@@ -296,6 +321,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const picker = useRef<HTMLInputElement>(null);
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
+  const steering = useSteeringOf(chatId);
   const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan === "pi");
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
@@ -696,7 +722,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
+      {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
