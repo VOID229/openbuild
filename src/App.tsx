@@ -11,6 +11,7 @@ import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
 import { EXTERNAL_VIA } from "../shared/replies";
 import { resumeReplies } from "./lib/chat";
+import { resumeShells } from "./lib/shell";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
@@ -176,6 +177,8 @@ function Main() {
           if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);
         }
         useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
+        // Commands another device started here.
+        resumeShells();
       } catch { /* Keep the current view offline; the next poll retries. */ }
       finally { pending = false; }
     };

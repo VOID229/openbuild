@@ -117,11 +117,12 @@ export class PiProcess {
     this.proc.stdin.flush();
   }
 
-  /** Send a command and wait for its response; rejects when Pi says it failed. */
+  /** Send a command and wait for its response; rejects when Pi says it failed. A command can bring
+   *  its own `id`, which Pi puts on the events it streams for it (`bash_execution_update`). */
   async send<T = any>(command: PiRecord, timeoutMs = 60_000): Promise<T> {
     if (this.exited) throw new PiError(`Pi isn't running (exited with code ${this.exitCode})`);
     this.lastUsed = Date.now();
-    const id = crypto.randomUUID();
+    const id = typeof command.id === "string" ? command.id : crypto.randomUUID();
     const response = await new Promise<PiRecord>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);

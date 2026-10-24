@@ -1,12 +1,14 @@
-import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Attachment, PiCommand } from "../../shared/types";
+import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
 import { dictationSupported, useDictation } from "../lib/dictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
+import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
+import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
@@ -177,6 +179,79 @@ function QueueTray({ chatId, queue, onEdit, onFinish, live, onError }: TrayProps
 
 const SOURCE_ICON = { extension: Puzzle, prompt: FileText, skill: BookOpen, openbuild: Slash } as const;
 
+/** A tiny colored badge for a file's extension, like an editor's file icon. */
+const FILE_GLYPH: Record<string, { label: string; color: string }> = {
+  ts: { label: "TS", color: "#4f8ff7" },
+  tsx: { label: "TS", color: "#4f8ff7" },
+  js: { label: "JS", color: "#e5c07b" },
+  jsx: { label: "JS", color: "#e5c07b" },
+  mjs: { label: "JS", color: "#e5c07b" },
+  cjs: { label: "JS", color: "#e5c07b" },
+  json: { label: "{}", color: "#d9b44a" },
+  jsonl: { label: "{}", color: "#d9b44a" },
+  css: { label: "CSS", color: "#a97bd8" },
+  scss: { label: "CSS", color: "#a97bd8" },
+  less: { label: "CSS", color: "#a97bd8" },
+  html: { label: "<>" , color: "#e07a5f" },
+  md: { label: "MD", color: "#7fb3d5" },
+  mdx: { label: "MD", color: "#7fb3d5" },
+  py: { label: "PY", color: "#62a8d8" },
+  go: { label: "GO", color: "#5bc0de" },
+  rs: { label: "RS", color: "#d08770" },
+  yml: { label: "YML", color: "#c792ea" },
+  yaml: { label: "YML", color: "#c792ea" },
+  toml: { label: "TML", color: "#c792ea" },
+  sh: { label: "SH", color: "#89ca78" },
+};
+
+function FileGlyph({ entry }: { entry: WorkspaceEntry }) {
+  if (entry.dir) return <Folder className="mention-folder" size={17} aria-hidden />;
+  const path = entry.path;
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  const ext = name.includes(".") ? name.split(".").pop()!.toLowerCase() : "";
+  const glyph = FILE_GLYPH[ext] ?? { label: ext ? ext.slice(0, 2).toUpperCase() : "•", color: "var(--text-3)" };
+  return (
+    <span className="mention-icon" style={{ color: glyph.color }} aria-hidden>
+      {glyph.label}
+    </span>
+  );
+}
+
+/** The "@" file and folder list, above (in a thread) or below (new thread) the composer. */
+function MentionMenu({ entries, active, dropUp, onPick, onHover }: { entries: WorkspaceEntry[]; active: number; dropUp: boolean; onPick: (entry: WorkspaceEntry) => void; onHover: (i: number) => void }) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [active]);
+  return (
+    <div ref={list} className={cx("slash-menu mention-menu", dropUp ? "slash-up" : "slash-down")} role="listbox" aria-label="Files and folders">
+      {entries.map((entry, i) => {
+        const slash = entry.path.lastIndexOf("/");
+        const name = entry.path.slice(slash + 1);
+        const dir = slash === -1 ? "" : entry.path.slice(0, slash);
+        return (
+          <button
+            key={`${entry.dir ? "d" : "f"}:${entry.path}`}
+            type="button"
+            role="option"
+            data-index={i}
+            aria-selected={i === active}
+            className="slash-item mention-item"
+            // Keep focus (and the keyboard) in the textarea.
+            onMouseDown={(e) => e.preventDefault()}
+            onMouseEnter={() => onHover(i)}
+            onClick={() => onPick(entry)}
+          >
+            <FileGlyph entry={entry} />
+            <span className="mention-name">{entry.dir ? `${name}/` : name}</span>
+            {dir && <span className="mention-dir">{dir}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /** The "/" command list, above (in a thread) or below (new thread) the composer. */
 function SlashMenu({ commands, active, dropUp, onPick, onHover }: { commands: PiCommand[]; active: number; dropUp: boolean; onPick: (c: PiCommand) => void; onHover: (i: number) => void }) {
   const list = useRef<HTMLDivElement>(null);
@@ -221,7 +296,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const picker = useRef<HTMLInputElement>(null);
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
-  const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.at(-1)?.model?.plan === "pi");
+  const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan === "pi");
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -342,6 +417,88 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const runtime = useStore((s) => chatId ? s.chats.find((c) => c.id === chatId)?.runtime ?? "pi" : s.settings.threadRuntime ?? "pi");
   const workspace = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId)?.workspace : undefined));
   const homeProject = useStore((s) => (chatId ? undefined : s.projects.find((p) => p.id === s.settings.workspace.projectId)));
+
+  // "@" mentions scan where this thread works (its workspace), or the home screen's project.
+  const mentionCwd = workspace?.cwd ?? homeProject?.path;
+  const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>(() => cachedEntries(mentionCwd) ?? []);
+  useEffect(() => {
+    let live = true;
+    setMentionEntries(cachedEntries(mentionCwd) ?? []);
+    // Warm the index as soon as the composer appears, so the first "@" has nothing to wait for.
+    // The scratch root (no project on the home screen) is scanned lazily on first mention instead.
+    if (mentionCwd) {
+      loadEntries(mentionCwd).then(
+        (entries) => live && setMentionEntries(entries),
+        () => {},
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [mentionCwd]);
+  const [mention, setMention] = useState<{ start: number; end: number; query: string }>();
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionDismissed, setMentionDismissed] = useState<string>();
+  const mentionKey = mention ? `${mention.start}:${mention.query}` : "";
+  const mentionMatches = useMemo(() => {
+    if (!mention || mentionDismissed === mentionKey) return [];
+    return matchEntries(mentionEntries, mention.query, 50);
+  }, [mention, mentionEntries, mentionDismissed, mentionKey]);
+  useEffect(() => setMentionIndex(0), [mentionKey]);
+
+  /** Track whether the caret sits in an "@word" token (and what it starts with). */
+  const syncMention = (value: string, caret: number) => {
+    const upto = value.slice(0, caret);
+    const at = upto.lastIndexOf("@");
+    if (at === -1) return setMention(undefined);
+    // Only at a word boundary: not inside an email address or a path.
+    if (at > 0 && !/[\s([{]/.test(upto[at - 1]!)) return setMention(undefined);
+    const query = upto.slice(at + 1);
+    if (query.length > 200 || /\s/.test(query)) return setMention(undefined);
+    setMention({ start: at, end: caret, query });
+    // Refresh if the index is stale, so files the agent just created show up. Usually instant (cached).
+    loadEntries(mentionCwd).then(setMentionEntries, () => {});
+  };
+
+  const pickMention = (entry: WorkspaceEntry) => {
+    if (!mention) return;
+    const before = text.slice(0, mention.start);
+    const after = text.slice(mention.end);
+    // A file is finished with a space. A folder keeps the menu open on its contents, so you can
+    // drill into it; type a space (or Esc) to stop at the folder itself. A command gets the bare path.
+    const insert = `${shellMode ? "" : "@"}${entry.path}${entry.dir ? "/" : ""}${entry.dir ? "" : " "}`;
+    setText(before + insert + after);
+    if (entry.dir) {
+      setMention({ start: mention.start, end: before.length + insert.length, query: `${entry.path}/` });
+    } else if (shellMode) {
+      setMention(undefined);
+    } else {
+      setMention(undefined);
+      // Read a file's contents in the background; the prompt inlines them like any attached text file.
+      const path = entry.path;
+      void readMentionFile(mentionCwd, path).then(
+        (file) => setFiles((all) => (all.some((f) => f.mention && f.name === path) ? all : [...all, file])),
+        (err: Error) => setNotice(err.message),
+      );
+    }
+    requestAnimationFrame(() => {
+      const el = textarea.current;
+      if (!el) return;
+      const pos = before.length + insert.length;
+      el.focus();
+      el.setSelectionRange(pos, pos);
+    });
+  };
+
+  // Deleting a mention from the text also drops the file it had attached (even if it arrives later).
+  useEffect(() => {
+    const tokens = new Set(text.split(/\s+/));
+    setFiles((all) => {
+      const stale = all.some((f) => f.mention && !tokens.has(`@${f.name}`));
+      return stale ? all.filter((f) => !f.mention || tokens.has(`@${f.name}`)) : all;
+    });
+  }, [text, files]);
+
   const typedCommand = /^\/(\S*)$/.exec(text)?.[1];
   const [slashDismissed, setSlashDismissed] = useState<string>();
   const [slashIndex, setSlashIndex] = useState(0);
@@ -379,6 +536,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
   };
 
   const hasContent = text.trim().length > 0 || files.length > 0;
+  // "!cmd" runs a command in the thread's folder and the agent sees it; "!!cmd" runs it for you alone.
+  const shellMode = /^\s*!!/.test(text) ? "!!" : /^\s*!/.test(text) ? "!" : undefined;
   // While a reply is coming in, sending queues the message instead.
   const queueing = streaming && !!chatId;
 
@@ -436,6 +595,15 @@ export function Composer({ variant, chatId, streaming }: Props) {
     if (editing) return finishEdit(true);
     if (!line && !files.length) return;
     dictation.cancel();
+    if (line.startsWith("!")) {
+      // Runs right away, even while a reply is coming in: it doesn't queue behind it or interrupt it.
+      if (!shellCommand(line)) return;
+      if (files.length) return setNotice("A command can't take attachments. Remove them to run it.");
+      void runShell(line, chatId).catch((err: Error) => setNotice(err.message));
+      saveDraft(draftKey, "", []);
+      setText("");
+      return;
+    }
     if (!files.length && runBuiltin(line)) {
       saveDraft(draftKey, "", []);
       setText("");
@@ -455,6 +623,25 @@ export function Composer({ variant, chatId, streaming }: Props) {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionMatches.length && !e.nativeEvent.isComposing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = mentionMatches.length;
+        setMentionIndex((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      // Tab or Enter picks the highlighted file; the composer keeps the text and the file's contents.
+      if ((e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) && mentionMatches[mentionIndex]) {
+        e.preventDefault();
+        pickMention(mentionMatches[mentionIndex]!);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMentionDismissed(mentionKey);
+        return;
+      }
+    }
     if (slashMatches.length && !e.nativeEvent.isComposing) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -502,15 +689,18 @@ export function Composer({ variant, chatId, streaming }: Props) {
   };
 
   const hint = cmdEnter ? `${isMac ? "⌘" : "Ctrl"}+Enter to send` : "Enter to send · Shift+Enter for a new line";
+  // Mentioned files live in the text ("@path"), so they don't need a second chip above it.
+  const chipFiles = files.filter((f) => !f.mention);
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
       {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
+      {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
       <div
-        className={cx("composer", dragging && "composer-drag")}
+        className={cx("composer", dragging && "composer-drag", shellMode && "composer-shell")}
         onClick={(e) => {
           if (e.target === e.currentTarget) textarea.current?.focus();
         }}
@@ -529,16 +719,16 @@ export function Composer({ variant, chatId, streaming }: Props) {
           void addFiles(e.dataTransfer.files);
         }}
       >
-        {files.length > 0 && (
+        {chipFiles.length > 0 && (
           <div className="attachments">
-            {files.map((f) => (
+            {chipFiles.map((f) => (
               <div key={f.id} className="attachment" title={f.name}>
                 {f.mime.startsWith("image/") ? (
                   <button
                     type="button"
                     className="attachment-preview"
                     aria-label={`Preview ${f.name}`}
-                    onClick={() => openLightbox(files.filter((x) => x.mime.startsWith("image/")), f.id)}
+                    onClick={() => openLightbox(chipFiles.filter((x) => x.mime.startsWith("image/")), f.id)}
                   >
                     <img src={f.dataUrl} alt="" />
                   </button>
@@ -568,8 +758,13 @@ export function Composer({ variant, chatId, streaming }: Props) {
           onChange={(e) => {
             lastTyped.current = Date.now();
             setText(e.target.value);
+            setMentionDismissed(undefined);
+            syncMention(e.target.value, e.target.selectionStart);
           }}
           onKeyDown={onKeyDown}
+          onKeyUp={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
+          onClick={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
+          onSelect={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
           onPaste={onPaste}
         />
         <div className="composer-bar">
@@ -590,7 +785,16 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <ModelPicker dropUp={variant === "dock"} />
           <EffortPicker dropUp={variant === "dock"} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
-          {notice && <span className="composer-notice">{notice}</span>}
+          {notice ? (
+            <span className="composer-notice">{notice}</span>
+          ) : (
+            shellMode && (
+              <span className="composer-mode">
+                <SquareTerminal size={14} />
+                {shellMode === "!!" ? "Command · only you see the output" : "Command · the agent sees the output"}
+              </span>
+            )
+          )}
           <div className="composer-controls">
             <button
               type="button"
@@ -614,8 +818,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
               <button
                 type="button"
                 className="round-btn"
-                aria-label={editing ? "Save edit" : queueing ? "Queue message" : "Send message"}
-                data-tooltip={editing ? "Save edit" : hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
+                aria-label={editing ? "Save edit" : shellMode ? "Run command" : queueing ? "Queue message" : "Send message"}
+                data-tooltip={editing ? "Save edit" : shellMode ? (queueing ? "Run now, without waiting for the reply" : "Run command") : hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
                 data-tooltip-side={variant === "dock" ? "top" : "bottom"}
                 disabled={!hasContent && !editing}
                 onClick={() => submit()}

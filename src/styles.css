@@ -675,6 +675,16 @@ svg {
   animation: flyout-in 140ms var(--ease) both;
 }
 
+/* Bridges the gap to the row, so crossing it doesn't count as leaving the submenu. */
+.filter-flyout::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 12px;
+}
+
 @keyframes flyout-in {
   from {
     opacity: 0;
@@ -3621,6 +3631,10 @@ p.key-status svg {
     max-width: min(280px, calc(100vw - 48px));
   }
 
+  .filter-flyout::before {
+    display: none;
+  }
+
   .main,
   .main-full {
     margin: 0;
@@ -4529,6 +4543,175 @@ p.key-status svg {
   color: var(--text);
 }
 
+/* Commands the user ran ("!cmd", "!!cmd"): their bubble, then the output like a reply. */
+
+.msg-shell {
+  gap: 8px;
+}
+
+.bubble-shell {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.shell-sigil {
+  margin-right: 8px;
+  color: var(--text-3);
+  user-select: none;
+}
+
+.shell-run {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.shell-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.shell-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-2);
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .shell-toggle:hover {
+    background: var(--hover);
+  }
+}
+
+.shell-icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.shell-where {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.shell-audience {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.shell-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.shell-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--med) var(--ease);
+}
+
+.shell-open .shell-chevron {
+  transform: rotate(90deg);
+}
+
+.shell-action {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--text-3);
+}
+
+.shell-body {
+  border-top: 1px solid var(--border);
+  background: var(--code-bg);
+}
+
+.shell-output {
+  margin: 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.shell-empty {
+  padding: 10px 12px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.shell-note {
+  padding: 8px 12px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.shell-note code {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+@media (max-width: 560px) {
+  /* Only the icon says who sees it on a narrow screen; the tooltip has the words. */
+  .shell-audience {
+    font-size: 0;
+  }
+}
+
+/* The composer while it holds a command ("!" or "!!" at the start). */
+
+.composer-shell .composer-input {
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.composer-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tool-diff {
   padding: 6px 0;
 }
@@ -4922,6 +5105,56 @@ p.key-status svg {
 }
 
 .slash-desc {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+/* "@" file mentions */
+
+.mention-menu {
+  max-height: min(340px, 45dvh);
+}
+
+.mention-item {
+  gap: 9px;
+}
+
+.mention-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 20px;
+  border-radius: 5px;
+  background: color-mix(in srgb, currentColor 13%, transparent);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.mention-folder {
+  flex: none;
+  color: #d9b44a;
+  margin: 0 3.5px;
+}
+
+.mention-name {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.mention-dir {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;

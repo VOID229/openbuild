@@ -2,10 +2,11 @@
 // and for projects and workspaces. Mounted by server/index.ts behind its request checks.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { isStreamRef } from "../../shared/replies";
+import { isStreamId, isStreamRef } from "../../shared/replies";
 import { EFFORTS, type ModelInfo, type PiChatRequest } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
+import * as workspaceFiles from "../workspaceFiles";
 import { beforeChat, hasChatHooks } from "../plugins";
 import { localRun, Run } from "../runs";
 import * as auth from "./auth";
@@ -14,6 +15,7 @@ import { currentJob, jobStream, startJob } from "./jobs";
 import * as resources from "./resources";
 import { forgetPrices, lookup, priceBook, pricing, type PriceBook } from "./pricing";
 import { problems } from "./rpc";
+import { findShell, startShell, stopShell } from "./shell";
 import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn, steer } from "./sessions";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
@@ -211,6 +213,42 @@ export function piRoutes(api: Api) {
         } catch (err) {
           return fail(err, 409);
         }
+      }),
+    },
+    // A command the user runs in the thread's folder: "!" (the agent reads it with the next message)
+    // or "!!" (it doesn't). It runs on its own, apart from any turn; the app follows it at
+    // /api/pi/shells/:id, and sending the same id again just watches it.
+    "/api/pi/threads/:id/shell": {
+      POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/shell">, server: Bun.Server<unknown>) => {
+        server.timeout(req, 0);
+        const body = await readJson(req);
+        const threadId = req.params.id;
+        if (!isThreadId(threadId) || !isStreamId(body?.id) || !str(body?.cwd, 1024) || !str(body?.command, 100_000) || (body.hidden !== undefined && typeof body.hidden !== "boolean")) {
+          return bad("Expected { id, cwd, command, hidden? }");
+        }
+        if (!existsSync(body.cwd)) return bad("This thread's folder doesn't exist anymore (was its worktree removed?).", 410);
+        if (!projects.allowedCwd(body.cwd)) return bad("That folder isn't a project in OpenBuild", 403);
+        if (threadRuntime(threadId) === "durable") return bad("Shell commands aren't available in Durable threads yet.");
+        try {
+          claimRuntime(threadId, "pi");
+        } catch (err) {
+          return fail(err);
+        }
+        const shell = startShell({ id: body.id, threadId, cwd: body.cwd, command: body.command, hidden: body.hidden === true });
+        return new Response(shell.stream(), { headers: ndjson });
+      }),
+    },
+    "/api/pi/shells/:id": {
+      GET: api((req: Bun.BunRequest<"/api/pi/shells/:id">, server: Bun.Server<unknown>) => {
+        server.timeout(req, 0);
+        const shell = isStreamId(req.params.id) ? findShell(req.params.id) : undefined;
+        return shell ? new Response(shell.stream(), { headers: ndjson }) : bad("No such command", 404);
+      }),
+    },
+    "/api/pi/shells/:id/stop": {
+      POST: api((req: Bun.BunRequest<"/api/pi/shells/:id/stop">) => {
+        if (isStreamId(req.params.id)) stopShell(req.params.id);
+        return Response.json({ ok: true });
       }),
     },
     "/api/pi/threads/:id/compact": {
@@ -414,6 +452,34 @@ export function piRoutes(api: Api) {
       GET: api((req) => {
         try {
           return Response.json(projects.browse(new URL(req.url).searchParams.get("dir") ?? undefined));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // Files and folders for the composer's "@" menu. `cwd` is a thread's workspace; without it, the scratch area.
+    "/api/workspaces/files": {
+      GET: api(async (req) => {
+        const params = new URL(req.url).searchParams;
+        const cwd = params.get("cwd") || undefined;
+        if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return Response.json({ entries: await workspaceFiles.listEntries(cwd, params.has("refresh")) });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // One workspace file's text, for an "@" mention.
+    "/api/workspaces/file": {
+      GET: api((req) => {
+        const params = new URL(req.url).searchParams;
+        const cwd = params.get("cwd") || undefined;
+        const path = params.get("path");
+        if (!path) return bad("Expected ?path=");
+        if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return Response.json(workspaceFiles.readFile(cwd, path));
         } catch (err) {
           return fail(err);
         }

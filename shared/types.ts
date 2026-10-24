@@ -102,7 +102,27 @@ export type Attachment = {
   /** Decoded contents for text files; inlined into the prompt by the client. */
   text?: string;
   size: number;
+  /** Picked from the composer's "@" menu: the text already names it, so no chip is shown. */
+  mention?: boolean;
 };
+
+/** A workspace file's text, from GET /api/workspaces/file (for an "@" mention). */
+export interface FileRead {
+  /** Path relative to the workspace root. */
+  path: string;
+  name: string;
+  dir: string;
+  mime: string;
+  size: number;
+  text: string;
+}
+
+/** A file or folder in a workspace, for the composer's "@" menu. */
+export interface WorkspaceEntry {
+  /** Path relative to the workspace root. */
+  path: string;
+  dir: boolean;
+}
 
 export interface WireMessage {
   role: "user" | "assistant";
@@ -286,6 +306,20 @@ export interface PiChatRequest {
   forkFrom?: string;
   stream?: { id: string };
 }
+
+/** How a command the user ran ("!" or "!!") ended. */
+export type ShellStatus = "running" | "done" | "stopped" | "error";
+
+/**
+ * NDJSON events for a command the user ran, from /api/pi/shells/:id. Whoever watches first gets the
+ * output so far ("snap"), then new output as it comes, then how it ended.
+ */
+export type ShellEvent =
+  | { t: "snap"; output: string; status: ShellStatus }
+  | { t: "out"; v: string }
+  /** It's over: its exit code, or why it didn't finish. `fullOutputPath`: Pi cut the output down for the model; all of it is in this file. */
+  | { t: "exit"; status: Exclude<ShellStatus, "running">; exitCode?: number; fullOutputPath?: string; error?: string; ms: number }
+  | { t: "end" };
 
 /** A slash command from Pi: an extension command, a prompt template or a skill. */
 export interface PiCommand {

@@ -1,8 +1,10 @@
 // Read Pi's persisted transcripts without opening/migrating them or starting an agent.
+import { realpathSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { AskPart, Chat, Message, ToolPart } from "../../src/lib/types";
+import { scratchDir } from "../projects";
 import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL, cleanOptions } from "./extensions/question-ask";
 import { agentDir } from "./install";
@@ -52,6 +54,8 @@ export function projectSession(source: string, file: string, modified: number): 
     branch.reverse();
   }
   const createdAt = Date.parse(header.timestamp) || modified;
+  // OpenBuild runs a scratch thread's commands from the home folder (shell.ts); show them as typed.
+  const scratch = header.cwd.startsWith(scratchRoot() + sep);
   const messages: Message[] = [];
   const tools = new Map<string, ToolPart>();
   const asks = new Map<string, AskPart>();
@@ -95,6 +99,18 @@ export function projectSession(source: string, file: string, modified: number): 
       addUsage(reply.usage!, m.usage);
       reply.status = m.stopReason === "error" ? "error" : m.stopReason === "aborted" ? "stopped" : "done";
       reply.error = m.errorMessage;
+    } else if (m.role === "bashExecution") {
+      // A command the user ran ("!" or "!!"): its own message, between replies.
+      reply = undefined;
+      const command = String(m.command ?? "");
+      const typed = scratch ? command.replace(/^cd ~ && /, "") : command;
+      messages.push({
+        id: entry.id || `shell-${messages.length}`, role: "shell", content: typed, createdAt: at,
+        shell: {
+          command: typed, hidden: m.excludeFromContext || undefined, status: m.cancelled ? "stopped" : "done", output: String(m.output ?? ""),
+          exitCode: typeof m.exitCode === "number" ? m.exitCode : undefined, fullOutputPath: m.truncated ? m.fullOutputPath : undefined,
+        },
+      });
     } else if (m.role === "toolResult") {
       const ask = asks.get(m.toolCallId);
       if (ask) ask.answer = m.isError ? "" : String(m.details?.answer ?? "");
@@ -122,6 +138,15 @@ export function projectSession(source: string, file: string, modified: number): 
 }
 
 const isLive = (modified: number) => Date.now() - modified < LIVE_MS;
+
+/** Where scratch threads work, as their cwd is recorded (resolved). */
+function scratchRoot() {
+  try {
+    return realpathSync(scratchDir());
+  } catch {
+    return scratchDir();
+  }
+}
 
 async function filesIn(dir: string): Promise<string[]> {
   try {

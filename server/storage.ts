@@ -177,4 +177,6 @@ export function backup() {
 
 if (hot.openchatBackupTimer) clearInterval(hot.openchatBackupTimer);
 backup();
+// Importing storage in a one-off diagnostic must not keep that process alive forever.
 hot.openchatBackupTimer = setInterval(backup, BACKUP_EVERY);
+hot.openchatBackupTimer.unref();

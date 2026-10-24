@@ -11,6 +11,7 @@ import { openLightbox } from "./Lightbox";
 import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { BrandIcon, IconButton } from "./primitives";
+import { ShellMessage } from "./ShellMessage";
 import { AskCard, WorkRun } from "./ToolCalls";
 import { PluginSlot } from "../lib/plugins";
 
@@ -344,6 +345,8 @@ export const MessageItem = memo(function MessageItem({
 }) {
   return message.role === "user" ? (
     <UserMessage message={message} chatId={chatId} />
+  ) : message.role === "shell" && message.shell ? (
+    <ShellMessage message={message} chatId={chatId} />
   ) : (
     <AssistantMessage message={message} chatId={chatId} isLast={isLast} />
   );

@@ -7,6 +7,7 @@ import { editingQueued, moveQueued, queueOf, removeQueued, requeue, shiftQueue, 
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
+import { resumeShells, runShell, shellCommand } from "./shell";
 import { selectionFor, useStore } from "./store";
 import { effortFor } from "./effort";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
@@ -19,7 +20,7 @@ export { uid };
  */
 const running = new Map<string, { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[] }>();
 
-function makeTitle(text: string, attachments: Attachment[]) {
+export function makeTitle(text: string, attachments: Attachment[]) {
   const line = text.trim().split("\n").find((l) => l.trim()) ?? attachments[0]?.name ?? "New thread";
   const clean = line.replace(/[#*_`>]/g, "").trim();
   return clean.length > 60 ? clean.slice(0, 57).trimEnd() + "…" : clean;
@@ -65,8 +66,9 @@ function toWire(history: Message[], input: string[]): WireMessage[] {
     (a.mime.startsWith("image/") && input.includes("image")) || (a.mime === "application/pdf" && input.includes("pdf"));
   const out: WireMessage[] = [];
   for (const m of history) {
-    // Skip failed/empty assistant turns; they carry nothing useful for the model.
-    if (m.role === "assistant" && !m.content.trim()) continue;
+    // Skip failed/empty assistant turns; they carry nothing useful for the model. Commands the user
+    // ran only reach Pi threads (Pi keeps them in its session).
+    if ((m.role === "assistant" && !m.content.trim()) || m.role === "shell") continue;
     const files = m.attachments ?? [];
     const textFiles = files.filter((a) => a.text != null);
     const binary = files.filter((a) => a.text == null);
@@ -150,6 +152,8 @@ export function resumeReplies(chatId?: string) {
     const msg = chat.messages.findLast((m) => m.status === "streaming" && m.stream && canResume(m.stream.via));
     if (msg) void generate(chat.id, msg.id, true);
   }
+  // And commands the user ran ("!"), which run apart from replies.
+  resumeShells(chatId);
 }
 
 /** Resolve the chat's composer selection to a concrete model for this prompt. */
@@ -248,6 +252,11 @@ export function drainQueue(chatId: string) {
     return;
   }
   const next = shiftQueue(chatId);
+  // A queued message edited into a command runs as one.
+  if (next && shellCommand(next.text)) {
+    void runShell(next.text, chatId).catch(() => {});
+    return drainQueue(chatId);
+  }
   // No usable model: put it back so it isn't lost (sendMessage opened Settings).
   if (next && !sendMessage(next.text, next.files, chatId)) requeue(chatId, [next]);
 }
@@ -255,7 +264,7 @@ export function drainQueue(chatId: string) {
 class WorkspaceError extends Error {}
 
 /** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
-async function newWorkspace(chat: Chat): Promise<Workspace> {
+export async function newWorkspace(chat: Chat): Promise<Workspace> {
   const { settings, projects } = useStore.getState();
   const pref = settings.workspace;
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;

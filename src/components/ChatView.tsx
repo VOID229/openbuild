@@ -98,9 +98,9 @@ export function ChatView({ chat }: { chat: Chat }) {
   const glideFrame = useRef(0);
   const touchY = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
-  const last = chat.messages.at(-1);
-  const streaming = last?.status === "streaming";
-  const userCount = chat.messages.filter((m) => m.role === "user").length;
+  // Commands the user ran can come after a reply that's still going.
+  const streaming = chat.messages.findLast((m) => m.role === "assistant")?.status === "streaming";
+  const userCount = chat.messages.filter((m) => m.role !== "assistant").length;
 
   const gap = (el: HTMLElement) => el.scrollHeight - el.clientHeight - el.scrollTop;
 

@@ -35,15 +35,20 @@ interface Live {
   asks: Map<string, Extract<StreamEvent, { t: "ask" }>>;
   /** Running question_ask calls and their questions, to tell their dialogs from other extensions'. */
   questions: Map<string, string>;
+  /** Commands the user is running with "!" or "!!" (shell.ts); they keep the process open like a turn. */
+  shells: number;
   emit?: (e: StreamEvent) => void;
 }
+
+/** Working on something: a turn, or a command the user ran. */
+const inUse = (l: Live) => l.busy || l.shells > 0;
 
 const hot = globalThis as { openbuildPiLive?: Map<string, Live>; openbuildPiReaper?: ReturnType<typeof setInterval> };
 const live = (hot.openbuildPiLive ??= new Map());
 if (hot.openbuildPiReaper) clearInterval(hot.openbuildPiReaper);
 hot.openbuildPiReaper = setInterval(() => {
   for (const [id, l] of live) {
-    if (l.proc.exited || (!l.busy && Date.now() - l.proc.lastUsed > IDLE)) {
+    if (l.proc.exited || (!inUse(l) && Date.now() - l.proc.lastUsed > IDLE)) {
       l.proc.close();
       live.delete(id);
     }
@@ -97,7 +102,7 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
   const existing = live.get(threadId);
   if (existing && !existing.proc.exited && existing.proc.cwd === cwd) return existing;
   if (existing) {
-    if (existing.busy) throw new PiError("This thread is still working in another directory");
+    if (inUse(existing)) throw new PiError("This thread is still working in another directory");
     existing.proc.close();
     live.delete(threadId);
   }
@@ -110,7 +115,7 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
         ? ["--fork", from.file]
         : ["--session-id", threadId];
   const proc = new PiProcess([...args, ...EXTENSIONS.flatMap((e) => ["-e", e])], cwd);
-  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), questions: new Map(), ready: Promise.resolve() };
+  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), questions: new Map(), shells: 0, ready: Promise.resolve() };
   // Extension questions can come at any time, also before a run (e.g. while starting up).
   proc.on((r) => {
     if (r.toolName === QUESTION_TOOL) {
@@ -178,6 +183,48 @@ export async function steer(threadId: string, steerId: string, message: string, 
   } catch (err) {
     drop();
     throw err;
+  }
+}
+
+/** What Pi's `bash` command reports when a command is over. */
+export interface BashResult {
+  output: string;
+  exitCode?: number;
+  cancelled: boolean;
+  truncated: boolean;
+  fullOutputPath?: string;
+}
+
+/** Longest a command may run; setTimeout can't wait any longer. */
+const FOREVER = 2 ** 31 - 1;
+
+/**
+ * Run a command the user typed ("!" or, with `exclude`, "!!") through Pi's own `bash`, in the
+ * thread's Pi process, so it's recorded in the session like `!` in Pi's terminal UI: the model reads
+ * the command and its output with the next prompt, unless it's excluded. Pi handles these alongside
+ * a running turn (a result that comes in mid-turn waits for the turn to end), and runs the user's
+ * `user_bash` extensions on them first, like any `!` command.
+ *
+ * `signal` stops it. Pi can only stop all of a thread's commands at once (`abort_bash`), so it stops
+ * the others too.
+ */
+export async function bash(threadId: string, cwd: string, id: string, command: string, exclude: boolean, onOutput: (delta: string) => void, signal: AbortSignal): Promise<BashResult> {
+  const l = ensure(threadId, cwd);
+  l.shells++;
+  const off = l.proc.on((r) => {
+    if (r.type === "bash_execution_update" && r.id === id && typeof r.delta === "string") onOutput(r.delta);
+  });
+  const onAbort = () => void l.proc.send({ type: "abort_bash" }).catch(() => {});
+  try {
+    await l.ready;
+    if (signal.aborted) return { output: "", cancelled: true, truncated: false };
+    signal.addEventListener("abort", onAbort, { once: true });
+    return await l.proc.send<BashResult>({ type: "bash", id, command, excludeFromContext: exclude || undefined }, FOREVER);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    off();
+    l.shells--;
+    l.proc.lastUsed = Date.now();
   }
 }
 
@@ -434,7 +481,7 @@ export function listCommands(cwd: string): Promise<PiCommand[]> {
     p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
       r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
     );
-  const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !l.busy && !l.proc.exited);
+  const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !inUse(l) && !l.proc.exited);
   const value = idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
   commandsCache.set(cwd, { at: Date.now(), value });
   value.catch(() => commandsCache.delete(cwd));
@@ -461,7 +508,7 @@ export function release(threadId: string) {
 
 /** Restart every idle process, so changed extensions, skills or credentials take effect. */
 export function restartIdle() {
-  for (const [id, l] of live) if (!l.busy) release(id);
+  for (const [id, l] of live) if (!inUse(l)) release(id);
   forgetModels();
   forgetCommands();
 }

@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ShellStatus, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -162,9 +162,27 @@ export interface SteerPart {
 /** A reply in order: what Pi wrote and thought, the tools it ran in between, questions it asked, and messages steered in. */
 export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart | SteerPart;
 
+/** A command the user ran from the composer: "!" (the agent reads it and its output) or "!!" (it doesn't). */
+export interface ShellRun {
+  command: string;
+  /** "!!": run for the user alone. */
+  hidden?: boolean;
+  status: ShellStatus;
+  /** Its latest output (a long-running command keeps the tail). */
+  output: string;
+  exitCode?: number;
+  /** Pi cut the output down for the agent; all of it is in this file on the server. */
+  fullOutputPath?: string;
+  error?: string;
+  ms?: number;
+  /** Where it runs, to follow it after a reload or from another device. */
+  stream?: ReplyStream;
+}
+
 export interface Message {
   id: string;
-  role: "user" | "assistant";
+  /** "shell": a command the user ran (`shell`); `content` is the command. */
+  role: "user" | "assistant" | "shell";
   content: string;
   reasoning?: string;
   attachments?: Attachment[];
@@ -187,6 +205,7 @@ export interface Message {
   parts?: Part[];
   /** Tokens, cost and context fill after this reply. */
   usage?: Usage;
+  shell?: ShellRun;
   createdAt: number;
 }
 
