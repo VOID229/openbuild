@@ -444,6 +444,16 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
   );
 }
 
+/**
+ * A paired device that answers 403 runs an OpenBuild whose allowlist predates managing Pi from
+ * another device: say that instead of the proxy's bare "Forbidden".
+ */
+function deviceRefusal(err: Error, where?: string): string {
+  return err.message === "Forbidden" && where
+    ? `${where} refused the request: it runs an older OpenBuild, which doesn't allow managing Pi from another computer. Update OpenBuild there and restart it.`
+    : err.message;
+}
+
 export function PiSection() {
   // This device's state comes from the cache filled at launch, so the page opens with its content;
   // a paired device's is fetched through the proxy when it is picked.
@@ -459,6 +469,8 @@ export function PiSection() {
   const [checking, setChecking] = useState(false);
   const [editing, setEditing] = useState<PiResource>();
   const refreshDetection = useStore((s) => s.refreshDetection);
+  const loadDeviceModels = useStore((s) => s.loadDeviceModels);
+  const where = deviceName(deviceId);
 
   const loadStatus = useCallback(
     async (fresh = false, quiet = false) => {
@@ -467,12 +479,12 @@ export function PiSection() {
         await loadPiStatus(fresh, deviceId);
         setStatusError(undefined);
       } catch (err) {
-        setStatusError((err as Error).message);
+        setStatusError(deviceRefusal(err as Error, where));
       } finally {
         if (!quiet) setChecking(false);
       }
     },
-    [loadPiStatus, deviceId],
+    [loadPiStatus, deviceId, where],
   );
   const loadResources = useCallback(async () => {
     await loadPiResources(deviceId).catch(() => {});
@@ -480,8 +492,9 @@ export function PiSection() {
   const job = useJob(() => {
     void loadStatus(true);
     void loadResources();
-    // Only this device's models are in the composer's list; a paired device's come with its threads.
-    if (!deviceId) void refreshDetection();
+    // New models may be usable now: this device's list, or the one its paired-device threads use.
+    if (deviceId) void loadDeviceModels(deviceId, true);
+    else void refreshDetection();
   }, deviceId);
 
   useEffect(() => {
@@ -501,11 +514,10 @@ export function PiSection() {
       await fn();
       await job.follow();
     } catch (err) {
-      setStatusError((err as Error).message);
+      setStatusError(deviceRefusal(err as Error, where));
     }
   };
   const by = (k: ResourceKind) => data?.resources.filter((r) => r.kind === k) ?? [];
-  const where = deviceName(deviceId);
 
   return (
     <>
@@ -757,6 +769,7 @@ export function ProvidersSection() {
   const [login, setLogin] = useState<{ provider: PiProvider; type: "api_key" | "oauth" }>();
   const [busy, setBusy] = useState<string>();
   const refreshDetection = useStore((s) => s.refreshDetection);
+  const loadDeviceModels = useStore((s) => s.loadDeviceModels);
   const where = deviceName(deviceId);
   // Which models each provider has: this device's from the composer's list, a paired device's from
   // its own /api/pi/models.
@@ -769,9 +782,9 @@ export function ProvidersSection() {
       await loadPiProviders(deviceId);
     } catch (err) {
       // A cached list beats an error page; keep showing what Pi last told us.
-      if (!piCacheOn(useStore.getState(), deviceId).providers) setError((err as Error).message);
+      if (!piCacheOn(useStore.getState(), deviceId).providers) setError(deviceRefusal(err as Error, where));
     }
-  }, [loadPiProviders, deviceId]);
+  }, [loadPiProviders, deviceId, where]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -809,11 +822,12 @@ export function ProvidersSection() {
     try {
       await logoutProvider(p.id, deviceId);
     } catch (err) {
-      setError((err as Error).message);
+      setError(deviceRefusal(err as Error, where));
     }
     setBusy(undefined);
     await load();
-    if (!deviceId) void refreshDetection();
+    if (deviceId) void loadDeviceModels(deviceId, true);
+    else void refreshDetection();
   };
 
   /** What Pi has for a provider, in words that don't depend on how the row is laid out. */
@@ -893,7 +907,8 @@ export function ProvidersSection() {
             setLogin(undefined);
             if (ok) {
               void load();
-              if (!deviceId) void refreshDetection();
+              if (deviceId) void loadDeviceModels(deviceId, true);
+              else void refreshDetection();
             }
           }}
         />
