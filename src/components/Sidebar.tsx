@@ -217,14 +217,14 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           </span>
         )}
         <span className="history-meta">
-          <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
-            {runtime === "durable" ? <ShieldHalf size={12} /> : <PiMark size={12} />}
-          </span>
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
               {chat.workspace.projectName}
             </span>
           )}
+          <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
+            {runtime === "durable" ? <ShieldHalf size={12} /> : <PiMark size={12} />}
+          </span>
         </span>
       </button>
       <span className="history-actions">

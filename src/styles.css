@@ -982,10 +982,11 @@ svg {
   color: var(--text-3);
 }
 
-/* Below the snippet: which runtime the thread is fixed to, then its project. */
+/* Under the title, right-aligned: the thread's project, then the runtime it is fixed to. */
 .history-meta {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
   min-width: 0;
   width: 100%;
@@ -6417,7 +6418,7 @@ a.btn-primary {
   color: var(--text);
 }
 
-/* Sidebar: a thread's project, after the runtime mark on its meta line */
+/* Sidebar: a thread's project, before the runtime mark on its meta line */
 
 .history-proj {
   min-width: 0;
