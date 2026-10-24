@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
@@ -8,6 +8,7 @@ import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { arrowNav, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, IconButton, Popover, Spinner } from "./primitives";
+import { PluginSlot } from "../lib/plugins";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -49,6 +50,15 @@ function previewOf(chat: Chat) {
 
 /** The model of the chat's latest reply. */
 const modelOf = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
+
+/** A chat whose latest message is still being generated. */
+const isWorking = (chat: Chat) => chat.messages.at(-1)?.status === "streaming";
+
+/** Working, but blocked on a question from an extension: not generating, not done. */
+const isWaiting = (chat: Chat) => {
+  const last = chat.messages.at(-1);
+  return last?.status === "streaming" && !!last.parts?.some((p) => p.type === "ask" && p.answer === undefined);
+};
 
 const chatUrl = threadPath;
 
@@ -124,6 +134,7 @@ function useLongPress(open: (x: number, y: number) => void) {
 const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
+  const waiting = isWaiting(chat);
   const model = modelOf(chat);
   const preview = useMemo(() => (hit?.snippet ? "" : previewOf(chat)), [chat, hit]);
   const [draft, setDraft] = useState(chat.title);
@@ -186,6 +197,11 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
             {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
           </span>
           <span className="history-title-text">{hit ? <Highlight text={chat.title} ranges={hit.titleRanges} /> : chat.title}</span>
+          {chat.subagent && (
+            <span className="history-subagent" title="Subagent" aria-label="Subagent">
+              <Bot size={13} />
+            </span>
+          )}
           {hit && chat.archived && <span className="badge">archived</span>}
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
@@ -193,7 +209,13 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
             </span>
           )}
           <span className="history-status">
-            {streaming ? <Spinner size={13} /> : chat.unread ? <span className="unread-dot" aria-label="New reply" /> : null}
+            {waiting ? (
+              <Spinner size={13} waiting />
+            ) : streaming ? (
+              <Spinner size={13} />
+            ) : chat.unread ? (
+              <span className="unread-dot" aria-label="New reply" />
+            ) : null}
           </span>
         </span>
         {hit?.snippet ? (
@@ -391,7 +413,8 @@ function FilterMenu() {
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const models = useChatModels();
-  const active = view.sort !== DEFAULT_VIEW.sort || view.models.length > 0 || view.includePinned !== DEFAULT_VIEW.includePinned;
+  const active =
+    view.sort !== DEFAULT_VIEW.sort || view.models.length > 0 || view.includePinned !== DEFAULT_VIEW.includePinned || view.subagents !== DEFAULT_VIEW.subagents;
   const close = () => {
     setOpen(false);
     setSub(undefined);
@@ -530,6 +553,19 @@ function FilterMenu() {
               <span className="toggle-knob" />
             </span>
           </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={view.subagents}
+            className="menu-item filter-toggle"
+            onMouseEnter={() => setSub(undefined)}
+            onClick={() => setView({ subagents: !view.subagents })}
+          >
+            <span className="menu-item-label">Show subagents</span>
+            <span className="toggle toggle-sm" aria-hidden data-on={view.subagents}>
+              <span className="toggle-knob" />
+            </span>
+          </button>
           {active && (
             <>
               <div className="menu-sep" />
@@ -565,18 +601,25 @@ export function Sidebar() {
 
   const view = useStore((s) => s.view);
 
-  // Model filter and sort order from the filter menu.
+  // Model filter, subagents and sort order from the filter menu. A pinned or open subagent thread stays listed.
   const visible = useMemo(() => {
+    const shown = view.subagents ? chats : chats.filter((c) => !c.subagent || c.pinned || c.id === activeChatId);
     const byModel = view.models.length
-      ? chats.filter((c) => c.messages.some((m) => m.model && view.models.includes(m.model.id)))
-      : chats;
+      ? shown.filter((c) => c.messages.some((m) => m.model && view.models.includes(m.model.id)))
+      : shown;
     return view.sort === "created" ? [...byModel].sort((a, b) => b.createdAt - a.createdAt) : byModel;
-  }, [chats, view.models, view.sort]);
+  }, [chats, view.models, view.sort, view.subagents, activeChatId]);
   const field = view.sort === "created" ? "createdAt" : "updatedAt";
 
   const hits = useMemo(() => (deferredQuery ? searchChats(visible, deferredQuery) : []), [visible, deferredQuery]);
   const pinned = useMemo(() => (view.includePinned ? visible.filter((c) => c.pinned && !c.archived) : []), [visible, view.includePinned]);
-  const buckets = useMemo(() => bucketChats(visible.filter((c) => !c.pinned && !c.archived), field), [visible, field]);
+  // Pinned threads keep their spot; everything else that is still generating lives in "Working"
+  // (and moves to "Today" once its reply finishes).
+  const rest = useMemo(() => visible.filter((c) => !c.archived && !(c.pinned && view.includePinned)), [visible, view.includePinned]);
+  // Subagent threads, when listed, keep to their own section, working or not.
+  const subagents = useMemo(() => rest.filter((c) => c.subagent), [rest]);
+  const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c)), [rest]);
+  const buckets = useMemo(() => bucketChats(rest.filter((c) => !c.subagent && !isWorking(c)), field), [rest, field]);
   const archived = useMemo(() => visible.filter((c) => c.archived), [visible]);
   const filtered = view.models.length > 0;
 
@@ -625,6 +668,7 @@ export function Sidebar() {
             <span className="wordmark">OpenBuild</span>
             <FilterMenu />
           </div>
+          <PluginSlot name="sidebar:header" />
 
           <button
             type="button"
@@ -679,13 +723,25 @@ export function Sidebar() {
                     {pinned.map((c) => row(c))}
                   </Collapsible>
                 )}
+                {subagents.length > 0 && (
+                  <section className="history-group">
+                    <h3 className="history-heading">Subagents</h3>
+                    {subagents.map((c) => row(c))}
+                  </section>
+                )}
+                {working.length > 0 && (
+                  <section className="history-group">
+                    <h3 className="history-heading">Working</h3>
+                    {working.map((c) => row(c))}
+                  </section>
+                )}
                 {buckets.map((b) => (
                   <section key={b.label} className="history-group">
                     <h3 className="history-heading">{b.label}</h3>
                     {b.chats.map((c) => row(c))}
                   </section>
                 ))}
-                {filtered && !pinned.length && !buckets.length && !archived.length && <p className="history-empty">No threads with the selected models.</p>}
+                {filtered && !pinned.length && !subagents.length && !working.length && !buckets.length && !archived.length && <p className="history-empty">No threads with the selected models.</p>}
                 {archived.length > 0 && (
                   <Collapsible label={`Archived (${archived.length})`} open={sections.archived} onToggle={() => toggleSection("archived")}>
                     {archived.map((c) => row(c))}
@@ -694,6 +750,8 @@ export function Sidebar() {
               </>
             )}
           </nav>
+
+          <PluginSlot name="sidebar:footer" />
 
           <div className="settings-row">
             <button type="button" className="settings-btn" onClick={() => openSettings()}>

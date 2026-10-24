@@ -9,6 +9,7 @@ import { SettingsModal } from "./components/Settings";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
+import { EXTERNAL_VIA } from "../shared/replies";
 import { resumeReplies } from "./lib/chat";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
@@ -148,7 +149,8 @@ function Main() {
           const original = before.get(chat.id);
           const now = byId.get(chat.id);
           // A local edit, delete or streamed delta happened during the request: leave it alone.
-          if (now !== original || now?.messages.some((m) => m.status === "streaming")) continue;
+          // Pi running outside OpenBuild only changes here, so keep taking it.
+          if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
           // Unchanged chats come back as the same object from the chat cache.
           if (now === chat) continue;
           if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);

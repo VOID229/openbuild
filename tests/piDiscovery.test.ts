@@ -81,6 +81,23 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.equal(projectSession("not a session", file, 10), undefined);
     const empty = projectSession(jsonl([header]), file, 10);
     assert.equal(empty.messages.length, 0);
+
+    // A turn mid-tool-call is running while its transcript is fresh, and stopped once it's gone quiet.
+    const live = projectSession(jsonl(lines), file, Date.now());
+    assert.equal(live.messages[1].status, "streaming");
+    assert.equal(live.messages[1].stream.via, "external");
+    const pending = projectSession(jsonl([header, user, assistant]), file, Date.now());
+    assert.equal(pending.messages[1].parts[2].status, "running");
+    assert.equal(projectSession(jsonl(lines), file, Date.now() - 60 * 60 * 1000).messages[1].status, "stopped");
+    const finished = entry("answer2", "result1", "assistant", [{ type: "text", text: "Done" }], { stopReason: "stop" });
+    assert.equal(projectSession(jsonl([...lines, finished]), file, Date.now()).messages[1].status, "done");
+
+    // Subagents name their session first thing; the prefix becomes a flag rather than part of the title.
+    const info = { type: "session_info", id: "info1", parentId: null, timestamp: header.timestamp, name: "subagent: runtime-ui" };
+    const child = projectSession(jsonl([header, info, { ...user, parentId: "info1" }]), file, 10);
+    assert.equal(child.subagent, true);
+    assert.equal(child.title, "runtime-ui");
+    assert.equal(projectSession(jsonl(lines), file, 10).subagent, undefined);
     process.exit(0);
   `;
   try {

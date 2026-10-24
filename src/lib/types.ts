@@ -214,4 +214,6 @@ export interface Chat {
   forkDepth?: number;
   /** Where the thread works (set when it starts; a fork works where its original did). */
   workspace?: Workspace;
+  /** A Pi session another agent started (a subagent), not the user. Hidden from the sidebar by default. */
+  subagent?: boolean;
 }

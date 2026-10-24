@@ -151,16 +151,18 @@ const SPIN_MS = 700;
 // share one phase (now mod duration) however late they mount and always spin in lockstep.
 // It's a script animation, not a CSS one: a CSS animation restarts at 0° whenever its
 // element is moved (the thread list reorders) or re-shown, knocking it out of phase.
-export function Spinner({ size = 14 }: { size?: number }) {
+// `waiting` parks the ring and puts a dot in it: the work isn't over, but it isn't moving either
+// (a thread blocked on an extension's question).
+export function Spinner({ size = 14, waiting = false }: { size?: number; waiting?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!el || waiting || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const a = el.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], { duration: SPIN_MS, iterations: Infinity });
     a.startTime = 0;
     return () => a.cancel();
-  }, []);
-  return <span ref={ref} className="spinner" style={{ width: size, height: size }} aria-hidden />;
+  }, [waiting]);
+  return <span ref={ref} className={cx("spinner", waiting && "spinner-waiting")} style={{ width: size, height: size }} aria-hidden />;
 }
 
 export const IconButton = forwardRef<

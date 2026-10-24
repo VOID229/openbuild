@@ -17,6 +17,10 @@ export interface ReplyStream {
   key?: string;
 }
 
+/** `via` of a reply Pi is running outside OpenBuild (a terminal, a subagent): there's nothing to pick
+ *  back up, the server re-reads it from Pi's transcript as it goes (server/pi/discovery.ts). */
+export const EXTERNAL_VIA = "external";
+
 const ID = /^[A-Za-z0-9_-]{16,64}$/;
 const KEY = /^[A-Za-z0-9_-]{43}$/;
 export const isStreamId = (id: unknown): id is string => typeof id === "string" && ID.test(id);

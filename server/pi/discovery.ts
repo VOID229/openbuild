@@ -7,6 +7,14 @@ import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL, cleanOptions } from "./extensions/question-ask";
 import { agentDir } from "./install";
 import { isSessionLive, isThreadId } from "./sessions";
+import { EXTERNAL_VIA } from "../../shared/replies";
+
+// A turn that stopped mid-way (tools pending, or the model's next step not written yet) is still
+// running if the transcript changed this recently. Pi only writes whole messages, so a long tool
+// call goes quiet; past this, the process is taken to be gone and the reply reads as stopped.
+const LIVE_MS = 10 * 60 * 1000;
+// Sessions another agent spawned name themselves first thing (pi subagents, trace children).
+const CHILD_NAME = /^(subagent|trace): /;
 
 const textOf = (content: any): string => typeof content === "string" ? content : Array.isArray(content)
   ? content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n") : "";
@@ -95,16 +103,26 @@ export function projectSession(source: string, file: string, modified: number): 
       if (tool) { tool.status = m.isError ? "error" : "done"; tool.output = textOf(m.content).slice(0, 12000); }
     }
   }
+  // The last turn hasn't ended: Pi is still on it in some other process, or that process died.
+  const tail = branch.findLast((e) => e.type === "message" && e.message?.role !== "system")?.message;
+  if (reply && messages.at(-1) === reply && (tail?.role === "toolResult" || tail?.stopReason === "toolUse")) {
+    if (isLive(modified)) Object.assign(reply, { status: "streaming", stream: { id: "", via: EXTERNAL_VIA } });
+    else reply.status = "stopped";
+  }
   // Never answered (the reply was stopped): nothing is waiting for it anymore.
   for (const ask of asks.values()) ask.answer ??= "";
-  const name = entries.filter((e) => e.type === "session_info" && typeof e.name === "string").at(-1)?.name;
+  const names = entries.filter((e) => e.type === "session_info" && typeof e.name === "string").map((e) => e.name as string);
+  const subagent = CHILD_NAME.test(names[0] ?? "");
+  const name = subagent ? names.at(-1)!.replace(CHILD_NAME, "") : names.at(-1);
   const id = isThreadId(header.id) ? header.id : `pi-${createHash("sha256").update(file).digest("hex").slice(0, 32)}`;
   return {
     id, title: name || messages.find((m) => m.role === "user")?.content.slice(0, 100) || "Pi session",
-    titleSource: "auto", createdAt, updatedAt: modified, messages,
+    titleSource: "auto", createdAt, updatedAt: modified, messages, ...(subagent ? { subagent } : {}),
     workspace: { cwd: header.cwd, projectId: "", projectName: basename(header.cwd) || header.cwd },
   };
 }
+
+const isLive = (modified: number) => Date.now() - modified < LIVE_MS;
 
 async function filesIn(dir: string): Promise<string[]> {
   try {
@@ -138,7 +156,8 @@ async function discover() {
   for (let i = 0; i < files.length; i += 8) await Promise.all(files.slice(i, i + 8).map(async (file) => {
     try {
       const info = await stat(file);
-      const fingerprint = `${info.mtimeMs}:${info.size}`;
+      // Includes liveness so a run that went quiet is read again once it's taken to be over.
+      const fingerprint = `${info.mtimeMs}:${info.size}:${isLive(info.mtimeMs)}`;
       if (fingerprints.get(file) === fingerprint) return;
       const knownId = mappings.get(resolve(file));
       // Never replace the richer UI events of a process owned by OpenBuild.

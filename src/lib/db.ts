@@ -11,6 +11,7 @@
 // On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
 // (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
 import { clear, createStore, del, entries, get, set, usingFallbackStorage } from "./kv";
+import { EXTERNAL_VIA } from "../../shared/replies";
 import { canResume, config, isHosted } from "./runtime";
 import type { Chat } from "./types";
 
@@ -175,7 +176,8 @@ const settle = (chat: Chat): Chat => ({
   ...chat,
   // A reload mid-generation leaves "streaming" messages behind. Replies still running where this app
   // can reach them are picked back up (chat.ts resumeReplies); the rest are marked stopped.
-  messages: chat.messages.map((m) => (m.status === "streaming" && !canResume(m.stream?.via) ? { ...m, status: "stopped" as const } : m)),
+  // Pi running elsewhere is the server's to judge (it re-reads the transcript).
+  messages: chat.messages.map((m) => (m.status === "streaming" && !canResume(m.stream?.via) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m)),
 });
 
 /** Load every chat from the server. Throws when it can't be reached (the caller retries). */

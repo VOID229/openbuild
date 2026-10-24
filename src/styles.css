@@ -394,6 +394,20 @@ svg {
   /* Spun from script (Spinner in primitives.tsx) so every spinner shares one phase. */
 }
 
+/* Parked, with a dot in the middle: waiting on input rather than working. */
+.spinner-waiting {
+  position: relative;
+  border-color: var(--border-strong);
+}
+
+.spinner-waiting::after {
+  content: "";
+  position: absolute;
+  inset: 27%;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+
 .avatar {
   border-radius: 50%;
   object-fit: cover;
@@ -946,6 +960,15 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Started by another agent, not the user. */
+.history-subagent {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  margin-left: -4px;
+  color: var(--text-3);
 }
 
 .history-title-line .badge {
