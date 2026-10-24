@@ -13,3 +13,9 @@ MEMORY.md
 
 # Vercel build output
 .vercel
+
+# Local code-review notes (working documents, not part of the project)
+reviews/
+
+# Isolated git worktrees this checkout creates for parallel work
+.worktrees/
