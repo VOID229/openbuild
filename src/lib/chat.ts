@@ -190,6 +190,8 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
     ? { ...existing, runtime: existing.runtime ?? "pi", updatedAt: now, messages: [...existing.messages, user, assistant] }
     : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts } };
   st.upsertChat(chat);
+  // Name the thread from its first prompt, without waiting for the reply.
+  if (chat.messages.filter((m) => m.role === "user").length === 1) void autoName(chat.id);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
   useStore.setState(chatId === st.activeChatId ? { activeChatId: chat.id, selections } : { selections });
@@ -528,9 +530,6 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const latest = st2.chats.find((c) => c.id === chatId);
   if (!latest) return;
   st2.upsertChat({ ...latest, updatedAt: Date.now(), unread: latest.unread || (!error && st2.activeChatId !== chatId) });
-  // Name the chat after its first successful exchange.
-  const replies = latest.messages.filter((m) => m.role === "assistant" && m.content.trim()).length;
-  if (!error && replies === 1 && !latest.titleSource) void autoName(chatId);
   // Done, stopped or failed, the chat is free again: send what was queued meanwhile.
   drainQueue(chatId);
 }

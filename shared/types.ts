@@ -18,6 +18,11 @@ export function nearestEffort(levels: Effort[], wanted: Effort): Effort | undefi
   return [...levels].sort((a, b) => distance(a) - distance(b) || EFFORTS.indexOf(a) - EFFORTS.indexOf(b))[0];
 }
 
+/** The lowest reasoning a model supports: no thinking ("off") if it allows it, else the next level up. */
+export function lowestEffort(levels: Effort[]): Effort {
+  return nearestEffort(levels, "off") ?? "off";
+}
+
 export interface PlanConfig {
   id: PlanId;
   /** Label in Settings → API Keys */

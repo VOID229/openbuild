@@ -1,10 +1,12 @@
-// Automatic chat titles: after the first reply, ask the configured naming models (in order,
-// falling back on failure) for a short title.
+// Automatic thread titles: as soon as the first user prompt is sent, title the thread.
+// Models picked in Settings are tried in order; with none picked, the thread's own model is used
+// at the lowest reasoning it supports (no thinking when possible).
 import { streamOnce } from "./api";
-import { fastTarget, findModel } from "./models";
+import { findModel } from "./models";
 import { completeOnce } from "./pi";
 import { useStore } from "./store";
-import type { NamingModel } from "./types";
+import { lowestEffort } from "../../shared/types";
+import type { Chat, NamingModel } from "./types";
 
 const NAMING_SYSTEM =
   "You name coding threads and conversations. Reply with only a short, specific title of 2 to 6 words in Title Case that captures the topic. " +
@@ -25,13 +27,17 @@ export function cleanTitle(raw: string) {
   return t.length > 60 ? t.slice(0, 57).trimEnd() + "…" : t;
 }
 
-/** Configured naming models that are currently usable, else the fastest available model, else the thread's own. */
-function candidates(own?: NamingModel): NamingModel[] {
+/**
+ * Models that may name threads, in order. Models picked in Settings override the default; with none
+ * picked, the model this thread is using names it, at the lowest reasoning it supports.
+ */
+function candidates(chat: Chat): NamingModel[] {
   const { settings, detection } = useStore.getState();
-  const usable = settings.naming.models.filter((m) => findModel(detection, m) && (m.plan === "pi" || settings.keys[m.plan]?.length));
-  if (usable.length) return usable;
-  const fast = fastTarget(detection, settings);
-  return [...(fast ? [{ ...fast, effort: "low" as const }] : []), ...(own && own.id !== fast?.id ? [own] : [])];
+  const usable = (m: NamingModel) => findModel(detection, m) && (m.plan === "pi" || settings.keys[m.plan]?.length);
+  if (settings.naming.models.length) return settings.naming.models.filter(usable);
+  const used = chat.messages.find((m) => m.role === "assistant" && m.model)?.model;
+  const model = used ? findModel(detection, used) : undefined;
+  return used && model ? [{ plan: used.plan, id: used.id, effort: lowestEffort(model.reasoning.efforts) }] : [];
 }
 
 export async function autoName(chatId: string) {
@@ -39,14 +45,13 @@ export async function autoName(chatId: string) {
   if (!settings.naming.enabled) return;
   const chat = chats.find((c) => c.id === chatId);
   const question = chat?.messages.find((m) => m.role === "user");
-  const answer = chat?.messages.find((m) => m.role === "assistant" && m.content.trim());
-  if (!chat || chat.titleSource || !question || !answer) return;
+  if (!chat || chat.titleSource || !question) return;
 
   const asked = question.content.trim() || (question.attachments ?? []).map((a) => a.name).join(", ");
-  const content = `Conversation to title:\n\nUser: ${clip(asked, 1500)}\n\nAssistant: ${clip(answer.content, 1500)}`;
+  if (!asked) return;
+  const content = `User prompt to title:\n\n${clip(asked, 1500)}`;
 
-  const own = answer.model && { plan: answer.model.plan, id: answer.model.id, effort: "off" as const };
-  for (const cand of candidates(own)) {
+  for (const cand of candidates(chat)) {
     const keys = useStore.getState().settings.keys[cand.plan];
     if (cand.plan !== "pi" && !keys?.length) continue;
     const ctrl = new AbortController();

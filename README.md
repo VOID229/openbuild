@@ -122,4 +122,4 @@ Signing in to a provider from the phone: OAuth flows that redirect to `localhost
   Writes are synced to disk before they're acknowledged (SQLite WAL, `synchronous=FULL`). If the server is unreachable (restarting, stopped), changes wait in a queue in the browser and are sent as soon as it's back. A snapshot is copied to `backups/` next to the database at startup and every 6 hours (the newest 20 are kept).
 - The port never changes on its own: if it's taken, `bun run dev` stops with an error instead of moving to another port.
 - The API rejects requests with a foreign `Host` or `Origin`, so other websites can't drive Pi through your browser.
-- Threads are named automatically after the first reply (Settings → General → Thread naming), with a quick no-tools Pi call.
+- Threads are named automatically after the first prompt (Settings → General → Thread naming), using the thread's own model with thinking off unless you pick naming models.

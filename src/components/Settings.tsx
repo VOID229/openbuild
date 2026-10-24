@@ -1,6 +1,6 @@
 import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { nearestEffort } from "../../shared/types";
+import { lowestEffort, nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
@@ -171,7 +171,7 @@ function ChatNaming() {
         : plans.flatMap((plan) => (detection[plan]?.models ?? []).map((m) => ({ plan, id: m.id }))).find((m) => !taken.has(`${m.plan}:${m.id}`));
     if (!pick) return;
     const model = findModel(detection, pick);
-    setModels([...naming.models, { ...pick, effort: nearestEffort(model?.reasoning.efforts ?? [], "low") ?? "low" }]);
+    setModels([...naming.models, { ...pick, effort: lowestEffort(model?.reasoning.efforts ?? []) }]);
   };
 
   return (
@@ -179,14 +179,14 @@ function ChatNaming() {
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Thread naming</div>
-          <p className="setting-desc">Name new threads automatically after the first reply. Models are tried from top to bottom; if one fails, the next one is used.</p>
+          <p className="setting-desc">Name new threads automatically after the first user prompt. Models are tried from top to bottom; if one fails, the next one is used.</p>
         </div>
         <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Thread naming" />
       </div>
       <div className={cx("router-config", !naming.enabled && "router-config-hidden")} inert={!naming.enabled}>
         <div className="router-config-inner">
           <div className="naming-list">
-            {!naming.models.length && <p className="naming-empty">Using a fast model from Pi (or the thread's own). Add models to choose which ones name your threads.</p>}
+            {!naming.models.length && <p className="naming-empty">Uses the thread's own model at no or lowest reasoning. Select to override.</p>}
             {naming.models.map((entry, i) => {
               const model = findModel(detection, entry);
               const efforts = model?.reasoning.efforts ?? [];
@@ -226,7 +226,7 @@ function ChatNaming() {
               );
             })}
             <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
-              <Plus size={14} /> {naming.models.length ? "add fallback" : "add model"}
+              <Plus size={14} /> {naming.models.length ? "add model" : "select model"}
             </button>
             {!plans.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose naming models.</p>}
           </div>

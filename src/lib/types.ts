@@ -62,7 +62,7 @@ export interface Settings {
    * sees that digest. No model means the fastest available one.
    */
   searchDigest: { enabled: boolean; model?: NamingModel };
-  /** Automatic chat titles; an empty model list means "fastest available model". */
+  /** Automatic chat titles; an empty model list means the thread's own model at the lowest reasoning. */
   naming: { enabled: boolean; models: NamingModel[] };
   /** Account sync: also sync API keys (end-to-end encrypted). Off unless turned on. */
   syncApiKeys?: boolean;
