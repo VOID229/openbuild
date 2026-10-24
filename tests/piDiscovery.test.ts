@@ -92,6 +92,15 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     const finished = entry("answer2", "result1", "assistant", [{ type: "text", text: "Done" }], { stopReason: "stop" });
     assert.equal(projectSession(jsonl([...lines, finished]), file, Date.now()).messages[1].status, "done");
 
+    // Pi writes one assistant message per round, with tools in between: the paragraph break that
+    // follows a round extends the text, and never becomes a whitespace-only part that would split
+    // the run of tools after it into a second "Ran N commands" row.
+    const round = entry("answer2", "result1", "assistant", [{ type: "text", text: "Now checking" }, { type: "toolCall", id: "tool2", name: "bash", arguments: { command: "ls" } }], { stopReason: "toolUse" });
+    const next2 = projectSession(jsonl([...lines, round]), file, 10).messages[1];
+    assert.deepEqual(next2.parts.map((p) => p.type), ["thought", "text", "tool", "text", "tool"]);
+    assert.equal(next2.parts[3].text, "Now checking");
+    assert.equal(next2.content, "Old answer\\n\\nNow checking");
+
     // Subagents name their session first thing; the prefix becomes a flag rather than part of the title.
     const info = { type: "session_info", id: "info1", parentId: null, timestamp: header.timestamp, name: "subagent: runtime-ui" };
     const child = projectSession(jsonl([header, info, { ...user, parentId: "info1" }]), file, 10);

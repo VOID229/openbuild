@@ -229,6 +229,8 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   // Thinking shares a block with the tools around it, like in flash.
   const blocks: Block[] = [];
   for (const p of message.parts ?? []) {
+    // Whitespace-only text renders nothing but would split the run of tools around it in two.
+    if (p.type === "text" && !p.text.trim()) continue;
     const last = blocks.at(-1);
     const grouped = p.type === "tool" || p.type === "thought";
     if (grouped && Array.isArray(last)) last.push(p);

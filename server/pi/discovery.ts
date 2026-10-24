@@ -60,6 +60,16 @@ export function projectSession(source: string, file: string, modified: number): 
   const tools = new Map<string, ToolPart>();
   const asks = new Map<string, AskPart>();
   let reply: Message | undefined;
+  // Text parts mark where Pi wrote, among the tools it ran. A paragraph break between two of its
+  // assistant messages extends the text part that ended the first one; it never becomes a part of
+  // its own, or the run of tools after it would read as a second "Ran N commands" row.
+  const addText = (text: string) => {
+    if (!text) return;
+    const parts = reply!.parts!;
+    const last = parts.at(-1);
+    if (last?.type === "text") last.text += text;
+    else if (text.trim()) parts.push({ type: "text", text });
+  };
   for (const entry of branch) {
     const m = entry.type === "message" ? entry.message : undefined;
     if (!m) continue;
@@ -78,12 +88,12 @@ export function projectSession(source: string, file: string, modified: number): 
       if (m.model && m.provider) reply.model = { plan: "pi", id: `${m.provider}/${m.model}`, name: m.model };
       if (reply.content && textOf(m.content)) {
         reply.content += "\n\n";
-        reply.parts!.push({ type: "text", text: "\n\n" });
+        addText("\n\n");
       }
       for (const block of Array.isArray(m.content) ? m.content : [{ type: "text", text: textOf(m.content) }]) {
         if (block.type === "text") {
           reply.content += block.text;
-          reply.parts!.push({ type: "text", text: block.text });
+          addText(block.text);
         } else if (block.type === "thinking" && block.thinking) reply.parts!.push({ type: "thought", text: block.thinking });
         else if (block.type === "toolCall" && block.name === QUESTION_TOOL) {
           // A question_ask call reads as its question card.
