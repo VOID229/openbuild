@@ -164,9 +164,11 @@ function serve(port: number, hostname: string) {
       },
 
       // Chats, stored on disk. Deleting keeps a tombstone so a deleted chat can't come back.
+      // `?index`: only ids and versions, so browsers fetch just the chats their cache lacks.
       "/api/chats": {
-        GET: api(async () => {
+        GET: api(async (req) => {
           await discoverSessions();
+          if (new URL(req.url).searchParams.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
         }),
         DELETE: api(() => {
@@ -182,11 +184,23 @@ function serve(port: number, hostname: string) {
           return Response.json({ imported: storage.importChats(body.chats) });
         }),
       },
+      // The given chats as stored, spliced in raw rather than parsed and serialized again.
+      "/api/chats/fetch": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (!Array.isArray(body?.ids) || !body.ids.every((id: unknown) => typeof id === "string")) return bad("Expected { ids: string[] }");
+          const rows = storage.chatsById(body.ids);
+          return new Response(`{"chats":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+            headers: { "content-type": "application/json" },
+          });
+        }),
+      },
       "/api/chats/:id": {
         PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
-          return storage.putChat(chat) ? Response.json({ ok: true }) : bad("Chat was deleted", 410);
+          const v = storage.putChat(chat);
+          return v ? Response.json({ ok: true, v }) : bad("Chat was deleted", 410);
         }),
         DELETE: api((req: Bun.BunRequest<"/api/chats/:id">) => {
           storage.deleteChat(req.params.id);

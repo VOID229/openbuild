@@ -27,6 +27,9 @@ export interface StoredChat {
   [key: string]: unknown;
 }
 
+/** A chat's version: changes whenever its stored content does, so browsers can cache chats by it. */
+export const versionOf = (data: string) => Bun.hash(data).toString(36);
+
 function open(): Database {
   const dir = dataDir();
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -40,6 +43,15 @@ function open(): Database {
     updated_at INTEGER NOT NULL,
     deleted_at INTEGER
   )`);
+  // Versions are computed once on write, so the 5 s index poll never has to read chat bodies.
+  if (!db.query<{ name: string }, []>("PRAGMA table_info(chats)").all().some((column) => column.name === "version")) {
+    db.run("ALTER TABLE chats ADD COLUMN version TEXT");
+  }
+  const unversioned = db.query<{ id: string; data: string }, []>("SELECT id, data FROM chats WHERE version IS NULL AND data IS NOT NULL").all();
+  if (unversioned.length) {
+    const setVersion = db.query("UPDATE chats SET version = ?2 WHERE id = ?1");
+    db.transaction(() => { for (const row of unversioned) setVersion.run(row.id, versionOf(row.data)); })();
+  }
   db.run(`CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -68,22 +80,42 @@ export function listChats(): StoredChat[] {
   return out;
 }
 
+/** Every current chat's id and version, newest first. Reads only the index columns, never chat bodies. */
+export function chatIndex(): { id: string; v: string }[] {
+  return db.query<{ id: string; version: string }, []>("SELECT id, version FROM chats WHERE deleted_at IS NULL ORDER BY updated_at DESC").all()
+    .map((r) => ({ id: r.id, v: r.version }));
+}
+
+/** The stored JSON of the given current chats, with their versions. */
+export function chatsById(ids: string[]): { id: string; v: string; data: string }[] {
+  const find = db.query<{ data: string; version: string | null }, [string]>("SELECT data, version FROM chats WHERE id = ? AND deleted_at IS NULL");
+  const out: { id: string; v: string; data: string }[] = [];
+  for (const id of ids) {
+    const row = find.get(id);
+    if (row) out.push({ id, v: row.version ?? versionOf(row.data), data: row.data });
+  }
+  return out;
+}
+
 /** Read one current chat, excluding deletion tombstones. */
 export function getChat(id: string): StoredChat | undefined {
   const row = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL").get(id);
   try { return row ? JSON.parse(row.data) : undefined; } catch { return undefined; }
 }
 
-/** Save a chat. Returns false when it was deleted (it stays deleted). */
-export function putChat(chat: StoredChat): boolean {
+/** Save a chat. Returns its new version, or false when it was deleted (it stays deleted). */
+export function putChat(chat: StoredChat): string | false {
   const row = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM chats WHERE id = ?").get(chat.id);
   if (row?.deleted_at) return false;
-  db.query("INSERT INTO chats (id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET data = ?2, updated_at = ?3").run(
+  const data = JSON.stringify(chat);
+  const version = versionOf(data);
+  db.query("INSERT INTO chats (id, data, updated_at, version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(id) DO UPDATE SET data = ?2, updated_at = ?3, version = ?4").run(
     chat.id,
-    JSON.stringify(chat),
+    data,
     chat.updatedAt,
+    version,
   );
-  return true;
+  return version;
 }
 
 /**
@@ -106,11 +138,11 @@ export function importChats(chats: StoredChat[]): number {
 
 /** Delete a chat's content, keeping a tombstone. */
 export function deleteChat(id: string) {
-  db.query("INSERT INTO chats (id, data, updated_at, deleted_at) VALUES (?1, NULL, ?2, ?2) ON CONFLICT(id) DO UPDATE SET data = NULL, deleted_at = ?2").run(id, Date.now());
+  db.query("INSERT INTO chats (id, data, updated_at, version, deleted_at) VALUES (?1, NULL, ?2, NULL, ?2) ON CONFLICT(id) DO UPDATE SET data = NULL, version = NULL, deleted_at = ?2").run(id, Date.now());
 }
 
 export function deleteAllChats() {
-  db.query("UPDATE chats SET data = NULL, deleted_at = ?1 WHERE deleted_at IS NULL").run(Date.now());
+  db.query("UPDATE chats SET data = NULL, version = NULL, deleted_at = ?1 WHERE deleted_at IS NULL").run(Date.now());
 }
 
 export function getValue(key: string): string | undefined {

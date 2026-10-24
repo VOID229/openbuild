@@ -10,7 +10,7 @@
 //
 // On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
 // (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
-import { clear, createStore, del, entries, get, set } from "./kv";
+import { clear, createStore, del, entries, get, set, usingFallbackStorage } from "./kv";
 import { canResume, config, isHosted } from "./runtime";
 import type { Chat } from "./types";
 
@@ -25,6 +25,27 @@ const legacy = createStore("openchat", "chats");
 const LEGACY_IMPORTED = "openchat-chats-imported";
 
 let seq = Date.now();
+
+// The local server's chats, cached in this browser by version (see /api/chats?index). A reload
+// reads them from here and downloads only the chats that changed, not every message of every
+// thread. Without IndexedDB the cache lives in memory only, for this page load.
+type Cached = { v: string; chat: Chat };
+const chatCache = createStore("openchat-chat-cache", "chats");
+/** Settled chats by id. Unchanged chats keep the same object across loads. */
+const cached = new Map<string, Cached>();
+let cacheRead: Promise<void> | undefined;
+const readCache = () => (cacheRead ??= usingFallbackStorage ? Promise.resolve() : entries<string, Cached>(chatCache).then(
+  (rows) => { for (const [id, c] of rows) if (c?.chat && !cached.has(id)) cached.set(id, { v: c.v, chat: settle(c.chat) }); },
+  () => {},
+));
+function remember(id: string, v: string, chat: Chat) {
+  cached.set(id, { v, chat: settle(chat) });
+  if (!usingFallbackStorage) void set(id, { v, chat }, chatCache).catch(() => {});
+}
+function forget(id: string) {
+  cached.delete(id);
+  if (!usingFallbackStorage) void del(id, chatCache).catch(() => {});
+}
 
 class Retry extends Error {}
 
@@ -47,7 +68,12 @@ async function send(id: string, op: Op) {
     throw new Retry("Server unreachable");
   }
   // 410: the chat was deleted (maybe from another tab); it stays deleted, so the write is done.
-  if (res.ok || res.status === 410) return;
+  if (res.ok || res.status === 410) {
+    // The server's version of what was just written, so the next load doesn't download it again.
+    const v = op.op === "put" && res.ok && ((await res.json().catch(() => undefined)) as { v?: unknown } | undefined)?.v;
+    if (op.op === "put" && typeof v === "string") remember(id, v, op.chat);
+    return;
+  }
   // 5xx, or 404 from a server too old to have /api/chats: keep it and try again later.
   throw res.status >= 500 || res.status === 404 ? new Retry(`HTTP ${res.status}`) : new Error(`HTTP ${res.status}: ${await res.text().catch(() => "")}`);
 }
@@ -161,16 +187,31 @@ export async function loadChats(): Promise<Chat[]> {
   }
   await flush();
   await importLegacy();
-  const res = await fetch("/api/chats");
+  const [res] = await Promise.all([fetch("/api/chats?index"), readCache()]);
   if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
-  const chats = new Map(((await res.json()).chats as Chat[]).map((c) => [c.id, c]));
+  const body = (await res.json()) as { index?: { id: string; v: string }[]; chats?: Chat[] };
+  let chats: Map<string, Chat>;
+  if (!body.index) {
+    // A server from before the index: it sent every chat.
+    chats = new Map((body.chats ?? []).map((c) => [c.id, c]));
+  } else {
+    const stale = body.index.filter((e) => cached.get(e.id)?.v !== e.v).map((e) => e.id);
+    if (stale.length) {
+      const res = await fetch("/api/chats/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: stale }) });
+      if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
+      for (const { v, chat } of (await res.json()).chats as Cached[]) remember(chat.id, v, chat);
+    }
+    const live = new Set(body.index.map((e) => e.id));
+    for (const id of cached.keys()) if (!live.has(id)) forget(id);
+    chats = new Map(body.index.flatMap((e) => (cached.has(e.id) ? [[e.id, cached.get(e.id)!.chat] as const] : [])));
+  }
   // Changes still waiting in the outbox are newer than what the server has.
   for (const [id, op] of await queued().catch(() => [] as [string, Op][])) {
     if (op.op === "put") chats.set(id, op.chat);
     else if (op.op === "delete") chats.delete(id);
     else chats.clear();
   }
-  return [...chats.values()].map(settle).sort((a, b) => b.updatedAt - a.updatedAt);
+  return [...chats.values()].map((c) => (cached.get(c.id)?.chat === c ? c : settle(c))).sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 /** Listeners told about every local chat change (cloud sync uses it); null means "all chats deleted". */

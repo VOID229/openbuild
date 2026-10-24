@@ -144,6 +144,8 @@ function Main() {
           const now = byId.get(chat.id);
           // A local edit, delete or streamed delta happened during the request: leave it alone.
           if (now !== original || now?.messages.some((m) => m.status === "streaming")) continue;
+          // Unchanged chats come back as the same object from the chat cache.
+          if (now === chat) continue;
           if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);
         }
         useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
