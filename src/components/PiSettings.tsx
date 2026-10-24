@@ -840,7 +840,7 @@ export function ProvidersSection() {
       <span className="pi-row-actions">
         {signIn && (
           <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "oauth" })}>
-            {ready ? "Sign in again" : "Sign in"}
+            {ready ? "Switch account" : "Sign in"}
           </button>
         )}
         {apiKey && (
