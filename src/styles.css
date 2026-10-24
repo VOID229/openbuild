@@ -6505,6 +6505,15 @@ a.btn-primary {
   text-overflow: ellipsis;
 }
 
+/* The project gives way first; the device keeps its name unless it's very long. */
+.history-device {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 @media (pointer: coarse) {
   .pp-search input,
   .mp-search input {

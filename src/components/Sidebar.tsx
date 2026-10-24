@@ -6,6 +6,7 @@ import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
+import type { Device } from "../../shared/types";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
@@ -136,12 +137,23 @@ function useLongPress(open: (x: number, y: number) => void) {
   };
 }
 
+/**
+ * The device a row names: a paired device always, this one only once others are paired (otherwise
+ * every row would say the same thing). Undefined: no label.
+ */
+function rowDevice(devices: Device[], deviceId: string | undefined): string | undefined {
+  if (deviceId) return devices.find((d) => d.id === deviceId)?.name ?? "unpaired device";
+  if (!devices.some((d) => !d.local)) return undefined;
+  return devices.find((d) => d.local)?.name;
+}
+
 const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
   const model = modelOf(chat);
   const runtime = chat.runtime ?? "pi";
+  const device = useStore((s) => rowDevice(s.devices, chat.workspace?.deviceId));
   const [draft, setDraft] = useState(chat.title);
   const input = useRef<HTMLInputElement>(null);
   const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
@@ -228,6 +240,11 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
               {chat.workspace.projectName}
+            </span>
+          )}
+          {device && (
+            <span className="history-device" title={`Runs on ${device}`}>
+              @ {device}
             </span>
           )}
           <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
