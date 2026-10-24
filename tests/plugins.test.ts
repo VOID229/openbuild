@@ -70,6 +70,143 @@ test("the codex-multi plugin gives the second Codex login its own Codex group", 
   }
 });
 
+test("icon first paint waits for plugins, with cached, missing, corrupt or blocked storage", async () => {
+  // Each process gets a genuinely fresh module registry and synchronous cache hydration. Browser
+  // shims must not leak into the server/plugin tests (or other frontend tests) in this process.
+  const directory = mkdtempSync(join(tmpdir(), "openbuild-icon-paint-"));
+  const client = join(directory, "client.mjs");
+  writeFileSync(client, `export default async () => {
+    globalThis.__iconEntered = (globalThis.__iconEntered ?? 0) + 1;
+    await globalThis.__iconGate;
+    return { icons: ${JSON.stringify(openrouterDeepseek.icons)} };
+  };`);
+  try {
+    for (const scenario of ["missing", "blocked", "corrupt", "malformed", "empty", "partial", "cached", "cold-failure", "cached-failure"]) {
+      const script = `
+        import { expect } from "bun:test";
+        import { createElement } from "react";
+        import { renderToStaticMarkup } from "react-dom/server";
+        const scenario = ${JSON.stringify(scenario)};
+        const icons = ${JSON.stringify(openrouterDeepseek.icons)};
+        const cache = scenario === "corrupt" ? "{" : scenario === "malformed" ? "null" :
+          scenario.startsWith("cached") ? JSON.stringify(icons) : scenario === "partial" ?
+          JSON.stringify({ providers: {}, brands: { unrelated: "<svg/>" } }) :
+          scenario === "empty" ? JSON.stringify({ providers: {}, brands: {} }) : null;
+        globalThis.window = globalThis;
+        globalThis.document = { addEventListener() {}, documentElement: { style: {
+          getPropertyValue: () => "", setProperty() {}, removeProperty() {},
+        } } };
+        globalThis.localStorage = {
+          getItem(key) {
+            if (scenario === "blocked") throw new Error("Storage blocked");
+            return key === "openbuild:plugin-icons" ? cache : null;
+          },
+          setItem() { if (scenario === "blocked") throw new Error("Storage blocked"); },
+          removeItem() {},
+        };
+        const { BrandIcon, ProviderIcon } = await import("./src/components/primitives.tsx");
+        const { usePlugins, pluginIconsReady, pluginProviderSvg } = await import("./src/lib/plugins.tsx");
+        const paint = () => [
+          renderToStaticMarkup(createElement(BrandIcon, { id: "deepseek/deepseek-v3" })),
+          renderToStaticMarkup(createElement(ProviderIcon, { provider: "deepseek" })),
+        ];
+        const assertOverride = () => { for (const html of paint()) expect(html).toContain("M18.654"); };
+        expect(pluginIconsReady()).toBe(false);
+        if (scenario.startsWith("cached")) assertOverride();
+        else for (const html of paint()) expect(html).not.toContain("<svg");
+
+        if (scenario.endsWith("-failure")) {
+          // A failed API request releases built-ins instead of leaving the UI blank forever,
+          // but never throws away an available cached override.
+          globalThis.fetch = async () => { throw new Error("Offline"); };
+          const version = usePlugins.getState().version;
+          await usePlugins.getState().refresh();
+          expect(usePlugins.getState().error).toBe("Offline");
+          expect(usePlugins.getState().version).toBeGreaterThan(version);
+          expect(pluginIconsReady()).toBe(true);
+          if (scenario === "cached-failure") assertOverride();
+          else for (const html of paint()) {
+            expect(html).toContain("<svg");
+            expect(html).not.toContain("M18.654");
+          }
+          process.exit(0);
+        }
+
+        let release;
+        globalThis.__iconGate = new Promise(resolve => { release = resolve; });
+        let info = { enabled: true, safe: false, disabled: [], customCss: false, plugins: [{
+          id: "icons", name: "Icons", version: "1.0.0", apiVersion: 1,
+          client: true, clientUrl: ${JSON.stringify(`file://${client}`)},
+        }] };
+        globalThis.fetch = async () => Response.json(info);
+        const waitForEntry = async (count) => {
+          const deadline = Date.now() + 2000;
+          while ((globalThis.__iconEntered ?? 0) < count) {
+            if (Date.now() > deadline) throw new Error("Plugin factory did not start");
+            await new Promise(resolve => setTimeout(resolve, 5));
+          }
+        };
+        const loading = usePlugins.getState().refresh();
+        await waitForEntry(1);
+        expect(pluginIconsReady()).toBe(false);
+        if (scenario === "cached") assertOverride();
+        else for (const html of paint()) expect(html).not.toContain("<svg");
+        release();
+        await loading;
+        expect(usePlugins.getState().errors).toEqual({});
+        expect(pluginIconsReady()).toBe(true);
+        assertOverride();
+
+        // Hot reload keeps committed icons until replacement is ready, never flashing built-ins.
+        globalThis.__iconGate = new Promise(resolve => { release = resolve; });
+        const reload = usePlugins.getState().refresh();
+        await waitForEntry(2);
+        assertOverride();
+        release();
+        await reload;
+        assertOverride();
+
+        // A superseded async factory must not repopulate the newly disabled registry.
+        const enabledInfo = info;
+        globalThis.__iconGate = new Promise(resolve => { release = resolve; });
+        const superseded = usePlugins.getState().refresh();
+        await waitForEntry(3);
+        info = { ...enabledInfo, enabled: false };
+        await usePlugins.getState().refresh(true);
+        release();
+        await superseded;
+        expect(pluginProviderSvg("deepseek")).toBeUndefined();
+
+        // Disabled/safe mode commits an empty set and restores the built-in fallback.
+        for (const patch of [{ disabled: ["icons"] }, { enabled: false }, { safe: true }]) {
+          info = { ...enabledInfo, ...patch };
+          await usePlugins.getState().refresh();
+          expect(pluginIconsReady()).toBe(true);
+          expect(pluginProviderSvg("deepseek")).toBeUndefined();
+          for (const html of paint()) {
+            expect(html).toContain("<svg");
+            expect(html).not.toContain("M18.654");
+          }
+        }
+      `;
+      const child = Bun.spawn([process.execPath, "-e", script], {
+        cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
+      });
+      const timer = setTimeout(() => child.kill(), 8_000);
+      try {
+        const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+        if (code !== 0) throw new Error(`${scenario}: ${out}\n${err}`);
+        expect(code).toBe(0);
+      } finally {
+        clearTimeout(timer);
+        child.kill();
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}, 65_000);
+
 test("plugins are served, built against the host React, and can be disabled", async () => {
   const directory = mkdtempSync(join(tmpdir(), "openbuild-plugins-"));
   const pluginsDir = join(directory, "plugins");

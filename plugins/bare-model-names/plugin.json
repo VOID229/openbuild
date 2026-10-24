@@ -1,0 +1,9 @@
+{
+  "id": "bare-model-names",
+  "name": "Bare model names",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Drops OpenRouter's \"Vendor: \" prefix from model names, so the picker, composer pill and settings read \"DeepSeek V4.1 Flash 1017\" instead of \"DeepSeek: DeepSeek V4.1 Flash 1017\". The provider line and logo stay. Edit PROVIDERS in client.tsx to apply it to other providers.",
+  "client": "client.tsx",
+  "defaultEnabled": true
+}

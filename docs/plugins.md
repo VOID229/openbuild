@@ -14,7 +14,7 @@ Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in 
 
 The whole plugin system is **off by default**. `Settings → Plugins` has the master switch: until it's on, nothing from the folder runs — no UI slots, styles, server routes or hooks. With it on, the same page lists everything found (including broken plugins) and turns each one on or off without deleting it.
 
-The folder ships five examples: `daily-note` (a composer button + server route + settings page), `openrouter-deepseek` (icon overrides), `pi-claude` and `codex-multi` (provider grouping and a badged provider icon) and `quiet-ui` (manifest-only tokens and CSS, off by default).
+The folder ships six examples: `daily-note` (a composer button + server route + settings page), `openrouter-deepseek` (icon overrides), `pi-claude` and `codex-multi` (provider grouping and a badged provider icon), `bare-model-names` (rewrites Pi's OpenRouter model names through the SDK's `subscribe`/`useStore`) and `quiet-ui` (manifest-only tokens and CSS, off by default).
 
 ## Manifest
 

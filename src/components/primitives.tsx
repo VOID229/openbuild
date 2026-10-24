@@ -2,7 +2,7 @@ import { Boxes, CircleUserRound } from "lucide-react";
 import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
-import { pluginBrandSvg, pluginProviderSvg, usePlugins } from "../lib/plugins";
+import { pluginBrandSvg, pluginIconsReady, pluginProviderSvg, usePlugins } from "../lib/plugins";
 import { cx, useDismiss, usePresence } from "../lib/ui";
 
 /** A Settings section's "# Title" heading. */
@@ -109,7 +109,10 @@ export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string
   // and if that copy is hidden (closed picker, collapsed sidebar) WebKit paints every copy blank.
   const uid = useId();
   usePlugins((s) => s.version);
-  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: (pluginBrandSvg(id) ?? brandSvg(id)).replaceAll("_R_0_", uid) }} />;
+  // Cached overrides are safe immediately; built-ins must wait for the live plugin registry.
+  const svg = pluginBrandSvg(id) ?? (pluginIconsReady() ? brandSvg(id) : undefined);
+  if (!svg) return <span className={cx("brand-icon", className)} aria-hidden />;
+  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) }} />;
 });
 
 /** The Pi mark (pi.dev's monogram), in the current text colour. Padded so it sits like a Lucide icon. */
@@ -133,7 +136,9 @@ export const ProviderIcon = memo(function ProviderIcon({ provider, className }: 
         <Boxes />
       </span>
     );
-  const svg = pluginProviderSvg(provider) ?? providerSvg(provider);
+  const override = pluginProviderSvg(provider);
+  if (!override && !pluginIconsReady()) return <span className={cx("brand-icon", className)} aria-hidden />;
+  const svg = override ?? providerSvg(provider);
   if (svg) return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) }} />;
   return (
     <span className={cx("brand-icon provider-letter", className)} aria-hidden>

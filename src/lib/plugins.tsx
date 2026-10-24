@@ -88,6 +88,19 @@ const toolRenderers = new Map<string, ToolEntry[]>();
 const settingsSections = new Map<string, PluginSettingsSection & { pluginId: string }>();
 const providerIcons = new Map<string, string>();
 const brandIcons = new Map<string, string>();
+// Icons found by the last successful load are mirrored here so the first paint after a refresh can
+// already use them. Client modules are fetched and evaluated asynchronously, so without this the
+// built-in marks would flash for a frame or two before the plugin's replacements swapped in.
+const ICON_CACHE_KEY = "openbuild:plugin-icons";
+let stagedProviderIcons = new Map<string, string>();
+let stagedBrandIcons = new Map<string, string>();
+/**
+ * Whether plugin initialization has settled and built-in fallbacks are safe to draw. Cached overrides
+ * can be used immediately, but a cache may be incomplete or stale, so it never enables fallbacks.
+ * While it's false, BrandIcon/ProviderIcon draw nothing rather than a mark a plugin may replace —
+ * a missing icon for a few frames reads far better than DeepSeek's mark turning into OpenRouter's.
+ */
+let iconsReady = false;
 const applied = new Map<string, Applied>();
 const runtimeErrors = new Map<string, string>();
 let generation = 0;
@@ -125,6 +138,12 @@ export const usePlugins = create<PluginStore>((set, get) => ({
       await loadAll(info);
     } catch (err) {
       set({ error: (err as Error).message || "Couldn't reach the OpenBuild server" });
+      // A failed initial request must not leave every uncached icon blank indefinitely. Keep any
+      // cached overrides, but release built-in fallbacks now that initialization has settled.
+      if (!iconsReady) {
+        iconsReady = true;
+        bump();
+      }
     } finally {
       set({ loading: false });
     }
@@ -237,8 +256,10 @@ function unloadAll() {
   slots.clear();
   toolRenderers.clear();
   settingsSections.clear();
-  providerIcons.clear();
-  brandIcons.clear();
+  // Committed icons are left alone until the next load finishes: they're what's on screen right now,
+  // and blanking them here would flash the built-in marks while the client modules re-import.
+  stagedProviderIcons = new Map();
+  stagedBrandIcons = new Map();
   clearProviderOverrides();
   runtimeErrors.clear();
   bump();
@@ -278,10 +299,10 @@ function register(info: PluginInfo, config: ClientPlugin, entry: Applied) {
   }
 
   for (const [provider, svg] of Object.entries(config.icons?.providers ?? {})) {
-    if (typeof svg === "string" && svg.trim().startsWith("<svg")) providerIcons.set(provider.toLowerCase(), svg);
+    if (isSvg(svg)) stagedProviderIcons.set(provider.toLowerCase(), svg);
   }
   for (const [prefix, svg] of Object.entries(config.icons?.brands ?? {})) {
-    if (typeof svg === "string" && svg.trim().startsWith("<svg")) brandIcons.set(prefix.toLowerCase(), svg);
+    if (isSvg(svg)) stagedBrandIcons.set(prefix.toLowerCase(), svg);
   }
 
   if (config.providers) setProviderOverrides(config.providers);
@@ -316,6 +337,49 @@ function register(info: PluginInfo, config: ClientPlugin, entry: Applied) {
 
 const importModule = new Function("url", "return import(url)") as (url: string) => Promise<{ default?: unknown }>;
 
+function isSvg(value: unknown): value is string {
+  return typeof value === "string" && value.trim().startsWith("<svg");
+}
+
+/** Publish the icons staged by this load and remember them for the next page load. */
+function commitIcons() {
+  providerIcons.clear();
+  brandIcons.clear();
+  for (const [provider, svg] of stagedProviderIcons) providerIcons.set(provider, svg);
+  for (const [prefix, svg] of stagedBrandIcons) brandIcons.set(prefix, svg);
+  iconsReady = true;
+  try {
+    // Written even when empty: "no overrides" is just as worth remembering as overrides are.
+    localStorage.setItem(ICON_CACHE_KEY, JSON.stringify({ providers: Object.fromEntries(providerIcons), brands: Object.fromEntries(brandIcons) }));
+  } catch {
+    // Storage may be full or blocked; the icons still work for this page load.
+  }
+}
+
+/** Load the icons saved by the previous load, synchronously, before React's first render. */
+function hydrateIcons() {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(ICON_CACHE_KEY);
+  } catch {
+    // Storage blocked (site data off, an embedded view, a full quota): fall back to drawing nothing
+    // until the plugins load, so no built-in mark is painted and then swapped.
+    return;
+  }
+  if (!raw) return;
+  try {
+    const saved: unknown = JSON.parse(raw);
+    const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+    if (!isRecord(saved) || !isRecord(saved.providers) || !isRecord(saved.brands)) return;
+    for (const [provider, svg] of Object.entries(saved.providers)) if (isSvg(svg)) providerIcons.set(provider.toLowerCase(), svg);
+    for (const [prefix, svg] of Object.entries(saved.brands)) if (isSvg(svg)) brandIcons.set(prefix.toLowerCase(), svg);
+  } catch {
+    // A corrupt cache means the same as none: wait for the plugins rather than guess.
+  }
+}
+
+hydrateIcons();
+
 async function loadAll(info: PluginsResponse) {
   const current = ++generation;
   unloadAll();
@@ -325,6 +389,7 @@ async function loadAll(info: PluginsResponse) {
   if (info.safe || !info.enabled) {
     customCss?.remove();
     customCss = undefined;
+    commitIcons();
     bump();
     return;
   }
@@ -347,9 +412,11 @@ async function loadAll(info: PluginsResponse) {
       if (current !== generation) return;
       const exported = mod.default;
       const config = (typeof exported === "function" ? await (exported as (api: typeof host) => ClientPlugin)(host) : exported) as ClientPlugin | undefined;
+      if (current !== generation) return;
       if (!config || typeof config !== "object") throw new Error("The client module has no default export");
       register(plugin, config, entry);
     } catch (err) {
+      if (current !== generation) return;
       const message = (err as Error).message || String(err);
       runtimeErrors.set(plugin.id, message);
       unapply(entry);
@@ -357,7 +424,10 @@ async function loadAll(info: PluginsResponse) {
       console.error(`[plugin:${plugin.id}]`, err);
     }
   }
-  if (current === generation) bump();
+  if (current === generation) {
+    commitIcons();
+    bump();
+  }
 }
 
 /** Fetch plugins and watch for file changes. Called once after the app unlocks. */
@@ -379,6 +449,11 @@ export function initPlugins() {
 }
 
 // ------------------------------------------------------------------ icon overrides
+
+/** Whether initialization settled (loaded or failed), so built-in fallbacks may be drawn. */
+export function pluginIconsReady(): boolean {
+  return iconsReady;
+}
 
 /** The provider icon a plugin registered, by provider id (e.g. "deepseek"). */
 export function pluginProviderSvg(provider: string): string | undefined {
