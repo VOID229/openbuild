@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isStreamRef } from "../../shared/replies";
-import type { ModelInfo, PiChatRequest } from "../../shared/types";
+import { EFFORTS, type ModelInfo, type PiChatRequest } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import { beforeChat, hasChatHooks } from "../plugins";
@@ -15,6 +15,8 @@ import * as resources from "./resources";
 import { problems } from "./rpc";
 import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn, steer } from "./sessions";
 import { piBin } from "./install";
+import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
+import * as durable from "../durable";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 
@@ -44,9 +46,11 @@ function isPiChat(b: any): b is PiChatRequest {
   return (
     !!b &&
     isThreadId(b.threadId) &&
+    (b.runtime === undefined || validRuntime(b.runtime)) &&
     str(b.cwd, 1024) &&
     str(b.model, 512) &&
     b.model.includes("/") &&
+    EFFORTS.includes(b.effort) &&
     typeof b.message === "string" &&
     b.message.length < 2_000_000 &&
     Number.isInteger(b.prior) &&
@@ -150,14 +154,26 @@ export function piRoutes(api: Api) {
         }
         if (!existsSync(body.cwd)) return bad("This thread's folder doesn't exist anymore (was its worktree removed?). Start a new thread to keep going.", 410);
         if (!projects.allowedCwd(body.cwd)) return bad("That folder isn't a project in OpenBuild", 403);
-        const run = localRun(body.stream.id, () => startStream((signal) => runTurn(body, signal)));
-        return new Response(run.stream(), { headers: runHeaders });
+        try {
+          claimRuntime(body.threadId, body.runtime ?? "pi");
+        } catch (err) {
+          return fail(err);
+        }
+        try {
+          const run = body.runtime === "durable"
+            ? await durable.startRun(body)
+            : localRun(body.stream.id, () => startStream((signal) => runTurn(body, signal)));
+          return new Response(run.stream(), { headers: runHeaders });
+        } catch (err) {
+          return fail(err);
+        }
       }),
     },
     "/api/pi/threads/:id/answer": {
       POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/answer">) => {
         const body = await readJson(req);
         if (!isThreadId(req.params.id) || !str(body?.askId, 128)) return bad("Expected { askId, value | confirmed | cancelled }");
+        if (threadRuntime(req.params.id) === "durable") return bad("Pi extension dialogs aren't available in Durable threads.", 400);
         const ok = answer(req.params.id, body.askId, { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true });
         return ok ? Response.json({ ok }) : bad("That question isn't waiting anymore", 410);
       }),
@@ -169,6 +185,7 @@ export function piRoutes(api: Api) {
           return bad("Expected { steerId, message, images? }");
         }
         try {
+          if (threadRuntime(req.params.id) === "durable") return bad("Steering isn't available in Durable threads yet.");
           return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
         } catch (err) {
           return fail(err, 409);
@@ -180,6 +197,7 @@ export function piRoutes(api: Api) {
         if (!isThreadId(req.params.id)) return bad("Bad thread id");
         const body = await readJson(req);
         try {
+          if (threadRuntime(req.params.id) === "durable") return bad("Manual compaction isn't available in Durable threads yet.");
           return Response.json(await compact(req.params.id, typeof body?.instructions === "string" ? body.instructions : undefined));
         } catch (err) {
           return fail(err);

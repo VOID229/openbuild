@@ -357,12 +357,11 @@ switch (cmd) {
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
-    // A restart ends the server process, and with it the `pi --mode rpc` process of every thread it
-    // has open: a reply being written right now is lost and has to be asked for again. The session
-    // files stay on disk, so the threads themselves are still there afterwards.
+    // Ordinary Pi RPC replies stop; Durable checkpoints resume on the next server startup.
+    // Neither runtime runs while the server is stopped.
     if (owned && !assumeYes) {
       if (!process.stdin.isTTY) fail("restarting ends the Pi threads working in it, and there is no terminal to confirm in. Add --yes to restart anyway.");
-      if (!(await confirm("Restarting OpenBuild will stop working Pi threads in it, proceed?"))) {
+      if (!(await confirm("Restarting stops ordinary Pi replies; Durable threads resume after startup. Proceed?"))) {
         console.log("restart canceled");
         break;
       }

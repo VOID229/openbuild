@@ -118,8 +118,9 @@ export async function steerQueued(chatId: string, id: string) {
   const run = running.get(chatId);
   const item = queueOf(chatId).find((q) => q.id === id);
   const st = useStore.getState();
-  const msg = st.chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === run?.messageId);
-  if (!run || !item || msg?.model?.plan !== "pi") return;
+  const chat = st.chats.find((c) => c.id === chatId);
+  const msg = chat?.messages.find((m) => m.id === run?.messageId);
+  if (!run || !item || msg?.model?.plan !== "pi" || chat?.runtime === "durable") return;
   const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(st.detection, msg.model)?.input ?? ["text"]);
   removeQueued(chatId, id);
   run.steers.push(item);
@@ -186,8 +187,8 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   };
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const chat: Chat = existing
-    ? { ...existing, updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts } };
+    ? { ...existing, runtime: existing.runtime ?? "pi", updatedAt: now, messages: [...existing.messages, user, assistant] }
+    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts } };
   st.upsertChat(chat);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
@@ -199,7 +200,11 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
 /** Retry an assistant turn. */
 export function regenerate(chatId: string, messageId: string) {
   const st = useStore.getState();
-  const msg = st.chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
+  const chat = st.chats.find((c) => c.id === chatId);
+  const msg = chat?.messages.find((m) => m.id === messageId);
+  // Durable has no rewind. Only workspace-preparation failures are safely retryable:
+  // no turn could have been admitted before its workspace existed.
+  if (chat?.runtime === "durable" && chat.workspace) return;
   const target = msg?.model;
   const model = findModel(st.detection, target);
   if (!msg || !target || !model) {
@@ -284,6 +289,7 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
   const steered = before.slice(0, userAt).reduce((n, m) => n + (m.parts?.filter((p) => p.type === "steer").length ?? 0), 0);
   return {
     threadId: chat.id,
+    runtime: chat.runtime ?? "pi",
     cwd: workspace.cwd,
     model: model.id,
     effort,
@@ -295,6 +301,7 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
 
 /** Answer a question a Pi extension asked; the reply's stream records the answer. */
 export async function answerQuestion(chatId: string, messageId: string, part: AskPart, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
+  if (useStore.getState().chats.find((c) => c.id === chatId)?.runtime === "durable") return;
   const { answerAsk } = await import("./pi");
   const shown = reply.cancelled ? "" : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : (reply.value ?? "");
   useStore.getState().patchMessage(chatId, messageId, (m) => ({ parts: m.parts?.map((p) => (p.type === "ask" && p.id === part.id ? { ...p, answer: shown } : p)) }));
@@ -397,7 +404,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
     const flushParts = () => {
       if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { parts: [...parts] });
     };
-    for await (const ev of streamChat(request, stream, startedAt, ctrl.signal)) {
+    for await (const ev of streamChat(request, stream, startedAt, ctrl.signal, chat.runtime === "durable")) {
       if (ev.t === "reset") {
         // Reconnected: the reply is replayed from the start.
         text = reasoning = "";

@@ -33,6 +33,7 @@ const DEFAULT_SETTINGS: Settings = {
   syncApiKeys: false,
   workspace: { mode: "worktree", defaultMode: "worktree" },
   favorites: [],
+  threadRuntime: "pi",
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };

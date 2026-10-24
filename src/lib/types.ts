@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ToolId, Usage, Workspace } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -68,6 +68,8 @@ export interface Settings {
   syncApiKeys?: boolean;
   /** Where new threads work: a project (none = a scratch folder), in its checkout or a new worktree. */
   workspace: NewWorkspace;
+  /** Runtime for new threads; older settings default to Pi. */
+  threadRuntime?: ThreadRuntime;
   /** Starred Pi models ("<provider>/<id>"), in order; the first nine get ⌘1–⌘9. */
   favorites: string[];
 }
@@ -189,6 +191,8 @@ export interface Message {
 }
 
 export interface Chat {
+  /** Fixed when the thread starts. Missing on legacy threads means Pi. */
+  runtime?: ThreadRuntime;
   /** Reasoning preferences keyed by model identity (including the auto router). */
   efforts?: Record<string, Effort>;
   id: string;

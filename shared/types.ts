@@ -230,9 +230,13 @@ export interface GitInfo {
   behind?: number;
 }
 
+/** Runtime chosen when a thread starts; absent on legacy threads means Pi. */
+export type ThreadRuntime = "pi" | "durable";
+
 /** A turn of a thread, run by Pi in the thread's workspace. */
 export interface PiChatRequest {
   threadId: string;
+  runtime?: ThreadRuntime;
   cwd: string;
   /** "<provider>/<model id>" */
   model: string;

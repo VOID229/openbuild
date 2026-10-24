@@ -279,6 +279,9 @@ function Typing() {
 }
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
+  const durable = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime === "durable");
+  const hasWorkspace = useStore((s) => !!s.chats.find((c) => c.id === chatId)?.workspace);
+  const canRetry = !durable || !hasWorkspace;
   const streaming = message.status === "streaming";
   const busy = message.searches?.some((s) => s.status === "running") || message.parts?.some((p) => p.type === "tool" && p.status === "running");
   const waiting = streaming && !message.content && !message.reasoning && !busy && !message.parts?.length;
@@ -298,9 +301,11 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
         <div className="msg-error" role="alert">
           <CircleAlert size={16} />
           <span>{message.error ?? "Something went wrong."}</span>
-          <button type="button" className="btn btn-sm" onClick={() => regenerate(chatId, message.id)}>
-            Retry
-          </button>
+          {canRetry ? (
+            <button type="button" className="btn btn-sm" onClick={() => regenerate(chatId, message.id)}>
+              Retry
+            </button>
+          ) : <span>Durable cannot retry an existing turn. Start a new thread to try again.</span>}
         </div>
       )}
       {message.notice && <div className="msg-notice">{message.notice}</div>}
@@ -317,7 +322,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
           )}
           {message.content && <CopyButton text={message.content} />}
           <PluginSlot name="message:actions" context={{ message, chatId }} />
-          {isLast && message.status !== "error" && (
+          {isLast && !durable && message.status !== "error" && (
             <IconButton label="Regenerate" tooltipSide="top" className="msg-action" onClick={() => regenerate(chatId, message.id)}>
               <RotateCcw size={15} />
             </IconButton>

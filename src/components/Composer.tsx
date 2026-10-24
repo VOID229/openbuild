@@ -338,18 +338,19 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   };
 
-  // "/" at the start (and no space yet) lists commands.
+  // "/" at the start (and no space yet) lists commands. Legacy threads always use Pi.
+  const runtime = useStore((s) => chatId ? s.chats.find((c) => c.id === chatId)?.runtime ?? "pi" : s.settings.threadRuntime ?? "pi");
   const workspace = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId)?.workspace : undefined));
   const homeProject = useStore((s) => (chatId ? undefined : s.projects.find((p) => p.id === s.settings.workspace.projectId)));
   const typedCommand = /^\/(\S*)$/.exec(text)?.[1];
   const [slashDismissed, setSlashDismissed] = useState<string>();
   const [slashIndex, setSlashIndex] = useState(0);
-  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, typedCommand !== undefined);
+  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, runtime === "pi" && typedCommand !== undefined);
   const slashMatches = useMemo(() => {
     if (typedCommand === undefined || slashDismissed === text) return [];
-    const builtins = BUILTIN_COMMANDS.filter((c) => c.name !== "compact" || chatId);
-    return matchCommands([...builtins, ...(piCmds ?? [])], typedCommand).slice(0, 50);
-  }, [typedCommand, piCmds, slashDismissed, text, chatId]);
+    const builtins = BUILTIN_COMMANDS.filter((c) => c.name !== "compact" || (chatId && runtime === "pi"));
+    return matchCommands([...builtins, ...(runtime === "pi" ? piCmds ?? [] : [])], typedCommand).slice(0, 50);
+  }, [typedCommand, piCmds, slashDismissed, text, chatId, runtime]);
   useEffect(() => setSlashIndex(0), [typedCommand]);
   const pickCommand = (c: PiCommand) => {
     setText(`/${c.name} `);
@@ -362,6 +363,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
     if (!m) return false;
     if (m[1] === "new") {
       useStore.getState().newChat();
+      return true;
+    }
+    if (runtime === "durable") {
+      setNotice("Durable does not support Pi's /compact command.");
       return true;
     }
     if (!chatId) return false;
@@ -501,7 +506,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply ? "pi" : "other") : undefined} onError={setNotice} />}
+      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
       <div

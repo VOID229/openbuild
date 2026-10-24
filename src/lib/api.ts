@@ -99,7 +99,7 @@ const CLAIM_GRACE = 90_000;
  * network blip, the tab was frozen) this reconnects and replays the reply from the start, after a
  * {t:"reset"}. Ends after the reply's last event.
  */
-export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal): AsyncGenerator<ReplyEvent> {
+export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal, durable = false): AsyncGenerator<ReplyEvent> {
   let posted = !req;
   /** When the current run of failed attempts began. */
   let failingSince: number | undefined;
@@ -131,7 +131,8 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
       yield { t: "error", message: "Lost the connection to this reply, and it can't be picked back up." };
       return;
     }
-    if (outcome === "lost" && Date.now() - failingSince > (posted ? RESUME_PATIENCE : POST_PATIENCE)) {
+    // Durable work remains recoverable even when the server is down for longer than ten minutes.
+    if (outcome === "lost" && !(durable && posted) && Date.now() - failingSince > (posted ? RESUME_PATIENCE : POST_PATIENCE)) {
       yield { t: "error", message: posted ? "Lost the connection to this reply." : "Couldn't reach the OpenBuild server. Check your connection." };
       return;
     }
