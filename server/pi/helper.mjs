@@ -1,16 +1,19 @@
 // Runs under Node with the *installed* Pi's SDK (its path is the first argument), for what Pi's RPC
 // mode doesn't offer: listing providers and their sign-in state, signing in (OAuth or API key) and
-// signing out. Credentials land in Pi's own auth.json, exactly as `/login` in Pi would store them.
+// signing out, and resolving Pi's model scope. Credentials land in Pi's own auth.json, exactly as
+// `/login` in Pi would store them.
 //
 //   node helper.mjs <pi package dir> providers
 //   node helper.mjs <pi package dir> login <provider> <api_key|oauth>
 //   node helper.mjs <pi package dir> logout <provider>
 //   node helper.mjs <pi package dir> builtins
 //   node helper.mjs <pi package dir> prices
+//   node helper.mjs <pi package dir> scope [agent dir]
 //
 // Output is JSONL. During a login, prompts go out as {type:"prompt", id, prompt} and answers come
 // back on stdin as {id, value} or {id, cancel:true}; {type:"event"} records are for display.
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
@@ -53,6 +56,20 @@ try {
       subscription: !!p.auth.oauth?.isSubscription && credentials.find((c) => c.providerId === p.id)?.type === "oauth",
     }));
     out({ type: "prices", models, providers });
+  } else if (command === "scope") {
+    // Pi's `enabledModels` (Settings → Models, `pi --models`), resolved with Pi's own resolver so
+    // OpenBuild and a terminal agree. Only the global settings file counts: OpenBuild lists models
+    // for a device, not for one folder's project settings.
+    const { SettingsManager, resolveModelScopeWithDiagnostics } = sdk;
+    const agent = args[0] || process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+    const patterns = (SettingsManager.create(homedir(), agent).getGlobalSettings()?.enabledModels ?? []).filter((p) => typeof p === "string" && p.trim());
+    const { scopedModels, diagnostics } = patterns.length ? await resolveModelScopeWithDiagnostics(patterns, runtime) : { scopedModels: [], diagnostics: [] };
+    out({
+      type: "scope",
+      patterns,
+      models: scopedModels.map((s) => ({ provider: s.model.provider, id: s.model.id })),
+      diagnostics: diagnostics.map((d) => ({ code: d.code, pattern: d.pattern, message: d.message })),
+    });
   } else if (command === "builtins") {
     // The providers Pi ships with, as opposed to ones from models.json or extensions. pi-ai doesn't
     // export this to the coding agent's dependents, so find it the way Node would from Pi's package.

@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { compareVersions } from "../server/pi/install";
+import { parseModelScope } from "../server/pi/scope";
 import type { ModelInfo } from "../shared/types";
 import { matchCommands } from "../src/lib/commands";
-import { providerGroups, searchProviderGroups } from "../src/lib/modelSearch";
+import { hasModelScope, providerGroups, scopeIds, scopedModels, searchProviderGroups } from "../src/lib/modelSearch";
 
 const model = (provider: string, id: string, name: string): ModelInfo => ({
   id: `${provider}/${id}`,
@@ -48,6 +49,46 @@ describe("Pi model search", () => {
 
   test("without a query, lists only the selected provider", () => {
     expect(searchProviderGroups(models, "", "openai-codex").flatMap((g) => g.models.map((m) => m.name))).toEqual(["GPT-6.1 Sol"]);
+  });
+});
+
+describe("Pi model scope (enabledModels)", () => {
+  const all = [
+    model("fireworks", "accounts/fireworks/models/deepseek-v4p1-flash", "DeepSeek V4.1 Flash"),
+    model("xai", "grok-4.7", "Grok 4.7"),
+    model("openai-codex", "gpt-6.1-sol", "GPT-6.1 Sol"),
+  ];
+  const record = (patterns: string[], models: { provider: string; id: string }[], diagnostics?: unknown[]) =>
+    parseModelScope({ type: "scope", patterns, models, diagnostics });
+
+  test("no scope, or a helper that failed, leaves the model list as it is", () => {
+    expect(record([], [])).toBeUndefined();
+    expect(parseModelScope({ type: "error", message: "Couldn't load Pi's SDK" })).toBeUndefined();
+    expect(parseModelScope(undefined)).toBeUndefined();
+    expect(scopedModels(all, record([], []))).toBe(all);
+  });
+
+  test("reads the helper's scope record, and ignores junk in it", () => {
+    const scope = record(["xai/grok-4.7", "gpt-6.1-sol"], [{ provider: "xai", id: "grok-4.7" }, { provider: "openai-codex", id: "gpt-6.1-sol" }], [
+      { code: "no-match", pattern: "nope", message: "No models matched nope" },
+    ]);
+    expect(scope?.patterns).toEqual(["xai/grok-4.7", "gpt-6.1-sol"]);
+    expect(scope?.models).toEqual([{ provider: "xai", id: "grok-4.7" }, { provider: "openai-codex", id: "gpt-6.1-sol" }]);
+    expect(scope?.diagnostics?.[0]?.code).toBe("no-match");
+    expect(record([""], [{ provider: "xai", id: "" }])).toBeUndefined();
+  });
+
+  test("a scope filters the picker's models, but keeps the selected one", () => {
+    const scope = record(["xai/grok-4.7"], [{ provider: "xai", id: "grok-4.7" }]);
+    expect(scopedModels(all, scope).map((m) => m.id)).toEqual(["xai/grok-4.7"]);
+    expect(scopeIds(scope!)?.has("xai/grok-4.7")).toBe(true);
+    expect(scopedModels(all, scope, "openai-codex/gpt-6.1-sol").map((m) => m.id)).toEqual(["xai/grok-4.7", "openai-codex/gpt-6.1-sol"]);
+  });
+
+  test("patterns that matched nothing do not empty the picker", () => {
+    const scope = record(["nope"], []);
+    expect(hasModelScope(scope)).toBe(false);
+    expect(scopedModels(all, scope)).toBe(all);
   });
 });
 

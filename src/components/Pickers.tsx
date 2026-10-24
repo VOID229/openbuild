@@ -9,7 +9,7 @@ import {
 } from "../../shared/types";
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
-import { providerGroups, searchProviderGroups } from "../lib/modelSearch";
+import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
 import { composerEffort, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { effortFor } from "../lib/effort";
@@ -267,16 +267,33 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     ? undefined
     : findModel(detection, selection);
   const all = detection.pi?.models ?? [];
+  // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
+  const scope = detection.pi?.scope;
+  const scoped = hasModelScope(scope);
+  const [showAll, setShowAll] = useState(false);
+  const shown = useMemo(
+    () =>
+      showAll
+        ? all
+        : scopedModels(
+            all,
+            scope,
+            !isAuto(selection) && selection?.plan === "pi"
+              ? selection.id
+              : undefined,
+          ),
+    [all, scope, showAll, selection],
+  );
   const providers = useMemo(
-    () => providerGroups(all).map((g) => g.provider),
-    [all, pluginVersion],
+    () => providerGroups(shown).map((g) => g.provider),
+    [shown, pluginVersion],
   );
   const favModels = useMemo(
     () =>
       favorites
-        .map((id) => all.find((m) => m.id === id))
+        .map((id) => shown.find((m) => m.id === id))
         .filter((m): m is ModelInfo => !!m),
-    [all, favorites],
+    [shown, favorites],
   );
   const [tab, setTab] = useState<string>(RAIL_FAV);
   const [query, setQuery] = useState("");
@@ -332,6 +349,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   useEffect(() => {
     if (!open) return;
     setQuery("");
+    setShowAll(false);
     if (window.matchMedia("(pointer: fine)").matches)
       requestAnimationFrame(() => search.current?.focus());
     setTab(
@@ -346,10 +364,10 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
 
   const q = query.trim();
   const rows: ModelInfo[] = useMemo(() => {
-    if (q) return searchProviderGroups(all, q).flatMap((g) => g.models);
+    if (q) return searchProviderGroups(shown, q).flatMap((g) => g.models);
     if (tab === RAIL_FAV) return favModels;
-    return all.filter((m) => providerOf(m) === tab);
-  }, [all, q, tab, favModels]);
+    return shown.filter((m) => providerOf(m) === tab);
+  }, [shown, q, tab, favModels]);
   const checking = detection.pi?.status === "checking";
   const label = current
     ? current.name
@@ -448,6 +466,16 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
             />
             {checking && <Spinner size={12} />}
           </label>
+          {scoped && (
+            <button
+              type="button"
+              className="mp-scope"
+              aria-pressed={showAll}
+              onClick={() => setShowAll((v) => !v)}
+            >
+              {showAll ? "Show only scoped models" : `Show all ${all.length} models`}
+            </button>
+          )}
           <div ref={list} className="mp-list" onKeyDown={(e) => arrowNav(e)}>
             {rows.map((m) => {
               const selected =
@@ -491,13 +519,21 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
                 <div className="model-empty">
                   <p>No models match “{q}”.</p>
                 </div>
-              ) : tab === RAIL_FAV && all.length ? (
+              ) : tab === RAIL_FAV && shown.length ? (
                 <div className="model-empty">
                   <Star size={18} />
                   <p>Star the models you use most.</p>
                 </div>
-              ) : (
+              ) : !scoped ? (
                 <PiStatus detection={detection} />
+              ) : (
+                <div className="model-empty">
+                  <p>
+                    {showAll
+                      ? "No models here."
+                      : "No models from this device's Pi scope here."}
+                  </p>
+                </div>
               ))}
           </div>
           <ThinkingRow model={current} />

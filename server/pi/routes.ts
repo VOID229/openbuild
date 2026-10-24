@@ -132,7 +132,9 @@ export function piRoutes(api: Api) {
             auth.builtinProviders().catch(() => undefined),
             priceBook().catch((err) => void console.warn("[pi] model prices unavailable:", (err as Error).message)),
           ]);
-          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined)), defaultModel: r.defaultModel, checkedAt: r.checkedAt });
+          // `models` stays the full list (routing, priorities and digests use it); `scope` says which
+          // of them this device's Pi settings put in the picker.
+          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined)), defaultModel: r.defaultModel, scope: r.scope, checkedAt: r.checkedAt });
         } catch (err) {
           return fail(err, 502);
         }

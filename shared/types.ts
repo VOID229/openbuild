@@ -84,6 +84,17 @@ export interface ModelInfo {
   priceFrom?: string;
 }
 
+/**
+ * Pi's scoped models: the `enabledModels` patterns in a device's Pi settings, and the models they
+ * resolved to. A device with no scope lists every model its providers have.
+ */
+export interface ModelScope {
+  patterns: string[];
+  models: { provider: string; id: string }[];
+  /** Patterns Pi couldn't use (no match, ambiguous, bad thinking level). */
+  diagnostics?: { code: string; pattern: string; message: string }[];
+}
+
 export interface DetectResult {
   plan: PlanId;
   status: "valid" | "invalid" | "error";

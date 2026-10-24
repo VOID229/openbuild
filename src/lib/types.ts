@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, PlanId, SearchProviderId, SearchResultLink, ShellStatus, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, ModelScope, PlanId, SearchProviderId, SearchResultLink, ShellStatus, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -99,6 +99,8 @@ export interface Detection {
   status: DetectStatus;
   error?: string;
   models: ModelInfo[];
+  /** Pi models: the device's `enabledModels` scope, when it has one (the picker shows only these). */
+  scope?: ModelScope;
   checkedAt?: number;
   /** Per-key results, keyed by `keyId(key)` (of the saved key's id, never the key itself). */
   keys?: Record<string, KeyStatus>;

@@ -1,6 +1,6 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { Device, GitInfo, ModelInfo, PiCommand, Project, Workspace } from "../../shared/types";
+import type { Device, GitInfo, ModelInfo, ModelScope, PiCommand, Project, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
@@ -62,6 +62,8 @@ export const clearPiProblems = (deviceId?: DeviceId) => send(apiUrl(deviceId, "/
 export interface PiModels {
   models: ModelInfo[];
   defaultModel?: string;
+  /** The models this device's Pi settings (`enabledModels`) scope the picker to; absent = all. */
+  scope?: ModelScope;
   checkedAt: number;
 }
 export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));

@@ -1,6 +1,6 @@
 // Model search shared by every picker. Plan words in the query ("go", "zen", "opencode plus", …)
 // filter by API key; the remaining words fuzzy-match the model: "go deepseek", "go zen qwen".
-import { PLANS, type ModelInfo, type PlanId } from "../../shared/types";
+import { PLANS, type ModelInfo, type ModelScope, type PlanId } from "../../shared/types";
 import { CUSTOM_PROVIDER, providerOf } from "./models";
 import { fold, fuzzyScore } from "./search";
 import type { Detection } from "./types";
@@ -71,6 +71,25 @@ export function searchModelGroups(detection: Partial<Record<PlanId, Detection>>,
 export interface ProviderGroup {
   provider: string;
   models: ModelInfo[];
+}
+
+/** Whether a device's Pi settings scope its models at all (patterns that matched nothing don't). */
+export const hasModelScope = (scope?: ModelScope) => !!scope?.models.length;
+
+/** The model ids ("<provider>/<model id>") a device's Pi scope allows; undefined = no scope. */
+export function scopeIds(scope?: ModelScope): Set<string> | undefined {
+  const allowed = scope?.models ?? [];
+  return allowed.length ? new Set(allowed.map((m) => `${m.provider}/${m.id}`)) : undefined;
+}
+
+/**
+ * The models a picker offers: all of them, or only those in the device's Pi scope. The model already
+ * selected is kept even when it's out of scope, so the picker can always show what the thread uses.
+ */
+export function scopedModels(models: ModelInfo[], scope?: ModelScope, selected?: string): ModelInfo[] {
+  const ids = scopeIds(scope);
+  if (!ids) return models;
+  return models.filter((m) => ids.has(m.id) || m.id === selected);
 }
 
 /** Pi models grouped by provider (in the order Pi lists them), with non-built-in providers as one Custom group. */

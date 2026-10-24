@@ -8,7 +8,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { EFFORTS, type Effort, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
+import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
 import { PiError, PiProcess, type PiRecord } from "./rpc";
@@ -453,17 +453,34 @@ export interface PiModels {
   models: any[];
   defaultModel?: string;
   defaultThinking?: string;
+  /** Pi's `enabledModels` scope on this device, if it has one. Display only: the list stays full. */
+  scope?: ModelScope;
   checkedAt: number;
 }
 let modelsCache: { at: number; value: Promise<PiModels> } | undefined;
 
-/** The models configured in Pi (those with credentials), and Pi's default. Cached for a minute. */
+/** Pi's model scope, or undefined. A scope that can't be resolved must never stop models being listed. */
+async function modelScope(): Promise<ModelScope | undefined> {
+  try {
+    // Loaded here so this module doesn't import auth.ts (which imports this one) at load time.
+    const { modelScope: resolve } = await import("./auth");
+    return await resolve();
+  } catch (err) {
+    console.warn("[pi] model scope unavailable:", (err as Error).message);
+    return undefined;
+  }
+}
+
+/** The models configured in Pi (those with credentials), Pi's default, and its model scope. Cached for a minute. */
 export function listModels(fresh = false): Promise<PiModels> {
   if (!fresh && modelsCache && Date.now() - modelsCache.at < 60_000) return modelsCache.value;
-  const value = withScratch(homedir(), async (p) => {
-    const [{ models }, state] = await Promise.all([p.send<{ models: any[] }>({ type: "get_available_models" }), p.send<{ model?: any; thinkingLevel?: string }>({ type: "get_state" })]);
-    return { models, defaultModel: state.model ? `${state.model.provider}/${state.model.id}` : undefined, defaultThinking: state.thinkingLevel, checkedAt: Date.now() };
-  });
+  const value = Promise.all([
+    withScratch(homedir(), async (p) => {
+      const [{ models }, state] = await Promise.all([p.send<{ models: any[] }>({ type: "get_available_models" }), p.send<{ model?: any; thinkingLevel?: string }>({ type: "get_state" })]);
+      return { models, defaultModel: state.model ? `${state.model.provider}/${state.model.id}` : undefined, defaultThinking: state.thinkingLevel, checkedAt: Date.now() };
+    }),
+    modelScope(),
+  ]).then(([models, scope]) => ({ ...models, scope }));
   modelsCache = { at: Date.now(), value };
   value.catch(() => modelsCache?.value === value && (modelsCache = undefined));
   return value;

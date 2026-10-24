@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from "react";
 import { type Effort } from "../../shared/types";
 import { findModel, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
-import { searchProviderGroups } from "../lib/modelSearch";
+import { hasModelScope, scopedModels, searchProviderGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
@@ -14,14 +14,24 @@ import { BrandIcon, Popover } from "./primitives";
 export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
   usePlugins((s) => s.version);
   const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const detection = useStore((s) => s.detection);
+  // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
+  const scope = detection.pi?.scope;
+  const scoped = hasModelScope(scope);
+  const all = detection.pi?.models ?? [];
 
   useFocusOnShow(search);
 
+  const models = useMemo(
+    () => (showAll ? all : scopedModels(all, scope, selected?.plan === "pi" ? selected.id : undefined)),
+    [all, scope, showAll, selected],
+  );
+
   // "xai grok", "fireworks deepseek": provider words narrow to that provider.
-  const groups = useMemo(() => searchProviderGroups(detection.pi?.models ?? [], query), [detection, query]);
+  const groups = useMemo(() => searchProviderGroups(models, query), [models, query]);
 
   return (
     <>
@@ -44,6 +54,11 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
         }}
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
+        {scoped && (
+          <button type="button" className="menu-item" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
+            <span className="menu-item-label">{showAll ? "Show only scoped models" : `Show all ${all.length} models`}</span>
+          </button>
+        )}
         {groups.map((g) => (
           <div key={g.provider} role="group" aria-label={providerName(g.provider)}>
             <div className="menu-label">{providerName(g.provider)}</div>
@@ -59,7 +74,15 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
             })}
           </div>
         ))}
-        {!groups.length && <p className="menu-empty">{query.trim() ? `No models match “${query.trim()}”.` : "Sign in to a provider in Settings → Providers to choose a model."}</p>}
+        {!groups.length && (
+          <p className="menu-empty">
+            {query.trim()
+              ? `No models match “${query.trim()}”.`
+              : scoped && !showAll
+                ? "No models from this device's Pi scope."
+                : "Sign in to a provider in Settings → Providers to choose a model."}
+          </p>
+        )}
       </div>
     </>
   );

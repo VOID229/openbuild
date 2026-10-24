@@ -6447,6 +6447,31 @@ a.btn-primary {
   }
 }
 
+/* A device's Pi model scope narrows the picker; this row widens it back to every model. */
+.mp-scope {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-3);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .mp-scope:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
+.mp-scope:focus-visible {
+  background: var(--hover);
+  color: var(--text);
+  outline: none;
+}
+
 .mp-foot {
   display: flex;
   align-items: center;

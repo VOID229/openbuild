@@ -217,16 +217,16 @@ export const useStore = create<State>()(
       loadDeviceModels: async (deviceId, fresh = false) => {
         // Keep the old list on screen while asking again: switching device shouldn't empty the picker.
         const prev = get().remoteModels[deviceId];
-        set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "checking", models: prev?.models ?? [], checkedAt: prev?.checkedAt } } }));
+        set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "checking", models: prev?.models ?? [], scope: prev?.scope, checkedAt: prev?.checkedAt } } }));
         try {
           const r = await piModels(fresh, deviceId);
           if (!Array.isArray(r?.models)) throw new Error("Pi didn't list any models");
-          set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "valid", models: r.models, checkedAt: r.checkedAt ?? Date.now() } } }));
+          set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "valid", models: r.models, scope: r.scope, checkedAt: r.checkedAt ?? Date.now() } } }));
         } catch (err) {
           set((s) => ({
             remoteModels: {
               ...s.remoteModels,
-              [deviceId]: { plan: "pi", status: "error", error: (err as Error).message, models: s.remoteModels[deviceId]?.models ?? [], checkedAt: Date.now() },
+              [deviceId]: { plan: "pi", status: "error", error: (err as Error).message, models: s.remoteModels[deviceId]?.models ?? [], scope: s.remoteModels[deviceId]?.scope, checkedAt: Date.now() },
             },
           }));
         }
@@ -404,16 +404,16 @@ export const useStore = create<State>()(
       refreshDetection: async () => {
         detectControllers.pi?.abort();
         const ctrl = (detectControllers.pi = new AbortController());
-        set((s) => ({ detection: { pi: { plan: "pi", status: "checking", models: s.detection.pi?.models ?? [], checkedAt: s.detection.pi?.checkedAt } } }));
+        set((s) => ({ detection: { pi: { plan: "pi", status: "checking", models: s.detection.pi?.models ?? [], scope: s.detection.pi?.scope, checkedAt: s.detection.pi?.checkedAt } } }));
         try {
           const r = await piModels(true);
           if (ctrl.signal.aborted) return;
           if (!Array.isArray(r?.models)) throw new Error("Pi didn't list any models");
-          set({ detection: { pi: { plan: "pi", status: "valid", models: r.models, checkedAt: Date.now() } }, piDefault: r.defaultModel });
+          set({ detection: { pi: { plan: "pi", status: "valid", models: r.models, scope: r.scope, checkedAt: Date.now() } }, piDefault: r.defaultModel });
         } catch (err) {
           if (ctrl.signal.aborted) return;
           // Keep what was known; a transient failure shouldn't empty the model picker.
-          set((s) => ({ detection: { pi: { plan: "pi", status: "error", error: (err as Error).message, models: s.detection.pi?.models ?? [], checkedAt: Date.now() } } }));
+          set((s) => ({ detection: { pi: { plan: "pi", status: "error", error: (err as Error).message, models: s.detection.pi?.models ?? [], scope: s.detection.pi?.scope, checkedAt: Date.now() } } }));
         }
         ensureSelection();
       },

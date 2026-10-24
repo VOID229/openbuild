@@ -4,8 +4,10 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import * as storage from "../storage";
-import { nodeBin, packageRoot, piEnv } from "./install";
+import type { ModelScope } from "../../shared/types";
+import { agentDir, nodeBin, packageRoot, piEnv } from "./install";
 import { PiError } from "./rpc";
+import { parseModelScope } from "./scope";
 import { restartIdle } from "./sessions";
 
 const HELPER = join(import.meta.dir, "helper.mjs");
@@ -104,6 +106,11 @@ export function providers(): Promise<PiProvider[]> {
 /** Every model Pi has a price for (signed in or not), and which providers are signed in with a subscription. */
 export function pricesFromPi() {
   return once<{ models: { provider: string; id: string; context?: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number } }[]; providers: { id: string; subscription: boolean }[] }>(["prices"]);
+}
+
+/** The models Pi's `enabledModels` setting scopes this device to (undefined = no scope). */
+export async function modelScope(): Promise<ModelScope | undefined> {
+  return parseModelScope(await once<Record<string, unknown>>(["scope", agentDir()]));
 }
 
 let builtinsCache: { root: string; value: Promise<Set<string>> } | undefined;
