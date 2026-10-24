@@ -8,7 +8,7 @@ import { BACKGROUND_CONTEXT as context } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { Harness, createRegistry, type Conversation, type EntryRecord, type WatchHandle } from "@earendil-works/pi-durable";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
-import { CodingTools } from "@earendil-works/pi-durable/tools";
+import { durableCodingTools } from "./tools";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import { Run } from "../runs";
@@ -70,7 +70,7 @@ export class DurableRuntime {
   private retryAt = new Map<string, number>();
   private closed = false;
   private recovering?: Promise<void>;
-  constructor(readonly directory = join(dataDir(), "durable"), private suppliedModels?: Models) {}
+  constructor(readonly directory = join(dataDir(), "durable"), private suppliedModels?: Models, private options: { bashTimeoutSeconds?: number } = {}) {}
 
   private file(id: string) { return join(this.directory, "runs", `${key(id)}.json`); }
   private persist(m: Manifest) { save(this.file(m.id), m); }
@@ -151,7 +151,7 @@ export class DurableRuntime {
       pending = (async () => {
         const models = await this.getModels();
         const registry = createRegistry();
-        registry.install(CodingTools);
+        registry.install(durableCodingTools(this.options.bashTimeoutSeconds));
         const storage = await openNodeJsonlStorage(join(this.directory, "threads", key(id)), context, { fsync: true });
         const harness = await Harness.open(storage, { models, registry, env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }) }, context);
         return { harness, root: await harness.root(context) };
@@ -313,7 +313,10 @@ export class DurableRuntime {
       if (req.forkFrom) throw new DurableUnsupportedError("Durable history forks are not supported");
       const previous = [...this.manifests.values()].filter(m => m.request.threadId === req.threadId);
       if (previous.some(m => !m.ended)) throw new DurableUnsupportedError("This durable thread is still working");
-      if (req.prior !== previous.length) throw new DurableUnsupportedError("Durable history rewinds/imports are not supported; start a new thread");
+      // Rejected admissions (busy/model/workspace errors) can leave extra user turns in the UI.
+      // They never entered Durable's transcript. A larger UI count is therefore harmless: submit
+      // only this new input against the server-owned history. A smaller count is still a rewind.
+      if (req.prior < previous.length) throw new DurableUnsupportedError("Durable history rewinds/imports are not supported; start a new thread");
       const separator = req.model.indexOf("/");
       if (separator < 1 || !(await this.getModels()).getModel(req.model.slice(0, separator), req.model.slice(separator + 1))) {
         throw new Error(`Durable model is not available in Pi's configured ModelRuntime: ${req.model}`);

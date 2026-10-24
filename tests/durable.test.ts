@@ -32,6 +32,25 @@ describe("durable runtime (offline)", () => {
       await expect(runtime.startRun({ ...req, stream: { id: "new-run" }, prior: 0 })).rejects.toThrow("rewinds/imports");
     } finally { await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
   });
+  test("rejected UI turns do not permanently prevent the next Durable admission", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "durable-ui-gaps-"));
+    const fake = fakeModels({ hold: true });
+    const runtime = new DurableRuntime(directory, fake.models);
+    const req = request(fake.model);
+    try {
+      const first = await runtime.startRun(req);
+      await until(() => fake.calls() > 0);
+      await expect(runtime.startRun({ ...req, prior: 1, stream: { id: "busy-rejected" } })).rejects.toThrow("still working");
+      await runtime.stopRun(first.id);
+      await until(() => first.ended);
+      // The UI now counts the rejected user message too, unlike the authoritative transcript.
+      const next = await runtime.startRun({ ...req, prior: 2, stream: { id: "after-busy" } });
+      await until(() => fake.calls() > 1);
+      await runtime.stopRun(next.id);
+      await until(() => next.ended);
+      await expect(runtime.startRun({ ...req, prior: 1, stream: { id: "rewind" } })).rejects.toThrow("rewinds/imports");
+    } finally { await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
   test("an admission failure before submit does not wedge the thread forever", async () => {
     const directory = mkdtempSync(join(tmpdir(), "durable-admission-failure-"));
     const fake = fakeModels();
@@ -192,6 +211,24 @@ describe("durable runtime (offline)", () => {
       expect(await new Response(replay!.stream()).text()).toContain('"t":"end"');
       await expect(reopened.startRun({ ...req, message: "different" })).rejects.toThrow("different request");
       await reopened.close();
+    } finally { await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
+  test("a bash command without a timeout is bounded and the turn continues", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "durable-bash-timeout-"));
+    // Like the stranded diagnostic: prints a result, then keeps its event loop alive.
+    const fake = fakeModels({ tool: true, command: `${JSON.stringify(process.execPath)} -e 'console.log("diagnostic ready"); setInterval(() => {}, 1000)'` });
+    const runtime = new DurableRuntime(directory, fake.models, { bashTimeoutSeconds: 0.2 });
+    try {
+      const run = await runtime.startRun(request(fake.model));
+      await until(() => run.ended);
+      expect(run.events.filter(e => e.t === "tool")).toMatchObject([
+        { status: "running" },
+        { status: "error", output: expect.stringContaining("timed out after 0.2 seconds") },
+      ]);
+      expect(run.events.some(e => e.t === "text" && e.v === "offline answer")).toBe(true);
+      expect(fake.calls()).toBe(2);
+      const next = await runtime.startRun({ ...request(fake.model), prior: 1, stream: { id: "after-timeout" } });
+      await until(() => next.ended);
     } finally { await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
   });
   test("SIGKILL during unsafe bash reports interruption instead of replaying side effects", async () => {
