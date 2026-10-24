@@ -28,26 +28,6 @@ function bucketChats(chats: Chat[], field: "updatedAt" | "createdAt") {
   return buckets.filter((b) => b.chats.length);
 }
 
-/** Markdown → one plain line for the row preview. */
-function plain(md: string) {
-  return md
-    .replace(/```[\w-]*\n?/g, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/[#>*_`|~$]+/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Latest model reply (or the latest message if there is no reply yet). */
-function previewOf(chat: Chat) {
-  for (let i = chat.messages.length - 1; i >= 0; i--) {
-    const m = chat.messages[i]!;
-    if (m.role === "assistant" && m.content.trim()) return plain(m.content.slice(0, 400));
-  }
-  return plain(chat.messages.at(-1)?.content.slice(0, 400) ?? "");
-}
-
 /** The model of the chat's latest reply. */
 const modelOf = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
 
@@ -154,7 +134,6 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   const waiting = isWaiting(chat);
   const model = modelOf(chat);
   const runtime = chat.runtime ?? "pi";
-  const preview = useMemo(() => (hit?.snippet ? "" : previewOf(chat)), [chat, hit]);
   const [draft, setDraft] = useState(chat.title);
   const input = useRef<HTMLInputElement>(null);
   const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
@@ -231,12 +210,11 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
             ) : null}
           </span>
         </span>
-        {hit?.snippet ? (
+        {/* Only search results show a body line: the text that matched. */}
+        {hit?.snippet && (
           <span className="history-snippet">
             <Highlight text={hit.snippet.text} ranges={hit.snippet.ranges} />
           </span>
-        ) : (
-          preview && <span className="history-snippet">{preview}</span>
         )}
         <span className="history-meta">
           <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
