@@ -2,6 +2,7 @@ import { Boxes, CircleUserRound } from "lucide-react";
 import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
+import { pluginBrandSvg, pluginProviderSvg, usePlugins } from "../lib/plugins";
 import { cx, useDismiss, usePresence } from "../lib/ui";
 
 /** A Settings section's "# Title" heading. */
@@ -11,9 +12,17 @@ export const SettingsHeading = ({ children }: { children: ReactNode }) => (
   </h2>
 );
 
-export function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className="toggle" onClick={() => onChange(!checked)}>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      className={cx("toggle", disabled && "toggle-disabled")}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+    >
       <span className="toggle-knob" />
     </button>
   );
@@ -97,19 +106,21 @@ export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string
   // Gradient ids must be unique per instance: url(#id) resolves to the first match in the document,
   // and if that copy is hidden (closed picker, collapsed sidebar) WebKit paints every copy blank.
   const uid = useId();
-  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: brandSvg(id).replaceAll("_R_0_", uid) }} />;
+  usePlugins((s) => s.version);
+  return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: (pluginBrandSvg(id) ?? brandSvg(id)).replaceAll("_R_0_", uid) }} />;
 });
 
 /** A Pi provider's icon: its brand mark, or its initial on a tile. */
 export const ProviderIcon = memo(function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
   const uid = useId();
+  usePlugins((s) => s.version);
   if (provider === CUSTOM_PROVIDER)
     return (
       <span className={cx("brand-icon", className)} aria-hidden>
         <Boxes />
       </span>
     );
-  const svg = providerSvg(provider);
+  const svg = pluginProviderSvg(provider) ?? providerSvg(provider);
   if (svg) return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) }} />;
   return (
     <span className={cx("brand-icon provider-letter", className)} aria-hidden>

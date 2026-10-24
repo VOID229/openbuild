@@ -9,6 +9,7 @@ import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
+import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
 import { checkWhisper, transcribe } from "./dictation";
@@ -219,6 +220,8 @@ function serve(port: number, hostname: string) {
         }),
       },
 
+      ...pluginRoutes(api),
+
       ...piRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
@@ -229,6 +232,10 @@ function serve(port: number, hostname: string) {
     },
   });
 }
+
+// Plugins are read before routes are assembled: a server plugin contributes routes at startup.
+// A broken plugin is reported in Settings, never fatal to the app.
+await loadPlugins().catch((err) => console.error("[plugins] Startup failed:", err));
 
 // Under `bun --hot` this module re-runs on every edit. Stop the previous server and take over its
 // port, so a reload always serves the current routes and bind address instead of leaving the old

@@ -9,6 +9,7 @@ import { cx, duration } from "../lib/ui";
 import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { Spinner } from "./primitives";
+import { PluginRender, useToolRenderers } from "../lib/plugins";
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
@@ -107,6 +108,19 @@ function RunningFor() {
 
 export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
   const [open, setOpen] = useState(false);
+  // A plugin can take over rendering a tool by name (e.g. a richer diff for "edit").
+  const renderers = useToolRenderers(part.name);
+  if (renderers.length) {
+    return (
+      <>
+        {renderers.map((Component, i) => (
+          <PluginRender key={i} pluginId={`tool:${part.name}:${i}`}>
+            <Component part={part} cwd={cwd} />
+          </PluginRender>
+        ))}
+      </>
+    );
+  }
   const d = describe(part, cwd);
   const Icon = d.icon;
   const patch = patchOf(part);

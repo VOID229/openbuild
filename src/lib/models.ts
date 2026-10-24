@@ -1,5 +1,6 @@
 import type { ModelInfo, PlanId } from "../../shared/types";
 import type { Detection, ModelRef, NamedModel, NamingModel, PriorityEntry, Selection, Settings } from "./types";
+import { providerOverride } from "./pluginOverrides";
 
 import claude from "../assets/brands/claude-color.svg" with { type: "text" };
 import gemini from "../assets/brands/gemini-color.svg" with { type: "text" };
@@ -73,8 +74,15 @@ export const providerSvg = (provider: string) => PROVIDER_ICONS.find(([re]) => r
 /** The group that collects every provider Pi doesn't ship with (models.json, extensions). */
 export const CUSTOM_PROVIDER = "custom";
 
-/** The provider group a Pi model is listed under: its provider, or Custom. */
-export const providerOf = (m: Pick<ModelInfo, "id" | "provider" | "custom">) => (m.custom ? CUSTOM_PROVIDER : (m.provider ?? m.id.split("/")[0]!));
+/**
+ * The provider group a Pi model is listed under: its provider, a group a plugin assigned to it, or
+ * Custom. Checking the plugin override before `custom` is what lets "pi-claude" join Claude's group
+ * instead of the catch-all Custom one.
+ */
+export const providerOf = (m: Pick<ModelInfo, "id" | "provider" | "custom">) => {
+  const raw = m.provider ?? m.id.split("/")[0]!;
+  return providerOverride(raw)?.group ?? (m.custom ? CUSTOM_PROVIDER : raw);
+};
 
 const PROVIDER_NAMES: Record<string, string> = {
   anthropic: "Anthropic",
@@ -97,7 +105,7 @@ const PROVIDER_NAMES: Record<string, string> = {
 
 /** A provider id as people read it: "openai-codex" → "Codex", "glm-local" → "Glm Local". */
 export const providerName = (provider: string) =>
-  PROVIDER_NAMES[provider] ?? provider.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  providerOverride(provider)?.name ?? PROVIDER_NAMES[provider] ?? provider.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 export function brandSvg(modelId: string): string {
   const id = bareId(modelId.toLowerCase());

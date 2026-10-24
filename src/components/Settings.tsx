@@ -1,4 +1,4 @@
-import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
@@ -11,6 +11,8 @@ import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
+import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
+import { PluginsSection } from "./PluginSettings";
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
@@ -20,6 +22,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "keys", label: "Providers", icon: Key },
   { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "plugins", label: "Plugins", icon: Puzzle },
   { id: "security", label: "Security", icon: Shield },
   { id: "account", label: "Account", icon: CircleUser },
 ];
@@ -383,7 +386,11 @@ export function SettingsModal() {
   const open = useStore((s) => s.settingsOpen);
   const requestedSection = useStore((s) => s.settingsSection);
   const hasCloud = cloudConfigured();
-  const sections = SECTIONS.filter((s) => s.id !== "account" || hasCloud);
+  const pluginSections = usePluginSettingsSections();
+  const sections: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
+    ...SECTIONS.filter((s) => s.id !== "account" || hasCloud),
+    ...pluginSections.map((p) => ({ id: p.id as SettingsSection, label: p.label, icon: Puzzle })),
+  ];
   const section = requestedSection === "account" && !hasCloud ? "profile" : requestedSection;
   const close = useStore((s) => s.closeSettings);
   const { mounted, visible } = usePresence(open, 220);
@@ -453,7 +460,14 @@ export function SettingsModal() {
           {section === "pi" && <PiSection />}
           {section === "keys" && <ProvidersSection />}
           {section === "projects" && <ProjectsSection />}
-          {section === "appearance" && <AppearanceSection />}
+          {section === "appearance" && (
+            <>
+              <AppearanceSection />
+              <PluginSlot name="settings:appearance:after" />
+            </>
+          )}
+          {section === "plugins" && <PluginsSection />}
+          {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
         </div>
         <IconButton label="Close settings" tooltip={false} className="modal-close" onClick={close}>
           <X size={18} />

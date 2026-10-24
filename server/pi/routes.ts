@@ -6,6 +6,7 @@ import { isStreamRef } from "../../shared/replies";
 import type { ModelInfo, PiChatRequest } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
+import { beforeChat, hasChatHooks } from "../plugins";
 import { localRun, Run } from "../runs";
 import * as auth from "./auth";
 import { status } from "./install";
@@ -138,8 +139,15 @@ export function piRoutes(api: Api) {
     "/api/pi/chat": {
       POST: api(async (req, server: Bun.Server<unknown>) => {
         server.timeout(req, 0);
-        const body = await readJson(req);
+        let body = await readJson(req);
         if (!isPiChat(body) || !isStreamRef(body.stream)) return bad("Malformed request");
+        if (hasChatHooks()) {
+          // A plugin may adjust the model, prompt or effort for this turn; it may not change the
+          // stream or leave an invalid request behind.
+          const next = await beforeChat(body);
+          if (!isPiChat(next) || !isStreamRef(next.stream)) return bad("A plugin produced an invalid chat request");
+          body = next;
+        }
         if (!existsSync(body.cwd)) return bad("This thread's folder doesn't exist anymore (was its worktree removed?). Start a new thread to keep going.", 410);
         if (!projects.allowedCwd(body.cwd)) return bad("That folder isn't a project in OpenBuild", 403);
         const run = localRun(body.stream.id, () => startStream((signal) => runTurn(body, signal)));

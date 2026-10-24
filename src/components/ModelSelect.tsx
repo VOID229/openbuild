@@ -2,7 +2,8 @@
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { type Effort } from "../../shared/types";
-import { findModel, providerName } from "../lib/models";
+import { findModel, providerName, providerOf } from "../lib/models";
+import { usePlugins } from "../lib/plugins";
 import { searchProviderGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
@@ -11,6 +12,7 @@ import { BrandIcon, Popover } from "./primitives";
 
 /** Search box + Pi's models grouped by provider. Mounts fresh per open. */
 export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
+  usePlugins((s) => s.version);
   const [query, setQuery] = useState("");
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
@@ -83,7 +85,7 @@ export function ModelSelect({ value, onChange, label }: { value: ModelRef; onCha
       >
         {current ? <BrandIcon id={current.id} /> : <CircleAlert size={15} className="bad" />}
         <span className="select-value">{current ? current.name : `${value.id} (unavailable)`}</span>
-        <span className="select-hint">{current?.provider ?? value.plan}</span>
+        <span className="select-hint">{current ? providerName(providerOf(current)) : value.plan}</span>
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">

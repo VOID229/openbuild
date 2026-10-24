@@ -1,0 +1,8 @@
+{
+  "id": "pi-claude",
+  "name": "Claude provider for pi-claude",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Groups Pi's pi-claude provider under Claude, with Claude's logo, instead of leaving its models in the catch-all Custom provider. A small example of provider overrides.",
+  "client": "client.tsx"
+}

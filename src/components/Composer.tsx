@@ -9,6 +9,7 @@ import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../li
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, type Queued } from "../lib/queue";
 import { useStore } from "../lib/store";
+import { PluginSlot } from "../lib/plugins";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker } from "./Pickers";
@@ -233,6 +234,17 @@ export function Composer({ variant, chatId, streaming }: Props) {
     },
     [],
   );
+  // A plugin can put text in the composer (openbuild.insertComposerText).
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const value = (e as CustomEvent<{ text?: unknown }>).detail?.text;
+      if (typeof value !== "string" || !value) return;
+      setText((current) => (current ? `${current}${current.endsWith("\n") ? "" : "\n"}${value}` : value));
+      textarea.current?.focus();
+    };
+    window.addEventListener("openbuild:composer-insert", onInsert);
+    return () => window.removeEventListener("openbuild:composer-insert", onInsert);
+  }, []);
   // Text in the box when dictation started; the live transcript is appended after it.
   const dictationBase = useRef("");
   const dictationSettings = useStore((s) => s.settings.dictation);
@@ -491,6 +503,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       {!chatId && <WorkspaceTop />}
       {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
+      <PluginSlot name="composer:above" context={{ variant, chatId }} />
       <div
         className={cx("composer", dragging && "composer-drag")}
         onClick={(e) => {
@@ -571,6 +584,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           />
           <ModelPicker dropUp={variant === "dock"} />
           <EffortPicker dropUp={variant === "dock"} />
+          <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice && <span className="composer-notice">{notice}</span>}
           <div className="composer-controls">
             <button
@@ -607,6 +621,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           </div>
         </div>
       </div>
+      <PluginSlot name="composer:below" context={{ variant, chatId }} />
       {chatId && <WorkspaceBelow chatId={chatId} streaming={streaming} />}
     </div>
   );

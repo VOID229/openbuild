@@ -1,0 +1,8 @@
+{
+  "id": "openrouter-deepseek",
+  "name": "OpenRouter logo for DeepSeek",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "description": "Shows OpenRouter's mark wherever DeepSeek's provider or model logo would appear: the composer, model picker, sidebar and message actions. A small example of the icons override.",
+  "client": "client.tsx"
+}

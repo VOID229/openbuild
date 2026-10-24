@@ -12,6 +12,7 @@ import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { BrandIcon, IconButton } from "./primitives";
 import { AskCard, WorkRun } from "./ToolCalls";
+import { PluginSlot } from "../lib/plugins";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -190,6 +191,7 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
       )}
       <div className="msg-actions msg-actions-end">
         <CopyButton text={message.content} />
+        <PluginSlot name="message:user-actions" context={{ message, chatId }} />
       </div>
     </div>
   );
@@ -314,6 +316,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
             </span>
           )}
           {message.content && <CopyButton text={message.content} />}
+          <PluginSlot name="message:actions" context={{ message, chatId }} />
           {isLast && message.status !== "error" && (
             <IconButton label="Regenerate" tooltipSide="top" className="msg-action" onClick={() => regenerate(chatId, message.id)}>
               <RotateCcw size={15} />

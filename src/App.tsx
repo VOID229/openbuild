@@ -17,6 +17,7 @@ import { findModel } from "./lib/models";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
+import { initPlugins, PluginSlot } from "./lib/plugins";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -50,7 +51,9 @@ function Home() {
     <div className="home">
       <div className="home-center">
         <ProjectHeading />
+        <PluginSlot name="home:above-composer" />
         <Composer variant="home" streaming={false} />
+        <PluginSlot name="home:below-composer" />
         {setup && (
           <button type="button" className="onboarding" onClick={() => openSettings(pi.status === "error" ? "pi" : "keys")}>
             <KeyRound size={15} />
@@ -77,6 +80,8 @@ export function App() {
 function Main() {
   useTheme();
   useFont();
+  // Plugins load after the app hydrates, so a slow or broken plugin never holds up startup.
+  useEffect(() => { initPlugins(); }, []);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const lightboxOpen = useLightbox((s) => s.open);
@@ -232,6 +237,7 @@ function Main() {
 
   return (
     <>
+      <PluginSlot name="app:before" />
       <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen || lightboxOpen}>
         <Sidebar />
         <main className={cx("main", !sidebarOpen && "main-full")}>
@@ -261,6 +267,7 @@ function Main() {
       <SettingsModal />
       <Lightbox />
       <TooltipLayer />
+      <PluginSlot name="app:overlay" />
       {cloudConfigured() && <CloudSync />}
       {cloudConfigured() && <SyncLockScreen />}
     </>

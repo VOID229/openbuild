@@ -7,6 +7,7 @@ import {
   type ModelInfo,
 } from "../../shared/types";
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
+import { usePlugins } from "../lib/plugins";
 import { providerGroups, searchProviderGroups } from "../lib/modelSearch";
 import { composerEffort, selectionFor, useStore } from "../lib/store";
 import { effortFor } from "../lib/effort";
@@ -224,6 +225,7 @@ function ThinkingRow({ model }: { model?: ModelInfo }) {
 }
 
 export function ModelPicker({ dropUp }: { dropUp: boolean }) {
+  const pluginVersion = usePlugins((s) => s.version);
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const selection = useStore(selectionFor);
@@ -238,7 +240,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
   const all = detection.pi?.models ?? [];
   const providers = useMemo(
     () => providerGroups(all).map((g) => g.provider),
-    [all],
+    [all, pluginVersion],
   );
   const favModels = useMemo(
     () =>
@@ -346,7 +348,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
         }
       >
         {current ? (
-          <ProviderIcon provider={current.provider ?? ""} />
+          <ProviderIcon provider={providerOf(current)} />
         ) : !all.length && !checking ? (
           <KeyRound size={14} />
         ) : null}
@@ -434,9 +436,9 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
                   >
                     <span className="mp-name">{m.name}</span>
                     <span className="mp-sub">
-                      <ProviderIcon provider={m.provider ?? ""} />
+                      <ProviderIcon provider={providerOf(m)} />
                       <span className="mp-sub-text">
-                        {providerName(m.provider ?? "")}
+                        {providerName(providerOf(m))}
                         {modelFacts(m) && ` · ${modelFacts(m)}`}
                       </span>
                     </span>
