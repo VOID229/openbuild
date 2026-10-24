@@ -82,10 +82,13 @@ function useJob(onDone: () => void) {
   done.current = onDone;
   const follow = useCallback(async () => {
     setLines([]);
-    setRunning(true);
     setResult(undefined);
     try {
-      const r = await followJob((line) => setLines((l) => [...l.slice(-400), line]));
+      const r = await followJob(
+        (line) => setLines((l) => [...l.slice(-400), line]),
+        undefined,
+        () => setRunning(true),
+      );
       setResult(r);
     } finally {
       setRunning(false);

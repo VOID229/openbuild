@@ -30,9 +30,11 @@ export const installPi = () => send<{ job: string }>("/api/pi/install", "POST");
 export const updatePi = (all = false) => send<{ job: string }>("/api/pi/update", "POST", { all });
 
 /** Follow the current maintenance job's output; resolves with its exit code. */
-export async function followJob(onLine: (line: string) => void, signal?: AbortSignal): Promise<{ code?: number; title?: string } | undefined> {
+export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void): Promise<{ code?: number; title?: string } | undefined> {
   const res = await fetch("/api/pi/job", { signal });
   if (!res.ok || !res.body || res.status === 204) return undefined;
+  // Only a real job stream counts as running: an empty answer must not flash a progress panel.
+  onStart?.();
   for await (const r of readEvents(res.body) as AsyncGenerator<any>) {
     if (r.line !== undefined) onLine(r.line);
     if (r.done) return { code: r.code, title: r.title };
