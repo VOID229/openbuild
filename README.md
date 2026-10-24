@@ -86,7 +86,7 @@ Use HTTPS (or localhost) to open OpenBuild: browsers block microphone access on 
 
 ### The `openbuild` command
 
-`bun run cli:install` links `openbuild` into `~/.local/bin`. It runs the server in the background:
+`bun run cli:install` links `openbuild` and its shorter alias `ob` into `~/.local/bin`. It runs the server in the background:
 
 ```sh
 openbuild set pass <pw>     # set/change the local password
