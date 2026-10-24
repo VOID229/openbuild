@@ -17,7 +17,7 @@ export function DictationSettings() {
       <div className="setting-row setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Local dictation</div>
-          <p className="setting-desc">Use your server's Whisper instead of browser speech recognition. Tap the mic to record, then tap again to transcribe. Audio stays on your private server. Up to two minutes per recording.</p>
+          <p className="setting-desc">Use your server's Whisper instead of browser speech recognition. Tap the mic to record, then tap again to transcribe. Audio stays on your private server. Up to two minutes per recording. Chrome and browsers generally won't give a page the microphone over plain HTTP, so use HTTPS or localhost.</p>
         </div>
         <Toggle label="Local dictation" checked={enabled} onChange={(enabled) => update({ dictation: { enabled, connection } })} />
       </div>
@@ -25,7 +25,7 @@ export function DictationSettings() {
         <div className="setting-row setting-row-stack setting-row-top">
           <div className="setting-text">
             <div className="setting-label">Whisper connection</div>
-            <p className="setting-desc">This selects how the OpenBuild server reaches Whisper—not how your browser connects to OpenBuild. Microphone access requires HTTPS or localhost.</p>
+            <p className="setting-desc">Which Whisper address the server talks to: LAN when you're on the same network, Tailscale when you're away. This is the server's route to Whisper, not your browser's route to OpenBuild.</p>
             {status && (
               <p className={cx("setting-desc", "setting-status", status.ok ? "setting-status-ok" : "setting-status-bad")} role="status">
                 {status.text}
