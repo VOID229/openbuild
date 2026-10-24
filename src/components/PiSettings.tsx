@@ -708,7 +708,8 @@ export function ProvidersSection() {
   const others = (providers ?? []).filter((p) => !p.status.configured && match(p) && (p.oauth || p.apiKey?.canLogin));
 
   const signOut = async (p: PiProvider) => {
-    if (!confirm(`Sign out of ${p.name}? Pi forgets the saved ${p.stored === "oauth" ? "sign-in" : "API key"}.`)) return;
+    const ask = p.stored === "oauth" ? `Sign out of ${p.name}? Pi forgets the saved sign-in.` : `Remove ${p.name}'s saved API key?`;
+    if (!confirm(ask)) return;
     setBusy(p.id);
     try {
       await logoutProvider(p.id);
@@ -727,24 +728,37 @@ export function ProvidersSection() {
     return SOURCE_LABEL[p.status.source ?? ""] ?? "Configured";
   };
 
-  /** One button per way in: refresh the saved one first, then the other one if there is one. */
+  /**
+   * A ready provider has one credential, so it gets one action: change that credential.
+   * Adding a provider is where the two ways in are offered.
+   */
   const actions = (p: PiProvider) => {
-    const signedIn = p.status.configured && p.stored === "oauth";
-    const keyed = p.status.configured && p.stored === "api_key";
+    const ready = p.status.configured;
+    const signIn = p.oauth && (!ready || p.stored === "oauth");
+    const apiKey = p.apiKey?.canLogin && (!ready || p.stored === "api_key");
+    if (!signIn && !apiKey && !p.stored) return null; // Configured outside Settings (environment, models.json).
+    const remove = p.stored === "oauth" ? `Sign out of ${p.name}` : `Remove ${p.name}'s saved API key`;
     return (
       <span className="pi-row-actions">
-        {p.oauth && (
+        {signIn && (
           <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "oauth" })}>
-            {signedIn ? "Sign in again" : keyed ? "Sign in instead" : "Sign in"}
+            {ready ? "Sign in again" : "Sign in"}
           </button>
         )}
-        {p.apiKey?.canLogin && (
+        {apiKey && (
           <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "api_key" })}>
-            {keyed ? "Replace API key" : signedIn ? "Use API key" : "Add API key"}
+            {ready ? "Replace API key" : "Add API key"}
           </button>
         )}
         {p.stored && (
-          <IconButton label={`Sign out of ${p.name}`} tooltip="Sign out" tooltipSide="top" className="key-icon-btn key-remove" disabled={busy === p.id} onClick={() => void signOut(p)}>
+          <IconButton
+            label={remove}
+            tooltip={p.stored === "oauth" ? "Sign out" : "Remove key"}
+            tooltipSide="top"
+            className="key-icon-btn key-remove"
+            disabled={busy === p.id}
+            onClick={() => void signOut(p)}
+          >
             {busy === p.id ? <Spinner size={12} /> : <Trash2 size={14} />}
           </IconButton>
         )}
@@ -812,7 +826,7 @@ export function ProvidersSection() {
                   <div className="pi-row-text">
                     <span className="pi-row-name">{p.name}</span>
                     <span className="pi-row-desc">
-                      {[p.oauth?.subscription ? p.oauth.name : p.oauth ? "Sign in" : "", p.apiKey?.canLogin ? (p.apiKey.name || "API key") : ""].filter(Boolean).join(" or ")}
+                      {[p.oauth ? "Sign in" : "", p.apiKey?.canLogin ? "API key" : ""].filter(Boolean).join(" or ")}
                       {p.models ? ` · ${p.models} model${p.models === 1 ? "" : "s"}` : ""}
                     </span>
                   </div>
@@ -830,14 +844,14 @@ export function ProvidersSection() {
 
 // ------------------------------------------------------------------ Projects
 
-function FolderBrowser({ onAdd }: { onAdd: (path: string) => Promise<void> }) {
+function FolderBrowser({ deviceId, onAdd }: { deviceId?: string; onAdd: (path: string) => Promise<void> }) {
   const [dir, setDir] = useState<string>();
   const [data, setData] = useState<Awaited<ReturnType<typeof browseFolders>>>();
   const [error, setError] = useState<string>();
   const [typed, setTyped] = useState("");
   useEffect(() => {
     let live = true;
-    browseFolders(dir).then(
+    browseFolders(dir, deviceId).then(
       (d) => {
         if (!live) return;
         setData(d);
