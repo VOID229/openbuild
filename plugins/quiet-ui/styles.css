@@ -1,4 +1,0 @@
-/* Only loaded while Quiet UI is enabled. Plugin styles come after the app's own styles. */
-.sidebar .wordmark { letter-spacing: 0.01em; }
-.composer { box-shadow: var(--shadow-sm); }
-.history-heading { letter-spacing: 0.055em; }

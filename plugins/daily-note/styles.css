@@ -1,5 +1,0 @@
-.plugin-daily-note { font-variant-numeric: tabular-nums; }
-.plugin-daily-note span { font-size: 14px; line-height: 1; }
-.plugin-daily-note-settings { font-size: 13px; line-height: 1.6; color: var(--text-2); }
-.plugin-daily-note-settings p { margin: 0 0 10px; }
-.plugin-daily-note-settings code { font-family: var(--mono); font-size: 11.5px; padding: 1px 5px; border-radius: 5px; background: var(--surface-3); }
