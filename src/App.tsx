@@ -98,13 +98,32 @@ export async function preloadApp() {
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
 export function App() {
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
+  // When the saved settings can't be read, zustand never finishes hydrating and this gate would
+  // show nothing at all. Wait, then say what happened instead of leaving a blank page.
+  const [stuck, setStuck] = useState(false);
   useEffect(() => {
     if (hydrated) return;
     const unsubscribe = useStore.persist.onFinishHydration(() => setHydrated(true));
     if (useStore.persist.hasHydrated()) setHydrated(true);
-    return unsubscribe;
+    const timer = setTimeout(() => setStuck(true), 10_000);
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
   }, [hydrated]);
-  return hydrated ? <Main /> : null;
+  if (!hydrated) {
+    return stuck ? (
+      <div className="home">
+        <div className="home-center">
+          <p>Couldn't load your saved settings from the OpenBuild server. Reload this page to try again.</p>
+          <button type="button" className="btn" onClick={() => location.reload()}>
+            Reload
+          </button>
+        </div>
+      </div>
+    ) : null;
+  }
+  return <Main />;
 }
 
 function Main() {
