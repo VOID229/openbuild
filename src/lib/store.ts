@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
-import { listProjects, piModels } from "./pi";
+import { listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
@@ -52,6 +52,17 @@ export interface SidebarView {
 
 export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true, subagents: false, runtime: "all" };
 
+/**
+ * What Settings → Pi and Settings → Providers show, fetched at launch (and kept from the last
+ * session) so those pages open with their content instead of a spinner.
+ */
+export interface PiCache {
+  status?: PiStatus;
+  resources?: { resources: PiResource[]; packages: string[] };
+  problems?: PiProblem[];
+  providers?: PiProvider[];
+}
+
 interface State {
   settings: Settings;
   detection: Partial<Record<PlanId, Detection>>;
@@ -76,6 +87,11 @@ interface State {
   loadProjects: () => Promise<void>;
   /** Pi's own default model ("<provider>/<id>"), used until one is picked here. */
   piDefault?: string;
+  /** Pi's install state, resources and providers, loaded at launch and reused by Settings. */
+  piCache: PiCache;
+  loadPiStatus: (fresh?: boolean) => Promise<void>;
+  loadPiResources: () => Promise<void>;
+  loadPiProviders: () => Promise<void>;
 
   updateSettings: (patch: Partial<Settings>) => void;
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
@@ -133,6 +149,24 @@ export const useStore = create<State>()(
       settingsSection: "profile",
       projects: [],
       projectsLoaded: false,
+      piCache: {},
+      loadPiStatus: async (fresh = false) => {
+        const status = await piStatus(fresh);
+        set((s) => ({ piCache: { ...s.piCache, status } }));
+      },
+      loadPiResources: async () => {
+        const resources = await piResources();
+        set((s) => ({ piCache: { ...s.piCache, resources } }));
+        // Problems are secondary: show them when they arrive, and never fail the list over them.
+        piProblems().then(
+          (problems) => set((s) => ({ piCache: { ...s.piCache, problems } })),
+          () => {},
+        );
+      },
+      loadPiProviders: async () => {
+        const providers = await piProviders();
+        set((s) => ({ piCache: { ...s.piCache, providers } }));
+      },
       loadProjects: async () => {
         try {
           set({ projects: await listProjects(), projectsLoaded: true });
@@ -394,7 +428,16 @@ export const useStore = create<State>()(
         }
         return state as State;
       },
-      partialize: (s) => ({ settings: s.settings, detection: s.detection, searchStatus: s.searchStatus, selections: s.selections, sidebarOpen: s.sidebarOpen, sections: s.sections, view: s.view }),
+      partialize: (s) => ({
+        settings: s.settings,
+        detection: s.detection,
+        searchStatus: s.searchStatus,
+        selections: s.selections,
+        sidebarOpen: s.sidebarOpen,
+        sections: s.sections,
+        view: s.view,
+        piCache: s.piCache,
+      }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
         const detection = { ...(p.detection ?? {}) };
@@ -413,6 +456,7 @@ export const useStore = create<State>()(
           ...p,
           detection,
           searchStatus,
+          piCache: { ...current.piCache, ...p.piCache },
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
           sections: { ...current.sections, ...p.sections },
           view: { ...DEFAULT_VIEW, ...p.view },

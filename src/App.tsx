@@ -82,6 +82,11 @@ export async function preloadApp() {
     // Replies that were still coming in when the app was closed or reloaded.
     resumeReplies();
   }, () => { /* Main keeps retrying and shows the error. */ });
+  // Settings → Pi and Settings → Providers open with content, not a spinner.
+  void hydrated.then(() => {
+    const pi = useStore.getState();
+    void Promise.all([pi.loadPiStatus(), pi.loadPiResources(), pi.loadPiProviders()]).catch(() => {});
+  });
   const all = Promise.all([hydrated, chats, useStore.getState().loadProjects()]);
   await Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
 }

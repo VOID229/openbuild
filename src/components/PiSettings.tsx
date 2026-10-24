@@ -32,10 +32,6 @@ import {
   installPackage,
   installPi,
   logoutProvider,
-  piProblems,
-  piProviders,
-  piResources,
-  piStatus,
   readResourceFile,
   removePackage,
   removeProject,
@@ -50,7 +46,6 @@ import {
   type PiProblem,
   type PiProvider,
   type PiResource,
-  type PiStatus,
   type ResourceKind,
 } from "../lib/pi";
 import { useStore } from "../lib/store";
@@ -386,31 +381,34 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
 }
 
 export function PiSection() {
-  const [status, setStatus] = useState<PiStatus>();
+  // Everything here comes from the cache filled at launch, so the page opens with its content.
+  const status = useStore((s) => s.piCache.status);
+  const data = useStore((s) => s.piCache.resources);
+  const problems = useStore((s) => s.piCache.problems) ?? [];
+  const loadPiStatus = useStore((s) => s.loadPiStatus);
+  const loadPiResources = useStore((s) => s.loadPiResources);
   const [statusError, setStatusError] = useState<string>();
   const [checking, setChecking] = useState(false);
-  const [data, setData] = useState<{ resources: PiResource[]; packages: string[] }>();
-  const [problems, setProblems] = useState<PiProblem[]>([]);
   const [editing, setEditing] = useState<PiResource>();
   const refreshDetection = useStore((s) => s.refreshDetection);
 
-  const loadStatus = useCallback(async (fresh = false) => {
-    setChecking(true);
-    try {
-      setStatus(await piStatus(fresh));
-      setStatusError(undefined);
-    } catch (err) {
-      setStatusError((err as Error).message);
-    } finally {
-      setChecking(false);
-    }
-  }, []);
+  const loadStatus = useCallback(
+    async (fresh = false, quiet = false) => {
+      if (!quiet) setChecking(true);
+      try {
+        await loadPiStatus(fresh);
+        setStatusError(undefined);
+      } catch (err) {
+        setStatusError((err as Error).message);
+      } finally {
+        if (!quiet) setChecking(false);
+      }
+    },
+    [loadPiStatus],
+  );
   const loadResources = useCallback(async () => {
-    try {
-      setData(await piResources());
-    } catch {}
-    piProblems().then(setProblems, () => {});
-  }, []);
+    await loadPiResources().catch(() => {});
+  }, [loadPiResources]);
   const job = useJob(() => {
     void loadStatus(true);
     void loadResources();
@@ -418,7 +416,8 @@ export function PiSection() {
   });
 
   useEffect(() => {
-    void loadStatus();
+    // Revalidate quietly; the cached status and resources are already on screen.
+    void loadStatus(false, true);
     void loadResources();
     // Pick up a job that was already running (e.g. an update started before a reload).
     void job.follow();
@@ -494,7 +493,12 @@ export function PiSection() {
 
       {status?.installed && (
         <>
-          <Problems problems={problems} onClear={() => void clearPiProblems().then(() => setProblems([]))} />
+          <Problems
+            problems={problems}
+            onClear={() =>
+              void clearPiProblems().then(() => useStore.setState((s) => ({ piCache: { ...s.piCache, problems: [] } })))
+            }
+          />
           {!data ? (
             <Spinner />
           ) : (
@@ -521,10 +525,6 @@ const SOURCE_LABEL: Record<string, string> = {
   models_json_key: "Key from models.json",
   models_json_command: "Command from models.json",
 };
-
-// The last provider list, kept outside the component so reopening Settings shows it immediately
-// instead of a spinner while Pi lists its providers again.
-let providerCache: PiProvider[] | undefined;
 
 /** A sign-in in progress: what Pi shows and asks, answered right here. */
 function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api_key" | "oauth"; onEnd: (ok: boolean) => void }) {
@@ -671,7 +671,8 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
 }
 
 export function ProvidersSection() {
-  const [providers, setProviders] = useState<PiProvider[] | undefined>(providerCache);
+  const providers = useStore((s) => s.piCache.providers);
+  const loadPiProviders = useStore((s) => s.loadPiProviders);
   const [error, setError] = useState<string>();
   const [query, setQuery] = useState("");
   const [login, setLogin] = useState<{ provider: PiProvider; type: "api_key" | "oauth" }>();
@@ -681,15 +682,13 @@ export function ProvidersSection() {
 
   const load = useCallback(async () => {
     try {
-      const next = await piProviders();
-      providerCache = next;
-      setProviders(next);
+      await loadPiProviders();
       setError(undefined);
     } catch (err) {
       // A cached list beats an error page; keep showing what Pi last told us.
-      if (!providerCache) setError((err as Error).message);
+      if (!useStore.getState().piCache.providers) setError((err as Error).message);
     }
-  }, []);
+  }, [loadPiProviders]);
   useEffect(() => {
     void load();
   }, [load]);
