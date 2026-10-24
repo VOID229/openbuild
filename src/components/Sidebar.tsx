@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, ShieldHalf, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, ShieldHalf, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
@@ -6,7 +6,7 @@ import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
-import { arrowNav, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
+import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 
@@ -51,16 +51,33 @@ function previewOf(chat: Chat) {
 /** The model of the chat's latest reply. */
 const modelOf = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
 
-/** A chat whose latest message is still being generated. */
-const isWorking = (chat: Chat) => chat.messages.at(-1)?.status === "streaming";
+/** The chat's latest reply (commands the user ran may come after it). */
+const lastReply = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant");
+
+/** A chat whose latest reply is still being generated. */
+const isWorking = (chat: Chat) => lastReply(chat)?.status === "streaming";
 
 /** Working, but blocked on a question from an extension: not generating, not done. */
 const isWaiting = (chat: Chat) => {
-  const last = chat.messages.at(-1);
+  const last = lastReply(chat);
   return last?.status === "streaming" && !!last.parts?.some((p) => p.type === "ask" && p.answer === undefined);
 };
 
 const chatUrl = threadPath;
+
+/** The thread as one Markdown document: its title, then each message under its author. */
+function chatMarkdown(chat: Chat) {
+  const fence = (text: string, lang = "") => {
+    const ticks = "`".repeat(Math.max(3, ...(text.match(/`+/g) ?? []).map((t) => t.length + 1)));
+    return `${ticks}${lang}\n${text.replace(/\n+$/, "")}\n${ticks}`;
+  };
+  const blocks = [`# ${chat.title}`];
+  for (const m of chat.messages) {
+    if (m.role === "shell" && m.shell) blocks.push(`## Shell\n\n${fence(`$ ${m.shell.command}${m.shell.output ? `\n${m.shell.output}` : ""}`, "sh")}`);
+    else if (m.content.trim()) blocks.push(`## ${m.role === "user" ? "User" : (m.model?.name ?? "Assistant")}\n\n${m.content.trim()}`);
+  }
+  return blocks.join("\n\n") + "\n";
+}
 
 function Highlight({ text, ranges }: { text: string; ranges: Range[] }) {
   if (!ranges.length) return <>{text}</>;
@@ -302,11 +319,13 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
   const [confirm, setConfirm] = useState(false);
+  const [copyOpen, setCopyOpen] = useState(false);
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
     if (!open || !mounted || !state) return;
     setConfirm(false);
+    setCopyOpen(false);
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 220;
@@ -343,8 +362,13 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
       className="popover menu context-menu"
       data-state={visible && pos ? "open" : "closed"}
       style={{ position: "fixed", left: pos?.left ?? state?.x, top: pos?.top ?? state?.y, transformOrigin: pos?.origin }}
-      onKeyDown={(e) => arrowNav(e)}
+      onKeyDown={(e) => arrowNav(e, ":scope > button, :scope > .filter-row > button")}
       onContextMenu={(e) => e.preventDefault()}
+      // Like a native menu, the Copy submenu stays open until another item is hovered.
+      onMouseOver={(e) => {
+        const item = (e.target as Element).closest(".menu-item");
+        if (item && !item.closest(".filter-row")) setCopyOpen(false);
+      }}
     >
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => window.open(chatUrl(chat.id), "_blank", "noopener"))}>
         <ExternalLink size={15} /> Open in new tab
@@ -363,6 +387,60 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
         {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
       </button>
+      <div className="filter-row" onMouseEnter={() => setCopyOpen(true)}>
+        <button
+          type="button"
+          role="menuitem"
+          aria-haspopup="menu"
+          aria-expanded={copyOpen}
+          className={cx("menu-item", copyOpen && "menu-item-active")}
+          onClick={() => setCopyOpen(!copyOpen)}
+          onKeyDown={(e) => {
+            if (e.key !== "ArrowRight") return;
+            e.preventDefault();
+            setCopyOpen(true);
+            requestAnimationFrame(() => e.currentTarget.parentElement?.querySelector<HTMLElement>(".filter-flyout button")?.focus());
+          }}
+        >
+          <Copy size={15} />
+          <span className="menu-item-label">Copy</span>
+          <ChevronRight size={14} className="filter-chevron" />
+        </button>
+        {copyOpen && (
+          <div
+            className="popover menu filter-flyout"
+            data-state="open"
+            role="menu"
+            aria-label="Copy"
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              arrowNav(e);
+              if (e.key === "ArrowLeft") {
+                e.preventDefault();
+                setCopyOpen(false);
+                (e.currentTarget.parentElement?.firstElementChild as HTMLElement | null)?.focus();
+              }
+            }}
+          >
+            <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chat.id))}>
+              <Fingerprint size={15} /> Session ID
+            </button>
+            <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chatMarkdown(chat)))}>
+              <FileText size={15} /> As Markdown
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="menu-item"
+              disabled={!chat.workspace?.branch}
+              title={chat.workspace?.branch ? undefined : "This thread has no git branch"}
+              onClick={act(() => copyText(chat.workspace!.branch!))}
+            >
+              <GitBranch size={15} /> Branch
+            </button>
+          </div>
+        )}
+      </div>
       {chat.workspace?.worktree && (
         <button
           type="button"
@@ -408,7 +486,14 @@ function useChatModels() {
   }, [chats]);
 }
 
-type Sub = "sort" | "model";
+type Sub = "sort" | "model" | "runtime";
+
+/** Runtime choices in the filter menu, where Pi keeps its own name. */
+const RUNTIME_FILTERS = [
+  ["all", "All runtimes"],
+  ["pi", "Pi"],
+  ["durable", "Durable"],
+] as const;
 
 function FilterMenu() {
   const [open, setOpen] = useState(false);
@@ -545,6 +630,21 @@ function FilterMenu() {
                   </button>
                 ))}
               </div>
+            </>,
+          )}
+          {row(
+            "runtime",
+            "Runtime",
+            view.runtime === "all" ? "All" : view.runtime === "durable" ? "Durable" : "Pi",
+            <>
+              <div className="menu-label">Runtime</div>
+              {RUNTIME_FILTERS.map(([value, label]) => (
+                <button key={value} type="button" role="menuitemradio" aria-checked={view.runtime === value} className="menu-item" onClick={() => setView({ runtime: value })}>
+                  {value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : <ShieldHalf size={15} />}
+                  <span className="menu-item-label">{label}</span>
+                  {view.runtime === value && <Check size={15} className="menu-check" />}
+                </button>
+              ))}
             </>,
           )}
           <div className="menu-sep" />
