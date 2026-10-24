@@ -383,6 +383,24 @@ async function pairHost() {
   await start(mode);
   const state = readState();
   if (!state) fail("couldn't read the server state after starting it.");
+  // A server left over from an older version has no pairing routes. Say so instead of waiting
+  // for a code it will never accept.
+  let supportsPairing = false;
+  for (const base of [`http://127.0.0.1:${state!.port}`, ...state!.urls]) {
+    try {
+      const res = await fetch(`${base.replace(/\/$/, "")}/api/pair/info`, { signal: AbortSignal.timeout(2000) });
+      const body = (await res.json().catch(() => null)) as { pending?: unknown } | null;
+      if (res.ok && typeof body?.pending === "boolean") {
+        supportsPairing = true;
+        break;
+      }
+    } catch {}
+  }
+  if (!supportsPairing)
+    fail(
+      "the OpenBuild running on this computer is from an older version and can't pair.\n" +
+        "Restart it (`openbuild restart`) or stop the old process, then run `openbuild pair --host` again.",
+    );
   const pending = devices.createPairing({ name, mode, urls: state!.urls });
   console.log(`\n  Pairing code: ${bold(pending.code)}`);
   console.log(dim("  Valid for 15 minutes, for one device."));
@@ -426,15 +444,30 @@ interface PairCandidate {
 
 /** GET /api/pair/info, which only answers while a pairing is open. */
 async function probePairing(base: string): Promise<PairCandidate | undefined> {
-  try {
-    const res = await fetch(`${base.replace(/\/$/, "")}/api/pair/info`, { signal: AbortSignal.timeout(900) });
-    if (!res.ok) return undefined;
-    const info = (await res.json()) as { pending?: boolean; name?: string; machine?: string; deviceId?: string; claimed?: boolean };
-    if (!info?.pending || info.claimed) return undefined;
-    return { base: base.replace(/\/$/, ""), name: info.name || base, machine: info.machine, deviceId: info.deviceId };
-  } catch {
-    return undefined;
+  const url = base.replace(/\/$/, "");
+  // Two tries: a machine that accidentally has two servers on one port (or a transient TLS
+  // timeout) can answer the first probe from the wrong one. Retrying is cheap and avoids a
+  // confusing "nothing waiting" when the host is actually there.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(`${url}/api/pair/info`, { signal: AbortSignal.timeout(900) });
+      if (res.ok) {
+        const info = (await res.json()) as { pending?: boolean; name?: string; machine?: string; deviceId?: string; claimed?: boolean };
+        if (!info?.pending || info.claimed) return undefined;
+        return { base: url, name: info.name || base, machine: info.machine, deviceId: info.deviceId };
+      }
+    } catch {}
+    if (attempt === 0) await Bun.sleep(150);
   }
+  return undefined;
+}
+
+/** Probe a typed address with the given scheme, and the other one if that fails. */
+async function probeAddress(typed: string): Promise<PairCandidate | undefined> {
+  if (/^https?:\/\//.test(typed)) return probePairing(typed);
+  const host = typed.includes(":") ? typed : `${typed}:${PORT}`;
+  // Tailscale often has HTTPS on a nonstandard port; a LAN host is usually plain HTTP.
+  return (await probePairing(`https://${host}`)) ?? (await probePairing(`http://${host}`));
 }
 
 /** Run probes a few at a time, so a /24 scan stays quick without hundreds of sockets at once. */
@@ -484,6 +517,7 @@ function tailscaleCandidates(): string[] {
     const dns = String(peer?.DNSName ?? "").replace(/\.$/, "");
     if (dns) {
       out.add(`https://${dns}`);
+      out.add(`https://${dns}:${PORT}`);
       out.add(`http://${dns}:${PORT}`);
     }
   }
@@ -501,11 +535,10 @@ async function pairClient() {
   candidates = candidates.filter((c, i) => candidates.findIndex((x) => x.deviceId && x.deviceId === c.deviceId) === i);
   if (!candidates.length) {
     console.log(dim("No OpenBuild is waiting to pair here. If you know its address, enter it below."));
-    const typed = await ask("Host address (host or host:port, Enter to cancel): ");
+    const typed = await ask("Host address (host, host:port, or https://…, Enter to cancel): ");
     if (!typed) fail("nothing to pair with.");
-    const base = /^https?:\/\//.test(typed) ? typed.replace(/\/$/, "") : `http://${typed.includes(":") ? typed : `${typed}:${PORT}`}`;
-    const found = await probePairing(base);
-    if (!found) fail(`no OpenBuild is waiting to pair at ${base}. Check that \`openbuild pair --host\` is running there.`);
+    const found = await probeAddress(typed);
+    if (!found) fail(`no OpenBuild is waiting to pair at ${typed}. Check that \`openbuild pair --host\` is running there.`);
     candidates = [found!];
   }
 
