@@ -281,10 +281,10 @@ function RuntimeMenu() {
         <div onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => (
             <button key={o.runtime} type="button" role="option" aria-selected={o.runtime === runtime} className="menu-item ws-option" onClick={() => { updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}>
-              <span className="ws-option-text">
               <span className="ws-option-icon" aria-hidden>
                 {o.runtime === "durable" ? <ShieldHalf size={15} /> : <PiMark size={15} />}
               </span>
+              <span className="ws-option-text">
                 <span className="menu-item-label">{o.label}</span>
                 <span className="ws-option-path">{o.desc}</span>
               </span>
