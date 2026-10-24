@@ -515,11 +515,11 @@ export function PiSection() {
 
 const SOURCE_LABEL: Record<string, string> = {
   stored: "Saved in Pi",
-  runtime: "Set for this session",
-  environment: "From an environment variable",
-  fallback: "Default credentials",
-  models_json_key: "Key in models.json",
-  models_json_command: "Command in models.json",
+  runtime: "Set for this session only",
+  environment: "Key from an environment variable",
+  fallback: "Using Pi's default credentials",
+  models_json_key: "Key from models.json",
+  models_json_command: "Command from models.json",
 };
 
 // The last provider list, kept outside the component so reopening Settings shows it immediately
@@ -718,32 +718,46 @@ export function ProvidersSection() {
     void refreshDetection();
   };
 
-  const actions = (p: PiProvider) => (
-    <span className="pi-row-actions">
-      {p.oauth && (
-        <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "oauth" })}>
-          {p.status.configured && p.stored === "oauth" ? "Sign in again" : "Sign in"}
-        </button>
-      )}
-      {p.apiKey?.canLogin && (
-        <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "api_key" })}>
-          {p.stored === "api_key" ? "Replace key" : "API key"}
-        </button>
-      )}
-      {p.stored && (
-        <IconButton label={`Sign out of ${p.name}`} tooltip="Sign out" tooltipSide="top" className="key-icon-btn key-remove" disabled={busy === p.id} onClick={() => void signOut(p)}>
-          {busy === p.id ? <Spinner size={12} /> : <Trash2 size={14} />}
-        </IconButton>
-      )}
-    </span>
-  );
+  /** What Pi has for a provider, in words that don't depend on how the row is laid out. */
+  const credential = (p: PiProvider) => {
+    if (p.stored === "oauth") return "Signed in";
+    if (p.stored === "api_key") return "API key saved";
+    return SOURCE_LABEL[p.status.source ?? ""] ?? "Configured";
+  };
+
+  /** One button per way in: refresh the saved one first, then the other one if there is one. */
+  const actions = (p: PiProvider) => {
+    const signedIn = p.status.configured && p.stored === "oauth";
+    const keyed = p.status.configured && p.stored === "api_key";
+    return (
+      <span className="pi-row-actions">
+        {p.oauth && (
+          <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "oauth" })}>
+            {signedIn ? "Sign in again" : keyed ? "Sign in instead" : "Sign in"}
+          </button>
+        )}
+        {p.apiKey?.canLogin && (
+          <button type="button" className="btn btn-sm" onClick={() => setLogin({ provider: p, type: "api_key" })}>
+            {keyed ? "Replace API key" : signedIn ? "Use API key" : "Add API key"}
+          </button>
+        )}
+        {p.stored && (
+          <IconButton label={`Sign out of ${p.name}`} tooltip="Sign out" tooltipSide="top" className="key-icon-btn key-remove" disabled={busy === p.id} onClick={() => void signOut(p)}>
+            {busy === p.id ? <Spinner size={12} /> : <Trash2 size={14} />}
+          </IconButton>
+        )}
+      </span>
+    );
+  };
+
+  const modelsLine = (count: number) => (count ? `${count} model${count === 1 ? "" : "s"} available` : "No models available");
 
   return (
     <>
       <Heading>Providers</Heading>
       <p className="setting-desc pi-intro">
-        Sign in to the model providers Pi uses. Credentials are saved by Pi in <code>~/.pi/agent/auth.json</code>, the same as <code>/login</code> in Pi, so the <code>pi</code> command
-        uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
+        Set up the model providers Pi uses, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi in <code>~/.pi/agent/auth.json</code>, the
+        same as <code>/login</code> in Pi, so the <code>pi</code> command uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
       </p>
       {login && (
         <LoginFlow
@@ -769,7 +783,7 @@ export function ProvidersSection() {
       ) : (
         <>
           <section className="pi-block">
-            <SubHeading>Ready</SubHeading>
+            <SubHeading>Ready to use</SubHeading>
             <ul className="pi-list">
               {configured.map((p) => (
                 <li key={p.id} className="pi-row">
@@ -779,15 +793,13 @@ export function ProvidersSection() {
                       <Check size={13} className="ok" />
                     </span>
                     <span className="pi-row-desc">
-                      {p.stored === "oauth" ? "Signed in" : (SOURCE_LABEL[p.status.source ?? ""] ?? "Configured")}
-                      {" · "}
-                      {usable.get(p.id) ?? 0} model{usable.get(p.id) === 1 ? "" : "s"}
+                      {credential(p)} · {modelsLine(usable.get(p.id) ?? 0)}
                     </span>
                   </div>
                   {actions(p)}
                 </li>
               ))}
-              {!configured.length && <li className="pi-empty">{q ? "No match." : "No provider is set up yet. Sign in to one below."}</li>}
+              {!configured.length && <li className="pi-empty">{q ? "No match." : "No provider is set up yet. Add one below."}</li>}
             </ul>
           </section>
           <section className="pi-block">
@@ -798,14 +810,14 @@ export function ProvidersSection() {
                   <div className="pi-row-text">
                     <span className="pi-row-name">{p.name}</span>
                     <span className="pi-row-desc">
-                      {[p.oauth?.subscription ? p.oauth.name : p.oauth ? "Sign in" : "", p.apiKey?.canLogin ? "API key" : ""].filter(Boolean).join(" or ")}
-                      {p.models ? ` · ${p.models} models` : ""}
+                      {[p.oauth?.subscription ? p.oauth.name : p.oauth ? "Sign in" : "", p.apiKey?.canLogin ? (p.apiKey.name || "API key") : ""].filter(Boolean).join(" or ")}
+                      {p.models ? ` · ${p.models} model${p.models === 1 ? "" : "s"}` : ""}
                     </span>
                   </div>
                   {actions(p)}
                 </li>
               ))}
-              {!others.length && <li className="pi-empty">No match.</li>}
+              {!others.length && <li className="pi-empty">{q ? "No match." : "Every provider Pi knows is already set up."}</li>}
             </ul>
           </section>
         </>
