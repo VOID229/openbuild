@@ -48,9 +48,11 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
     return () => { active = false; };
   }, [status?.authenticated, load]);
 
+  // Until the first status check answers, show nothing: an unlocked session shouldn't flash the lock.
+  const locked = status ? !status.authenticated : !!error;
   useEffect(() => {
-    if (!status?.authenticated && dialog.current && !dialog.current.open) dialog.current.showModal();
-  }, [status?.authenticated]);
+    if (locked && dialog.current && !dialog.current.open) dialog.current.showModal();
+  }, [locked]);
 
   const unlock = async (event: FormEvent) => {
     event.preventDefault();
@@ -68,7 +70,8 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
     finally { setBusy(false); }
   };
 
-  if (status?.authenticated) return <>{content || <div className="local-access-loading" role="status">{error || "Opening OpenBuild…"}</div>}</>;
+  if (status?.authenticated) return <>{content || <div className="local-access-loading" role="status">{error}</div>}</>;
+  if (!locked) return <div className="local-access-screen" />;
   return (
     <div className="local-access-screen">
       <dialog ref={dialog} className="local-access-dialog" aria-labelledby="local-access-title" aria-describedby="local-access-description" onCancel={(e) => e.preventDefault()}>

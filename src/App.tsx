@@ -65,6 +65,26 @@ function Home() {
   );
 }
 
+/**
+ * Settings, threads and projects, fetched together before the app first renders so it appears in
+ * one piece instead of the sidebar filling in afterwards. A slow server doesn't hold it back for
+ * long: past the deadline the app renders and whatever's missing fills in when it arrives.
+ */
+export async function preloadApp() {
+  const hydrated = new Promise<void>((resolve) => {
+    if (useStore.persist.hasHydrated()) return resolve();
+    const off = useStore.persist.onFinishHydration(() => { off(); resolve(); });
+  });
+  const chats = Promise.all([hydrated, loadChats()]).then(([, chats]) => {
+    if (useStore.getState().chatsLoaded) return;
+    useStore.getState().setChats(chats);
+    // Replies that were still coming in when the app was closed or reloaded.
+    resumeReplies();
+  }, () => { /* Main keeps retrying and shows the error. */ });
+  const all = Promise.all([hydrated, chats, useStore.getState().loadProjects()]);
+  await Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
+}
+
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
 export function App() {
   const [hydrated, setHydrated] = useState(() => useStore.persist.hasHydrated());
@@ -107,10 +127,11 @@ function Main() {
           timer = setTimeout(() => load(Math.min(delay * 2, 10_000)), delay);
         },
       );
-    void load(1000);
+    // Usually already loaded by preloadApp.
+    if (!useStore.getState().chatsLoaded) void load(1000);
     // Projects, and the models Pi can use (cached ones stay usable meanwhile).
     ensureSelection();
-    void useStore.getState().loadProjects();
+    if (!useStore.getState().projectsLoaded) void useStore.getState().loadProjects();
     void useStore.getState().refreshDetection();
     // Re-ask Pi when the tab comes back after a while (a provider signed in elsewhere, new models).
     const STALE = 10 * 60 * 1000;
