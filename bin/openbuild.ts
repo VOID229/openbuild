@@ -127,16 +127,42 @@ async function waitForServer(url: string, pid: number): Promise<boolean> {
   return false;
 }
 
-/** The `tailscale serve` HTTPS port to use: 443 unless something else already serves there. */
-function freeServePort(bin: string): number {
-  const r = run(bin, tailscaleArgs(["serve", "status", "--json"]));
+/** The Serve config, when its JSON can be read. */
+function serveConfig(bin: string): any {
   try {
-    const cfg = JSON.parse(r.out || "{}");
-    const used = Object.keys(cfg.TCP ?? {}).map(Number);
-    return used.includes(443) ? PORT : 443;
+    return JSON.parse(run(bin, tailscaleArgs(["serve", "status", "--json"])).out || "{}");
   } catch {
-    return 443;
+    return {};
   }
+}
+
+/** The `tailscale serve` HTTPS port already forwarding to this app, if any (443 preferred). */
+function existingServePort(bin: string): number | undefined {
+  const web = serveConfig(bin).Web ?? {};
+  const ports: number[] = [];
+  for (const [host, entry] of Object.entries<any>(web)) {
+    const port = Number(host.slice(host.lastIndexOf(":") + 1));
+    if (!Number.isFinite(port)) continue;
+    const proxies = Object.values<any>(entry?.Handlers ?? {}).map((h) => h?.Proxy);
+    if (proxies.some((p) => p === `http://127.0.0.1:${PORT}`)) ports.push(port);
+  }
+  return ports.includes(443) ? 443 : ports[0];
+}
+
+/**
+ * The `tailscale serve` HTTPS port to use: one already pointing at this app, else 443, else another
+ * free port. Never the server's own plain-HTTP port: Serve would take over the tailnet address on
+ * that port, and the advertised `http://<tailscale-ip>:PORT` fallback would answer TLS instead.
+ */
+function freeServePort(bin: string): number {
+  const existing = existingServePort(bin);
+  if (existing && existing !== PORT) return existing;
+  const cfg = serveConfig(bin);
+  const used = Object.keys(cfg.TCP ?? {}).map(Number).filter(Number.isFinite);
+  if (!used.includes(443)) return 443;
+  for (const candidate of [8443, 9443, 10443, 12443, 14443]) if (!used.includes(candidate) && candidate !== PORT) return candidate;
+  for (let candidate = 20000; candidate < 30000; candidate++) if (!used.includes(candidate) && candidate !== PORT) return candidate;
+  return 443;
 }
 
 async function start(mode: Mode) {
@@ -150,6 +176,13 @@ async function start(mode: Mode) {
     }
     console.log(dim(`Switching from ${current.mode} to ${mode}…`));
     await stop(true);
+  } else if (await serving(PORT)) {
+    // Two servers on one port split requests between them (especially with Tailscale): some API
+    // calls hit the old code, with no pairing routes. Never start a duplicate.
+    fail(
+      `something else is already answering on port ${PORT}, but it wasn't started by \`openbuild start\` (no ${STATE}).\n` +
+        "It may be an older OpenBuild or one managed by systemd. Stop or restart it where it runs, then try again.",
+    );
   }
 
   const env: Record<string, string> = { ...(process.env as Record<string, string>), NODE_ENV: "production", PORT: String(PORT) };
@@ -221,15 +254,19 @@ async function start(mode: Mode) {
 
   if (tailscale && tailscale.self && tailscale.self.https) {
     servePort = freeServePort(tailscale.bin);
+    // An older start may have put HTTPS on the app's own port, where it answers TLS instead of
+    // the plain-HTTP fallback. That entry is never useful; clear it when we use another port.
+    if (servePort !== PORT) run(tailscale.bin, tailscaleArgs(["serve", `--https=${PORT}`, "off"]));
     const r = run(tailscale.bin, tailscaleArgs(["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${PORT}`]));
     if (!r.ok) {
       process.kill(pid);
       fail(`tailscale serve failed: ${r.err || r.out}\nHTTPS may need enabling for your tailnet: https://tailscale.com/kb/1153/enabling-https`);
     }
     urls.push(`https://${tailscale.self.name}${servePort === 443 ? "" : `:${servePort}`}`);
-    // Advertise the plain HTTP fallback only if there's a real Tailscale interface listener.
+    // Advertise the plain HTTP fallback only if there's a real Tailscale interface listener, and
+    // only when Serve isn't also using that same port (it would answer TLS there instead).
     const ip = tailscale.self.ips.find((a) => a.includes("."));
-    if (ip && env.HOST!.split(",").includes(ip)) urls.push(`http://${ip}:${PORT}`);
+    if (ip && env.HOST!.split(",").includes(ip) && servePort !== PORT) urls.push(`http://${ip}:${PORT}`);
   }
 
   const state: State = { pid, mode, port: PORT, urls, servePort, startedAt: Date.now() };
