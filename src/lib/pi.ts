@@ -12,6 +12,9 @@ const get = <T>(url: string) => fetch(url).then((r) => json<T>(r));
 const send = <T>(url: string, method: string, body?: unknown) =>
   fetch(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => json<T>(r));
 
+/** A paired device's id; undefined means this server. */
+type DeviceId = string | undefined;
+
 // ------------------------------------------------------------------ install and status
 
 export interface PiStatus {
@@ -26,13 +29,16 @@ export interface PiStatus {
   node: string;
 }
 
-export const piStatus = (fresh = false) => get<PiStatus>(`/api/pi/status${fresh ? "?fresh=1" : ""}`);
-export const installPi = () => send<{ job: string }>("/api/pi/install", "POST");
-export const updatePi = (all = false) => send<{ job: string }>("/api/pi/update", "POST", { all });
+// A trailing `deviceId` means "that paired device's Pi": the request goes through the proxy and
+// the device's server installs, updates and lists its own Pi.
+
+export const piStatus = (fresh = false, deviceId?: DeviceId) => get<PiStatus>(apiUrl(deviceId, `/api/pi/status${fresh ? "?fresh=1" : ""}`));
+export const installPi = (deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/install"), "POST");
+export const updatePi = (all = false, deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/update"), "POST", { all });
 
 /** Follow the current maintenance job's output; resolves with its exit code. */
-export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void): Promise<{ code?: number; title?: string } | undefined> {
-  const res = await fetch("/api/pi/job", { signal });
+export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void, deviceId?: DeviceId): Promise<{ code?: number; title?: string } | undefined> {
+  const res = await fetch(apiUrl(deviceId, "/api/pi/job"), { signal });
   if (!res.ok || !res.body || res.status === 204) return undefined;
   // Only a real job stream counts as running: an empty answer must not flash a progress panel.
   onStart?.();
@@ -48,8 +54,8 @@ export interface PiProblem {
   source: string;
   message: string;
 }
-export const piProblems = () => get<{ problems: PiProblem[] }>("/api/pi/problems").then((r) => r.problems);
-export const clearPiProblems = () => send("/api/pi/problems", "DELETE");
+export const piProblems = (deviceId?: DeviceId) => get<{ problems: PiProblem[] }>(apiUrl(deviceId, "/api/pi/problems")).then((r) => r.problems);
+export const clearPiProblems = (deviceId?: DeviceId) => send(apiUrl(deviceId, "/api/pi/problems"), "DELETE");
 
 // ------------------------------------------------------------------ models, commands, threads
 
@@ -58,7 +64,7 @@ export interface PiModels {
   defaultModel?: string;
   checkedAt: number;
 }
-export const piModels = (fresh = false) => get<PiModels>(`/api/pi/models${fresh ? "?fresh=1" : ""}`);
+export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));
 
 /** Prices for models Pi no longer lists, by "<provider>/<model id>". */
 export const piModelPrices = (ids: string[]) =>
@@ -92,8 +98,8 @@ export interface PiProvider {
   stored?: "api_key" | "oauth";
   models: number;
 }
-export const piProviders = () => get<{ providers: PiProvider[] }>("/api/pi/providers").then((r) => r.providers);
-export const logoutProvider = (id: string) => send(`/api/pi/providers/${encodeURIComponent(id)}/logout`, "POST");
+export const piProviders = (deviceId?: DeviceId) => get<{ providers: PiProvider[] }>(apiUrl(deviceId, "/api/pi/providers")).then((r) => r.providers);
+export const logoutProvider = (id: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/pi/providers/${encodeURIComponent(id)}/logout`), "POST");
 
 export type AuthPrompt =
   | { type: "text" | "secret" | "manual_code"; message: string; placeholder?: string }
@@ -110,14 +116,16 @@ export type LoginRecord =
   | { type: "done" }
   | { type: "error"; message: string };
 
-export const startLogin = (provider: string, type: "api_key" | "oauth") => send<{ id: string }>("/api/pi/login", "POST", { provider, type }).then((r) => r.id);
-export async function* followLogin(id: string, signal: AbortSignal): AsyncGenerator<LoginRecord> {
-  const res = await fetch(`/api/pi/login/${encodeURIComponent(id)}`, { signal });
+export const startLogin = (provider: string, type: "api_key" | "oauth", deviceId?: DeviceId) =>
+  send<{ id: string }>(apiUrl(deviceId, "/api/pi/login"), "POST", { provider, type }).then((r) => r.id);
+export async function* followLogin(id: string, signal: AbortSignal, deviceId?: DeviceId): AsyncGenerator<LoginRecord> {
+  const res = await fetch(apiUrl(deviceId, `/api/pi/login/${encodeURIComponent(id)}`), { signal });
   if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? "Sign-in failed");
   yield* readEvents(res.body) as AsyncGenerator<any>;
 }
-export const answerLogin = (id: string, promptId: string, value?: string) => send(`/api/pi/login/${encodeURIComponent(id)}/answer`, "POST", { promptId, value });
-export const cancelLogin = (id: string) => send(`/api/pi/login/${encodeURIComponent(id)}/cancel`, "POST");
+export const answerLogin = (id: string, promptId: string, value?: string, deviceId?: DeviceId) =>
+  send(apiUrl(deviceId, `/api/pi/login/${encodeURIComponent(id)}/answer`), "POST", { promptId, value });
+export const cancelLogin = (id: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/pi/login/${encodeURIComponent(id)}/cancel`), "POST");
 
 // ------------------------------------------------------------------ extensions, skills, prompts
 
@@ -131,14 +139,18 @@ export interface PiResource {
   builtin?: boolean;
   files: string[];
 }
-export const piResources = () => get<{ resources: PiResource[]; packages: string[] }>("/api/pi/resources");
-export const toggleResource = (kind: ResourceKind, id: string, enabled: boolean) => send("/api/pi/resources/toggle", "POST", { kind, id, enabled });
-export const readResourceFile = (path: string) => get<{ content: string }>(`/api/pi/resources/file?path=${encodeURIComponent(path)}`).then((r) => r.content);
-export const writeResourceFile = (path: string, content: string) => send("/api/pi/resources/file", "PUT", { path, content });
-export const removeResource = (id: string) => send<{ trash: string }>("/api/pi/resources/remove", "POST", { id }).then((r) => r.trash);
-export const createResource = (kind: ResourceKind, name: string) => send<{ path: string }>("/api/pi/resources/create", "POST", { kind, name }).then((r) => r.path);
-export const installPackage = (source: string) => send<{ job: string }>("/api/pi/packages", "POST", { source });
-export const removePackage = (source: string) => send<{ job: string }>("/api/pi/packages", "DELETE", { source });
+export const piResources = (deviceId?: DeviceId) => get<{ resources: PiResource[]; packages: string[] }>(apiUrl(deviceId, "/api/pi/resources"));
+export const toggleResource = (kind: ResourceKind, id: string, enabled: boolean, deviceId?: DeviceId) =>
+  send(apiUrl(deviceId, "/api/pi/resources/toggle"), "POST", { kind, id, enabled });
+export const readResourceFile = (path: string, deviceId?: DeviceId) =>
+  get<{ content: string }>(apiUrl(deviceId, `/api/pi/resources/file?path=${encodeURIComponent(path)}`)).then((r) => r.content);
+export const writeResourceFile = (path: string, content: string, deviceId?: DeviceId) => send(apiUrl(deviceId, "/api/pi/resources/file"), "PUT", { path, content });
+export const removeResource = (id: string, deviceId?: DeviceId) =>
+  send<{ trash: string }>(apiUrl(deviceId, "/api/pi/resources/remove"), "POST", { id }).then((r) => r.trash);
+export const createResource = (kind: ResourceKind, name: string, deviceId?: DeviceId) =>
+  send<{ path: string }>(apiUrl(deviceId, "/api/pi/resources/create"), "POST", { kind, name }).then((r) => r.path);
+export const installPackage = (source: string, deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/packages"), "POST", { source });
+export const removePackage = (source: string, deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/packages"), "DELETE", { source });
 
 // ------------------------------------------------------------------ devices
 
@@ -147,8 +159,6 @@ export const listDevices = () => get<{ devices: Device[] }>("/api/devices").then
 export const removeDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}`, "DELETE");
 
 // ------------------------------------------------------------------ projects and workspaces
-
-type DeviceId = string | undefined;
 
 /** Projects on this server, or on a paired device. Remote ids are namespaced by the caller. */
 export const listProjects = (deviceId?: DeviceId) => get<{ projects: Project[] }>(apiUrl(deviceId, "/api/projects")).then((r) => r.projects);

@@ -18,7 +18,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Project } from "../../shared/types";
+import type { ModelInfo, Project } from "../../shared/types";
 import {
   addProject,
   answerLogin,
@@ -32,6 +32,7 @@ import {
   installPackage,
   installPi,
   logoutProvider,
+  piModels,
   readResourceFile,
   removeDevice,
   removePackage,
@@ -49,9 +50,10 @@ import {
   type PiResource,
   type ResourceKind,
 } from "../lib/pi";
-import { useStore } from "../lib/store";
+import { piCacheOn, useStore } from "../lib/store";
 import { deviceName, splitProjectId } from "../lib/devices";
 import { cx } from "../lib/ui";
+import { OptionSelect } from "./ModelSelect";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -75,28 +77,85 @@ function ErrorNote({ children }: { children: ReactNode }) {
 
 // ------------------------------------------------------------------ jobs (install, update, packages)
 
-/** Output of the running (or last) maintenance job, followed live. */
-function useJob(onDone: () => void) {
+// ------------------------------------------------------------------ device picker
+
+/**
+ * Which device's Pi Settings is looking at: undefined for this one. Loads the device list if Settings
+ * opened before it arrived, and drops a device that was unpaired while the page was open.
+ */
+function usePiDevice(): [string | undefined, (id: string | undefined) => void] {
+  const [deviceId, setDeviceId] = useState<string>();
+  const devices = useStore((s) => s.devices);
+  const devicesLoaded = useStore((s) => s.devicesLoaded);
+  const loadDevices = useStore((s) => s.loadDevices);
+  useEffect(() => {
+    if (!devicesLoaded) void loadDevices().catch(() => {});
+  }, [devicesLoaded, loadDevices]);
+  useEffect(() => {
+    if (deviceId && devicesLoaded && !devices.some((d) => d.id === deviceId)) setDeviceId(undefined);
+  }, [deviceId, devices, devicesLoaded]);
+  return [deviceId, setDeviceId];
+}
+
+/** The "Manage Pi on" row, shown once another computer is paired. */
+function DeviceRow({ deviceId, onChange }: { deviceId?: string; onChange: (id: string | undefined) => void }) {
+  const devices = useStore((s) => s.devices);
+  const local = devices.find((d) => d.local);
+  const remote = devices.filter((d) => !d.local);
+  if (!remote.length) return null;
+  return (
+    <div className="pi-row pi-device">
+      <span className="pi-row-text">
+        <span className="pi-row-name">Manage Pi on</span>
+        <span className="pi-row-desc">What this page shows and changes belongs to the device you pick.</span>
+      </span>
+      <OptionSelect
+        className="pi-row-field"
+        label="Device whose Pi to manage"
+        value={deviceId ?? ""}
+        options={[
+          { value: "", label: local ? `This device — ${local.name}` : "This device" },
+          ...remote.map((d) => ({ value: d.id, label: `${d.name}${d.online === false ? " (offline)" : ""}` })),
+        ]}
+        onChange={(v) => onChange(v || undefined)}
+      />
+    </div>
+  );
+}
+
+/** Output of the running (or last) maintenance job on a device, followed live. */
+function useJob(onDone: () => void, deviceId?: string) {
   const [lines, setLines] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ code?: number; title?: string }>();
   const done = useRef(onDone);
   done.current = onDone;
+  // One stream at a time: picking another device drops the previous device's log instead of
+  // appending to it.
+  const live = useRef<AbortController>(undefined);
   const follow = useCallback(async () => {
+    live.current?.abort();
+    const ctrl = (live.current = new AbortController());
     setLines([]);
     setResult(undefined);
     try {
       const r = await followJob(
         (line) => setLines((l) => [...l.slice(-400), line]),
-        undefined,
+        ctrl.signal,
         () => setRunning(true),
+        deviceId,
       );
-      setResult(r);
+      if (!ctrl.signal.aborted) setResult(r);
+    } catch {
+      // An aborted or dropped stream has no result; the status card says why nothing ran.
     } finally {
-      setRunning(false);
-      done.current();
+      if (!ctrl.signal.aborted) {
+        setRunning(false);
+        done.current();
+      }
     }
-  }, []);
+  }, [deviceId]);
+  useEffect(() => () => live.current?.abort(), []);
   return { lines, running, result, follow };
 }
 
@@ -119,7 +178,7 @@ function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
 
 // ------------------------------------------------------------------ file editor
 
-function FileEditor({ resource, onClose }: { resource: PiResource; onClose: () => void }) {
+function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; deviceId?: string; onClose: () => void }) {
   const [file, setFile] = useState(resource.files[0]!);
   const [content, setContent] = useState<string>();
   const [saved, setSaved] = useState<string>();
@@ -130,7 +189,7 @@ function FileEditor({ resource, onClose }: { resource: PiResource; onClose: () =
     let live = true;
     setContent(undefined);
     setError(undefined);
-    readResourceFile(file).then(
+    readResourceFile(file, deviceId).then(
       (c) => {
         if (!live) return;
         setContent(c);
@@ -141,13 +200,13 @@ function FileEditor({ resource, onClose }: { resource: PiResource; onClose: () =
     return () => {
       live = false;
     };
-  }, [file]);
+  }, [file, deviceId]);
   const save = async () => {
     if (content === undefined) return;
     setSaving(true);
     setError(undefined);
     try {
-      await writeResourceFile(file, content);
+      await writeResourceFile(file, content, deviceId);
       setSaved(content);
     } catch (err) {
       setError((err as Error).message);
@@ -218,7 +277,7 @@ const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: strin
   prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name in the composer." },
 };
 
-function ResourceList({ kind, items, onChanged, onEdit, busy }: { kind: ResourceKind; items: PiResource[]; onChanged: () => void; onEdit: (r: PiResource) => void; busy: boolean }) {
+function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }: { kind: ResourceKind; items: PiResource[]; deviceId?: string; onChanged: () => void; onEdit: (r: PiResource) => void; busy: boolean }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
@@ -250,7 +309,7 @@ function ResourceList({ kind, items, onChanged, onEdit, busy }: { kind: Resource
           onSubmit={(e) => {
             e.preventDefault();
             void act(async () => {
-              await createResource(kind, name);
+              await createResource(kind, name, deviceId);
               setName("");
               setAdding(false);
             });
@@ -286,12 +345,12 @@ function ResourceList({ kind, items, onChanged, onEdit, busy }: { kind: Resource
                   tooltipSide="top"
                   className="key-icon-btn key-remove"
                   disabled={busy}
-                  onClick={() => confirm(`Remove ${r.name}? It's moved to ~/.pi/agent/.openbuild-trash, so you can bring it back.`) && void act(() => removeResource(r.id))}
+                  onClick={() => confirm(`Remove ${r.name}? It's moved to ~/.pi/agent/.openbuild-trash, so you can bring it back.`) && void act(() => removeResource(r.id, deviceId))}
                 >
                   <Trash2 size={14} />
                 </IconButton>
               )}
-              <Toggle checked={r.enabled} label={`${r.enabled ? "Turn off" : "Turn on"} ${r.name}`} onChange={(v) => void act(() => toggleResource(r.kind, r.id, v))} />
+              <Toggle checked={r.enabled} label={`${r.enabled ? "Turn off" : "Turn on"} ${r.name}`} onChange={(v) => void act(() => toggleResource(r.kind, r.id, v, deviceId))} />
             </span>
           </li>
         ))}
@@ -301,7 +360,7 @@ function ResourceList({ kind, items, onChanged, onEdit, busy }: { kind: Resource
   );
 }
 
-function Packages({ packages, job, onChanged }: { packages: string[]; job: ReturnType<typeof useJob>; onChanged: () => void }) {
+function Packages({ packages, job, deviceId, onChanged }: { packages: string[]; job: ReturnType<typeof useJob>; deviceId?: string; onChanged: () => void }) {
   const [source, setSource] = useState("");
   const [error, setError] = useState<string>();
   const run = async (fn: () => Promise<unknown>) => {
@@ -324,7 +383,7 @@ function Packages({ packages, job, onChanged }: { packages: string[]; job: Retur
             <div className="pi-row-text">
               <span className="pi-row-name pi-mono">{p}</span>
             </div>
-            <IconButton label={`Remove ${p}`} tooltip="Remove" tooltipSide="top" className="key-icon-btn key-remove" disabled={job.running} onClick={() => confirm(`Remove ${p}?`) && void run(() => removePackage(p))}>
+            <IconButton label={`Remove ${p}`} tooltip="Remove" tooltipSide="top" className="key-icon-btn key-remove" disabled={job.running} onClick={() => confirm(`Remove ${p}?`) && void run(() => removePackage(p, deviceId))}>
               <Trash2 size={14} />
             </IconButton>
           </li>
@@ -335,7 +394,7 @@ function Packages({ packages, job, onChanged }: { packages: string[]; job: Retur
         className="pi-inline-form"
         onSubmit={(e) => {
           e.preventDefault();
-          if (source.trim()) void run(() => installPackage(source.trim())).then(() => setSource(""));
+          if (source.trim()) void run(() => installPackage(source.trim(), deviceId)).then(() => setSource(""));
         }}
       >
         <input className="input input-sm" placeholder="npm:@scope/pkg or git:github.com/you/repo" value={source} spellCheck={false} autoCapitalize="off" onChange={(e) => setSource(e.target.value)} />
@@ -386,12 +445,16 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
 }
 
 export function PiSection() {
-  // Everything here comes from the cache filled at launch, so the page opens with its content.
-  const status = useStore((s) => s.piCache.status);
-  const data = useStore((s) => s.piCache.resources);
-  const problems = useStore((s) => s.piCache.problems) ?? [];
+  // This device's state comes from the cache filled at launch, so the page opens with its content;
+  // a paired device's is fetched through the proxy when it is picked.
+  const [deviceId, setDeviceId] = usePiDevice();
+  const cached = useStore((s) => piCacheOn(s, deviceId));
+  const status = cached.status;
+  const data = cached.resources;
+  const problems = cached.problems ?? [];
   const loadPiStatus = useStore((s) => s.loadPiStatus);
   const loadPiResources = useStore((s) => s.loadPiResources);
+  const setPiCache = useStore((s) => s.setPiCache);
   const [statusError, setStatusError] = useState<string>();
   const [checking, setChecking] = useState(false);
   const [editing, setEditing] = useState<PiResource>();
@@ -401,7 +464,7 @@ export function PiSection() {
     async (fresh = false, quiet = false) => {
       if (!quiet) setChecking(true);
       try {
-        await loadPiStatus(fresh);
+        await loadPiStatus(fresh, deviceId);
         setStatusError(undefined);
       } catch (err) {
         setStatusError((err as Error).message);
@@ -409,26 +472,29 @@ export function PiSection() {
         if (!quiet) setChecking(false);
       }
     },
-    [loadPiStatus],
+    [loadPiStatus, deviceId],
   );
   const loadResources = useCallback(async () => {
-    await loadPiResources().catch(() => {});
-  }, [loadPiResources]);
+    await loadPiResources(deviceId).catch(() => {});
+  }, [loadPiResources, deviceId]);
   const job = useJob(() => {
     void loadStatus(true);
     void loadResources();
-    void refreshDetection();
-  });
+    // Only this device's models are in the composer's list; a paired device's come with its threads.
+    if (!deviceId) void refreshDetection();
+  }, deviceId);
 
   useEffect(() => {
+    setStatusError(undefined);
+    setEditing(undefined);
     // Revalidate quietly; the cached status and resources are already on screen.
     void loadStatus(false, true);
     void loadResources();
-    // Pick up a job that was already running (e.g. an update started before a reload).
-    void job.follow();
-  }, []);
+    // Pick up a job that was already running there (e.g. an update started before a reload).
+    void job.follow().catch(() => {});
+  }, [deviceId]);
 
-  if (editing) return <FileEditor resource={editing} onClose={() => (setEditing(undefined), void loadResources())} />;
+  if (editing) return <FileEditor resource={editing} deviceId={deviceId} onClose={() => (setEditing(undefined), void loadResources())} />;
 
   const start = async (fn: () => Promise<unknown>) => {
     try {
@@ -439,12 +505,22 @@ export function PiSection() {
     }
   };
   const by = (k: ResourceKind) => data?.resources.filter((r) => r.kind === k) ?? [];
+  const where = deviceName(deviceId);
 
   return (
     <>
       <Heading>Pi</Heading>
+      <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
       <p className="setting-desc pi-intro">
-        OpenBuild runs every thread on the Pi installed on this computer: its models, credentials, extensions and skills are the same ones the <code>pi</code> command uses.
+        {where ? (
+          <>
+            Threads on {where} run on the Pi installed there: its models, credentials, extensions and skills are the same ones the <code>pi</code> command on {where} uses.
+          </>
+        ) : (
+          <>
+            OpenBuild runs every thread on the Pi installed on this computer: its models, credentials, extensions and skills are the same ones the <code>pi</code> command uses.
+          </>
+        )}
       </p>
       <section className="pi-card">
         {!status ? (
@@ -462,7 +538,7 @@ export function PiSection() {
                 </div>
               </div>
               {status.updateAvailable ? (
-                <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => updatePi())}>
+                <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => updatePi(false, deviceId))}>
                   Update to {status.latest}
                 </button>
               ) : (
@@ -473,7 +549,7 @@ export function PiSection() {
             </div>
             {status.checkError && <p className="pi-meta">{status.checkError}</p>}
             <div className="pi-card-links">
-              <button type="button" className="link-btn" disabled={job.running} onClick={() => void start(() => updatePi(true))}>
+              <button type="button" className="link-btn" disabled={job.running} onClick={() => void start(() => updatePi(true, deviceId))}>
                 Update Pi and all packages
               </button>
               <span className="pi-meta">Config: {tilde(status.agentDir)}</span>
@@ -484,10 +560,10 @@ export function PiSection() {
             <div className="pi-card-text">
               <div className="pi-version">Pi isn't installed</div>
               <div className="pi-meta">
-                OpenBuild needs Pi to run threads. Install it with Pi's installer (<code>curl -fsSL https://pi.dev/install.sh | sh</code>) here or in a terminal.
+                OpenBuild needs Pi to run threads. Install it with Pi's installer (<code>curl -fsSL https://pi.dev/install.sh | sh</code>) in a terminal on {where ?? "this computer"}.
               </div>
             </div>
-            <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(installPi)}>
+            <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => installPi(deviceId))}>
               Install Pi
             </button>
           </div>
@@ -498,20 +574,15 @@ export function PiSection() {
 
       {status?.installed && (
         <>
-          <Problems
-            problems={problems}
-            onClear={() =>
-              void clearPiProblems().then(() => useStore.setState((s) => ({ piCache: { ...s.piCache, problems: [] } })))
-            }
-          />
+          <Problems problems={problems} onClear={() => void clearPiProblems(deviceId).then(() => setPiCache({ problems: [] }, deviceId))} />
           {!data ? (
             <Spinner />
           ) : (
             <>
-              <ResourceList kind="extension" items={by("extension")} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <ResourceList kind="skill" items={by("skill")} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <ResourceList kind="prompt" items={by("prompt")} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <Packages packages={data.packages} job={job} onChanged={loadResources} />
+              <ResourceList kind="extension" items={by("extension")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
+              <ResourceList kind="skill" items={by("skill")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
+              <ResourceList kind="prompt" items={by("prompt")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
+              <Packages packages={data.packages} job={job} deviceId={deviceId} onChanged={loadResources} />
             </>
           )}
         </>
@@ -532,7 +603,7 @@ const SOURCE_LABEL: Record<string, string> = {
 };
 
 /** A sign-in in progress: what Pi shows and asks, answered right here. */
-function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api_key" | "oauth"; onEnd: (ok: boolean) => void }) {
+function LoginFlow({ provider, type, deviceId, onEnd }: { provider: PiProvider; type: "api_key" | "oauth"; deviceId?: string; onEnd: (ok: boolean) => void }) {
   const [id, setId] = useState<string>();
   const [events, setEvents] = useState<AuthEvent[]>([]);
   const [prompt, setPrompt] = useState<{ id: string; prompt: AuthPrompt }>();
@@ -547,9 +618,9 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
     let loginId: string | undefined;
     void (async () => {
       try {
-        loginId = await startLogin(provider.id, type);
+        loginId = await startLogin(provider.id, type, deviceId);
         setId(loginId);
-        for await (const r of followLogin(loginId, ctrl.signal)) {
+        for await (const r of followLogin(loginId, ctrl.signal, deviceId)) {
           if (r.type === "event") setEvents((e) => [...e, r.event]);
           else if (r.type === "prompt") {
             setPrompt({ id: r.id, prompt: r.prompt });
@@ -567,19 +638,21 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
     })();
     return () => {
       ctrl.abort();
-      if (loginId) void cancelLogin(loginId).catch(() => {});
+      if (loginId) void cancelLogin(loginId, deviceId).catch(() => {});
     };
-  }, [provider.id, type]);
+  }, [provider.id, type, deviceId]);
 
   const reply = (v: string) => {
     if (!id || !prompt) return;
-    void answerLogin(id, prompt.id, v).catch((err: Error) => setError(err.message));
+    void answerLogin(id, prompt.id, v, deviceId).catch((err: Error) => setError(err.message));
     setPrompt(undefined);
   };
   const url = [...events].reverse().find((e): e is Extract<AuthEvent, { type: "auth_url" }> => e.type === "auth_url");
   const device = [...events].reverse().find((e): e is Extract<AuthEvent, { type: "device_code" }> => e.type === "device_code");
   const notes = events.filter((e): e is Extract<AuthEvent, { type: "info" | "progress" }> => e.type === "info" || e.type === "progress");
-  const remote = !["localhost", "127.0.0.1"].includes(location.hostname);
+  // A redirect to localhost only opens on the machine running that Pi, so it needs the paste hint
+  // when this page is open on another computer (or on a paired device, whatever the browser's host).
+  const elsewhere = !!deviceId || !["localhost", "127.0.0.1"].includes(location.hostname);
 
   return (
     <div className="login">
@@ -602,7 +675,7 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
                 <ExternalLink size={14} /> Open the sign-in page
               </a>
               {url.instructions && <p className="setting-desc">{url.instructions}</p>}
-              {remote && <p className="setting-desc">If the page ends on an address that won't load (starting with http://localhost or 127.0.0.1), copy that whole address and paste it below.</p>}
+              {elsewhere && <p className="setting-desc">If the page ends on an address that won't load (starting with http://localhost or 127.0.0.1), copy that whole address and paste it below.</p>}
             </div>
           )}
           {device && (
@@ -676,28 +749,48 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
 }
 
 export function ProvidersSection() {
-  const providers = useStore((s) => s.piCache.providers);
+  const [deviceId, setDeviceId] = usePiDevice();
+  const providers = useStore((s) => piCacheOn(s, deviceId).providers);
   const loadPiProviders = useStore((s) => s.loadPiProviders);
   const [error, setError] = useState<string>();
   const [query, setQuery] = useState("");
   const [login, setLogin] = useState<{ provider: PiProvider; type: "api_key" | "oauth" }>();
   const [busy, setBusy] = useState<string>();
   const refreshDetection = useStore((s) => s.refreshDetection);
-  const models = useStore((s) => s.detection.pi?.models);
+  const where = deviceName(deviceId);
+  // Which models each provider has: this device's from the composer's list, a paired device's from
+  // its own /api/pi/models.
+  const localModels = useStore((s) => s.detection.pi?.models);
+  const [deviceModels, setDeviceModels] = useState<ModelInfo[]>();
 
   const load = useCallback(async () => {
+    setError(undefined);
     try {
-      await loadPiProviders();
-      setError(undefined);
+      await loadPiProviders(deviceId);
     } catch (err) {
       // A cached list beats an error page; keep showing what Pi last told us.
-      if (!useStore.getState().piCache.providers) setError((err as Error).message);
+      if (!piCacheOn(useStore.getState(), deviceId).providers) setError((err as Error).message);
     }
-  }, [loadPiProviders]);
+  }, [loadPiProviders, deviceId]);
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    setLogin(undefined);
+    setBusy(undefined);
+    setDeviceModels(undefined);
+    if (!deviceId) return;
+    let live = true;
+    piModels(false, deviceId).then(
+      (r) => live && setDeviceModels(r.models),
+      () => live && setDeviceModels([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [deviceId]);
 
+  const models = deviceId ? deviceModels : localModels;
   const usable = useMemo(() => {
     const counts = new Map<string, number>();
     for (const m of models ?? []) if (m.provider) counts.set(m.provider, (counts.get(m.provider) ?? 0) + 1);
@@ -714,13 +807,13 @@ export function ProvidersSection() {
     if (!confirm(ask)) return;
     setBusy(p.id);
     try {
-      await logoutProvider(p.id);
+      await logoutProvider(p.id, deviceId);
     } catch (err) {
       setError((err as Error).message);
     }
     setBusy(undefined);
     await load();
-    void refreshDetection();
+    if (!deviceId) void refreshDetection();
   };
 
   /** What Pi has for a provider, in words that don't depend on how the row is laid out. */
@@ -768,25 +861,39 @@ export function ProvidersSection() {
     );
   };
 
-  const modelsLine = (count: number) => (count ? `${count} model${count === 1 ? "" : "s"} available` : "No models available");
+  // A provider's model count is only known once the device has answered; until then, say nothing.
+  const modelsLine = (count: number | undefined) =>
+    models === undefined ? "" : count ? `${count} model${count === 1 ? "" : "s"} available` : "No models available";
+  const describe = (p: PiProvider, modelsText: string) => [credential(p), modelsText].filter(Boolean).join(" · ");
 
   return (
     <>
       <Heading>Providers</Heading>
+      <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
       <p className="setting-desc pi-intro">
-        Set up the model providers Pi uses, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi in <code>~/.pi/agent/auth.json</code>, the
-        same as <code>/login</code> in Pi, so the <code>pi</code> command uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
+        {where ? (
+          <>
+            Set up the model providers Pi uses on {where}, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi there in <code>~/.pi/agent/auth.json</code>, the
+            same as <code>/login</code> in Pi, so the <code>pi</code> command on {where} uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
+          </>
+        ) : (
+          <>
+            Set up the model providers Pi uses, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi in <code>~/.pi/agent/auth.json</code>, the same as{" "}
+            <code>/login</code> in Pi, so the <code>pi</code> command uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
+          </>
+        )}
       </p>
       {login && (
         <LoginFlow
-          key={`${login.provider.id}:${login.type}`}
+          key={`${deviceId ?? ""}:${login.provider.id}:${login.type}`}
           provider={login.provider}
           type={login.type}
+          deviceId={deviceId}
           onEnd={(ok) => {
             setLogin(undefined);
             if (ok) {
               void load();
-              void refreshDetection();
+              if (!deviceId) void refreshDetection();
             }
           }}
         />
@@ -810,9 +917,7 @@ export function ProvidersSection() {
                       {p.name}
                       <Check size={13} className="ok" />
                     </span>
-                    <span className="pi-row-desc">
-                      {credential(p)} · {modelsLine(usable.get(p.id) ?? 0)}
-                    </span>
+                    <span className="pi-row-desc">{describe(p, modelsLine(usable.get(p.id)))}</span>
                   </div>
                   {actions(p)}
                 </li>
@@ -1026,14 +1131,16 @@ export function ProjectsSection() {
             <span className="pi-row-name">Add from</span>
             <span className="pi-row-desc">Projects are added on the device you pick.</span>
           </span>
-          <select className="input input-sm" value={deviceId} aria-label="Device to add a project from" onChange={(e) => setDeviceId(e.target.value)}>
-            <option value="">{local ? `This device — ${local.name}` : "This device"}</option>
-            {remote.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}{d.online === false ? " (offline)" : ""}
-              </option>
-            ))}
-          </select>
+          <OptionSelect
+            className="pi-row-field"
+            label="Device to add a project from"
+            value={deviceId}
+            options={[
+              { value: "", label: local ? `This device — ${local.name}` : "This device" },
+              ...remote.map((d) => ({ value: d.id, label: `${d.name}${d.online === false ? " (offline)" : ""}` })),
+            ]}
+            onChange={setDeviceId}
+          />
         </div>
         {remote.length === 0 ? (
           <p className="setting-desc">

@@ -5384,6 +5384,27 @@ p.key-status svg {
   overflow-wrap: anywhere;
 }
 
+/* A control inside a row keeps its own size, so the row text never collapses
+   (`.input { width: 100% }` would otherwise take the whole flex line). */
+.pi-row-field {
+  flex: none;
+  width: 240px;
+  max-width: 50%;
+}
+
+/* Custom selects in a row fill the field instead of using their fixed width. */
+.pi-row-field .select-trigger {
+  width: 100%;
+}
+
+/* Which device's Pi the sections below manage: a row above the Pi card, not one in a list. */
+.pi-device {
+  margin: -4px 0 16px;
+  padding: 8px 10px 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
 .pi-clamp {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -5396,6 +5417,11 @@ p.key-status svg {
   flex: none;
   align-items: center;
   gap: 6px;
+}
+
+/* Rows say "Sign in again" or "Replace API key"; one width keeps the column of actions aligned. */
+.pi-row-actions .btn {
+  min-width: 132px;
 }
 
 .pi-empty {

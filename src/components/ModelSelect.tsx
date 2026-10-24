@@ -150,12 +150,12 @@ export function EffortSelect({ value, levels, onChange, label }: { value: Effort
 }
 
 /** Themed dropdown for a short fixed list of options. */
-export function OptionSelect<T extends string>({ value, options, onChange, label }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string }) {
+export function OptionSelect<T extends string>({ value, options, onChange, label, className }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value);
   return (
-    <span className="select-wrap">
+    <span className={cx("select-wrap", className)}>
       <button
         ref={anchor}
         type="button"

@@ -51,15 +51,19 @@ function forbidden(req: Request): Response | undefined {
   return ok ? undefined : bad("Forbidden", 403);
 }
 /**
- * What a paired device may do: work in projects and run Pi there. It can't read saved keys,
- * change this device's password, manage plugins, or list other devices.
+ * What a paired device may do: work in projects, run Pi there, and manage that Pi (Settings → Pi
+ * from the other device: install, updates, extensions, skills, prompts, packages, providers).
+ * It can't read saved keys, change this device's password, manage plugins, or list other devices.
  */
 const devicePathAllowed = (path: string) =>
   path === "/api/config" ||
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
-  /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path);
+  /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path) ||
+  // Managing Pi on this device. It already runs Pi turns here — tools included — so this is not
+  // a wider grant: it's the same power through a settings page instead of a prompt.
+  /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
 
 /** Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser session. */
 const api =

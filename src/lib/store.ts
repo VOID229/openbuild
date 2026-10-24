@@ -65,6 +65,17 @@ export interface PiCache {
   providers?: PiProvider[];
 }
 
+const NO_PI: PiCache = {};
+
+/** Pi's state on one device: this one, or a paired device reached through the proxy. */
+export const piCacheOn = (s: Pick<State, "piCache" | "piRemote">, deviceId?: string): PiCache => (deviceId ? (s.piRemote[deviceId] ?? NO_PI) : s.piCache);
+
+/** Keep Pi's state for this device (persisted) or for a paired one (for as long as the page is open). */
+function withPi(s: State, deviceId: string | undefined, patch: PiCache): Partial<State> {
+  if (!deviceId) return { piCache: { ...s.piCache, ...patch } };
+  return { piRemote: { ...s.piRemote, [deviceId]: { ...s.piRemote[deviceId], ...patch } } };
+}
+
 interface State {
   settings: Settings;
   detection: Partial<Record<PlanId, Detection>>;
@@ -95,9 +106,12 @@ interface State {
   piDefault?: string;
   /** Pi's install state, resources and providers, loaded at launch and reused by Settings. */
   piCache: PiCache;
-  loadPiStatus: (fresh?: boolean) => Promise<void>;
-  loadPiResources: () => Promise<void>;
-  loadPiProviders: () => Promise<void>;
+  /** The same for paired devices, fetched when Settings asks for one. Not persisted. */
+  piRemote: Record<string, PiCache>;
+  loadPiStatus: (fresh?: boolean, deviceId?: string) => Promise<void>;
+  loadPiResources: (deviceId?: string) => Promise<void>;
+  loadPiProviders: (deviceId?: string) => Promise<void>;
+  setPiCache: (patch: PiCache, deviceId?: string) => void;
 
   updateSettings: (patch: Partial<Settings>) => void;
   updateProfile: (patch: Partial<Settings["profile"]>) => void;
@@ -158,23 +172,25 @@ export const useStore = create<State>()(
       devices: [],
       devicesLoaded: false,
       piCache: {},
-      loadPiStatus: async (fresh = false) => {
-        const status = await piStatus(fresh);
-        set((s) => ({ piCache: { ...s.piCache, status } }));
+      piRemote: {},
+      loadPiStatus: async (fresh = false, deviceId) => {
+        const status = await piStatus(fresh, deviceId);
+        set((s) => withPi(s, deviceId, { status }));
       },
-      loadPiResources: async () => {
-        const resources = await piResources();
-        set((s) => ({ piCache: { ...s.piCache, resources } }));
+      loadPiResources: async (deviceId) => {
+        const resources = await piResources(deviceId);
+        set((s) => withPi(s, deviceId, { resources }));
         // Problems are secondary: show them when they arrive, and never fail the list over them.
-        piProblems().then(
-          (problems) => set((s) => ({ piCache: { ...s.piCache, problems } })),
+        piProblems(deviceId).then(
+          (problems) => set((s) => withPi(s, deviceId, { problems })),
           () => {},
         );
       },
-      loadPiProviders: async () => {
-        const providers = await piProviders();
-        set((s) => ({ piCache: { ...s.piCache, providers } }));
+      loadPiProviders: async (deviceId) => {
+        const providers = await piProviders(deviceId);
+        set((s) => withPi(s, deviceId, { providers }));
       },
+      setPiCache: (patch, deviceId) => set((s) => withPi(s, deviceId, patch)),
       loadDevices: async () => {
         let remote: Device[] = [];
         try {
