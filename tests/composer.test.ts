@@ -57,6 +57,55 @@ describe("model selection", () => {
   });
 });
 
+describe("threads on a paired device", () => {
+  // The device's Pi lists only its own providers; this server's models aren't usable there.
+  const remote = { pi: { plan: "pi", status: "valid", models: [model("llama/3")], checkedAt: 1 } } as Record<"pi", Detection>;
+  const chat: Chat = {
+    id: "r",
+    title: "",
+    createdAt: 0,
+    updatedAt: 0,
+    workspace: { cwd: "/srv/app", deviceId: "dev" } as any,
+    messages: [
+      { id: "u", role: "user", content: "hi", createdAt: 0 },
+      { id: "a", role: "assistant", content: "hey", model: { plan: "pi", id: "llama/3", name: "llama/3" }, createdAt: 0 },
+    ],
+  };
+  const on = (models?: Record<string, Detection>, over: Record<string, unknown> = {}) =>
+    ({ activeChatId: "r", chats: [chat], selections: {}, settings, detection, remoteModels: models, ...over });
+
+  test("the chat uses the device's model, not this server's list", () => {
+    // This server knows nothing about llama/3; the device does.
+    expect(selectionFor(on({ dev: remote.pi }))).toMatchObject({ id: "llama/3" });
+  });
+  test("its model is kept while the device's list is still on its way", () => {
+    expect(selectionFor(on({}))).toMatchObject({ id: "llama/3" });
+    expect(selectionFor(on(undefined))).toMatchObject({ id: "llama/3" });
+  });
+  test("a model this server has but the device doesn't gives way to one it does", () => {
+    const gone = { ...chat, messages: [...chat.messages.slice(0, 1), { id: "a", role: "assistant", content: "", model: { plan: "pi", id: "deepseek/chat", name: "deepseek/chat" }, createdAt: 0 }] } as Chat;
+    expect(selectionFor(on({ dev: remote.pi }, { chats: [gone] }))).toMatchObject({ id: "llama/3" });
+  });
+  test("new threads use the models of the project's device", () => {
+    // The new-chat model is this server's (go/deepseek); the device offers llama/3.
+    const st = on({ dev: remote.pi }, { activeChatId: undefined, chats: [], projects: [{ id: "dev::app", deviceId: "dev" }] });
+    st.settings = { ...settings, workspace: { projectId: "dev::app" } } as Settings;
+    expect(selectionFor(st)).toMatchObject({ id: "llama/3" });
+  });
+  test("the model it swaps in for the device is a stable object", () => {
+    // The fallback is derived from the device's list, and this runs as a store selector: a fresh
+    // object every call re-renders for ever (React drops the page: "getSnapshot should be cached").
+    const st = on({ dev: remote.pi }, { activeChatId: undefined, chats: [], projects: [{ id: "dev::app", deviceId: "dev" }] });
+    st.settings = { ...settings, workspace: { projectId: "dev::app" } } as Settings;
+    expect(selectionFor(st)).toBe(selectionFor(st));
+    const listed = { plan: "pi", status: "valid", models: [model("qwen/4")], checkedAt: 2 } as Detection;
+    const newer = on({ dev: listed }, { activeChatId: undefined, chats: [], projects: [{ id: "dev::app", deviceId: "dev" }] });
+    newer.settings = st.settings;
+    expect(selectionFor(newer)).toBe(selectionFor(newer));
+    expect(selectionFor(newer)).toMatchObject({ id: "qwen/4" });
+  });
+});
+
 describe("drafts", () => {
   test("recent drafts survive a reload; old ones are dropped", async () => {
     await draftsReady;

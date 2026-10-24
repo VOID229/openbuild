@@ -134,6 +134,59 @@ function ProjectList({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Without a project, the device line under the heading picks which device's scratch folder new threads use. */
+function DeviceMenu() {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const devices = useStore((s) => s.devices);
+  const devicesLoaded = useStore((s) => s.devicesLoaded);
+  const pref = useStore((s) => s.settings.workspace);
+  const updateSettings = useStore((s) => s.updateSettings);
+  // A device unpaired since it was picked: back to this one.
+  useEffect(() => {
+    if (pref.deviceId && devicesLoaded && !devices.some((d) => d.id === pref.deviceId && !d.local)) updateSettings({ workspace: { ...pref, deviceId: undefined } });
+  }, [pref, devices, devicesLoaded, updateSettings]);
+  const current = devices.find((d) => (pref.deviceId ? d.id === pref.deviceId : d.local));
+  const name = current?.name ?? machineName();
+  if (!devices.some((d) => !d.local)) return name ? <p className="home-machine"><Laptop size={13} /> {name}</p> : null;
+  return (
+    <>
+      <button ref={anchor} type="button" className={cx("home-machine home-machine-pick", open && "home-machine-open")} aria-haspopup="listbox" aria-expanded={open} data-tooltip="Device new threads run on" onClick={() => setOpen((o) => !o)}>
+        <Laptop size={13} /> {name ?? "This device"}
+        <ChevronDown size={12} className="pill-chevron" />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Device" fixed="auto">
+        <div onKeyDown={(e) => arrowNav(e)}>
+          {devices.map((d) => {
+            const selected = d === current;
+            return (
+              <button
+                key={d.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className="menu-item ws-option"
+                disabled={d.online === false}
+                onClick={() => {
+                  updateSettings({ workspace: { ...pref, deviceId: d.local ? undefined : d.id } });
+                  setOpen(false);
+                }}
+              >
+                <Laptop size={15} />
+                <span className="ws-option-text">
+                  <span className="menu-item-label">{d.name}</span>
+                  <span className="ws-option-path">{d.local ? "This device" : d.online === false ? "Offline" : (d.machine ?? "Paired device")}</span>
+                </span>
+                {selected && <Check size={15} className="menu-check" />}
+              </button>
+            );
+          })}
+        </div>
+      </Popover>
+    </>
+  );
+}
+
 /** The home heading; the underlined part opens the project picker. */
 export function ProjectHeading() {
   const [open, setOpen] = useState(false);
@@ -148,10 +201,14 @@ export function ProjectHeading() {
   return (
     <div className="home-head">
       <h1 className="home-title">{project ? <>What should we build in {trigger(project.name)}?</> : <>What should we {trigger("work on")}?</>}</h1>
-      {machine && (
-        <p className="home-machine">
-          <Laptop size={13} /> {machine}
-        </p>
+      {project ? (
+        machine && (
+          <p className="home-machine">
+            <Laptop size={13} /> {machine}
+          </p>
+        )
+      ) : (
+        <DeviceMenu />
       )}
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="pp" label="Choose a project" fixed="auto">
         <ProjectList onDone={() => setOpen(false)} />

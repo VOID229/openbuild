@@ -5,11 +5,13 @@ import {
   nearestEffort,
   type Effort,
   type ModelInfo,
+  type PlanId,
 } from "../../shared/types";
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { providerGroups, searchProviderGroups } from "../lib/modelSearch";
 import { composerEffort, selectionFor, useStore } from "../lib/store";
+import type { Detection } from "../lib/types";
 import { effortFor } from "../lib/effort";
 import { arrowNav, cx } from "../lib/ui";
 import { Popover, ProviderIcon, Spinner } from "./primitives";
@@ -31,12 +33,39 @@ const LONG: Record<Effort, string> = {
   max: "Max",
 };
 
-export function EffortPicker({ dropUp }: { dropUp: boolean }) {
+/** A paired device's list before it arrives: the picker says it's asking, not "no models". */
+const PENDING: Detection = { plan: "pi", status: "checking", models: [] };
+const STALE_MODELS = 10 * 60 * 1000;
+
+/**
+ * The models the composer can use: this server's, or those of the paired device the thread works
+ * on (fetched once its first turn needs them, and re-asked when they're old).
+ */
+function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection>> {
+  const local = useStore((s) => s.detection);
+  const remote = useStore((s) => (deviceId ? s.remoteModels[deviceId] : undefined));
+  const load = useStore((s) => s.loadDeviceModels);
+  const detection = useMemo(
+    () => (deviceId ? { pi: remote ?? PENDING } : local),
+    [deviceId, remote, local],
+  );
+  useEffect(() => {
+    if (!deviceId) return;
+    const stale =
+      remote &&
+      remote.status !== "checking" &&
+      Date.now() - (remote.checkedAt ?? 0) > STALE_MODELS;
+    if (!remote || stale) void load(deviceId, !!remote);
+  }, [deviceId, remote, load]);
+  return detection;
+}
+
+export function EffortPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const effort = useStore(composerEffort);
   const selection = useStore(selectionFor);
-  const detection = useStore((s) => s.detection);
+  const detection = useDeviceDetection(deviceId);
   const setEffort = useStore((s) => s.setEffort);
 
   const auto = isAuto(selection);
@@ -125,8 +154,8 @@ export function EffortPicker({ dropUp }: { dropUp: boolean }) {
 }
 
 /** Why there are no models to pick: Pi missing, not signed in anywhere, or not answering. */
-function PiStatus() {
-  const d = useStore((s) => s.detection.pi);
+function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>> }) {
+  const d = detection.pi;
   const openSettings = useStore((s) => s.openSettings);
   if (d?.status === "checking" && !d.models.length)
     return (
@@ -224,12 +253,12 @@ function ThinkingRow({ model }: { model?: ModelInfo }) {
   );
 }
 
-export function ModelPicker({ dropUp }: { dropUp: boolean }) {
+export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
   const pluginVersion = usePlugins((s) => s.version);
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const selection = useStore(selectionFor);
-  const detection = useStore((s) => s.detection);
+  const detection = useDeviceDetection(deviceId);
   const favorites = useStore((s) => s.settings.favorites);
   const setSelection = useStore((s) => s.setSelection);
   const openSettings = useStore((s) => s.openSettings);
@@ -468,7 +497,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
                   <p>Star the models you use most.</p>
                 </div>
               ) : (
-                <PiStatus />
+                <PiStatus detection={detection} />
               ))}
           </div>
           <ThinkingRow model={current} />

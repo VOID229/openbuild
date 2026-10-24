@@ -15,7 +15,7 @@ import { resumeShells } from "./lib/shell";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
-import { ensureSelection, useStore } from "./lib/store";
+import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
@@ -44,7 +44,9 @@ function useFont() {
 }
 
 function Home() {
-  const pi = useStore((s) => s.detection.pi);
+  // The project the composer is set to may live on a paired device: ask that device's Pi, not this one's.
+  const deviceId = useStore(composerDevice);
+  const pi = useStore((s) => (deviceId ? s.remoteModels[deviceId] : s.detection.pi));
   const openSettings = useStore((s) => s.openSettings);
   // Nothing to build with yet: Pi isn't reachable, or no provider is signed in.
   const setup = pi && pi.status !== "checking" && !pi.models.length;

@@ -7,9 +7,9 @@ import { editingQueued, moveQueued, queueOf, removeQueued, requeue, setSteering,
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
-import { deviceServerId } from "./devices";
+import { deviceName, deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
-import { selectionFor, useStore } from "./store";
+import { deviceDetection, selectionFor, threadDevice, useStore } from "./store";
 import { effortFor } from "./effort";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
@@ -135,7 +135,7 @@ export async function steerQueued(chatId: string, id: string) {
   const chat = st.chats.find((c) => c.id === chatId);
   const msg = chat?.messages.find((m) => m.id === run?.messageId);
   if (!run || !item || msg?.model?.plan !== "pi" || chat?.runtime === "durable") return;
-  const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(st.detection, msg.model)?.input ?? ["text"]);
+  const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(deviceDetection(st, threadDevice(st, chatId)), msg.model)?.input ?? ["text"]);
   removeQueued(chatId, id);
   setSteers(chatId, run, [...run.steers, item]);
   try {
@@ -171,7 +171,9 @@ export function resumeReplies(chatId?: string) {
 /** Resolve the chat's composer selection to a concrete model for this prompt. */
 function resolveModel(text: string, attachments: Attachment[], chatId: string | undefined): { ref: ModelRef; routed: boolean } | undefined {
   const st = useStore.getState();
-  const { settings, detection } = st;
+  const { settings } = st;
+  // A thread on a paired device can only use the models that device's Pi lists.
+  const detection = deviceDetection(st, threadDevice(st, chatId));
   const sel = selectionFor({ ...st, activeChatId: chatId });
   if (isAuto(sel)) {
     const ref = routePrompt(text, attachments.some((a) => a.text == null), detection, settings);
@@ -184,7 +186,7 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
 export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId): boolean {
   const st = useStore.getState();
   const resolved = resolveModel(text, attachments, chatId);
-  const model = resolved && findModel(st.detection, resolved.ref);
+  const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId)), resolved.ref);
   if (!resolved || !model) {
     st.openSettings("keys");
     return false;
@@ -224,7 +226,7 @@ export function regenerate(chatId: string, messageId: string) {
   // no turn could have been admitted before its workspace existed.
   if (chat?.runtime === "durable" && chat.workspace) return;
   const target = msg?.model;
-  const model = findModel(st.detection, target);
+  const model = target && findModel(deviceDetection(st, threadDevice(st, chatId)), target);
   if (!msg || !target || !model) {
     st.openSettings("keys");
     return;
@@ -275,19 +277,13 @@ export function drainQueue(chatId: string) {
 
 class WorkspaceError extends Error {}
 
-/** The paired device of the project new threads are set to work in, if any. */
-function projectDevice(st: ReturnType<typeof useStore.getState>): string | undefined {
-  const id = st.settings.workspace.projectId;
-  return id ? st.projects.find((p) => p.id === id)?.deviceId : undefined;
-}
-
 /** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
 export async function newWorkspace(chat: Chat): Promise<Workspace> {
   const { settings, projects } = useStore.getState();
   const pref = settings.workspace;
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
   try {
-    if (!project) return await prepareWorkspace({ mode: "scratch" });
+    if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId });
     return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, name: chat.title });
   } catch (err) {
     throw new WorkspaceError((err as Error).message);
@@ -352,19 +348,20 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const msg = chat?.messages[index];
   if (!chat || !msg?.model || (resume && !msg.stream)) return;
 
-  const model = findModel(st.detection, msg.model);
+  // Where the reply runs; saved on the message right away so a reload can find it. A thread whose
+  // workspace is on a paired device runs there, through this server's device proxy.
+  const plannedDevice = threadDevice(st, chatId);
+  const model = findModel(deviceDetection(st, plannedDevice), msg.model);
   const plan = msg.model.plan;
   const pi = plan === "pi";
   const keys = st.settings.keys[plan];
   if (!resume && (!model || (!pi && !keys?.length))) {
-    const error = pi ? "This model isn't available in Pi anymore. Pick another one, or check Settings → Providers." : "This model isn't available. Check your API keys in Settings.";
+    const on = plannedDevice ? ` on ${deviceName(plannedDevice) ?? "that device"}` : "";
+    const error = pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
     st.patchMessage(chatId, messageId, { status: "error", error }, true);
     return;
   }
 
-  // Where the reply runs; saved on the message right away so a reload can find it. A thread whose
-  // workspace is on a paired device runs there, through this server's device proxy.
-  const plannedDevice = chat.workspace?.deviceId ?? projectDevice(st);
   const host = replyHost();
   const via = plannedDevice ? (deviceServerId(plannedDevice) ?? host) : host;
   const stream: ReplyStream = resume

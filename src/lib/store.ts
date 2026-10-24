@@ -12,7 +12,7 @@ import { effortFor, effortKey } from "./effort";
 import type { Effort } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
-import type { Chat, Detection, KeyStatus, Message, Selection, Settings } from "./types";
+import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
 export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance" | "plugins" | `plugin:${string}`;
 
@@ -76,6 +76,40 @@ function withPi(s: State, deviceId: string | undefined, patch: PiCache): Partial
   return { piRemote: { ...s.piRemote, [deviceId]: { ...s.piRemote[deviceId], ...patch } } };
 }
 
+/** A paired device whose model list hasn't arrived yet. */
+const PENDING_PI: Detection = { plan: "pi", status: "checking", models: [] };
+
+/**
+ * The paired device a thread's next turn runs on: the one its workspace lives on, or (before its
+ * first turn made a workspace) the device of the project new threads start in, or the device picked
+ * for project-less threads. Undefined = this server.
+ */
+export function threadDevice(
+  s: Pick<State, "chats" | "settings"> & Partial<Pick<State, "projects">>,
+  chatId?: string,
+): string | undefined {
+  const chat = chatId ? s.chats.find((c) => c.id === chatId) : undefined;
+  if (chat?.workspace) return chat.workspace.deviceId;
+  const id = s.settings.workspace?.projectId;
+  return id ? s.projects?.find((p) => p.id === id)?.deviceId : s.settings.workspace?.deviceId;
+}
+
+/** The device the composer is pointed at. */
+export const composerDevice = (s: Pick<State, "activeChatId" | "chats" | "settings"> & Partial<Pick<State, "projects">>): string | undefined =>
+  threadDevice(s, s.activeChatId);
+
+/**
+ * Pi's models on a device: this server's, or a paired device's own list. A device whose list isn't
+ * in yet reads as "checking" rather than borrowing this server's models, which it may not share.
+ */
+export function deviceDetection(
+  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels">>,
+  deviceId?: string,
+): Partial<Record<PlanId, Detection>> {
+  if (!deviceId) return s.detection;
+  return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
+}
+
 interface State {
   settings: Settings;
   detection: Partial<Record<PlanId, Detection>>;
@@ -108,6 +142,12 @@ interface State {
   piCache: PiCache;
   /** The same for paired devices, fetched when Settings asks for one. Not persisted. */
   piRemote: Record<string, PiCache>;
+  /**
+   * The models each paired device's Pi lists, by device id. This server's models live in
+   * `detection.pi`; a device's are fetched when the composer works there. Not persisted.
+   */
+  remoteModels: Record<string, Detection>;
+  loadDeviceModels: (deviceId: string, fresh?: boolean) => Promise<void>;
   loadPiStatus: (fresh?: boolean, deviceId?: string) => Promise<void>;
   loadPiResources: (deviceId?: string) => Promise<void>;
   loadPiProviders: (deviceId?: string) => Promise<void>;
@@ -173,6 +213,24 @@ export const useStore = create<State>()(
       devicesLoaded: false,
       piCache: {},
       piRemote: {},
+      remoteModels: {},
+      loadDeviceModels: async (deviceId, fresh = false) => {
+        // Keep the old list on screen while asking again: switching device shouldn't empty the picker.
+        const prev = get().remoteModels[deviceId];
+        set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "checking", models: prev?.models ?? [], checkedAt: prev?.checkedAt } } }));
+        try {
+          const r = await piModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Pi didn't list any models");
+          set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "valid", models: r.models, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({
+            remoteModels: {
+              ...s.remoteModels,
+              [deviceId]: { plan: "pi", status: "error", error: (err as Error).message, models: s.remoteModels[deviceId]?.models ?? [], checkedAt: Date.now() },
+            },
+          }));
+        }
+      },
       loadPiStatus: async (fresh = false, deviceId) => {
         const status = await piStatus(fresh, deviceId);
         set((s) => withPi(s, deviceId, { status }));
@@ -529,19 +587,43 @@ export function composerEffort(s: Pick<State, "activeChatId" | "chats" | "select
 const AUTO: Selection = { auto: true };
 
 /**
+ * The model a device's list falls back to, memoised per list object. `selectionFor` is used as a
+ * zustand selector, and zustand compares snapshots by identity: a fresh object on every call
+ * re-renders for ever, and React gives up on the page ("the result of getSnapshot should be
+ * cached"). Keyed on the list, so two pickers watching different devices don't share an answer.
+ */
+const deviceDefaults = new WeakMap<Detection, ModelRef | undefined>();
+function deviceDefault(detection: Partial<Record<PlanId, Detection>>): ModelRef | undefined {
+  const pi = detection.pi;
+  if (!pi) return undefined;
+  if (!deviceDefaults.has(pi)) deviceDefaults.set(pi, defaultModel(detection));
+  return deviceDefaults.get(pi);
+}
+
+/**
  * The model the composer sends with: in a chat, the one picked there or else the one its last reply
  * used; on the new-chat screen (or when a chat's model isn't available anymore), the new-chat model.
  * Returns stored objects only, so it's safe as a store selector.
  */
-export function selectionFor(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): Selection | undefined {
+export function selectionFor(
+  s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection"> & Partial<Pick<State, "projects" | "remoteModels">>,
+): Selection | undefined {
   const id = s.activeChatId;
+  // A thread working on a paired device can only use that device's models.
+  const deviceId = composerDevice(s);
+  const detection = deviceDetection(s, deviceId);
+  // Don't drop a chat's model while the device's list is still on its way.
+  const pending = deviceId ? !s.remoteModels?.[deviceId] : false;
   if (id) {
     const picked = s.selections[id];
     const reply = s.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant" && m.model);
     const sel = picked ?? (reply ? (reply.routed ? AUTO : reply.model) : undefined);
-    if (sel && (isAuto(sel) ? s.settings.autoRouter : findModel(s.detection, sel))) return sel;
+    if (sel && (isAuto(sel) ? s.settings.autoRouter : pending || findModel(detection, sel))) return sel;
   }
-  return s.settings.selection;
+  const fallback = s.settings.selection;
+  // The new-chat model may belong to this server only: on a paired device, point at one it does have.
+  if (deviceId && !pending && fallback && !isAuto(fallback) && !findModel(detection, fallback)) return deviceDefault(detection) ?? fallback;
+  return fallback;
 }
 
 /** Keep the composer pointed at a model that actually exists for the configured keys. */

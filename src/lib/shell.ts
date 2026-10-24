@@ -9,7 +9,7 @@ import { makeTitle, newWorkspace } from "./chat";
 import { uid } from "./id";
 import { canResume, replyHost } from "./runtime";
 import { apiUrl, deviceServerId } from "./devices";
-import { useStore } from "./store";
+import { threadDevice, useStore } from "./store";
 import type { Chat, Message, ShellRun } from "./types";
 
 export { shellCommand };
@@ -22,12 +22,6 @@ const PATIENCE = 10 * 60 * 1000;
 /** Commands this app is following, by message id. */
 const following = new Map<string, AbortController>();
 
-/** The paired device of the project new threads are set to work in, if any. */
-function projectDevice(st: ReturnType<typeof useStore.getState>): string | undefined {
-  const id = st.settings.workspace.projectId;
-  return id ? st.projects.find((p) => p.id === id)?.deviceId : undefined;
-}
-
 /** Run "!cmd" or "!!cmd" in `chatId` (default: the open chat, or a new one). Throws what went wrong before it started. */
 export async function runShell(text: string, chatId = useStore.getState().activeChatId): Promise<void> {
   const parsed = shellCommand(text);
@@ -37,7 +31,7 @@ export async function runShell(text: string, chatId = useStore.getState().active
   const runtime = existing ? (existing.runtime ?? "pi") : (st.settings.threadRuntime ?? "pi");
   if (runtime === "durable") throw new Error("Shell commands aren't available in Durable threads yet.");
   const now = Date.now();
-  const plannedDevice = existing?.workspace?.deviceId ?? (existing ? undefined : projectDevice(st));
+  const plannedDevice = existing?.workspace?.deviceId ?? (existing ? undefined : threadDevice(st));
   const via = plannedDevice ? (deviceServerId(plannedDevice) ?? replyHost()) : replyHost();
   const stream: ReplyStream = { id: uid(), via: via ?? "", deviceId: plannedDevice };
   const message: Message = {

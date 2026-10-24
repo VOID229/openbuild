@@ -5774,6 +5774,24 @@ a.btn-primary {
   color: var(--text-3);
 }
 
+.home-machine-pick {
+  padding: 3px 8px;
+  margin-top: 7px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color 120ms, color 120ms;
+}
+
+.home-machine-pick:hover,
+.home-machine-open {
+  color: var(--text-2);
+  background: var(--hover);
+}
+
 /* Project picker */
 
 .pp {

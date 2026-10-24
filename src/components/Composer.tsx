@@ -10,7 +10,7 @@ import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/fil
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
-import { useStore } from "../lib/store";
+import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
@@ -443,10 +443,12 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const runtime = useStore((s) => chatId ? s.chats.find((c) => c.id === chatId)?.runtime ?? "pi" : s.settings.threadRuntime ?? "pi");
   const workspace = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId)?.workspace : undefined));
   const homeProject = useStore((s) => (chatId ? undefined : s.projects.find((p) => p.id === s.settings.workspace.projectId)));
+  // The device new threads start on (their project's, or the one picked without a project): a chat without a workspace yet starts there.
+  const prefDevice = useStore((s) => threadDevice(s));
 
   // "@" mentions scan where this thread works (its workspace), or the home screen's project.
   const mentionCwd = workspace?.cwd ?? homeProject?.path;
-  const mentionDevice = workspace?.deviceId ?? homeProject?.deviceId;
+  const mentionDevice = workspace ? workspace.deviceId : prefDevice;
   const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>(() => cachedEntries(mentionCwd, mentionDevice) ?? []);
   useEffect(() => {
     let live = true;
@@ -809,8 +811,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
               e.target.value = "";
             }}
           />
-          <ModelPicker dropUp={variant === "dock"} />
-          <EffortPicker dropUp={variant === "dock"} />
+          <ModelPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
+          <EffortPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>

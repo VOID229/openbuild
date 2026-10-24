@@ -76,6 +76,8 @@ export interface Settings {
 
 export interface NewWorkspace {
   projectId?: string;
+  /** Without a project: the paired device whose scratch folder new threads work in. None = this server. */
+  deviceId?: string;
   mode: "local" | "worktree";
   /** Default workspace mode for new threads; last-used preserves the mode picker selection. */
   defaultMode?: "local" | "worktree" | "last-used";
