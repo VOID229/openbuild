@@ -178,7 +178,7 @@ function modelFacts(m: ModelInfo) {
     .join(" · ");
 }
 
-/** Star or unstar a Pi model (the first nine starred get ⌘1–⌘9). */
+/** Star or unstar a Pi model. */
 export function toggleFavorite(id: string) {
   const { settings, updateSettings } = useStore.getState();
   const favorites = settings.favorites.includes(id)
@@ -443,9 +443,6 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
                       </span>
                     </span>
                   </button>
-                  {fav >= 0 && fav < 9 && (
-                    <kbd className="mp-kbd">⌘{fav + 1}</kbd>
-                  )}
                   <button
                     type="button"
                     className={cx("mp-star", fav >= 0 && "mp-star-on")}
@@ -468,7 +465,7 @@ export function ModelPicker({ dropUp }: { dropUp: boolean }) {
               ) : tab === RAIL_FAV && all.length ? (
                 <div className="model-empty">
                   <Star size={18} />
-                  <p>Star the models you use most. The first nine get ⌘1–⌘9.</p>
+                  <p>Star the models you use most.</p>
                 </div>
               ) : (
                 <PiStatus />

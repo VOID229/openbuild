@@ -70,7 +70,7 @@ export interface Settings {
   workspace: NewWorkspace;
   /** Runtime for new threads; older settings default to Pi. */
   threadRuntime?: ThreadRuntime;
-  /** Starred Pi models ("<provider>/<id>"), in order; the first nine get ⌘1–⌘9. */
+  /** Starred Pi models ("<provider>/<id>"), in order. */
   favorites: string[];
 }
 

@@ -14,7 +14,6 @@ import { resumeReplies } from "./lib/chat";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
-import { findModel } from "./lib/models";
 import { ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
@@ -172,7 +171,6 @@ function Main() {
   //   Cmd/Ctrl+,        open settings (instead of the browser's)
   //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
   //   Cmd/Ctrl+Shift+O  new thread
-  //   Cmd/Ctrl+1…9      pick a starred model
   //   /                 focus chat search (or the composer when the sidebar is collapsed)
   //   Enter             focus the composer (sidebar open)
   // "/" and Enter only apply when not typing in a field and not in Settings; Enter also leaves
@@ -193,13 +191,6 @@ function Main() {
         } else if (e.shiftKey && key === "o") {
           e.preventDefault();
           newChat();
-        } else if (!e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
-          // ⌘1–⌘9: the starred models, in order.
-          const id = st.settings.favorites[Number(e.key) - 1];
-          if (id && findModel(st.detection, { plan: "pi", id })) {
-            e.preventDefault();
-            st.setSelection({ plan: "pi", id });
-          }
         }
         return;
       }
