@@ -179,12 +179,6 @@ export function PluginsSection() {
                 )}
               </div>
               <div className="plugin-actions">
-                <Toggle
-                  checked={enabled}
-                  disabled={!systemEnabled || !!problem}
-                  onChange={(next) => void setEnabled(plugin.id, next)}
-                  label={`Enable ${plugin.name}`}
-                />
                 <IconButton
                   label={`Delete ${plugin.name}`}
                   tooltip="Delete plugin"
@@ -195,6 +189,12 @@ export function PluginsSection() {
                 >
                   <Trash2 size={15} />
                 </IconButton>
+                <Toggle
+                  checked={enabled}
+                  disabled={!systemEnabled || !!problem}
+                  onChange={(next) => void setEnabled(plugin.id, next)}
+                  label={`Enable ${plugin.name}`}
+                />
               </div>
             </div>
           );
