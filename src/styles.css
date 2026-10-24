@@ -3052,6 +3052,27 @@ svg {
   margin-top: 8px;
 }
 
+/* A row whose control is more than a single toggle: stacked and aligned to the row's right edge. */
+.setting-control {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.setting-status {
+  margin-top: 10px;
+}
+
+.setting-status-ok {
+  color: var(--ok);
+}
+
+.setting-status-bad {
+  color: var(--danger);
+}
+
 .naming-list {
   display: flex;
   flex-direction: column;
@@ -3792,6 +3813,15 @@ p.key-status svg {
     flex: 1;
     min-width: 0;
     padding: 0 8px;
+  }
+
+  /* Stacked controls span the row, so their buttons match the segmented width. */
+  .setting-row-stack .setting-control {
+    align-items: stretch;
+    width: 100%;
+  }
+  .setting-control .btn-sm {
+    width: 100%;
   }
 
   .naming-row {
