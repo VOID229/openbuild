@@ -142,7 +142,8 @@ export function projectSession(source: string, file: string, modified: number): 
   const id = isThreadId(header.id) ? header.id : `pi-${createHash("sha256").update(file).digest("hex").slice(0, 32)}`;
   return {
     id, title: name || messages.find((m) => m.role === "user")?.content.slice(0, 100) || "Pi session",
-    titleSource: "auto", createdAt, updatedAt: modified, messages, ...(subagent ? { subagent } : {}),
+    // Without a Pi session name the title is only the prompt's opening: not a name yet.
+    ...(name ? { titleSource: "auto" as const } : {}), createdAt, updatedAt: modified, messages, ...(subagent ? { subagent } : {}),
     workspace: { cwd: header.cwd, projectId: "", projectName: basename(header.cwd) || header.cwd },
   };
 }
@@ -202,9 +203,11 @@ async function discover() {
       // Reads above yield to requests; re-check ownership and metadata immediately before writing.
       if (isSessionLive(id)) { fingerprints.set(file, fingerprint); return; }
       const old = storage.getChat(id) as Chat | undefined;
-      // Metadata (pins, archive, custom titles) belongs to OpenBuild, history belongs to Pi.
+      // Metadata (pins, archive, titles) belongs to OpenBuild, history belongs to Pi. A title OpenBuild
+      // generated stays unless Pi named the session since; one the user typed always stays.
+      const keepTitle = old?.titleSource === "user" || (old?.titleSource === "auto" && !projected.titleSource);
       const chat = { ...old, ...projected, id, updatedAt: Math.max(old?.updatedAt || 0, projected.updatedAt),
-        ...(old?.titleSource === "user" ? { title: old.title, titleSource: old.titleSource } : {}),
+        ...(keepTitle ? { title: old.title, titleSource: old.titleSource } : {}),
         workspace: old?.workspace || projected.workspace,
       };
       if (storage.putChat(chat)) storage.setValue(`pi-session:${id}`, JSON.stringify({ file, cwd: projected.workspace!.cwd }));

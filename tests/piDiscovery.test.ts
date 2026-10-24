@@ -52,6 +52,12 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.equal(chats[0].pinned, true);
     assert.equal(chats[0].title, "My title");
 
+    // A generated title survives later turns too.
+    storage.putChat({ ...chats[0], title: "Generated Name", titleSource: "auto" });
+    await appendFile(file, jsonl([entry("user3", "user2", "user", "And again")]));
+    await discoverSessions();
+    assert.equal(storage.listChats()[0].title, "Generated Name");
+
     // A session born after startup appears automatically; no project registration required.
     await writeFile(join(root, "new.jsonl"), jsonl([{ ...header, id: "future-session-1234" }, user]));
     await discoverSessions();
