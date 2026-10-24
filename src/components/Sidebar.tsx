@@ -10,6 +10,14 @@ import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "
 import { Avatar, BrandIcon, IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 
+// Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
+function fitFlyout(el: HTMLElement | null) {
+  if (!el) return;
+  const rect = el.getBoundingClientRect();
+  const row = el.parentElement!.getBoundingClientRect();
+  if (rect.bottom > window.innerHeight - 8 && row.bottom - rect.height >= 8) el.classList.add("filter-flyout-up");
+}
+
 const DAY = 24 * 60 * 60 * 1000;
 
 /** Recent chats split into the static date sections. */
@@ -388,6 +396,7 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
         </button>
         {copyOpen && (
           <div
+            ref={fitFlyout}
             className="popover menu filter-flyout"
             data-state="open"
             role="menu"
@@ -527,6 +536,7 @@ function FilterMenu() {
       </button>
       {sub === id && (
         <div
+          ref={fitFlyout}
           className="popover menu filter-flyout"
           data-state="open"
           role="menu"

@@ -675,6 +675,11 @@ svg {
   animation: flyout-in 140ms var(--ease) both;
 }
 
+.filter-flyout-up {
+  top: auto;
+  bottom: -6px;
+}
+
 /* Bridges the gap to the row, so crossing it doesn't count as leaving the submenu. */
 .filter-flyout::before {
   content: "";
@@ -3646,6 +3651,11 @@ p.key-status svg {
     right: 0;
     z-index: 1;
     max-width: min(280px, calc(100vw - 48px));
+  }
+
+  .filter-flyout-up {
+    top: auto;
+    bottom: calc(100% + 4px);
   }
 
   .filter-flyout::before {
