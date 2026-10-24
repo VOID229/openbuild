@@ -523,17 +523,6 @@ export function PiSection() {
     <>
       <Heading>Pi</Heading>
       <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
-      <p className="setting-desc pi-intro">
-        {where ? (
-          <>
-            Threads on {where} run on the Pi installed there: its models, credentials, extensions and skills are the same ones the <code>pi</code> command on {where} uses.
-          </>
-        ) : (
-          <>
-            OpenBuild runs every thread on the Pi installed on this computer: its models, credentials, extensions and skills are the same ones the <code>pi</code> command uses.
-          </>
-        )}
-      </p>
       <section className="pi-card">
         {!status ? (
           statusError ? <ErrorNote>{statusError}</ErrorNote> : <Spinner />
@@ -884,19 +873,6 @@ export function ProvidersSection() {
     <>
       <Heading>Providers</Heading>
       <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
-      <p className="setting-desc pi-intro">
-        {where ? (
-          <>
-            Set up the model providers Pi uses on {where}, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi there in <code>~/.pi/agent/auth.json</code>, the
-            same as <code>/login</code> in Pi, so the <code>pi</code> command on {where} uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
-          </>
-        ) : (
-          <>
-            Set up the model providers Pi uses, either by signing in with a subscription or by saving an API key. Credentials are saved by Pi in <code>~/.pi/agent/auth.json</code>, the same as{" "}
-            <code>/login</code> in Pi, so the <code>pi</code> command uses them too. Custom endpoints go in <code>~/.pi/agent/models.json</code>.
-          </>
-        )}
-      </p>
       {login && (
         <LoginFlow
           key={`${deviceId ?? ""}:${login.provider.id}:${login.type}`}
@@ -1116,9 +1092,6 @@ export function ProjectsSection() {
   return (
     <>
       <Heading>Projects</Heading>
-      <p className="setting-desc pi-intro">
-        Folders threads can work in, on this computer or on a paired device. Pick one under the composer when you start a thread, in its own checkout or in a new git worktree (kept in OpenBuild's data folder on that device).
-      </p>
       <ul className="pi-list">
         {projects.map((p) => (
           <ProjectRow key={p.id} project={p} onChanged={loadProjects} />
