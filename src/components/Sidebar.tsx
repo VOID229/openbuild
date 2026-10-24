@@ -223,7 +223,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
             </span>
           )}
           <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
-            {runtime === "durable" ? <ShieldHalf size={12} /> : <PiMark size={12} />}
+            {runtime === "durable" ? <ShieldHalf size={14} /> : <PiMark size={14} />}
           </span>
         </span>
       </button>
