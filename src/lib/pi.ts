@@ -57,6 +57,10 @@ export interface PiModels {
 }
 export const piModels = (fresh = false) => get<PiModels>(`/api/pi/models${fresh ? "?fresh=1" : ""}`);
 
+/** Prices for models Pi no longer lists, by "<provider>/<model id>". */
+export const piModelPrices = (ids: string[]) =>
+  get<{ models: Record<string, Pick<ModelInfo, "billing" | "price" | "priceFrom" | "contextLimit">> }>(`/api/pi/prices?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.models);
+
 export const piCommands = (cwd?: string) => get<{ commands: PiCommand[] }>(`/api/pi/commands${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`).then((r) => r.commands);
 
 export const answerAsk = (threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) =>

@@ -8,6 +8,7 @@ import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { useStore } from "../lib/store";
+import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
 import { PiMark, Popover, Spinner } from "./primitives";
 
@@ -313,27 +314,128 @@ export function WorkspaceTop() {
 
 // ------------------------------------------------------------------ thread (below the composer)
 
-/** How full the context is: a small ring and a percentage. */
-function ContextRing({ tokens, window, runtime }: { tokens: number; window: number; runtime: ThreadRuntime }) {
-  const pct = Math.min(100, Math.round((tokens / window) * 100));
+const CONTEXT_ROWS = [
+  ["system", "System & tools", "The system prompt, skills and tool definitions (estimated from the thread's first request)."],
+  ["cacheRead", "Cached", "Read from the provider's prompt cache: billed at a fraction of the input price."],
+  ["cacheWrite", "Cache write", "New input written to the prompt cache."],
+  ["input", "Input", "New, uncached input: your messages and tool results."],
+  ["output", "Output", "The model's last answer, thinking and tool calls."],
+] as const;
+
+/** Under the composer, on the right: how full the context is (a ring and a percentage) and what the thread has cost. Click for the breakdown. */
+function UsageMeter({ chatId, runtime }: { chatId: string; runtime: ThreadRuntime }) {
+  const messages = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages);
+  const models = useThreadModels(messages, useStore((s) => s.detection.pi?.models));
+  const fill = useMemo(() => messages && contextFill(messages, models), [messages, models]);
+  const spend = useMemo(() => messages && threadSpend(messages, models), [messages, models]);
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  if (!fill && !spend) return null;
+  const pct = fill?.used !== undefined && fill.window ? Math.min(100, Math.round((fill.used / fill.window) * 100)) : undefined;
   const r = 7;
   const c = 2 * Math.PI * r;
-  const k = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  const kind = spend && spendKind(spend);
+  const rows = fill?.rows;
+  const rowTotal = rows ? CONTEXT_ROWS.reduce((n, [k]) => n + (rows[k] ?? 0), 0) : 0;
   return (
-    <span className={cx("ctx", pct >= 80 && "ctx-high")} data-tooltip={`${k(tokens)} of ${k(window)} tokens in context.${runtime === "pi" ? " Pi compacts it when it's nearly full (or type /compact)." : ""}`} data-tooltip-side="top">
-      <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
-        <circle cx="9" cy="9" r={r} className="ctx-track" />
-        <circle cx="9" cy="9" r={r} className="ctx-fill" strokeDasharray={`${(pct / 100) * c} ${c}`} transform="rotate(-90 9 9)" />
-      </svg>
-      {pct}%
-    </span>
+    <>
+      <button
+        ref={anchor}
+        type="button"
+        className="usage"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${pct !== undefined ? `Context ${pct}% full` : "Context"}${spend ? `, ${formatUsd(spend.total)} spent` : ""}. Show details`}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {fill && (
+          <span className={cx("ctx", pct !== undefined && pct >= 80 && "ctx-high")}>
+            <svg width="16" height="16" viewBox="0 0 18 18" aria-hidden>
+              <circle cx="9" cy="9" r={r} className="ctx-track" />
+              <circle cx="9" cy="9" r={r} className="ctx-fill" strokeDasharray={`${((pct ?? 0) / 100) * c} ${c}`} transform="rotate(-90 9 9)" />
+            </svg>
+            {pct !== undefined ? `${pct}%` : fill.used !== undefined ? shortTokens(fill.used) : "–"}
+          </span>
+        )}
+        {spend && (
+          <span className="usage-cost">
+            {kind && <span className="usage-kind">({kind})</span>}
+            {/* Nothing priced at all: don't claim $0. */}
+            {spend.total || !spend.unpriced ? formatUsd(spend.total) : null}
+          </span>
+        )}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="usage-pop" label="Context and spend" fixed="up" align="end">
+        {fill && (
+          <section>
+            <div className="usage-head">
+              <span>Context</span>
+              {pct !== undefined && <span>{pct}%</span>}
+            </div>
+            {rows && rowTotal > 0 && (
+              <div className="usage-bar" aria-hidden>
+                {CONTEXT_ROWS.map(([k]) => (rows[k] ? <span key={k} className={`usage-seg-${k}`} style={{ width: `${(rows[k]! / (fill.window || rowTotal)) * 100}%` }} /> : null))}
+              </div>
+            )}
+            {rows ? (
+              <dl className="usage-rows">
+                {CONTEXT_ROWS.map(([k, label, hint]) =>
+                  rows[k] || (k !== "system" && k !== "cacheWrite") ? (
+                    <div key={k} data-tooltip={hint} data-tooltip-side="left">
+                      <dt><i className={`usage-dot usage-seg-${k}`} />{label}</dt>
+                      <dd>{k === "system" ? "~" : ""}{formatTokens(rows[k] ?? 0)}</dd>
+                    </div>
+                  ) : null,
+                )}
+              </dl>
+            ) : (
+              <p className="usage-note">{fill.used === undefined ? "Just compacted. The next reply measures the context again." : "No breakdown for this reply."}</p>
+            )}
+            {fill.used !== undefined && (
+              <div className="usage-total">
+                <span>Used</span>
+                <span>{formatTokens(fill.used)}{fill.window ? <span className="usage-of"> of {formatTokens(fill.window)}</span> : null}</span>
+              </div>
+            )}
+            {runtime === "pi" && <p className="usage-note">Pi compacts the context when it's nearly full (or type /compact).</p>}
+          </section>
+        )}
+        {spend && (
+          <section>
+            <div className="usage-head">
+              <span>Spend in this thread</span>
+              <span>{spend.total || !spend.unpriced ? formatUsd(spend.total) : "Unknown"}</span>
+            </div>
+            <dl className="usage-rows">
+              {spend.billed > 0 && (
+                <div data-tooltip="Charged per token by the provider." data-tooltip-side="left"><dt>Billed</dt><dd>{formatUsd(spend.billed)}</dd></div>
+              )}
+              {spend.plan > 0 && (
+                <div data-tooltip="Covered by your subscription, so not charged. Shown at API prices." data-tooltip-side="left"><dt>Plan (API value)</dt><dd>{formatUsd(spend.plan)}</dd></div>
+              )}
+              {(spend.free > 0 || (kind === "free" && !spend.unpriced)) && (
+                <div data-tooltip="Local models and free tiers cost nothing per token. Shown at what the same model costs from a provider." data-tooltip-side="left"><dt>Free (estimated)</dt><dd>{formatUsd(spend.free)}</dd></div>
+              )}
+            </dl>
+            <dl className="usage-rows usage-tokens">
+              <div><dt>Input</dt><dd>{formatTokens(spend.tokens.input + spend.tokens.cacheWrite)}</dd></div>
+              <div><dt>Cached</dt><dd>{formatTokens(spend.tokens.cacheRead)}</dd></div>
+              <div><dt>Output</dt><dd>{formatTokens(spend.tokens.output)}</dd></div>
+            </dl>
+            {spend.estimatedFrom.length > 0 && (
+              <p className="usage-note">Estimated at {spend.estimatedFrom.length === 1 ? <code>{spend.estimatedFrom[0]}</code> : `${spend.estimatedFrom.length} other listings'`} prices.</p>
+            )}
+            {spend.unpriced > 0 && <p className="usage-note">{spend.unpriced === 1 ? "One reply has" : `${spend.unpriced} replies have`} no known price and count as $0.</p>}
+          </section>
+        )}
+      </Popover>
+    </>
   );
 }
 
 function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; workspace?: Workspace; streaming: boolean }) {
   const [info, setInfo] = useState<GitInfo>();
   const runtime = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime ?? "pi");
-  const usage = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant" && m.usage?.contextWindow)?.usage);
   // Refresh after each reply (Pi may have committed or switched branches) and on coming back.
   useEffect(() => {
     if (streaming || !workspace?.branch) return;
@@ -369,7 +471,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
           {!!info?.ahead && <span className="ws-dirty">↑{info.ahead}</span>}
         </span>
       )}
-      {usage?.contextTokens && usage.contextWindow ? <ContextRing tokens={usage.contextTokens} window={usage.contextWindow} runtime={runtime} /> : null}
+      <UsageMeter chatId={chatId} runtime={runtime} />
     </div>
   );
 }

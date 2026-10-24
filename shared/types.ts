@@ -72,6 +72,11 @@ export interface ModelInfo {
   providerName?: string;
   /** Pi models from a provider Pi doesn't ship with (models.json, extensions). */
   custom?: boolean;
+  billing?: Billing;
+  /** To price (or, for local, plan and free models, estimate) a thread's spend. */
+  price?: Price;
+  /** `price` is another listing's ("<provider>/<model id>"): the model's own provider reports none. */
+  priceFrom?: string;
 }
 
 export interface DetectResult {
@@ -189,13 +194,40 @@ export interface ChatRequest {
   digest?: SearchDigestModel;
 }
 
+/** Tokens by kind: new input, input read from or written to the provider's cache, and output. */
+export interface TokenCounts {
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
 /** Tokens and cost of a reply, and how full the thread's context is afterwards. */
 export interface Usage {
+  /** Summed over the reply's model requests; `input` excludes cached input. */
   input?: number;
   output?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  /** USD, as Pi priced it (0 when the provider reports no price: local, bundled in a plan, free). */
   cost?: number;
   contextTokens?: number;
   contextWindow?: number;
+  /** The reply's last request: what the context holds now, by kind. */
+  last?: TokenCounts;
+  /** Prompt tokens of the reply's first request (in a thread's first reply: system prompt, tools and the first message). */
+  firstPrompt?: number;
+}
+
+/** How a model is paid for: per token, by a subscription, running locally, or a free tier. */
+export type Billing = "api" | "plan" | "local" | "free";
+
+/** USD per 1M tokens. */
+export interface Price {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
 }
 
 /** Where a thread works: a project's own checkout, or a git worktree of it. */
@@ -295,6 +327,8 @@ export type StreamEvent =
   | { t: "asked"; id: string; answer?: string }
   /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). */
   | { t: "steer"; id?: string; text: string }
+  /** Tokens and cost so far, after each of the reply's model requests. */
+  | { t: "usage"; usage: Usage }
   | { t: "done"; finish?: string; usage?: Usage }
   /** The reply is over (after done, an error, or a stop). A stream that ends without it was cut off. */
   | { t: "end" };

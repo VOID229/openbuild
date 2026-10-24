@@ -7,6 +7,7 @@ import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL, cleanOptions } from "./extensions/question-ask";
 import { agentDir } from "./install";
 import { isSessionLive, isThreadId } from "./sessions";
+import { addUsage, emptyUsage } from "./usage";
 import { EXTERNAL_VIA } from "../../shared/replies";
 
 // A turn that stopped mid-way (tools pending, or the model's next step not written yet) is still
@@ -67,7 +68,7 @@ export function projectSession(source: string, file: string, modified: number): 
       messages.push({ id: entry.id || `user-${messages.length}`, role: "user", content: promptText(m.content), createdAt: at, ...(attachments.length ? { attachments } : {}) });
     } else if (m.role === "assistant") {
       if (!reply) {
-        reply = { id: entry.id || `reply-${messages.length}`, role: "assistant", content: "", parts: [], status: "done", createdAt: at, usage: { input: 0, output: 0, cost: 0 } };
+        reply = { id: entry.id || `reply-${messages.length}`, role: "assistant", content: "", parts: [], status: "done", createdAt: at, usage: emptyUsage() };
         messages.push(reply);
       }
       if (m.model && m.provider) reply.model = { plan: "pi", id: `${m.provider}/${m.model}`, name: m.model };
@@ -91,9 +92,7 @@ export function projectSession(source: string, file: string, modified: number): 
           reply.parts!.push(tool);
         }
       }
-      reply.usage!.input! += m.usage?.input || 0;
-      reply.usage!.output! += m.usage?.output || 0;
-      reply.usage!.cost! += m.usage?.cost?.total || 0;
+      addUsage(reply.usage!, m.usage);
       reply.status = m.stopReason === "error" ? "error" : m.stopReason === "aborted" ? "stopped" : "done";
       reply.error = m.errorMessage;
     } else if (m.role === "toolResult") {

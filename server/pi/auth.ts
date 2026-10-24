@@ -87,6 +87,11 @@ export async function providers(): Promise<PiProvider[]> {
   return (await once<{ providers: PiProvider[] }>(["providers"])).providers;
 }
 
+/** Every model Pi has a price for (signed in or not), and which providers are signed in with a subscription. */
+export function pricesFromPi() {
+  return once<{ models: { provider: string; id: string; context?: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number } }[]; providers: { id: string; subscription: boolean }[] }>(["prices"]);
+}
+
 let builtinsCache: { root: string; value: Promise<Set<string>> } | undefined;
 
 /** The ids of the providers Pi ships with; the rest come from models.json or extensions. */

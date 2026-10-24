@@ -6,6 +6,7 @@
 //   node helper.mjs <pi package dir> login <provider> <api_key|oauth>
 //   node helper.mjs <pi package dir> logout <provider>
 //   node helper.mjs <pi package dir> builtins
+//   node helper.mjs <pi package dir> prices
 //
 // Output is JSONL. During a login, prompts go out as {type:"prompt", id, prompt} and answers come
 // back on stdin as {id, value} or {id, cancel:true}; {type:"event"} records are for display.
@@ -40,6 +41,18 @@ try {
       models: runtime.getModels(p.id).length,
     }));
     out({ type: "providers", providers });
+  } else if (command === "prices") {
+    // Every model Pi knows a price for, signed in or not (reference prices for estimates), and how
+    // each provider is signed in to (a subscription's OAuth is a plan, not per-token billing).
+    const credentials = await runtime.listCredentials();
+    const models = runtime.getProviders().flatMap((p) => runtime.getModels(p.id))
+      .filter((m) => m.cost && (m.cost.input > 0 || m.cost.output > 0))
+      .map((m) => ({ provider: m.provider, id: m.id, context: m.contextWindow, cost: { input: m.cost.input, output: m.cost.output, cacheRead: m.cost.cacheRead || 0, cacheWrite: m.cost.cacheWrite || 0 } }));
+    const providers = runtime.getProviders().map((p) => ({
+      id: p.id,
+      subscription: !!p.auth.oauth?.isSubscription && credentials.find((c) => c.providerId === p.id)?.type === "oauth",
+    }));
+    out({ type: "prices", models, providers });
   } else if (command === "builtins") {
     // The providers Pi ships with, as opposed to ones from models.json or extensions. pi-ai doesn't
     // export this to the coding agent's dependents, so find it the way Node would from Pi's package.

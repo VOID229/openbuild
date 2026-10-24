@@ -12,6 +12,7 @@ import * as auth from "./auth";
 import { status } from "./install";
 import { currentJob, jobStream, startJob } from "./jobs";
 import * as resources from "./resources";
+import { forgetPrices, lookup, priceBook, pricing, type PriceBook } from "./pricing";
 import { problems } from "./rpc";
 import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn, steer } from "./sessions";
 import { piBin } from "./install";
@@ -26,7 +27,7 @@ const fail = (err: unknown, status = 400) => bad((err as Error).message || Strin
 const str = (v: unknown, max = 4096): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 
 /** A Pi model as the app's ModelInfo; its id is "<provider>/<model id>". */
-function toModelInfo(m: any, builtins?: Set<string>): ModelInfo {
+function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook): ModelInfo {
   return {
     id: `${m.provider}/${m.id}`,
     name: m.name || m.id,
@@ -39,6 +40,7 @@ function toModelInfo(m: any, builtins?: Set<string>): ModelInfo {
     tools: true,
     provider: m.provider,
     custom: builtins && !builtins.has(m.provider) ? true : undefined,
+    ...pricing(m, book),
   };
 }
 
@@ -119,9 +121,28 @@ export function piRoutes(api: Api) {
     "/api/pi/models": {
       GET: api(async (req) => {
         try {
-          // Without the built-in list, every provider keeps its own group.
-          const [r, builtins] = await Promise.all([listModels(new URL(req.url).searchParams.has("fresh")), auth.builtinProviders().catch(() => undefined)]);
-          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins)), defaultModel: r.defaultModel, checkedAt: r.checkedAt });
+          const fresh = new URL(req.url).searchParams.has("fresh");
+          if (fresh) forgetPrices();
+          // Without the built-in list, every provider keeps its own group; without prices, spend
+          // shows only what Pi priced itself.
+          const [r, builtins, book] = await Promise.all([
+            listModels(fresh),
+            auth.builtinProviders().catch(() => undefined),
+            priceBook().catch((err) => void console.warn("[pi] model prices unavailable:", (err as Error).message)),
+          ]);
+          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined)), defaultModel: r.defaultModel, checkedAt: r.checkedAt });
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    // Prices for models a thread used that Pi no longer lists: ?ids=<provider>/<model id>,…
+    "/api/pi/prices": {
+      GET: api(async (req) => {
+        const ids = (new URL(req.url).searchParams.get("ids") ?? "").split(",").filter((id) => id.includes("/") && id.length <= 512).slice(0, 50);
+        try {
+          const book = await priceBook();
+          return Response.json({ models: Object.fromEntries(ids.map((id) => [id, lookup(id, book)])) });
         } catch (err) {
           return fail(err, 502);
         }

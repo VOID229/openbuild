@@ -41,10 +41,12 @@ interface PopoverProps {
    * "auto" opens toward the side with more room and caps the height to fit.
    */
   fixed?: "up" | "down" | "auto";
+  /** Fixed popovers: line up with the anchor's left edge, or its right edge. */
+  align?: "start" | "end";
   style?: React.CSSProperties;
 }
 
-export function Popover({ open, onClose, anchor, className, children, role = "dialog", label, fixed, style }: PopoverProps) {
+export function Popover({ open, onClose, anchor, className, children, role = "dialog", label, fixed, align = "start", style }: PopoverProps) {
   const ref = useRef<HTMLDivElement>(null);
   const { mounted, visible } = usePresence(open, 160);
   const [pos, setPos] = useState<React.CSSProperties>();
@@ -57,7 +59,7 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
       const width = ref.current?.offsetWidth ?? 0;
-      const left = Math.max(12, Math.min(r.left, window.innerWidth - width - 12));
+      const left = Math.max(12, Math.min(align === "end" ? r.right - width : r.left, window.innerWidth - width - 12));
       const below = window.innerHeight - r.bottom - 20;
       const above = r.top - 20;
       const up = fixed === "up" || (fixed === "auto" && below < 320 && above > below);
@@ -83,7 +85,7 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", onScroll, true);
     };
-  }, [fixed, open, mounted, anchor]);
+  }, [fixed, align, open, mounted, anchor]);
   if (!mounted) return null;
   const el = (
     <div

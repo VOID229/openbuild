@@ -411,7 +411,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         reasoningMs = finish = notice = error = usage = undefined;
         searches = [];
         parts = [];
-        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { content: "", reasoning: undefined, reasoningMs: undefined, searches: undefined, parts: undefined });
+        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { content: "", reasoning: undefined, reasoningMs: undefined, searches: undefined, parts: undefined, usage: undefined });
       } else if (ev.t === "text") {
         if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
         text += ev.v;
@@ -457,9 +457,13 @@ async function generate(chatId: string, messageId: string, resume = false) {
       } else if (ev.t === "error") {
         error = ev.message;
         break;
+      } else if (ev.t === "usage") {
+        // Spend and context fill as the reply goes, kept if it then fails or is stopped.
+        usage = ev.usage;
+        if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { usage });
       } else if (ev.t === "done") {
         finish = ev.finish;
-        usage = ev.usage;
+        usage = ev.usage ?? usage;
       } else if (ev.t === "search") {
         const { t: _t, ...call } = ev;
         searches = searches.some((s) => s.id === call.id) ? searches.map((s) => (s.id === call.id ? call : s)) : [...searches, call];

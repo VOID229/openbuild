@@ -12,6 +12,7 @@ import { EFFORTS, type Effort, type PiChatRequest, type PiCommand, type StreamEv
 import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
 import { PiError, PiProcess, type PiRecord } from "./rpc";
+import { addUsage, emptyUsage } from "./usage";
 
 /** Close a thread's Pi process after this long without use. */
 const IDLE = 20 * 60 * 1000;
@@ -230,7 +231,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         let wroteText = false;
         let lastThought = false;
         let lastError: string | undefined;
-        const usage: Usage = { input: 0, output: 0, cost: 0 };
+        const usage: Usage = emptyUsage();
         const progress = new Map<string, number>();
         off = proc.on((r) => {
           switch (r.type) {
@@ -267,9 +268,8 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             case "message_end": {
               const m = r.message;
               if (m?.role !== "assistant") break;
-              usage.input! += m.usage?.input ?? 0;
-              usage.output! += m.usage?.output ?? 0;
-              usage.cost! += m.usage?.cost?.total ?? 0;
+              addUsage(usage, m.usage);
+              if (m.usage) send({ t: "usage", usage: { ...usage } });
               if (m.stopReason === "error") lastError = m.errorMessage || "The model returned an error.";
               else if (m.stopReason !== "aborted") lastError = undefined;
               break;
@@ -369,6 +369,8 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (stats?.contextUsage) {
             usage.contextTokens = stats.contextUsage.tokens ?? undefined;
             usage.contextWindow = stats.contextUsage.contextWindow;
+            // Just compacted: what the context holds isn't known until the next reply.
+            if (stats.contextUsage.tokens == null) usage.last = undefined;
           }
           send({ t: "done", finish: signal.aborted ? "aborted" : "stop", usage });
         }

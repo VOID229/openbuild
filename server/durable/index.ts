@@ -14,6 +14,7 @@ import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import { Run } from "../runs";
 import { dataDir } from "../paths";
 import { agentDir, packageRoot } from "../pi/install";
+import { addUsage } from "../pi/usage";
 
 interface Manifest {
   version: 1;
@@ -191,13 +192,9 @@ export class DurableRuntime {
       const events: StreamEvent[] = [];
       for (const message of entry.model ?? []) {
         if (message.role === "assistant") {
-          const usage = m.usage ??= {};
-          usage.input = (usage.input ?? 0) + (message.usage?.input ?? 0);
-          usage.output = (usage.output ?? 0) + (message.usage?.output ?? 0);
-          usage.cost = (usage.cost ?? 0) + (message.usage?.cost?.total ?? 0);
-          // Provider-reported token count for the latest request/answer, including cached context.
-          usage.contextTokens = (message.usage?.input ?? 0) + (message.usage?.cacheRead ?? 0) +
-            (message.usage?.cacheWrite ?? 0) + (message.usage?.output ?? 0);
+          // Provider-reported tokens for the latest request/answer, including cached context.
+          addUsage(m.usage ??= {}, message.usage);
+          if (message.usage) events.push({ t: "usage", usage: { ...m.usage } });
           for (const block of message.content) {
             if (block.type === "text" && block.text) events.push({ t: "text", v: block.text });
             else if (block.type === "thinking" && block.thinking) events.push({ t: "reasoning", v: block.thinking });

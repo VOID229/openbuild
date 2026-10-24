@@ -5676,13 +5676,49 @@ a.btn-primary {
   flex: none;
 }
 
-.ctx {
+.usage {
   display: inline-flex;
   flex: none;
   align-items: center;
-  gap: 5px;
-  margin-left: auto;
+  gap: 10px;
+  margin: -3px -6px -3px auto;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
+  color: inherit;
+  font: inherit;
   font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .usage:hover {
+    background: var(--hover);
+    color: var(--text-2);
+  }
+}
+
+.usage[aria-expanded="true"] {
+  background: var(--active);
+  color: var(--text-2);
+}
+
+.usage:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.ctx,
+.usage-cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.usage-kind {
+  color: var(--text-3);
 }
 
 .ctx-track {
@@ -5705,6 +5741,115 @@ a.btn-primary {
 
 .ctx-high .ctx-fill {
   stroke: var(--danger);
+}
+
+.usage-pop {
+  width: 280px;
+  padding: 4px 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-pop section {
+  padding: 10px 14px;
+}
+
+.usage-pop section + section {
+  border-top: 1px solid var(--border);
+}
+
+.usage-head,
+.usage-total,
+.usage-rows > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.usage-head {
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.usage-bar {
+  display: flex;
+  gap: 1px;
+  height: 6px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--surface-3);
+}
+
+.usage-bar > span {
+  min-width: 2px;
+}
+
+.usage-rows {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+}
+
+.usage-rows dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.usage-rows dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.usage-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.usage-seg-system { background: color-mix(in srgb, var(--text) 90%, transparent); }
+.usage-seg-cacheRead { background: color-mix(in srgb, var(--text) 55%, transparent); }
+.usage-seg-cacheWrite { background: color-mix(in srgb, var(--text) 38%, transparent); }
+.usage-seg-input { background: color-mix(in srgb, var(--text) 25%, transparent); }
+.usage-seg-output { background: var(--ok); }
+
+.usage-total {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-strong);
+  color: var(--text);
+}
+
+.usage-of {
+  color: var(--text-3);
+}
+
+.usage-tokens {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-strong);
+  color: var(--text-3);
+}
+
+.usage-tokens dd {
+  color: var(--text-2);
+}
+
+.usage-note {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+.usage-note code {
+  font-family: var(--mono);
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 /* Plain composer controls: model and thinking level read as text, not boxed pills. */
