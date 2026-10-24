@@ -22,11 +22,13 @@ g.window ??= globalThis;
 g.innerWidth = 1280;
 g.document ??= { addEventListener() {}, visibilityState: "visible" };
 g.addEventListener ??= () => {};
+g.matchMedia ??= () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 const ls = new Map<string, string>();
 g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v), removeItem: (k: string) => void ls.delete(k) };
 
 const { useStore } = await import("../src/lib/store");
 const { WorkspaceTop, WorkspaceBelow } = await import("../src/components/Workspace");
+const { Sidebar } = await import("../src/components/Sidebar");
 const { sendMessage, regenerate } = await import("../src/lib/chat");
 const initialSettings = useStore.getState().settings;
 const thread = (runtime?: Chat["runtime"]): Chat => ({ id: "runtime-test", title: "Test", createdAt: 0, updatedAt: 0, messages: [], runtime });
@@ -44,10 +46,10 @@ function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
   useStore.setState({ settings: { ...initialSettings, workspace: { mode: "local" }, ...settings }, chats, activeChatId: undefined, projects: [], selections: {} });
 }
 
-test("scratch threads offer a runtime picker, defaulting old settings to Pi", () => {
+test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", () => {
   reset({ threadRuntime: undefined });
   const html = markup(createElement(WorkspaceTop));
-  expect(html).toContain('aria-label="Thread runtime: Pi"');
+  expect(html).toContain('aria-label="Thread runtime: Default"');
   expect(html).not.toContain("Local checkout");
   reset({ threadRuntime: "durable" });
   expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
@@ -61,6 +63,30 @@ test("existing threads have a locked runtime label even before workspace prepara
     expect(html).not.toContain('aria-haspopup="listbox"');
     expect(html).toContain("Runtime");
   }
+});
+
+test("sidebar shows each thread's runtime and filters to Pi, Durable or both", () => {
+  const now = 1_700_000_000_000;
+  const chat = (id: string, runtime?: Chat["runtime"]): Chat => ({ id, title: id, createdAt: now, updatedAt: now, messages: [], runtime });
+  const titles = (html: string) => [...html.matchAll(/<span class="history-title-text">([^<]*)<\/span>/g)].map((m) => m[1]);
+  reset({}, [chat("pi-thread", "pi"), chat("durable-thread", "durable"), chat("legacy-thread")]);
+
+  useStore.setState((s) => ({ view: { ...s.view, runtime: "all" } }));
+  let html = markup(createElement(Sidebar));
+  expect(titles(html)).toEqual(["pi-thread", "durable-thread", "legacy-thread"]);
+  expect(html).toContain('title="Pi runtime"');
+  expect(html).toContain('title="Durable runtime"');
+  expect(html).toContain('class="runtime-toggle"');
+
+  useStore.setState((s) => ({ view: { ...s.view, runtime: "pi" } }));
+  html = markup(createElement(Sidebar));
+  expect(titles(html)).toEqual(["pi-thread", "legacy-thread"]);
+  expect(html).toContain('class="runtime-toggle active"');
+
+  useStore.setState((s) => ({ view: { ...s.view, runtime: "durable" } }));
+  html = markup(createElement(Sidebar));
+  expect(titles(html)).toEqual(["durable-thread"]);
+  expect(html).not.toContain('title="Pi runtime"');
 });
 
 test("Durable regeneration cannot clear an existing turn", () => {

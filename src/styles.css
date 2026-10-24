@@ -971,6 +971,19 @@ svg {
   color: var(--text-3);
 }
 
+/* Pi mark or Durable shield, after the project name: which runtime the thread is fixed to. */
+.history-runtime {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+/* Without a project name, the runtime mark is the last word: push it to the end. */
+.history-title-line:not(:has(.history-proj)) .history-runtime {
+  margin-left: auto;
+}
+
 .history-title-line .badge {
   margin-left: auto;
   flex-shrink: 0;
@@ -1122,7 +1135,8 @@ svg {
   margin-top: 0;
 }
 
-.archive-toggle {
+.archive-toggle,
+.runtime-toggle {
   display: grid;
   place-items: center;
   width: 40px;
@@ -1133,16 +1147,25 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.archive-toggle.active {
+.archive-toggle.active,
+.runtime-toggle.active {
   background: var(--hover);
   color: var(--text);
 }
 
 @media (hover: hover) {
-  .archive-toggle:hover {
+  .archive-toggle:hover,
+  .runtime-toggle:hover {
     background: var(--hover);
     color: var(--text);
   }
+}
+
+/* "Both runtimes": the Pi mark and the Durable shield side by side. */
+.runtime-both {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
 }
 
 .settings-btn {
@@ -4815,6 +4838,14 @@ p.key-status svg {
   padding-bottom: 6px;
 }
 
+.ws-option-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  color: var(--text-2);
+}
+
 .ws-option-text {
   display: flex;
   flex: 1;
@@ -6015,7 +6046,7 @@ a.btn-primary {
   color: var(--text-3);
 }
 
-.history-proj + .history-status {
+.history-runtime + .history-status {
   margin-left: 4px;
 }
 

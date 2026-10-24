@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId } from "../../shared/types";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
 import { listProjects, piModels } from "./pi";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
@@ -46,9 +46,11 @@ export interface SidebarView {
   includePinned: boolean;
   /** Also list threads subagents ran. */
   subagents: boolean;
+  /** Runtime to list: both, or only threads on one. */
+  runtime: "all" | ThreadRuntime;
 }
 
-export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true, subagents: false };
+export const DEFAULT_VIEW: SidebarView = { sort: "updated", models: [], includePinned: true, subagents: false, runtime: "all" };
 
 interface State {
   settings: Settings;

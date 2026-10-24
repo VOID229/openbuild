@@ -110,6 +110,17 @@ export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string
   return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: (pluginBrandSvg(id) ?? brandSvg(id)).replaceAll("_R_0_", uid) }} />;
 });
 
+/** The Pi mark (pi.dev's monogram), in the current text colour. Padded so it sits like a Lucide icon. */
+export const PiMark = memo(function PiMark({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg viewBox="-47 -47 654 654" width={size} height={size} fill="currentColor" className={className} aria-hidden>
+      <path d="M420 280H280V140H0V0H420V280Z" />
+      <path d="M560 560H420V280H560V560Z" />
+      <path d="M140 560H0V140H140V280H280V420H140V560Z" />
+    </svg>
+  );
+});
+
 /** A Pi provider's icon: its brand mark, or its initial on a tile. */
 export const ProviderIcon = memo(function ProviderIcon({ provider, className }: { provider: string; className?: string }) {
   const uid = useId();

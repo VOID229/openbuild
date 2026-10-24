@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Ellipsis, ExternalLink, FolderX, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, ShieldHalf, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
@@ -7,7 +7,7 @@ import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/sea
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { arrowNav, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
-import { Avatar, BrandIcon, IconButton, Popover, Spinner } from "./primitives";
+import { Avatar, BrandIcon, IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -136,6 +136,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
   const model = modelOf(chat);
+  const runtime = chat.runtime ?? "pi";
   const preview = useMemo(() => (hit?.snippet ? "" : previewOf(chat)), [chat, hit]);
   const [draft, setDraft] = useState(chat.title);
   const input = useRef<HTMLInputElement>(null);
@@ -208,6 +209,9 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
               {chat.workspace.projectName}
             </span>
           )}
+          <span className="history-runtime" title={runtime === "durable" ? "Durable runtime" : "Pi runtime"}>
+            {runtime === "durable" ? <ShieldHalf size={13} /> : <PiMark size={13} />}
+          </span>
           <span className="history-status">
             {waiting ? (
               <Spinner size={13} waiting />
@@ -414,7 +418,11 @@ function FilterMenu() {
   const setView = useStore((s) => s.setView);
   const models = useChatModels();
   const active =
-    view.sort !== DEFAULT_VIEW.sort || view.models.length > 0 || view.includePinned !== DEFAULT_VIEW.includePinned || view.subagents !== DEFAULT_VIEW.subagents;
+    view.sort !== DEFAULT_VIEW.sort ||
+    view.models.length > 0 ||
+    view.includePinned !== DEFAULT_VIEW.includePinned ||
+    view.subagents !== DEFAULT_VIEW.subagents ||
+    view.runtime !== DEFAULT_VIEW.runtime;
   const close = () => {
     setOpen(false);
     setSub(undefined);
@@ -600,15 +608,17 @@ export function Sidebar() {
   const [archiveView, setArchiveView] = useState(false);
 
   const view = useStore((s) => s.view);
+  const setView = useStore((s) => s.setView);
 
-  // Model filter, subagents and sort order from the filter menu. A pinned or open subagent thread stays listed.
+  // Model, runtime, subagent and sort filters from the filter menu and the runtime switch. A pinned or open subagent thread stays listed.
   const visible = useMemo(() => {
     const shown = view.subagents ? chats : chats.filter((c) => !c.subagent || c.pinned || c.id === activeChatId);
+    const byRuntime = view.runtime === "all" ? shown : shown.filter((c) => (c.runtime ?? "pi") === view.runtime);
     const byModel = view.models.length
-      ? shown.filter((c) => c.messages.some((m) => m.model && view.models.includes(m.model.id)))
-      : shown;
+      ? byRuntime.filter((c) => c.messages.some((m) => m.model && view.models.includes(m.model.id)))
+      : byRuntime;
     return view.sort === "created" ? [...byModel].sort((a, b) => b.createdAt - a.createdAt) : byModel;
-  }, [chats, view.models, view.sort, view.subagents, activeChatId]);
+  }, [chats, view.models, view.sort, view.subagents, view.runtime, activeChatId]);
   const field = view.sort === "created" ? "createdAt" : "updatedAt";
 
   const hits = useMemo(() => (deferredQuery ? searchChats(visible, deferredQuery) : []), [visible, deferredQuery]);
@@ -621,7 +631,12 @@ export function Sidebar() {
   const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c)), [rest]);
   const buckets = useMemo(() => bucketChats(rest.filter((c) => !c.subagent && !isWorking(c)), field), [rest, field]);
   const archived = useMemo(() => visible.filter((c) => c.archived), [visible]);
-  const filtered = view.models.length > 0;
+  const filtered = view.models.length > 0 || view.runtime !== "all";
+
+  // The bottom-right runtime switch cycles Pi → Durable → both.
+  const nextRuntime = view.runtime === "all" ? "pi" : view.runtime === "pi" ? "durable" : "all";
+  const runtimeLabel = view.runtime === "all" ? "All runtimes" : view.runtime === "pi" ? "Pi only" : "Durable only";
+  const nextRuntimeLabel = nextRuntime === "all" ? "all runtimes" : nextRuntime === "pi" ? "Pi only" : "Durable only";
 
   // Clearing the search also clears in-chat highlights.
   useEffect(() => {
@@ -741,7 +756,13 @@ export function Sidebar() {
                     {b.chats.map((c) => row(c))}
                   </section>
                 ))}
-                {filtered && !pinned.length && !subagents.length && !working.length && !buckets.length && !archived.length && <p className="history-empty">No threads with the selected models.</p>}
+                {filtered && !pinned.length && !subagents.length && !working.length && !buckets.length && !archived.length && (
+                  <p className="history-empty">
+                    {view.runtime === "all"
+                      ? "No threads with the selected models."
+                      : `No ${view.runtime === "pi" ? "Pi" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
+                  </p>
+                )}
                 {archived.length > 0 && (
                   <Collapsible label={`Archived (${archived.length})`} open={sections.archived} onToggle={() => toggleSection("archived")}>
                     {archived.map((c) => row(c))}
@@ -757,6 +778,24 @@ export function Sidebar() {
             <button type="button" className="settings-btn" onClick={() => openSettings()}>
               <Avatar src={avatar} name={name} size={26} />
               Settings
+            </button>
+            <button
+              type="button"
+              className={`runtime-toggle${view.runtime === "all" ? "" : " active"}`}
+              aria-label={`Runtime filter: ${runtimeLabel}. Show ${nextRuntimeLabel}.`}
+              title={`Runtime: ${runtimeLabel} — click for ${nextRuntimeLabel}`}
+              onClick={() => setView({ runtime: nextRuntime })}
+            >
+              {view.runtime === "durable" ? (
+                <ShieldHalf size={18} />
+              ) : view.runtime === "pi" ? (
+                <PiMark size={18} />
+              ) : (
+                <span className="runtime-both" aria-hidden>
+                  <PiMark size={11} />
+                  <ShieldHalf size={12} />
+                </span>
+              )}
             </button>
             <button
               type="button"

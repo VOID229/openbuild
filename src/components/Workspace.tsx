@@ -1,15 +1,15 @@
 // Where a thread works. On the new-thread screen the heading picks the project ("What should we
 // build in <project>?"), and above the composer you choose the project's checkout or a new
-// worktree, and the branch. In a thread, under the composer: where it works, and how full its
-// context is.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, X } from "lucide-react";
+// worktree, and the branch. In a thread, under the composer: where it works, how full its context
+// is, and what it has cost.
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, ShieldHalf, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { useStore } from "../lib/store";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { Popover, Spinner } from "./primitives";
+import { PiMark, Popover, Spinner } from "./primitives";
 
 /** Git state of a project (refetched when it changes or `refresh` ticks). */
 function useProjectGit(projectId: string | undefined, refresh: number) {
@@ -266,13 +266,14 @@ function RuntimeMenu() {
   const runtime = useStore((s) => s.settings.threadRuntime ?? "pi");
   const updateSettings = useStore((s) => s.updateSettings);
   const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
-    { runtime: "pi", label: "Pi", desc: "Pi tools, extensions and slash commands" },
-    { runtime: "durable", label: "Durable", desc: "Durable execution; no Pi extensions or slash commands" },
+    { runtime: "pi", label: "Default", desc: "Tools and extensions" },
+    { runtime: "durable", label: "Durable", desc: "Survives restarts" },
   ];
   return (
     <>
-      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${runtime === "durable" ? "Durable" : "Pi"}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "Runtime for this new thread; fixed after the first send"} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
-        <span className="ws-pill-text">{runtime === "durable" ? "Durable" : "Pi"}</span>
+      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${runtime === "durable" ? "Durable" : "Default"}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "Runtime for this new thread; fixed after the first send"} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
+        {runtime === "durable" ? <ShieldHalf size={13} /> : <PiMark size={13} />}
+        <span className="ws-pill-text">{runtime === "durable" ? "Durable" : "Default"}</span>
         <ChevronDown size={13} className="pill-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
@@ -280,6 +281,9 @@ function RuntimeMenu() {
           {options.map((o) => (
             <button key={o.runtime} type="button" role="option" aria-selected={o.runtime === runtime} className="menu-item ws-option" onClick={() => { updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}>
               <span className="ws-option-text">
+              <span className="ws-option-icon" aria-hidden>
+                {o.runtime === "durable" ? <ShieldHalf size={15} /> : <PiMark size={15} />}
+              </span>
                 <span className="menu-item-label">{o.label}</span>
                 <span className="ws-option-path">{o.desc}</span>
               </span>
