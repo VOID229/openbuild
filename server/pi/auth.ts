@@ -83,8 +83,22 @@ export interface PiProvider {
   models: number;
 }
 
-export async function providers(): Promise<PiProvider[]> {
-  return (await once<{ providers: PiProvider[] }>(["providers"])).providers;
+// Listing providers means starting Node with Pi's SDK, so keep the answer for a moment: opening
+// Settings repeatedly shouldn't pay for it every time. Any sign-in or sign-out clears it.
+const PROVIDERS_TTL = 10_000;
+let providersCache: { at: number; value: Promise<PiProvider[]> } | undefined;
+
+/** Forget the cached provider list (credentials changed). */
+export function forgetProviders() {
+  providersCache = undefined;
+}
+
+export function providers(): Promise<PiProvider[]> {
+  if (providersCache && Date.now() - providersCache.at < PROVIDERS_TTL) return providersCache.value;
+  const value = once<{ providers: PiProvider[] }>(["providers"]).then((r) => r.providers);
+  providersCache = { at: Date.now(), value };
+  value.catch(() => providersCache?.value === value && forgetProviders());
+  return value;
 }
 
 /** Every model Pi has a price for (signed in or not), and which providers are signed in with a subscription. */
@@ -107,6 +121,7 @@ export function builtinProviders(): Promise<Set<string>> {
 
 export async function logout(provider: string) {
   await once(["logout", provider]);
+  forgetProviders();
   restartIdle();
 }
 
@@ -128,6 +143,7 @@ export function startLogin(provider: string, type: "api_key" | "oauth"): Login {
   const child = helper(["login", provider, type]);
   const login: Login = { id: crypto.randomUUID(), child, records: [], done: false, waiters: new Set() };
   const push = (r: any) => {
+    if (r.type === "done") forgetProviders();
     login.records.push(r);
     for (const w of login.waiters) w();
     login.waiters.clear();
@@ -155,6 +171,8 @@ export const findLogin = (id: string) => logins.get(id);
 export function answerLogin(id: string, promptId: string, value: string | undefined): boolean {
   const l = logins.get(id);
   if (!l || l.done) return false;
+  // A pasted code or key can complete the sign-in before the helper reports "done".
+  if (value !== undefined) forgetProviders();
   l.child.stdin.write(JSON.stringify(value === undefined ? { id: promptId, cancel: true } : { id: promptId, value }) + "\n");
   return true;
 }

@@ -522,6 +522,10 @@ const SOURCE_LABEL: Record<string, string> = {
   models_json_command: "Command in models.json",
 };
 
+// The last provider list, kept outside the component so reopening Settings shows it immediately
+// instead of a spinner while Pi lists its providers again.
+let providerCache: PiProvider[] | undefined;
+
 /** A sign-in in progress: what Pi shows and asks, answered right here. */
 function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api_key" | "oauth"; onEnd: (ok: boolean) => void }) {
   const [id, setId] = useState<string>();
@@ -667,7 +671,7 @@ function LoginFlow({ provider, type, onEnd }: { provider: PiProvider; type: "api
 }
 
 export function ProvidersSection() {
-  const [providers, setProviders] = useState<PiProvider[]>();
+  const [providers, setProviders] = useState<PiProvider[] | undefined>(providerCache);
   const [error, setError] = useState<string>();
   const [query, setQuery] = useState("");
   const [login, setLogin] = useState<{ provider: PiProvider; type: "api_key" | "oauth" }>();
@@ -677,10 +681,13 @@ export function ProvidersSection() {
 
   const load = useCallback(async () => {
     try {
-      setProviders(await piProviders());
+      const next = await piProviders();
+      providerCache = next;
+      setProviders(next);
       setError(undefined);
     } catch (err) {
-      setError((err as Error).message);
+      // A cached list beats an error page; keep showing what Pi last told us.
+      if (!providerCache) setError((err as Error).message);
     }
   }, []);
   useEffect(() => {
