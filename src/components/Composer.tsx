@@ -420,14 +420,15 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   // "@" mentions scan where this thread works (its workspace), or the home screen's project.
   const mentionCwd = workspace?.cwd ?? homeProject?.path;
-  const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>(() => cachedEntries(mentionCwd) ?? []);
+  const mentionDevice = workspace?.deviceId ?? homeProject?.deviceId;
+  const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>(() => cachedEntries(mentionCwd, mentionDevice) ?? []);
   useEffect(() => {
     let live = true;
-    setMentionEntries(cachedEntries(mentionCwd) ?? []);
+    setMentionEntries(cachedEntries(mentionCwd, mentionDevice) ?? []);
     // Warm the index as soon as the composer appears, so the first "@" has nothing to wait for.
     // The scratch root (no project on the home screen) is scanned lazily on first mention instead.
     if (mentionCwd) {
-      loadEntries(mentionCwd).then(
+      loadEntries(mentionCwd, false, mentionDevice).then(
         (entries) => live && setMentionEntries(entries),
         () => {},
       );
@@ -435,7 +436,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     return () => {
       live = false;
     };
-  }, [mentionCwd]);
+  }, [mentionCwd, mentionDevice]);
   const [mention, setMention] = useState<{ start: number; end: number; query: string }>();
   const [mentionIndex, setMentionIndex] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState<string>();
@@ -457,7 +458,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     if (query.length > 200 || /\s/.test(query)) return setMention(undefined);
     setMention({ start: at, end: caret, query });
     // Refresh if the index is stale, so files the agent just created show up. Usually instant (cached).
-    loadEntries(mentionCwd).then(setMentionEntries, () => {});
+    loadEntries(mentionCwd, false, mentionDevice).then(setMentionEntries, () => {});
   };
 
   const pickMention = (entry: WorkspaceEntry) => {
@@ -476,7 +477,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       setMention(undefined);
       // Read a file's contents in the background; the prompt inlines them like any attached text file.
       const path = entry.path;
-      void readMentionFile(mentionCwd, path).then(
+      void readMentionFile(mentionCwd, path, mentionDevice).then(
         (file) => setFiles((all) => (all.some((f) => f.mention && f.name === path) ? all : [...all, file])),
         (err: Error) => setNotice(err.message),
       );
@@ -502,7 +503,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const typedCommand = /^\/(\S*)$/.exec(text)?.[1];
   const [slashDismissed, setSlashDismissed] = useState<string>();
   const [slashIndex, setSlashIndex] = useState(0);
-  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, runtime === "pi" && typedCommand !== undefined);
+  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, runtime === "pi" && typedCommand !== undefined, mentionDevice);
   const slashMatches = useMemo(() => {
     if (typedCommand === undefined || slashDismissed === text) return [];
     const builtins = BUILTIN_COMMANDS.filter((c) => c.name !== "compact" || (chatId && runtime === "pi"));
@@ -528,7 +529,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
     if (!chatId) return false;
     setNotice("Compacting…");
-    compactThread(chatId, m[2]?.trim() || undefined).then(
+    compactThread(chatId, m[2]?.trim() || undefined, workspace?.deviceId).then(
       (r) => setNotice(`Compacted: ${Math.round(r.tokensBefore / 1000)}k → ${r.estimatedTokensAfter ? `~${Math.round(r.estimatedTokensAfter / 1000)}k` : "less"} tokens`),
       (err: Error) => setNotice(err.message),
     );

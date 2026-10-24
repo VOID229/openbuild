@@ -3,6 +3,7 @@ import { api as convexApi } from "../../convex/_generated/api";
 import { openEvents, readEvents, type ReplyStream } from "../../shared/replies";
 import { GITHUB_SCOPE, SEARCH_PROVIDERS, type ChatRequest, type DetectResult, type PiChatRequest, type PlanId, type SearchCheckResult, type SearchProviderId, type StreamEvent } from "../../shared/types";
 import { cloudClient } from "./cloud";
+import { apiUrl } from "./devices";
 import { browserSecretById, browserSecrets } from "./keyStore";
 import { config } from "./runtime";
 
@@ -173,7 +174,7 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
   const pi = "threadId" in req;
   const hosted = !pi && (await config).mode === "hosted";
   const body = { ...req, stream: { id: stream.id, key: pi ? undefined : stream.key }, ...(hosted ? { secrets: await secretsFor(req as ChatRequest) } : {}) };
-  const res = await fetch(pi ? "/api/pi/chat" : "/api/chat", {
+  const res = await fetch(pi ? apiUrl(stream.deviceId, "/api/pi/chat") : "/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -203,7 +204,7 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
 
 async function* attach(stream: ReplyStream, signal: AbortSignal): AsyncGenerator<ReplyEvent, Outcome> {
   if (stream.via === "hosted") return yield* attachSaved(stream, signal);
-  const res = await fetch(`/api/chat/runs/${encodeURIComponent(stream.id)}`, { signal });
+  const res = await fetch(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}`), { signal });
   if (res.status === 404) return "gone";
   if (!res.ok || !res.body) return "lost";
   yield { t: "reset" };
@@ -280,7 +281,7 @@ async function* attachSaved(stream: ReplyStream, signal: AbortSignal): AsyncGene
 export async function stopReply(stream: ReplyStream) {
   try {
     if (stream.via === "hosted") await cloudClient()?.mutation(convexApi.streams.stop, { id: stream.id });
-    else await fetch(`/api/chat/runs/${encodeURIComponent(stream.id)}/stop`, { method: "POST" });
+    else await fetch(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}/stop`), { method: "POST" });
   } catch (err) {
     console.warn("[chat] couldn't stop a reply on the server", err);
   }

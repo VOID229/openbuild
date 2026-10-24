@@ -33,6 +33,7 @@ import {
   installPi,
   logoutProvider,
   readResourceFile,
+  removeDevice,
   removePackage,
   removeProject,
   removeResource,
@@ -49,6 +50,7 @@ import {
   type ResourceKind,
 } from "../lib/pi";
 import { useStore } from "../lib/store";
+import { deviceName, splitProjectId } from "../lib/devices";
 import { cx } from "../lib/ui";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 
@@ -863,7 +865,7 @@ function FolderBrowser({ deviceId, onAdd }: { deviceId?: string; onAdd: (path: s
     return () => {
       live = false;
     };
-  }, [dir]);
+  }, [dir, deviceId]);
   return (
     <div className="browser">
       <form
@@ -906,6 +908,8 @@ function FolderBrowser({ deviceId, onAdd }: { deviceId?: string; onAdd: (path: s
 function ProjectRow({ project, onChanged }: { project: Project; onChanged: () => void }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(project.name);
+  const ref = splitProjectId(project.id);
+  const where = project.deviceName ?? deviceName(ref.deviceId);
   return (
     <li className={cx("pi-row", project.missing && "pi-row-off")}>
       {project.git ? <FolderGit2 size={16} className="pi-row-icon" /> : <Folder size={16} className="pi-row-icon" />}
@@ -915,7 +919,7 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
             className="pi-inline-form"
             onSubmit={(e) => {
               e.preventDefault();
-              void renameProject(project.id, name).then(onChanged);
+              void renameProject(ref.id, name, ref.deviceId).then(onChanged);
               setRenaming(false);
             }}
           >
@@ -924,7 +928,10 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
         ) : (
           <span className="pi-row-name">{project.name}</span>
         )}
-        <span className="pi-row-desc pi-mono">{project.missing ? `Missing: ${tilde(project.path)}` : tilde(project.path)}</span>
+        <span className="pi-row-desc pi-mono">
+          {where ? `@ ${where} · ` : ""}
+          {project.missing ? `Missing: ${tilde(project.path)}` : tilde(project.path)}
+        </span>
       </div>
       <span className="pi-row-actions">
         <IconButton label={`Rename ${project.name}`} tooltip="Rename" tooltipSide="top" className="key-icon-btn" onClick={() => setRenaming(true)}>
@@ -935,7 +942,7 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
           tooltip="Remove from OpenBuild"
           tooltipSide="top"
           className="key-icon-btn key-remove"
-          onClick={() => confirm(`Remove ${project.name} from OpenBuild? The folder and its threads stay as they are.`) && void removeProject(project.id).then(onChanged)}
+          onClick={() => confirm(`Remove ${project.name} from OpenBuild? The folder and its threads stay as they are.`) && void removeProject(ref.id, ref.deviceId).then(onChanged)}
         >
           <Trash2 size={14} />
         </IconButton>
@@ -946,29 +953,41 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
 
 export function ProjectsSection() {
   const projects = useStore((s) => s.projects);
+  const devices = useStore((s) => s.devices);
   const loadProjects = useStore((s) => s.loadProjects);
+  const loadDevices = useStore((s) => s.loadDevices);
   const updateSettings = useStore((s) => s.updateSettings);
   const pref = useStore((s) => s.settings.workspace);
+  const [deviceId, setDeviceId] = useState("");
   const [found, setFound] = useState<{ name: string; path: string }[]>();
   const [browsing, setBrowsing] = useState(false);
   const [error, setError] = useState<string>();
   const [added, setAdded] = useState<string>();
+  const local = devices.find((d) => d.local);
+  const remote = devices.filter((d) => !d.local);
+  // The server's own API has no device prefix; a paired device is reached through the proxy.
+  const apiDevice = deviceId || undefined;
 
   useEffect(() => {
-    void loadProjects();
-    discoverProjects().then(setFound, () => setFound([]));
-  }, [loadProjects]);
+    // Refresh online state too, so a device that just came back shows its projects.
+    void loadDevices().finally(() => loadProjects());
+  }, [loadDevices, loadProjects]);
+  useEffect(() => {
+    setFound(undefined);
+    setBrowsing(false);
+    discoverProjects(apiDevice).then(setFound, () => setFound([]));
+  }, [apiDevice]);
 
   const add = async (path: string) => {
     setError(undefined);
     try {
-      const p = await addProject(path);
+      const p = await addProject(path, apiDevice);
       await loadProjects();
       setFound((f) => f?.filter((x) => x.path !== p.path));
       setAdded(p.name);
       setBrowsing(false);
       // The first project becomes where new threads work.
-      if (!pref.projectId) updateSettings({ workspace: { ...pref, projectId: p.id } });
+      if (!pref.projectId && !apiDevice) updateSettings({ workspace: { ...pref, projectId: p.id } });
     } catch (err) {
       setError((err as Error).message);
     }
@@ -978,7 +997,7 @@ export function ProjectsSection() {
     <>
       <Heading>Projects</Heading>
       <p className="setting-desc pi-intro">
-        Folders on this computer that threads can work in. Pick one under the composer when you start a thread, in its own checkout or in a new git worktree (kept in OpenBuild's data folder).
+        Folders threads can work in, on this computer or on a paired device. Pick one under the composer when you start a thread, in its own checkout or in a new git worktree (kept in OpenBuild's data folder on that device).
       </p>
       <ul className="pi-list">
         {projects.map((p) => (
@@ -1002,12 +1021,55 @@ export function ProjectsSection() {
         >
           Add a project
         </SubHeading>
-        {browsing && <FolderBrowser onAdd={add} />}
+        <div className="pi-row">
+          <span className="pi-row-text">
+            <span className="pi-row-name">Add from</span>
+            <span className="pi-row-desc">Projects are added on the device you pick.</span>
+          </span>
+          <select className="input input-sm" value={deviceId} aria-label="Device to add a project from" onChange={(e) => setDeviceId(e.target.value)}>
+            <option value="">{local ? `This device — ${local.name}` : "This device"}</option>
+            {remote.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name}{d.online === false ? " (offline)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+        {remote.length === 0 ? (
+          <p className="setting-desc">
+            No other devices yet. Pair one with <code>openbuild pair --client</code> on this computer, or <code>openbuild pair --host</code> on the other one.
+          </p>
+        ) : (
+          <ul className="pi-list">
+            {remote.map((d) => (
+              <li key={d.id} className="pi-row">
+                <span className={cx("pi-status-dot", d.online === false && "pi-status-dot-off")} aria-hidden />
+                <div className="pi-row-text">
+                  <span className="pi-row-name">{d.name}</span>
+                  <span className="pi-row-desc">
+                    {d.online === false ? "Offline" : "Online"} · {d.mode === "tailscale" ? "Tailscale" : "LAN"} · {d.urls[0] ?? "no address"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    if (!confirm(`Unpair ${d.name}? Its projects disappear from this device. You can pair it again with a new code.`)) return;
+                    void removeDevice(d.id).then(() => loadDevices()).then(() => loadProjects());
+                  }}
+                >
+                  Unpair
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {browsing && <FolderBrowser deviceId={apiDevice} onAdd={add} />}
         {found === undefined ? (
           <Spinner />
         ) : found.length ? (
           <>
-            <p className="setting-desc">Repositories found in your usual code folders:</p>
+            <p className="setting-desc">Repositories found in the usual code folders on {apiDevice ? (deviceName(apiDevice) ?? "that device") : "this device"}:</p>
             <ul className="pi-list">
               {found.slice(0, 60).map((f) => (
                 <li key={f.path} className="pi-row">

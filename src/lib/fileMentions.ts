@@ -2,6 +2,7 @@
 // locally, so typing feels instant (no request per keystroke). Content is read only when a file is
 // picked; a folder is mentioned by path so the agent can explore what's inside.
 import type { Attachment, FileRead, WorkspaceEntry } from "../../shared/types";
+import { apiUrl } from "./devices";
 
 interface Cached {
   at: number;
@@ -12,14 +13,14 @@ const cache = new Map<string, Cached>();
 const pending = new Map<string, Promise<WorkspaceEntry[]>>();
 /** Client-side trust window; the server rebuilds its own index when it's older than a few seconds. */
 const CLIENT_TTL = 10_000;
-const keyOf = (cwd?: string) => cwd ?? "";
+const keyOf = (cwd?: string, deviceId?: string) => `${deviceId ?? ""}:${cwd ?? ""}`;
 
 /** The index already loaded for this workspace, if any. */
-export const cachedEntries = (cwd?: string): WorkspaceEntry[] | undefined => cache.get(keyOf(cwd))?.entries;
+export const cachedEntries = (cwd?: string, deviceId?: string): WorkspaceEntry[] | undefined => cache.get(keyOf(cwd, deviceId))?.entries;
 
 /** Fetch (or reuse) a workspace's files and folders. `cwd` undefined means the scratch area. */
-export function loadEntries(cwd?: string, refresh = false): Promise<WorkspaceEntry[]> {
-  const key = keyOf(cwd);
+export function loadEntries(cwd?: string, refresh = false, deviceId?: string): Promise<WorkspaceEntry[]> {
+  const key = keyOf(cwd, deviceId);
   const hit = cache.get(key);
   if (!refresh && hit && Date.now() - hit.at < CLIENT_TTL) return Promise.resolve(hit.entries);
   const waiting = pending.get(key);
@@ -27,7 +28,7 @@ export function loadEntries(cwd?: string, refresh = false): Promise<WorkspaceEnt
   const params = new URLSearchParams();
   if (cwd) params.set("cwd", cwd);
   if (refresh) params.set("refresh", "1");
-  const req = fetch(`/api/workspaces/files?${params}`)
+  const req = fetch(apiUrl(deviceId, `/api/workspaces/files?${params}`))
     .then(async (res) => {
       const body = await res.json().catch(() => null);
       if (!res.ok) throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
@@ -43,10 +44,10 @@ export function loadEntries(cwd?: string, refresh = false): Promise<WorkspaceEnt
 }
 
 /** Read one workspace file for an "@" mention. The attachment keeps the relative path as its name. */
-export async function readMentionFile(cwd: string | undefined, path: string): Promise<Attachment> {
+export async function readMentionFile(cwd: string | undefined, path: string, deviceId?: string): Promise<Attachment> {
   const params = new URLSearchParams({ path });
   if (cwd) params.set("cwd", cwd);
-  const res = await fetch(`/api/workspaces/file?${params}`);
+  const res = await fetch(apiUrl(deviceId, `/api/workspaces/file?${params}`));
   const body = (await res.json().catch(() => null)) as FileRead | { error?: string } | null;
   if (!res.ok) throw new Error((body as { error?: string } | null)?.error ?? `Request failed (HTTP ${res.status})`);
   const file = body as FileRead;

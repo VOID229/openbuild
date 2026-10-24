@@ -7,6 +7,7 @@ import { editingQueued, moveQueued, queueOf, removeQueued, requeue, shiftQueue, 
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
+import { deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
 import { selectionFor, useStore } from "./store";
 import { effortFor } from "./effort";
@@ -128,7 +129,7 @@ export async function steerQueued(chatId: string, id: string) {
   run.steers.push(item);
   try {
     // An extension took it as input; there's nothing more to show for it.
-    if ((await steerThread(chatId, id, message, images)).handled) run.steers = run.steers.filter((q) => q !== item);
+    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId)).handled) run.steers = run.steers.filter((q) => q !== item);
   } catch (err) {
     if (run.steers.includes(item)) {
       run.steers = run.steers.filter((q) => q !== item);
@@ -263,6 +264,12 @@ export function drainQueue(chatId: string) {
 
 class WorkspaceError extends Error {}
 
+/** The paired device of the project new threads are set to work in, if any. */
+function projectDevice(st: ReturnType<typeof useStore.getState>): string | undefined {
+  const id = st.settings.workspace.projectId;
+  return id ? st.projects.find((p) => p.id === id)?.deviceId : undefined;
+}
+
 /** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
 export async function newWorkspace(chat: Chat): Promise<Workspace> {
   const { settings, projects } = useStore.getState();
@@ -317,7 +324,7 @@ export async function answerQuestion(chatId: string, messageId: string, part: As
   const shown = reply.cancelled ? "" : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : (reply.value ?? "");
   useStore.getState().patchMessage(chatId, messageId, (m) => ({ parts: m.parts?.map((p) => (p.type === "ask" && p.id === part.id ? { ...p, answer: shown } : p)) }));
   try {
-    await answerAsk(chatId, part.id, reply);
+    await answerAsk(chatId, part.id, reply, useStore.getState().chats.find((c) => c.id === chatId)?.workspace?.deviceId);
   } catch {
     // Expired (timed out, or the reply ended): it's shown as answered either way.
   }
@@ -344,9 +351,14 @@ async function generate(chatId: string, messageId: string, resume = false) {
     return;
   }
 
-  // Where the reply runs; saved on the message right away so a reload can find it.
+  // Where the reply runs; saved on the message right away so a reload can find it. A thread whose
+  // workspace is on a paired device runs there, through this server's device proxy.
+  const plannedDevice = chat.workspace?.deviceId ?? projectDevice(st);
   const host = replyHost();
-  const stream: ReplyStream = resume ? msg.stream! : { id: uid(), via: host ?? "", key: host === "hosted" ? newStreamKey() : undefined };
+  const via = plannedDevice ? (deviceServerId(plannedDevice) ?? host) : host;
+  const stream: ReplyStream = resume
+    ? msg.stream!
+    : { id: uid(), via: via ?? "", deviceId: plannedDevice, key: host === "hosted" ? newStreamKey() : undefined };
   const ctrl = new AbortController();
   const run = { ctrl, messageId, stream, steers: [] as Queued[] };
   running.set(chatId, run);
@@ -397,6 +409,11 @@ async function generate(chatId: string, messageId: string, resume = false) {
       workspace = await newWorkspace(chat);
       if (!isCurrent()) return;
       useStore.getState().updateChat(chatId, { workspace });
+      // The remote device is only known once the workspace was made; keep the stream findable there.
+      if (workspace.deviceId) {
+        stream.deviceId = workspace.deviceId;
+        useStore.getState().patchMessage(chatId, messageId, { stream }, true);
+      }
     }
     const request = resume
       ? undefined

@@ -12,11 +12,11 @@ export const BUILTIN_COMMANDS: PiCommand[] = [
 
 const cache = new Map<string, { at: number; value: Promise<PiCommand[]> }>();
 
-function load(cwd: string | undefined): Promise<PiCommand[]> {
-  const key = cwd ?? "";
+function load(cwd: string | undefined, deviceId: string | undefined): Promise<PiCommand[]> {
+  const key = `${deviceId ?? ""}:${cwd ?? ""}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
-  const value = piCommands(cwd).catch(() => {
+  const value = piCommands(cwd, deviceId).catch(() => {
     cache.delete(key);
     return [] as PiCommand[];
   });
@@ -25,16 +25,16 @@ function load(cwd: string | undefined): Promise<PiCommand[]> {
 }
 
 /** Pi's commands for `cwd`, loaded the first time the composer needs them (`active`). */
-export function usePiCommands(cwd: string | undefined, active: boolean): PiCommand[] | undefined {
+export function usePiCommands(cwd: string | undefined, active: boolean, deviceId?: string): PiCommand[] | undefined {
   const [commands, setCommands] = useState<PiCommand[]>();
   useEffect(() => {
     if (!active) return;
     let live = true;
-    void load(cwd).then((c) => live && setCommands(c));
+    void load(cwd, deviceId).then((c) => live && setCommands(c));
     return () => {
       live = false;
     };
-  }, [cwd, active]);
+  }, [cwd, active, deviceId]);
   return commands;
 }
 

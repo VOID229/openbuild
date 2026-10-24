@@ -5346,6 +5346,21 @@ p.key-status svg {
   color: var(--text-3);
 }
 
+/* Paired devices: a small online dot, grey when the other server can't be reached. */
+.pi-status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-left: 3px;
+  border-radius: 50%;
+  background: var(--ok, #3fb950);
+}
+
+.pi-status-dot-off {
+  background: var(--text-3);
+  opacity: 0.5;
+}
+
 .pi-row-text {
   display: flex;
   flex: 1;

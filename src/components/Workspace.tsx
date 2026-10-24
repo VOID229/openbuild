@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
+import { deviceName, splitProjectId } from "../lib/devices";
 import { useStore } from "../lib/store";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
@@ -21,7 +22,8 @@ function useProjectGit(projectId: string | undefined, refresh: number) {
     if (!projectId) return;
     let live = true;
     setLoading(true);
-    projectGit(projectId)
+    const ref = splitProjectId(projectId);
+    projectGit(ref.id, ref.deviceId)
       .then((g) => live && setInfo(g))
       .catch(() => {})
       .finally(() => live && setLoading(false));
@@ -89,7 +91,7 @@ function ProjectList({ onDone }: { onDone: () => void }) {
           <div key={p.id} className="pp-row" aria-selected={p.id === pref.projectId}>
             <button type="button" className="pp-pick" disabled={p.missing} onClick={() => pick(p.id)}>
               <span className="pp-name">{p.name}</span>
-              <span className="pp-sub">{p.missing ? "missing from disk" : `@ ${machine ?? p.path.replace(/^\/Users\/[^/]+/, "~")}`}</span>
+              <span className="pp-sub">{p.missing ? "missing from disk" : `@ ${p.deviceName ?? machine ?? p.path.replace(/^\/Users\/[^/]+/, "~")}`}</span>
             </button>
             {p.id === pref.projectId && <Check size={15} className="pp-check" />}
             <button
@@ -100,7 +102,8 @@ function ProjectList({ onDone }: { onDone: () => void }) {
               data-tooltip-side="left"
               onClick={() => {
                 if (!confirm(`Remove ${p.name} from OpenBuild? The folder and its threads stay as they are.`)) return;
-                void removeProject(p.id).then(() => {
+                const ref = splitProjectId(p.id);
+                void removeProject(ref.id, ref.deviceId).then(() => {
                   if (pref.projectId === p.id) updateSettings({ workspace: { ...pref, projectId: undefined, branch: undefined } });
                   return loadProjects();
                 });
@@ -136,7 +139,7 @@ export function ProjectHeading() {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const project = useStore((s) => s.projects.find((p) => p.id === s.settings.workspace.projectId));
-  const machine = machineName();
+  const machine = project?.deviceName ?? machineName();
   const trigger = (label: string) => (
     <button ref={anchor} type="button" className={cx("home-pick", open && "home-pick-open")} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
       {label}
@@ -440,7 +443,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
   useEffect(() => {
     if (streaming || !workspace?.branch) return;
     let live = true;
-    const load = () => workspaceGit(workspace.cwd).then((g) => live && setInfo(g), () => {});
+    const load = () => workspaceGit(workspace.cwd, workspace.deviceId).then((g) => live && setInfo(g), () => {});
     void load();
     const onVisible = () => document.visibilityState === "visible" && void load();
     document.addEventListener("visibilitychange", onVisible);
@@ -448,7 +451,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
       live = false;
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [workspace?.cwd, workspace?.branch, streaming]);
+  }, [workspace?.cwd, workspace?.deviceId, workspace?.branch, streaming]);
   const branch = info?.branch ?? workspace?.branch;
   return (
     <div className="ws-bottom">
@@ -457,7 +460,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
       </span>
       {workspace && (
         <span className="ws-where" title={workspace.cwd}>
-          <span className="ws-chip">
+          <span className="ws-chip" data-tooltip={workspace.deviceId ? `Runs on ${deviceName(workspace.deviceId) ?? "a paired device"}` : undefined} data-tooltip-side="top">
             {workspace.worktree ? <GitFork size={13} /> : <FolderGit2 size={13} />}
             <span className="ws-pill-text">{workspace.projectName ? `${workspace.projectName} · ${workspace.worktree ? "worktree" : "local checkout"}` : "Scratch folder"}</span>
           </span>

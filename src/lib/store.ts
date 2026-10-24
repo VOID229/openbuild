@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
+import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type Device, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
-import { listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
+import { listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
+import { qualifyProject, setDeviceList } from "./devices";
+import { config } from "./runtime";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
@@ -81,10 +83,14 @@ interface State {
   view: SidebarView;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
-  /** Projects threads can work in (from the server). */
+  /** Projects threads can work in (from this server, and from paired devices). Remote ids are namespaced. */
   projects: Project[];
   projectsLoaded: boolean;
   loadProjects: () => Promise<void>;
+  /** This server first, then paired devices. */
+  devices: Device[];
+  devicesLoaded: boolean;
+  loadDevices: () => Promise<void>;
   /** Pi's own default model ("<provider>/<id>"), used until one is picked here. */
   piDefault?: string;
   /** Pi's install state, resources and providers, loaded at launch and reused by Settings. */
@@ -149,6 +155,8 @@ export const useStore = create<State>()(
       settingsSection: "profile",
       projects: [],
       projectsLoaded: false,
+      devices: [],
+      devicesLoaded: false,
       piCache: {},
       loadPiStatus: async (fresh = false) => {
         const status = await piStatus(fresh);
@@ -167,12 +175,36 @@ export const useStore = create<State>()(
         const providers = await piProviders();
         set((s) => ({ piCache: { ...s.piCache, providers } }));
       },
-      loadProjects: async () => {
+      loadDevices: async () => {
+        let remote: Device[] = [];
         try {
-          set({ projects: await listProjects(), projectsLoaded: true });
-        } catch {
-          set({ projectsLoaded: true });
-        }
+          remote = await listDevices();
+        } catch {}
+        const cfg = await config;
+        const local: Device = {
+          id: cfg.serverId ?? "local",
+          serverId: cfg.serverId,
+          name: cfg.machine ?? "This device",
+          machine: cfg.machine,
+          mode: "lan",
+          urls: [],
+          local: true,
+          online: true,
+        };
+        const devices = [local, ...remote];
+        setDeviceList(devices);
+        set({ devices, devicesLoaded: true });
+      },
+      loadProjects: async () => {
+        if (!get().devicesLoaded) await get().loadDevices().catch(() => {});
+        const { devices } = get();
+        const local = await listProjects().catch(() => [] as Project[]);
+        const remote = await Promise.all(
+          devices
+            .filter((d) => !d.local)
+            .map((device) => listProjects(device.id).then((list) => list.map((p) => qualifyProject(p, device)), () => [] as Project[])),
+        );
+        set({ projects: [...local, ...remote.flat()], projectsLoaded: true });
       },
 
       updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),

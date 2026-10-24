@@ -1,6 +1,7 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { GitInfo, ModelInfo, PiCommand, Project, Workspace } from "../../shared/types";
+import type { Device, GitInfo, ModelInfo, PiCommand, Project, Workspace } from "../../shared/types";
+import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
@@ -63,16 +64,17 @@ export const piModels = (fresh = false) => get<PiModels>(`/api/pi/models${fresh 
 export const piModelPrices = (ids: string[]) =>
   get<{ models: Record<string, Pick<ModelInfo, "billing" | "price" | "priceFrom" | "contextLimit">> }>(`/api/pi/prices?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.models);
 
-export const piCommands = (cwd?: string) => get<{ commands: PiCommand[] }>(`/api/pi/commands${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`).then((r) => r.commands);
+export const piCommands = (cwd?: string, deviceId?: string) =>
+  get<{ commands: PiCommand[] }>(apiUrl(deviceId, `/api/pi/commands${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ""}`)).then((r) => r.commands);
 
-export const answerAsk = (threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) =>
-  send(`/api/pi/threads/${encodeURIComponent(threadId)}/answer`, "POST", { askId, ...reply });
+export const answerAsk = (threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }, deviceId?: string) =>
+  send(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/answer`), "POST", { askId, ...reply });
 
-export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[]) =>
-  send<{ handled: boolean }>(`/api/pi/threads/${encodeURIComponent(threadId)}/steer`, "POST", { steerId, message, images });
+export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[], deviceId?: string) =>
+  send<{ handled: boolean }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/steer`), "POST", { steerId, message, images });
 
-export const compactThread = (threadId: string, instructions?: string) =>
-  send<{ tokensBefore: number; estimatedTokensAfter?: number }>(`/api/pi/threads/${encodeURIComponent(threadId)}/compact`, "POST", { instructions });
+export const compactThread = (threadId: string, instructions?: string, deviceId?: string) =>
+  send<{ tokensBefore: number; estimatedTokensAfter?: number }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/compact`), "POST", { instructions });
 
 export const completeOnce = (model: string, system: string, prompt: string, signal?: AbortSignal) =>
   fetch("/api/pi/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, system, prompt }), signal })
@@ -138,17 +140,31 @@ export const createResource = (kind: ResourceKind, name: string) => send<{ path:
 export const installPackage = (source: string) => send<{ job: string }>("/api/pi/packages", "POST", { source });
 export const removePackage = (source: string) => send<{ job: string }>("/api/pi/packages", "DELETE", { source });
 
+// ------------------------------------------------------------------ devices
+
+/** Paired devices (online and offline) this OpenBuild can use. */
+export const listDevices = () => get<{ devices: Device[] }>("/api/devices").then((r) => r.devices);
+export const removeDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}`, "DELETE");
+
 // ------------------------------------------------------------------ projects and workspaces
 
-export const listProjects = () => get<{ projects: Project[] }>("/api/projects").then((r) => r.projects);
-export const addProject = (path: string) => send<{ project: Project }>("/api/projects", "POST", { path }).then((r) => r.project);
-export const renameProject = (id: string, name: string) => send(`/api/projects/${encodeURIComponent(id)}`, "PATCH", { name });
-export const removeProject = (id: string) => send(`/api/projects/${encodeURIComponent(id)}`, "DELETE");
-export const discoverProjects = () => get<{ found: { name: string; path: string }[] }>("/api/projects/discover").then((r) => r.found);
-export const projectGit = (id: string) => get<GitInfo>(`/api/projects/${encodeURIComponent(id)}/git`);
-export const browseFolders = (dir?: string) =>
-  get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(`/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`);
-export const workspaceGit = (cwd: string) => get<GitInfo>(`/api/workspaces/git?cwd=${encodeURIComponent(cwd)}`);
-export const prepareWorkspace = (req: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string }) =>
-  send<{ workspace: Workspace }>("/api/workspaces", "POST", req).then((r) => r.workspace);
-export const removeWorktree = (cwd: string, force = false) => send("/api/workspaces/remove", "POST", { cwd, force });
+type DeviceId = string | undefined;
+
+/** Projects on this server, or on a paired device. Remote ids are namespaced by the caller. */
+export const listProjects = (deviceId?: DeviceId) => get<{ projects: Project[] }>(apiUrl(deviceId, "/api/projects")).then((r) => r.projects);
+export const addProject = (path: string, deviceId?: DeviceId) =>
+  send<{ project: Project }>(apiUrl(deviceId, "/api/projects"), "POST", { path }).then((r) => r.project);
+export const renameProject = (id: string, name: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "PATCH", { name });
+export const removeProject = (id: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "DELETE");
+export const discoverProjects = (deviceId?: DeviceId) =>
+  get<{ found: { name: string; path: string }[] }>(apiUrl(deviceId, "/api/projects/discover")).then((r) => r.found);
+export const projectGit = (id: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}/git`));
+export const browseFolders = (dir?: string, deviceId?: DeviceId) =>
+  get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(apiUrl(deviceId, `/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`));
+export const workspaceGit = (cwd: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/workspaces/git?cwd=${encodeURIComponent(cwd)}`));
+export const prepareWorkspace = (req: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string }) => {
+  const ref = req.projectId ? splitProjectId(req.projectId) : undefined;
+  return send<{ workspace: Workspace }>(apiUrl(ref?.deviceId, "/api/workspaces"), "POST", { ...req, projectId: ref?.id })
+    .then((r) => (ref?.deviceId ? { ...r.workspace, deviceId: ref.deviceId } : r.workspace));
+};
+export const removeWorktree = (cwd: string, force = false, deviceId?: DeviceId) => send(apiUrl(deviceId, "/api/workspaces/remove"), "POST", { cwd, force });

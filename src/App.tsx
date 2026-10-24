@@ -88,6 +88,8 @@ export async function preloadApp() {
     void Promise.all([pi.loadPiStatus(), pi.loadPiResources(), pi.loadPiProviders()]).catch(() => {});
   });
   const all = Promise.all([hydrated, chats, useStore.getState().loadProjects()]);
+  // Devices (and so replies running on them) are known only after projects are loaded.
+  void all.then(() => resumeReplies());
   await Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
 }
 
@@ -143,10 +145,11 @@ function Main() {
     const STALE = 10 * 60 * 1000;
     const recheck = () => {
       if (document.visibilityState !== "visible") return;
-      const { detection, refreshDetection, loadProjects } = useStore.getState();
+      const { detection, refreshDetection, loadDevices, loadProjects } = useStore.getState();
       const d = detection.pi;
       if (!d || (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > STALE)) void refreshDetection();
-      void loadProjects();
+      // Reload paired devices too, so a device that came online shows its projects again.
+      void loadDevices().finally(() => loadProjects());
     };
     const interval = setInterval(recheck, 5 * 60 * 1000);
     document.addEventListener("visibilitychange", recheck);

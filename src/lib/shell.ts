@@ -8,6 +8,7 @@ import type { ShellEvent } from "../../shared/types";
 import { makeTitle, newWorkspace } from "./chat";
 import { uid } from "./id";
 import { canResume, replyHost } from "./runtime";
+import { apiUrl, deviceServerId } from "./devices";
 import { useStore } from "./store";
 import type { Chat, Message, ShellRun } from "./types";
 
@@ -21,6 +22,12 @@ const PATIENCE = 10 * 60 * 1000;
 /** Commands this app is following, by message id. */
 const following = new Map<string, AbortController>();
 
+/** The paired device of the project new threads are set to work in, if any. */
+function projectDevice(st: ReturnType<typeof useStore.getState>): string | undefined {
+  const id = st.settings.workspace.projectId;
+  return id ? st.projects.find((p) => p.id === id)?.deviceId : undefined;
+}
+
 /** Run "!cmd" or "!!cmd" in `chatId` (default: the open chat, or a new one). Throws what went wrong before it started. */
 export async function runShell(text: string, chatId = useStore.getState().activeChatId): Promise<void> {
   const parsed = shellCommand(text);
@@ -30,7 +37,9 @@ export async function runShell(text: string, chatId = useStore.getState().active
   const runtime = existing ? (existing.runtime ?? "pi") : (st.settings.threadRuntime ?? "pi");
   if (runtime === "durable") throw new Error("Shell commands aren't available in Durable threads yet.");
   const now = Date.now();
-  const stream: ReplyStream = { id: uid(), via: replyHost() ?? "" };
+  const plannedDevice = existing?.workspace?.deviceId ?? (existing ? undefined : projectDevice(st));
+  const via = plannedDevice ? (deviceServerId(plannedDevice) ?? replyHost()) : replyHost();
+  const stream: ReplyStream = { id: uid(), via: via ?? "", deviceId: plannedDevice };
   const message: Message = {
     id: uid(),
     role: "shell",
@@ -53,6 +62,10 @@ export async function runShell(text: string, chatId = useStore.getState().active
       return patchShell(chat.id, message.id, { status: "error", error: (err as Error).message }, true);
     }
     useStore.getState().updateChat(chat.id, { workspace });
+    if (workspace.deviceId) {
+      stream.deviceId = workspace.deviceId;
+      patchShell(chat.id, message.id, { stream }, true);
+    }
   }
   void follow(chat.id, message.id, { cwd: workspace.cwd, command: parsed.command, hidden: parsed.hidden });
 }
@@ -62,7 +75,7 @@ export async function stopShell(message: Message) {
   const stream = message.shell?.stream;
   if (!stream || message.shell?.status !== "running") return;
   try {
-    await fetch(`/api/pi/shells/${encodeURIComponent(stream.id)}/stop`, { method: "POST" });
+    await fetch(apiUrl(stream.deviceId, `/api/pi/shells/${encodeURIComponent(stream.id)}/stop`), { method: "POST" });
   } catch (err) {
     console.warn("[shell] couldn't stop a command", err);
   }
@@ -141,8 +154,8 @@ async function* shellEvents(threadId: string, stream: ReplyStream, start: { cwd:
     let res: Response | undefined;
     try {
       res = posted
-        ? await fetch(`/api/pi/shells/${encodeURIComponent(stream.id)}`, { signal })
-        : await fetch(`/api/pi/threads/${encodeURIComponent(threadId)}/shell`, {
+        ? await fetch(apiUrl(stream.deviceId, `/api/pi/shells/${encodeURIComponent(stream.id)}`), { signal })
+        : await fetch(apiUrl(stream.deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/shell`), {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ id: stream.id, ...start }),

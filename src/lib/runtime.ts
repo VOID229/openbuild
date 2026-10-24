@@ -1,3 +1,5 @@
+import { isRemoteServer } from "./devices";
+
 // Where this copy of the app runs, read once at startup from /api/config:
 //   - "local":  served by your own OpenChat server, which keeps chats and settings on disk and API
 //               keys in the OS keychain.
@@ -34,7 +36,7 @@ export const replyHost = () => (resolved?.mode === "hosted" ? "hosted" : resolve
 
 /** Whether this app can pick up a reply that runs at `via`: the website's, or this same local server's. */
 export const canResume = (via: string | undefined) =>
-  !!resolved && (resolved.mode === "hosted" ? via === "hosted" && !!resolved.convexUrl : !!resolved.serverId && via === resolved.serverId);
+  !!resolved && (resolved.mode === "hosted" ? via === "hosted" && !!resolved.convexUrl : !!resolved.serverId && (via === resolved.serverId || isRemoteServer(via ?? "")));
 
 /** The computer threads run on (once `config` has resolved). */
 export const machineName = () => resolved?.machine;
