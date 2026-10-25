@@ -273,12 +273,20 @@ export const useStore = create<State>()(
         if (!get().devicesLoaded) await get().loadDevices().catch(() => {});
         const { devices } = get();
         const local = await listProjects().catch(() => [] as Project[]);
+        // This device's projects show at once: a paired device that's asleep must not leave the
+        // picker empty while its request hangs on a dead tailnet address.
+        set({ projects: local, projectsLoaded: true });
         const remote = await Promise.all(
           devices
             .filter((d) => !d.local)
-            .map((device) => listProjects(device.id).then((list) => list.map((p) => qualifyProject(p, device)), () => [] as Project[])),
+            .map((device) =>
+              withTimeout(listProjects(device.id), 8000).then(
+                (list) => list.map((p) => qualifyProject(p, device)),
+                () => [] as Project[],
+              ),
+            ),
         );
-        set({ projects: [...local, ...remote.flat()], projectsLoaded: true });
+        set({ projects: [...local, ...remote.flat()] });
       },
 
       updateSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
@@ -585,6 +593,23 @@ export function composerEffort(s: Pick<State, "activeChatId" | "chats" | "select
 }
 
 const AUTO: Selection = { auto: true };
+
+/** Settle a request within `ms`, so a device that never answers can't hold a caller for ever. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("it didn't answer in time")), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 /**
  * The model a device's list falls back to, memoised per list object. `selectionFor` is used as a

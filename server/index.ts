@@ -57,6 +57,8 @@ function forbidden(req: Request): Response | undefined {
  */
 const devicePathAllowed = (path: string) =>
   path === "/api/config" ||
+  path === "/api/pair/self" ||
+  /^\/api\/remote(\/|$)/.test(path) ||
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
@@ -80,6 +82,12 @@ const api =
 
 /** Headers from a proxied remote response that are safe to pass back to the browser. */
 const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after"];
+/**
+ * How long a paired device gets to send response headers. A sleeping machine's tailnet address
+ * swallows connections instead of refusing them, and without a deadline the browser's request (and
+ * whatever waits on it, such as the project list) hangs for minutes.
+ */
+const PROXY_HEADER_TIMEOUT_MS = 6000;
 
 /**
  * Forward a request to a paired device's server. The browser never sees the device token: it is
@@ -103,8 +111,15 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
   let lastError = "the device didn't answer";
   for (const base of device.urls) {
     const target = `${base.replace(/\/$/, "")}${path}${url.search}`;
+    // Abort only until the headers arrive: a reply's body streams for as long as it runs.
+    const ctrl = new AbortController();
+    const abort = () => ctrl.abort();
+    req.signal.addEventListener("abort", abort, { once: true });
+    const deadline = setTimeout(abort, PROXY_HEADER_TIMEOUT_MS);
     try {
-      const res = await fetch(target, { method: req.method, headers, body, signal: req.signal });
+      const res = await fetch(target, { method: req.method, headers, body, signal: ctrl.signal });
+      clearTimeout(deadline);
+      req.signal.removeEventListener("abort", abort);
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         lastError = `the device answered HTTP ${res.status}`;
         void res.body?.cancel().catch(() => {});
@@ -118,7 +133,9 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
       }
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
     } catch (err) {
-      lastError = (err as Error).message;
+      clearTimeout(deadline);
+      req.signal.removeEventListener("abort", abort);
+      lastError = req.signal.aborted ? "the browser went away" : ctrl.signal.aborted ? `no answer in ${PROXY_HEADER_TIMEOUT_MS / 1000}s` : (err as Error).message;
     }
   }
   return bad(`Couldn't reach ${device.name}: ${lastError}`, 502);
@@ -170,6 +187,32 @@ function serve(port: number, hostname: string) {
         },
       },
 
+      // Controlling this server from a paired device. While the server is stopped, the keeper
+      // (server/keeper.ts) answers the same paths on the same port, so starting it again works.
+      "/api/remote/status": {
+        GET: api(() => Response.json({ running: true, paired: true, device: machine() })),
+      },
+      "/api/remote/start": {
+        POST: api(() => Response.json({ ok: true, running: true, already: true })),
+      },
+      "/api/remote/stop": {
+        POST: api(() => {
+          // Answer first, then stop the way `openbuild stop` does: the keeper takes the port and
+          // tailscale serve keeps pointing at it, so the paired address still answers a start.
+          setTimeout(() => process.kill(process.pid, "SIGTERM"), 300);
+          return Response.json({ ok: true, running: false, stopping: true });
+        }),
+      },
+      // A client can revoke its own token when it unpairs, so the host stops trusting it.
+      "/api/pair/self": {
+        DELETE: api((req: Request) => {
+          const who = devices.authenticateDevice(req);
+          if (!who) return bad("Unauthorized", 401);
+          devices.forgetPairedClient(who.id);
+          return Response.json({ ok: true });
+        }),
+      },
+
       // Paired devices this server's UI can use (tokens stay on the server).
       "/api/devices": {
         GET: api(async () => {
@@ -192,7 +235,12 @@ function serve(port: number, hostname: string) {
         }),
       },
       "/api/devices/:id": {
-        DELETE: api((req: Bun.BunRequest<"/api/devices/:id">) => (devices.removeDevice(req.params.id) ? Response.json({ ok: true }) : bad("No such device", 404))),
+        DELETE: api(async (req: Bun.BunRequest<"/api/devices/:id">) => {
+          const device = devices.deviceCredentials(req.params.id);
+          // Revoke on the host too, so unpairing removes its trust rather than only this copy.
+          if (device) await devices.revokeDevice(device);
+          return devices.removeDevice(req.params.id) ? Response.json({ ok: true }) : bad("No such device", 404);
+        }),
       },
       // Everything the UI needs on that device: /api/devices/<id>/api/projects, /api/pi/chat, …
       "/api/devices/:id/*": {
