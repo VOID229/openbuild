@@ -15,7 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
-import { createInterface } from "node:readline/promises";
+import { ask, confirm } from "./prompt";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
@@ -383,17 +383,6 @@ async function serving(port: number): Promise<boolean> {
   }
 }
 
-/** Ask on the terminal; Enter takes the default. */
-async function confirm(question: string, fallback = true): Promise<boolean> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question(`${question} ${fallback ? "[Y/n]" : "[y/N]"} `)).trim().toLowerCase();
-    return answer ? answer === "y" || answer === "yes" : fallback;
-  } finally {
-    rl.close();
-  }
-}
-
 function status() {
   const s = running();
   if (!s) {
@@ -436,16 +425,6 @@ async function savePassword(password: string) {
 }
 
 // ------------------------------------------------------------------ pairing
-
-/** Ask one question on the terminal. */
-async function ask(question: string): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await rl.question(question)).trim();
-  } finally {
-    rl.close();
-  }
-}
 
 async function chooseTransport(verb: string): Promise<"tailscale" | "lan"> {
   if (!process.stdin.isTTY) fail("run pairing in a terminal so the code and questions can be shown privately.");
