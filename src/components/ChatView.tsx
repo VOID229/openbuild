@@ -82,6 +82,12 @@ function resolveAnchor(a: Anchor, root: HTMLElement): Element | undefined {
   return node;
 }
 
+/** Where the reader left each thread, to put them back there on returning: following the bottom, or
+ *  the message at the top of the view and how far down it they were. A message rather than a scroll
+ *  offset, so whatever was opened above it closing on the way back can't move them. */
+type Place = { stick: true } | { stick: false; message: string; offset: number };
+const places = new Map<string, Place>();
+
 export function ChatView({ chat }: { chat: Chat }) {
   const autoScroll = useStore((s) => s.settings.autoScroll);
   const scroller = useRef<HTMLDivElement>(null);
@@ -187,14 +193,35 @@ export function ChatView({ chat }: { chat: Chat }) {
 
   useEffect(() => () => cancelAnimationFrame(glideFrame.current), []);
 
-  // Opening a chat starts at the latest message.
+  const remember = () => {
+    const el = scroller.current;
+    const root = inner.current;
+    if (!el || !root) return;
+    if (following() || gap(el) <= 2) return void places.set(chat.id, { stick: true });
+    const top = el.getBoundingClientRect().top;
+    const msg = [...root.querySelectorAll(":scope > [data-message-id]")].find((m) => m.getBoundingClientRect().bottom > top);
+    if (!msg) return;
+    places.set(chat.id, { stick: false, message: msg.getAttribute("data-message-id")!, offset: top - msg.getBoundingClientRect().top });
+  };
+
+  // Opening a chat starts where the reader left it, or at the latest message.
   useLayoutEffect(() => {
     cancelAnimationFrame(glideFrame.current);
     stick.current = true;
     setSlack(0);
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
-    lastTop.current = el?.scrollTop ?? 0;
+    if (!el) return;
+    const place = places.get(chat.id);
+    const msg = place && !place.stick ? inner.current?.querySelector<HTMLElement>(`[data-message-id="${place.message}"]`) : null;
+    if (place && !place.stick && msg) {
+      stick.current = false;
+      const offset = Math.min(place.offset, msg.offsetHeight);
+      el.scrollTop = msg.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop + offset;
+      moved.current = el.scrollTop;
+      capture();
+      setAtBottom(gap(el) < 72);
+    } else el.scrollTop = el.scrollHeight;
+    lastTop.current = el.scrollTop;
   }, [chat.id]);
 
   // Opened from a search result: bring the matching message into view and highlight the matched words.
@@ -275,6 +302,7 @@ export function ChatView({ chat }: { chat: Chat }) {
     if (!ours && !wasFollowing && !following()) scrolled(delta);
     trimSlack(el);
     setAtBottom(g < 72 || (autoScroll && stick.current));
+    remember();
   };
 
   return (
