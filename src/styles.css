@@ -3977,6 +3977,14 @@ p.key-status svg {
   [data-keyboard] .sidebar-inner {
     padding-bottom: 10px;
   }
+
+  /* The empty state scrolls up to keep the composer above the keyboard (see Composer). It stops
+     short of the bottom by its own padding-bottom, which only counts as scrollable room if the
+     content isn't stretched to the screen first. */
+  .home {
+    align-items: flex-start;
+    overscroll-behavior: contain;
+  }
 }
 
 /* Phones: the model picker is a tall sheet along the bottom of the screen. Dropping from the pill

@@ -310,6 +310,17 @@ function SlashMenu({ commands, active, dropUp, onPick, onHover }: { commands: Pi
   );
 }
 
+/** Phones only: keeps the box (and what's above it) above the keyboard by scrolling the empty state
+ *  up just enough, and lets it back down when the keyboard goes away and there's nothing to scroll. */
+function keepAboveKeyboard(wrap: HTMLElement) {
+  const scroller = wrap.closest<HTMLElement>(".home");
+  if (!scroller || !window.matchMedia("(pointer: coarse)").matches) return;
+  // Typing in this box is what moved things: a reader who scrolled up stays where they are.
+  if (!wrap.contains(document.activeElement)) return;
+  const gap = scroller.getBoundingClientRect().bottom - wrap.getBoundingClientRect().bottom - 12;
+  if (gap < 0) scroller.scrollTop -= gap;
+}
+
 export function Composer({ variant, chatId, streaming }: Props) {
   const draftKey = chatId ?? NEW_CHAT;
   const lastTyped = useRef(0);
@@ -386,6 +397,22 @@ export function Composer({ variant, chatId, streaming }: Props) {
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [text]);
+
+  // On a phone the keyboard shrinks the screen, not the page, so the empty state has to be scrolled
+  // to keep the box out from under it. Following the screen as it shrinks, rather than animating a
+  // scroll of our own, makes the box ride the keyboard's own animation up — and back down when it
+  // closes, as the scroll it needs shrinks to nothing.
+  useEffect(() => {
+    const wrap = textarea.current?.closest<HTMLElement>(".composer-wrap");
+    const scroller = wrap?.closest<HTMLElement>(".home");
+    if (!wrap || !scroller) return;
+    // The screen shrinking (the keyboard) and the box growing (a long draft, an attachment) both
+    // move the box relative to the bottom of the screen.
+    const ro = new ResizeObserver(() => keepAboveKeyboard(wrap));
+    ro.observe(scroller);
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
 
   // Right after a reload the saved drafts may still be loading; fill them in unless typing has started.
   useEffect(() => {

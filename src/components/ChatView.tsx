@@ -242,7 +242,21 @@ export function ChatView({ chat }: { chat: Chat }) {
       } else glide();
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    // The view itself changing size is the screen, not the thread: a phone's keyboard taking the
+    // bottom half, or the composer growing under a long draft. Following readers go to the new
+    // bottom straight away, a frame behind the keyboard at most, instead of gliding after it.
+    const screen = new ResizeObserver(() => {
+      const view = scroller.current;
+      if (!view || !following()) return;
+      cancelAnimationFrame(glideFrame.current);
+      view.scrollTop = view.scrollHeight;
+      lastTop.current = view.scrollTop;
+    });
+    screen.observe(el.parentElement!);
+    return () => {
+      ro.disconnect();
+      screen.disconnect();
+    };
   }, [autoScroll]);
 
   const onScroll = () => {
