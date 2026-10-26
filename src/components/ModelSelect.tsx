@@ -7,14 +7,14 @@ import { usePlugins } from "../lib/plugins";
 import { hasModelScope, scopedModels, searchProviderGroups } from "../lib/modelSearch";
 import { useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
-import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
+import { arrowNav, cx, useDevicePref, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
 
 /** Search box + Pi's models grouped by provider. Mounts fresh per open. */
 export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
   usePlugins((s) => s.version);
   const [query, setQuery] = useState("");
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useDevicePref("models.showAll");
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
   const detection = useStore((s) => s.detection);
@@ -55,8 +55,17 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
         {scoped && (
-          <button type="button" className="menu-item" aria-pressed={showAll} onClick={() => setShowAll((v) => !v)}>
-            <span className="menu-item-label">{showAll ? "Show only scoped models" : `Show all ${all.length} models`}</span>
+          <button
+            type="button"
+            role="switch"
+            className="menu-item filter-toggle"
+            aria-checked={showAll}
+            onClick={() => setShowAll(!showAll)}
+          >
+            <span className="menu-item-label">Show all {all.length} models</span>
+            <span className="toggle toggle-sm" aria-hidden data-on={showAll}>
+              <span className="toggle-knob" />
+            </span>
           </button>
         )}
         {groups.map((g) => (

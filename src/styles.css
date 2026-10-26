@@ -6455,9 +6455,12 @@ a.btn-primary {
   }
 }
 
-/* A device's Pi model scope narrows the picker; this row widens it back to every model. */
+/* A device's Pi model scope narrows the picker; this switch widens it back to every model. */
 .mp-scope {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   width: 100%;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
@@ -6478,6 +6481,10 @@ a.btn-primary {
   background: var(--hover);
   color: var(--text);
   outline: none;
+}
+
+.mp-scope[aria-checked="true"] {
+  color: var(--text);
 }
 
 .mp-foot {

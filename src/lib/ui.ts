@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
@@ -86,6 +86,35 @@ export function useFocusOnShow(ref: RefObject<HTMLElement | null>) {
       cancelAnimationFrame(inner);
     };
   }, [ref]);
+}
+
+function readDevicePref(name: string) {
+  try {
+    return localStorage.getItem(name) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A boolean UI preference this browser remembers per paired device (localStorage, never synced), so
+ * each device keeps its last choice. Pass the device id, or none for this server's own models.
+ */
+export function useDevicePref(key: string, deviceId?: string): [boolean, (value: boolean) => void] {
+  const name = `openchat.pref.${key}.${deviceId ?? "local"}`;
+  const [value, setValue] = useState(() => readDevicePref(name));
+  // Following a picker to another device shows that device's remembered choice.
+  useEffect(() => setValue(readDevicePref(name)), [name]);
+  const set = useCallback(
+    (next: boolean) => {
+      setValue(next);
+      try {
+        localStorage.setItem(name, next ? "1" : "0");
+      } catch {}
+    },
+    [name],
+  );
+  return [value, set];
 }
 
 export function useMediaQuery(query: string) {

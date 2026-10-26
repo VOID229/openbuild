@@ -13,7 +13,7 @@ import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } fro
 import { composerEffort, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { effortFor } from "../lib/effort";
-import { arrowNav, cx } from "../lib/ui";
+import { arrowNav, cx, useDevicePref } from "../lib/ui";
 import { Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
@@ -270,7 +270,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
   const scope = detection.pi?.scope;
   const scoped = hasModelScope(scope);
-  const [showAll, setShowAll] = useState(false);
+  // Remembered per device: following the picker to another device shows that device's choice.
+  const [showAll, setShowAll] = useDevicePref("models.showAll", deviceId);
   const shown = useMemo(
     () =>
       showAll
@@ -469,11 +470,16 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
           {scoped && (
             <button
               type="button"
+              role="switch"
               className="mp-scope"
-              aria-pressed={showAll}
-              onClick={() => setShowAll((v) => !v)}
+              aria-checked={showAll}
+              aria-label={`Show all ${all.length} models`}
+              onClick={() => setShowAll(!showAll)}
             >
-              {showAll ? "Show only scoped models" : `Show all ${all.length} models`}
+              <span>Show all {all.length} models</span>
+              <span className="toggle toggle-sm" aria-hidden data-on={showAll}>
+                <span className="toggle-knob" />
+              </span>
             </button>
           )}
           <div ref={list} className="mp-list" onKeyDown={(e) => arrowNav(e)}>
