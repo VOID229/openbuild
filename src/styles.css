@@ -5613,64 +5613,6 @@ p.pi-empty {
   font-size: 13.5px;
 }
 
-/* Folder browser */
-
-.browser {
-  margin: 8px 0 12px;
-}
-
-.browser .pi-inline-form {
-  margin-top: 0;
-}
-
-.browser-list {
-  max-height: 320px;
-  margin: 8px 0 0;
-  padding: 4px;
-  overflow-y: auto;
-  list-style: none;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overscroll-behavior: contain;
-}
-
-.browser-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.browser-open {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  height: 36px;
-  padding: 0 8px;
-  border-radius: 8px;
-  font-size: 13.5px;
-  text-align: left;
-}
-
-.browser-open span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-@media (hover: hover) {
-  .browser-open:hover {
-    background: var(--hover);
-  }
-}
-
-.browser-chevron {
-  color: var(--text-3);
-}
-
 @media (pointer: coarse) {
   /* iOS zooms into fields under 16px. */
   .ask-input,
@@ -5956,6 +5898,34 @@ a.btn-primary {
 .pp-action-current {
   background: var(--active);
   color: var(--text);
+}
+
+/* New project, step one: a device or a git URL (src/components/NewProject.tsx) */
+.pp-pick-icon {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+
+.pp-pick-icon:disabled {
+  opacity: 0.5;
+}
+
+.pp-icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.pp-pick-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.pp-pick-icon .pi-status-dot {
+  margin: 0 4px 0 0;
 }
 
 /* Checkout and branch, right above the new-thread composer */
@@ -6636,6 +6606,29 @@ a.btn-primary {
 .confirm-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .spin { animation: openbuild-spin 900ms linear infinite; }
 @keyframes openbuild-spin { to { transform: rotate(360deg); } }
+
+/* New project dialog (src/components/NewProject.tsx): a small card over the app, not the settings frame. */
+.modal.np { display: block; text-align: left; width: min(440px, 100%); height: auto; padding: 24px; border-radius: 18px; overflow: visible; }
+.np-title { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -0.01em; }
+.np-where { display: flex; align-items: center; gap: 4px; margin: 6px 0 18px; font-size: 13.5px; color: var(--text-2); }
+.np-device { display: inline-flex; align-items: center; gap: 4px; margin: -3px 0 -3px -2px; padding: 3px 6px; border: 0; border-radius: 7px; background: none; font: inherit; color: var(--text); cursor: pointer; transition: background var(--fast) var(--ease); }
+.np-device:hover, .np-device-open { background: var(--hover); }
+.np-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.np-row-browse { grid-template-columns: 1fr auto; }
+.np-browse { height: 40px; }
+.np-url { font-family: var(--mono); font-size: 13.5px; }
+.np-path { margin-top: 10px; font-family: var(--mono); font-size: 13.5px; }
+.np-hint { min-height: 18px; margin: 8px 2px 0; font-size: 12.5px; color: var(--text-3); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.np-error { color: var(--danger); white-space: normal; }
+.np-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.np-actions .btn { height: 38px; }
+.np-cancel { border-color: transparent; background: none; color: var(--text-2); }
+@media (hover: hover) {
+  .np-cancel:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+}
+@media (pointer: coarse) {
+  .np .input { font-size: 16px; }
+}
 
 /* Plugin slot content in a toolbar: match the surrounding controls instead of looking foreign. */
 .composer-bar > .plugin-slot-button { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--text-2); font: inherit; font-size: 12px; cursor: pointer; transition: background var(--fast) var(--ease), color var(--fast) var(--ease); }

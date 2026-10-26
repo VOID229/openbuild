@@ -13,6 +13,7 @@ import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpe
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
 import { IconButton, PiMark, Popover, Spinner } from "./primitives";
+import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 /** Git state of a project (refetched when it changes or `refresh` ticks). */
 function useProjectGit(projectId: string | undefined, refresh: number) {
@@ -52,11 +53,10 @@ function useNewWorkspace() {
 
 // ------------------------------------------------------------------ project picker (in the heading)
 
-function ProjectList({ onDone }: { onDone: () => void }) {
+function ProjectList({ onDone, onNew }: { onDone: () => void; onNew: () => void }) {
   const projects = useStore((s) => s.projects);
   const pref = useStore((s) => s.settings.workspace);
   const updateSettings = useStore((s) => s.updateSettings);
-  const openSettings = useStore((s) => s.openSettings);
   const loadProjects = useStore((s) => s.loadProjects);
   const [query, setQuery] = useState("");
   const search = useRef<HTMLInputElement>(null);
@@ -121,8 +121,7 @@ function ProjectList({ onDone }: { onDone: () => void }) {
           type="button"
           className="pp-action"
           onClick={() => {
-            onDone();
-            openSettings("projects");
+            onNew();
           }}
         >
           <Plus size={15} /> New project…
@@ -191,6 +190,12 @@ function DeviceMenu() {
 /** The home heading; the underlined part opens the project picker. */
 export function ProjectHeading() {
   const [open, setOpen] = useState(false);
+  // The picker's step: its projects, or where a new project comes from.
+  const [step, setStep] = useState<"projects" | "new">("projects");
+  const [adding, setAdding] = useState<NewProjectStart>();
+  useEffect(() => {
+    if (open) setStep("projects");
+  }, [open]);
   const anchor = useRef<HTMLButtonElement>(null);
   const project = useStore((s) => s.projects.find((p) => p.id === s.settings.workspace.projectId));
   const machine = project?.deviceName ?? machineName();
@@ -212,8 +217,19 @@ export function ProjectHeading() {
         <DeviceMenu />
       )}
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="pp" label="Choose a project" fixed="auto">
-        <ProjectList onDone={() => setOpen(false)} />
+        {step === "projects" ? (
+          <ProjectList onDone={() => setOpen(false)} onNew={() => setStep("new")} />
+        ) : (
+          <NewProjectSource
+            onBack={() => setStep("projects")}
+            onPick={(start) => {
+              setOpen(false);
+              setAdding(start);
+            }}
+          />
+        )}
       </Popover>
+      <NewProjectDialog start={adding} onClose={() => setAdding(undefined)} />
     </div>
   );
 }

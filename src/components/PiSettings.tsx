@@ -3,12 +3,10 @@
 import {
   ArrowLeft,
   Check,
-  ChevronRight,
   CircleAlert,
   ExternalLink,
   Folder,
   FolderGit2,
-  FolderUp,
   Pencil,
   Plus,
   RefreshCw,
@@ -20,13 +18,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ModelInfo, Project } from "../../shared/types";
 import {
-  addProject,
   answerLogin,
-  browseFolders,
   cancelLogin,
   clearPiProblems,
   createResource,
-  discoverProjects,
   followJob,
   followLogin,
   installPackage,
@@ -54,6 +49,7 @@ import { piCacheOn, useStore } from "../lib/store";
 import { deviceName, splitProjectId } from "../lib/devices";
 import { cx } from "../lib/ui";
 import { OptionSelect } from "./ModelSelect";
+import { projectsDir } from "./NewProject";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -942,65 +938,6 @@ export function ProvidersSection() {
 
 // ------------------------------------------------------------------ Projects
 
-function FolderBrowser({ deviceId, onAdd }: { deviceId?: string; onAdd: (path: string) => Promise<void> }) {
-  const [dir, setDir] = useState<string>();
-  const [data, setData] = useState<Awaited<ReturnType<typeof browseFolders>>>();
-  const [error, setError] = useState<string>();
-  const [typed, setTyped] = useState("");
-  useEffect(() => {
-    let live = true;
-    browseFolders(dir, deviceId).then(
-      (d) => {
-        if (!live) return;
-        setData(d);
-        setTyped(tilde(d.dir));
-        setError(undefined);
-      },
-      (err: Error) => live && setError(err.message),
-    );
-    return () => {
-      live = false;
-    };
-  }, [dir, deviceId]);
-  return (
-    <div className="browser">
-      <form
-        className="pi-inline-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setDir(typed.trim());
-        }}
-      >
-        <IconButton label="Up a folder" tooltipSide="top" disabled={!data?.parent} onClick={() => data?.parent && setDir(data.parent)}>
-          <FolderUp size={16} />
-        </IconButton>
-        <input className="input input-sm pi-mono" value={typed} spellCheck={false} autoCapitalize="off" aria-label="Folder" onChange={(e) => setTyped(e.target.value)} />
-        <button type="button" className="btn btn-sm btn-primary" disabled={!data} onClick={() => data && void onAdd(data.dir)}>
-          Add this folder
-        </button>
-      </form>
-      {error && <ErrorNote>{error}</ErrorNote>}
-      <ul className="browser-list">
-        {data?.entries.map((e) => (
-          <li key={e.path} className="browser-row">
-            <button type="button" className="browser-open" onClick={() => setDir(e.path)}>
-              {e.git ? <FolderGit2 size={15} className="ok" /> : <Folder size={15} />}
-              <span>{e.name}</span>
-              <ChevronRight size={14} className="browser-chevron" />
-            </button>
-            {e.git && (
-              <button type="button" className="btn btn-sm" onClick={() => void onAdd(e.path)}>
-                Add
-              </button>
-            )}
-          </li>
-        ))}
-        {data && !data.entries.length && <li className="pi-empty">No folders here.</li>}
-      </ul>
-    </div>
-  );
-}
-
 function ProjectRow({ project, onChanged }: { project: Project; onChanged: () => void }) {
   const [renaming, setRenaming] = useState(false);
   const [name, setName] = useState(project.name);
@@ -1047,94 +984,74 @@ function ProjectRow({ project, onChanged }: { project: Project; onChanged: () =>
   );
 }
 
+/** Settings → Projects: the projects on every device (or one), to rename or remove, and where new ones go. Adding is in the project picker's New project dialog. */
 export function ProjectsSection() {
   const projects = useStore((s) => s.projects);
   const devices = useStore((s) => s.devices);
   const loadProjects = useStore((s) => s.loadProjects);
   const loadDevices = useStore((s) => s.loadDevices);
   const updateSettings = useStore((s) => s.updateSettings);
-  const pref = useStore((s) => s.settings.workspace);
-  const [deviceId, setDeviceId] = useState("");
-  const [found, setFound] = useState<{ name: string; path: string }[]>();
-  const [browsing, setBrowsing] = useState(false);
-  const [error, setError] = useState<string>();
-  const [added, setAdded] = useState<string>();
-  const local = devices.find((d) => d.local);
+  const saved = projectsDir(useStore((s) => s.settings.projectsDir));
+  const [dir, setDir] = useState(saved);
+  const [filter, setFilter] = useState("all");
   const remote = devices.filter((d) => !d.local);
-  // The server's own API has no device prefix; a paired device is reached through the proxy.
-  const apiDevice = deviceId || undefined;
+  // "" is this device: its projects have no device prefix.
+  const shown = filter === "all" ? projects : projects.filter((p) => (splitProjectId(p.id).deviceId ?? "") === filter);
 
   useEffect(() => {
     // Refresh online state too, so a device that just came back shows its projects.
     void loadDevices().finally(() => loadProjects());
   }, [loadDevices, loadProjects]);
-  useEffect(() => {
-    setFound(undefined);
-    setBrowsing(false);
-    discoverProjects(apiDevice).then(setFound, () => setFound([]));
-  }, [apiDevice]);
-
-  const add = async (path: string) => {
-    setError(undefined);
-    try {
-      const p = await addProject(path, apiDevice);
-      await loadProjects();
-      setFound((f) => f?.filter((x) => x.path !== p.path));
-      setAdded(p.name);
-      setBrowsing(false);
-      // The first project becomes where new threads work.
-      if (!pref.projectId && !apiDevice) updateSettings({ workspace: { ...pref, projectId: p.id } });
-    } catch (err) {
-      setError((err as Error).message);
-    }
+  useEffect(() => setDir(saved), [saved]);
+  const saveDir = () => {
+    const next = projectsDir(dir);
+    setDir(next);
+    if (next !== saved) updateSettings({ projectsDir: next });
   };
 
   return (
     <>
       <Heading>Projects</Heading>
-      <ul className="pi-list">
-        {projects.map((p) => (
-          <ProjectRow key={p.id} project={p} onChanged={loadProjects} />
-        ))}
-        {!projects.length && <li className="pi-empty">No projects yet. Add a folder below.</li>}
-      </ul>
-      {added && (
-        <p className="setting-desc">
-          <Check size={13} className="ok" /> Added {added}.
-        </p>
-      )}
-      {error && <ErrorNote>{error}</ErrorNote>}
+      <div className="pi-row">
+        <span className="pi-row-text">
+          <span className="pi-row-name">Default location</span>
+          <span className="pi-row-desc">Where new projects are made, on any device.</span>
+        </span>
+        <form
+          className="pi-row-field"
+          onSubmit={(e) => {
+            e.preventDefault();
+            saveDir();
+          }}
+        >
+          <input className="input input-sm pi-mono" value={dir} spellCheck={false} autoCapitalize="off" aria-label="Default project location" onChange={(e) => setDir(e.target.value)} onBlur={saveDir} />
+        </form>
+      </div>
       <section className="pi-block">
         <SubHeading
           action={
-            <button type="button" className="link-btn" onClick={() => setBrowsing((b) => !b)}>
-              {browsing ? "Close" : "Browse folders…"}
-            </button>
+            remote.length > 0 && (
+              <OptionSelect
+                label="Show projects on"
+                value={filter}
+                options={[{ value: "all", label: "All devices" }, ...devices.map((d) => ({ value: d.local ? "" : d.id, label: d.name }))]}
+                onChange={setFilter}
+              />
+            )
           }
         >
-          Add a project
+          Your projects
         </SubHeading>
-        <div className="pi-row">
-          <span className="pi-row-text">
-            <span className="pi-row-name">Add from</span>
-            <span className="pi-row-desc">Projects are added on the device you pick.</span>
-          </span>
-          <OptionSelect
-            className="pi-row-field"
-            label="Device to add a project from"
-            value={deviceId}
-            options={[
-              { value: "", label: local ? `This device — ${local.name}` : "This device" },
-              ...remote.map((d) => ({ value: d.id, label: `${d.name}${d.online === false ? " (offline)" : ""}` })),
-            ]}
-            onChange={setDeviceId}
-          />
-        </div>
-        {remote.length === 0 ? (
-          <p className="setting-desc">
-            No other devices yet. Pair one with <code>openbuild pair --client</code> on this computer, or <code>openbuild pair --host</code> on the other one.
-          </p>
-        ) : (
+        <ul className="pi-list">
+          {shown.map((p) => (
+            <ProjectRow key={p.id} project={p} onChanged={loadProjects} />
+          ))}
+          {!shown.length && <li className="pi-empty">{projects.length ? "No projects on this device." : "No projects yet. Add one with New project… in the project picker."}</li>}
+        </ul>
+      </section>
+      {remote.length > 0 && (
+        <section className="pi-block">
+          <SubHeading>Devices</SubHeading>
           <ul className="pi-list">
             {remote.map((d) => (
               <li key={d.id} className="pi-row">
@@ -1158,32 +1075,8 @@ export function ProjectsSection() {
               </li>
             ))}
           </ul>
-        )}
-        {browsing && <FolderBrowser deviceId={apiDevice} onAdd={add} />}
-        {found === undefined ? (
-          <Spinner />
-        ) : found.length ? (
-          <>
-            <p className="setting-desc">Repositories found in the usual code folders on {apiDevice ? (deviceName(apiDevice) ?? "that device") : "this device"}:</p>
-            <ul className="pi-list">
-              {found.slice(0, 60).map((f) => (
-                <li key={f.path} className="pi-row">
-                  <FolderGit2 size={16} className="pi-row-icon" />
-                  <div className="pi-row-text">
-                    <span className="pi-row-name">{f.name}</span>
-                    <span className="pi-row-desc pi-mono">{tilde(f.path)}</span>
-                  </div>
-                  <button type="button" className="btn btn-sm" onClick={() => void add(f.path)}>
-                    Add
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          !browsing && <p className="setting-desc">Browse to a folder to add it.</p>
-        )}
-      </section>
+        </section>
+      )}
     </>
   );
 }

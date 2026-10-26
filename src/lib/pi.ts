@@ -164,15 +164,21 @@ export const removeDevice = (id: string) => send(`/api/devices/${encodeURICompon
 
 /** Projects on this server, or on a paired device. Remote ids are namespaced by the caller. */
 export const listProjects = (deviceId?: DeviceId) => get<{ projects: Project[] }>(apiUrl(deviceId, "/api/projects")).then((r) => r.projects);
-export const addProject = (path: string, deviceId?: DeviceId) =>
-  send<{ project: Project }>(apiUrl(deviceId, "/api/projects"), "POST", { path }).then((r) => r.project);
+/** `create` makes the folder when it doesn't exist yet; `name` defaults to the folder's. */
+export const addProject = (path: string, deviceId?: DeviceId, opts: { name?: string; create?: boolean } = {}) =>
+  send<{ project: Project }>(apiUrl(deviceId, "/api/projects"), "POST", { path, ...opts }).then((r) => r.project);
+/** Clone a repository into `path` (which mustn't exist yet) and add it as a project. */
+export const cloneProject = (url: string, path: string, deviceId?: DeviceId) =>
+  send<{ project: Project }>(apiUrl(deviceId, "/api/projects/clone"), "POST", { url, path }).then((r) => r.project);
 export const renameProject = (id: string, name: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "PATCH", { name });
 export const removeProject = (id: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "DELETE");
-export const discoverProjects = (deviceId?: DeviceId) =>
-  get<{ found: { name: string; path: string }[] }>(apiUrl(deviceId, "/api/projects/discover")).then((r) => r.found);
 export const projectGit = (id: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}/git`));
 export const browseFolders = (dir?: string, deviceId?: DeviceId) =>
   get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(apiUrl(deviceId, `/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`));
+/** Whether this browser can use the server's native folder picker (only when both are on one machine). */
+export const folderPickerAvailable = () => get<{ available: boolean }>("/api/native/folder").then((r) => r.available, () => false);
+/** Open the native folder picker; null when it was cancelled. */
+export const pickFolder = (dir?: string) => send<{ path: string | null }>("/api/native/folder", "POST", { dir }).then((r) => r.path);
 export const workspaceGit = (cwd: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/workspaces/git?cwd=${encodeURIComponent(cwd)}`));
 /** `deviceId` is only for a scratch folder: a project's own id says which device it's on. */
 export const prepareWorkspace = ({ deviceId: scratchDevice, ...req }: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string; deviceId?: DeviceId }) => {

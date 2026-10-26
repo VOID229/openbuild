@@ -421,14 +421,25 @@ export function piRoutes(api: Api) {
         const body = await readJson(req);
         if (!str(body?.path, 1024)) return bad("Expected { path }");
         try {
-          return Response.json({ project: await projects.addProject(body.path) });
+          const name = typeof body.name === "string" ? body.name.slice(0, 200) : undefined;
+          return Response.json({ project: await projects.addProject(body.path, { name, create: body.create === true }) });
         } catch (err) {
           return fail(err);
         }
       }),
     },
-    "/api/projects/discover": {
-      GET: api(() => Response.json({ found: projects.discover() })),
+    "/api/projects/clone": {
+      POST: api(async (req, server: Bun.Server<unknown>) => {
+        // A big repository takes a while.
+        server.timeout(req, 0);
+        const body = await readJson(req);
+        if (!str(body?.url, 2048) || !str(body?.path, 1024)) return bad("Expected { url, path }");
+        try {
+          return Response.json({ project: await projects.cloneProject(body.url, body.path, typeof body.name === "string" ? body.name.slice(0, 200) : undefined) });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
     },
     "/api/projects/:id": {
       PATCH: api(async (req: Bun.BunRequest<"/api/projects/:id">) => {

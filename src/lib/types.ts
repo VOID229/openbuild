@@ -70,6 +70,8 @@ export interface Settings {
   syncApiKeys?: boolean;
   /** Where new threads work: a project (none = a scratch folder), in its checkout or a new worktree. */
   workspace: NewWorkspace;
+  /** Where the New project dialog makes new project folders ("~/" when unset). */
+  projectsDir?: string;
   /** Runtime for new threads; older settings default to Pi. */
   threadRuntime?: ThreadRuntime;
   /** Starred Pi models ("<provider>/<id>"), in order. */

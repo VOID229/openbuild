@@ -3,7 +3,7 @@
 // checkout. Worktrees live in <data dir>/worktrees/<project>/<name>.
 import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 import type { GitInfo, Project, Workspace } from "../shared/types";
 import * as storage from "./storage";
 
@@ -24,8 +24,8 @@ function stored(): StoredProject[] {
 }
 const store = (list: StoredProject[]) => storage.setValue(KEY, JSON.stringify(list));
 
-async function git(cwd: string, args: string[], timeoutMs = 30_000): Promise<{ code: number; out: string; err: string }> {
-  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
+async function git(cwd: string, args: string[], timeoutMs = 30_000, env: Record<string, string> = {}): Promise<{ code: number; out: string; err: string }> {
+  const proc = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env } });
   const timer = setTimeout(() => proc.kill(), timeoutMs);
   const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
   clearTimeout(timer);
@@ -50,19 +50,44 @@ export function listProjects(): Project[] {
 
 export const findProject = (id: string) => listProjects().find((p) => p.id === id);
 
-/** Add a directory as a project (a repository's root when it's inside one). */
-export async function addProject(rawPath: string): Promise<Project> {
+/**
+ * Add a directory as a project (a repository's root when it's inside one). With `create`, a folder
+ * that doesn't exist yet is made first: that's how a new project starts.
+ */
+export async function addProject(rawPath: string, opts: { name?: string; create?: boolean } = {}): Promise<Project> {
   let path = expand(rawPath);
-  if (!isDir(path)) throw new Error(`No folder at ${tilde(path)}`);
+  if (!isDir(path)) {
+    if (!opts.create || existsSync(path)) throw new Error(`No folder at ${tilde(path)}`);
+    mkdirSync(path, { recursive: true });
+  }
   path = realpathSync(path);
   const top = await git(path, ["rev-parse", "--show-toplevel"]);
   if (top.code === 0 && top.out) path = realpathSync(top.out);
   const list = stored();
   const existing = list.find((p) => p.path === path);
   if (existing) return { ...existing, git: top.code === 0 };
-  const project = { id: crypto.randomUUID().slice(0, 8), name: basename(path), path };
+  const project = { id: crypto.randomUUID().slice(0, 8), name: opts.name?.trim().slice(0, 80) || basename(path), path };
   store([...list, project]);
   return { ...project, git: top.code === 0 };
+}
+
+/** A repository URL git can clone over the network: https, ssh, or scp-style (git@host:owner/repo). */
+const CLONE_URL = /^(?:(?:https?|ssh|git):\/\/[^\s/]+\/\S+|[\w.-]+@[\w.-]+:\S+)$/;
+
+/** Clone a repository into a new folder and add it as a project. */
+export async function cloneProject(url: string, rawPath: string, name?: string): Promise<Project> {
+  url = url.trim();
+  if (!CLONE_URL.test(url)) throw new Error("That doesn't look like a git URL (https://…, ssh://… or git@host:owner/repo)");
+  const path = expand(rawPath);
+  if (existsSync(path) && (!isDir(path) || readdirSync(path).length)) throw new Error(`${tilde(path)} already exists`);
+  mkdirSync(dirname(path), { recursive: true });
+  const r = await git(dirname(path), ["clone", "--", url, path], 10 * 60_000, {
+    // Network transports only (no ext:: or file://), and ssh fails instead of waiting for a prompt.
+    GIT_ALLOW_PROTOCOL: "https:http:ssh:git",
+    GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
+  });
+  if (r.code !== 0) throw new Error(r.err.split("\n").filter((l) => !l.startsWith("Cloning into")).pop() || "Couldn't clone the repository");
+  return addProject(path, { name });
 }
 
 export function removeProject(id: string) {
@@ -73,7 +98,7 @@ export function renameProject(id: string, name: string) {
   store(stored().map((p) => (p.id === id ? { ...p, name: name.trim().slice(0, 80) || p.name } : p)));
 }
 
-/** Subfolders of a folder, for the folder browser; repositories are marked. */
+/** Subfolders of a folder (an error when there's no folder there); repositories are marked. */
 export function browse(rawDir: string | undefined): { dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] } {
   const dir = expand(rawDir || homedir());
   if (!isDir(dir)) throw new Error(`No folder at ${tilde(dir)}`);
@@ -84,33 +109,6 @@ export function browse(rawDir: string | undefined): { dir: string; parent?: stri
     .sort((a, b) => Number(b.git) - Number(a.git) || a.name.localeCompare(b.name));
   const parent = resolve(dir, "..");
   return { dir, parent: parent !== dir ? parent : undefined, entries };
-}
-
-/** Git repositories in the usual places under your home folder, for quick adding. */
-export function discover(): { name: string; path: string }[] {
-  const roots = ["Efforts", "code", "Code", "dev", "Dev", "src", "projects", "Projects", "Developer", "repos", "git", "github", "GitHub", "work", "Work", "workspace", "Documents/GitHub"]
-    .map((d) => join(homedir(), d))
-    .filter(isDir);
-  const known = new Set(stored().map((p) => p.path));
-  const found: { name: string; path: string }[] = [];
-  const walk = (dir: string, depth: number) => {
-    if (found.length >= 200 || depth > 3) return;
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith(".") || e.name === "node_modules") continue;
-      const p = join(dir, e.name);
-      if (existsSync(join(p, ".git"))) {
-        if (!known.has(p)) found.push({ name: e.name, path: p });
-      } else walk(p, depth + 1);
-    }
-  };
-  for (const r of roots) walk(r, 0);
-  return found.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export async function gitInfo(cwd: string): Promise<GitInfo> {

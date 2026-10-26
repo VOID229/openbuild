@@ -19,6 +19,7 @@ import * as vault from "./vault";
 import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
 import * as durable from "./durable";
 import * as devices from "./devices";
+import * as folderPicker from "./folderPicker";
 
 const isEdits = (e: unknown): e is KeyEdit[] =>
   Array.isArray(e) &&
@@ -172,6 +173,22 @@ function serve(port: number, hostname: string) {
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
       "/api/config": {
         GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine() })),
+      },
+
+      // The OS folder picker, for a browser on this same machine (server/folderPicker.ts).
+      "/api/native/folder": {
+        GET: api((req, server: Bun.Server<unknown>) => Response.json({ available: folderPicker.sameMachine(req, server.requestIP(req)?.address) && folderPicker.available() })),
+        POST: api(async (req, server: Bun.Server<unknown>) => {
+          if (!folderPicker.sameMachine(req, server.requestIP(req)?.address)) return bad("The folder picker only opens for a browser on this machine", 403);
+          // The picker stays open for as long as it takes to choose.
+          server.timeout(req, 0);
+          const body = await readJson(req);
+          try {
+            return Response.json({ path: (await folderPicker.pickFolder(typeof body?.dir === "string" ? body.dir.slice(0, 1024) : undefined)) ?? null });
+          } catch (err) {
+            return bad((err as Error).message, 500);
+          }
+        }),
       },
 
       // Pairing: public, because the other device has no session yet. The code is the credential,
