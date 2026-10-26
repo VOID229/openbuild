@@ -254,6 +254,24 @@ export function deviceCredentials(id: string): StoredDevice | undefined {
   return readDevices().find((d) => d.id === id);
 }
 
+/**
+ * Ask a paired host to forget this client's token, so an unpair really revokes access.
+ * Best effort: an unreachable or stopped server (one without a keeper) can't be told.
+ */
+export async function revokeDevice(device: StoredDevice): Promise<boolean> {
+  for (const base of device.urls) {
+    try {
+      const res = await fetch(`${base.replace(/\/$/, "")}/api/pair/self`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${device.token}` },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) return true;
+    } catch {}
+  }
+  return false;
+}
+
 export function touchDevice(id: string, online: boolean): void {
   const list = readDevices();
   const device = list.find((d) => d.id === id);
