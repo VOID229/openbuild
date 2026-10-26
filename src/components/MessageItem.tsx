@@ -308,7 +308,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
             <button type="button" className="btn btn-sm" onClick={() => regenerate(chatId, message.id)}>
               Retry
             </button>
-          ) : <span>Durable cannot retry an existing turn. Start a new thread to try again.</span>}
+          ) : <span>Durable can't retry a turn. Send another message to carry on from here.</span>}
         </div>
       )}
       {message.notice && <div className="msg-notice">{message.notice}</div>}

@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall
 import { writeFileSync } from "node:fs";
 
 /** Zero network/key access: only use the static catalog, replace the dispatch method. */
-export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; marker?: string; tool?: boolean; command?: string } = {}) {
+export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; marker?: string; tool?: boolean; command?: string; delayMs?: number } = {}) {
   const models = builtinModels();
   const model = models.getModels().find(m => m.type === "chat")!;
   let calls = 0;
@@ -24,6 +24,15 @@ export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; m
       if (options.hold || (options.holdAfterTool && hasTool)) {
         if (options.marker) writeFileSync(options.marker, "model-entered");
         request?.signal?.addEventListener("abort", () => {
+          const aborted = { ...message, stopReason: "aborted" as const };
+          stream.push({ type: "error", reason: "aborted", error: aborted });
+        }, { once: true });
+      } else if (options.delayMs) {
+        // Answers after a while, like a real model, so work can be observed in flight.
+        if (options.marker) writeFileSync(options.marker, "model-entered");
+        const timer = setTimeout(() => stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message }), options.delayMs);
+        request?.signal?.addEventListener("abort", () => {
+          clearTimeout(timer);
           const aborted = { ...message, stopReason: "aborted" as const };
           stream.push({ type: "error", reason: "aborted", error: aborted });
         }, { once: true });

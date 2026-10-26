@@ -42,6 +42,8 @@ const STATE = join(DATA, "server.json");
 const LOG = join(DATA, "server.log");
 const KEEPER = join(DATA, "keeper.json");
 const KEEPER_LOG = join(DATA, "keeper.log");
+/** The process that runs Durable turns, so a server restart doesn't interrupt them (`server/durable/worker.ts`). */
+const DURABLE_WORKER = join(DATA, "durable", "worker.json");
 const PORT = Number(process.env.PORT ?? 3100);
 
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
@@ -227,7 +229,7 @@ async function start(mode: Mode) {
       return;
     }
     console.log(dim(`Switching from ${current.mode} to ${mode}…`));
-    await stop(true);
+    await stop(true, true);
   } else if (await serving(PORT)) {
     // Two servers on one port split requests between them (especially with Tailscale): some API
     // calls hit the old code, with no pairing routes. Never start a duplicate.
@@ -332,13 +334,23 @@ async function start(mode: Mode) {
   console.log(dim(`  Logs: openbuild logs · stop: openbuild stop`));
 }
 
+/** Stop the Durable worker. Only a full stop does: a restart leaves it running its turns. */
+function stopDurableWorker() {
+  try {
+    const state = JSON.parse(readFileSync(DURABLE_WORKER, "utf8")) as { pid?: unknown };
+    if (typeof state.pid === "number" && alive(state.pid)) process.kill(state.pid, "SIGTERM");
+  } catch {}
+  rmSync(DURABLE_WORKER, { force: true });
+}
 
-async function stop(quiet = false) {
+/** `keepWorker`: leave the Durable worker running (a restart reattaches to it). */
+async function stop(quiet = false, keepWorker = false) {
   const s = readState();
   const serverAlive = !!s && alive(s.pid);
   const keeper = keeperPid();
   if (!serverAlive && !keeper) {
     rmSync(STATE, { force: true });
+    if (!keepWorker) stopDurableWorker();
     if (!quiet) console.log("OpenBuild isn't running.");
     return;
   }
@@ -355,6 +367,7 @@ async function stop(quiet = false) {
     if (alive(s!.pid)) process.kill(s!.pid, "SIGKILL");
   }
   rmSync(STATE, { force: true });
+  if (!keepWorker) stopDurableWorker();
   if (!quiet) console.log("OpenBuild stopped.");
 }
 
@@ -844,16 +857,17 @@ switch (cmd) {
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
-    // Ordinary Pi RPC replies stop; Durable checkpoints resume on the next server startup.
-    // Neither runtime runs while the server is stopped.
+    // Ordinary Pi RPC replies stop. Durable turns keep running in their own worker process, and the
+    // new server reattaches to it.
     if (owned && !assumeYes) {
       if (!process.stdin.isTTY) fail("restarting ends the Pi threads working in it, and there is no terminal to confirm in. Add --yes to restart anyway.");
-      if (!(await confirm("Restarting stops ordinary Pi replies; Durable threads resume after startup. Proceed?"))) {
+      if (!(await confirm("Restarting stops ordinary Pi replies; Durable turns keep running and reattach afterwards. Proceed?"))) {
         console.log("restart canceled");
         break;
       }
     }
-    if (owned) await stop(true);
+    // Keep the Durable worker: its turns carry on through the restart, and the new server reattaches.
+    if (owned) await stop(true, true);
     await start(mode);
     break;
   }

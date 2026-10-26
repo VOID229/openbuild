@@ -17,11 +17,17 @@ Durable data lives in `durable/` inside OpenBuild's data directory (`OPENCHAT_DA
 - The manifest is written before submission. Repeating the same request ID reattaches to the original submission instead of sending a second prompt.
 - Server startup reopens unfinished runs and starts their scheduler without waiting for a browser. Reconnecting clients replay the saved events.
 
-**No work executes while OpenBuild is stopped.** Starting it again resumes durable work; this does not install a service manager or automatically restart a dead server. Use your existing supervisor if you need automatic server restart. Ordinary Pi replies still stop on server restart.
+### Turns run in a worker process
+
+The Durable runtime itself runs in a separate worker process (`server/durable/worker.ts`), started detached by the server and reached over a private Unix socket (`/tmp/openbuild-durable-<hash>.sock`, mode 0600). Its pid and socket are in `durable/worker.json`, and its output in `durable/worker.log`.
+
+That is what makes a **restart** not interrupt a turn: the server only drops its connection; the model request, tools and checkpoints keep going, and the new server process reattaches to the same worker and replays the run's events. A browser that lost its stream during the restart reconnects on its own. If a message is sent to a thread whose previous turn is still running, it reports "still working" with `code: "busy"`; the app then waits for the current turn and sends it rather than failing.
+
+`openbuild stop` (and a crash) does not run work forever: the worker is stopped too on a full stop, and a worker that died has its pending runs recovered from the manifests when the next one starts. A worker running older code (after an update) is replaced; its pending runs are resumed by the new one. **No work executes while both are stopped**, and none of this installs a service manager — use your existing supervisor if you need automatic server restart. Ordinary Pi replies still stop on server restart.
 
 Recovery is not an exactly-once guarantee for arbitrary shell commands or external services. Finished, committed tool results are retained. A crash during a tool declared unsafe to replay produces an interrupted tool result, allowing the model to assess what happened instead of blindly repeating side effects. A model request cut off before a committed response may be made again and may incur additional provider charges. Keep the workspace, Durable data and model credentials available across restarts.
 
-Only **one OpenBuild process** may own a Durable data directory. Do not open its harness storage from a second process while OpenBuild is using it. Back up the entire `durable/` directory while stopped; the existing `openchat.db` snapshots alone do not include Durable checkpoints.
+Only **the worker** may own a Durable data directory. Do not open its harness storage from a second process while the worker is using it: the server reaches it over the socket instead. Back up the entire `durable/` directory while stopped; the existing `openchat.db` snapshots alone do not include Durable checkpoints.
 
 ## Initial limitations
 

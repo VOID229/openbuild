@@ -25,7 +25,15 @@ type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A
 
 const ndjson = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" };
 const runHeaders = { ...ndjson, "x-openchat-run": "1" };
-const fail = (err: unknown, status = 400) => bad((err as Error).message || String(err), status);
+/** An error response. An explicit status wins; otherwise the error's own (409 for Durable), then 400. */
+const fail = (err: unknown, status?: number) => {
+  const code = (err as { code?: unknown })?.code;
+  const own = (err as { status?: unknown })?.status;
+  return Response.json(
+    { error: (err as Error).message || String(err), ...(typeof code === "string" ? { code } : {}) },
+    { status: status ?? (typeof own === "number" ? own : 400) },
+  );
+};
 const str = (v: unknown, max = 4096): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 
 /** A Pi model as the app's ModelInfo; its id is "<provider>/<model id>". */

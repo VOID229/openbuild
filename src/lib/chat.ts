@@ -423,7 +423,10 @@ async function generate(chatId: string, messageId: string, resume = false) {
         useStore.getState().patchMessage(chatId, messageId, { stream }, true);
       }
     }
-    const request = resume
+    // Durable admission is keyed by the reply's stream id, so posting the same request again picks up
+    // its turn (or starts it, if the server restarted before admitting it). Pi replies are reattached.
+    const repost = resume && chat.runtime === "durable" && !!workspace && !!model;
+    const request = resume && !repost
       ? undefined
       : pi
         ? piRequest(chat, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), workspace!)
