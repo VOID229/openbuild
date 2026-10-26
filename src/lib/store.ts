@@ -20,6 +20,7 @@ const DEFAULT_SETTINGS: Settings = {
   theme: "system",
   font: "fun",
   autoScroll: true,
+  confirmDelete: true,
   cmdEnter: false,
   autoRouter: false,
   avoid: [],

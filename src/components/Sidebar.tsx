@@ -313,23 +313,83 @@ interface MenuState {
   end?: boolean;
 }
 
-function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onClose: () => void; onRename: (id: string) => void }) {
+/** Delete a thread for good, stopping any reply still running. */
+function deleteThread(id: string) {
+  stopGeneration(id);
+  useStore.getState().removeChat(id);
+}
+
+function DeleteThreadDialog({ chat, onClose }: { chat: Chat; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const updateSettings = useStore((s) => s.updateSettings);
+  const [skipNextTime, setSkipNextTime] = useState(false);
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="confirm-dialog"
+      aria-labelledby="thread-delete-title"
+      aria-describedby="thread-delete-description"
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+    >
+      <h2 id="thread-delete-title">Delete “{chat.title}”?</h2>
+      <p id="thread-delete-description">This permanently deletes the thread and its messages. It can't be undone.</p>
+      <label className="confirm-skip">
+        <input type="checkbox" checked={skipNextTime} onChange={(e) => setSkipNextTime(e.target.checked)} />
+        Don't ask again
+      </label>
+      <div className="confirm-actions">
+        <button type="button" className="btn btn-sm" onClick={onClose} autoFocus>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-danger"
+          onClick={() => {
+            if (skipNextTime) updateSettings({ confirmDelete: false });
+            deleteThread(chat.id);
+            onClose();
+          }}
+        >
+          <Trash size={14} /> Delete
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+function ChatContextMenu({
+  state,
+  onClose,
+  onRename,
+  onDelete,
+}: {
+  state?: MenuState;
+  onClose: () => void;
+  onRename: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const last = useRef(state);
   if (state) last.current = state;
   const current = last.current;
   const chat = useStore((s) => s.chats.find((c) => c.id === current?.chatId));
-  const { updateChat, removeChat } = useStore.getState();
+  const { updateChat } = useStore.getState();
   const open = !!state;
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
-  const [confirm, setConfirm] = useState(false);
   const [copyOpen, setCopyOpen] = useState(false);
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
     if (!open || !mounted || !state) return;
-    setConfirm(false);
     setCopyOpen(false);
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
@@ -468,15 +528,10 @@ function ChatContextMenu({ state, onClose, onRename }: { state?: MenuState; onCl
       <button
         type="button"
         role="menuitem"
-        className={cx("menu-item menu-item-danger", confirm && "menu-item-confirm")}
-        onClick={() => {
-          if (!confirm) return setConfirm(true);
-          stopGeneration(chat.id);
-          removeChat(chat.id);
-          onClose();
-        }}
+        className="menu-item menu-item-danger"
+        onClick={act(() => (useStore.getState().settings.confirmDelete === false ? deleteThread(chat.id) : onDelete(chat.id)))}
       >
-        <Trash size={15} /> {confirm ? "Click again to delete" : "Delete"}
+        <Trash size={15} /> Delete
       </button>
     </div>
   );
@@ -709,6 +764,8 @@ export function Sidebar() {
   const [menu, setMenu] = useState<MenuState>();
   const [renamingId, setRenamingId] = useState<string>();
   const closeMenu = useCallback(() => setMenu(undefined), []);
+  const [deletingId, setDeletingId] = useState<string>();
+  const deleting = useStore((s) => s.chats.find((c) => c.id === deletingId));
 
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
@@ -917,7 +974,8 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
-      <ChatContextMenu state={menu} onClose={closeMenu} onRename={setRenamingId} />
+      <ChatContextMenu state={menu} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} />
+      {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
     </>
   );
 }

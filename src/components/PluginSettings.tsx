@@ -33,7 +33,7 @@ function DeletePluginDialog({ plugin, busy, onCancel, onConfirm }: { plugin: Plu
   return (
     <dialog
       ref={dialog}
-      className="plugin-confirm-dialog"
+      className="confirm-dialog"
       aria-labelledby="plugin-delete-title"
       aria-describedby="plugin-delete-description"
       onCancel={(event) => {
@@ -46,11 +46,11 @@ function DeletePluginDialog({ plugin, busy, onCancel, onConfirm }: { plugin: Plu
         This permanently removes the <code>{plugin.id}</code> folder from <code>plugins/</code>, including its manifest, client and
         server files. It can't be undone from OpenBuild.
       </p>
-      <label className="plugin-confirm-skip">
+      <label className="confirm-skip">
         <input type="checkbox" checked={skipNextTime} onChange={(event) => setSkipNextTime(event.target.checked)} />
         Don't ask again
       </label>
-      <div className="plugin-confirm-actions">
+      <div className="confirm-actions">
         <button type="button" className="btn btn-sm" onClick={onCancel} disabled={busy} autoFocus>
           Cancel
         </button>

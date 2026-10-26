@@ -38,6 +38,8 @@ export interface Settings {
   theme: Theme;
   font: FontStyle;
   autoScroll: boolean;
+  /** Ask before deleting a thread (off once "Don't ask again" is ticked). */
+  confirmDelete: boolean;
   cmdEnter: boolean;
   /** Opt-in transcription on the server's private Whisper endpoint. */
   dictation?: { enabled: boolean; connection: "lan" | "tailscale" };

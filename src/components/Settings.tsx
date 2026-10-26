@@ -139,6 +139,13 @@ function GeneralSection() {
       </div>
       <div className="setting-row">
         <div className="setting-text">
+          <div className="setting-label">Confirm Before Deleting Threads</div>
+          <p className="setting-desc">Ask before a thread is deleted from the sidebar.</p>
+        </div>
+        <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm Before Deleting Threads" />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
           <div className="setting-label">Require Cmd+Enter To Submit</div>
           <p className="setting-desc">
             When enabled, press Cmd+Enter (or Ctrl+Enter) to submit.

@@ -564,10 +564,6 @@ svg {
   color: var(--danger);
 }
 
-.menu-item-confirm {
-  background: var(--danger-bg) !important;
-}
-
 .menu-empty {
   margin: 0;
   padding: 10px;
@@ -6626,15 +6622,15 @@ a.btn-primary {
 }
 
 /* Deleting a plugin: a small native modal so focus and Escape work like the rest of the app. */
-.plugin-confirm-dialog { width: min(420px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
-.plugin-confirm-dialog::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
-.plugin-confirm-dialog h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.plugin-confirm-dialog p { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
-.plugin-confirm-dialog code { font-family: var(--mono); font-size: 12px; padding: 1px 5px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); overflow-wrap: anywhere; }
-.plugin-confirm-skip { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; }
-.plugin-confirm-skip input { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); cursor: pointer; }
-.plugin-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-.plugin-confirm-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
+.confirm-dialog { width: min(420px, calc(100vw - 32px)); padding: 22px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface); color: var(--text); box-shadow: var(--shadow-lg); }
+.confirm-dialog::backdrop { background: var(--scrim); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.confirm-dialog h2 { margin: 0 0 8px; font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.confirm-dialog p { margin: 0 0 16px; font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.confirm-dialog code { font-family: var(--mono); font-size: 12px; padding: 1px 5px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); overflow-wrap: anywhere; }
+.confirm-skip { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); cursor: pointer; user-select: none; }
+.confirm-skip input { width: 15px; height: 15px; margin: 0; accent-color: var(--ink); cursor: pointer; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.confirm-actions .btn { display: inline-flex; align-items: center; gap: 6px; }
 .spin { animation: openbuild-spin 900ms linear infinite; }
 @keyframes openbuild-spin { to { transform: rotate(360deg); } }
 
