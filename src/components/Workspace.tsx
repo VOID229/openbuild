@@ -2,7 +2,7 @@
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, ShieldHalf, X } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, ShieldHalf, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
@@ -10,8 +10,9 @@ import { machineName } from "../lib/runtime";
 import { deviceName, splitProjectId } from "../lib/devices";
 import { useStore } from "../lib/store";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
+import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { PiMark, Popover, Spinner } from "./primitives";
+import { IconButton, PiMark, Popover, Spinner } from "./primitives";
 
 /** Git state of a project (refetched when it changes or `refresh` ticks). */
 function useProjectGit(projectId: string | undefined, refresh: number) {
@@ -532,6 +533,9 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
         </span>
       )}
       <UsageMeter chatId={chatId} runtime={runtime} />
+      <IconButton label="Open a terminal here" tooltip="Terminal (⌘J)" tooltipSide="top" className="ws-terminal" onClick={toggleTerminal}>
+        <SquareTerminal size={14} />
+      </IconButton>
     </div>
   );
 }

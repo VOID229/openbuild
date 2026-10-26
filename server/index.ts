@@ -8,6 +8,7 @@ import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
+import { terminalRoutes } from "./terminals";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
@@ -63,6 +64,8 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
   /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path) ||
+  // A terminal in a project's folder. It's a shell on this device, which Pi turns here already are.
+  /^\/api\/terminals(\/|$)/.test(path) ||
   // Managing Pi on this device. It already runs Pi turns here — tools included — so this is not
   // a wider grant: it's the same power through a settings page instead of a prompt.
   /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
@@ -394,6 +397,8 @@ function serve(port: number, hostname: string) {
       ...pluginRoutes(api),
 
       ...piRoutes(api),
+
+      ...terminalRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
     },

@@ -6,12 +6,14 @@ import { Composer } from "./components/Composer";
 import { Lightbox, useLightbox } from "./components/Lightbox";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
+import { TerminalPanel } from "./components/TerminalPanel";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
 import { EXTERNAL_VIA } from "../shared/replies";
 import { resumeReplies } from "./lib/chat";
 import { resumeShells } from "./lib/shell";
+import { toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
@@ -223,6 +225,7 @@ function Main() {
   // Global shortcuts:
   //   Cmd/Ctrl+,        open settings (instead of the browser's)
   //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
+  //   Cmd/Ctrl+J        open a terminal in the thread's folder (on the device it runs on)
   //   Cmd/Ctrl+Shift+O  new thread
   //   /                 focus chat search (or the composer when the sidebar is collapsed)
   //   Enter             focus the composer (sidebar open)
@@ -241,6 +244,12 @@ function Main() {
         } else if (key === "b" && !e.shiftKey && !e.altKey) {
           e.preventDefault();
           st.setSidebarOpen(!st.sidebarOpen);
+        } else if (key === "j" && !e.shiftKey && !e.altKey) {
+          // The browser's own Cmd/Ctrl+J (downloads) doesn't get it: the app is what has focus.
+          // Stopped here so a focused terminal doesn't also take it (Ctrl+J is a line feed there).
+          e.preventDefault();
+          e.stopPropagation();
+          toggleTerminal();
         } else if (e.shiftKey && key === "o") {
           e.preventDefault();
           newChat();
@@ -308,6 +317,7 @@ function Main() {
               </div>
             )
           ) : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+          <TerminalPanel />
         </main>
       </div>
       <SettingsModal />

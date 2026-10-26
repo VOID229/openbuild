@@ -45,6 +45,8 @@
   --bubble: #f0f0ee;
   --code-bg: #f6f6f4;
   --scrim: rgba(20, 20, 20, 0.18);
+  /* The terminal's own background: a touch off the page, so the drawer reads as its own surface. */
+  --terminal-bg: #fbfbfa;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
   --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
@@ -94,6 +96,7 @@
   --bubble: #262626;
   --code-bg: #151515;
   --scrim: rgba(0, 0, 0, 0.45);
+  --terminal-bg: #151515;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   /* Kept short: over near-black there are only ~10 grey levels, so any wide soft shadow shows as rings. */
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.3), 0 3px 8px rgba(0, 0, 0, 0.3);
@@ -6647,4 +6650,247 @@ a.btn-primary {
 .toggle:disabled { opacity: 0.45; cursor: default; }
 @media (hover: hover) {
   .toggle:disabled:hover { border-color: var(--border); }
+}
+
+/* ==========================================================================
+   Terminal
+
+   A drawer at the bottom of the thread: a tab per shell, each a real one on the device that holds
+   the project, in the folder the thread works in (src/components/TerminalPanel.tsx). Cmd/Ctrl+J
+   opens and closes it.
+   ========================================================================== */
+
+/* The space the drawer takes in the thread, and what slides in and out of it. It's pinned to the
+   bottom, so opening uncovers the terminal from the prompt up and closing slides it back down. Its
+   height is the only thing that animates: the panel inside keeps its size, so the terminal never
+   reflows or re-fits on the way. */
+.terminal-drawer {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: height 260ms var(--ease), opacity 200ms var(--ease);
+}
+
+.terminal-drawer-open {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.terminal-panel {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  margin: 0 8px 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+/* The top edge: drag it to make the drawer taller. */
+.terminal-grip {
+  flex: 0 0 auto;
+  height: 8px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+
+.terminal-grip::after {
+  content: "";
+  display: block;
+  width: 32px;
+  height: 3px;
+  margin: 3px auto 0;
+  border-radius: 2px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .terminal-panel:hover .terminal-grip::after { opacity: 1; }
+}
+
+.terminal-dragging { cursor: ns-resize; user-select: none; -webkit-user-select: none; }
+
+/* One row: the tabs, then where they run, then what you can do to the drawer. */
+.terminal-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 4px 0 6px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.terminal-tabs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.terminal-tabs::-webkit-scrollbar { display: none; }
+
+/* Tabs look like the app's chips: plain until you're on one, then a quiet surface. */
+.terminal-tab {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 1px;
+  height: 26px;
+  min-width: 0;
+  padding: 0 3px 0 10px;
+  border-radius: 8px;
+  color: var(--text-3);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.terminal-tab-active {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+@media (hover: hover) {
+  .terminal-tab:hover:not(.terminal-tab-active) { background: var(--hover); color: var(--text-2); }
+}
+
+.terminal-tab-name {
+  max-width: 170px;
+  overflow: hidden;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.terminal-tab-close {
+  display: grid;
+  margin-left: 2px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.terminal-tab-active .terminal-tab-close,
+.terminal-tab:hover .terminal-tab-close { opacity: 1; }
+
+@media (hover: hover) {
+  .terminal-tab-close:hover { background: var(--active); color: var(--text); }
+}
+
+.terminal-new { flex: 0 0 auto; }
+
+.terminal-where {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  margin-left: 2px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.terminal-where-icon { flex: 0 0 auto; }
+.terminal-where { text-overflow: ellipsis; }
+
+.terminal-action { flex: 0 0 auto; width: 26px; height: 26px; color: var(--text-3); }
+.terminal-action:disabled { opacity: 0.4; }
+
+/* The screen itself sits in the card, on the terminal's own background. */
+.terminal-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  padding: 0 8px 8px;
+}
+
+.terminal-screen {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--terminal-bg);
+  /* The terminal's own type, not the page's: xterm measures what it inherits, and the app's font
+     (16px Comic Neue on the default theme) would make its cells far taller than its font size. */
+  font-family: var(--font-mono-ui);
+  font-size: 12.5px;
+  line-height: 1.1;
+}
+
+/* xterm measures itself, so its padding belongs on its own element (the fit addon subtracts it). */
+.terminal-screen .xterm { height: 100%; padding: 7px 0 5px 10px; }
+.terminal-screen .xterm-viewport { background: transparent !important; }
+
+.terminal-note {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  margin: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.terminal-problem {
+  position: absolute;
+  inset: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--terminal-bg) 94%, transparent);
+  text-align: center;
+}
+
+.terminal-problem p { margin: 0; max-width: 46ch; color: var(--text-2); font-size: 13px; line-height: 1.5; }
+
+@media (max-width: 620px) {
+  .terminal-where { display: none; }
+  .terminal-tab-name { max-width: 120px; }
+}
+
+/* The thread's own way in, next to where it works (Cmd/Ctrl+J does the same from anywhere). */
+.ws-terminal { width: 24px; height: 24px; margin-left: -2px; color: var(--text-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-drawer { transition: none; }
 }
