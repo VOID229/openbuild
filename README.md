@@ -88,7 +88,7 @@ Use HTTPS (or localhost) to open OpenBuild: browsers block microphone access on 
 
 ### The `openbuild` command
 
-`bun run cli:install` links `openbuild` and its shorter alias `ob` into `~/.local/bin`. It runs the server in the background:
+`bun run cli:install` registers the package with Bun and installs both `openbuild` and `ob` from its `bin` entries into Bun's global bin directory (normally `~/.bun/bin`). Both names run the same CLI on Linux and macOS; neither is a separate wrapper. Keep that directory on your `PATH` and remove old wrappers or aliases that shadow either name. It runs the server in the background:
 
 ```sh
 openbuild set pass <pw>     # set/change the local password
