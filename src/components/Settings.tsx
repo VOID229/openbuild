@@ -1,4 +1,4 @@
-import { ArrowUp, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Bell, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
@@ -22,6 +22,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "keys", label: "Providers", icon: Key },
   { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "notifications", label: "Notifications", icon: Bell },
   { id: "plugins", label: "Plugins", icon: Puzzle },
   { id: "security", label: "Security", icon: Shield },
   { id: "account", label: "Account", icon: CircleUser },
@@ -103,6 +104,32 @@ function ProfileSection() {
       <Field label="language" htmlFor="profile-language">
         <input id="profile-language" className="input" value={profile.language} onChange={(e) => updateProfile({ language: e.target.value })} />
       </Field>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------ Notifications
+
+function NotificationsSection() {
+  const n = useStore((st) => st.settings.notifications);
+  const update = useStore((st) => st.updateSettings);
+  return (
+    <>
+      <Heading>Notifications</Heading>
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-label">New Builds</div>
+          <p className="setting-desc">Offer a reload when the OpenBuild server is running newer code than this window, e.g. after a pull and restart.</p>
+        </div>
+        <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New Builds" />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-label">Pi Updates</div>
+          <p className="setting-desc">Show when a newer Pi is out for this computer. Closing the notice skips that release.</p>
+        </div>
+        <Toggle checked={n.piUpdates} onChange={(piUpdates) => update({ notifications: { ...n, piUpdates } })} label="Pi Updates" />
+      </div>
     </>
   );
 }
@@ -473,6 +500,7 @@ export function SettingsModal() {
               <PluginSlot name="settings:appearance:after" />
             </>
           )}
+          {section === "notifications" && <NotificationsSection />}
           {section === "plugins" && <PluginsSection />}
           {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
         </div>

@@ -160,6 +160,11 @@ function serve(port: number, hostname: string) {
     development: process.env.NODE_ENV !== "production" && { hmr: true, console: true },
     routes: {
       "/*": index,
+      // The bundle's own files are exact routes and win over this. A script or stylesheet that
+      // isn't one of them is from an older build (a tab left open across an update): answer 404
+      // instead of the page, so it fails plainly. Anything else here (/thread-<id>) is the page.
+      "/:file": (req, server: Bun.Server<unknown>) =>
+        /\.(?:js|css|map)$/.test(req.params.file) ? new Response("Not found", { status: 404 }) : fetch(new URL("/", server.url)),
 
       // Only these authentication routes are public; never allow first-time password setup over the network.
       "/api/auth/status": { GET: (req) => forbidden(req) ?? localAuth.status(req) },

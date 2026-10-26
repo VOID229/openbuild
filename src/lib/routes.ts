@@ -1,6 +1,6 @@
 import type { SettingsSection } from "./store";
 
-const sections: readonly SettingsSection[] = ["security", "account", "profile", "general", "pi", "keys", "projects", "search", "appearance"];
+const sections: readonly SettingsSection[] = ["security", "account", "profile", "general", "pi", "keys", "projects", "search", "appearance", "notifications"];
 
 export const threadPath = (id: string) => `/thread-${encodeURIComponent(id)}`;
 

@@ -4,6 +4,7 @@ import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { Lightbox, useLightbox } from "./components/Lightbox";
+import { Notices } from "./components/Notices";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { TerminalPanel } from "./components/TerminalPanel";
@@ -321,6 +322,7 @@ function Main() {
         </main>
       </div>
       <SettingsModal />
+      <Notices />
       <Lightbox />
       <TooltipLayer />
       <PluginSlot name="app:overlay" />

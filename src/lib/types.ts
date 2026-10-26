@@ -41,6 +41,8 @@ export interface Settings {
   /** Ask before deleting a thread (off once "Don't ask again" is ticked). */
   confirmDelete: boolean;
   cmdEnter: boolean;
+  /** Notices at the top of the window. `dismissedPi` is the Pi release whose notice was closed. */
+  notifications: { builds: boolean; piUpdates: boolean; dismissedPi?: string };
   /** Opt-in transcription on the server's private Whisper endpoint. */
   dictation?: { enabled: boolean; connection: "lan" | "tailscale" };
   autoRouter: boolean;

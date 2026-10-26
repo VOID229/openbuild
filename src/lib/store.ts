@@ -14,7 +14,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
-export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance" | "plugins" | `plugin:${string}`;
+export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoScroll: true,
   confirmDelete: true,
   cmdEnter: false,
+  notifications: { builds: true, piUpdates: true },
   autoRouter: false,
   avoid: [],
   prioritize: [],
@@ -582,6 +583,7 @@ export const useStore = create<State>()(
             naming: { ...DEFAULT_SETTINGS.naming, ...p.settings?.naming },
             searchDigest: { ...DEFAULT_SETTINGS.searchDigest, ...p.settings?.searchDigest },
             workspace: { ...DEFAULT_SETTINGS.workspace, ...p.settings?.workspace },
+            notifications: { ...DEFAULT_SETTINGS.notifications, ...p.settings?.notifications },
           },
         };
       },
