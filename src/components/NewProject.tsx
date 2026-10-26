@@ -14,8 +14,6 @@ import { Popover } from "./primitives";
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 /** The default location, as a folder path ending in "/". */
 export const projectsDir = (dir: string | undefined) => (dir?.trim() || "~").replace(/\/*$/, "/");
-/** A typed name as a folder name: same words, no spaces or slashes. */
-const folderName = (name: string) => name.trim().replace(/[\s/]+/g, "-");
 /** The folder a clone of `url` gets: the repository's name. */
 const repoName = (url: string) =>
   url
@@ -123,8 +121,6 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [path, setPath] = useState(base);
-  // Until the path is edited, it follows the name: <default location>/<name>.
-  const [pathEdited, setPathEdited] = useState(false);
   const [exists, setExists] = useState<boolean>();
   const [canBrowse, setCanBrowse] = useState(false);
   const [busy, setBusy] = useState<"browse" | "add">();
@@ -145,7 +141,9 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
   }, [local]);
 
   // Whether the folder is already there (then it's added as it is) or will be made.
-  const target = path.trim();
+  // The folder. A clone left at the default location goes in a folder named after the repository there.
+  const atBase = projectsDir(path) === base;
+  const target = clone && atBase && repoName(url) ? base + repoName(url) : path.trim();
   useEffect(() => {
     setExists(undefined);
     if (!target) return;
@@ -175,8 +173,6 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
       const picked = await pickFolder(target || base);
       if (!picked) return;
       setPath(tilde(picked));
-      setPathEdited(true);
-      if (!name.trim()) setName(picked.split("/").filter(Boolean).pop() ?? "");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -184,8 +180,9 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
     }
   };
 
-  // The default location alone isn't a project; it needs a name or another folder.
-  const ready = !!target && (clone ? !!url.trim() && exists !== true : !!name.trim() || projectsDir(target) !== base) && !busy;
+  // A new project needs a name with something visible in it (not only spaces or invisible characters).
+  const named = /[\p{L}\p{N}\p{P}\p{S}]/u.test(name);
+  const ready = !!target && (clone ? !!url.trim() && exists !== true : named) && !busy;
   const add = async () => {
     if (!ready) return;
     setBusy("add");
@@ -240,7 +237,6 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
               autoCorrect="off"
               onChange={(e) => {
                 setUrl(e.target.value);
-                if (!pathEdited) setPath(base + repoName(e.target.value));
               }}
             />
           ) : (
@@ -254,7 +250,6 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
                 spellCheck={false}
                 onChange={(e) => {
                   setName(e.target.value);
-                  if (!pathEdited) setPath(base + folderName(e.target.value));
                 }}
               />
               {canBrowse && (
@@ -273,7 +268,6 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
             autoCorrect="off"
             onChange={(e) => {
               setPath(e.target.value);
-              setPathEdited(true);
             }}
           />
           <p className={cx("np-hint", error && "np-error")} role={error ? "alert" : undefined}>
@@ -286,9 +280,9 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
                     : ready
                       ? `Clones into ${projectsDir(target).slice(0, -1)}`
                       : " "
-                : ready && exists === false
+                : target && exists === false
                   ? `Creates ${projectsDir(target).slice(0, -1)}`
-                  : ready && exists
+                  : target && exists
                     ? "Adds this folder as it is"
                     : " ")}
           </p>
