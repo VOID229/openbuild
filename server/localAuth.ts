@@ -181,8 +181,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
   }
 
   async function setPassword(password: string): Promise<void> {
-    if (typeof password !== "string" || password.length < 12 || password.length > 1024) {
-      throw new Error("Password must contain 12–1024 characters");
+    if (typeof password !== "string" || password.length < 4 || password.length > 1024) {
+      throw new Error("Password must contain 4–1024 characters");
     }
     const hash = await Bun.password.hash(password, { algorithm: "argon2id" });
     sessions.clear();
@@ -276,7 +276,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
         current = passwordField(body.current);
         next = passwordField(body.password);
       } catch { return json({ error: "Invalid body" }, 400); }
-      if (next.length < 12) return json({ error: "Password must contain 12–1024 characters" }, 400);
+      if (next.length < 4) return json({ error: "Password must contain 4–1024 characters" }, 400);
       const valid = await matches(current, hash);
       if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
       if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 403);

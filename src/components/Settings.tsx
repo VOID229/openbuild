@@ -28,7 +28,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
 ];
 
 const Heading = SettingsHeading;
-const MIN_LOCAL_PASSWORD = 12;
+const MIN_LOCAL_PASSWORD = 4;
 
 function Field({ label, htmlFor, children }: { label: string; htmlFor: string; children: ReactNode }) {
   return (

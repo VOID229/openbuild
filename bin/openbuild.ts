@@ -818,7 +818,7 @@ switch (cmd) {
       if (result.status !== 0) fail("password entry cancelled (requires bash and a terminal).");
       return result.stdout;
     };
-    const password = prompt("New local password (at least 12 characters): ");
+    const password = prompt("New local password (at least 4 characters): ");
     if (password !== prompt("Confirm password: ")) fail("passwords don't match.");
     await savePassword(password);
     break;

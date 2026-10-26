@@ -42,11 +42,11 @@ describe("local password authentication", () => {
 
   test("validates password bounds and atomically stores only a private Argon2id hash", async () => {
     const { auth, directory } = fixture();
-    for (const password of ["", "a".repeat(11), "a".repeat(1025)]) {
+    for (const password of ["", "a".repeat(3), "a".repeat(1025)]) {
       await expect(auth.setPassword(password)).rejects.toThrow();
     }
     expect(readdirSync(directory)).toEqual([]);
-    await auth.setPassword("a".repeat(12));
+    await auth.setPassword("a".repeat(4));
     await auth.setPassword("b".repeat(1024));
     const file = join(directory, "access.json");
     const stored = JSON.parse(readFileSync(file, "utf8"));
@@ -184,7 +184,7 @@ describe("local password authentication", () => {
 
     expect((await auth.change(post("/password", { current: PASSWORD, password: "a brand new password" }))).status).toBe(401);
     expect((await auth.change(post("/password", { current: "wrong password", password: "a brand new password" }, cookie))).status).toBe(403);
-    expect((await auth.change(post("/password", { current: PASSWORD, password: "too short" }, cookie))).status).toBe(400);
+    expect((await auth.change(post("/password", { current: PASSWORD, password: "abc" }, cookie))).status).toBe(400);
     expect(auth.authorize(request(cookie))).toBeUndefined();
 
     const fresh = session(await auth.change(post("/password", { current: PASSWORD, password: "a brand new password" }, cookie)));
