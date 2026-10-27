@@ -17,6 +17,7 @@ import { Sidebar } from "./components/Sidebar";
 import { UsagePage } from "./components/UsagePage";
 import { canSyncChat, readChatProjection } from "./lib/chatSync";
 import { resumeReplies } from "./lib/chat";
+import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
@@ -86,7 +87,7 @@ export async function preloadApp() {
     if (useStore.persist.hasHydrated()) return resolve();
     const off = useStore.persist.onFinishHydration(() => { off(); resolve(); });
   });
-  const chats = Promise.all([hydrated, loadChats()]).then(([, chats]) => {
+  const chats = Promise.all([hydrated, loadChats(), queuesReady]).then(([, chats]) => {
     if (useStore.getState().chatsLoaded) return;
     useStore.getState().setChats(chats);
     // Replies that were still coming in when the app was closed or reloaded.

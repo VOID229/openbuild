@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Attachment } from "../../shared/types";
+import { createStore, del, entries, set } from "./kv";
 
 /** A message written while a reply was still coming in; it's sent once the chat is free. */
 export interface Queued {
@@ -9,7 +10,7 @@ export interface Queued {
 }
 
 interface QueueState {
-  /** Per chat, oldest first. Kept in memory only, like the replies they wait on. */
+  /** Per chat, oldest first. Saved in this browser across reloads and app restarts. */
   queues: Record<string, Queued[]>;
   /** Per chat, the queued message open in the composer. It keeps its slot, and nothing is sent meanwhile. */
   editing: Record<string, string>;
@@ -19,12 +20,54 @@ interface QueueState {
 
 export const useQueue = create<QueueState>(() => ({ queues: {}, editing: {}, steering: {} }));
 
+// Use IndexedDB (with the same fallback as drafts), not localStorage: attachments can be large.
+// Editing and steering are transient; restoring steering could send an already-consumed input twice.
+const storage = createStore("openchat-queues", "queues");
+let loaded = false;
+export const queuesLoaded = () => loaded;
+const changed = new Set<string>();
+
+function saveQueue(chatId: string, list: Queued[]) {
+  void (list.length ? set(chatId, list, storage) : del(chatId, storage)).catch((err) => {
+    console.error("Couldn't save queued messages", err);
+  });
+}
+
+useQueue.subscribe((state, prev) => {
+  if (state.queues === prev.queues) return;
+  for (const id of new Set([...Object.keys(prev.queues), ...Object.keys(state.queues)])) {
+    if (state.queues[id] === prev.queues[id]) continue;
+    if (!loaded) changed.add(id);
+    else saveQueue(id, state.queues[id] ?? []);
+  }
+});
+
+/** Queue hydration must finish before replies resume and start draining messages. */
+export const queuesReady: Promise<void> = (async () => {
+  try {
+    const saved = await entries<string, Queued[]>(storage);
+    const queues = { ...useQueue.getState().queues };
+    for (const [id, list] of saved) {
+      if (!changed.has(id) && Array.isArray(list) && list.length) queues[id] = list;
+    }
+    useQueue.setState({ queues });
+  } catch (err) {
+    console.error("Couldn't restore queued messages", err);
+  } finally {
+    loaded = true;
+    for (const id of changed) saveQueue(id, useQueue.getState().queues[id] ?? []);
+    changed.clear();
+  }
+})();
+
 const EMPTY: Queued[] = [];
 
 export const queueOf = (chatId: string | undefined) => (chatId && useQueue.getState().queues[chatId]) || EMPTY;
 export const useQueueOf = (chatId: string | undefined) => useQueue((s) => (chatId && s.queues[chatId]) || EMPTY);
 
 function setQueue(chatId: string, list: Queued[]) {
+  // Even deleting an as-yet-unloaded queue must override its saved copy.
+  if (!loaded) changed.add(chatId);
   useQueue.setState((s) => {
     const { [chatId]: _, ...rest } = s.queues;
     return { queues: list.length ? { ...rest, [chatId]: list } : rest };

@@ -4,7 +4,7 @@ import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
-import { editingQueued, moveQueued, queueOf, removeQueued, requeue, setSteering, shiftQueue, type Queued } from "./queue";
+import { editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, removeQueued, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
@@ -269,6 +269,10 @@ export function regenerate(chatId: string, messageId: string) {
 
 /** Send the chat's next queued message, unless a reply is still coming in or one is being edited. */
 export function drainQueue(chatId: string) {
+  if (!queuesLoaded()) {
+    void queuesReady.then(() => drainQueue(chatId));
+    return;
+  }
   if (running.has(chatId) || editingQueued(chatId)) return;
   if (!useStore.getState().chats.some((c) => c.id === chatId)) {
     while (shiftQueue(chatId));
