@@ -9,6 +9,7 @@ import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } f
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
 import { terminalRoutes } from "./terminals";
+import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
@@ -436,6 +437,8 @@ function serve(port: number, hostname: string) {
       ...piRoutes(api),
 
       ...terminalRoutes(api),
+
+      ...usageRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
     },

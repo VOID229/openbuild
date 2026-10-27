@@ -76,12 +76,14 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   expect(titles(html)).toEqual(["pi-thread", "durable-thread", "legacy-thread"]);
   expect(html).toContain('title="Pi runtime"');
   expect(html).toContain('title="Durable runtime"');
-  expect(html).toContain('class="runtime-toggle"');
+  // The footer's runtime switch became the usage button; the filter menu still filters by runtime.
+  expect(html).not.toContain("runtime-toggle");
+  expect(html).toContain('class="usage-toggle"');
 
   useStore.setState((s) => ({ view: { ...s.view, runtime: "pi" } }));
   html = markup(createElement(Sidebar));
   expect(titles(html)).toEqual(["pi-thread", "legacy-thread"]);
-  expect(html).toContain('class="runtime-toggle active"');
+  expect(html).toContain("filter-active");
 
   useStore.setState((s) => ({ view: { ...s.view, runtime: "durable" } }));
   html = markup(createElement(Sidebar));

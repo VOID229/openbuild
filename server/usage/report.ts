@@ -5,10 +5,9 @@ import { USAGE_PROVIDERS, type UsageModelRow, type UsageProvider, type UsageRang
 import type { Price } from "../../shared/types";
 import { modelKey, priceBook, referencePrice, type PriceBook } from "../pi/pricing";
 import { cursorPriceModel, type Rec } from "./formats";
-import { generation, scan, scanProblems } from "./scan";
+import { generation, pendingSources, scan, scanProblems } from "./scan";
 
 const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 const DAYS: Record<UsageRange, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };
 
 // ------------------------------------------------------------------ time zones
@@ -86,8 +85,9 @@ export async function report(range: UsageRange, tz: string, force = false): Prom
   const key = `${range}|${zone}`;
   const hit = reports.get(key);
   // Unchanged records, prices and hour: the same report.
-  if (hit && hit.version === version && hit.book === (book ?? undefined) && Date.now() - hit.at < 60_000) return hit.value;
+  if (hit && hit.version === version && hit.book === (book ?? undefined) && Date.now() - hit.at < 60_000) return { ...hit.value, pending: [...pendingSources()] };
   const value = build(range, zone, entries, book ?? undefined);
+  value.pending = [...pendingSources()];
   reports.set(key, { version, book: book ?? undefined, at: Date.now(), value });
   return value;
 }
@@ -148,8 +148,8 @@ function build(range: UsageRange, tz: string, entries: Map<string, { provider: U
         if (starts[mid]! <= r.t) lo = mid;
         else hi = mid - 1;
       }
-      series[lo]!.cost[pi] += cost;
-      series[lo]!.tokens[pi] += tokens;
+      series[lo]!.cost[pi]! += cost;
+      series[lo]!.tokens[pi]! += tokens;
       daySessions[lo]!.add(`${provider}:${r.session}`);
 
       const mk = `${provider}\0${r.model}`;
@@ -163,7 +163,7 @@ function build(range: UsageRange, tz: string, entries: Map<string, { provider: U
   const providers = [...per].map(([id, p]) => ({ id, sessions: p.sessions.size, requests: p.requests, cost: p.cost, tokens: p.tokens })).sort((a, b) => b.cost - a.cost || b.tokens - a.tokens);
   totals.sessions = providers.reduce((s, p) => s + p.sessions, 0);
   const order = providers.map((p) => ids.indexOf(p.id));
-  const problems = [...scanProblems()];
+  const problems: UsageReport["problems"] = [...scanProblems()];
   if (!book) problems.push({ provider: "pi", message: "Model prices are unavailable (Pi didn't answer), so costs that aren't reported are missing." });
   return {
     range,

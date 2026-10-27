@@ -117,8 +117,8 @@ async function codexSnapshot(): Promise<Omit<UsageLimits, "provider"> | undefine
   const dated = await Promise.all(names.map(async (n) => ({ path: join(root, n), m: (await stat(join(root, n))).mtimeMs })));
   const newest = dated.sort((a, b) => b.m - a.m)[0];
   if (!newest) return;
-  let bytes = await Bun.file(newest.path).bytes();
-  if (newest.path.endsWith(".zst")) bytes = Bun.zstdDecompressSync(bytes);
+  const raw = await Bun.file(newest.path).bytes();
+  const bytes: Uint8Array = newest.path.endsWith(".zst") ? Bun.zstdDecompressSync(raw) : raw;
   const lines = new TextDecoder().decode(bytes).split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
     if (!lines[i]!.includes('"rate_limits"')) continue;

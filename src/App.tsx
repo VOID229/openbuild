@@ -14,6 +14,7 @@ import { ThreadTools } from "./components/ThreadTools";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
+import { UsagePage } from "./components/UsagePage";
 import { canSyncChat, readChatProjection } from "./lib/chatSync";
 import { resumeReplies } from "./lib/chat";
 import { usePanel } from "./lib/panel";
@@ -140,6 +141,7 @@ function Main() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const lightboxOpen = useLightbox((s) => s.open);
+  const usageOpen = useStore((s) => s.usageOpen);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -306,8 +308,8 @@ function Main() {
   }, [newChat]);
 
   useEffect(() => {
-    document.title = chat ? `${chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title]);
+    document.title = usageOpen ? "Usage · OpenBuild" : chat ? `${chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, usageOpen]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -348,7 +350,7 @@ function Main() {
           ) : (
             <div className="main-row">
               <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                {chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+                {usageOpen ? <UsagePage /> : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
                 {!sideTerminal && <TerminalPanel />}
               </div>
               {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}

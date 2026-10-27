@@ -4,7 +4,7 @@ const sections: readonly SettingsSection[] = ["security", "account", "profile", 
 
 export const threadPath = (id: string) => `/thread-${encodeURIComponent(id)}`;
 
-type Route = { threadId?: string; section?: SettingsSection };
+type Route = { threadId?: string; section?: SettingsSection; usage?: true };
 
 export function readRoute(pathname: string, hash = ""): Route {
   try {
@@ -14,6 +14,7 @@ export function readRoute(pathname: string, hash = ""): Route {
     const path = pathname.replace(/\/+$/, "");
     const thread = /^\/thread-([^/]+)$/.exec(path);
     if (thread) return { threadId: decodeURIComponent(thread[1]!) };
+    if (path === "/usage") return { usage: true };
     const settings = /^\/settings(?:\/([^/]+))?$/.exec(path);
     if (settings) {
       const section = settings[1] ?? "profile";
@@ -29,12 +30,13 @@ interface RouteState {
   activeChatId?: string;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
+  usageOpen?: boolean;
   chats: { id: string }[];
 }
 interface RouteStore {
   getState(): RouteState;
   selectChat(id: string): void;
-  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection"> & { searchFocus?: undefined }): void;
+  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection" | "usageOpen"> & { searchFocus?: undefined }): void;
   subscribe(listener: () => void): () => void;
 }
 type Browser = Pick<Window, "location" | "history" | "addEventListener" | "removeEventListener">;
@@ -45,7 +47,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
   let applying = false;
   const pathFor = (state: RouteState) => state.settingsOpen
     ? `/settings/${state.settingsSection}`
-    : state.activeChatId ? threadPath(state.activeChatId) : "/new";
+    : state.usageOpen ? "/usage" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
   const write = (replace: boolean) => {
     const state = store.getState();
     const url = pathFor(state) + location.search;
@@ -66,6 +68,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
         activeChatId: chat?.id,
         settingsOpen: !!route.section,
         settingsSection: route.section ?? state.settingsSection,
+        usageOpen: !!route.usage,
         searchFocus: undefined,
       });
     } finally {

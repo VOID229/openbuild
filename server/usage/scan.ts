@@ -109,7 +109,7 @@ async function readFileInto(path: string, format: Format, info: { size: number; 
     ? { provider: format.provider, size: 0, mtime: 0, offset: 0, state: format.initial(), recs: [] }
     : { ...prev, recs: [...prev.recs], gone: undefined };
   const file = Bun.file(path);
-  let bytes = await (fresh ? file : file.slice(entry.offset)).bytes();
+  let bytes: Uint8Array = await (fresh ? file : file.slice(entry.offset)).bytes();
   let consumed = bytes.length;
   if (compressed) {
     bytes = Bun.zstdDecompressSync(bytes);
@@ -242,7 +242,7 @@ const CURSOR_TTL_MS = 5 * 60_000;
 const CURSOR_PAGE = 1000;
 let cursorProblem: string | undefined;
 
-async function scanCursor(entries: Map<string, Entry>, seen: Set<string>, force: boolean) {
+async function scanCursor(entries: Map<string, Entry>, force: boolean) {
   let token: string;
   try {
     token = await cursorToken();
@@ -255,10 +255,10 @@ async function scanCursor(entries: Map<string, Entry>, seen: Set<string>, force:
   const userId = subject.split("|").at(-1);
   if (!userId) return false;
   const id = `cursor:${Bun.hash(subject).toString(36)}`;
-  for (const [k, e] of entries) if (e.provider === "cursor") seen.add(k); // Other accounts' history stays.
   const prev = entries.get(id);
   const state = (prev?.state ?? {}) as { fetched?: number; through?: number };
-  if (!force && state.fetched && Date.now() - state.fetched < CURSOR_TTL_MS) return false;
+  // Refresh asks again, but not more than once a minute: each read is several requests to cursor.com.
+  if (state.fetched && Date.now() - state.fetched < (force ? 60_000 : CURSOR_TTL_MS)) return false;
   const end = Date.now();
   const start = Math.max(end - KEEP_MS, (state.through ?? 0) - 86_400_000);
   const page = async (n: number) => {
@@ -297,7 +297,6 @@ async function scanCursor(entries: Map<string, Entry>, seen: Set<string>, force:
     // Keep what came before the overlap; the rest was just fetched again.
     const kept = (prev?.recs ?? []).filter((r) => r.t < start && r.t > end - KEEP_MS);
     entries.set(id, { provider: "cursor", size: 0, mtime: 0, offset: 0, state: { fetched: Date.now(), through: end }, recs: [...kept, ...recs] });
-    seen.add(id);
     cursorProblem = undefined;
     return true;
   } catch (err) {
@@ -305,6 +304,22 @@ async function scanCursor(entries: Map<string, Entry>, seen: Set<string>, force:
     return false;
   }
 }
+
+let cursorRun: Promise<void> | undefined;
+/** Cursor's history takes a second a page, so it never holds up a report: it lands in a later one. */
+function refreshCursor(entries: Map<string, Entry>, force: boolean) {
+  cursorRun ??= scanCursor(entries, force)
+    .then((changed) => {
+      if (changed) {
+        changes++;
+        save(entries);
+      }
+    })
+    .finally(() => (cursorRun = undefined));
+}
+
+/** Sources still being read in the background. */
+export const pendingSources = () => (cursorRun ? (["cursor"] as const) : []);
 
 /** Sources that couldn't be read in the last scan. */
 export const scanProblems = () => (cursorProblem ? [{ provider: "cursor" as const, message: `Account history: ${cursorProblem}` }] : []);
@@ -330,12 +345,16 @@ export function scan(force = false): Promise<Map<string, Entry>> {
       ...SOURCES.map((s) => scanSource(s, entries, seen)),
       Promise.resolve(scanDurable(entries, seen)),
       scanOpenCode(entries, seen).catch((err) => (console.warn("[usage] couldn't read OpenCode:", (err as Error).message), false)),
-      scanCursor(entries, seen, force),
     ]);
     let changed = results.some(Boolean);
     const now = Date.now();
+    refreshCursor(entries, force);
     for (const [path, e] of entries) {
-      if (seen.has(path)) continue;
+      // Cursor's history (per account) isn't a file; it ages out with the rest below.
+      if (seen.has(path) || e.provider === "cursor") {
+        if (e.provider === "cursor" && !e.recs.some((r) => r.t > now - KEEP_MS)) entries.delete(path);
+        continue;
+      }
       // Missing: keep its records until the newest is older than any range shows.
       if (!e.gone) {
         e.gone = now;

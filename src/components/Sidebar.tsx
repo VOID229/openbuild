@@ -1,10 +1,11 @@
-import { Archive, ArchiveRestore, Bot, CalendarDays, Check, ChevronDown, ChevronRight, Clock, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, ShieldHalf, SquarePen, Trash, X } from "lucide-react";
+import { Archive, ArchiveRestore, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, ShieldHalf, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
+import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
@@ -772,7 +773,6 @@ export function Sidebar() {
   const [archiveView, setArchiveView] = useState(false);
 
   const view = useStore((s) => s.view);
-  const setView = useStore((s) => s.setView);
 
   // Model, runtime, subagent and sort filters from the filter menu and the runtime switch. A pinned or open subagent thread stays listed.
   const visible = useMemo(() => {
@@ -797,10 +797,8 @@ export function Sidebar() {
   const archived = useMemo(() => visible.filter((c) => c.archived), [visible]);
   const filtered = view.models.length > 0 || view.runtime !== "all";
 
-  // The bottom-right runtime switch cycles Pi → Durable → both.
-  const nextRuntime = view.runtime === "all" ? "pi" : view.runtime === "pi" ? "durable" : "all";
-  const runtimeLabel = view.runtime === "all" ? "All runtimes" : view.runtime === "pi" ? "Pi only" : "Durable only";
-  const nextRuntimeLabel = nextRuntime === "all" ? "all runtimes" : nextRuntime === "pi" ? "Pi only" : "Durable only";
+  const usageOpen = useStore((s) => s.usageOpen);
+  const setUsageOpen = useStore((s) => s.setUsageOpen);
 
   // Clearing the search also clears in-chat highlights.
   useEffect(() => {
@@ -945,21 +943,19 @@ export function Sidebar() {
             </button>
             <button
               type="button"
-              className={`runtime-toggle${view.runtime === "all" ? "" : " active"}`}
-              aria-label={`Runtime filter: ${runtimeLabel}. Show ${nextRuntimeLabel}.`}
-              title={`Runtime: ${runtimeLabel} — click for ${nextRuntimeLabel}`}
-              onClick={() => setView({ runtime: nextRuntime })}
+              className={`usage-toggle${usageOpen ? " active" : ""}`}
+              aria-label="Usage"
+              aria-pressed={usageOpen}
+              data-tooltip="Usage and limits"
+              data-tooltip-side="top"
+              onPointerEnter={() => prefetchUsage()}
+              onFocus={() => prefetchUsage()}
+              onClick={() => {
+                setUsageOpen(!usageOpen);
+                if (mobile && !usageOpen) setSidebarOpen(false);
+              }}
             >
-              {view.runtime === "durable" ? (
-                <ShieldHalf size={18} />
-              ) : view.runtime === "pi" ? (
-                <PiMark size={18} />
-              ) : (
-                <span className="runtime-both" aria-hidden>
-                  <PiMark size={11} />
-                  <ShieldHalf size={12} />
-                </span>
-              )}
+              <ChartNoAxesColumn size={18} />
             </button>
             <button
               type="button"

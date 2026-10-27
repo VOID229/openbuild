@@ -66,6 +66,8 @@ export interface UsageReport {
   days: UsageDayRow[];
   /** Models that used tokens but have no known price; their cost counts as 0. */
   unpriced: string[];
+  /** Sources still being read in the background; ask again shortly for them. */
+  pending?: UsageProvider[];
   /** Sources that couldn't be read. */
   problems: { provider: UsageProvider; message: string }[];
   generatedAt: number;
