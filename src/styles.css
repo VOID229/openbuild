@@ -6691,9 +6691,10 @@ a.btn-primary {
 }
 
 /* ==========================================================================
-   Terminal
+   Terminal (bottom drawer)
 
-   A drawer at the bottom of the thread: a tab per shell, each a real one on the device that holds
+   A drawer at the bottom of the thread, the default place for shells (Settings → General → Terminal
+   puts them beside the thread instead): a tab per shell, each a real one on the device that holds
    the project, in the folder the thread works in (src/components/TerminalPanel.tsx). Cmd/Ctrl+J
    opens and closes it.
    ========================================================================== */
@@ -6732,10 +6733,14 @@ a.btn-primary {
   overflow: hidden;
 }
 
-/* The top edge: drag it to make the drawer taller. */
+/* The top edge: drag it to make the drawer taller, double-click it for the default height. It
+   reaches a few pixels into the bar below, so it's easy to land on without sitting in the layout. */
 .terminal-grip {
+  position: relative;
+  z-index: 1;
   flex: 0 0 auto;
-  height: 8px;
+  height: 12px;
+  margin-bottom: -4px;
   cursor: ns-resize;
   touch-action: none;
 }
@@ -6756,7 +6761,11 @@ a.btn-primary {
   .terminal-panel:hover .terminal-grip::after { opacity: 1; }
 }
 
+/* While dragging, nothing under the pointer gets its own cursor, and the drawer follows the pointer
+   instead of easing after it. */
 .terminal-dragging { cursor: ns-resize; user-select: none; -webkit-user-select: none; }
+.terminal-dragging * { cursor: ns-resize !important; }
+.terminal-dragging .terminal-drawer { transition: none; }
 
 /* One row: the tabs, then where they run, then what you can do to the drawer. */
 .terminal-bar {
@@ -6853,14 +6862,481 @@ a.btn-primary {
   color: var(--text-3);
   font-family: var(--font-mono-ui);
   font-size: 11.5px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .terminal-where-icon { flex: 0 0 auto; }
-.terminal-where { text-overflow: ellipsis; }
 
 .terminal-action { flex: 0 0 auto; width: 26px; height: 26px; color: var(--text-3); }
 .terminal-action:disabled { opacity: 0.4; }
+
+@media (max-width: 620px) {
+  .terminal-tab-name { max-width: 120px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-drawer { transition: none; }
+}
+
+/* ==========================================================================
+   Beside the thread
+
+   The top right of the window (src/components/ThreadTools.tsx): the Commit button and the switches
+   for the side panel and the file tree. The side panel holds open files and terminals as tabs
+   (SidePanel.tsx); the file tree sits at the window's right edge (FileTree.tsx). Both slide open by
+   their width; what's inside keeps its own width, so it never reflows on the way.
+   ========================================================================== */
+
+:root {
+  --git-mod: #b66b00;
+  --git-new: #2f8a4d;
+  --git-del: #c93a3a;
+  --cm-comment: #8a8a85;
+  --cm-keyword: #a626a4;
+  --cm-string: #3f8a3a;
+  --cm-number: #b66b00;
+  --cm-type: #b66b00;
+  --cm-function: #2f6bd8;
+  --cm-property: #b5482e;
+  --cm-tag: #2f6bd8;
+  --cm-meta: #0f8aa0;
+  --cm-selection: rgba(47, 107, 216, 0.16);
+  --cm-active-line: rgba(0, 0, 0, 0.025);
+  --cm-search: rgba(182, 107, 0, 0.18);
+}
+
+:root[data-theme="dark"] {
+  --git-mod: #f0b46b;
+  --git-new: #8fd18a;
+  --git-del: #ef6b6b;
+  --cm-comment: #7a7a75;
+  --cm-keyword: #d58bf0;
+  --cm-string: #9ad38a;
+  --cm-number: #f0b46b;
+  --cm-type: #f0b46b;
+  --cm-function: #7fb0ff;
+  --cm-property: #f08c74;
+  --cm-tag: #7fb0ff;
+  --cm-meta: #6fd0e0;
+  --cm-selection: rgba(127, 176, 255, 0.22);
+  --cm-active-line: rgba(255, 255, 255, 0.03);
+  --cm-search: rgba(240, 180, 107, 0.2);
+}
+
+/* The thread (or home) on the left, then the side panel, then the file tree. */
+.main-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.main-col {
+  flex: 1;
+  min-width: min(440px, 100%);
+  display: flex;
+  flex-direction: column;
+}
+
+/* The thread keeps out from under the top-right tools: when the space to the right of its centred
+   column is narrower than the tools, the column moves left (and narrows, if it must) to make room.
+   The prompt moves with it, so the two stay lined up. On a phone the tools sit in their own row. */
+@media (min-width: 769px) {
+  .main-col .messages,
+  .main-col .dock {
+    padding-right: clamp(24px, calc(2 * var(--tools-over, 0px) + var(--content-w) + 40px - 100%), min(calc(var(--tools-over, 0px) + 8px), calc(100% - 420px)));
+    transition: padding-right var(--med) var(--ease);
+  }
+}
+
+/* The panel expanded over it: the thread stays mounted (and where it was scrolled), just hidden. */
+.main-col-hidden { display: none; }
+
+.thread-tools {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+}
+
+.thread-tool { color: var(--text-3); }
+.thread-tool-on { color: var(--text); background: var(--active); }
+
+.git-menu {
+  width: min(330px, calc(100vw - 24px));
+  max-height: min(620px, calc(100dvh - 80px));
+  overflow-y: auto;
+}
+
+.git-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px 6px;
+}
+
+.git-branch {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.git-sync { flex: none; color: var(--text-3); font-family: var(--font-mono-ui); font-size: 11.5px; }
+
+.git-message {
+  display: block;
+  width: calc(100% - 8px);
+  margin: 0 4px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: none;
+  outline: none;
+  transition: border-color var(--fast) var(--ease);
+}
+
+.git-message::placeholder { color: var(--text-3); }
+.git-message:focus { border-color: var(--border-strong); }
+
+.git-scope {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 4px 6px;
+}
+
+.git-scope-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+.git-scope-option[aria-checked="true"] { border-color: var(--border-strong); background: var(--active); }
+
+@media (hover: hover) {
+  .git-scope-option:hover:not([aria-checked="true"]) { background: var(--hover); }
+}
+
+.git-scope-name { font-size: 13px; font-weight: 500; }
+.git-scope-count { color: var(--text-3); font-size: 11.5px; }
+
+.git-files-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+@media (hover: hover) {
+  .git-files-toggle:hover { color: var(--text-2); }
+}
+
+.git-files-chevron { transform: rotate(-90deg); transition: transform var(--fast) var(--ease); }
+.git-files-chevron-open { transform: none; }
+
+.git-files {
+  max-height: 168px;
+  margin: 2px 4px 4px;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+}
+
+.git-files li { display: flex; gap: 8px; padding: 2px 10px; min-width: 0; }
+.git-file { min-width: 0; overflow: hidden; color: var(--text-2); text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.git-status { flex: none; width: 10px; color: var(--git-mod); font-weight: 600; }
+.git-status-new,
+.git-status-A { color: var(--git-new); }
+.git-status-D,
+.git-status-U { color: var(--git-del); }
+
+.git-note {
+  margin: 4px 10px 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+
+.git-note code { font-size: 11.5px; }
+.git-note-bad { color: var(--danger); }
+.git-note-ok { color: var(--text-2); }
+.git-note a { display: inline-flex; align-items: center; gap: 3px; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+
+.menu-hint { margin-left: auto; color: var(--text-3); font-size: 12px; }
+
+/* The side panel and the file tree. */
+.side-panel,
+.file-tree {
+  position: relative;
+  flex: none;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid transparent;
+  opacity: 0;
+  pointer-events: none;
+  transition: width 240ms var(--ease), opacity 180ms var(--ease), border-color 240ms var(--ease);
+}
+
+.side-panel-open,
+.file-tree-open {
+  border-left-color: var(--border);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The window's own rounded corner, on whichever is at its right edge. */
+.file-tree-open,
+.side-panel-open:not(:has(+ .file-tree-open)) { border-radius: 0 15px 15px 0; }
+
+.side-panel-expanded { flex: 1; border-left-color: transparent; }
+
+/* While the width animates, what's inside keeps at least its smallest size instead of squeezing. */
+.side-inner,
+.file-tree-inner {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.side-inner { min-width: 320px; }
+.file-tree-inner { min-width: 180px; }
+
+/* The thread keeps room to read and type: the panel gives way first (down to its smallest). */
+.side-panel:not(.side-panel-expanded) { flex-shrink: 1; min-width: 0; }
+.side-panel-open:not(.side-panel-expanded) { min-width: 320px; }
+.file-tree { max-width: 40%; }
+
+/* The left edge: drag to resize, double-click for the default width. */
+.side-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  width: 6px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.side-grip::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  background: var(--border-strong);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .side-grip:hover::after { opacity: 1; }
+}
+
+/* While dragging, nothing under the pointer gets its own cursor, and the edges follow the pointer
+   instead of easing after it. */
+.panel-dragging { cursor: ew-resize; user-select: none; -webkit-user-select: none; }
+.panel-dragging * { cursor: ew-resize !important; }
+.panel-dragging .side-panel,
+.panel-dragging .file-tree { transition: none; }
+
+/* The top row, level with the window's tools (which sit over its right end). */
+.side-head {
+  flex: none;
+  height: 48px;
+}
+
+.side-bar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-tabs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.side-tabs::-webkit-scrollbar { display: none; }
+
+/* Tabs look like the app's chips: plain until you're on one, then a quiet surface. */
+.side-tab {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 1px;
+  height: 28px;
+  min-width: 0;
+  padding: 0 3px 0 9px;
+  border-radius: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.side-tab-active { background: var(--surface-3); color: var(--text); }
+
+@media (hover: hover) {
+  .side-tab:hover:not(.side-tab-active) { background: var(--hover); color: var(--text-2); }
+}
+
+.side-tab-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.side-tab-close {
+  display: grid;
+  flex: none;
+  margin-left: 2px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.side-tab-active .side-tab-close,
+.side-tab:hover .side-tab-close { opacity: 1; }
+
+@media (hover: hover) {
+  .side-tab-close:hover { background: var(--active); color: var(--text); }
+}
+
+/* Unsaved: a dot where the close button is, the button itself on hover. */
+.side-tab-dirty { opacity: 1; }
+.side-tab-dirty svg { display: none; }
+.side-tab-dirty::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--text-2); }
+
+@media (hover: hover) {
+  .side-tab-dirty:hover svg { display: block; }
+  .side-tab-dirty:hover::after { display: none; }
+}
+
+.side-action { flex: none; width: 26px; height: 26px; color: var(--text-3); }
+.side-new { margin-left: 2px; }
+.side-menu { min-width: 190px; }
+
+.side-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* With no tabs: what the panel can open. */
+.side-launcher {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+}
+
+.side-launch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(340px, 100%);
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.side-launch svg { color: var(--text-2); }
+
+@media (hover: hover) {
+  .side-launch:hover { background: var(--hover); }
+}
+
+.side-launch-key { margin-left: auto; color: var(--text-3); font-family: var(--font-mono-ui); font-size: 12px; font-weight: 400; }
+.side-launch-hint { margin: 0; color: var(--text-3); font-size: 12.5px; }
+
+/* A terminal tab: where it runs, then the screen. */
+.side-terminal { display: flex; flex-direction: column; height: 100%; }
+
+.terminal-sub {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 6px 0 12px;
+}
+
+.terminal-where {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 /* The screen itself sits in the card, on the terminal's own background. */
 .terminal-body {
@@ -6921,16 +7397,183 @@ a.btn-primary {
 
 .terminal-problem p { margin: 0; max-width: 46ch; color: var(--text-2); font-size: 13px; line-height: 1.5; }
 
-@media (max-width: 620px) {
-  .terminal-where { display: none; }
-  .terminal-tab-name { max-width: 120px; }
-}
-
 /* The thread's own way in, next to where it works (Cmd/Ctrl+J does the same from anywhere). */
 .ws-terminal { width: 24px; height: 24px; margin-left: -2px; color: var(--text-3); }
 
+/* File tree. */
+.ft-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 8px 10px;
+}
+
+.ft-search {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+.ft-search input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.ft-search input::placeholder { color: var(--text-3); }
+.ft-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--text-3); }
+.ft-tool { flex: none; width: 30px; height: 30px; color: var(--text-3); }
+.ft-tool-on { color: var(--text-2); }
+
+.ft-list {
+  flex: 1;
+  min-height: 0;
+  padding: 0 6px 12px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ft-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding-right: 8px;
+  border-radius: 7px;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ft-row:hover { background: var(--hover); }
+}
+
+.ft-row:focus-visible { outline: none; background: var(--hover); }
+.ft-active { background: var(--active); color: var(--text); }
+.ft-chevron { display: grid; flex: none; place-items: center; width: 14px; color: var(--text-3); }
+.ft-chevron svg { transition: transform var(--fast) var(--ease); }
+.ft-chevron-open { transform: rotate(90deg); }
+.ft-icon { flex: none; color: var(--text-3); }
+.ft-icon[data-kind="ts"],
+.ft-icon[data-kind="tsx"] { color: #3b82c4; }
+.ft-icon[data-kind="js"],
+.ft-icon[data-kind="jsx"] { color: #c9a227; }
+.ft-icon[data-kind="swift"] { color: #e8743b; }
+.ft-icon[data-kind="py"] { color: #4b8bbe; }
+.ft-icon[data-kind="rs"] { color: #c86f3a; }
+.ft-icon[data-kind="text"] { color: #5a8dd6; }
+.ft-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ft-where { min-width: 0; margin-left: auto; overflow: hidden; color: var(--text-3); font-size: 11.5px; text-overflow: ellipsis; direction: rtl; }
+.ft-result { padding-left: 8px; }
+.ft-ignored { opacity: 0.5; }
+.ft-git-M .ft-name, .ft-git-R .ft-name { color: var(--git-mod); }
+.ft-git-new .ft-name, .ft-git-A .ft-name { color: var(--git-new); }
+.ft-git-D .ft-name { color: var(--git-del); text-decoration: line-through; }
+.ft-status { margin-left: auto; padding-left: 6px; color: inherit; font-family: var(--font-mono-ui); font-size: 11px; opacity: 0.8; }
+.ft-git-M .ft-status, .ft-git-R .ft-status { color: var(--git-mod); }
+.ft-git-new .ft-status, .ft-git-A .ft-status { color: var(--git-new); }
+.ft-git-D .ft-status { color: var(--git-del); }
+.ft-dot { width: 5px; height: 5px; margin-left: auto; border-radius: 50%; background: var(--git-mod); opacity: 0.8; }
+.ft-note { margin: 0; padding: 4px 12px; color: var(--text-3); font-size: 12.5px; }
+.ft-error { color: var(--danger); }
+
+/* An open file. */
+.fv { display: flex; flex-direction: column; height: 100%; }
+
+.fv-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 34px;
+  padding: 0 6px 0 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.fv-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fv-name { color: var(--text); }
+.fv-sep { margin: 0 3px; opacity: 0.6; }
+.fv-state { flex: none; color: var(--text-3); font-size: 12px; }
+.fv-tool { width: 26px; height: 26px; color: var(--text-3); }
+.fv-tool:disabled { opacity: 0.4; }
+.fv-tool-on { color: var(--text); background: var(--active); }
+
+.fv-conflict {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.fv-conflict > span { flex: 1; min-width: 160px; }
+.fv-conflict > svg { color: var(--git-mod); }
+.fv-body { position: relative; flex: 1; min-height: 0; }
+.fv-editor { height: 100%; }
+.fv-editor-hidden { visibility: hidden; }
+.fv-note { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text-3); font-size: 13px; text-align: center; }
+.fv-raw { display: grid; place-items: center; padding: 16px; overflow: auto; }
+.fv-raw img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
+
+@media (max-width: 768px) {
+  /* A phone has room for one: the panel or the tree covers the thread. */
+  .side-panel-open,
+  .file-tree-open {
+    position: absolute;
+    inset: 0;
+    z-index: 15;
+    width: auto !important;
+    min-width: 0 !important;
+    border-left: 0;
+    border-radius: 16px;
+    background: var(--surface);
+  }
+
+  .main-col { min-width: 0; }
+  .side-panel-open,
+  .file-tree-open { max-width: none !important; }
+  .side-inner,
+  .file-tree-inner { min-width: 0; }
+  .side-grip { display: none; }
+  .terminal-where { display: none; }
+  .side-tab-name { max-width: 120px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .terminal-drawer { transition: none; }
+  .side-panel,
+  .file-tree { transition: none; }
 }
 
 /* A page the agent shows (html_render): a frame on the thread's own background that fits the page. */

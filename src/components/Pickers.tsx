@@ -350,7 +350,6 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   useEffect(() => {
     if (!open) return;
     setQuery("");
-    setShowAll(false);
     if (window.matchMedia("(pointer: fine)").matches)
       requestAnimationFrame(() => search.current?.focus());
     setTab(

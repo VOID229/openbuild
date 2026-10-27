@@ -1,5 +1,5 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
@@ -7,13 +7,17 @@ import { Lightbox, useLightbox } from "./components/Lightbox";
 import { Notices } from "./components/Notices";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
+import { FileTree } from "./components/FileTree";
 import { TerminalPanel } from "./components/TerminalPanel";
+import { SidePanel } from "./components/SidePanel";
+import { ThreadTools } from "./components/ThreadTools";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
 import { canSyncChat, readChatProjection } from "./lib/chatSync";
 import { resumeReplies } from "./lib/chat";
-import { toggleTerminal } from "./lib/terminal";
+import { usePanel } from "./lib/panel";
+import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
 import { isHosted } from "./lib/runtime";
@@ -139,6 +143,23 @@ function Main() {
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const { setSidebarOpen, newChat } = useStore.getState();
+  const folder = usePanel((s) => s.folder);
+  const panelOpen = usePanel((s) => s.panel);
+  const expanded = usePanel((s) => s.expanded);
+  const [toolsWidth, setToolsWidth] = useState(0);
+  const onToolsWidth = useCallback((w: number) => setToolsWidth(w), []);
+  const sideTerminal = useStore((s) => (s.settings.terminal ?? "bottom") === "side");
+  const panelWidth = usePanel((s) => s.width);
+  const treeOpen = usePanel((s) => s.tree);
+  const treeWidth = usePanel((s) => s.treeWidth);
+  // How far the top-right tools reach over the thread (past the panel and tree they sit above), so
+  // the thread can keep out from under them.
+  const toolsOver = Math.max(0, toolsWidth - (panelOpen ? panelWidth : 0) - (treeOpen && folder?.cwd ? treeWidth : 0));
+  // The side panel and file tree follow the open thread's folder (or, on the home screen, the project
+  // the composer is set to), on the device it's on.
+  const projectId = useStore((s) => s.settings.workspace.projectId);
+  const projects = useStore((s) => s.projects);
+  useEffect(() => refreshTerminal(), [chat?.id, chat?.workspace?.cwd, chat?.workspace?.deviceId, projectId, projects, panelOpen]);
 
   const [loadError, setLoadError] = useState<string>();
   useEffect(() => {
@@ -324,8 +345,18 @@ function Main() {
                 </div>
               </div>
             )
-          ) : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
-          <TerminalPanel />
+          ) : (
+            <div className="main-row">
+              <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
+                {chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+                {!sideTerminal && <TerminalPanel />}
+              </div>
+              {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
+              {/* Only a real folder: a thread's, or the project the composer is set to (not every scratch folder at once). */}
+              {folder?.cwd && <FileTree folder={folder} />}
+            </div>
+          )}
+          {chatsLoaded && <ThreadTools chat={chat} onWidth={onToolsWidth} />}
         </main>
       </div>
       <SettingsModal />

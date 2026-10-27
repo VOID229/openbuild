@@ -1,6 +1,7 @@
-// A terminal tab's screen, in the side panel (SidePanel.tsx): one tab per shell, each running on the
-// device that holds the project, in the folder the thread works in (src/lib/terminal.ts,
-// server/terminals.ts), drawing what its PTY sends with xterm.js. Cmd/Ctrl+J shows and hides it.
+// A terminal tab's screen, shared by the bottom drawer (TerminalPanel.tsx) and the side panel
+// (SidePanel.tsx): one tab per shell, each running on the device that holds the project, in the
+// folder the thread works in (src/lib/terminal.ts, server/terminals.ts), drawing what its PTY sends
+// with xterm.js. Cmd/Ctrl+J shows and hides it.
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -9,6 +10,14 @@ import { editingSequence } from "../../shared/terminal";
 import { newTerminalTab, restartTerminalTab, TerminalConnection, useTerminal, type TerminalFolder, type TerminalTab } from "../lib/terminal";
 
 const FONT = '"JetBrains Mono Variable", "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace';
+/** Long enough to tell two shells in the same folder apart, short enough for the tab strip. */
+const TAB_TITLE = 28;
+
+/** A shell with a folder in its title is that folder; a title like "vim foo.txt" is worth showing as is. */
+export const tabLabel = (tab: TerminalTab, folder: TerminalFolder) => {
+  const title = tab.title?.replace(/^.*?:\s*/, "").trim();
+  return (title || folder.label).slice(0, TAB_TITLE);
+};
 
 /** The terminal's colours, read from the page so it matches the app's theme. */
 function readTheme() {
@@ -138,7 +147,7 @@ export function useTabKeys(open: boolean) {
       // With Option held a Mac reports "†"/"∑" as the key; the code is the letter itself.
       if (e.code !== "KeyT" && e.code !== "KeyW") return;
       const el = document.activeElement;
-      if (!el?.closest?.(".side-panel .xterm")) return;
+      if (!el?.closest?.(".side-panel .xterm, .terminal-panel .xterm")) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.code === "KeyT") newTerminalTab();
