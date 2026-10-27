@@ -1,8 +1,21 @@
 import { realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 export type CommandResult = { ok: boolean; out: string; err: string };
 export type Runner = (command: string, args: string[]) => CommandResult;
 export const UNIT = "openbuild.service";
+
+/** Only network settings belong here; leave ExecStart and worker lifecycle untouched. */
+export function systemdNetworkOverride(env: Record<string, string>) {
+  const quote = (value: string) => `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%").replace(/\n/g, "\\n").replace(/\r/g, "\\r")}"`;
+  return "# Managed by openbuild start [local|lan|tailscale].\n[Service]\n" +
+    ["HOST", "OPENCHAT_ALLOWED_HOSTS", "OPENBUILD_PUBLIC_HTTPS"].map((key) => `Environment=${quote(`${key}=${env[key] ?? ""}`)}`).join("\n") + "\n";
+}
+
+export function systemdNetworkOverridePath() {
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "systemd", "user", `${UNIT}.d`, "zz-openbuild-network.conf");
+}
 
 /** Only adopt a user service whose executable points at this installation. */
 export function systemdService(root: string, run: Runner, platform = process.platform) {

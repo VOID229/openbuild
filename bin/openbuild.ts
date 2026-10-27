@@ -19,7 +19,7 @@ import { ask } from "./prompt";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
-import { systemdService, UNIT } from "./systemd";
+import { systemdService, systemdNetworkOverride, systemdNetworkOverridePath, UNIT } from "./systemd";
 
 type Mode = "local" | "lan" | "tailscale";
 
@@ -40,13 +40,19 @@ interface State {
 const ROOT = dirname(dirname(realpathSync(import.meta.path)));
 const DATA = dataDir();
 const STATE = join(DATA, "server.json");
+// Never put a systemd PID in server.json: detached lifecycle code must not own it.
+const SERVICE_NETWORK = join(DATA, "systemd-network.json");
+type ServiceNetwork = Omit<State, "pid">;
+function serviceNetwork(): ServiceNetwork | undefined {
+  try { return JSON.parse(readFileSync(SERVICE_NETWORK, "utf8")); } catch { return undefined; }
+}
 const LOG = join(DATA, "server.log");
 const KEEPER = join(DATA, "keeper.json");
 const KEEPER_LOG = join(DATA, "keeper.log");
 /** The process that runs Durable turns, so a server restart doesn't interrupt them (`server/durable/worker.ts`). */
 const DURABLE_WORKER = join(DATA, "durable", "worker.json");
 const PI_WORKER = join(DATA, "pi-worker", "worker.json");
-const PORT = Number(process.env.PORT ?? 3100);
+let PORT = Number(process.env.PORT ?? 3100);
 
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s);
@@ -218,30 +224,40 @@ function freeServePort(bin: string): number {
   return 443;
 }
 
-async function start(mode: Mode) {
+function disableServe(s?: Pick<State, "servePort" | "serveHttpPort">) {
+  const bin = s?.servePort || s?.serveHttpPort ? tailscaleBin() : undefined;
+  if (bin && s?.servePort) run(bin, tailscaleArgs(["serve", `--https=${s.servePort}`, "off"]));
+  if (bin && s?.serveHttpPort) run(bin, tailscaleArgs(["serve", `--http=${s.serveHttpPort}`, "off"]));
+}
+
+async function start(mode: Mode, managed?: { active: boolean; restart: boolean }) {
+  if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild start [local|lan|tailscale]`);
   if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
-  const current = running();
-  // A stopped server leaves the keeper holding the port. A local start takes it back.
-  if (!current) await stopKeeper();
-  if (current) {
-    if (current.mode === mode) {
-      console.log(`OpenBuild is already running (${current.mode}).`);
-      for (const u of current.urls) console.log(`  ${bold(u)}`);
-      ensureKeeper(current);
-      return;
+  if (!managed) {
+    const current = running();
+    // A stopped server leaves the keeper holding the port. A local start takes it back.
+    if (!current) await stopKeeper();
+    if (current) {
+      if (current.mode === mode) {
+        console.log(`OpenBuild is already running (${current.mode}).`);
+        for (const u of current.urls) console.log(`  ${bold(u)}`);
+        ensureKeeper(current);
+        return;
+      }
+      console.log(dim(`Switching from ${current.mode} to ${mode}…`));
+      await stop(true, true);
+    } else if (await serving(PORT)) {
+      // Two servers on one port split requests between them (especially with Tailscale): some API
+      // calls hit the old code, with no pairing routes. Never start a duplicate.
+      fail(
+        `something else is already answering on port ${PORT}, but it wasn't started by \`openbuild start\` (no ${STATE}).\n` +
+          "It may be an older OpenBuild or one managed by systemd. Stop or restart it where it runs, then try again.",
+      );
     }
-    console.log(dim(`Switching from ${current.mode} to ${mode}…`));
-    await stop(true, true);
-  } else if (await serving(PORT)) {
-    // Two servers on one port split requests between them (especially with Tailscale): some API
-    // calls hit the old code, with no pairing routes. Never start a duplicate.
-    fail(
-      `something else is already answering on port ${PORT}, but it wasn't started by \`openbuild start\` (no ${STATE}).\n` +
-        "It may be an older OpenBuild or one managed by systemd. Stop or restart it where it runs, then try again.",
-    );
   }
 
-  const env: Record<string, string> = { ...(process.env as Record<string, string>), NODE_ENV: "production", PORT: String(PORT) };
+  // Explicitly reset network settings inherited from an earlier mode.
+  const env: Record<string, string> = { ...(process.env as Record<string, string>), NODE_ENV: "production", PORT: String(PORT), OPENCHAT_ALLOWED_HOSTS: "", OPENBUILD_PUBLIC_HTTPS: "" };
   const urls: string[] = [];
   const notes: string[] = [];
   let servePort: number | undefined;
@@ -293,19 +309,48 @@ async function start(mode: Mode) {
   }
 
   mkdirSync(DATA, { recursive: true });
-  const log = openSync(LOG, "a");
-  writeFileSync(log, `\n--- ${new Date().toISOString()} openbuild start ${mode} ---\n`);
-  const child = spawn(process.execPath, [join(ROOT, "server", "index.ts")], { cwd: ROOT, env, detached: true, stdio: ["ignore", log, log] });
-  child.unref();
-  closeSync(log);
-  const pid = child.pid ?? fail("Couldn't start the server.");
+  let pid: number | undefined;
+  let restoreService: (() => void) | undefined;
+  if (managed) {
+    const path = systemdNetworkOverridePath();
+    const previous = existsSync(path) ? readFileSync(path, "utf8") : undefined;
+    const next = systemdNetworkOverride(env);
+    const changed = previous !== next;
+    mkdirSync(dirname(path), { recursive: true });
+    restoreService = () => {
+      if (previous === undefined) rmSync(path, { force: true });
+      else writeFileSync(path, previous, { mode: 0o600 });
+      run("systemctl", ["--user", "daemon-reload"]);
+    };
+    if (changed) {
+      writeFileSync(path, next, { mode: 0o600 });
+      const reload = run("systemctl", ["--user", "daemon-reload"]);
+      if (!reload.ok) {
+        restoreService();
+        fail(reload.err || reload.out || "systemd daemon-reload failed");
+      }
+    }
+    const action = managed.restart || (managed.active && changed) ? "restart" : "start";
+    const result = run("systemctl", ["--user", action, UNIT]);
+    if (!result.ok) {
+      restoreService();
+      fail(result.err || result.out || `systemd ${action} failed`);
+    }
+  } else {
+    const log = openSync(LOG, "a");
+    writeFileSync(log, `\n--- ${new Date().toISOString()} openbuild start ${mode} ---\n`);
+    const child = spawn(process.execPath, [join(ROOT, "server", "index.ts")], { cwd: ROOT, env, detached: true, stdio: ["ignore", log, log] });
+    child.unref();
+    closeSync(log);
+    pid = child.pid ?? fail("Couldn't start the server.");
 
-  const first = env.HOST!.split(",")[0]!;
-  const probe = `http://${first === "0.0.0.0" ? "127.0.0.1" : first}:${PORT}`;
-  if (!(await waitForServer(probe, pid))) {
-    const tail = readFileSync(LOG, "utf8").trim().split("\n").slice(-8).join("\n");
-    if (alive(pid)) process.kill(pid);
-    fail(`the server didn't start. Last lines of ${LOG}:\n${tail}`);
+    const first = env.HOST!.split(",")[0]!;
+    const probe = `http://${first === "0.0.0.0" ? "127.0.0.1" : first}:${PORT}`;
+    if (!(await waitForServer(probe, pid))) {
+      const tail = readFileSync(LOG, "utf8").trim().split("\n").slice(-8).join("\n");
+      if (alive(pid)) process.kill(pid);
+      fail(`the server didn't start. Last lines of ${LOG}:\n${tail}`);
+    }
   }
 
   if (tailscale && tailscale.self && tailscale.self.https) {
@@ -315,7 +360,11 @@ async function start(mode: Mode) {
     if (servePort !== PORT) run(tailscale.bin, tailscaleArgs(["serve", `--https=${PORT}`, "off"]));
     const r = run(tailscale.bin, tailscaleArgs(["serve", "--bg", `--https=${servePort}`, `http://127.0.0.1:${PORT}`]));
     if (!r.ok) {
-      process.kill(pid);
+      if (pid) process.kill(pid);
+      if (restoreService) {
+        restoreService();
+        run("systemctl", ["--user", "restart", UNIT]);
+      }
       fail(`tailscale serve failed: ${r.err || r.out}\nHTTPS may need enabling for your tailnet: https://tailscale.com/kb/1153/enabling-https`);
     }
     urls.push(`https://${tailscale.self.name}${servePort === 443 ? "" : `:${servePort}`}`);
@@ -325,9 +374,16 @@ async function start(mode: Mode) {
     if (ip && env.HOST!.split(",").includes(ip) && servePort !== PORT) urls.push(`http://${ip}:${PORT}`);
   }
 
-  const state: State = { pid, mode, port: PORT, urls, servePort, hosts: env.HOST!.split(",").filter(Boolean), startedAt: Date.now() };
-  writeFileSync(STATE, JSON.stringify(state, null, 2));
-  ensureKeeper(state);
+  const network: ServiceNetwork = { mode, port: PORT, urls, servePort, hosts: env.HOST!.split(",").filter(Boolean), startedAt: Date.now() };
+  if (managed) {
+    const previous = serviceNetwork();
+    if (previous?.servePort !== servePort || previous?.serveHttpPort) disableServe(previous);
+    writeFileSync(SERVICE_NETWORK, JSON.stringify(network, null, 2), { mode: 0o600 });
+  } else {
+    const state: State = { pid: pid!, ...network };
+    writeFileSync(STATE, JSON.stringify(state, null, 2));
+    ensureKeeper(state);
+  }
   console.log(`OpenBuild is running ${mode === "local" ? "on this computer" : mode === "lan" ? "on your network" : "on your tailnet"}:`);
   for (const u of urls) console.log(`  ${bold(u)}`);
   for (const n of notes) console.log(dim(`  ${n}`));
@@ -365,11 +421,7 @@ async function stop(quiet = false, keepWorker = true) {
   }
   // Local stop means fully stopped: no keepalive left offering to start it again.
   await stopKeeper();
-  if (s) {
-    const bin = s.servePort || s.serveHttpPort ? tailscaleBin() : undefined;
-    if (bin && s.servePort) run(bin, tailscaleArgs(["serve", `--https=${s.servePort}`, "off"]));
-    if (bin && s.serveHttpPort) run(bin, tailscaleArgs(["serve", `--http=${s.serveHttpPort}`, "off"]));
-  }
+  disableServe(s);
   if (serverAlive) {
     process.kill(s!.pid, "SIGTERM");
     for (let i = 0; i < 40 && alive(s!.pid); i++) await Bun.sleep(100);
@@ -797,22 +849,35 @@ if (stopAll && cmd !== "stop") fail("--all is only supported by openbuild stop."
 const serviceCommands = ["start", "stop", "restart", "status", "logs"];
 const service = cmd && serviceCommands.includes(cmd) && !running() ? systemdService(ROOT, run) : undefined;
 if (service) {
-  if (arg) fail(`the systemd service controls its own configuration; use openbuild ${cmd} without extra arguments.`);
-  if ((cmd === "stop" || cmd === "restart") && !stopAll && !service.workerSurvives) {
+  const mode = cmd === "start" || cmd === "restart" ? arg ?? serviceNetwork()?.mode : undefined;
+  if (arg && cmd !== "start" && cmd !== "restart") fail(`usage: openbuild ${cmd}${cmd === "stop" ? " [--all]" : ""}`);
+  if (mode && !["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild ${cmd} [local|lan|tailscale]`);
+  if ((cmd === "stop" || cmd === "restart" || (mode && service.active)) && !stopAll && !service.workerSurvives) {
     fail(`${UNIT} would kill detached Pi and Durable workers (KillMode is not process). Set [Service] KillMode=process with \`systemctl --user edit ${UNIT}\`, then run \`systemctl --user daemon-reload\` and retry. Existing units are not updated automatically. Use openbuild stop --all only if you intend to terminate workers too.`);
   }
-  if (cmd === "logs") {
+  if (mode || cmd === "stop") {
+    // Use the unit's actual network context, not the interactive shell's defaults.
+    const configured = run("systemctl", ["--user", "show", UNIT, "--property=Environment", "--value"]);
+    for (const match of configured.out.matchAll(/(?:^|\s)"?(PORT|OPENBUILD_TAILSCALE_SOCKET)=([^\s"]+)"?/g)) {
+      if (match[1] === "PORT") PORT = Number(match[2]);
+      else process.env.OPENBUILD_TAILSCALE_SOCKET = match[2];
+    }
+  }
+  if (mode) {
+    await start(mode as Mode, { active: service.active, restart: cmd === "restart" });
+  } else if (cmd === "logs") {
     const result = spawnSync("journalctl", ["--user", "-u", UNIT, "-n", "50", "-f"], { stdio: "inherit" });
     process.exit(result.status ?? 1);
-  }
-  if (cmd === "status") {
+  } else if (cmd === "status") {
     const result = run("systemctl", ["--user", "status", UNIT, "--no-pager"]);
     console.log(result.out || result.err);
+    if (service.active) for (const url of serviceNetwork()?.urls ?? []) console.log(`  ${bold(url)}`);
   } else {
     const result = run("systemctl", ["--user", cmd!, UNIT]);
     if (!result.ok) fail(result.err || result.out || `systemd ${cmd} failed`);
     if (cmd === "stop") {
       await stopKeeper();
+      disableServe(serviceNetwork());
       if (stopAll) stopWorkers();
     }
     console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"} (${UNIT}, systemd user service).`);

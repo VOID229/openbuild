@@ -43,7 +43,7 @@ if [ "$2" = status ]; then echo 'OpenBuild active (running)'; fi
     function cli(args: string[], state = "active", fail = false, killMode = "process") {
       writeFileSync(log, "");
       const child = Bun.spawnSync([process.execPath, join(root, "bin/openbuild.ts"), ...args], {
-        env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, OPENCHAT_DATA_DIR: join(temp, "data"), CALL_LOG: log, SERVICE_PROPERTIES: properties(state, undefined, killMode), FAIL_ACTION: fail ? "yes" : "no" },
+        env: { ...process.env, PATH: `${temp}:${process.env.PATH}`, XDG_CONFIG_HOME: join(temp, "config"), OPENCHAT_DATA_DIR: join(temp, "data"), CALL_LOG: log, SERVICE_PROPERTIES: properties(state, undefined, killMode), FAIL_ACTION: fail ? "yes" : "no" },
         stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 10000,
       });
       return { code: child.exitCode, output: child.stdout.toString() + child.stderr.toString(), calls: readFileSync(log, "utf8") };
@@ -74,7 +74,17 @@ if [ "$2" = status ]; then echo 'OpenBuild active (running)'; fi
     expect(cli(["restart", "--all"]).code).toBe(1);
     const mode = cli(["start", "tailscale"]);
     expect(mode.code).toBe(1);
+    expect(mode.output).toContain("set a local access password first");
     expect(mode.calls).not.toContain("--user start");
+    for (const command of ["start", "restart"]) {
+      const unsafe = cli([command, "lan"], "active", false, "control-group");
+      expect(unsafe.code).toBe(1);
+      expect(unsafe.output).toContain("KillMode=process");
+      expect(unsafe.calls).not.toContain("--user daemon-reload");
+      const invalid = cli([command, "invalid"]);
+      expect(invalid.code).toBe(1);
+      expect(invalid.output).toContain("unknown mode");
+    }
     const failed = cli(["restart", "--yes"], "active", true);
     expect(failed.code).toBe(1);
     expect(failed.output).toContain("permission denied");
