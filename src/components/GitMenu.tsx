@@ -2,7 +2,7 @@
 // a message (left blank, the text generation models write it), which changes go in, and commit,
 // commit and push, push, or open a pull request. The git itself is server/workspaceGit.ts; which
 // changes are this thread's is src/lib/git.ts.
-import { ArrowUp, Check, ChevronDown, CloudUpload, ExternalLink, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
+import { ArrowUp, ChevronDown, CloudUpload, ExternalLink, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitChange } from "../../shared/types";
 import { commitPaths, commitScope, gitCommit, gitPullRequest, gitPush, useGitChanges, writeCommitMessage } from "../lib/git";
@@ -130,7 +130,7 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {busy ? <Spinner size={15} /> : done && !open ? <Check size={16} /> : primary === "push" ? <ArrowUp size={16} /> : <GitBranch size={16} />}
+        {busy ? <Spinner size={15} /> : <GitBranch size={16} />}
       </IconButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu git-menu" label="Commit" fixed="down" align="end">
         <div className="git-head">
