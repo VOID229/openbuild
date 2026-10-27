@@ -449,17 +449,19 @@ function LimitsView({ data, error, loading }: { data?: { providers: UsageLimits[
   return (
     <>
       {ok.map((p) => (
-        <section key={p.provider} className="ustats-limit-group">
+        <section key={p.id} className="ustats-limit-group">
           <h2 className="ustats-limit-head">
             <Mark provider={p.provider} size={18} />
             {USAGE_PROVIDER_NAMES[p.provider]}
+            {p.account && <span className="ustats-account">{p.account}</span>}
             {p.plan && <span className="ustats-plan">{p.plan}</span>}
+            {p.account && p.source && <span className="ustats-dim ustats-small ustats-source">{p.source}</span>}
             {p.stale && <span className="ustats-dim ustats-small">as of {ago(p.asOf, now)}</span>}
           </h2>
           {p.windows.map((w) => <LimitRow key={w.id} provider={p.provider} w={w} now={now} credits={w.kind === "weekly" || w.id === "primary" ? p.resetCredits : undefined} />)}
         </section>
       ))}
-      {failed.length > 0 && <Problem lines={failed.map((p) => `${USAGE_PROVIDER_NAMES[p.provider]}: ${p.error}`)} />}
+      {failed.length > 0 && <Problem lines={failed.map((p) => `${USAGE_PROVIDER_NAMES[p.provider]}${p.account ? ` ${p.account}` : ""}${p.source ? ` (${p.source})` : ""}: ${p.error}`)} />}
       <p className="ustats-foot ustats-dim">
         Checked {ago(data.checkedAt, now)}
         {loading && " · updating…"}

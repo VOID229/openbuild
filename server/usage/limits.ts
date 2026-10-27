@@ -4,6 +4,7 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { agentDir } from "../pi/install";
 import { USAGE_PROVIDER_NAMES, type UsageLimits, type UsageProvider, type UsageWindow } from "../../shared/usage";
 
 const home = () => process.env.HOME || homedir();
@@ -11,6 +12,11 @@ const tilde = (p: string) => resolve(p.replace(/^~(?=\/|$)/, home()));
 const TIMEOUT_MS = 8000;
 
 class Missing extends Error {}
+
+type Reading = Omit<UsageLimits, "provider" | "asOf" | "id"> & { asOf?: number };
+
+/** `/home/me/.claude-2` → `~/.claude-2`. */
+const tildePath = (p: string) => (p.startsWith(home() + "/") ? `~${p.slice(home().length)}` : p);
 
 async function readJson(path: string): Promise<any> {
   let text: string;
@@ -47,13 +53,54 @@ const CLAUDE_WINDOWS: [key: string, label: string, mins: number][] = [
   ["seven_day_sonnet", "Weekly · Sonnet", 10080],
 ];
 
-async function claudeLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
-  const dir = process.env.CLAUDE_CONFIG_DIR ? tilde(process.env.CLAUDE_CONFIG_DIR) : join(home(), ".claude");
-  const creds = (await readJson(join(dir, ".credentials.json"))).claudeAiOauth;
-  if (!creds?.accessToken) throw new Missing();
+/** Claude Code config dirs: the default, CLAUDE_CONFIG_DIR, and siblings like ~/.claude-2 (one per account). */
+export async function claudeDirs(): Promise<string[]> {
+  const dirs = [join(home(), ".claude")];
+  if (process.env.CLAUDE_CONFIG_DIR) dirs.push(tilde(process.env.CLAUDE_CONFIG_DIR));
+  dirs.push(...(await siblings(/^\.claude[-_.].+/)));
+  return [...new Set(dirs)];
+}
+
+/** Dot-directories in the home folder matching `re` (other accounts' config dirs). */
+async function siblings(re: RegExp): Promise<string[]> {
+  try {
+    const entries = await readdir(home(), { withFileTypes: true });
+    return entries.filter((e) => e.isDirectory() && re.test(e.name)).map((e) => join(home(), e.name)).sort();
+  } catch {
+    return [];
+  }
+}
+
+/** `~/.claude-2` → "2"; the default dir has no tag. */
+const dirTag = (dir: string, base: string) => {
+  const name = dir.slice(dir.lastIndexOf("/") + 1);
+  return name === base ? undefined : name.replace(new RegExp(`^${base.replace(".", "\\.")}[-_.]?`), "") || name;
+};
+
+async function claudeAccounts(): Promise<Account[]> {
+  const out: Account[] = [];
+  for (const dir of await claudeDirs()) {
+    let creds: any;
+    try {
+      creds = (await readJson(join(dir, ".credentials.json"))).claudeAiOauth;
+    } catch {
+      continue;
+    }
+    if (!creds?.accessToken) continue;
+    // The account id Claude Code keeps beside the sign-in (in ~/.claude.json for the default dir).
+    let id: string | undefined;
+    for (const f of [join(dir, ".claude.json"), ...(dir === join(home(), ".claude") ? [join(home(), ".claude.json")] : [])]) {
+      id ??= await readJson(f).then((j) => j?.oauthAccount?.accountUuid, () => undefined);
+    }
+    out.push({ key: id ?? `token:${Bun.hash(creds.refreshToken ?? creds.accessToken).toString(36)}`, tag: dirTag(dir, ".claude"), source: tildePath(dir), read: () => claudeLimits(creds) });
+  }
+  return out;
+}
+
+async function claudeLimits(creds: any): Promise<Reading> {
   const plan = typeof creds.subscriptionType === "string" ? creds.subscriptionType : undefined;
   if (typeof creds.expiresAt === "number" && creds.expiresAt < Date.now())
-    return { plan, windows: [], error: "Claude Code's sign-in has expired. Run claude once to renew it." };
+    return { plan, windows: [], error: "The sign-in has expired. Run Claude Code with this config once to renew it." };
   const body = await getJson("https://api.anthropic.com/api/oauth/usage", {
     headers: { authorization: `Bearer ${creds.accessToken}`, "anthropic-beta": "oauth-2025-04-20" },
   }, "Claude");
@@ -88,14 +135,45 @@ function codexWindow(id: string, w: any, fallbackMins: number): UsageWindow | un
   return { id, label: LABEL[kind], kind, usedPercent: used, resetsAt: epoch(w.reset_at ?? w.resets_at), windowMins: mins };
 }
 
-async function codexLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
-  const auth = await readJson(join(codexHome(), "auth.json"));
-  const tokens = auth?.tokens;
-  // An API key alone is billed per token: no plan, no limits.
-  if (!tokens?.access_token) throw new Missing();
+/** Codex homes: ~/.codex, CODEX_HOME, and siblings like ~/.codex-2. */
+export async function codexHomes(): Promise<string[]> {
+  return [...new Set([codexHome(), join(home(), ".codex"), ...(await siblings(/^\.codex[-_.].+/))])];
+}
+
+async function codexAccounts(): Promise<Account[]> {
+  const out: Account[] = [];
+  for (const dir of await codexHomes()) {
+    const tokens = await readJson(join(dir, "auth.json")).then((a) => a?.tokens, () => undefined);
+    // An API key alone is billed per token: no plan, no limits.
+    if (!tokens?.access_token) continue;
+    out.push({
+      key: tokens.account_id ? `acct:${tokens.account_id}` : `token:${Bun.hash(tokens.access_token).toString(36)}`,
+      tag: dirTag(dir, ".codex"),
+      source: tildePath(dir),
+      read: () => codexLimits(tokens.access_token, tokens.account_id, dir),
+    });
+  }
+  // ChatGPT sign-ins Pi keeps itself (openai-codex, and openai-codex-2… from pi-codex-multi).
+  const pi = await readJson(join(agentDir(), "auth.json")).catch(() => ({}));
+  for (const [provider, cred] of Object.entries<any>(pi ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!/^openai-codex(-.+)?$/.test(provider) || cred?.type !== "oauth" || !cred.access) continue;
+    out.push({
+      key: cred.accountId ? `acct:${cred.accountId}` : `token:${Bun.hash(cred.access).toString(36)}`,
+      tag: provider.replace(/^openai-codex-?/, "") || undefined,
+      source: `Pi · ${provider}`,
+      read: () =>
+        typeof cred.expires === "number" && cred.expires < Date.now()
+          ? Promise.resolve({ windows: [], error: `Pi's ${provider} sign-in has expired. Use it in Pi once to renew it.` })
+          : codexLimits(cred.access, cred.accountId),
+    });
+  }
+  return out;
+}
+
+async function codexLimits(token: string, accountId: string | undefined, dir?: string): Promise<Reading> {
   try {
     const body = await getJson("https://chatgpt.com/backend-api/wham/usage", {
-      headers: { authorization: `Bearer ${tokens.access_token}`, ...(tokens.account_id ? { "chatgpt-account-id": tokens.account_id } : {}) },
+      headers: { authorization: `Bearer ${token}`, ...(accountId ? { "chatgpt-account-id": accountId } : {}) },
     }, "Codex");
     const rl = body.rate_limit ?? {};
     const monthly = body.plan_type === "free" || body.plan_type === "go";
@@ -103,16 +181,16 @@ async function codexLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
     const credits = body.rate_limit_reset_credits?.available_count;
     return { plan: body.plan_type ?? undefined, windows, ...(typeof credits === "number" && credits > 0 ? { resetCredits: credits } : {}) };
   } catch (err) {
-    // Offline or signed out: what the last session recorded, marked as such.
-    const snap = await codexSnapshot().catch(() => undefined);
+    // Offline or signed out: what the CLI's last session recorded, marked as such.
+    const snap = dir ? await codexSnapshot(dir).catch(() => undefined) : undefined;
     if (snap) return { ...snap, stale: true, error: (err as Error).message };
     throw err;
   }
 }
 
 /** The rate limits in the newest Codex transcript. */
-async function codexSnapshot(): Promise<Omit<UsageLimits, "provider"> | undefined> {
-  const root = join(codexHome(), "sessions");
+async function codexSnapshot(dir: string): Promise<Reading | undefined> {
+  const root = join(dir, "sessions");
   const names = (await readdir(root, { recursive: true })).filter((n) => /\.jsonl(\.zst)?$/.test(n));
   const dated = await Promise.all(names.map(async (n) => ({ path: join(root, n), m: (await stat(join(root, n))).mtimeMs })));
   const newest = dated.sort((a, b) => b.m - a.m)[0];
@@ -137,7 +215,7 @@ async function codexSnapshot(): Promise<Omit<UsageLimits, "provider"> | undefine
 /** The grok.com sign-in; never another deployment's from the same file. */
 const GROK_ACCOUNTS = ["https://auth.x.ai::b1a00492-073a-47ea-816f-4c329264a828", "https://accounts.x.ai/sign-in"];
 
-async function grokLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
+async function grokLimits(): Promise<Reading> {
   const dir = process.env.GROK_HOME ? tilde(process.env.GROK_HOME) : join(home(), ".grok");
   const auth = await readJson(join(dir, "auth.json"));
   const cred = GROK_ACCOUNTS.map((k) => auth?.[k]).find(Boolean);
@@ -172,7 +250,7 @@ const CURSOR_WINDOWS = [
   ["apiPercentUsed", "API models"],
 ] as const;
 
-async function cursorLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
+async function cursorLimits(): Promise<Reading> {
   const token = await cursorToken();
   const body = await getJson("https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage", {
     method: "POST",
@@ -193,34 +271,54 @@ async function cursorLimits(): Promise<Omit<UsageLimits, "provider" | "asOf">> {
 
 // ------------------------------------------------------------------ all of them
 
-const READERS: [UsageProvider, () => Promise<Omit<UsageLimits, "provider" | "asOf">>][] = [
-  ["claude", claudeLimits],
-  ["codex", codexLimits],
-  ["grok", grokLimits],
-  ["cursor", cursorLimits],
+interface Account {
+  /** Identifies the account, so the same one signed in twice (the CLI and Pi) shows once. */
+  key: string;
+  /** Tells accounts of one provider apart ("2"). */
+  tag?: string;
+  /** Where the sign-in was read from. */
+  source?: string;
+  read: () => Promise<Reading>;
+}
+
+const one = (source: string, read: () => Promise<Reading>) => async (): Promise<Account[]> => [{ key: source, read }];
+
+const PROVIDERS: [UsageProvider, () => Promise<Account[]>][] = [
+  ["claude", claudeAccounts],
+  ["codex", codexAccounts],
+  ["grok", one("grok", grokLimits)],
+  ["cursor", one("cursor", cursorLimits)],
 ];
 
 /** Fresh enough to reuse; Refresh asks again once this has passed. */
 const TTL_MS = 60_000;
 const MIN_REFRESH_MS = 10_000;
-const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits | undefined> }>();
+const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits[]> }>();
 
-/** Limits for each provider signed in on this machine. */
+async function readAccounts(provider: UsageProvider, list: () => Promise<Account[]>): Promise<UsageLimits[]> {
+  const seen = new Set<string>();
+  const accounts = (await list()).filter((a) => !seen.has(a.key) && seen.add(a.key));
+  const id = (a: Account) => `${provider}:${a.key}`;
+  const results = await Promise.all(accounts.map((a) => a.read().then(
+    (r): UsageLimits => ({ provider, id: id(a), asOf: Date.now(), ...r }),
+    (err): UsageLimits | undefined => {
+      if (err instanceof Missing) return undefined;
+      const message = err?.name === "TimeoutError" ? `${USAGE_PROVIDER_NAMES[provider]} didn't answer in time.` : (err as Error).message;
+      return { provider, id: id(a), asOf: Date.now(), windows: [], error: message };
+    },
+  ).then((r) => r && { ...r, ...(accounts.length > 1 ? { account: a.tag ?? "1" } : {}), source: a.source })));
+  return results.filter((r): r is NonNullable<typeof r> => !!r);
+}
+
+/** Limits for each account signed in on this machine. */
 export async function limits(force = false): Promise<UsageLimits[]> {
   const now = Date.now();
-  const all = await Promise.all(READERS.map(([provider, read]) => {
+  const all = await Promise.all(PROVIDERS.map(([provider, list]) => {
     const hit = cache.get(provider);
     if (hit && now - hit.at < (force ? MIN_REFRESH_MS : TTL_MS)) return hit.value;
-    const value = read().then(
-      (r): UsageLimits => ({ provider, asOf: Date.now(), ...r }),
-      (err): UsageLimits | undefined => {
-        if (err instanceof Missing) return undefined;
-        const message = err?.name === "TimeoutError" ? `${USAGE_PROVIDER_NAMES[provider]} didn't answer in time.` : (err as Error).message;
-        return { provider, asOf: Date.now(), windows: [], error: message };
-      },
-    );
+    const value = readAccounts(provider, list);
     cache.set(provider, { at: now, value });
     return value;
   }));
-  return all.filter((l): l is UsageLimits => !!l);
+  return all.flat();
 }

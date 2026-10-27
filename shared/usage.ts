@@ -86,7 +86,13 @@ export interface UsageWindow {
 }
 
 export interface UsageLimits {
+  /** Unique per account. */
+  id: string;
   provider: UsageProvider;
+  /** Set when a provider has more than one account here: "1", "2", … (from the config dir or Pi provider). */
+  account?: string;
+  /** Where the sign-in was read from: `~/.claude-2`, `Pi · openai-codex-2`. */
+  source?: string;
   plan?: string;
   windows: UsageWindow[];
   /** When the numbers were taken; a snapshot from a transcript can be older than this request. */

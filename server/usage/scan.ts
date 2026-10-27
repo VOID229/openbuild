@@ -11,7 +11,7 @@ import { dataDir } from "../paths";
 import { agentDir } from "../pi/install";
 import * as storage from "../storage";
 import { claude, codex, grok, opencodeRecord, pi, type Format, type Rec } from "./formats";
-import { cursorToken } from "./limits";
+import { claudeDirs, codexHomes, cursorToken } from "./limits";
 
 interface Entry {
   provider: UsageProvider;
@@ -61,13 +61,11 @@ interface Source {
 
 const SOURCES: Source[] = [
   { format: pi, roots: piRoots, match: (n) => n.endsWith(".jsonl") },
-  { format: claude, roots: () => [join(process.env.CLAUDE_CONFIG_DIR ? tilde(process.env.CLAUDE_CONFIG_DIR) : join(home(), ".claude"), "projects")], match: (n) => n.endsWith(".jsonl") },
+  // Every account's config dir (~/.claude, ~/.claude-2, …).
+  { format: claude, roots: async () => (await claudeDirs()).map((d) => join(d, "projects")), match: (n) => n.endsWith(".jsonl") },
   {
     format: codex,
-    roots: () => {
-      const dir = process.env.CODEX_HOME ? tilde(process.env.CODEX_HOME) : join(home(), ".codex");
-      return [join(dir, "sessions"), join(dir, "archived_sessions")];
-    },
+    roots: async () => (await codexHomes()).flatMap((d) => [join(d, "sessions"), join(d, "archived_sessions")]),
     match: (n) => n.endsWith(".jsonl") || n.endsWith(".jsonl.zst"),
   },
   { format: grok, roots: () => [join(process.env.GROK_HOME ? tilde(process.env.GROK_HOME) : join(home(), ".grok"), "sessions")], match: (n) => n === "updates.jsonl" },
