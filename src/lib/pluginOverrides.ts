@@ -9,6 +9,9 @@ export interface ProviderOverride {
 }
 
 const overrides = new Map<string, ProviderOverride>();
+// Provider groups in the order a plugin wants them in the picker rail: ["openai-codex", "claude", …].
+// Lists from several plugins are merged in registration order, first mention winning.
+const order: string[] = [];
 
 export function setProviderOverrides(values: Record<string, ProviderOverride>) {
   for (const [id, value] of Object.entries(values)) {
@@ -20,8 +23,23 @@ export function setProviderOverrides(values: Record<string, ProviderOverride>) {
   }
 }
 
+export function addProviderOrder(values: readonly string[]) {
+  for (const value of values) {
+    if (typeof value !== "string" || !value.trim()) continue;
+    const id = value.trim().toLowerCase();
+    if (!order.includes(id)) order.push(id);
+  }
+}
+
+/** Where a provider group sits in a plugin's rail order; undefined = after every ordered group. */
+export function providerOrder(group: string): number | undefined {
+  const index = order.indexOf(group.toLowerCase());
+  return index < 0 ? undefined : index;
+}
+
 export function clearProviderOverrides() {
   overrides.clear();
+  order.length = 0;
 }
 
 export function providerOverride(id: string): ProviderOverride | undefined {

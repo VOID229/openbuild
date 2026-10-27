@@ -1,0 +1,13 @@
+/* Immediate rail order that needs no server restart: plugin stylesheets hot-reload, while the host
+   change that reads `providerOrder` only takes effect after OpenBuild restarts. Both produce the
+   same top-to-bottom order. Negative values sort before any group the plugin doesn't name (order 0),
+   and the rail is a flex column, so `order` is all that's needed to move the buttons.
+   `order` only accepts integers, and OpenCode/OpenCode Go share one prefix. */
+.mp-rail-scroll .mp-rail-btn[data-tooltip="Codex"] { order: -8; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip="Codex (2)"] { order: -7; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip="Claude"] { order: -6; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip="Claude (2)"] { order: -5; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip^="OpenCode"] { order: -4; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip="xAI"],
+.mp-rail-scroll .mp-rail-btn[data-tooltip="Grok"] { order: -3; }
+.mp-rail-scroll .mp-rail-btn[data-tooltip="OpenRouter"] { order: -2; }

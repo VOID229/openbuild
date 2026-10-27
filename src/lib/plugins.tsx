@@ -15,7 +15,7 @@ import { Component, type ComponentType, type ErrorInfo, type ReactNode } from "r
 import { create } from "zustand";
 import { PLUGIN_API_VERSION, type PluginInfo, type PluginSettingsSection, type PluginsResponse } from "../../shared/plugins";
 import { useStore } from "./store";
-import { clearProviderOverrides, setProviderOverrides } from "./pluginOverrides";
+import { addProviderOrder, clearProviderOverrides, setProviderOverrides } from "./pluginOverrides";
 import type { ToolPart } from "./types";
 
 // ------------------------------------------------------------------ the host bridge
@@ -78,6 +78,8 @@ interface ClientPlugin {
   icons?: { providers?: Record<string, string>; brands?: Record<string, string> };
   /** Move providers into another group and/or rename them (e.g. "pi-claude" → "claude"). */
   providers?: Record<string, { group?: string; name?: string }>;
+  /** Provider groups in the model picker's rail, top to bottom; unlisted groups follow in Pi's order. */
+  providerOrder?: string[];
   tokens?: Record<string, string>;
   hide?: string[];
   dispose?: () => void;
@@ -306,6 +308,7 @@ function register(info: PluginInfo, config: ClientPlugin, entry: Applied) {
   }
 
   if (config.providers) setProviderOverrides(config.providers);
+  if (Array.isArray(config.providerOrder)) addProviderOrder(config.providerOrder);
 
   if (config.settings?.component && typeof config.settings.component === "function") {
     settingsSections.set(`plugin:${info.id}`, {

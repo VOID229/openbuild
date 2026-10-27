@@ -65,6 +65,7 @@ export default {
   providers: {
     "pi-claude": { group: "claude", name: "Claude" }, // move a provider out of Custom
   },
+  providerOrder: ["openai-codex", "claude", "opencode"], // provider rail, top to bottom
   tokens: { "--content-w": "900px" },
   hide: [".sidebar-divider"],
   dispose() {},
@@ -96,6 +97,8 @@ Components receive the slot's context as props.
 `icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are model id prefixes (case-insensitive, longest match wins): a provider-scoped prefix such as `claude-code-2/` takes precedence over a bare prefix such as `claude`. Bare prefixes still match the model id without its provider, so `deepseek` matches `deepseek/deepseek-v4.1-flash`. The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme. `plugins/openrouter-deepseek` is a working example.
 
 `providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group. `plugins/pi-claude` and `plugins/codex-multi` are working examples.
+
+`providerOrder` lists provider groups for the model picker's rail, top to bottom. Names are matched case-insensitively against the group ids that `providers` and `providerOf` produce (`openai-codex`, `claude`, `claude-code-2`, …). Groups it doesn't name follow in Pi's own order, and Custom stays last. Lists from several plugins merge in load order, first mention winning. `plugins/provider-order` is a working example.
 
 ### SDK
 

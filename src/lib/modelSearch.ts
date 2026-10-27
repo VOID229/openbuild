@@ -2,6 +2,7 @@
 // filter by API key; the remaining words fuzzy-match the model: "go deepseek", "go zen qwen".
 import { PLANS, type ModelInfo, type ModelScope, type PlanId } from "../../shared/types";
 import { CUSTOM_PROVIDER, providerOf } from "./models";
+import { providerOrder } from "./pluginOverrides";
 import { fold, fuzzyScore } from "./search";
 import type { Detection } from "./types";
 
@@ -92,7 +93,10 @@ export function scopedModels(models: ModelInfo[], scope?: ModelScope, selected?:
   return models.filter((m) => ids.has(m.id) || m.id === selected);
 }
 
-/** Pi models grouped by provider (in the order Pi lists them), with non-built-in providers as one Custom group. */
+/**
+ * Pi models grouped by provider: in a plugin's `providerOrder` first (when one names the group), then
+ * in the order Pi lists them, with non-built-in providers as one Custom group at the end.
+ */
 export function providerGroups(models: ModelInfo[]): ProviderGroup[] {
   const groups = new Map<string, ModelInfo[]>();
   for (const m of models) {
@@ -105,7 +109,10 @@ export function providerGroups(models: ModelInfo[]): ProviderGroup[] {
     groups.delete(CUSTOM_PROVIDER);
     groups.set(CUSTOM_PROVIDER, custom);
   }
-  return [...groups].map(([provider, list]) => ({ provider, models: list }));
+  return [...groups]
+    .map(([provider, list], index) => ({ provider, models: list, index }))
+    .sort((a, b) => (providerOrder(a.provider) ?? Infinity) - (providerOrder(b.provider) ?? Infinity) || a.index - b.index)
+    .map(({ provider, models: list }) => ({ provider, models: list }));
 }
 
 /**

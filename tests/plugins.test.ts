@@ -8,9 +8,10 @@ import type { ModelInfo } from "../shared/types";
 import openrouterDeepseek from "../plugins/openrouter-deepseek/client";
 import piClaude from "../plugins/pi-claude/client";
 import codexMulti from "../plugins/codex-multi/client";
+import providerOrderPlugin from "../plugins/provider-order/client";
 import { providerOf, providerName, providerSvg } from "../src/lib/models";
 import { providerGroups } from "../src/lib/modelSearch";
-import { clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
+import { addProviderOrder, clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
 
 const manifest = (patch: Partial<PluginManifest> = {}) => ({
   id: "example",
@@ -94,6 +95,43 @@ test("the codex-multi plugin gives the second Codex login its own Codex group", 
     // The "2" badge is cut out with two masks whose ids the host makes unique per instance.
     expect(icon).toContain("codex2-two-_R_0_");
     expect(icon).toContain("codex2-cut-_R_0_");
+  } finally {
+    clearProviderOverrides();
+  }
+});
+
+test("the provider-order plugin puts the rail in Codex → Claude → OpenCode → Grok → OpenRouter order", () => {
+  try {
+    setProviderOverrides(piClaude.providers);
+    setProviderOverrides(codexMulti.providers);
+    addProviderOrder(providerOrderPlugin.providerOrder);
+    const model = (provider: string, custom = true): ModelInfo => ({ id: `${provider}/m`, provider, custom, name: provider, protocol: "chat", reasoning: { efforts: [], mode: "effort", toggle: false }, input: ["text"] });
+    // Deliberately scrambled input: the plugin's order must win over Pi's model order.
+    // "alpha"/"beta" are not named, so they keep their relative order after the listed groups.
+    const groups = providerGroups([
+      model("openrouter", false),
+      model("alpha", false),
+      model("xai", false),
+      model("claude-code-2"),
+      model("opencode", false),
+      model("openai-codex-2"),
+      model("beta", false),
+      model("claude-code"),
+      model("openai-codex", false),
+      model("unknown"),
+    ]);
+    expect(groups.map((g) => g.provider)).toEqual([
+      "openai-codex",
+      "openai-codex-2",
+      "claude",
+      "claude-code-2",
+      "opencode",
+      "xai",
+      "openrouter",
+      "alpha",
+      "beta",
+      "custom",
+    ]);
   } finally {
     clearProviderOverrides();
   }
