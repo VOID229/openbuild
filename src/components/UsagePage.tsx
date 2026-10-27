@@ -1,6 +1,6 @@
 // Usage: tokens and cost across the agents on this machine, and their plans' limits (server/usage/).
 import { AlertTriangle, ArrowLeft, Info, RefreshCw, RotateCcw, Ticket } from "lucide-react";
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import claudeSvg from "../assets/brands/claude-color.svg" with { type: "text" };
 import grokSvg from "../assets/brands/grok.svg" with { type: "text" };
 import openaiSvg from "../assets/brands/openai.svg" with { type: "text" };
@@ -10,6 +10,7 @@ import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
 import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport } from "../lib/usageStats";
 import { IconButton, PiMark, Spinner } from "./primitives";
+import { useLightbox } from "./Lightbox";
 
 type Tab = "cost" | "tokens" | "limits";
 const RANGE_LABEL: Record<UsageRange, string> = { "24h": "Past 24h", "7d": "7 days", "30d": "30 days", "90d": "90 days" };
@@ -61,6 +62,20 @@ export function UsagePage() {
   const lim = useUsageLimits();
   const mobile = useMediaQuery("(max-width: 768px)");
   const close = () => useStore.getState().setUsageOpen(false);
+  // Escape goes back to the thread/home, like it closes Settings. Leave Escape to whatever is on
+  // top (the settings dialog, a lightbox, a menu) and only take it when Usage itself has focus.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      if (useStore.getState().settingsOpen || useLightbox.getState().open) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && el !== document.body && el.closest("[role='menu'], [role='dialog']")) return;
+      e.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const busy = tab === "limits" ? lim.loading : report.loading;
   const refresh = () => (tab === "limits" ? loadLimits(true) : loadReport(range, true));
 
