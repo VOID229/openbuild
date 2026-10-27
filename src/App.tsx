@@ -26,6 +26,7 @@ import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
+import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
 
 function useTheme() {
   const theme = useStore((s) => s.settings.theme);
@@ -140,8 +141,8 @@ function Main() {
   useEffect(() => { initPlugins(); }, []);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
-  const lightboxOpen = useLightbox((s) => s.open);
   const usageOpen = useStore((s) => s.usageOpen);
+  const lightboxOpen = useLightbox((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -253,59 +254,65 @@ function Main() {
     };
   }, [chatsLoaded]);
 
-  // Global shortcuts:
-  //   Cmd/Ctrl+,        open settings (instead of the browser's)
-  //   Cmd/Ctrl+B        toggle the sidebar (works everywhere)
-  //   Cmd/Ctrl+J        open a terminal in the thread's folder (on the device it runs on)
-  //   Cmd/Ctrl+Shift+O  new thread
-  //   /                 focus chat search (or the composer when the sidebar is collapsed)
-  //   Enter             focus the composer (sidebar open)
-  // "/" and Enter only apply when not typing in a field and not in Settings; Enter also leaves
-  // focused buttons/links alone so they still activate.
+  // Global shortcuts (Settings → Shortcuts): new thread, sidebar, terminal, dictation, settings and
+  // search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
+  // a shortcut is being recorded there.
   useEffect(() => {
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+    const run = (id: ShortcutId) => {
+      const st = useStore.getState();
+      switch (id) {
+        case "newThread":
+          st.newChat();
+          break;
+        case "toggleSidebar":
+          st.setSidebarOpen(!st.sidebarOpen);
+          break;
+        case "toggleTerminal":
+          // The browser's own Cmd/Ctrl+J (downloads) doesn't get it: the app is what has focus.
+          // Stopped in the handler so a focused terminal doesn't also take it (Ctrl+J is a line feed there).
+          toggleTerminal();
+          break;
+        case "openSettings":
+          st.openSettings();
+          break;
+        case "focusSearch":
+          if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();
+          else focusComposer();
+          break;
+        case "toggleDictation":
+          // Dictation lives in each field (useFieldDictation); the focused one, else the composer, takes it.
+          window.dispatchEvent(new CustomEvent<ShortcutEventDetail>(SHORTCUT_EVENT, { detail: { action: id } }));
+          break;
+      }
+    };
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
-      if (e.metaKey || e.ctrlKey) {
-        const key = e.key.toLowerCase();
-        if (e.key === "," && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          st.openSettings();
-        } else if (key === "b" && !e.shiftKey && !e.altKey) {
-          e.preventDefault();
-          st.setSidebarOpen(!st.sidebarOpen);
-        } else if (key === "j" && !e.shiftKey && !e.altKey) {
-          // The browser's own Cmd/Ctrl+J (downloads) doesn't get it: the app is what has focus.
-          // Stopped here so a focused terminal doesn't also take it (Ctrl+J is a line feed there).
-          e.preventDefault();
-          e.stopPropagation();
-          toggleTerminal();
-        } else if (e.shiftKey && key === "o") {
-          e.preventDefault();
-          newChat();
-        }
-        return;
-      }
-      if (e.altKey || e.isComposing || st.settingsOpen) return;
-      if (e.key !== "/" && e.key !== "Enter") return;
+      if (e.isComposing || e.repeat || st.settingsOpen || isShortcutRecording()) return;
       const el = document.activeElement as HTMLElement | null;
       const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+      for (const def of SHORTCUTS) {
+        const binding = shortcutBinding(st.settings, def.id);
+        if (!binding || !eventMatchesBinding(e, binding)) continue;
+        if (def.typingSensitive && typing) continue;
+        // Without a field that takes dictation there's nothing to dictate into.
+        if (def.id === "toggleDictation" && !document.querySelector("[data-dictation]")) continue;
+        e.preventDefault();
+        e.stopPropagation();
+        run(def.id);
+        return;
+      }
+      if (e.key !== "Enter" || e.metaKey || e.ctrlKey || e.altKey || typing) return;
       // Leave Enter alone on buttons/links/menu items so they still activate.
       const onControl = !!el && el !== document.body && !!el.closest("button, a[href], [role='menuitem'], [role='option'], [role='tab'], [role='switch']");
-      if (typing || (e.key === "Enter" && onControl)) return;
-      if (e.key === "/") {
-        e.preventDefault();
-        if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();
-        else focusComposer();
-      } else if (st.sidebarOpen) {
-        e.preventDefault();
-        focusComposer();
-      }
+      if (onControl || !st.sidebarOpen) return;
+      e.preventDefault();
+      focusComposer();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [newChat]);
+  }, []);
 
   useEffect(() => {
     document.title = usageOpen ? "Usage · OpenBuild" : chat ? `${chat.title} · OpenBuild` : "OpenBuild";

@@ -14,7 +14,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
-export type SettingsSection = "security" | "account" | "profile" | "general" | "pi" | "keys" | "projects" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
+export type SettingsSection = "security" | "account" | "profile" | "general" | "shortcuts" | "pi" | "keys" | "projects" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -39,6 +39,7 @@ const DEFAULT_SETTINGS: Settings = {
   favorites: [],
   threadRuntime: "pi",
   terminal: "bottom",
+  shortcuts: {},
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };
@@ -131,9 +132,9 @@ interface State {
   view: SidebarView;
   settingsOpen: boolean;
   settingsSection: SettingsSection;
-  /** Projects threads can work in (from this server, and from paired devices). Remote ids are namespaced. */
   /** The usage page is showing in place of a thread. */
   usageOpen: boolean;
+  /** Projects threads can work in (from this server, and from paired devices). Remote ids are namespaced. */
   projects: Project[];
   projectsLoaded: boolean;
   loadProjects: () => Promise<void>;
@@ -179,8 +180,8 @@ interface State {
   verifySearch: (provider: SearchProviderId, only?: string[]) => Promise<void>;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
-  setSidebarOpen: (open: boolean) => void;
   setUsageOpen: (open: boolean) => void;
+  setSidebarOpen: (open: boolean) => void;
   /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
   setSelection: (selection: Selection) => void;
   setEffort: (effort: Effort, selection?: Selection) => void;
@@ -213,8 +214,8 @@ export const useStore = create<State>()(
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
-      projects: [],
       usageOpen: false,
+      projects: [],
       projectsLoaded: false,
       devices: [],
       devicesLoaded: false,
@@ -435,8 +436,8 @@ export const useStore = create<State>()(
 
       openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
       closeSettings: () => set({ settingsOpen: false }),
-      setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setUsageOpen: (open) => set({ usageOpen: open }),
+      setSidebarOpen: (open) => set({ sidebarOpen: open }),
 
       setSelection: (selection) => {
         const id = get().activeChatId;
@@ -458,8 +459,8 @@ export const useStore = create<State>()(
       },
       newChat: () => set((s) => ({
         activeChatId: undefined,
-        searchFocus: undefined,
         usageOpen: false,
+        searchFocus: undefined,
         settings: s.settings.workspace.defaultMode === "last-used"
           ? s.settings
           : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },

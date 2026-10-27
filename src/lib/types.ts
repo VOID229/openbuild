@@ -83,6 +83,11 @@ export interface Settings {
   threadRuntime?: ThreadRuntime;
   /** Starred Pi models ("<provider>/<id>"), in order. */
   favorites: string[];
+  /**
+   * Changed keyboard shortcuts, by action id. Missing actions use their default; "none" means the
+   * action has no shortcut (it was taken over by another).
+   */
+  shortcuts?: Record<string, string>;
 }
 
 export interface NewWorkspace {

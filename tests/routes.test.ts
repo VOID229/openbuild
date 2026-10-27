@@ -37,6 +37,7 @@ describe("clean URLs", () => {
     expect(readRoute("/", "#/c/abc")).toEqual({ threadId: "abc" });
     expect(readRoute("/settings")).toEqual({ section: "profile" });
     expect(readRoute("/settings/appearance/")).toEqual({ section: "appearance" });
+    expect(readRoute("/settings/shortcuts")).toEqual({ section: "shortcuts" });
     expect(readRoute("/settings/invalid")).toEqual({ section: "profile" });
     expect(readRoute("/thread-%ZZ")).toEqual({});
   });

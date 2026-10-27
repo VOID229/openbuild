@@ -1,16 +1,18 @@
-import { ArrowUp, Bell, CircleUser, FolderGit2, Key, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Bell, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
+import { defaultBinding, formatBinding, isMacPlatform, shortcutBinding } from "../lib/shortcuts";
 import { arrowNav, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
+import { ShortcutsSection } from "./ShortcutSettings";
 import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
 import { PluginsSection } from "./PluginSettings";
 
@@ -18,6 +20,7 @@ import { PluginsSection } from "./PluginSettings";
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "general", label: "General", icon: Settings2 },
+  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "pi", label: "Pi", icon: SquareTerminal },
   { id: "keys", label: "Providers", icon: Key },
   { id: "projects", label: "Projects", icon: FolderGit2 },
@@ -139,6 +142,7 @@ function NotificationsSection() {
 function GeneralSection() {
   const s = useStore((st) => st.settings);
   const update = useStore((st) => st.updateSettings);
+  const terminalKey = formatBinding(shortcutBinding(s, "toggleTerminal") ?? defaultBinding("toggleTerminal"), isMacPlatform());
   return (
     <>
       <Heading>General</Heading>
@@ -161,7 +165,7 @@ function GeneralSection() {
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Terminal</div>
-          <p className="setting-desc">Where ⌘J opens it: a drawer under the thread, or a tab beside it with the open files.</p>
+          <p className="setting-desc">Where {terminalKey} opens it: a drawer under the thread, or a tab beside it with the open files.</p>
         </div>
         <OptionSelect
           label="Where the terminal opens"
@@ -509,6 +513,7 @@ export function SettingsModal() {
             </>
           )}
           {section === "general" && <GeneralSection />}
+          {section === "shortcuts" && <ShortcutsSection />}
           {section === "pi" && <PiSection />}
           {section === "keys" && <ProvidersSection />}
           {section === "projects" && <ProjectsSection />}
