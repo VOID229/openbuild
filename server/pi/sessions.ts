@@ -10,6 +10,8 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { partialTitle } from "../../shared/htmlRender";
+import { TOOL as HTML_TOOL } from "./extensions/html-render";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
 import { PiError, PiProcess, type PiRecord } from "./rpc";
 import { addUsage, emptyUsage } from "./usage";
@@ -19,8 +21,8 @@ const IDLE = 20 * 60 * 1000;
 /** Tool output kept per call (head and tail), and the diff of a file change. */
 const OUTPUT_MAX = 12_000;
 const PATCH_MAX = 60_000;
-/** OpenBuild's own extension, loaded into every thread: the question_ask tool. */
-const EXTENSIONS = [join(import.meta.dir, "extensions", "question-ask.ts")];
+/** OpenBuild's own extensions, loaded into every thread: question_ask, and html_render with html_preview. */
+const EXTENSIONS = ["question-ask.ts", "html-render.ts"].map((e) => join(import.meta.dir, "extensions", e));
 
 interface Live {
   threadId: string;
@@ -285,12 +287,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         let lastError: string | undefined;
         const usage: Usage = emptyUsage();
         const progress = new Map<string, number>();
+        /** html_render calls still being written, by their place in the message. */
+        const drawing = new Map<number, { id: string; json: string; at: number }>();
         off = proc.on((r) => {
           switch (r.type) {
             case "agent_start":
               started = true;
               break;
             case "message_start":
+              drawing.clear();
               if (r.message?.role === "assistant" && wroteText && lastText) send({ t: "text", v: "\n\n" });
               else if (r.message?.role === "user") {
                 // The first is this turn's prompt; any later one is a message steered in meanwhile.
@@ -314,6 +319,16 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               } else if (ev?.type === "thinking_delta" && ev.delta) {
                 send({ t: "reasoning", v: ev.delta });
                 lastThought = true;
+              } else if (ev?.type === "toolcall_start" && ev.toolName === HTML_TOOL && ev.id) {
+                // A page takes a while to write: show that it's coming, and its title once it's written.
+                drawing.set(ev.contentIndex, { id: ev.id, json: "", at: 0 });
+              } else if (ev?.type === "toolcall_delta" && drawing.has(ev.contentIndex)) {
+                const d = drawing.get(ev.contentIndex)!;
+                d.json += ev.delta ?? "";
+                if (Date.now() - d.at < 500) break;
+                d.at = Date.now();
+                send({ t: "tool", id: d.id, name: HTML_TOOL, status: "running", args: { title: partialTitle(d.json), written: d.json.length } });
+                lastText = lastThought = false;
               }
               break;
             }

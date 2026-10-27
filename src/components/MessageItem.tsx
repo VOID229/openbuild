@@ -13,6 +13,8 @@ import { Markdown } from "./Markdown";
 import { BrandIcon, IconButton } from "./primitives";
 import { ShellMessage } from "./ShellMessage";
 import { AskCard, WorkRun } from "./ToolCalls";
+import { HtmlRender } from "./HtmlRender";
+import { HTML_RENDER_TOOL } from "../../shared/htmlRender";
 import { PluginSlot } from "../lib/plugins";
 
 function CopyButton({ text }: { text: string }) {
@@ -200,6 +202,10 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
 
 type Block = Part | (ToolPart | ThoughtPart)[];
 
+/** A page the agent shows (html_render): out in the reply, not folded into the work around it. A
+ *  failed call reads as the tool call it is. */
+const isShownPage = (p: Part | Block): p is ToolPart => !Array.isArray(p) && p.type === "tool" && p.name === HTML_RENDER_TOOL && p.status !== "error";
+
 /** Everything Pi did before its final answer, folded into one line. `folding`: it was just on screen
  *  (the reply finished in front of the reader), so it folds away instead of starting shut. */
 function Worked({ message, folding, children }: { message: Message; folding: boolean; children: ReactNode }) {
@@ -232,7 +238,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
     // Whitespace-only text renders nothing but would split the run of tools around it in two.
     if (p.type === "text" && !p.text.trim()) continue;
     const last = blocks.at(-1);
-    const grouped = p.type === "tool" || p.type === "thought";
+    const grouped = (p.type === "tool" && !isShownPage(p)) || p.type === "thought";
     if (grouped && Array.isArray(last)) last.push(p);
     else blocks.push(grouped ? [p] : p);
   }
@@ -241,6 +247,8 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
       <WorkRun key={`g${i}`} parts={b} cwd={cwd} live={streaming && i === blocks.length - 1} block={i} />
     ) : b.type === "text" ? (
       <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} block={i} />
+    ) : isShownPage(b) ? (
+      <HtmlRender key={b.id} part={b} block={i} />
     ) : b.type === "ask" ? (
       <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} block={i} />
     ) : b.type === "steer" ? (
@@ -259,9 +267,18 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   // it writes stays where it is, and the answer keeps its key so it isn't redrawn when the rest folds.
   const last = blocks.at(-1);
   const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
+  // Pages stay out too, between the fold and the answer, in the order they were shown.
   if (message.status === "done" && blocks.some(Array.isArray)) {
-    const work = final ? blocks.slice(0, -1) : blocks;
-    return <>{[<Worked key="worked" message={message} folding={watched.current}>{work.map(render)}</Worked>, final && render(final, blocks.length - 1)]}</>;
+    const work = (final ? blocks.slice(0, -1) : blocks).map((b, i) => [b, i] as const);
+    return (
+      <>
+        {[
+          <Worked key="worked" message={message} folding={watched.current}>{work.filter(([b]) => !isShownPage(b)).map(([b, i]) => render(b, i))}</Worked>,
+          ...work.filter(([b]) => isShownPage(b)).map(([b, i]) => render(b, i)),
+          final && render(final, blocks.length - 1),
+        ]}
+      </>
+    );
   }
   return <>{blocks.map(render)}</>;
 }

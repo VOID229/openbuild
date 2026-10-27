@@ -1,7 +1,7 @@
 // What Pi did while answering: each run of tool calls folded into one line ("Read 3 files, ran 2
 // commands") that opens to a row per call and its output or diff, with what Pi is doing right now
 // under it; and the questions Pi extensions ask on the way.
-import { Bot, Brain, Check, ChevronRight, CircleAlert, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Check, ChevronRight, CircleAlert, Eye, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, PanelTop, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -47,6 +47,10 @@ function describe(part: ToolPart, cwd?: string): { icon: LucideIcon; verb: strin
     case "web_search":
     case "fetch":
       return { icon: Globe, verb: running ? "Searching the web for" : "Searched the web for", target: str(a.query) ?? str(a.url) ?? "" };
+    case "html_render":
+      return { icon: PanelTop, verb: running ? "Showing" : "Showed", target: str(a.title) ?? "a page" };
+    case "html_preview":
+      return { icon: Eye, verb: running ? "Previewing" : "Previewed", target: `a page${typeof a.width === "number" ? ` at ${a.width}px` : ""}` };
     default: {
       if (/subagent|agent/.test(part.name)) return { icon: Bot, verb: part.name.replace(/_/g, " "), target: firstLine(str(a.task) ?? str(a.prompt) ?? "") };
       const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
@@ -249,6 +253,10 @@ export function summarize(parts: Work[]) {
           return `searched the web${n > 1 ? ` ${times(n)}` : ""}`;
         case "agent":
           return `ran ${count(n, "subagent")}`;
+        case "html_preview":
+          return n === 1 ? "previewed a page" : `previewed ${count(n, "page")}`;
+        case "html_render":
+          return `tried to show ${n === 1 ? "a page" : count(n, "page")}`;
         default:
           return `used ${kind.replace(/_/g, " ")}${n > 1 ? ` ${times(n)}` : ""}`;
       }
