@@ -1649,14 +1649,16 @@ svg {
   opacity: 0.88;
 }
 
-.round-btn-listening {
+.round-btn-listening,
+.dictation-listening {
   opacity: 1;
   background: #e5484d;
   color: #fff;
   animation: listening 1.6s ease-in-out infinite;
 }
 
-.round-btn-listening:hover:not(:disabled) {
+.round-btn-listening:hover:not(:disabled),
+.dictation-listening:hover:not(:disabled) {
   background: #d13a40;
 }
 
@@ -1667,7 +1669,8 @@ svg {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .round-btn-listening {
+  .round-btn-listening,
+  .dictation-listening {
     animation: none;
   }
 }
@@ -3167,9 +3170,6 @@ svg {
   margin-top: 8px;
 }
 
-/* A row whose control is more than a single toggle: stacked and aligned to the row's right edge. */
-.setting-control {
-  display: flex;
 /* Shortcuts */
 
 .shortcut-intro {
@@ -3292,6 +3292,9 @@ svg {
   padding-top: 18px;
 }
 
+/* A row whose control is more than a single toggle: stacked and aligned to the row's right edge. */
+.setting-control {
+  display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 10px;
@@ -4052,9 +4055,6 @@ p.key-status svg {
     align-items: stretch;
     gap: 10px;
   }
-  .setting-row-stack .segmented {
-    display: flex;
-  }
 
   .shortcut-row {
     flex-direction: column;
@@ -4068,6 +4068,9 @@ p.key-status svg {
 
   .shortcut-keys {
     flex: 1;
+  }
+  .setting-row-stack .segmented {
+    display: flex;
   }
   .setting-row-stack .segment {
     flex: 1;
@@ -5144,6 +5147,49 @@ p.key-status svg {
 
 .ask-input {
   font-size: 14px;
+}
+
+/* An answer box with its mic inside, at the trailing edge (top-right for multi-line boxes). */
+.ask-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.ask-field .ask-input {
+  width: 100%;
+  padding-right: 36px;
+}
+
+.field-mic {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  transform: translateY(-50%);
+}
+
+.ask-field-multiline .field-mic {
+  top: 4px;
+  transform: none;
+}
+
+.field-mic.dictation-listening {
+  border-radius: 999px;
+}
+
+.ask-field-error {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.ask-other .ask-field-error {
+  position: absolute;
+  top: 100%;
+  left: 0;
 }
 
 /* Context fill after a reply */
@@ -7143,6 +7189,10 @@ a.btn-primary {
   outline: none;
   transition: border-color var(--fast) var(--ease);
 }
+
+.git-message-wrap { position: relative; }
+.git-message-wrap .git-message { padding-right: 36px; }
+.git-message-wrap .field-mic { top: 4px; right: 8px; transform: none; }
 
 .git-message::placeholder { color: var(--text-3); }
 .git-message:focus { border-color: var(--border-strong); }

@@ -1,10 +1,10 @@
-import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
-import { dictationSupported, useDictation } from "../lib/dictation";
+import { useFieldDictation } from "../lib/useFieldDictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
@@ -16,10 +16,10 @@ import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker } from "./Pickers";
 import { IconButton } from "./primitives";
+import { DictationButton } from "./DictationButton";
 import { WorkspaceBelow, WorkspaceTop } from "./Workspace";
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
-const isIOS = typeof navigator !== "undefined" && (/iPhone|iPad/.test(navigator.platform) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1));
 
 /** A draft from another device doesn't replace the text while you've typed within this long. */
 const TYPING_PAUSE = 3000;
@@ -357,38 +357,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
     window.addEventListener("openbuild:composer-insert", onInsert);
     return () => window.removeEventListener("openbuild:composer-insert", onInsert);
   }, []);
-  // Text in the box when dictation started; the live transcript is appended after it.
-  const dictationBase = useRef("");
-  const dictationSettings = useStore((s) => s.settings.dictation);
-  const dictation = useDictation(
-    (transcript) => {
-      const base = dictationBase.current;
-      const heard = transcript.trim();
-      if (dictationSettings?.enabled) {
-        // Whisper returns once, after recording; preserve anything typed while it transcribed.
-        if (heard) setText((current) => current && !/\s$/.test(current) ? `${current} ${heard}` : current + heard);
-      } else {
-        setText(base && heard && !/\s$/.test(base) ? `${base} ${heard}` : base + heard);
-      }
-    },
-    setNotice,
-    dictationSettings,
-  );
+  const dictation = useFieldDictation({ value: text, setValue: setText, field: textarea, onError: setNotice, fallback: true });
   useEffect(() => { dictation.cancel(); }, [draftKey]);
-
-  const toggleDictation = () => {
-    if (dictation.listening) return dictation.stop();
-    if (dictation.busy) return;
-    if (!dictationSettings?.enabled && !dictationSupported) {
-      // No speech API in this browser: hand off to the OS's own dictation on the focused box.
-      textarea.current?.focus();
-      setNotice(isIOS ? "Tap the mic on the keyboard to dictate." : isMac ? "Press Fn twice (or 🎤) to dictate." : "Dictation isn't supported in this browser.");
-      return;
-    }
-    dictationBase.current = text;
-    textarea.current?.focus();
-    dictation.start();
-  };
 
   // Auto-size the textarea to its content.
   useLayoutEffect(() => {
@@ -806,6 +776,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
         )}
         <textarea
           ref={textarea}
+          {...dictation.fieldProps}
           className="composer-input"
           value={text}
           rows={variant === "home" ? 2 : 1}
@@ -852,20 +823,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
             )
           )}
           <div className="composer-controls">
-            <button
-              type="button"
-              className={cx("round-btn round-btn-mic", dictation.listening && "round-btn-listening")}
-              disabled={dictation.busy}
-              aria-busy={dictation.busy}
-              data-local-dictation={dictationSettings?.enabled || undefined}
-              aria-label={dictation.busy ? "Transcribing…" : dictation.listening ? "Stop dictation" : "Dictate"}
-              aria-pressed={dictation.listening}
-              data-tooltip={dictation.busy ? "Transcribing…" : dictation.listening ? "Stop dictation" : "Dictate"}
-              data-tooltip-side={variant === "dock" ? "top" : "bottom"}
-              onClick={toggleDictation}
-            >
-              <Mic size={17} />
-            </button>
+            <DictationButton dictation={dictation} className="round-btn round-btn-mic" size={17} tooltipSide={variant === "dock" ? "top" : "bottom"} />
             {queueing && !hasContent && !editing ? (
               <button type="button" className="round-btn" aria-label="Stop generating" data-tooltip="Stop" data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
                 <Square size={13} fill="currentColor" />

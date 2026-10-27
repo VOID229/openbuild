@@ -9,6 +9,8 @@ import { cx, duration } from "../lib/ui";
 import { Fold } from "./Fold";
 import { Markdown } from "./Markdown";
 import { Spinner } from "./primitives";
+import { DictationButton } from "./DictationButton";
+import { useFieldDictation } from "../lib/useFieldDictation";
 import { PluginRender, useToolRenderers } from "../lib/plugins";
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
@@ -330,6 +332,26 @@ export function WorkRun({
   );
 }
 
+/** A question card's answer box, with a mic for dictating into it. */
+function AskField({ value, setValue, placeholder, multiline, autoFocus }: { value: string; setValue: React.Dispatch<React.SetStateAction<string>>; placeholder?: string; multiline?: boolean; autoFocus?: boolean }) {
+  const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    if (!error) return;
+    const t = setTimeout(() => setError(undefined), 4000);
+    return () => clearTimeout(t);
+  }, [error]);
+  const dictation = useFieldDictation({ value, setValue, field, onError: setError });
+  const props = { ref: field, ...dictation.fieldProps, className: cx("input ask-input", multiline && "textarea"), value, placeholder, autoFocus, onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => setValue(e.target.value) };
+  return (
+    <div className={cx("ask-field", multiline && "ask-field-multiline")}>
+      {multiline ? <textarea rows={5} {...props} /> : <input {...props} />}
+      <DictationButton dictation={dictation} />
+      {error && <p className="ask-field-error" role="status">{error}</p>}
+    </div>
+  );
+}
+
 /** A question from a Pi extension: choose, confirm or type, or dismiss. */
 export function AskCard({ part, chatId, messageId, block }: { part: AskPart; chatId: string; messageId: string; block?: number }) {
   const [value, setValue] = useState(part.prefill ?? "");
@@ -373,7 +395,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
               if (value.trim()) reply({ value: value.trim() });
             }}
           >
-            <input className="input ask-input" value={value} placeholder={part.options?.length ? "Other…" : "Your answer"} onChange={(e) => setValue(e.target.value)} />
+            <AskField value={value} setValue={setValue} placeholder={part.options?.length ? "Other…" : "Your answer"} />
             <button type="submit" className="btn btn-sm btn-primary" disabled={!value.trim()}>
               Send
             </button>
@@ -401,11 +423,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
             reply({ value });
           }}
         >
-          {part.method === "editor" ? (
-            <textarea className="input textarea ask-input" rows={5} value={value} placeholder={part.placeholder} onChange={(e) => setValue(e.target.value)} />
-          ) : (
-            <input className="input ask-input" value={value} placeholder={part.placeholder} autoFocus onChange={(e) => setValue(e.target.value)} />
-          )}
+          <AskField value={value} setValue={setValue} placeholder={part.placeholder} multiline={part.method === "editor"} autoFocus={part.method !== "editor"} />
           <div className="ask-actions">
             <button type="submit" className="btn btn-sm btn-primary">
               Send

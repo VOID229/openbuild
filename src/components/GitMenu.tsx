@@ -9,6 +9,8 @@ import { commitPaths, commitScope, gitCommit, gitPullRequest, gitPush, useGitCha
 import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { cx } from "../lib/ui";
+import { useFieldDictation } from "../lib/useFieldDictation";
+import { DictationButton } from "./DictationButton";
 import { IconButton, Popover, Spinner } from "./primitives";
 
 type Action = "commit" | "commit-push" | "push" | "pr";
@@ -33,6 +35,8 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
   const [error, setError] = useState<string>();
   const [done, setDone] = useState<{ text: string; short: string; url?: string }>();
   const [showFiles, setShowFiles] = useState(false);
+  const dictation = useFieldDictation({ value: message, setValue: setMessage, field: input, onError: setError });
+  useEffect(() => { if (!open) dictation.cancel(); }, [open]);
 
   const scope = useMemo(() => (changes?.repo ? commitScope(chat, changes, chats) : undefined), [chat, changes, chats]);
   useEffect(() => {
@@ -141,22 +145,26 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
             </span>
           )}
         </div>
-        <textarea
-          ref={input}
-          className="git-message"
-          value={message}
-          rows={Math.min(6, Math.max(2, message.split("\n").length))}
-          placeholder="Commit message (leave blank to generate)"
-          aria-label="Commit message"
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={(e) => {
-            // ⌘/Ctrl+Enter commits, like the composer sends.
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) {
-              e.preventDefault();
-              void run("commit");
-            }
-          }}
-        />
+        <div className="git-message-wrap">
+          <textarea
+            ref={input}
+            {...dictation.fieldProps}
+            className="git-message"
+            value={message}
+            rows={Math.min(6, Math.max(2, message.split("\n").length))}
+            placeholder="Commit message (leave blank to generate)"
+            aria-label="Commit message"
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={(e) => {
+              // ⌘/Ctrl+Enter commits, like the composer sends.
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && canCommit) {
+                e.preventDefault();
+                void run("commit");
+              }
+            }}
+          />
+          <DictationButton dictation={dictation} tooltipSide="bottom" />
+        </div>
         {scope.separable && (
           <div className="git-scope" role="radiogroup" aria-label="What to commit">
             <button type="button" role="radio" aria-checked={mine} className="git-scope-option" onClick={() => setOnlyMine(true)}>
