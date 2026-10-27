@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   workspace: { mode: "worktree", defaultMode: "worktree" },
   favorites: [],
   threadRuntime: "pi",
+  terminal: "bottom",
 };
 
 type SidebarSections = { pinned: boolean; archived: boolean };

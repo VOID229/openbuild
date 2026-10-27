@@ -86,6 +86,12 @@ export function chatIndex(): { id: string; v: string }[] {
     .map((r) => ({ id: r.id, v: r.version }));
 }
 
+/** Every current Durable thread's id and version (for usage, which reads only those). */
+export function durableChatIndex(): { id: string; v: string }[] {
+  return db.query<{ id: string; version: string }, []>("SELECT id, version FROM chats WHERE deleted_at IS NULL AND json_extract(data, '$.runtime') = 'durable'").all()
+    .map((r) => ({ id: r.id, v: r.version }));
+}
+
 /** The stored JSON of the given current chats, with their versions. */
 export function chatsById(ids: string[]): { id: string; v: string; data: string }[] {
   const find = db.query<{ data: string; version: string | null }, [string]>("SELECT data, version FROM chats WHERE id = ? AND deleted_at IS NULL");

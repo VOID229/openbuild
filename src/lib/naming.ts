@@ -1,6 +1,7 @@
-// Automatic thread titles: as soon as the first user prompt is sent, title the thread.
-// Models picked in Settings are tried in order; with none picked, the thread's own model is used
-// at the lowest reasoning it supports (no thinking when possible).
+// Short texts written by a model on the side: thread titles (as soon as the first user prompt is
+// sent) and commit messages. The text generation models picked in Settings are tried in order;
+// with none picked, the thread's own model is used at the lowest reasoning it supports (no
+// thinking when possible).
 import { streamOnce } from "./api";
 import { findModel } from "./models";
 import { completeOnce } from "./pi";
@@ -28,41 +29,35 @@ export function cleanTitle(raw: string) {
 }
 
 /**
- * Models that may name threads, in order. Models picked in Settings override the default; with none
- * picked, the model this thread is using names it, at the lowest reasoning it supports.
+ * Models that may write side texts, in order. Models picked in Settings override the default; with
+ * none picked, the model this thread is using, at the lowest reasoning it supports.
  */
-function candidates(chat: Chat): NamingModel[] {
+function candidates(chat?: Chat): NamingModel[] {
   const { settings, detection } = useStore.getState();
   const usable = (m: NamingModel) => findModel(detection, m) && (m.plan === "pi" || settings.keys[m.plan]?.length);
   if (settings.naming.models.length) return settings.naming.models.filter(usable);
-  const used = chat.messages.find((m) => m.role === "assistant" && m.model)?.model;
+  const used = chat?.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
   const model = used ? findModel(detection, used) : undefined;
   return used && model ? [{ plan: used.plan, id: used.id, effort: lowestEffort(model.reasoning.efforts) }] : [];
 }
 
-export async function autoName(chatId: string) {
-  const { settings, chats } = useStore.getState();
-  if (!settings.naming.enabled) return;
-  const chat = chats.find((c) => c.id === chatId);
-  const question = chat?.messages.find((m) => m.role === "user");
-  if (!chat || chat.titleSource || !question) return;
-
-  const asked = question.content.trim() || (question.attachments ?? []).map((a) => a.name).join(", ");
-  if (!asked) return;
-  const content = `User prompt to title:\n\n${clip(asked, 1500)}`;
-
-  for (const cand of candidates(chat)) {
+/**
+ * Ask the text generation models, in order, until one answers with something `clean` keeps. Empty
+ * when none could (none chosen and the thread has no model, or they all failed).
+ */
+export async function generateText(opts: { system: string; content: string; sessionId: string; chat?: Chat; clean: (raw: string) => string; timeoutMs?: number }): Promise<string> {
+  for (const cand of candidates(opts.chat)) {
     const keys = useStore.getState().settings.keys[cand.plan];
     if (cand.plan !== "pi" && !keys?.length) continue;
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 30_000);
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 30_000);
     let text = "";
     let failed = false;
     try {
-      if (cand.plan === "pi") text = await completeOnce(cand.id, NAMING_SYSTEM, content, ctrl.signal);
+      if (cand.plan === "pi") text = await completeOnce(cand.id, opts.system, opts.content, ctrl.signal);
       else {
         const stream = streamOnce(
-          { plan: cand.plan, model: cand.id, effort: cand.effort, system: NAMING_SYSTEM, sessionId: `${chatId}-title`, messages: [{ role: "user", content }] },
+          { plan: cand.plan, model: cand.id, effort: cand.effort, system: opts.system, sessionId: opts.sessionId, messages: [{ role: "user", content: opts.content }] },
           ctrl.signal,
         );
         for await (const ev of stream) {
@@ -78,11 +73,25 @@ export async function autoName(chatId: string) {
     } finally {
       clearTimeout(timer);
     }
-    const title = cleanTitle(text);
-    if (failed || !title) continue;
-    // The user may have renamed it while we were waiting.
-    const latest = useStore.getState().chats.find((c) => c.id === chatId);
-    if (latest && latest.titleSource !== "user") useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
-    return;
+    const out = opts.clean(text);
+    if (!failed && out) return out;
   }
+  return "";
+}
+
+export async function autoName(chatId: string) {
+  const { settings, chats } = useStore.getState();
+  if (!settings.naming.enabled) return;
+  const chat = chats.find((c) => c.id === chatId);
+  const question = chat?.messages.find((m) => m.role === "user");
+  if (!chat || chat.titleSource || !question) return;
+
+  const asked = question.content.trim() || (question.attachments ?? []).map((a) => a.name).join(", ");
+  if (!asked) return;
+  const content = `User prompt to title:\n\n${clip(asked, 1500)}`;
+  const title = await generateText({ system: NAMING_SYSTEM, content, sessionId: `${chatId}-title`, chat, clean: cleanTitle });
+  if (!title) return;
+  // The user may have renamed it while we were waiting.
+  const latest = useStore.getState().chats.find((c) => c.id === chatId);
+  if (latest && latest.titleSource !== "user") useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
 }

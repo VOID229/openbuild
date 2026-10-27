@@ -29,10 +29,13 @@ export interface Profile {
   avatar?: string;
 }
 
-/** One entry in the chat-naming model list (tried in order). */
+/** One entry in the text generation model list (thread names, commit messages; tried in order). */
 export interface NamingModel extends ModelRef {
   effort: Effort;
 }
+
+/** Bottom drawer (the default) or beside the thread in the side panel. */
+export type TerminalPosition = "bottom" | "side";
 
 export interface Settings {
   theme: Theme;
@@ -74,6 +77,8 @@ export interface Settings {
   workspace: NewWorkspace;
   /** Where the New project dialog makes new project folders ("~/" when unset). */
   projectsDir?: string;
+  /** Where the terminal opens: a drawer at the bottom of the thread, or a tab in the side panel. */
+  terminal?: TerminalPosition;
   /** Runtime for new threads; older settings default to Pi. */
   threadRuntime?: ThreadRuntime;
   /** Starred Pi models ("<provider>/<id>"), in order. */

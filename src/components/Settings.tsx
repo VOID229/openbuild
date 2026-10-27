@@ -5,7 +5,7 @@ import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
-import { arrowNav, cx, usePresence } from "../lib/ui";
+import { arrowNav, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
@@ -160,6 +160,21 @@ function GeneralSection() {
       </div>
       <div className="setting-row">
         <div className="setting-text">
+          <div className="setting-label">Terminal</div>
+          <p className="setting-desc">Where ⌘J opens it: a drawer under the thread, or a tab beside it with the open files.</p>
+        </div>
+        <OptionSelect
+          label="Where the terminal opens"
+          value={s.terminal ?? "bottom"}
+          options={[
+            { value: "bottom", label: "Bottom" },
+            { value: "side", label: "Side panel" },
+          ]}
+          onChange={(terminal) => update({ terminal })}
+        />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
           <div className="setting-label">Enable Auto Scroll</div>
         </div>
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Enable Auto Scroll" />
@@ -183,12 +198,13 @@ function GeneralSection() {
         <Toggle checked={s.cmdEnter} onChange={(v) => update({ cmdEnter: v })} label="Require Cmd+Enter To Submit" />
       </div>
       <DictationSettings />
-      <ChatNaming />
+      <TextGeneration />
     </>
   );
 }
 
-function ChatNaming() {
+/** Settings → General: the models that write thread names and commit messages (stored as `naming`). */
+function TextGeneration() {
   const naming = useStore((s) => s.settings.naming);
   const detection = useStore((s) => s.detection);
   const settings = useStore((s) => s.settings);
@@ -212,59 +228,61 @@ function ChatNaming() {
     <>
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
-          <div className="setting-label">Thread naming</div>
-          <p className="setting-desc">Name new threads automatically after the first user prompt. Models are tried from top to bottom; if one fails, the next one is used.</p>
+          <div className="setting-label">Text generation models</div>
+          <p className="setting-desc">Used for thread names and commit messages. Tried top to bottom; if one fails, the next is used.</p>
         </div>
-        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Thread naming" />
       </div>
-      <div className={cx("router-config", !naming.enabled && "router-config-hidden")} inert={!naming.enabled}>
-        <div className="router-config-inner">
-          <div className="naming-list">
-            {!naming.models.length && <p className="naming-empty">Uses the thread's own model at no or lowest reasoning. Select to override.</p>}
-            {naming.models.map((entry, i) => {
-              const model = findModel(detection, entry);
-              const efforts = model?.reasoning.efforts ?? [];
-              return (
-                <div key={`${entry.plan}:${entry.id}:${i}`} className="naming-row">
-                  <span className="naming-index">{i + 1}</span>
-                  <ModelSelect
-                    label={`Naming model ${i + 1}`}
-                    value={entry}
-                    onChange={(ref) => {
-                      const next = findModel(detection, ref);
-                      setModels(naming.models.map((m, j) => (j === i ? { ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], m.effort) ?? m.effort } : m)));
-                    }}
-                  />
-                  <EffortSelect
-                    label={`Reasoning for naming model ${i + 1}`}
-                    levels={efforts}
-                    value={nearestEffort(efforts, entry.effort) ?? entry.effort}
-                    onChange={(effort) => setModels(naming.models.map((m, j) => (j === i ? { ...m, effort } : m)))}
-                  />
-                  <span className="naming-actions">
-                    {i > 0 && (
-                      <IconButton
-                        label="Try earlier"
-                        tooltipSide="left"
-                        className="key-icon-btn"
-                        onClick={() => setModels(naming.models.map((m, j) => (j === i - 1 ? naming.models[i]! : j === i ? naming.models[i - 1]! : m)))}
-                      >
-                        <ArrowUp size={14} />
-                      </IconButton>
-                    )}
-                    <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
-                      <Trash2 size={14} />
-                    </IconButton>
-                  </span>
-                </div>
-              );
-            })}
-            <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
-              <Plus size={14} /> {naming.models.length ? "add model" : "select model"}
-            </button>
-            {!plans.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose naming models.</p>}
-          </div>
+      <div className="naming-list">
+        {!naming.models.length && <p className="naming-empty">Uses the thread's own model at its lowest reasoning. Select models to override.</p>}
+        {naming.models.map((entry, i) => {
+          const model = findModel(detection, entry);
+          const efforts = model?.reasoning.efforts ?? [];
+          return (
+            <div key={`${entry.plan}:${entry.id}:${i}`} className="naming-row">
+              <span className="naming-index">{i + 1}</span>
+              <ModelSelect
+                label={`Text generation model ${i + 1}`}
+                value={entry}
+                onChange={(ref) => {
+                  const next = findModel(detection, ref);
+                  setModels(naming.models.map((m, j) => (j === i ? { ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], m.effort) ?? m.effort } : m)));
+                }}
+              />
+              <EffortSelect
+                label={`Reasoning for text generation model ${i + 1}`}
+                levels={efforts}
+                value={nearestEffort(efforts, entry.effort) ?? entry.effort}
+                onChange={(effort) => setModels(naming.models.map((m, j) => (j === i ? { ...m, effort } : m)))}
+              />
+              <span className="naming-actions">
+                {i > 0 && (
+                  <IconButton
+                    label="Try earlier"
+                    tooltipSide="left"
+                    className="key-icon-btn"
+                    onClick={() => setModels(naming.models.map((m, j) => (j === i - 1 ? naming.models[i]! : j === i ? naming.models[i - 1]! : m)))}
+                  >
+                    <ArrowUp size={14} />
+                  </IconButton>
+                )}
+                <IconButton label="Remove" tooltipSide="left" className="key-icon-btn key-remove" onClick={() => setModels(naming.models.filter((_, j) => j !== i))}>
+                  <Trash2 size={14} />
+                </IconButton>
+              </span>
+            </div>
+          );
+        })}
+        <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
+          <Plus size={14} /> {naming.models.length ? "add model" : "select model"}
+        </button>
+        {!plans.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose models.</p>}
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-label">Name threads automatically</div>
+          <p className="setting-desc">Give each new thread a title after its first prompt.</p>
         </div>
+        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Name threads automatically" />
       </div>
     </>
   );
