@@ -93,7 +93,7 @@ Components receive the slot's context as props.
 
 `toolRenderers` is keyed by Pi tool name (`bash`, `edit`, …). A registered renderer replaces the built-in tool row and receives `{ part, cwd }`.
 
-`icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are bare model id prefixes (longest match wins, so `deepseek` matches `deepseek/deepseek-v4.1-flash`). The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme. `plugins/openrouter-deepseek` is a working example.
+`icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are model id prefixes (case-insensitive, longest match wins): a provider-scoped prefix such as `claude-code-2/` takes precedence over a bare prefix such as `claude`. Bare prefixes still match the model id without its provider, so `deepseek` matches `deepseek/deepseek-v4.1-flash`. The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme. `plugins/openrouter-deepseek` is a working example.
 
 `providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group. `plugins/pi-claude` and `plugins/codex-multi` are working examples.
 

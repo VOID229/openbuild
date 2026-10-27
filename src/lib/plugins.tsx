@@ -460,13 +460,19 @@ export function pluginProviderSvg(provider: string): string | undefined {
   return providerIcons.get(provider.toLowerCase());
 }
 
-/** The model brand a plugin registered, by the longest matching bare model id prefix. */
+/** Provider-scoped model prefixes take precedence over bare model id prefixes. */
 export function pluginBrandSvg(modelId: string): string | undefined {
   const id = modelId.toLowerCase();
+  // Scoped aliases (e.g. claude-code-2/default) must not rebrand another provider's default.
+  let scoped: string | undefined;
+  for (const prefix of brandIcons.keys()) {
+    if (prefix.includes("/") && id.startsWith(prefix) && (!scoped || prefix.length > scoped.length)) scoped = prefix;
+  }
+  if (scoped) return brandIcons.get(scoped);
   const bare = id.slice(id.lastIndexOf("/") + 1);
   let match: string | undefined;
   for (const prefix of brandIcons.keys()) {
-    if (bare.startsWith(prefix) && (!match || prefix.length > match.length)) match = prefix;
+    if (!prefix.includes("/") && bare.startsWith(prefix) && (!match || prefix.length > match.length)) match = prefix;
   }
   return match ? brandIcons.get(match) : undefined;
 }

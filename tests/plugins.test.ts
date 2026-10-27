@@ -4,10 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateManifest, type PluginManifest } from "../shared/plugins";
 import { createLocalAuth } from "../server/localAuth";
+import type { ModelInfo } from "../shared/types";
 import openrouterDeepseek from "../plugins/openrouter-deepseek/client";
 import piClaude from "../plugins/pi-claude/client";
 import codexMulti from "../plugins/codex-multi/client";
-import { providerOf, providerName } from "../src/lib/models";
+import { providerOf, providerName, providerSvg } from "../src/lib/models";
+import { providerGroups } from "../src/lib/modelSearch";
 import { clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
 
 const manifest = (patch: Partial<PluginManifest> = {}) => ({
@@ -49,6 +51,33 @@ test("provider overrides move pi-claude out of Custom and into Claude", () => {
   }
 });
 
+test("Claude Code accounts have separate Claude groups and a badged second icon", () => {
+  try {
+    setProviderOverrides(piClaude.providers);
+    const first: ModelInfo = { id: "claude-code/claude-opus-5-5", provider: "claude-code", custom: true, name: "Claude Opus 5.5", protocol: "chat", reasoning: { efforts: [], mode: "effort", toggle: false }, input: ["text", "image"] };
+    const second: ModelInfo = { ...first, id: "claude-code-2/claude-opus-5-5", provider: "claude-code-2" };
+    expect(providerOf(first)).toBe("claude");
+    expect(providerName(providerOf(first))).toBe("Claude");
+    expect(providerSvg(providerOf(first))).toContain("<svg");
+    expect(providerOf(second)).toBe("claude-code-2");
+    expect(providerName(providerOf(second))).toBe("Claude (2)");
+    const groups = providerGroups([first, second]);
+    expect(groups.map((g) => g.provider)).toEqual(["claude", "claude-code-2"]);
+    expect(groups[0]!.models).toEqual([first]);
+    expect(groups[1]!.models).toEqual([second]);
+
+    const icon = piClaude.icons.providers["claude-code-2"];
+    expect(icon).toContain("<svg");
+    expect(icon).toContain('fill="currentColor"');
+    expect(icon).toContain('fill="#D97757"');
+    expect(icon).toContain("claude2-two-_R_0_");
+    expect(icon).toContain("claude2-cut-_R_0_");
+    expect(icon).not.toContain("<title>");
+  } finally {
+    clearProviderOverrides();
+  }
+});
+
 test("the codex-multi plugin gives the second Codex login its own Codex group", () => {
   try {
     setProviderOverrides(codexMulti.providers);
@@ -68,6 +97,50 @@ test("the codex-multi plugin gives the second Codex login its own Codex group", 
   } finally {
     clearProviderOverrides();
   }
+});
+
+test("Claude model icons include provider-scoped default aliases without rebranding other providers", async () => {
+  const script = `
+    import { expect } from "bun:test";
+    import { createElement } from "react";
+    import { renderToStaticMarkup } from "react-dom/server";
+    globalThis.window = globalThis;
+    globalThis.document = { addEventListener() {}, documentElement: { style: {
+      getPropertyValue: () => "", setProperty() {}, removeProperty() {},
+    } } };
+    globalThis.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
+    globalThis.fetch = async () => Response.json({ enabled: true, safe: false, disabled: [], plugins: [{
+      id: "pi-claude", name: "Claude", version: "0.2.0", apiVersion: 1, client: true,
+      clientUrl: ${JSON.stringify(new URL("../plugins/pi-claude/client.tsx", import.meta.url).href)},
+    }] });
+    const { usePlugins, pluginBrandSvg } = await import("./src/lib/plugins.tsx");
+    const { BrandIcon } = await import("./src/components/primitives.tsx");
+    await usePlugins.getState().refresh();
+    expect(usePlugins.getState().errors).toEqual({});
+    for (const id of ["claude-code/default", "claude-code/claude-opus-5-5"]) {
+      expect(pluginBrandSvg(id)).toContain('fill="#D97757"');
+      expect(renderToStaticMarkup(createElement(BrandIcon, { id }))).not.toContain("claude2-two-");
+    }
+    for (const id of ["claude-code-2/default", "claude-code-2/claude-opus-5-5", "CLAUDE-CODE-2/DEFAULT"]) {
+      const html = renderToStaticMarkup(createElement(BrandIcon, { id }));
+      expect(html).toContain("claude2-two-");
+    }
+    const pair = renderToStaticMarkup(createElement("div", null,
+      createElement(BrandIcon, { id: "claude-code-2/default" }),
+      createElement(BrandIcon, { id: "claude-code-2/default" }),
+    ));
+    const masks = [...pair.matchAll(/<mask id="([^"]+)"/g)].map((m) => m[1]);
+    expect(new Set(masks).size).toBe(4);
+    for (const id of masks) expect(pair).toContain("url(#" + id + ")");
+    expect(pluginBrandSvg("other/default")).toBeUndefined();
+    expect(pluginBrandSvg("other/claude-opus-5-5")).toBeUndefined();
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
+  });
+  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  if (code !== 0) throw new Error(`${out}\n${err}`);
+  expect(code).toBe(0);
 });
 
 test("icon first paint waits for plugins, with cached, missing, corrupt or blocked storage", async () => {
