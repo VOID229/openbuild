@@ -26,6 +26,8 @@ const legacy = createStore("openchat", "chats");
 const LEGACY_IMPORTED = "openchat-chats-imported";
 
 let seq = Date.now();
+/** Successful server PUTs, distinct from merely queued writes (or deletion tombstones). */
+const acknowledged = new Map<string, number>();
 
 // The local server's chats, cached in this browser by version (see /api/chats?index). A reload
 // reads them from here and downloads only the chats that changed, not every message of every
@@ -71,8 +73,11 @@ async function send(id: string, op: Op) {
   // 410: the chat was deleted (maybe from another tab); it stays deleted, so the write is done.
   if (res.ok || res.status === 410) {
     // The server's version of what was just written, so the next load doesn't download it again.
-    const v = op.op === "put" && res.ok && ((await res.json().catch(() => undefined)) as { v?: unknown } | undefined)?.v;
-    if (op.op === "put" && typeof v === "string") remember(id, v, op.chat);
+    const saved = op.op === "put" && res.ok ? await res.json().catch(() => undefined) as { v?: unknown; chat?: Chat } | undefined : undefined;
+    if (op.op === "put" && res.ok) {
+      acknowledged.set(id, Math.max(acknowledged.get(id) ?? 0, op.seq));
+      if (typeof saved?.v === "string") remember(id, saved.v, saved.chat ?? op.chat);
+    }
     return;
   }
   // 5xx, or 404 from a server too old to have /api/chats: keep it and try again later.
@@ -226,6 +231,22 @@ export function saveChat(chat: Chat) {
   notify(chat.id);
   if (isHosted()) return set(chat.id, chat, browserChats).catch(logFailure("save chat"));
   return enqueue(chat.id, { op: "put", chat, seq: ++seq });
+}
+
+/** Admission barrier: the worker must not start until its reply id and workspace are on disk.
+ * Unlike saveChat, this waits for the server, not just the browser's durable outbox. */
+export async function saveChatBeforeRun(chat: Chat) {
+  if (isHosted()) return saveChat(chat);
+  notify(chat.id);
+  const op: Op = { op: "put", chat, seq: ++seq };
+  await enqueue(chat.id, op);
+  const failed = () => new Error("Couldn't save this thread to the OpenBuild server. Check your connection and try again.");
+  do {
+    if (!await flush()) throw failed();
+  } while (await get(chat.id, outbox));
+  // A deleted chat (410), or a failed direct-send fallback when local storage is unavailable,
+  // also empties the outbox. Neither is permission to launch an orphan worker.
+  if ((acknowledged.get(chat.id) ?? 0) < op.seq) throw failed();
 }
 
 export function deleteChat(id: string) {

@@ -60,16 +60,20 @@ test("a Durable turn posts again through a gateway error instead of failing", as
   `);
 });
 
-test("a Pi turn still reports a gateway error: only Durable work survives the restart", async () => {
+test("an ordinary Pi turn probes its persisted run after a gateway error", async () => {
   await run(`
-    let posts = 0;
-    globalThis.fetch = await chat(async () => (++posts === 1 ? new Response('Bad Gateway', { status: 502 }) : ${answer}));
+    let posts = 0, gets = 0;
+    globalThis.fetch = async (url) => {
+      if (String(url) === '/api/pi/chat') { posts++; return new Response('Bad Gateway', { status: 502 }); }
+      if (String(url).startsWith('/api/chat/runs/')) { gets++; return ${answer}; }
+      return Response.json({ mode: 'local', convexUrl: null, serverId: 'server-1' });
+    };
     const { streamChat } = await import('./src/lib/api.ts');
     const events = [];
     for await (const e of streamChat(${piRequest}, ${durableStream}, 0, new AbortController().signal, false)) events.push(e);
     assert.equal(posts, 1);
-    assert.deepEqual(events.map((e) => e.t), ['error']);
-    assert.match(events[0].message, /502/);
+    assert.equal(gets, 1);
+    assert.deepEqual(events.map((e) => e.t), ['reset', 'text', 'done']);
   `);
 });
 

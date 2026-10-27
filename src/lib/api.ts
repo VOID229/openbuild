@@ -100,8 +100,14 @@ const CLAIM_GRACE = 90_000;
  * network blip, the tab was frozen) this reconnects and replays the reply from the start, after a
  * {t:"reset"}. Ends after the reply's last event.
  */
-export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal, durable = false): AsyncGenerator<ReplyEvent> {
+export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, stream: ReplyStream, startedAt: number, signal: AbortSignal, recoverable = false): AsyncGenerator<ReplyEvent> {
+  const pi = !!req && "threadId" in req;
+  const probeBeforeRetry = pi && !recoverable;
+  recoverable ||= pi;
   let posted = !req;
+  // A failed POST may already have admitted the turn. Look up its stable id before retrying;
+  // only a definitive 404 permits another (idempotent) admission attempt.
+  let probing = false;
   /** When the current run of failed attempts began. */
   let failingSince: number | undefined;
   let delay = 500;
@@ -109,7 +115,7 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
   let waiting = false;
   while (!signal.aborted) {
     let outcome: Outcome;
-    const source = posted ? attach(stream, signal) : post(req!, stream, signal, () => (posted = true), durable);
+    const source = posted || probing ? attach(stream, signal) : post(req!, stream, signal, () => (posted = true), recoverable);
     try {
       let next = await source.next();
       while (!next.done) {
@@ -127,9 +133,14 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
       await source.return("lost").catch(() => {});
     }
     if (outcome === "end") return;
+    if (probing && outcome === "gone") {
+      probing = false;
+      continue;
+    }
+    if (probeBeforeRetry && !posted && outcome === "lost") probing = true;
     failingSince ??= Date.now();
     if (outcome === "busy") {
-      // Durable works one turn at a time: this message waits for the running one instead of failing.
+      // Persisted Pi workers work one turn at a time: wait for the running one instead of failing.
       // The server rejects it before admitting it (nothing is recorded), so retrying is safe.
       if (Date.now() - failingSince > RESUME_PATIENCE) {
         yield { t: "error", message: "This thread is still working on its previous reply. Stop it, or wait for it to finish, then try again." };
@@ -149,8 +160,8 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
       yield { t: "error", message: "Lost the connection to this reply, and it can't be picked back up." };
       return;
     }
-    // Durable work remains recoverable even when the server is down for longer than ten minutes.
-    if (outcome === "lost" && !(durable && posted) && Date.now() - failingSince > (durable || posted ? RESUME_PATIENCE : POST_PATIENCE)) {
+    // Persisted work remains recoverable even when the server is down longer than ten minutes.
+    if (outcome === "lost" && !(recoverable && (posted || probing)) && Date.now() - failingSince > (recoverable || posted ? RESUME_PATIENCE : POST_PATIENCE)) {
       yield { t: "error", message: posted ? "Lost the connection to this reply." : "Couldn't reach the OpenBuild server. Check your connection." };
       return;
     }
@@ -186,7 +197,7 @@ async function* readReply(res: Response): AsyncGenerator<ReplyEvent, Outcome> {
   return "lost";
 }
 
-async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, signal: AbortSignal, onPosted: () => void, durable: boolean): AsyncGenerator<ReplyEvent, Outcome> {
+async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, signal: AbortSignal, onPosted: () => void, recoverable: boolean): AsyncGenerator<ReplyEvent, Outcome> {
   // Pi threads (they name a working directory) run on the local server's Pi.
   const pi = "threadId" in req;
   const hosted = !pi && (await config).mode === "hosted";
@@ -199,7 +210,7 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
   });
   if (res.status === 409) {
     const body = await res.json().catch(() => null);
-    if (durable) {
+    if (recoverable) {
       // The thread's previous turn is still running. Nothing was admitted, so wait and ask again.
       if (body?.code === "busy") return "busy";
       // Anything else (a rewind, a deleted thread, a reused request id) won't change by retrying.
@@ -212,10 +223,8 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
   }
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
-    // A restart (or a proxy in front of it) answers 502/503 while the server is down. Durable work
-    // keeps going on the server, and the same request id attaches to it instead of starting a second
-    // turn, so a gateway error is a pause rather than the end of the reply.
-    if (durable && (res.status >= 500 || res.status === 408 || res.status === 425 || res.status === 429)) return "lost";
+    // Persisted workers survive a restart/proxy failure; their stable request id is recoverable.
+    if (recoverable && (res.status >= 500 || res.status === 408 || res.status === 425 || res.status === 429)) return "lost";
     yield { t: "error", status: res.status, message: body?.error ?? `Request failed (HTTP ${res.status})` };
     return "end";
   }

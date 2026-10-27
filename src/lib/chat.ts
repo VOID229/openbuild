@@ -1,6 +1,7 @@
 import { newStreamKey, type ReplyStream } from "../../shared/replies";
 import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
+import { saveChatBeforeRun } from "./db";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { editingQueued, moveQueued, queueOf, removeQueued, requeue, setSteering, shiftQueue, type Queued } from "./queue";
@@ -160,7 +161,15 @@ export function stopAllGenerations() {
  */
 export function resumeReplies(chatId?: string) {
   for (const chat of useStore.getState().chats) {
-    if ((chatId && chat.id !== chatId) || running.has(chat.id)) continue;
+    if (chatId && chat.id !== chatId) continue;
+    const run = running.get(chat.id);
+    if (run) {
+      // A server projection/cloud update finished the reply while this listener was offline.
+      // Release its local listener/queue without sending a stop to the surviving worker.
+      const message = chat.messages.find((m) => m.id === run.messageId);
+      if (message && message.status !== "streaming") run.ctrl.abort();
+      continue;
+    }
     const msg = chat.messages.findLast((m) => m.status === "streaming" && m.stream && canResume(m.stream.via));
     if (msg) void generate(chat.id, msg.id, true);
   }
@@ -381,7 +390,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
   let savedAt = Date.now();
   const flush = () => {
     scheduled = false;
-    if (!isCurrent()) return;
+    if (!isCurrent() || useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.status !== "streaming") return;
     // Persist periodically so a reload mid-stream keeps the partial answer. A reply picked back up
     // is only saved once it's over (the device that started it saves along the way).
     const persist = !resume && Date.now() - savedAt > 2000;
@@ -440,10 +449,20 @@ async function generate(chatId: string, messageId: string, resume = false) {
           search,
           digest: search ? searchDigest(st.settings, st.detection) : undefined,
         };
+    if (pi && !resume && chat.runtime !== "durable") {
+      const latest = useStore.getState().chats.find((c) => c.id === chatId);
+      if (!latest) return;
+      await saveChatBeforeRun(latest);
+      if (!isCurrent()) return;
+      ctrl.signal.throwIfAborted();
+    }
     const flushParts = () => {
       if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { parts: [...parts] });
     };
-    for await (const ev of streamChat(request, stream, startedAt, ctrl.signal, chat.runtime === "durable")) {
+    for await (const ev of streamChat(request, stream, startedAt, ctrl.signal, (resume && pi) || chat.runtime === "durable")) {
+      // A poll/cloud sync may already have supplied the worker's final projection. Never replace
+      // it with a partial replay (or mark it failed when a stale connection eventually dies).
+      if (useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.status !== "streaming") break;
       if (ev.t === "reset") {
         // Reconnected: the reply is replayed from the start.
         text = reasoning = "";
@@ -530,7 +549,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
   requeueSteers(chatId, run);
   // A reply picked back up may have been finished meanwhile by the device that started it.
   const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
-  if (resume && now?.status !== "streaming") return drainQueue(chatId);
+  if (now?.status !== "streaming") return drainQueue(chatId);
   if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
   endThought();
   const status: Message["status"] = error ? "error" : ctrl.signal.aborted ? "stopped" : "done";

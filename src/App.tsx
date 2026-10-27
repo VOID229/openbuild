@@ -11,9 +11,8 @@ import { TerminalPanel } from "./components/TerminalPanel";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
-import { EXTERNAL_VIA } from "../shared/replies";
+import { canSyncChat, readChatProjection } from "./lib/chatSync";
 import { resumeReplies } from "./lib/chat";
-import { resumeShells } from "./lib/shell";
 import { toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
@@ -198,28 +197,36 @@ function Main() {
         if (disposed) return;
         const current = useStore.getState().chats;
         const byId = new Map(current.map((c) => [c.id, c]));
+        let readActive: string | undefined;
         for (const chat of incoming) {
           const original = before.get(chat.id);
           const now = byId.get(chat.id);
           // A local edit, delete or streamed delta happened during the request: leave it alone.
           // Pi running outside OpenBuild only changes here, so keep taking it.
-          if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
+          if (now !== original || !canSyncChat(now, chat)) continue;
           // Unchanged chats come back as the same object from the chat cache.
           if (now === chat) continue;
-          if (!now || JSON.stringify(now) !== JSON.stringify(chat)) byId.set(chat.id, chat);
+          if (!now || JSON.stringify(now) !== JSON.stringify(chat)) {
+            const next = readChatProjection(chat, document.visibilityState === "visible" ? useStore.getState().activeChatId : undefined);
+            if (next !== chat) readActive = chat.id;
+            byId.set(chat.id, next);
+          }
         }
         useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
-        // Commands another device started here.
-        resumeShells();
+        if (readActive) useStore.getState().updateChat(readActive, { unread: false });
+        // Replies and commands another device started here, including runs admitted before a restart.
+        resumeReplies();
       } catch { /* Keep the current view offline; the next poll retries. */ }
       finally { pending = false; }
     };
     const timer = setInterval(() => void refresh(), 5000);
     document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("online", refresh);
     return () => {
       disposed = true;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("online", refresh);
     };
   }, [chatsLoaded]);
 
