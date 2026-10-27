@@ -15,10 +15,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
-import { ask, confirm } from "./prompt";
+import { ask } from "./prompt";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
+import { systemdService, UNIT } from "./systemd";
 
 type Mode = "local" | "lan" | "tailscale";
 
@@ -44,6 +45,7 @@ const KEEPER = join(DATA, "keeper.json");
 const KEEPER_LOG = join(DATA, "keeper.log");
 /** The process that runs Durable turns, so a server restart doesn't interrupt them (`server/durable/worker.ts`). */
 const DURABLE_WORKER = join(DATA, "durable", "worker.json");
+const PI_WORKER = join(DATA, "pi-worker", "worker.json");
 const PORT = Number(process.env.PORT ?? 3100);
 
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
@@ -334,24 +336,31 @@ async function start(mode: Mode) {
   console.log(dim(`  Logs: openbuild logs · stop: openbuild stop`));
 }
 
-/** Stop the Durable worker. Only a full stop does: a restart leaves it running its turns. */
-function stopDurableWorker() {
-  try {
-    const state = JSON.parse(readFileSync(DURABLE_WORKER, "utf8")) as { pid?: unknown };
-    if (typeof state.pid === "number" && alive(state.pid)) process.kill(state.pid, "SIGTERM");
-  } catch {}
-  rmSync(DURABLE_WORKER, { force: true });
+/** Only an explicit `stop --all` terminates detached runtimes. */
+function stopWorkers() {
+  for (const [file, script] of [[PI_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"]] as const) {
+    try {
+      const { pid } = JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown };
+      if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1 || pid === process.pid || !alive(pid)) continue;
+      // Metadata may outlive a worker and its PID may be reused. Only signal a
+      // process whose argv identifies this installation's matching runtime.
+      const command = run("ps", ["-p", String(pid), "-o", "args="]);
+      if (command.ok && command.out.split(/\s+/).includes(join(ROOT, script))) process.kill(pid, "SIGTERM");
+    } catch {}
+    // Never remove worker metadata: Pi startup retains its old PID as a
+    // process-group fence before admitting new work. Each runtime owns cleanup.
+  }
 }
 
-/** `keepWorker`: leave the Durable worker running (a restart reattaches to it). */
-async function stop(quiet = false, keepWorker = false) {
+/** By default only stop the server/keeper; detached turns keep running. */
+async function stop(quiet = false, keepWorker = true) {
   const s = readState();
   const serverAlive = !!s && alive(s.pid);
   const keeper = keeperPid();
   if (!serverAlive && !keeper) {
     rmSync(STATE, { force: true });
-    if (!keepWorker) stopDurableWorker();
-    if (!quiet) console.log("OpenBuild isn't running.");
+    if (!keepWorker) stopWorkers();
+    if (!quiet) console.log(keepWorker ? "OpenBuild server isn't running; detached workers left unchanged." : "OpenBuild server isn't running; Pi and Durable workers sent shutdown signals.");
     return;
   }
   // Local stop means fully stopped: no keepalive left offering to start it again.
@@ -367,8 +376,8 @@ async function stop(quiet = false, keepWorker = false) {
     if (alive(s!.pid)) process.kill(s!.pid, "SIGKILL");
   }
   rmSync(STATE, { force: true });
-  if (!keepWorker) stopDurableWorker();
-  if (!quiet) console.log("OpenBuild stopped.");
+  if (!keepWorker) stopWorkers();
+  if (!quiet) console.log(keepWorker ? "OpenBuild stopped; Pi and Durable workers left running." : "OpenBuild stopped; Pi and Durable workers sent shutdown signals.");
 }
 
 /** Is something OpenBuild-shaped answering on the port? A server started outside `openbuild start` (systemd, `bun dev`) writes no state file. */
@@ -409,11 +418,16 @@ function help() {
   openbuild remote status       where each paired device's server stands
   openbuild set pass <pw>     set/change the local access password
   openbuild password          the same, typed at a hidden prompt instead
-  openbuild stop              stop the server
-  openbuild restart [--yes]   restart in the same mode (asks first; that ends running Pi threads)
+  openbuild stop              stop the server; Pi and Durable work keep running
+  openbuild stop --all        also terminate Pi and Durable workers
+  openbuild restart [--yes]   restart in the same mode; running turns continue
   openbuild status            is it running, and where
   openbuild logs              follow the server log
   openbuild open              open it in the browser
+
+  On Linux, an openbuild.service user unit for this installation is managed
+  through systemd automatically (start, stop, restart, status, logs).
+  Its service configuration controls the address and startup mode.
 
   PORT=…  use another port (default 3100). Data: ${DATA}`);
 }
@@ -775,9 +789,36 @@ async function remoteServer(action: "start" | "stop", raw: string[]) {
 }
 
 const args = process.argv.slice(2);
-const assumeYes = args.includes("--yes") || args.includes("-y");
-const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y");
-switch (cmd) {
+const stopAll = args.includes("--all");
+const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y" && a !== "--all");
+if (stopAll && cmd !== "stop") fail("--all is only supported by openbuild stop.");
+// An installed user service owns its lifecycle, even while stopped. Never start a
+// competing detached server or kill its PID behind systemd's back.
+const serviceCommands = ["start", "stop", "restart", "status", "logs"];
+const service = cmd && serviceCommands.includes(cmd) && !running() ? systemdService(ROOT, run) : undefined;
+if (service) {
+  if (arg) fail(`the systemd service controls its own configuration; use openbuild ${cmd} without extra arguments.`);
+  if ((cmd === "stop" || cmd === "restart") && !stopAll && !service.workerSurvives) {
+    fail(`${UNIT} would kill detached Pi and Durable workers (KillMode is not process). Set [Service] KillMode=process with \`systemctl --user edit ${UNIT}\`, then run \`systemctl --user daemon-reload\` and retry. Existing units are not updated automatically. Use openbuild stop --all only if you intend to terminate workers too.`);
+  }
+  if (cmd === "logs") {
+    const result = spawnSync("journalctl", ["--user", "-u", UNIT, "-n", "50", "-f"], { stdio: "inherit" });
+    process.exit(result.status ?? 1);
+  }
+  if (cmd === "status") {
+    const result = run("systemctl", ["--user", "status", UNIT, "--no-pager"]);
+    console.log(result.out || result.err);
+  } else {
+    const result = run("systemctl", ["--user", cmd!, UNIT]);
+    if (!result.ok) fail(result.err || result.out || `systemd ${cmd} failed`);
+    if (cmd === "stop") {
+      await stopKeeper();
+      if (stopAll) stopWorkers();
+    }
+    console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"} (${UNIT}, systemd user service).`);
+    if (cmd === "stop") console.log(stopAll ? "Pi and Durable workers sent shutdown signals." : "Pi and Durable workers left running.");
+  }
+} else switch (cmd) {
   case "set": {
     if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>`);
     // Everything after `pass`, so a password with spaces works unquoted too.
@@ -826,7 +867,8 @@ switch (cmd) {
     break;
   }
   case "stop":
-    await stop();
+    if (arg) fail("usage: openbuild stop [--all]");
+    await stop(false, !stopAll);
     break;
   case "restart": {
     const state = readState();
@@ -836,16 +878,8 @@ switch (cmd) {
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
-    // Ordinary Pi RPC replies stop. Durable turns keep running in their own worker process, and the
-    // new server reattaches to it.
-    if (owned && !assumeYes) {
-      if (!process.stdin.isTTY) fail("restarting ends the Pi threads working in it, and there is no terminal to confirm in. Add --yes to restart anyway.");
-      if (!(await confirm("Restarting stops ordinary Pi replies; Durable turns keep running and reattach afterwards. Proceed?"))) {
-        console.log("restart canceled");
-        break;
-      }
-    }
-    // Keep the Durable worker: its turns carry on through the restart, and the new server reattaches.
+    // Pi and Durable turns carry on in detached workers; the new server reattaches.
+    // --yes/-y remain accepted for compatibility; no destructive confirmation is needed.
     if (owned) await stop(true, true);
     await start(mode);
     break;
