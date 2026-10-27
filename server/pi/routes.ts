@@ -7,6 +7,7 @@ import { EFFORTS, type ModelInfo, type PiChatRequest } from "../../shared/types"
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import * as workspaceFiles from "../workspaceFiles";
+import * as workspaceGit from "../workspaceGit";
 import { beforeChat, hasChatHooks } from "../plugins";
 import * as auth from "./auth";
 import { status } from "./install";
@@ -75,6 +76,17 @@ const validImages = (images: any) =>
   images === undefined || (Array.isArray(images) && images.length <= 20 && images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100)));
 
 export function piRoutes(api: Api) {
+  /** A git action on a workspace the server knows: `{ cwd, … }` in, its result (or why it failed) out. */
+  const gitAction = (action: (body: any) => Promise<unknown>) =>
+    api(async (req: Request) => {
+      const body = await readJson(req);
+      if (!str(body?.cwd, 1024) || !projects.allowedCwd(body.cwd)) return bad("Unknown folder", 403);
+      try {
+        return Response.json(await action(body));
+      } catch (err) {
+        return fail(err);
+      }
+    });
   return {
     // ---------------------------------------------------------------- install, version, updates
     "/api/pi/status": {
@@ -474,7 +486,7 @@ export function piRoutes(api: Api) {
         }
       }),
     },
-    // One workspace file's text, for an "@" mention.
+    // One workspace file's text, for an "@" mention or the editor; and saving it from the editor.
     "/api/workspaces/file": {
       GET: api((req) => {
         const params = new URL(req.url).searchParams;
@@ -483,11 +495,74 @@ export function piRoutes(api: Api) {
         if (!path) return bad("Expected ?path=");
         if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
         try {
+          // An open editor checking whether the file changed under it: no need to send it again.
+          const since = Number(params.get("since"));
+          if (params.has("since") && workspaceFiles.fileMtime(cwd, path) === since) return Response.json({ unchanged: true });
           return Response.json(workspaceFiles.readFile(cwd, path));
         } catch (err) {
           return fail(err);
         }
       }),
+      PUT: api(async (req) => {
+        const body = await readJson(req);
+        const cwd = typeof body?.cwd === "string" && body.cwd ? body.cwd : undefined;
+        if (!str(body?.path, 1024) || typeof body.text !== "string" || body.text.length > 5_000_000 || (body.mtime !== undefined && typeof body.mtime !== "number"))
+          return bad("Expected { cwd?, path, text, mtime? }");
+        if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return Response.json(workspaceFiles.writeFile(cwd, body.path, body.text, body.mtime));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // An image as it is, for the file viewer.
+    "/api/workspaces/raw": {
+      GET: api((req) => {
+        const params = new URL(req.url).searchParams;
+        const cwd = params.get("cwd") || undefined;
+        const path = params.get("path");
+        if (!path) return bad("Expected ?path=");
+        if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return workspaceFiles.rawFile(cwd, path);
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // One folder of the file tree.
+    "/api/workspaces/tree": {
+      GET: api(async (req) => {
+        const params = new URL(req.url).searchParams;
+        const cwd = params.get("cwd") || undefined;
+        if (cwd && !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return Response.json({ entries: await workspaceFiles.listDir(cwd, params.get("dir") ?? "") });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // The Commit menu: what changed, what a commit would contain, and committing, pushing, opening a PR.
+    "/api/workspaces/changes": {
+      GET: api(async (req) => {
+        const cwd = new URL(req.url).searchParams.get("cwd");
+        if (!cwd || !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        return Response.json(await workspaceGit.changes(cwd));
+      }),
+    },
+    "/api/workspaces/diff": {
+      POST: gitAction((body) => workspaceGit.diff(body.cwd, body.paths)),
+    },
+    "/api/workspaces/commit": {
+      POST: gitAction((body) => workspaceGit.commit(body.cwd, body.message, body.paths)),
+    },
+    "/api/workspaces/push": {
+      POST: gitAction((body) => workspaceGit.push(body.cwd)),
+    },
+    "/api/workspaces/pr": {
+      POST: gitAction((body) => workspaceGit.pullRequest(body.cwd)),
     },
     "/api/workspaces": {
       POST: api(async (req) => {

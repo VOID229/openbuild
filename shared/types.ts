@@ -126,6 +126,18 @@ export interface FileRead {
   mime: string;
   size: number;
   text: string;
+  /** When the file last changed on disk, to notice it changing under an open editor. */
+  mtime?: number;
+}
+
+/** One entry of a folder in the file tree. */
+export interface TreeEntry {
+  name: string;
+  dir: boolean;
+  /** Matched by .gitignore. */
+  ignored?: boolean;
+  /** Uncommitted: "M" changed, "A" added, "?" new, "D" deleted, … (a folder: something in it changed). */
+  git?: string;
 }
 
 /** A file or folder in a workspace, for the composer's "@" menu. */
@@ -322,6 +334,38 @@ export interface GitInfo {
   dirty: number;
   ahead?: number;
   behind?: number;
+}
+
+/** A changed path in a checkout, relative to the repository's top. */
+export interface GitChange {
+  path: string;
+  /** "M" modified, "A" added, "D" deleted, "R" renamed, "?" untracked, "U" conflicted. */
+  status: "M" | "A" | "D" | "R" | "?" | "U";
+  /** A rename's old path. */
+  from?: string;
+  /** Some of it is staged already. */
+  staged?: boolean;
+}
+
+/** What the Commit menu needs to know about a checkout. */
+export interface GitChanges {
+  repo: boolean;
+  /** The repository's top folder. */
+  root?: string;
+  /** Where the workspace sits inside it ("" at the top, else "sub/dir/"). */
+  prefix?: string;
+  branch?: string;
+  upstream?: string;
+  /** Commits not pushed yet. */
+  ahead?: number;
+  behind?: number;
+  /** The remote pushes go to when the branch has no upstream yet. */
+  remote?: string;
+  /** The remote's default branch, where pull requests go. */
+  defaultBranch?: string;
+  files: GitChange[];
+  /** GitHub's CLI is installed, so pull requests can be opened. */
+  gh?: boolean;
 }
 
 /** Runtime chosen when a thread starts; absent on legacy threads means Pi. */
