@@ -8,7 +8,7 @@ import type { ModelScope } from "../../shared/types";
 import { agentDir, nodeBin, packageRoot, piEnv } from "./install";
 import { PiError } from "./rpc";
 import { parseModelScope } from "./scope";
-import { restartIdle } from "./sessions";
+import { restartIdle } from "./remote";
 
 const HELPER = join(import.meta.dir, "helper.mjs");
 

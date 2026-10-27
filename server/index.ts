@@ -18,6 +18,9 @@ import * as storage from "./storage";
 import * as vault from "./vault";
 import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
 import * as durable from "./durable";
+import * as piWorker from "./pi/remote";
+import { projectChat, projectStoredChats } from "./pi/projection";
+import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as folderPicker from "./folderPicker";
 
@@ -342,7 +345,7 @@ function serve(port: number, hostname: string) {
       "/api/chat/runs/:id": {
         GET: api(async (req: Bun.BunRequest<"/api/chat/runs/:id">, server: Bun.Server<unknown>) => {
           server.timeout(req, 0);
-          const run = isStreamId(req.params.id) ? findRun(req.params.id) ?? await durable.findRun(req.params.id) : undefined;
+          const run = isStreamId(req.params.id) ? findRun(req.params.id) ?? await piWorker.findRun(req.params.id) ?? await durable.findRun(req.params.id) : undefined;
           return run ? new Response(run.stream(), { headers: runHeaders }) : bad("No such reply", 404);
         }),
       },
@@ -351,7 +354,7 @@ function serve(port: number, hostname: string) {
           if (isStreamId(req.params.id)) {
             const run = findRun(req.params.id);
             if (run) run.stop();
-            else await durable.stopRun(req.params.id);
+            else if (!(await piWorker.stopRun(req.params.id))) await durable.stopRun(req.params.id);
           }
           return Response.json({ ok: true });
         }),
@@ -361,12 +364,20 @@ function serve(port: number, hostname: string) {
       // `?index`: only ids and versions, so browsers fetch just the chats their cache lacks.
       "/api/chats": {
         GET: api(async (req) => {
-          await discoverSessions();
+          try {
+            const snapshots = await piWorker.snapshots();
+            projectStoredChats(snapshots);
+            await discoverSessions();
+          } catch (err) {
+            // Saved conversations remain readable if the worker needs repair. Do not fall back to
+            // transcript discovery here: that would overwrite authoritative OB stream identities.
+            console.warn("[pi-worker] Showing saved chats; worker unavailable:", (err as Error).message);
+          }
           if (new URL(req.url).searchParams.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
         }),
         DELETE: api(async () => {
-          await Promise.all(storage.listChats().filter((chat) => threadRuntime(chat.id) === "durable").map((chat) => durable.stopThread(chat.id)));
+          await Promise.all(storage.listChats().map((chat) => threadRuntime(chat.id) === "durable" ? durable.stopThread(chat.id) : piWorker.deleteThread(chat.id)));
           storage.deleteAllChats();
           return Response.json({ ok: true });
         }),
@@ -395,11 +406,15 @@ function serve(port: number, hostname: string) {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
           if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
-          const v = storage.putChat(chat);
-          return v ? Response.json({ ok: true, v }) : bad("Chat was deleted", 410);
+          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.shell);
+          const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
+          const projected = projectChat(chat as unknown as Chat, snapshots, storage.getChat(chat.id) as Chat | undefined);
+          const v = storage.putChat({ ...projected });
+          return v ? Response.json({ ok: true, v, chat: projected }) : bad("Chat was deleted", 410);
         }),
         DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           if (threadRuntime(req.params.id) === "durable") await durable.stopThread(req.params.id);
+          else await piWorker.deleteThread(req.params.id);
           storage.deleteChat(req.params.id);
           return Response.json({ ok: true });
         }),
@@ -462,6 +477,7 @@ try {
 hot.openbuildServers = servers;
 // Recover before any browser reconnects; attach also awaits this same recovery barrier.
 void durable.recover().catch((err) => console.error("[durable] Startup recovery failed:", err));
+void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");

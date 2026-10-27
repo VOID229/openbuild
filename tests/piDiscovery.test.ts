@@ -113,6 +113,28 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.equal(child.subagent, true);
     assert.equal(child.title, "runtime-ui");
     assert.equal(projectSession(jsonl(lines), file, 10).subagent, undefined);
+    // Worker-owned UI history stays intact, but later terminal continuations are still imported.
+    const { projectStoredChats } = await import('./server/pi/projection.ts');
+    const managedId = 'managed-thread-1234';
+    const managedFile = join(root, 'managed.jsonl');
+    const cutoff = Date.now();
+    storage.setValue('pi-session:' + managedId, JSON.stringify({file:managedFile,cwd:root}));
+    globalThis.openbuildPiClient.owned.add(managedId);
+    const ownedStream = {id:'owned-reply-0123456789',via:'server-test'};
+    storage.putChat({id:managedId,title:'Keep',createdAt:1,updatedAt:cutoff,messages:[
+      {id:'ob-user',role:'user',content:'Original',createdAt:cutoff + 999999},
+      {id:'ob-assistant',role:'assistant',content:'Rich output',createdAt:cutoff,stream:ownedStream,status:'done'}
+    ]});
+    projectStoredChats([{id:ownedStream.id,threadId:managedId,kind:'run',status:'finished',startedAt:cutoff-100,endedAt:cutoff,events:[{t:'text',v:'Rich output'},{t:'done',finish:'stop'}]}]);
+    const terminalUser = entry('terminal-user', 'answer1', 'user', 'Continue in terminal', {timestamp:cutoff+1000});
+    const terminalReply = entry('terminal-reply', 'terminal-user', 'assistant', [{type:'text',text:'Terminal answer'}], {timestamp:cutoff+1001,stopReason:'stop'});
+    await writeFile(managedFile,jsonl([{...header,id:managedId},user,assistant,terminalUser,terminalReply]));
+    await utimes(managedFile,(cutoff+1002)/1000,(cutoff+1002)/1000);
+    await discoverSessions();
+    const continued=storage.getChat(managedId);
+    assert.deepEqual(continued.messages.map(m=>m.id),['ob-user','ob-assistant','terminal-user','terminal-reply']);
+    assert.deepEqual(continued.messages[1].stream,ownedStream);
+    assert.equal(continued.messages[3].content,'Terminal answer');
     process.exit(0);
   `;
   try {

@@ -8,7 +8,9 @@ import { scratchDir } from "../projects";
 import * as storage from "../storage";
 import { TOOL as QUESTION_TOOL, cleanOptions } from "./extensions/question-ask";
 import { agentDir } from "./install";
-import { isSessionLive, isThreadId } from "./sessions";
+import { isThreadId } from "./sessions";
+import { ownsSession } from "./remote";
+import { managedSessionBoundary } from "./projection";
 import { addUsage, emptyUsage } from "./usage";
 import { EXTERNAL_VIA } from "../../shared/replies";
 
@@ -195,14 +197,28 @@ async function discover() {
       const fingerprint = `${info.mtimeMs}:${info.size}:${isLive(info.mtimeMs)}`;
       if (fingerprints.get(file) === fingerprint) return;
       const knownId = mappings.get(resolve(file));
-      // Never replace the richer UI events of a process owned by OpenBuild.
-      if (knownId && isSessionLive(knownId)) { fingerprints.set(file, fingerprint); return; }
+      // Worker logs own the original UI messages. After a finished turn, terminal-created
+      // messages may still be appended to this Pi session; import only that later suffix.
+      const boundary = knownId ? managedSessionBoundary(knownId) : undefined;
+      if (knownId && ownsSession(knownId) && (boundary === undefined || info.mtimeMs <= boundary)) { fingerprints.set(file, fingerprint); return; }
       const projected = projectSession(await readFile(file, "utf8"), file, info.mtimeMs);
       if (!projected) return;
       const id = knownId || projected.id;
       // Reads above yield to requests; re-check ownership and metadata immediately before writing.
-      if (isSessionLive(id)) { fingerprints.set(file, fingerprint); return; }
+      const managed = ownsSession(id);
+      const latestBoundary = managedSessionBoundary(id);
+      if (managed && (latestBoundary === undefined || info.mtimeMs <= latestBoundary)) { fingerprints.set(file, fingerprint); return; }
       const old = storage.getChat(id) as Chat | undefined;
+      if (managed) {
+        const suffix = projected.messages.filter(message => message.createdAt > latestBoundary!);
+        const suffixIds = new Set(suffix.map(message => message.id));
+        let previousSuffix = new Set<string>();
+        try { previousSuffix = new Set(JSON.parse(storage.getValue(`pi-terminal-suffix:${id}`) ?? "[]")); } catch {}
+        // Browser timestamps may differ from this machine's clock. Never identify original OB
+        // messages by their time; retire only IDs discovery itself imported after this boundary.
+        projected.messages = [...(old?.messages ?? []).filter(message => !suffixIds.has(message.id) && !(previousSuffix.has(message.id) && message.createdAt > latestBoundary!)), ...suffix];
+        storage.setValue(`pi-terminal-suffix:${id}`, JSON.stringify([...previousSuffix, ...suffixIds]));
+      }
       // Metadata (pins, archive, titles) belongs to OpenBuild, history belongs to Pi. A title OpenBuild
       // generated stays unless Pi named the session since; one the user typed always stays.
       const keepTitle = old?.titleSource === "user" || (old?.titleSource === "auto" && !projected.titleSource);

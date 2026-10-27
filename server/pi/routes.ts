@@ -8,15 +8,14 @@ import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import * as workspaceFiles from "../workspaceFiles";
 import { beforeChat, hasChatHooks } from "../plugins";
-import { localRun, Run } from "../runs";
 import * as auth from "./auth";
 import { status } from "./install";
 import { currentJob, jobStream, startJob } from "./jobs";
 import * as resources from "./resources";
 import { forgetPrices, lookup, priceBook, pricing, type PriceBook } from "./pricing";
 import { problems } from "./rpc";
-import { findShell, startShell, stopShell } from "./shell";
-import { answer, compact, complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts, restartIdle, runTurn, steer } from "./sessions";
+import { complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts } from "./sessions";
+import { answer, compact, findShell, startShell, stopShell, restartIdle, steer, startRun } from "./remote";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
 import * as durable from "../durable";
@@ -74,22 +73,6 @@ function isPiChat(b: any): b is PiChatRequest {
 
 const validImages = (images: any) =>
   images === undefined || (Array.isArray(images) && images.length <= 20 && images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100)));
-
-/** A run that produces its events itself (no upstream response to read). */
-function startStream(produce: (signal: AbortSignal) => ReadableStream<Uint8Array>): Run {
-  const run = new Run();
-  void (async () => {
-    const { readEvents } = await import("../../shared/replies");
-    try {
-      for await (const e of readEvents(produce(run.signal))) run.push(e);
-    } catch (err) {
-      if (!run.signal.aborted) run.push({ t: "error", message: `The reply was interrupted: ${(err as Error).message}` });
-    } finally {
-      run.end();
-    }
-  })();
-  return run;
-}
 
 export function piRoutes(api: Api) {
   return {
@@ -195,7 +178,7 @@ export function piRoutes(api: Api) {
         try {
           const run = body.runtime === "durable"
             ? await durable.startRun(body)
-            : localRun(body.stream.id, () => startStream((signal) => runTurn(body, signal)));
+            : await startRun(body);
           return new Response(run.stream(), { headers: runHeaders });
         } catch (err) {
           return fail(err);
@@ -207,7 +190,7 @@ export function piRoutes(api: Api) {
         const body = await readJson(req);
         if (!isThreadId(req.params.id) || !str(body?.askId, 128)) return bad("Expected { askId, value | confirmed | cancelled }");
         if (threadRuntime(req.params.id) === "durable") return bad("Pi extension dialogs aren't available in Durable threads.", 400);
-        const ok = answer(req.params.id, body.askId, { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true });
+        const ok = await answer(req.params.id, body.askId, { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true });
         return ok ? Response.json({ ok }) : bad("That question isn't waiting anymore", 410);
       }),
     },
@@ -244,20 +227,20 @@ export function piRoutes(api: Api) {
         } catch (err) {
           return fail(err);
         }
-        const shell = startShell({ id: body.id, threadId, cwd: body.cwd, command: body.command, hidden: body.hidden === true });
+        const shell = await startShell({ id: body.id, threadId, cwd: body.cwd, command: body.command, hidden: body.hidden === true });
         return new Response(shell.stream(), { headers: ndjson });
       }),
     },
     "/api/pi/shells/:id": {
-      GET: api((req: Bun.BunRequest<"/api/pi/shells/:id">, server: Bun.Server<unknown>) => {
+      GET: api(async (req: Bun.BunRequest<"/api/pi/shells/:id">, server: Bun.Server<unknown>) => {
         server.timeout(req, 0);
-        const shell = isStreamId(req.params.id) ? findShell(req.params.id) : undefined;
+        const shell = isStreamId(req.params.id) ? await findShell(req.params.id) : undefined;
         return shell ? new Response(shell.stream(), { headers: ndjson }) : bad("No such command", 404);
       }),
     },
     "/api/pi/shells/:id/stop": {
-      POST: api((req: Bun.BunRequest<"/api/pi/shells/:id/stop">) => {
-        if (isStreamId(req.params.id)) stopShell(req.params.id);
+      POST: api(async (req: Bun.BunRequest<"/api/pi/shells/:id/stop">) => {
+        if (isStreamId(req.params.id)) await stopShell(req.params.id);
         return Response.json({ ok: true });
       }),
     },

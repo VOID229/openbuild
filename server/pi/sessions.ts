@@ -250,6 +250,11 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         if (l && free) {
           l.busy = false;
           l.turn = undefined;
+          // Pi drops pending extension requests on abort without sending a UI dismissal. Retire
+          // turn-visible dialogs here so a later reply never replays a question nobody can answer.
+          for (const id of l.asks.keys()) send({ t: "asked", id });
+          l.asks.clear();
+          l.questions.clear();
           l.emit = undefined;
           l.proc.lastUsed = Date.now();
           free();
@@ -372,7 +377,12 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               break;
           }
         });
-        const onAbort = () => void proc.send({ type: "abort" }).catch(() => {});
+        const onAbort = () => {
+          // Extensions are not required to pass an AbortSignal to their dialogs. Dismiss them
+          // explicitly, otherwise abort may wait forever for a question with no UI attached.
+          for (const id of l!.asks.keys()) answer(req.threadId, id, { cancelled: true });
+          void proc.send({ type: "abort" }).catch(() => {});
+        };
         signal.addEventListener("abort", onAbort, { once: true });
 
         await l.ready;

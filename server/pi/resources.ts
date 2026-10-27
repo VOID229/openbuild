@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameS
 import { homedir } from "node:os";
 import { basename, dirname, extname, join, relative, sep } from "node:path";
 import { agentDir } from "./install";
-import { restartIdle } from "./sessions";
+import { restartIdle } from "./remote";
 
 export type Kind = "extension" | "skill" | "prompt";
 const DIRS: Record<Kind, string> = { extension: "extensions", skill: "skills", prompt: "prompts" };
