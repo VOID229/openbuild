@@ -10,7 +10,6 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
-import { CommandCache } from "../../shared/commandCache";
 import { partialTitle } from "../../shared/htmlRender";
 import { TOOL as HTML_TOOL } from "./extensions/html-render";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
@@ -542,18 +541,21 @@ export function listModels(fresh = false): Promise<PiModels> {
 
 export const forgetModels = () => (modelsCache = undefined);
 
-const commandsCache = new CommandCache<PiCommand[]>(60_000);
+const commandsCache = new Map<string, { at: number; value: Promise<PiCommand[]> }>();
 
 /** Pi's slash commands for a directory: extension commands, prompt templates and skills. */
 export function listCommands(cwd: string): Promise<PiCommand[]> {
-  return commandsCache.get(cwd, () => {
-    const fetchFrom = (p: PiProcess) =>
-      p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
-        r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
-      );
-    const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !inUse(l) && !l.proc.exited);
-    return idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
-  });
+  const hit = commandsCache.get(cwd);
+  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.value;
+  const fetchFrom = (p: PiProcess) =>
+    p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
+      r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
+    );
+  const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !inUse(l) && !l.proc.exited);
+  const value = idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
+  commandsCache.set(cwd, { at: Date.now(), value });
+  value.catch(() => commandsCache.delete(cwd));
+  return value;
 }
 
 export const forgetCommands = () => commandsCache.clear();
