@@ -5303,9 +5303,18 @@ p.key-status svg {
 
 .ws-menu {
   width: min(340px, calc(100vw - 24px));
+  /* Popover caps max-height to the space beside the anchor; let the list absorb the shortfall. */
+  display: flex;
+  flex-direction: column;
+}
+
+.ws-menu > * {
+  flex: none;
 }
 
 .ws-menu .select-list {
+  flex: 0 1 auto;
+  min-height: 0;
   max-height: 300px;
   overflow-y: auto;
 }
