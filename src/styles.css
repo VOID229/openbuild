@@ -619,6 +619,48 @@ svg {
   color: var(--text-3);
 }
 
+/* A folder path field's completion list (src/components/PathField.tsx): as wide as the field, with
+   the folder names in the same mono face as the path being typed. */
+.path-menu {
+  min-width: 220px;
+  max-height: min(300px, 50vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.path-item {
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.path-item-active {
+  background: var(--hover);
+}
+
+.path-icon {
+  flex: none;
+  color: var(--text-3);
+}
+
+.path-item-active .path-icon {
+  color: var(--text-2);
+}
+
+.path-hint {
+  position: sticky;
+  bottom: 0;
+  margin: 4px -6px -6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  border-radius: 0 0 12px 12px;
+  background: var(--surface);
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .picker {
   position: relative;
   display: inline-flex;
