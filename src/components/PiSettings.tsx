@@ -50,6 +50,7 @@ import { deviceName, splitProjectId } from "../lib/devices";
 import { cx } from "../lib/ui";
 import { OptionSelect } from "./ModelSelect";
 import { projectsDir } from "./NewProject";
+import { PathField } from "./PathField";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -1024,7 +1025,7 @@ export function ProjectsSection() {
             saveDir();
           }}
         >
-          <input className="input input-sm pi-mono" value={dir} spellCheck={false} autoCapitalize="off" aria-label="Default project location" onChange={(e) => setDir(e.target.value)} onBlur={saveDir} />
+          <PathField className="input-sm pi-mono" value={dir} label="Default project location" onChange={setDir} onBlur={saveDir} />
         </form>
       </div>
       <section className="pi-block">

@@ -467,7 +467,8 @@ export function piRoutes(api: Api) {
     "/api/fs": {
       GET: api((req) => {
         try {
-          return Response.json(projects.browse(new URL(req.url).searchParams.get("dir") ?? undefined));
+          const params = new URL(req.url).searchParams;
+          return Response.json(projects.browse(params.get("dir") ?? undefined, { hidden: params.get("hidden") === "1" }));
         } catch (err) {
           return fail(err);
         }

@@ -9,6 +9,7 @@ import { useStore } from "../lib/store";
 import { splitProjectId } from "../lib/devices";
 import { machineName } from "../lib/runtime";
 import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
+import { PathField } from "./PathField";
 import { Popover } from "./primitives";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -259,16 +260,14 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
               )}
             </div>
           )}
-          <input
-            className="input np-path"
+          <PathField
+            className="np-path"
             value={path}
-            aria-label="Folder"
-            spellCheck={false}
-            autoCapitalize="off"
-            autoCorrect="off"
-            onChange={(e) => {
-              setPath(e.target.value);
-            }}
+            label="Folder"
+            deviceId={deviceId}
+            onChange={setPath}
+            // No point suggesting folders while a clone is being added over this path.
+            disabled={busy === "add"}
           />
           <p className={cx("np-hint", error && "np-error")} role={error ? "alert" : undefined}>
             {error ??

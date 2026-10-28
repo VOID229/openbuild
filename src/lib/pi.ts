@@ -173,8 +173,11 @@ export const cloneProject = (url: string, path: string, deviceId?: DeviceId) =>
 export const renameProject = (id: string, name: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "PATCH", { name });
 export const removeProject = (id: string, deviceId?: DeviceId) => send(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}`), "DELETE");
 export const projectGit = (id: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}/git`));
-export const browseFolders = (dir?: string, deviceId?: DeviceId) =>
-  get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(apiUrl(deviceId, `/api/fs${dir ? `?dir=${encodeURIComponent(dir)}` : ""}`));
+/** A folder's subfolders on `deviceId` (this server without one). `hidden` also lists dotfolders. */
+export const browseFolders = (dir?: string, deviceId?: DeviceId, hidden = false) =>
+  get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(
+    apiUrl(deviceId, `/api/fs?${new URLSearchParams({ ...(dir ? { dir } : {}), ...(hidden ? { hidden: "1" } : {}) })}`),
+  );
 /** Whether this browser can use the server's native folder picker (only when both are on one machine). */
 export const folderPickerAvailable = () => get<{ available: boolean }>("/api/native/folder").then((r) => r.available, () => false);
 /** Open the native folder picker; null when it was cancelled. */

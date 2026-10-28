@@ -98,12 +98,15 @@ export function renameProject(id: string, name: string) {
   store(stored().map((p) => (p.id === id ? { ...p, name: name.trim().slice(0, 80) || p.name } : p)));
 }
 
-/** Subfolders of a folder (an error when there's no folder there); repositories are marked. */
-export function browse(rawDir: string | undefined): { dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] } {
+/**
+ * Subfolders of a folder (an error when there's no folder there); repositories are marked. `hidden`
+ * also lists dotfolders (bar "." and ".."), for a path being typed that starts with a dot.
+ */
+export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = {}): { dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] } {
   const dir = expand(rawDir || homedir());
   if (!isDir(dir)) throw new Error(`No folder at ${tilde(dir)}`);
   const entries = readdirSync(dir, { withFileTypes: true })
-    .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith(".") && e.name !== "node_modules" && e.name !== "Library")
+    .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && e.name !== "node_modules" && e.name !== "Library" && (opts.hidden ? e.name !== "." && e.name !== ".." : !e.name.startsWith(".")))
     .map((e) => ({ name: e.name, path: join(dir, e.name), git: existsSync(join(dir, e.name, ".git")) }))
     .filter((e) => isDir(e.path))
     .sort((a, b) => Number(b.git) - Number(a.git) || a.name.localeCompare(b.name));
