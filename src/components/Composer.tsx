@@ -528,7 +528,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const typedCommand = /^\/(\S*)$/.exec(text)?.[1];
   const [slashDismissed, setSlashDismissed] = useState<string>();
   const [slashIndex, setSlashIndex] = useState(0);
-  const piCmds = usePiCommands(workspace?.cwd ?? homeProject?.path, runtime === "pi" && typedCommand !== undefined, mentionDevice);
+  const piCmds = usePiCommands(mentionCwd, runtime === "pi", mentionDevice, typedCommand !== undefined);
   const slashMatches = useMemo(() => {
     if (typedCommand === undefined || slashDismissed === text) return [];
     const builtins = BUILTIN_COMMANDS.filter((c) => c.name !== "compact" || (chatId && runtime === "pi"));
