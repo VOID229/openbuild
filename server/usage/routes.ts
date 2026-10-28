@@ -1,6 +1,8 @@
-// /api/usage: tokens and cost across the agents on this machine; /api/usage/limits: their plans' limits.
+// /api/usage: tokens and cost across the agents on this machine and paired devices;
+// /api/usage/limits: their plans' limits. `scope=local` (what devices ask each other) is this machine only.
 import { USAGE_RANGES, type UsageRange } from "../../shared/usage";
 import { limits } from "./limits";
+import { machineLimits, machineReports, mergeReports } from "./machines";
 import { report } from "./report";
 
 type Wrap = <R extends Request>(handler: (req: R) => Response | Promise<Response>) => (req: R) => Response | Promise<Response>;
@@ -12,10 +14,19 @@ export function usageRoutes(api: Wrap) {
     "/api/usage": {
       GET: api(async (req) => {
         const url = new URL(req.url);
-        const range = url.searchParams.get("range") as UsageRange;
-        const tz = (url.searchParams.get("tz") ?? "UTC").slice(0, 64);
+        const p = url.searchParams;
+        const range = USAGE_RANGES.includes(p.get("range") as UsageRange) ? (p.get("range") as UsageRange) : "30d";
+        const tz = (p.get("tz") ?? "UTC").slice(0, 64);
+        const force = p.has("fresh");
         try {
-          return Response.json(await report(USAGE_RANGES.includes(range) ? range : "30d", tz, url.searchParams.has("fresh")));
+          const local = () => report(range, tz, force);
+          if (p.get("scope") === "local") return Response.json(await local());
+          const { machines, reports } = await machineReports(range, tz, force, local);
+          // `machine`: one machine's numbers ("local" or a device id); otherwise all of them added up.
+          const pick = p.get("machine");
+          const chosen = pick && pick !== "all" ? reports.filter((r) => r.machine.id === pick) : reports;
+          const merged = chosen.length ? mergeReports(chosen) : { ...(await local()), providers: [], series: [], models: [], days: [] };
+          return Response.json({ ...merged, machines });
         } catch (err) {
           return fail(err);
         }
@@ -23,8 +34,11 @@ export function usageRoutes(api: Wrap) {
     },
     "/api/usage/limits": {
       GET: api(async (req) => {
+        const p = new URL(req.url).searchParams;
+        const force = p.has("fresh");
         try {
-          return Response.json({ providers: await limits(new URL(req.url).searchParams.has("fresh")), checkedAt: Date.now() });
+          if (p.get("scope") === "local") return Response.json({ providers: await limits(force), checkedAt: Date.now() });
+          return Response.json(await machineLimits(force, () => limits(force)));
         } catch (err) {
           return fail(err);
         }

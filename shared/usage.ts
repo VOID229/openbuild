@@ -49,8 +49,23 @@ export interface UsageDayRow {
   sessions: number;
 }
 
+/** A machine whose usage is shown: this one, or a paired device. */
+export interface UsageMachine {
+  /** "local" for this machine, else the paired device's id. */
+  id: string;
+  name: string;
+  local?: boolean;
+  /** pending: still being read (its numbers fill in shortly); error: couldn't be reached. */
+  status: "ok" | "pending" | "error";
+  /** When its numbers were read. */
+  at?: number;
+  error?: string;
+}
+
 export interface UsageReport {
   range: UsageRange;
+  /** Machines this report covers or tried to (set for the whole-fleet view). */
+  machines?: UsageMachine[];
   /** Hourly buckets for the past day, daily otherwise. */
   bucket: "hour" | "day";
   start: number;
@@ -99,6 +114,8 @@ export interface UsageLimits {
   asOf: number;
   /** Read from the last transcript rather than asked live. */
   stale?: boolean;
+  /** The machine it was read on (set when more than one machine is shown). */
+  machine?: string;
   /** Banked resets (Codex). */
   resetCredits?: number;
   error?: string;
@@ -106,5 +123,6 @@ export interface UsageLimits {
 
 export interface UsageLimitsReport {
   providers: UsageLimits[];
+  machines?: UsageMachine[];
   checkedAt: number;
 }

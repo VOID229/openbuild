@@ -65,6 +65,8 @@ const devicePathAllowed = (path: string) =>
   path === "/api/config" ||
   path === "/api/pair/self" ||
   /^\/api\/remote(\/|$)/.test(path) ||
+  // Usage on this device, so the one it's paired to can show every machine's together.
+  /^\/api\/usage(\/|$)/.test(path) ||
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||

@@ -66,15 +66,17 @@ function load(key: string, url: string, force = false, stale = force) {
   return slot.promise;
 }
 
-const reportKey = (range: UsageRange) => `report:${range}`;
-const reportUrl = (range: UsageRange) => `/api/usage?range=${range}&tz=${encodeURIComponent(tz())}`;
+/** "all" (every machine added up), "local", or a paired device's id. */
+export type UsageScope = string;
+const reportKey = (range: UsageRange, machine: UsageScope) => `report:${machine}:${range}`;
+const reportUrl = (range: UsageRange, machine: UsageScope) => `/api/usage?range=${range}&tz=${encodeURIComponent(tz())}&machine=${encodeURIComponent(machine)}`;
 
-export const loadReport = (range: UsageRange, force = false, stale = force) => load(reportKey(range), reportUrl(range), force, stale);
+export const loadReport = (range: UsageRange, machine: UsageScope = "all", force = false, stale = force) => load(reportKey(range, machine), reportUrl(range, machine), force, stale);
 export const loadLimits = (force = false) => load("limits", "/api/usage/limits", force);
 
 /** Warm the page before it opens. */
 export function prefetchUsage(range: UsageRange = "30d") {
-  void loadReport(range);
+  void loadReport(range, "all");
   void loadLimits();
 }
 
@@ -91,22 +93,29 @@ function useSlot<T>(key: string) {
   return { data: s?.data, loading: !!s?.loading, error: s?.error, at: s?.at ?? 0 };
 }
 
-export function useUsageReport(range: UsageRange) {
-  useEffect(() => void loadReport(range), [range]);
-  const slot = useSlot<UsageReport>(reportKey(range));
-  // A source still loading on the server (Cursor's account history): ask again once it's had time.
-  const pending = !!slot.data?.pending?.length && !slot.loading;
+export function useUsageReport(range: UsageRange, machine: UsageScope) {
+  useEffect(() => void loadReport(range, machine), [range, machine]);
+  const slot = useSlot<UsageReport>(reportKey(range, machine));
+  // Still coming in on the server (Cursor's history, a paired machine): ask again once it's had time.
+  const pending = (!!slot.data?.pending?.length || !!slot.data?.machines?.some((m) => m.status === "pending")) && !slot.loading;
   useEffect(() => {
     if (!pending) return;
-    const t = setTimeout(() => void loadReport(range, false, true), 3000);
+    const t = setTimeout(() => void loadReport(range, machine, false, true), 3000);
     return () => clearTimeout(t);
-  }, [pending, range, slot.at]);
+  }, [pending, range, machine, slot.at]);
   return slot;
 }
 
 export function useUsageLimits() {
   useEffect(() => void loadLimits(), []);
-  return useSlot<UsageLimitsReport>("limits");
+  const slot = useSlot<UsageLimitsReport>("limits");
+  const pending = !!slot.data?.machines?.some((m) => m.status === "pending") && !slot.loading;
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => void load("limits", "/api/usage/limits", false, true), 3000);
+    return () => clearTimeout(t);
+  }, [pending, slot.at]);
+  return slot;
 }
 
 /** Re-renders every `ms`, for countdowns. */

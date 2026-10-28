@@ -7955,6 +7955,25 @@ a.btn-primary {
 }
 .main-full .ustats-bar { padding-left: 96px; }
 .ustats-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.ustats-crumb { color: var(--text-3); margin: 0 -4px; }
+.ustats-machine {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 8px 0 10px; border-radius: 8px;
+  font-size: 14px; color: var(--text-2); transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.ustats-machine:disabled { opacity: 0.45; }
+@media (hover: hover) { .ustats-machine:not(:disabled):hover { background: var(--hover); color: var(--text); } }
+.ustats-machine[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+.ustats-mstate { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.ustats-mstate-ok { background: var(--ok); opacity: 0.8; }
+.ustats-mstate-pending { background: #d6a028; }
+.ustats-mstate-error { background: var(--danger); }
+.ustats-mmenu { right: auto; width: 260px; }
+.ustats-mitem { height: auto; min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+.ustats-mtext { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.ustats-mname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ustats-mnote { font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ustats-mnote-error { color: var(--danger); }
+.ustats-mitem .ustats-mstate { margin: 0 4px; }
 .ustats-controls { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ustats-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
 .ustats-seg-btn {

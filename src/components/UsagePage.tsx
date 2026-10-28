@@ -1,15 +1,15 @@
 // Usage: tokens and cost across the agents on this machine, and their plans' limits (server/usage/).
-import { AlertTriangle, ArrowLeft, Info, RefreshCw, RotateCcw, Ticket } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import claudeSvg from "../assets/brands/claude-color.svg" with { type: "text" };
 import grokSvg from "../assets/brands/grok.svg" with { type: "text" };
 import openaiSvg from "../assets/brands/openai.svg" with { type: "text" };
 import opencodeSvg from "../assets/brands/opencode.svg" with { type: "text" };
-import { USAGE_PROVIDER_NAMES, USAGE_RANGES, type UsageLimits, type UsageProvider, type UsageRange, type UsageReport, type UsageWindow } from "../../shared/usage";
+import { USAGE_PROVIDER_NAMES, USAGE_RANGES, type UsageMachine, type UsageLimitsReport, type UsageProvider, type UsageRange, type UsageReport, type UsageWindow } from "../../shared/usage";
 import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
-import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport } from "../lib/usageStats";
-import { IconButton, PiMark, Spinner } from "./primitives";
+import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport, type UsageScope } from "../lib/usageStats";
+import { IconButton, PiMark, Popover, Spinner } from "./primitives";
 import { useLightbox } from "./Lightbox";
 
 type Tab = "cost" | "tokens" | "limits";
@@ -58,7 +58,8 @@ const color = (p: UsageProvider) => `var(--ustats-${p})`;
 export function UsagePage() {
   const [tab, setTab] = useState<Tab>("cost");
   const [range, setRange] = useState<UsageRange>("30d");
-  const report = useUsageReport(range);
+  const [machine, setMachine] = useState<UsageScope>("all");
+  const report = useUsageReport(range, machine);
   const lim = useUsageLimits();
   const mobile = useMediaQuery("(max-width: 768px)");
   const close = () => useStore.getState().setUsageOpen(false);
@@ -77,7 +78,9 @@ export function UsagePage() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   const busy = tab === "limits" ? lim.loading : report.loading;
-  const refresh = () => (tab === "limits" ? loadLimits(true) : loadReport(range, true));
+  const refresh = () => (tab === "limits" ? loadLimits(true) : loadReport(range, machine, true));
+  // Machines are known from any answer; the last one keeps the picker steady while switching.
+  const machines = report.data?.machines ?? lim.data?.machines ?? [];
 
   return (
     <div className="ustats">
@@ -88,6 +91,7 @@ export function UsagePage() {
           </IconButton>
         ) : null}
         <h1 className="ustats-title">Usage</h1>
+        {machines.length > 1 && <MachinePicker machines={machines} value={tab === "limits" ? "all" : machine} onChange={setMachine} disabled={tab === "limits"} />}
         <div className="ustats-controls">
           <div className="ustats-seg" role="tablist" aria-label="View">
             {(["cost", "tokens", "limits"] as const).map((t) => (
@@ -114,6 +118,59 @@ export function UsagePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ------------------------------------------------------------------ machines
+
+function MachinePicker({ machines, value, onChange, disabled }: { machines: UsageMachine[]; value: UsageScope; onChange: (m: UsageScope) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const now = useNow(30_000);
+  const current = machines.find((m) => m.id === value);
+  const issues = machines.filter((m) => m.status !== "ok").length;
+  const dot = (m: UsageMachine) => <span className={cx("ustats-mstate", `ustats-mstate-${m.status}`)} aria-hidden />;
+  return (
+    <>
+      <span className="ustats-crumb" aria-hidden>/</span>
+      <button ref={anchor} type="button" className="ustats-machine" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}
+        data-tooltip={disabled ? "Limits are per account, from every machine" : undefined} data-tooltip-side="bottom">
+        {value === "all" ? "All machines" : current?.name ?? "Machine"}
+        {value === "all" && issues > 0 && <span className={cx("ustats-mstate", machines.some((m) => m.status === "error") ? "ustats-mstate-error" : "ustats-mstate-pending")} aria-hidden />}
+        <ChevronDown size={14} />
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu drop-down ustats-mmenu" role="menu" label="Machine" fixed="down">
+        <button type="button" role="menuitemradio" aria-checked={value === "all"} className="menu-item" onClick={() => (onChange("all"), setOpen(false))}>
+          <Layers size={15} />
+          <span className="menu-item-label">All machines</span>
+          {value === "all" && <Check size={15} className="menu-check" />}
+        </button>
+        <div className="menu-sep" />
+        {machines.map((m) => (
+          <button
+            key={m.id}
+            type="button"
+            role="menuitemradio"
+            aria-checked={value === m.id}
+            className="menu-item ustats-mitem"
+            title={m.status === "error" ? m.error : undefined}
+            onClick={() => (onChange(m.id), setOpen(false))}
+          >
+            <Laptop size={15} />
+            <span className="ustats-mtext">
+              <span className="ustats-mname">
+                {m.name}
+                {m.local && <span className="ustats-dim"> · this machine</span>}
+              </span>
+              <span className={cx("ustats-mnote", m.status === "error" && "ustats-mnote-error")}>
+                {m.status === "error" ? (/doesn't report usage/.test(m.error ?? "") ? "Needs an OpenBuild update" : "Unreachable") : m.status === "pending" ? "Reading…" : m.at ? `Updated ${ago(m.at, now)}` : ""}
+              </span>
+            </span>
+            {value === m.id ? <Check size={15} className="menu-check" /> : dot(m)}
+          </button>
+        ))}
+      </Popover>
+    </>
   );
 }
 
@@ -193,9 +250,10 @@ function SpendView({ tab, data, loading, error }: { tab: "cost" | "tokens"; data
 
       <Breakdown data={data} metric={tab} />
 
-      {(data.problems.length > 0 || data.unpriced.length > 0) && (
+      {(data.problems.length > 0 || data.unpriced.length > 0 || data.machines?.some((m) => m.status === "error")) && (
         <Problem
           lines={[
+            ...(data.machines ?? []).filter((m) => m.status === "error").map((m) => `${m.name}: ${m.error}${m.at ? " Showing its last numbers." : ""}`),
             ...data.problems.map((p) => `${USAGE_PROVIDER_NAMES[p.provider]}: ${p.message}`),
             ...(data.unpriced.length ? [`No known price for ${data.unpriced.join(", ")}: counted as $0.`] : []),
           ]}
@@ -448,7 +506,7 @@ function Chart({ data, metric, hidden }: { data: UsageReport; metric: "cost" | "
 
 // ------------------------------------------------------------------ limits
 
-function LimitsView({ data, error, loading }: { data?: { providers: UsageLimits[]; checkedAt: number }; error?: string; loading: boolean }) {
+function LimitsView({ data, error, loading }: { data?: UsageLimitsReport; error?: string; loading: boolean }) {
   const now = useNow(30_000);
   if (!data) return error ? <Problem lines={[error]} /> : <div className="ustats-loading"><Spinner size={18} /> Asking providers…</div>;
   const ok = data.providers.filter((p) => p.windows.length);
@@ -470,13 +528,22 @@ function LimitsView({ data, error, loading }: { data?: { providers: UsageLimits[
             {USAGE_PROVIDER_NAMES[p.provider]}
             {p.account && <span className="ustats-account">{p.account}</span>}
             {p.plan && <span className="ustats-plan">{p.plan}</span>}
-            {p.account && p.source && <span className="ustats-dim ustats-small ustats-source">{p.source}</span>}
+            {(p.source || p.machine) && (data.machines?.length ?? 0) + (p.account ? 1 : 0) > 1 && (
+              <span className="ustats-dim ustats-small ustats-source">{[p.machine, p.source].filter(Boolean).join(" · ")}</span>
+            )}
             {p.stale && <span className="ustats-dim ustats-small">as of {ago(p.asOf, now)}</span>}
           </h2>
           {p.windows.map((w) => <LimitRow key={w.id} provider={p.provider} w={w} now={now} credits={w.kind === "weekly" || w.id === "primary" ? p.resetCredits : undefined} />)}
         </section>
       ))}
-      {failed.length > 0 && <Problem lines={failed.map((p) => `${USAGE_PROVIDER_NAMES[p.provider]}${p.account ? ` ${p.account}` : ""}${p.source ? ` (${p.source})` : ""}: ${p.error}`)} />}
+      {(failed.length > 0 || data.machines?.some((m) => m.status === "error")) && (
+        <Problem
+          lines={[
+            ...(data.machines ?? []).filter((m) => m.status === "error").map((m) => `${m.name}: ${m.error}`),
+            ...failed.map((p) => `${p.machine ? `${p.machine} · ` : ""}${USAGE_PROVIDER_NAMES[p.provider]}${p.account ? ` ${p.account}` : ""}${p.source ? ` (${p.source})` : ""}: ${p.error}`),
+          ]}
+        />
+      )}
       <p className="ustats-foot ustats-dim">
         Checked {ago(data.checkedAt, now)}
         {loading && " · updating…"}

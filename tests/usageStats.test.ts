@@ -73,3 +73,30 @@ describe("usage transcripts", () => {
     expect(readRoute("/usage/")).toEqual({ usage: true });
   });
 });
+
+import { mergeReports } from "../server/usage/machines";
+import type { UsageReport } from "../shared/usage";
+
+describe("usage across machines", () => {
+  const rep = (providers: [UsageReport["providers"][number]["id"], number][], t0: number): UsageReport => ({
+    range: "7d", bucket: "day", start: t0, end: t0 + 2 * 864e5,
+    providers: providers.map(([id, cost]) => ({ id, sessions: 1, requests: 2, cost, tokens: cost * 1000 })),
+    series: [0, 1].map((i) => ({ t: t0 + i * 864e5, cost: providers.map(([, c]) => c / 2), tokens: providers.map(([, c]) => (c * 1000) / 2) })),
+    totals: { input: 1, cacheRead: 2, cacheWrite: 0, output: 3, cost: providers.reduce((s, [, c]) => s + c, 0), sessions: providers.length, requests: 2, cacheSavings: 1 },
+    costByType: { input: 0, cacheRead: 0, cacheWrite: 0, output: 0, other: 0 },
+    models: providers.map(([id, cost]) => ({ provider: id, model: "m", cost, tokens: cost * 1000, requests: 2 })),
+    days: [], unpriced: [], problems: [], generatedAt: t0,
+  });
+  test("adds providers, series, models and totals; a remote's slightly older buckets line up", () => {
+    const t0 = Date.UTC(2026, 9, 1);
+    const m = mergeReports([
+      { machine: { id: "local", name: "imac", status: "ok" }, report: rep([["pi", 10], ["claude", 4]], t0) },
+      // Same days, read a little earlier on the other machine.
+      { machine: { id: "mac", name: "mac", status: "ok" }, report: rep([["codex", 20], ["pi", 2]], t0 - 1000) },
+    ]);
+    expect(m.providers.map((p) => [p.id, p.cost])).toEqual([["codex", 20], ["pi", 12], ["claude", 4]]);
+    expect(m.totals.cost).toBe(36);
+    expect(m.series.map((b) => b.cost)).toEqual([[10, 6, 2], [10, 6, 2]]);
+    expect(m.models.find((x) => x.provider === "pi")!.cost).toBe(12);
+  });
+});
