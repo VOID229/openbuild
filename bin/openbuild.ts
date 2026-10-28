@@ -16,6 +16,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync,
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { ask } from "./prompt";
+import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
@@ -563,51 +564,12 @@ async function pairHost() {
   }
 }
 
-interface PairCandidate {
-  base: string;
-  name: string;
-  machine?: string;
-  deviceId?: string;
-}
-
-/** GET /api/pair/info, which only answers while a pairing is open. */
-async function probePairing(base: string): Promise<PairCandidate | undefined> {
-  const url = base.replace(/\/$/, "");
-  // Two tries: a machine that accidentally has two servers on one port (or a transient TLS
-  // timeout) can answer the first probe from the wrong one. Retrying is cheap and avoids a
-  // confusing "nothing waiting" when the host is actually there.
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      const res = await fetch(`${url}/api/pair/info`, { signal: AbortSignal.timeout(900) });
-      if (res.ok) {
-        const info = (await res.json()) as { pending?: boolean; name?: string; machine?: string; deviceId?: string; claimed?: boolean };
-        if (!info?.pending || info.claimed) return undefined;
-        return { base: url, name: info.name || base, machine: info.machine, deviceId: info.deviceId };
-      }
-    } catch {}
-    if (attempt === 0) await Bun.sleep(150);
-  }
-  return undefined;
-}
-
 /** Probe a typed address with the given scheme, and the other one if that fails. */
 async function probeAddress(typed: string): Promise<PairCandidate | undefined> {
   if (/^https?:\/\//.test(typed)) return probePairing(typed);
   const host = typed.includes(":") ? typed : `${typed}:${PORT}`;
   // Tailscale often has HTTPS on a nonstandard port; a LAN host is usually plain HTTP.
   return (await probePairing(`https://${host}`)) ?? (await probePairing(`http://${host}`));
-}
-
-/** Run probes a few at a time, so a /24 scan stays quick without hundreds of sockets at once. */
-async function probeAll(bases: string[]): Promise<PairCandidate[]> {
-  const unique = [...new Set(bases)];
-  const found: PairCandidate[] = [];
-  const batch = 48;
-  for (let i = 0; i < unique.length; i += batch) {
-    const results = await Promise.all(unique.slice(i, i + batch).map(probePairing));
-    for (const r of results) if (r) found.push(r);
-  }
-  return found;
 }
 
 const isTailscaleIp = (ip: string) => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
@@ -658,19 +620,22 @@ async function pairClient() {
   const code = await ask("Pairing code: ");
   if (!code) fail("no pairing code entered.");
   console.log(dim(mode === "lan" ? "Looking for a device on your network…" : "Looking for a device on your tailnet…"));
-  let candidates = await probeAll(mode === "lan" ? lanCandidates() : tailscaleCandidates());
-  // A device that answers both ways can show up twice; keep one per device/name.
-  candidates = candidates.filter((c, i) => candidates.findIndex((x) => x.deviceId && x.deviceId === c.deviceId) === i);
-  if (!candidates.length) {
+  async function* candidates(): AsyncGenerator<PairCandidate> {
+    let foundAny = false;
+    for await (const candidate of discoverPairing(mode === "lan" ? lanCandidates() : tailscaleCandidates())) {
+      foundAny = true;
+      yield candidate;
+    }
+    if (foundAny) return;
     console.log(dim("No OpenBuild is waiting to pair here. If you know its address, enter it below."));
     const typed = await ask("Host address (host, host:port, or https://…, Enter to cancel): ");
     if (!typed) fail("nothing to pair with.");
     const found = await probeAddress(typed);
     if (!found) fail(`no OpenBuild is waiting to pair at ${typed}. Check that \`openbuild pair --host\` is running there.`);
-    candidates = [found!];
+    yield found!;
   }
 
-  for (const candidate of candidates) {
+  for await (const candidate of candidates()) {
     try {
       const res = await fetch(`${candidate.base}/api/pair/claim`, {
         method: "POST",
