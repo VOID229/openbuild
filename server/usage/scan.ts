@@ -85,16 +85,29 @@ async function filesIn(root: string, match: (name: string) => boolean): Promise<
 const NEWLINE = 0x0a;
 const decoder = new TextDecoder();
 
+/**
+ * Parse the lines that contain a marker, in order. Markers are searched for in the whole text rather
+ * than line by line: most of a transcript is content, and this skips it without splitting it up.
+ */
 function parseText(text: string, format: Format, state: unknown, out: Rec[]) {
-  for (const line of text.split("\n")) {
-    if (!line || !format.markers.some((m) => line.includes(m))) continue;
-    let e: unknown;
-    try {
-      e = JSON.parse(line);
-    } catch {
-      continue;
+  const next = format.markers.map((m) => text.indexOf(m));
+  let done = -1;
+  for (;;) {
+    let at = -1;
+    for (const i of next) if (i >= 0 && (at < 0 || i < at)) at = i;
+    if (at < 0) return;
+    const start = text.lastIndexOf("\n", at) + 1;
+    let end = text.indexOf("\n", at);
+    if (end < 0) end = text.length;
+    if (start > done) {
+      let e: unknown;
+      try {
+        e = JSON.parse(text.slice(start, end));
+      } catch {}
+      if (e && typeof e === "object") format.parse(e, state, out);
     }
-    if (e && typeof e === "object") format.parse(e, state, out);
+    done = end;
+    for (let k = 0; k < next.length; k++) if (next[k]! >= 0 && next[k]! <= end) next[k] = text.indexOf(format.markers[k]!, end);
   }
 }
 
