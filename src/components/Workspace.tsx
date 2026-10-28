@@ -345,7 +345,7 @@ function RuntimeMenu() {
   const updateSettings = useStore((s) => s.updateSettings);
   const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
     { runtime: "pi", label: "Default", desc: "Tools and extensions" },
-    { runtime: "durable", label: "Durable", desc: "Survives restarts" },
+    { runtime: "durable", label: "Durable", desc: "Resumes after crashes" },
   ];
   return (
     <>
