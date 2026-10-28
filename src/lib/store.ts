@@ -9,7 +9,7 @@ import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { effortFor, effortKey } from "./effort";
-import type { Effort } from "../../shared/types";
+import type { Effort, ModelInfo } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
@@ -425,7 +425,8 @@ export const useStore = create<State>()(
           const r = await piModels(true);
           if (ctrl.signal.aborted) return;
           if (!Array.isArray(r?.models)) throw new Error("Pi didn't list any models");
-          set({ detection: { pi: { plan: "pi", status: "valid", models: r.models, scope: r.scope, checkedAt: Date.now() } }, piDefault: r.defaultModel });
+          const models = withMissingProviders(get().detection.pi?.models ?? [], r.models);
+          set({ detection: { pi: { plan: "pi", status: "valid", models, scope: r.scope, checkedAt: Date.now() } }, piDefault: r.defaultModel });
         } catch (err) {
           if (ctrl.signal.aborted) return;
           // Keep what was known; a transient failure shouldn't empty the model picker.
@@ -660,6 +661,22 @@ export function selectionFor(
   // The new-chat model may belong to this server only: on a paired device, point at one it does have.
   if (deviceId && !pending && fallback && !isAuto(fallback) && !findModel(detection, fallback)) return deviceDefault(detection) ?? fallback;
   return fallback;
+}
+
+/** Providers a listing left out once already: dropped for real if the next listing agrees. */
+let droppedOnce = new Set<string>();
+
+/**
+ * A whole provider vanishing from one listing is far more often a slow auth check (claude-code's
+ * `claude auth status`) than a logout. Keep its previous models for one listing, so the picker
+ * doesn't flicker and chats on that provider aren't switched to another model; if the next listing
+ * still lacks it, it goes.
+ */
+function withMissingProviders(previous: ModelInfo[], next: ModelInfo[]): ModelInfo[] {
+  const have = new Set(next.map((m) => m.provider));
+  const missing = new Set(previous.map((m) => m.provider).filter((p): p is string => !!p && !have.has(p) && !droppedOnce.has(p)));
+  droppedOnce = missing;
+  return missing.size ? [...next, ...previous.filter((m) => m.provider && missing.has(m.provider))] : next;
 }
 
 /** Keep the composer pointed at a model that actually exists for the configured keys. */

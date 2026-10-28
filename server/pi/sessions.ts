@@ -10,6 +10,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { CommandCache } from "../../shared/commandCache";
 import { partialTitle } from "../../shared/htmlRender";
 import { TOOL as HTML_TOOL } from "./extensions/html-render";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
@@ -483,6 +484,34 @@ export interface PiModels {
   checkedAt: number;
 }
 let modelsCache: { at: number; value: Promise<PiModels> } | undefined;
+/** Providers seen in the last good listing, so a half-finished one can be recognised. */
+let knownProviders = new Set<string>();
+
+/**
+ * Pi answers `get_available_models` from a snapshot that fills in as each provider's auth check
+ * finishes. Providers backed by a CLI (claude-code, claude-code-2 spawn `claude auth status`) finish
+ * after stored-credential ones, so asking straight after start-up sometimes left them out — and the
+ * app then switched a chat away from a Claude model. Ask again until the snapshot settles: every
+ * provider from the last listing is back, or two answers in a row agree.
+ */
+async function settledModels(p: PiProcess): Promise<any[]> {
+  const ask = async () => (await p.send<{ models: any[] }>({ type: "get_available_models" })).models;
+  const providers = (models: any[]) => new Set<string>(models.map((m) => m.provider));
+  const deadline = Date.now() + 8_000;
+  let models = await ask();
+  let previous: string | undefined;
+  for (let wait = 150; Date.now() < deadline; wait = Math.min(wait * 2, 1_000)) {
+    const have = providers(models);
+    const missing = [...knownProviders].some((id) => !have.has(id));
+    const key = [...have].sort().join(",") + "#" + models.length;
+    if (!missing && (knownProviders.size > 0 || key === previous)) break;
+    previous = key;
+    await new Promise((r) => setTimeout(r, wait));
+    models = await ask();
+  }
+  knownProviders = providers(models);
+  return models;
+}
 
 /** Pi's model scope, or undefined. A scope that can't be resolved must never stop models being listed. */
 async function modelScope(): Promise<ModelScope | undefined> {
@@ -501,7 +530,7 @@ export function listModels(fresh = false): Promise<PiModels> {
   if (!fresh && modelsCache && Date.now() - modelsCache.at < 60_000) return modelsCache.value;
   const value = Promise.all([
     withScratch(homedir(), async (p) => {
-      const [{ models }, state] = await Promise.all([p.send<{ models: any[] }>({ type: "get_available_models" }), p.send<{ model?: any; thinkingLevel?: string }>({ type: "get_state" })]);
+      const [models, state] = await Promise.all([settledModels(p), p.send<{ model?: any; thinkingLevel?: string }>({ type: "get_state" })]);
       return { models, defaultModel: state.model ? `${state.model.provider}/${state.model.id}` : undefined, defaultThinking: state.thinkingLevel, checkedAt: Date.now() };
     }),
     modelScope(),
@@ -513,21 +542,18 @@ export function listModels(fresh = false): Promise<PiModels> {
 
 export const forgetModels = () => (modelsCache = undefined);
 
-const commandsCache = new Map<string, { at: number; value: Promise<PiCommand[]> }>();
+const commandsCache = new CommandCache<PiCommand[]>(60_000);
 
 /** Pi's slash commands for a directory: extension commands, prompt templates and skills. */
 export function listCommands(cwd: string): Promise<PiCommand[]> {
-  const hit = commandsCache.get(cwd);
-  if (hit && Date.now() - hit.at < 2 * 60_000) return hit.value;
-  const fetchFrom = (p: PiProcess) =>
-    p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
-      r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
-    );
-  const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !inUse(l) && !l.proc.exited);
-  const value = idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
-  commandsCache.set(cwd, { at: Date.now(), value });
-  value.catch(() => commandsCache.delete(cwd));
-  return value;
+  return commandsCache.get(cwd, () => {
+    const fetchFrom = (p: PiProcess) =>
+      p.send<{ commands: { name: string; description?: string; source: PiCommand["source"] }[] }>({ type: "get_commands" }).then((r) =>
+        r.commands.map((c) => ({ name: c.name, description: c.description, source: c.source })),
+      );
+    const idle = [...live.values()].find((l) => l.proc.cwd === cwd && !inUse(l) && !l.proc.exited);
+    return idle ? idle.ready.then(() => fetchFrom(idle.proc)) : withScratch(cwd, fetchFrom);
+  });
 }
 
 export const forgetCommands = () => commandsCache.clear();
