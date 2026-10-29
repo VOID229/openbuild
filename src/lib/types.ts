@@ -43,8 +43,17 @@ export interface Settings {
   autoScroll: boolean;
   /** Ask before deleting a thread (off once "Don't ask again" is ticked). */
   confirmDelete: boolean;
-  /** Notices at the top of the window. `dismissedPi` is the Pi release whose notice was closed. */
-  notifications: { builds: boolean; piUpdates: boolean; dismissedPi?: string };
+  /**
+   * Notices at the top of the window. `updateRuntimes` lists the runtimes whose releases are
+   * announced (undefined = every runtime that can be checked), and `dismissedUpdates` is, per
+   * runtime, the release whose notice was closed (a newer one shows again).
+   */
+  notifications: {
+    builds: boolean;
+    runtimeUpdates: boolean;
+    updateRuntimes?: ThreadRuntime[];
+    dismissedUpdates?: Partial<Record<ThreadRuntime, string>>;
+  };
   /** Opt-in transcription on the server's private Whisper endpoint. */
   dictation?: { enabled: boolean; connection: "lan" | "tailscale" };
   autoRouter: boolean;

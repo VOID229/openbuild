@@ -1,11 +1,12 @@
 import { ArrowUp, Bell, Boxes, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { lowestEffort, nearestEffort } from "../../shared/types";
+import { lowestEffort, nearestEffort, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
+import { UPDATABLE_RUNTIMES, runtimeName } from "../lib/runtimes";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
-import { arrowNav, usePresence } from "../lib/ui";
+import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
@@ -117,6 +118,14 @@ function ProfileSection() {
 function NotificationsSection() {
   const n = useStore((st) => st.settings.notifications);
   const update = useStore((st) => st.updateSettings);
+  const chosen = UPDATABLE_RUNTIMES.filter((runtime) => !n.updateRuntimes || n.updateRuntimes.includes(runtime));
+  const toggleRuntime = (runtime: ThreadRuntime, on: boolean) =>
+    update({
+      notifications: {
+        ...n,
+        updateRuntimes: UPDATABLE_RUNTIMES.filter((r) => (r === runtime ? on : chosen.includes(r))),
+      },
+    });
   return (
     <>
       <Heading>Notifications</Heading>
@@ -129,11 +138,36 @@ function NotificationsSection() {
       </div>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">Pi Updates</div>
-          <p className="setting-desc">Show when a newer Pi is out for this computer. Closing the notice skips that release.</p>
+          <div className="setting-label">Runtime Updates</div>
+          <p className="setting-desc">Show when a newer version of a runtime is out for this computer. Closing the notice skips that release.</p>
         </div>
-        <Toggle checked={n.piUpdates} onChange={(piUpdates) => update({ notifications: { ...n, piUpdates } })} label="Pi Updates" />
+        <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Runtime Updates" />
       </div>
+      {n.runtimeUpdates && (
+        <div className="setting-row setting-row-stack">
+          <div className="setting-text">
+            <div className="setting-label">Notify for</div>
+            <p className="setting-desc">Which runtime releases to announce. Only runtimes installed here can have an update.</p>
+          </div>
+          <div className="chips" role="group" aria-label="Runtimes to announce updates for">
+            {UPDATABLE_RUNTIMES.map((runtime) => {
+              const on = chosen.includes(runtime);
+              return (
+                <button
+                  key={runtime}
+                  type="button"
+                  className={cx("chip", "chip-tag", on && "chip-on")}
+                  aria-pressed={on}
+                  title={`${on ? "Announce" : "Don't announce"} ${runtimeName(runtime)} updates`}
+                  onClick={() => toggleRuntime(runtime, !on)}
+                >
+                  {runtimeName(runtime)}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </>
   );
 }

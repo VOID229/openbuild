@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import type { ThreadRuntime } from "../../shared/types";
 import { isHosted } from "./runtime";
-import { useStore } from "./store";
+import { cachedRuntimeStatuses, loadRuntimeStatuses } from "./runtimeStatus";
+import { UPDATABLE_RUNTIMES } from "./runtimes";
 
 // Noticing that the server now serves a newer app than this tab is running, e.g. after a pull and
-// restart while the tab stayed open, and that a newer Pi is out. Only this tab's own server is
-// asked; it's the one that checks npm for Pi.
+// restart while the tab stayed open, and that newer runtimes are out. Only this tab's own server
+// is asked; it's the one that checks the registries.
 //
 // A production build names its script after its content (/chunk-<hash>.js), so a different name
 // means different code. Dev builds get a new name on every start and update themselves (HMR), so
@@ -55,25 +57,42 @@ export function useUpdateAvailable(enabled = true): boolean {
   return available;
 }
 
-const PI_CHECK_EVERY = 30 * 60_000;
+const RUNTIME_CHECK_EVERY = 10 * 60_000;
 
-/** A newer Pi release for this computer, once its status shows one (the server asks npm hourly). */
-export function usePiUpdate(enabled = true): string | undefined {
-  const status = useStore((s) => s.piCache.status);
+export interface RuntimeUpdate {
+  runtime: ThreadRuntime;
+  version: string;
+}
+
+/**
+ * Newer releases of the runtimes picked in Settings → Notifications (the server asks their
+ * registries at most hourly; this only asks it every ten minutes, and stops while hidden).
+ */
+export function useRuntimeUpdates(enabled = true, only?: ThreadRuntime[]): RuntimeUpdate[] {
+  const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses());
   useEffect(() => {
     if (!enabled || isHosted()) return;
-    let last = Date.now();
-    const check = () => {
-      if (document.visibilityState !== "visible" || Date.now() - last < PI_CHECK_EVERY) return;
-      last = Date.now();
-      void useStore.getState().loadPiStatus().catch(() => {});
+    let cancelled = false;
+    const load = async () => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const next = await loadRuntimeStatuses();
+        if (!cancelled) setStatuses(next);
+      } catch { /* The server is down or restarting; the next check sees it. */ }
     };
-    const timer = setInterval(check, PI_CHECK_EVERY);
-    document.addEventListener("visibilitychange", check);
+    void load();
+    const timer = setInterval(() => void load(), RUNTIME_CHECK_EVERY);
+    const onVisible = () => void load();
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
+      cancelled = true;
       clearInterval(timer);
-      document.removeEventListener("visibilitychange", check);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [enabled]);
-  return enabled && !isHosted() && status?.updateAvailable ? status.latest : undefined;
+  if (!enabled || isHosted()) return [];
+  return UPDATABLE_RUNTIMES.filter((runtime) => !only || only.includes(runtime)).flatMap((runtime) => {
+    const status = statuses?.[runtime];
+    return status?.updateAvailable && status.latest ? [{ runtime, version: status.latest }] : [];
+  });
 }

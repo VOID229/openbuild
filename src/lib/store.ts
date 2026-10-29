@@ -21,7 +21,7 @@ const DEFAULT_SETTINGS: Settings = {
   font: "fun",
   autoScroll: true,
   confirmDelete: true,
-  notifications: { builds: true, piUpdates: true },
+  notifications: { builds: true, runtimeUpdates: true },
   autoRouter: false,
   avoid: [],
   prioritize: [],
@@ -711,7 +711,7 @@ export const useStore = create<State>()(
       name: "openchat",
       // Saved by the local server on disk, so every port and browser sees the same settings.
       storage: createJSONStorage(() => serverStorage),
-      version: 4,
+      version: 5,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
         // v1 shipped sample router chips and the auto router on; reset those to the new defaults.
@@ -742,6 +742,21 @@ export const useStore = create<State>()(
             if (SEARCH_PROVIDERS[id as SearchProviderId]?.credential === "url") search[id as SearchProviderId] = list;
           }
           state.settings = { ...state.settings, keys: {}, search };
+        }
+        // v5: the Pi-only update notice became runtime updates, with a list of runtimes (none saved
+        // = all of them) and per-release dismissal.
+        if (version < 5 && state.settings) {
+          const old = (state.settings.notifications ?? {}) as Partial<Settings["notifications"]> & { piUpdates?: boolean; dismissedPi?: string };
+          const { piUpdates, dismissedPi, ...rest } = old;
+          state.settings = {
+            ...state.settings,
+            notifications: {
+              builds: rest.builds ?? true,
+              runtimeUpdates: piUpdates ?? rest.runtimeUpdates ?? true,
+              updateRuntimes: rest.updateRuntimes,
+              dismissedUpdates: rest.dismissedUpdates ?? (dismissedPi ? { pi: dismissedPi } : undefined),
+            },
+          };
         }
         return state as State;
       },
