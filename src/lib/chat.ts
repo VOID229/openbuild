@@ -247,10 +247,12 @@ export function regenerate(chatId: string, messageId: string) {
   if (chat?.runtime === "durable" && chat.workspace) return;
   // fx can't rewind either: retrying a failed reply sends its message again, on top of what fx has.
   if ((chat?.runtime === "fx" || chat?.runtime === "codex" || chat?.runtime === "cursor" || chat?.runtime === "opencode") && chat.workspace && msg?.status !== "error") return;
-  const target = msg?.model;
-  const model = target && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), target);
-  if (!msg || !target || !model) {
-    st.openSettings("keys");
+  if (!chat || !msg) return;
+  const prompt = chat.messages.slice(0, chat.messages.indexOf(msg)).findLast((m) => m.role === "user");
+  const resolved = resolveModel(prompt?.content ?? "", prompt?.attachments ?? [], chatId);
+  const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
+  if (!resolved || !model) {
+    if (!["fx", "codex", "cursor", "claude", "opencode"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
     return;
   }
   const prev = running.get(chatId);
@@ -273,10 +275,17 @@ export function regenerate(chatId: string, messageId: string) {
     stream: undefined,
     parts: undefined,
     usage: undefined,
-    model: { plan: target.plan, id: target.id, name: model.name, effort: msg.model?.effort, speed: supportedSpeed(model.speeds, msg.model?.speed) },
-    routed: msg.routed,
+    model: {
+      ...resolved.ref,
+      name: model.name,
+      effort: effortFor(st.settings, chat, resolved.routed ? { auto: true } : resolved.ref),
+      speed: resolved.routed ? undefined : supportedSpeed(model.speeds, speedFor(st.settings, chat, resolved.ref)),
+    },
+    routed: resolved.routed,
     startedAt: now,
   });
+  const { [chatId]: _, ...selections } = useStore.getState().selections;
+  useStore.setState({ selections });
   void generate(chatId, messageId);
 }
 

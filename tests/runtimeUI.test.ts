@@ -262,6 +262,37 @@ test("OpenCode rejects shell commands before creating a thread", async () => {
   expect(useStore.getState().chats).toHaveLength(0);
 });
 
+test("retry uses the composer's model and per-model settings, then consumes the selection", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => { throw new Error("workspace unavailable"); }) as unknown as typeof fetch;
+  try {
+    for (const runtime of ["pi", "codex"] as const) {
+      const models = ["old", "new"].map((id) => ({ id, name: id, protocol: "openai", input: ["text"], reasoning: { efforts: ["low", "high"], mode: "effort", toggle: false }, speeds: [{ id: "priority" }] }));
+      const chat = thread(runtime);
+      const selected = { plan: runtime, id: "new" };
+      chat.efforts = { [effortKey(selected)]: "high" };
+      chat.speeds = { [effortKey(selected)]: "priority" };
+      chat.messages = [
+        { id: "u", role: "user", content: "retry this prompt", createdAt: 0 },
+        { id: "a", role: "assistant", content: "", status: "error", error: "usage limit", createdAt: 0, model: { plan: runtime, id: "old", name: "old", effort: "low" } },
+      ];
+      reset({}, [chat]);
+      const detection = { plan: runtime, status: "valid", models, defaultModel: "old" } as any;
+      // Retry must resolve the target chat even if a different chat is open.
+      useStore.setState({ activeChatId: "another-chat", detection: { pi: detection }, codexModels: { "": detection }, selections: { [chat.id]: selected, "another-chat": { plan: "pi", id: "old" } } });
+      regenerate(chat.id, "a");
+      expect(useStore.getState().chats[0]!.messages[1]!.model).toMatchObject({ ...selected, name: "new", effort: "high", speed: "priority" });
+      expect(useStore.getState().selections[chat.id]).toBeUndefined();
+      expect(useStore.getState().selections["another-chat"]).toBeDefined();
+      await Bun.sleep(20);
+      // With no new pick, retry keeps the now-current model.
+      regenerate(chat.id, "a");
+      expect(useStore.getState().chats[0]!.messages[1]!.model?.id).toBe("new");
+      await Bun.sleep(20);
+    }
+  } finally { globalThis.fetch = originalFetch; reset(); }
+});
+
 test("Durable regeneration cannot clear an existing turn", () => {
   const chat = thread("durable");
   chat.workspace = { projectId: "", projectName: "", cwd: "/tmp/runtime-ui" };
