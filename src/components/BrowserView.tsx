@@ -1,10 +1,9 @@
 // A browser tab in the side panel: a page in a frame, with an address bar, back, forward and reload.
 // Made for looking at what the thread is building (a dev server's localhost page), next to it.
 //
-// It's a frame, not a browser of its own (t3code uses Electron's webview for that), so a site that
-// refuses to be framed (X-Frame-Options, CSP frame-ancestors) stays blank; the bar offers to open it
-// in a real tab instead. A localhost address means the machine the thread runs on: opened from
-// another computer, it goes to this server's host name instead of that computer's own localhost.
+// It's a frame, not a standalone browser. Pages keep their normal framing restrictions;
+// use the toolbar's external-open button if a page won't embed. Localhost is mapped to
+// this server's hostname when the app is opened from another computer.
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { usePanel, type BrowserTab } from "../lib/panel";
@@ -22,7 +21,8 @@ export function normalizeUrl(input: string): string {
   if (/^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(:\d+)?(\/|$)/i.test(text)) return `http://${text}`;
   if (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?(\/|$)/.test(text)) return `http://${text}`;
   if (!/\s/.test(text) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(text)) return `https://${text}`;
-  return `https://duckduckgo.com/?q=${encodeURIComponent(text)}`;
+  // Google's embeddable results (igu=1): most search engines refuse to be framed.
+  return `https://www.google.com/search?igu=1&q=${encodeURIComponent(text)}`;
 }
 
 /** Where the frame actually goes: localhost on this server, when the app is open from elsewhere. */
@@ -130,8 +130,8 @@ export function BrowserView({ tab, folder }: { tab: BrowserTab; folder: Terminal
         ) : (
           <div className="bv-empty">
             <Globe size={22} />
-            <p>Type an address above: a URL, a port like 3000 for localhost, or words to search.</p>
-            <p className="bv-hint">Sites that refuse to be framed stay blank here; open those in a new tab.</p>
+            <p>Type an address above: a URL, a port like 3000 for localhost, or words to search Google.</p>
+            <p className="bv-hint">If a page won't embed, use Open in a new browser tab in the toolbar.</p>
           </div>
         )}
       </div>
