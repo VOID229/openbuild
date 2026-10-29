@@ -6,6 +6,7 @@ import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
+import { linkHref, onLinkClick } from "../lib/links";
 import { copyText, cx } from "../lib/ui";
 
 // Only ~~double~~ tildes strike through: models write a lone "~" to mean "about" ("~10 GB"), and
@@ -45,7 +46,10 @@ function CodeBlock({ children, ...props }: ComponentProps<"pre">) {
 
 const components: Components = {
   pre: ({ node: _node, ...props }) => <CodeBlock {...props} />,
-  a: ({ node: _node, className, ...props }) => <a {...props} className={cx("link", className)} target="_blank" rel="noopener noreferrer" />,
+  // localhost links open in the side panel's browser; ⌘-click for a real tab (lib/links.ts).
+  a: ({ node: _node, className, href, ...props }) => (
+    <a {...props} href={linkHref(href)} className={cx("link", className)} target="_blank" rel="noopener noreferrer" onClick={(e) => onLinkClick(e, href)} />
+  ),
   table: ({ node: _node, ...props }) => (
     <div className="table-wrap">
       <table {...props} />
