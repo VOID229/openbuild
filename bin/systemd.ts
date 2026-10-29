@@ -20,6 +20,8 @@ export function systemdNetworkOverridePath() {
 /** Only adopt a user service whose executable points at this installation. */
 export function systemdService(root: string, run: Runner, platform = process.platform) {
   if (platform !== "linux") return undefined;
+  // Tests that run the real CLI set this so they can never reach the developer's actual service.
+  if (process.env.OPENBUILD_SYSTEMD === "0") return undefined;
   const result = run("systemctl", ["--user", "show", UNIT, "--property=LoadState,ActiveState,ExecStart,KillMode"]);
   if (!result.ok) return undefined;
   const properties = Object.fromEntries(result.out.split("\n").map((line) => {
