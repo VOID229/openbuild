@@ -14,7 +14,7 @@ import type { TerminalEvent } from "../../shared/terminal";
 import { apiUrl } from "./devices";
 import { uid } from "./id";
 import { usePanel } from "./panel";
-import { useStore } from "./store";
+import { composerDevice, useStore } from "./store";
 
 /** Where the tabs run: a folder on this server, or on a paired one. */
 export interface TerminalFolder {
@@ -24,6 +24,10 @@ export interface TerminalFolder {
   cwd?: string;
   /** What the panel calls it: a project and branch, or "Home folder". */
   label: string;
+  /** The thread it's for. The side panel keeps its tabs per thread (the drawer's shells are per folder). */
+  thread?: string;
+  /** The thread was started just now (from the home screen), so it takes over what was open there. */
+  fresh?: boolean;
 }
 
 export interface TerminalTab {
@@ -61,12 +65,11 @@ export const defaultHeight = () =>
   typeof window === "undefined" ? 340 : Math.max(140, Math.min(360, Math.round(window.innerHeight * 0.42)));
 const MIN_HEIGHT = 120;
 
-const sameFolder = (a: TerminalFolder | undefined, b: TerminalFolder) => !!a && (a.deviceId ?? "") === (b.deviceId ?? "") && (a.cwd ?? "") === (b.cwd ?? "");
-
-// Tabs are remembered per folder, in this browser: a panel reopened tomorrow attaches to the shells
-// that were left running. The drawer and the side panel each keep their own.
+// Tabs are remembered per folder (the side panel's: per thread and folder), in this browser: a panel
+// reopened tomorrow attaches to the shells that were left running. The drawer and the side panel each keep their own.
 const folderKey = (place: TerminalPlace, folder: TerminalFolder) =>
-  `openbuild:${place === "side" ? "side-terminal" : "terminal"}:${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
+  `openbuild:${place === "side" ? "side-terminal" : "terminal"}:${folder.deviceId ?? "local"}:${folder.cwd ?? ""}${place === "side" && folder.thread ? `#${folder.thread}` : ""}`;
+const sameFolder = (place: TerminalPlace, a: TerminalFolder | undefined, b: TerminalFolder) => !!a && folderKey(place, a) === folderKey(place, b);
 
 function loadTabs(place: TerminalPlace, folder: TerminalFolder): { tabs: TerminalTab[]; active?: string } {
   let raw: string | null = null;
@@ -101,6 +104,10 @@ function reveal(place: TerminalPlace) {
   if (!panel.panel) panel.setPanel(true);
 }
 
+/** Going from the home screen (no thread) to a new thread in the same folder, which keeps what was open. */
+export const adopts = (from: TerminalFolder | undefined, to: TerminalFolder) =>
+  !!from && !from.thread && !!to.thread && !!to.fresh && (from.deviceId ?? "") === (to.deviceId ?? "") && (from.cwd ?? "") === (to.cwd ?? "");
+
 // Its own store, not settings: which shells are showing is a thing about this tab, not a preference.
 function terminalStore(place: TerminalPlace) {
   return create<TerminalState>((set, get) => ({
@@ -110,8 +117,15 @@ function terminalStore(place: TerminalPlace) {
 
     showFolder: (folder, start = false) =>
       set((s) => {
-        if (sameFolder(s.folder, folder) && (s.tabs.length || !start)) return {};
-        const saved = loadTabs(place, folder);
+        if (sameFolder(place, s.folder, folder) && (s.tabs.length || !start)) return {};
+        let saved = loadTabs(place, folder);
+        // A thread just started from the home screen takes the side panel's shells along with it.
+        if (place === "side" && !saved.tabs.length && adopts(s.folder, folder)) {
+          saved = { tabs: s.tabs, active: s.active };
+          try {
+            localStorage.removeItem(folderKey(place, s.folder!));
+          } catch {}
+        }
         const tabs = saved.tabs.length || !start ? saved.tabs : [{ id: uid() }];
         const active = tabs.some((t) => t.id === saved.active) ? saved.active! : tabs[0]?.id;
         saveTabs(place, folder, tabs, active);
@@ -172,14 +186,16 @@ export const terminalStoreFor = (place: TerminalPlace): TerminalStore => (place 
  */
 export function terminalFolder(): TerminalFolder {
   const st = useStore.getState();
-  const ws = st.chats.find((c) => c.id === st.activeChatId)?.workspace;
+  const chat = st.chats.find((c) => c.id === st.activeChatId);
+  const ws = chat?.workspace;
   const project = st.projects.find((p) => p.id === st.settings.workspace.projectId);
   const label = ws
     ? ws.projectName
       ? `${ws.projectName}${ws.worktree && ws.branch ? ` · ${ws.branch}` : ""}`
       : "Scratch folder"
     : (project?.name ?? "Home folder");
-  return { deviceId: ws?.deviceId ?? project?.deviceId ?? st.settings.workspace.deviceId, cwd: ws?.cwd ?? project?.path, label };
+  // An absent workspace/project device means this server; it must not inherit the scratch-device preference.
+  return { deviceId: composerDevice(st), cwd: ws ? ws.cwd : project?.path, label, thread: st.activeChatId, fresh: !!chat && Date.now() - chat.createdAt < 30_000 };
 }
 
 /** Show the drawer's terminal for the open thread (in its folder and on its device), starting a shell if it has none. */

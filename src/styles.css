@@ -54,6 +54,8 @@
   --composer-shadow: 0 1px 2px rgba(0, 0, 0, 0.03), 0 6px 24px rgba(0, 0, 0, 0.05);
 
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Opening and closing the side panel and file tree: quick off the mark, long soft landing. */
+  --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
   --fast: 150ms;
   --med: 220ms;
 
@@ -6264,11 +6266,23 @@ a.btn-primary {
   min-width: 0;
 }
 
+.ws-where {
+  overflow: hidden;
+}
+
+/* In a narrow pane (side panel open) the branch gives way first, then the project label; both ellipsize. */
 .ws-where .ws-chip {
+  flex: 0 3 auto;
+}
+
+.ws-where .ws-chip:first-child {
   flex: 0 1 auto;
 }
 
-.ws-where .ws-chip:first-child,
+.ws-chip > svg {
+  flex: none;
+}
+
 .ws-where .ws-dirty {
   flex: none;
 }
@@ -7368,7 +7382,13 @@ a.btn-primary {
   border-left: 1px solid transparent;
   opacity: 0;
   pointer-events: none;
-  transition: width 240ms var(--ease), opacity 180ms var(--ease), border-color 240ms var(--ease);
+  /* min-width moves with width: the open panel's 320px floor would otherwise snap in at once and
+     swallow most of the slide. */
+  transition:
+    width 320ms var(--ease-panel),
+    min-width 320ms var(--ease-panel),
+    opacity 220ms var(--ease-panel),
+    border-color 320ms var(--ease-panel);
 }
 
 .side-panel-open,
@@ -7532,7 +7552,7 @@ a.btn-primary {
 
 .side-action { flex: none; width: 26px; height: 26px; color: var(--text-3); }
 .side-new { margin-left: 2px; }
-.side-menu { min-width: 190px; }
+.side-menu { right: auto; width: max-content; min-width: 190px; }
 
 .side-body {
   position: relative;

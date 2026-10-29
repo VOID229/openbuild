@@ -47,6 +47,28 @@ function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
   useStore.setState({ settings: { ...initialSettings, workspace: { mode: "local" }, ...settings }, chats, activeChatId: undefined, projects: [], selections: {} });
 }
 
+test("files and terminals keep the folder's device instead of inheriting the scratch-device preference", async () => {
+  const { terminalFolder, refreshTerminal, useTerminal, useSideTerminal } = await import("../src/lib/terminal");
+  const { usePanel } = await import("../src/lib/panel");
+  const project = { id: "local-project", name: "openbuild", path: "/home/imac/openbuild", git: true };
+  reset({ workspace: { mode: "local", projectId: project.id, deviceId: "cachyos" } });
+  useStore.setState({ projects: [project] });
+  expect(terminalFolder()).toMatchObject({ cwd: project.path, deviceId: undefined });
+  const chat = { ...thread("codex"), workspace: { projectId: project.id, projectName: project.name, cwd: project.path } };
+  useStore.setState({ chats: [chat], activeChatId: chat.id, projects: [{ ...project, deviceId: "another-device" }] });
+  refreshTerminal();
+  for (const store of [usePanel, useTerminal, useSideTerminal]) {
+    expect(store.getState().folder).toMatchObject({ cwd: project.path, deviceId: undefined });
+  }
+  useStore.setState({ chats: [{ ...chat, workspace: { ...chat.workspace, deviceId: "remote-imac" } }] });
+  expect(terminalFolder()).toMatchObject({ cwd: project.path, deviceId: "remote-imac" });
+  reset({ workspace: { mode: "local", deviceId: "cachyos" } });
+  expect(terminalFolder()).toMatchObject({ cwd: undefined, deviceId: "cachyos" });
+  useStore.setState({ projects: [{ ...project, deviceId: "remote-imac" }], settings: { ...useStore.getState().settings, workspace: { mode: "local", projectId: project.id, deviceId: "cachyos" } } });
+  expect(terminalFolder()).toMatchObject({ cwd: project.path, deviceId: "remote-imac" });
+  reset();
+});
+
 test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", () => {
   reset({ threadRuntime: undefined });
   const html = markup(createElement(WorkspaceTop));

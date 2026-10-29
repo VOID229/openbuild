@@ -3,10 +3,11 @@
 // device it runs on, as the terminal does (terminal.ts): each folder keeps its own open files, in
 // this browser, so coming back to a thread brings its files back.
 //
-// What's open and how wide it is belongs to this browser tab, not to settings; widths and which
-// parts are showing are remembered across reloads.
+// What's open and how wide it is belongs to this browser tab, not to settings. The panel's width is
+// per thread (loadWidth); the tree's width and which parts are showing are shared, and all of it is
+// remembered across reloads.
 import { create } from "zustand";
-import type { TerminalFolder } from "./terminal";
+import { adopts, type TerminalFolder } from "./terminal";
 
 /** What the panel is showing: a file, a terminal, the diff, a browser tab, or (no tabs) the list of what it can open. */
 export type PanelView = "file" | "terminal" | "diff" | "browser" | "launcher";
@@ -42,6 +43,8 @@ interface PanelState extends Layout {
   diff: boolean;
   browsers: BrowserTab[];
   activeBrowser?: string;
+  /** The tabs' order, left to right, as keys ("f:<path>", "t:<shell>", "d", "b:<id>"); see arrangeTabs. */
+  order: string[];
   /** Files with edits not saved yet. */
   dirty: Record<string, boolean>;
   setPanel(open: boolean): void;
@@ -63,14 +66,23 @@ interface PanelState extends Layout {
   activateBrowser(id: string): void;
   closeBrowser(id: string): void;
   navigateBrowser(id: string, url: string): void;
+  setOrder(order: string[]): void;
 }
 
 const LAYOUT_KEY = "openbuild:panel";
 export const MIN_WIDTH = 320;
 export const MIN_TREE = 180;
+/** Bumped when the default width changes, so a width saved under the old default gives way to the new one. */
+const LAYOUT_VERSION = 2;
+
+/** About a third of the window: room for a page or a file without crowding the thread. */
+export function defaultWidth(): number {
+  const vw = typeof window === "undefined" ? 1440 : window.innerWidth;
+  return Math.min(480, Math.max(MIN_WIDTH, Math.round(vw * 0.36)));
+}
 
 function loadLayout(): Layout {
-  const fallback: Layout = { panel: false, tree: false, expanded: false, width: 560, treeWidth: 260, hideIgnored: false };
+  const fallback: Layout = { panel: false, tree: false, expanded: false, width: defaultWidth(), treeWidth: 260, hideIgnored: false };
   try {
     const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null") as Partial<Layout> | null;
     if (!saved) return fallback;
@@ -78,7 +90,8 @@ function loadLayout(): Layout {
       panel: saved.panel === true,
       tree: saved.tree === true,
       expanded: false,
-      width: typeof saved.width === "number" ? Math.max(MIN_WIDTH, saved.width) : fallback.width,
+      // The width is the thread's (see loadWidth), set once the thread's folder is known.
+      width: fallback.width,
       treeWidth: typeof saved.treeWidth === "number" ? Math.max(MIN_TREE, saved.treeWidth) : fallback.treeWidth,
       hideIgnored: saved.hideIgnored === true,
     };
@@ -89,13 +102,15 @@ function loadLayout(): Layout {
 
 function saveLayout(s: Layout) {
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ panel: s.panel, tree: s.tree, width: s.width, treeWidth: s.treeWidth, hideIgnored: s.hideIgnored }));
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION, panel: s.panel, tree: s.tree, treeWidth: s.treeWidth, hideIgnored: s.hideIgnored }));
   } catch {}
 }
 
 export const folderKey = (folder: Pick<TerminalFolder, "deviceId" | "cwd">) => `${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
-const filesKey = (folder: TerminalFolder) => `openbuild:files:${folderKey(folder)}`;
-export const sameFolder = (a: TerminalFolder | undefined, b: TerminalFolder) => !!a && folderKey(a) === folderKey(b);
+/** The panel's tabs belong to a thread in a folder (the home screen, with no thread, has its own per folder). */
+export const scopeKey = (folder: Pick<TerminalFolder, "deviceId" | "cwd" | "thread">) => `${folderKey(folder)}${folder.thread ? `#${folder.thread}` : ""}`;
+const filesKey = (folder: TerminalFolder) => `openbuild:files:${scopeKey(folder)}`;
+export const sameFolder = (a: TerminalFolder | undefined, b: TerminalFolder) => !!a && scopeKey(a) === scopeKey(b);
 
 /** What a folder has open in the panel, besides its terminals (kept in terminal.ts). */
 interface Saved {
@@ -104,6 +119,7 @@ interface Saved {
   diff: boolean;
   browsers: BrowserTab[];
   activeBrowser?: string;
+  order: string[];
 }
 
 function loadFiles(folder: TerminalFolder): Saved {
@@ -119,18 +135,40 @@ function loadFiles(folder: TerminalFolder): Saved {
       diff: saved?.diff === true,
       browsers,
       activeBrowser: browsers.some((b) => b.id === saved?.activeBrowser) ? (saved!.activeBrowser as string) : browsers[0]?.id,
+      order: Array.isArray(saved?.order) ? saved.order.filter((k): k is string => typeof k === "string") : [],
     };
   } catch {
-    return { files: [], diff: false, browsers: [] };
+    return { files: [], diff: false, browsers: [], order: [] };
   }
 }
 
-function save(s: Pick<PanelState, "folder" | "files" | "activeFile" | "diff" | "browsers" | "activeBrowser">) {
+function save(s: Pick<PanelState, "folder" | "files" | "activeFile" | "diff" | "browsers" | "activeBrowser" | "order">) {
   if (!s.folder) return;
   try {
     if (s.files.length || s.diff || s.browsers.length)
-      localStorage.setItem(filesKey(s.folder), JSON.stringify({ files: s.files, active: s.activeFile, diff: s.diff, browsers: s.browsers.map(({ id, url }) => ({ id, url })), activeBrowser: s.activeBrowser }));
+      localStorage.setItem(filesKey(s.folder), JSON.stringify({ files: s.files, active: s.activeFile, diff: s.diff, browsers: s.browsers.map(({ id, url }) => ({ id, url })), activeBrowser: s.activeBrowser, order: s.order }));
     else localStorage.removeItem(filesKey(s.folder));
+  } catch {}
+}
+
+// The panel's width belongs to the thread too: each starts at the default and keeps whatever it's
+// dragged to, coming back to it at that width.
+const widthKey = (folder: TerminalFolder) => `openbuild:panel-width:${scopeKey(folder)}`;
+
+function loadWidth(folder: TerminalFolder): number | undefined {
+  try {
+    const w = Number(localStorage.getItem(widthKey(folder)));
+    return w > 0 ? Math.max(MIN_WIDTH, w) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function saveWidth(folder: TerminalFolder | undefined, width: number) {
+  if (!folder) return;
+  try {
+    if (width === defaultWidth()) localStorage.removeItem(widthKey(folder));
+    else localStorage.setItem(widthKey(folder), String(width));
   } catch {}
 }
 
@@ -147,21 +185,47 @@ export const usePanel = create<PanelState>((set, get) => {
     files: [],
     diff: false,
     browsers: [],
+    order: [],
     dirty: {},
 
     setPanel: (panel) => layout(panel ? { panel } : { panel, expanded: false }),
     setTree: (tree) => layout({ tree }),
     setExpanded: (expanded) => set({ expanded }),
     setView: (view) => set({ view }),
-    setWidth: (width) => layout({ width: Math.max(MIN_WIDTH, Math.round(width)) }),
+    setWidth: (width) => {
+      const w = Math.max(MIN_WIDTH, Math.round(width));
+      set({ width: w });
+      saveWidth(get().folder, w);
+    },
     setTreeWidth: (treeWidth) => layout({ treeWidth: Math.max(MIN_TREE, Math.round(treeWidth)) }),
     setHideIgnored: (hideIgnored) => layout({ hideIgnored }),
 
     showFolder: (folder) => {
-      if (sameFolder(get().folder, folder)) return;
-      const saved = loadFiles(folder);
+      const prev = get();
+      if (sameFolder(prev.folder, folder)) return;
+      let saved = loadFiles(folder);
+      let width = loadWidth(folder);
+      // A new thread from the home screen keeps the width it had there.
+      if (width === undefined && adopts(prev.folder, folder) && prev.width !== defaultWidth()) {
+        width = prev.width;
+        saveWidth(folder, width);
+        try {
+          localStorage.removeItem(widthKey(prev.folder!));
+        } catch {}
+      }
+      set({ width: width ?? defaultWidth() });
+      // A thread just started from the home screen keeps the tabs that were open there.
+      if (adopts(prev.folder, folder) && !saved.files.length && !saved.diff && !saved.browsers.length && (prev.files.length || prev.diff || prev.browsers.length)) {
+        saved = { files: prev.files, active: prev.activeFile, diff: prev.diff, browsers: prev.browsers, activeBrowser: prev.activeBrowser, order: prev.order };
+        try {
+          localStorage.removeItem(filesKey(prev.folder!));
+        } catch {}
+        set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order });
+        save(get());
+        return;
+      }
       // The view stays what it was; the panel falls back to another tab when this folder has none of it.
-      set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, browsers: saved.browsers, activeBrowser: saved.activeBrowser, dirty: {} });
+      set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order, dirty: {} });
     },
 
     openFile: (path) => {
@@ -215,6 +279,11 @@ export const usePanel = create<PanelState>((set, get) => {
       save(get());
     },
 
+    setOrder: (order) => {
+      set({ order });
+      save(get());
+    },
+
     navigateBrowser: (id, url) => {
       set({ browsers: get().browsers.map((b) => (b.id === id ? { ...b, url } : b)) });
       save(get());
@@ -223,3 +292,19 @@ export const usePanel = create<PanelState>((set, get) => {
     setDirty: (path, dirty) => set((s) => (!!s.dirty[path] === dirty ? {} : { dirty: { ...s.dirty, [path]: dirty } })),
   };
 });
+
+/**
+ * The panel's tabs in order: the saved order, less tabs that are gone, with new tabs placed right
+ * after `anchor` (the tab that was showing when they opened), else at the end. A tab replaced in
+ * place (a restarted shell) goes where the old one was, since its key still has a place in `order`.
+ */
+export function arrangeTabs(order: string[], existing: string[], anchor?: string): string[] {
+  const live = new Set(existing);
+  const kept = order.filter((k) => live.has(k));
+  const known = new Set(order);
+  const fresh = existing.filter((k) => !known.has(k));
+  if (!fresh.length) return kept;
+  const at = anchor === undefined ? -1 : order.indexOf(anchor);
+  const pos = at < 0 ? kept.length : order.slice(0, at + 1).filter((k) => live.has(k)).length;
+  return [...kept.slice(0, pos), ...fresh, ...kept.slice(pos)];
+}

@@ -149,6 +149,8 @@ export function useTabKeys(open: boolean, place: TerminalPlace = "bottom") {
       // With Option held a Mac reports "†"/"∑" as the key; the code is the letter itself.
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
       if (e.code !== "KeyT" && e.code !== "KeyW" && !digit) return;
+      // The side panel numbers all its tabs (terminals, diff, browsers, files) itself.
+      if (digit && place === "side") return;
       const el = document.activeElement;
       if (!el?.closest?.(place === "side" ? ".side-panel .xterm" : ".terminal-panel .xterm")) return;
       e.preventDefault();

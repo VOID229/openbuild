@@ -162,8 +162,9 @@ function Main() {
   // The side panel and file tree follow the open thread's folder (or, on the home screen, the project
   // the composer is set to), on the device it's on.
   const projectId = useStore((s) => s.settings.workspace.projectId);
+  const workspaceDeviceId = useStore((s) => s.settings.workspace.deviceId);
   const projects = useStore((s) => s.projects);
-  useEffect(() => refreshTerminal(), [chat?.id, chat?.workspace?.cwd, chat?.workspace?.deviceId, projectId, projects, panelOpen]);
+  useEffect(() => refreshTerminal(), [chat?.id, chat?.workspace?.cwd, chat?.workspace?.deviceId, projectId, workspaceDeviceId, projects, panelOpen]);
 
   const [loadError, setLoadError] = useState<string>();
   useEffect(() => {
@@ -271,9 +272,8 @@ function Main() {
           st.setSidebarOpen(!st.sidebarOpen);
           break;
         case "toggleRightSidebar": {
-          const { panel, tree, folder: panelFolder, setPanel, setTree } = usePanel.getState();
-          // Nothing to show without the thread's folder.
-          if (!panelFolder?.cwd) break;
+          const { panel, tree, setPanel, setTree } = usePanel.getState();
+          // Browser and home-folder terminals work without a selected project, too.
           // On a phone there's room for one at a time, as with the panel's own switch.
           if (!panel && window.innerWidth <= 768 && tree) setTree(false);
           setPanel(!panel);
