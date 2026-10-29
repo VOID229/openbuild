@@ -17,7 +17,7 @@ export function DictationSettings() {
       <div className="setting-row setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Local dictation</div>
-          <p className="setting-desc">Use your server's Whisper instead of browser speech recognition. Tap the mic to record, then tap again to transcribe. Audio stays on your private server. Up to two minutes per recording. Chrome and browsers generally won't give a page the microphone over plain HTTP, so use HTTPS or localhost.</p>
+          <p className="setting-desc">Use your server's Whisper instead of browser speech recognition. Tap the mic to record, then tap again to transcribe. Audio stays on your private server. Up to two minutes per recording.</p>
         </div>
         <Toggle label="Local dictation" checked={enabled} onChange={(enabled) => update({ dictation: { enabled, connection } })} />
       </div>

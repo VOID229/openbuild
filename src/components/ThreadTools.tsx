@@ -1,5 +1,5 @@
 // The top right of the window: the Commit button (in a thread whose folder is a git repository),
-// and the switches for the side panel (files and terminals, beside the thread) and the file tree.
+// and the switches for the side panel (browser, terminals, diff and files, beside the thread) and the file tree.
 import { FolderTree, Maximize2, Minimize2, PanelRight } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { usePanel } from "../lib/panel";
@@ -51,7 +51,7 @@ export function ThreadTools({ chat, onWidth }: { chat?: Chat; onWidth: (width: n
       )}
       <IconButton
         label={panel ? "Hide the side panel" : "Show the side panel"}
-        tooltip={panel ? "Hide the side panel" : "Side panel (⌘J for the terminal)"}
+        tooltip={panel ? "Hide the side panel" : "Side panel: browser, terminal, diff"}
         className={cx("thread-tool", panel && "thread-tool-on")}
         aria-pressed={panel}
         onClick={() => {

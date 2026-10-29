@@ -7540,40 +7540,143 @@ a.btn-primary {
   min-height: 0;
 }
 
-/* With no tabs: what the panel can open. */
+/* With no tabs: what the panel can open, a quiet list with a key for each. */
 .side-launcher {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 14px;
   height: 100%;
   padding: 24px;
 }
 
+.side-launch-title { margin: 0 0 4px; color: var(--text); font-size: 15px; font-weight: 500; }
+.side-launch-list { display: flex; flex-direction: column; gap: 2px; width: min(320px, 100%); }
+
 .side-launch {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: min(340px, 100%);
-  height: 44px;
-  padding: 0 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  gap: 12px;
+  height: 38px;
+  padding: 0 8px 0 10px;
+  border-radius: 9px;
   color: var(--text);
   font-size: 14px;
-  font-weight: 500;
   transition: background-color var(--fast) var(--ease);
 }
 
-.side-launch svg { color: var(--text-2); }
+.side-launch svg { flex: none; color: var(--text-2); }
+.side-launch:disabled { color: var(--text-3); cursor: default; }
+.side-launch:disabled svg { color: var(--text-3); }
 
 @media (hover: hover) {
-  .side-launch:hover { background: var(--hover); }
+  .side-launch:hover:not(:disabled) { background: var(--hover); }
 }
 
-.side-launch-key { margin-left: auto; color: var(--text-3); font-family: var(--font-mono-ui); font-size: 12px; font-weight: 400; }
-.side-launch-hint { margin: 0; color: var(--text-3); font-size: 12.5px; }
+.side-launch-key {
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+}
+
+.side-launch:disabled .side-launch-key { opacity: 0.5; }
+.side-launch-hint { margin: 6px 0 0; color: var(--text-3); font-size: 12.5px; }
+
+/* The diff tab: one section per changed file, lines numbered old and new. */
+.diff-view, .browser-view { display: flex; flex-direction: column; height: 100%; }
+.dv-body { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.dv-file { border-bottom: 1px solid var(--border); }
+
+.dv-file-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  background: var(--surface-2, var(--bg));
+  color: var(--text-2);
+  font-size: 12.5px;
+  text-align: left;
+}
+
+@media (hover: hover) {
+  .dv-file-head:hover { color: var(--text); }
+}
+
+.dv-file-head > svg:first-child { flex: none; color: var(--text-3); }
+.dv-file-path { flex: 1; min-width: 0; overflow: hidden; font-family: var(--font-mono-ui); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.dv-file-dir { color: var(--text-3); }
+.dv-file-name { color: var(--text); }
+.dv-badge { flex: none; padding: 1px 6px; border-radius: 5px; background: var(--surface-3); color: var(--text-3); font-size: 10.5px; }
+.dv-badge-added { color: var(--ok); }
+.dv-badge-deleted { color: var(--danger); }
+.dv-count { flex: none; display: inline-flex; gap: 6px; font-family: var(--font-mono-ui); font-size: 11px; }
+.dv-adds { color: var(--ok); }
+.dv-dels { color: var(--danger); }
+
+.dv-lines {
+  min-width: max-content;
+  padding-bottom: 4px;
+  font-family: var(--font-mono-ui);
+  font-size: 11.5px;
+  line-height: 1.55;
+}
+
+.dv-wrap .dv-lines { min-width: 0; }
+
+.dv-line { display: flex; }
+.dv-no { flex: none; width: 40px; padding-right: 8px; color: var(--text-3); opacity: 0.7; text-align: right; user-select: none; -webkit-user-select: none; }
+.dv-sign { flex: none; width: 16px; color: var(--text-3); text-align: center; user-select: none; -webkit-user-select: none; }
+.dv-text { flex: 1; padding-right: 12px; color: var(--text-2); white-space: pre; tab-size: 4; }
+.dv-wrap .dv-text { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dv-add { background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.dv-add .dv-sign, .dv-add .dv-text { color: var(--text); }
+.dv-add .dv-sign { color: var(--ok); }
+.dv-del { background: var(--danger-bg); }
+.dv-del .dv-sign { color: var(--danger); }
+.dv-note { color: var(--text-3); }
+.dv-hunk { padding: 3px 12px; margin: 4px 0; background: var(--hover); color: var(--text-3); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.dv-empty-file, .dv-truncated { margin: 0; padding: 10px 14px; color: var(--text-3); font-size: 12.5px; }
+
+/* A browser tab: back, forward, reload and the address, over the page. */
+.bv-bar { flex: none; display: flex; align-items: center; gap: 2px; height: 40px; padding: 0 6px; border-bottom: 1px solid var(--border); }
+
+.bv-address {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  margin: 0 4px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--surface-3);
+  color: var(--text);
+  font-family: var(--font-mono-ui);
+  font-size: 12px;
+  outline: none;
+}
+
+.bv-address:focus { border-color: var(--border-strong); }
+.bv-address::placeholder { color: var(--text-3); }
+.bv-body { position: relative; flex: 1; min-height: 0; }
+.bv-frame { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.panel-dragging .bv-frame { pointer-events: none; }
+.bv-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; padding: 24px; color: var(--text-3); font-size: 13px; text-align: center; }
+.bv-empty p { margin: 0; max-width: 320px; }
+.bv-hint { font-size: 12px; opacity: 0.8; }
 
 /* A terminal tab: where it runs, then the screen, on one surface. */
 .side-terminal { display: flex; flex-direction: column; height: 100%; background: var(--terminal-bg); }

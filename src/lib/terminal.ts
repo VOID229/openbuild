@@ -2,8 +2,8 @@
 // the open thread works in, on the device that thread runs on — this one, or a paired one through
 // /api/devices/<id>/… — and the shell there is a real one on a PTY, not a command runner.
 //
-// Shells are tabs, in a drawer at the bottom of the thread (the default) or in the side panel next
-// to open files (Settings → General → Terminal). The tabs belong to the folder, not to the tab
+// Shells are tabs, in a drawer at the bottom of the thread (⌘J) and, separately, in the side panel
+// next to open files: two sets of shells, which can both be open at once. The tabs belong to the folder, not to the tab
 // you're looking at: they're kept per folder in this browser, so hiding the drawer or panel,
 // reloading, or opening the app on another device brings back the same shells instead of starting
 // new ones. A tab whose shell exits (typing `exit`) closes, and the drawer or panel closes with the
@@ -15,7 +15,6 @@ import { apiUrl } from "./devices";
 import { uid } from "./id";
 import { usePanel } from "./panel";
 import { useStore } from "./store";
-import type { TerminalPosition } from "./types";
 
 /** Where the tabs run: a folder on this server, or on a paired one. */
 export interface TerminalFolder {
@@ -34,8 +33,8 @@ export interface TerminalTab {
   title?: string;
 }
 
-interface TerminalState {
-  /** The drawer at the bottom is showing. */
+export interface TerminalState {
+  /** The drawer at the bottom is showing (the side panel's own terminals ignore it). */
   open: boolean;
   /** The folder the tabs are in. */
   folder?: TerminalFolder;
@@ -54,24 +53,25 @@ interface TerminalState {
   setHeight(height: number): void;
 }
 
+/** Which set of shells: the drawer under the thread (⌘J), or the side panel's own tabs. */
+export type TerminalPlace = "bottom" | "side";
+
 /** Open at about half the window, so a phone's screen isn't mostly terminal. */
 export const defaultHeight = () =>
   typeof window === "undefined" ? 340 : Math.max(140, Math.min(360, Math.round(window.innerHeight * 0.42)));
 const MIN_HEIGHT = 120;
 
-/** Where the terminal opens, per Settings → General → Terminal. */
-export const terminalPosition = (): TerminalPosition => useStore.getState().settings.terminal ?? "bottom";
-
 const sameFolder = (a: TerminalFolder | undefined, b: TerminalFolder) => !!a && (a.deviceId ?? "") === (b.deviceId ?? "") && (a.cwd ?? "") === (b.cwd ?? "");
 
 // Tabs are remembered per folder, in this browser: a panel reopened tomorrow attaches to the shells
-// that were left running.
-const folderKey = (folder: TerminalFolder) => `openbuild:terminal:${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
+// that were left running. The drawer and the side panel each keep their own.
+const folderKey = (place: TerminalPlace, folder: TerminalFolder) =>
+  `openbuild:${place === "side" ? "side-terminal" : "terminal"}:${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
 
-function loadTabs(folder: TerminalFolder): { tabs: TerminalTab[]; active?: string } {
+function loadTabs(place: TerminalPlace, folder: TerminalFolder): { tabs: TerminalTab[]; active?: string } {
   let raw: string | null = null;
   try {
-    raw = localStorage.getItem(folderKey(folder));
+    raw = localStorage.getItem(folderKey(place, folder));
   } catch {}
   if (!raw) return { tabs: [] };
   try {
@@ -86,81 +86,85 @@ function loadTabs(folder: TerminalFolder): { tabs: TerminalTab[]; active?: strin
   }
 }
 
-function saveTabs(folder: TerminalFolder | undefined, tabs: TerminalTab[], active?: string): void {
+function saveTabs(place: TerminalPlace, folder: TerminalFolder | undefined, tabs: TerminalTab[], active?: string): void {
   if (!folder) return;
   try {
-    localStorage.setItem(folderKey(folder), JSON.stringify({ tabs, active }));
+    localStorage.setItem(folderKey(place, folder), JSON.stringify({ tabs, active }));
   } catch {}
 }
 
-/** Show the terminal where it lives: the drawer opens, or the side panel shows its terminal tab. */
-const reveal = () => {
-  if (terminalPosition() === "bottom") return useTerminal.setState({ open: true });
+/** Show the shells where they live: the drawer opens, or the side panel shows its terminal tab. */
+function reveal(place: TerminalPlace) {
+  if (place === "bottom") return useTerminal.setState({ open: true });
   const panel = usePanel.getState();
   panel.setView("terminal");
   if (!panel.panel) panel.setPanel(true);
-};
+}
 
 // Its own store, not settings: which shells are showing is a thing about this tab, not a preference.
-export const useTerminal = create<TerminalState>((set, get) => ({
-  open: false,
-  tabs: [],
-  height: defaultHeight(),
+function terminalStore(place: TerminalPlace) {
+  return create<TerminalState>((set, get) => ({
+    open: false,
+    tabs: [],
+    height: defaultHeight(),
 
-  showFolder: (folder, start = false) =>
-    set((s) => {
-      if (sameFolder(s.folder, folder) && (s.tabs.length || !start)) return {};
-      const saved = loadTabs(folder);
-      const tabs = saved.tabs.length || !start ? saved.tabs : [{ id: uid() }];
-      const active = tabs.some((t) => t.id === saved.active) ? saved.active! : tabs[0]?.id;
-      saveTabs(folder, tabs, active);
-      return { folder, tabs, active };
-    }),
+    showFolder: (folder, start = false) =>
+      set((s) => {
+        if (sameFolder(s.folder, folder) && (s.tabs.length || !start)) return {};
+        const saved = loadTabs(place, folder);
+        const tabs = saved.tabs.length || !start ? saved.tabs : [{ id: uid() }];
+        const active = tabs.some((t) => t.id === saved.active) ? saved.active! : tabs[0]?.id;
+        saveTabs(place, folder, tabs, active);
+        return { folder, tabs, active };
+      }),
 
-  addTab: () => {
-    const { folder, tabs } = get();
-    const tab: TerminalTab = { id: uid() };
-    const next = [...tabs, tab];
-    saveTabs(folder, next, tab.id);
-    set({ tabs: next, active: tab.id });
-    reveal();
-  },
+    addTab: () => {
+      const { folder, tabs } = get();
+      const tab: TerminalTab = { id: uid() };
+      const next = [...tabs, tab];
+      saveTabs(place, folder, next, tab.id);
+      set({ tabs: next, active: tab.id });
+      reveal(place);
+    },
 
-  activateTab: (id) => {
-    const { folder, tabs } = get();
-    if (!tabs.some((t) => t.id === id)) return;
-    saveTabs(folder, tabs, id);
-    set({ active: id });
-  },
+    activateTab: (id) => {
+      const { folder, tabs } = get();
+      if (!tabs.some((t) => t.id === id)) return;
+      saveTabs(place, folder, tabs, id);
+      set({ active: id });
+    },
 
-  closeTab: (id) => {
-    const { folder, tabs, active } = get();
-    const at = tabs.findIndex((t) => t.id === id);
-    if (at < 0) return;
-    const rest = tabs.filter((t) => t.id !== id);
-    // The tab to its left takes over (or the one after it, if it was the first), like a browser's tabs.
-    const next = active === id ? (rest[at - 1] ?? rest[0])?.id : active;
-    saveTabs(folder, rest, next);
-    set(rest.length ? { tabs: rest, active: next } : { tabs: rest, active: next, open: false });
-    // The last shell gone: in the side panel, back to an open file, or, with none, the panel closes.
-    const panel = usePanel.getState();
-    if (!rest.length && panel.view === "terminal") {
-      if (panel.files.length) panel.setView("file");
-      else panel.setPanel(false);
-    }
-    if (folder) void endSession({ id, ...folder });
-  },
+    closeTab: (id) => {
+      const { folder, tabs, active } = get();
+      const at = tabs.findIndex((t) => t.id === id);
+      if (at < 0) return;
+      const rest = tabs.filter((t) => t.id !== id);
+      // The tab to its left takes over (or the one after it, if it was the first), like a browser's tabs.
+      const next = active === id ? (rest[at - 1] ?? rest[0])?.id : active;
+      saveTabs(place, folder, rest, next);
+      // The drawer closes with its last shell; the side panel moves on to its next tab by itself.
+      set(rest.length || place === "side" ? { tabs: rest, active: next } : { tabs: rest, active: next, open: false });
+      if (folder) void endSession({ id, ...folder });
+    },
 
-  hide: () => set({ open: false }),
-  setHeight: (height) => set({ height: Math.max(MIN_HEIGHT, Math.round(height)) }),
+    hide: () => set({ open: false }),
+    setHeight: (height) => set({ height: Math.max(MIN_HEIGHT, Math.round(height)) }),
 
-  setTabTitle: (id, title) =>
-    set((s) => {
-      const tabs = s.tabs.map((t) => (t.id === id ? { ...t, title } : t));
-      saveTabs(s.folder, tabs, s.active);
-      return { tabs };
-    }),
-}));
+    setTabTitle: (id, title) =>
+      set((s) => {
+        const tabs = s.tabs.map((t) => (t.id === id ? { ...t, title } : t));
+        saveTabs(place, s.folder, tabs, s.active);
+        return { tabs };
+      }),
+  }));
+}
+
+/** The drawer under the thread: ⌘J. */
+export const useTerminal = terminalStore("bottom");
+/** The side panel's terminals: separate shells, open alongside the drawer's. */
+export const useSideTerminal = terminalStore("side");
+export type TerminalStore = typeof useTerminal;
+export const terminalStoreFor = (place: TerminalPlace): TerminalStore => (place === "side" ? useSideTerminal : useTerminal);
 
 /**
  * The folder the open thread's terminal would use: its own folder, on its own device. Without a
@@ -178,53 +182,52 @@ export function terminalFolder(): TerminalFolder {
   return { deviceId: ws?.deviceId ?? project?.deviceId ?? st.settings.workspace.deviceId, cwd: ws?.cwd ?? project?.path, label };
 }
 
-/** Show the terminal for the open thread (in its folder and on its device), starting a shell if it has none. */
+/** Show the drawer's terminal for the open thread (in its folder and on its device), starting a shell if it has none. */
 export function showTerminal(): void {
   useTerminal.getState().showFolder(terminalFolder(), true);
-  reveal();
+  reveal("bottom");
 }
 
-/** ⌘J: show the open thread's terminal, or hide it when it's what you're looking at. */
+/** Show the side panel's terminal for the open thread, starting a shell there if it has none. */
+export function showSideTerminal(): void {
+  useSideTerminal.getState().showFolder(terminalFolder(), true);
+  reveal("side");
+}
+
+/** ⌘J: show the drawer's terminal, or hide it when it's open. The side panel's terminals are separate. */
 export function toggleTerminal(): void {
-  if (terminalPosition() === "bottom") {
-    const { open, hide } = useTerminal.getState();
-    if (open) hide();
-    else showTerminal();
-    return;
-  }
-  const panel = usePanel.getState();
-  if (panel.panel && panel.view === "terminal" && useTerminal.getState().tabs.length) panel.setPanel(false);
+  const { open, hide } = useTerminal.getState();
+  if (open) hide();
   else showTerminal();
 }
 
 /**
  * Follow the thread: opening another thread shows that folder's shells and files, not the last
- * one's. A terminal that's showing starts a shell in a folder that has none.
+ * one's. A drawer that's showing starts a shell in a folder that has none.
  */
 export function refreshTerminal(): void {
   const folder = terminalFolder();
-  const panel = usePanel.getState();
-  panel.showFolder(folder);
-  const { open } = useTerminal.getState();
-  const side = terminalPosition() === "side";
-  useTerminal.getState().showFolder(folder, side ? panel.panel && panel.view === "terminal" : open);
+  usePanel.getState().showFolder(folder);
+  useTerminal.getState().showFolder(folder, useTerminal.getState().open);
+  useSideTerminal.getState().showFolder(folder);
 }
 
-/** Open a new tab in the folder the drawer or panel is showing. */
-export function newTerminalTab(): void {
-  useTerminal.getState().addTab();
+/** Open a new tab in the drawer, or in the side panel. */
+export function newTerminalTab(place: TerminalPlace = "bottom"): void {
+  terminalStoreFor(place).getState().addTab();
 }
 
 /** Start the active tab's shell over: a new shell, in the same folder. */
-export function restartTerminalTab(): void {
-  const { folder, tabs, active } = useTerminal.getState();
+export function restartTerminalTab(place: TerminalPlace = "bottom"): void {
+  const store = terminalStoreFor(place);
+  const { folder, tabs, active } = store.getState();
   const tab = tabs.find((t) => t.id === active);
   if (!folder || !tab) return;
   void endSession({ id: tab.id, ...folder });
   const fresh: TerminalTab = { id: uid() };
   const next = tabs.map((t) => (t.id === tab.id ? fresh : t));
-  saveTabs(folder, next, fresh.id);
-  useTerminal.setState({ tabs: next, active: fresh.id });
+  saveTabs(place, folder, next, fresh.id);
+  store.setState({ tabs: next, active: fresh.id });
 }
 
 // ---------------------------------------------------------------------------- the connection

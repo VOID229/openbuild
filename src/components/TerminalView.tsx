@@ -7,7 +7,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { editingSequence } from "../../shared/terminal";
-import { newTerminalTab, restartTerminalTab, TerminalConnection, useTerminal, type TerminalFolder, type TerminalTab } from "../lib/terminal";
+import { newTerminalTab, restartTerminalTab, TerminalConnection, terminalStoreFor, type TerminalFolder, type TerminalPlace, type TerminalTab } from "../lib/terminal";
 
 const FONT = '"JetBrains Mono Variable", "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace';
 /** Long enough to tell two shells in the same folder apart, short enough for the tab strip. */
@@ -43,7 +43,8 @@ function useFollowTheme(term: { current: XTerm | undefined }) {
 
 const isMac = () => /mac/i.test(navigator.platform || navigator.userAgent);
 
-export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder: TerminalFolder; xterm: RefObject<XTerm | undefined> }) {
+export function TerminalView({ tab, folder, xterm, place = "bottom" }: { tab: TerminalTab; folder: TerminalFolder; xterm: RefObject<XTerm | undefined>; place?: TerminalPlace }) {
+  const store = terminalStoreFor(place);
   const host = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string>();
   const [retrying, setRetrying] = useState(false);
@@ -87,7 +88,7 @@ export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder:
         } else if (e.t === "exit") {
           // `exit`, or anything that ends the shell, closes its tab. A shell that couldn't start
           // (there's no such program) keeps its tab, so the reason stays on screen.
-          if (!e.error) useTerminal.getState().closeTab(tab.id);
+          if (!e.error) store.getState().closeTab(tab.id);
           else term.write(`\r\n\x1b[38;5;244m[${e.error}]\x1b[0m\r\n`);
         }
       },
@@ -95,7 +96,7 @@ export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder:
     });
     term.onData((data) => connection.input(data));
     term.onResize(({ cols, rows }) => connection.resize({ cols, rows }));
-    term.onTitleChange((title) => useTerminal.getState().setTabTitle(tab.id, title));
+    term.onTitleChange((title) => store.getState().setTabTitle(tab.id, title));
     // ⌥←/→, ⌘←/→, ⌥⌫, ⌘⌫ and friends do what they do in a terminal window (shared/terminal.ts).
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== "keydown") return true;
@@ -124,7 +125,7 @@ export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder:
       {error && (
         <div className="terminal-problem" role="alert">
           <p>{error}</p>
-          <button type="button" className="btn btn-sm" onClick={() => restartTerminalTab()}>
+          <button type="button" className="btn btn-sm" onClick={() => restartTerminalTab(place)}>
             Start a new shell
           </button>
         </div>
@@ -140,7 +141,7 @@ export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder:
  * here as in other terminal apps that live in a page. Option+1–8 goes to that tab and Option+9 to the
  * last one, the way browsers number theirs.
  */
-export function useTabKeys(open: boolean) {
+export function useTabKeys(open: boolean, place: TerminalPlace = "bottom") {
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -149,20 +150,20 @@ export function useTabKeys(open: boolean) {
       const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
       if (e.code !== "KeyT" && e.code !== "KeyW" && !digit) return;
       const el = document.activeElement;
-      if (!el?.closest?.(".side-panel .xterm, .terminal-panel .xterm")) return;
+      if (!el?.closest?.(place === "side" ? ".side-panel .xterm" : ".terminal-panel .xterm")) return;
       e.preventDefault();
       e.stopPropagation();
       if (digit) {
-        const { tabs, activateTab } = useTerminal.getState();
+        const { tabs, activateTab } = terminalStoreFor(place).getState();
         const tab = digit === "9" ? tabs.at(-1) : tabs[Number(digit) - 1];
         if (tab) activateTab(tab.id);
-      } else if (e.code === "KeyT") newTerminalTab();
+      } else if (e.code === "KeyT") newTerminalTab(place);
       else {
-        const { active, closeTab } = useTerminal.getState();
+        const { active, closeTab } = terminalStoreFor(place).getState();
         if (active) closeTab(active);
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open]);
+  }, [open, place]);
 }

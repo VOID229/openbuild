@@ -1,5 +1,5 @@
-// The terminal as a drawer at the bottom of the thread (the default; Settings → General → Terminal
-// puts it beside the thread in the side panel instead): one tab per shell, each a real one on the
+// The terminal as a drawer at the bottom of the thread (⌘J; the side panel has its own, separate
+// shells, and both can be open at once): one tab per shell, each a real one on the
 // device that holds the project, in the folder the thread works in (src/lib/terminal.ts,
 // server/terminals.ts). Cmd/Ctrl+J opens and closes it. The screen itself is TerminalView.tsx, which
 // the side panel uses too.
@@ -92,7 +92,7 @@ export function TerminalPanel() {
                 </button>
               </div>
             ))}
-            <IconButton label="New terminal tab" tooltip="New tab (⌥T)" tooltipSide="bottom" className="terminal-action terminal-new" onClick={newTerminalTab}>
+            <IconButton label="New terminal tab" tooltip="New tab (⌥T)" tooltipSide="bottom" className="terminal-action terminal-new" onClick={() => newTerminalTab()}>
               <Plus size={15} />
             </IconButton>
           </div>

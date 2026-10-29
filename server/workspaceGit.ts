@@ -151,6 +151,51 @@ export async function diff(cwd: string, rawPaths?: unknown): Promise<{ diff: str
   return { diff: text.length > MAX_DIFF ? `${text.slice(0, MAX_DIFF)}\n… (diff truncated)` : text, recent: log.code === 0 ? log.out.split("\n").filter(Boolean) : [] };
 }
 
+/** How much of a checkout's changes the side panel's diff viewer takes at once. */
+const MAX_VIEW_DIFF = 4_000_000;
+const MAX_VIEW_UNTRACKED = 400_000;
+
+/**
+ * Every change in the checkout against HEAD, as a unified patch, for the side panel's diff viewer:
+ * staged, unstaged and untracked files (those as additions), whole rather than trimmed for a model.
+ */
+export async function patch(cwd: string): Promise<{ repo: boolean; patch: string; truncated?: boolean; branch?: string }> {
+  const top = await git(cwd, ["rev-parse", "--show-toplevel"]);
+  if (top.code !== 0) return { repo: false, patch: "" };
+  const root = top.out.trim();
+  const [head, untracked, branch] = await Promise.all([
+    git(root, ["rev-parse", "--verify", "-q", "HEAD"]),
+    git(root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+    git(root, ["branch", "--show-current"]),
+  ]);
+  // Before the first commit there's no HEAD to compare with: compare with the empty tree instead.
+  const base = head.code === 0 ? "HEAD" : (await git(root, ["hash-object", "-t", "tree", "/dev/null"])).out.trim();
+  const tracked = await git(root, ["diff", base, "--patch", "--no-color", "--no-ext-diff", "-M", "--src-prefix=a/", "--dst-prefix=b/"], 60_000);
+  let text = tracked.out;
+  for (const file of untracked.out.split("\0").filter(Boolean)) {
+    if (text.length > MAX_VIEW_DIFF) break;
+    let body: string | undefined;
+    try {
+      const full = join(root, file);
+      if (statSync(full).size <= MAX_VIEW_UNTRACKED) {
+        const buf = readFileSync(full);
+        if (!buf.includes(0)) body = buf.toString("utf8");
+      }
+    } catch {}
+    text += `diff --git a/${file} b/${file}\nnew file mode 100644\n`;
+    if (body === undefined) {
+      text += `Binary files /dev/null and b/${file} differ\n`;
+      continue;
+    }
+    const lines = body.split("\n");
+    if (lines.at(-1) === "") lines.pop();
+    text += `--- /dev/null\n+++ b/${file}\n`;
+    if (lines.length) text += `@@ -0,0 +1,${lines.length} @@\n${lines.map((l) => `+${l}`).join("\n")}\n`;
+  }
+  const truncated = text.length > MAX_VIEW_DIFF;
+  return { repo: true, patch: truncated ? text.slice(0, MAX_VIEW_DIFF) : text, truncated: truncated || undefined, branch: branch.out.trim() || undefined };
+}
+
 /** Commit these paths (or every change) with this message. */
 export async function commit(cwd: string, message: unknown, rawPaths?: unknown): Promise<{ sha: string }> {
   if (typeof message !== "string" || !message.trim() || message.length > 20_000) throw new Error("A commit needs a message");

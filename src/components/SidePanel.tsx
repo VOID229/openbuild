@@ -1,21 +1,47 @@
-// The panel beside the thread: open files and terminals as tabs, side by side with the conversation.
-// It follows the open thread's folder on the device the thread runs on (lib/panel.ts for files,
-// lib/terminal.ts for shells). With nothing open it offers what it can open.
-import { Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
+// The panel beside the thread: open files, terminals, the diff and browser pages as tabs, side by side
+// with the conversation. It follows the open thread's folder on the device the thread runs on
+// (lib/panel.ts for files, diff and browser tabs, lib/terminal.ts for shells). With nothing open it
+// offers what it can open: a browser, a terminal or the diff.
+//
+// Its terminals are its own (useSideTerminal), not the drawer's under the thread: ⌘J still opens and
+// hides the drawer, and both can be open at once.
+import { FileDiff, Globe, Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
 import type { Terminal as XTerm } from "@xterm/xterm";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { deviceName } from "../lib/devices";
-import { usePanel } from "../lib/panel";
-import { useStore } from "../lib/store";
+import { usePanel, type PanelView } from "../lib/panel";
 import { machineName } from "../lib/runtime";
-import { newTerminalTab, restartTerminalTab, showTerminal, useTerminal, type TerminalFolder } from "../lib/terminal";
+import { restartTerminalTab, showSideTerminal, useSideTerminal, type TerminalFolder } from "../lib/terminal";
 import { cx } from "../lib/ui";
+import { BrowserView, dropBrowserHistory } from "./BrowserView";
+import { DiffView } from "./DiffView";
 import { dropBuffer, FileView } from "./FileView";
 import { FileIcon, useEdgeDrag } from "./FileTree";
 import { IconButton, Popover } from "./primitives";
 import { tabLabel, TerminalView, useTabKeys } from "./TerminalView";
 
-function NewTabMenu() {
+interface Surface {
+  id: "browser" | "terminal" | "diff";
+  label: string;
+  icon: ReactNode;
+  /** The key that opens it from the launcher. */
+  key: string;
+  open(): void;
+  /** Not in a folder that can have it (the diff needs a project folder). */
+  disabled?: boolean;
+}
+
+function useSurfaces(folder: TerminalFolder): Surface[] {
+  const { openBrowser, openDiff } = usePanel.getState();
+  return [
+    { id: "browser", label: "Browser", icon: <Globe size={16} />, key: "B", open: () => openBrowser() },
+    // A new shell each time: the launcher and the + menu both mean "another one".
+    { id: "terminal", label: "Terminal", icon: <SquareTerminal size={16} />, key: "T", open: () => (useSideTerminal.getState().tabs.length ? useSideTerminal.getState().addTab() : showSideTerminal()) },
+    { id: "diff", label: "Diff", icon: <FileDiff size={16} />, key: "D", open: openDiff, disabled: !folder.cwd },
+  ];
+}
+
+function NewTabMenu({ surfaces }: { surfaces: Surface[] }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   return (
@@ -24,39 +50,99 @@ function NewTabMenu() {
         <Plus size={15} />
       </IconButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu side-menu" role="menu" label="New tab" fixed="down">
-        <button
-          type="button"
-          role="menuitem"
-          className="menu-item"
-          onClick={() => {
-            setOpen(false);
-            newTerminalTab();
-          }}
-        >
-          <SquareTerminal size={15} />
-          <span className="menu-item-label">Terminal</span>
-          <span className="menu-hint">⌥T</span>
-        </button>
+        {surfaces.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={s.disabled}
+            onClick={() => {
+              setOpen(false);
+              s.open();
+            }}
+          >
+            {s.icon}
+            <span className="menu-item-label">{s.label}</span>
+          </button>
+        ))}
       </Popover>
     </>
   );
 }
 
-/** With no tabs: what the panel can open. */
-function Launcher({ files, terminal }: { files: boolean; terminal: boolean }) {
+/** With no tabs: what the panel can open, each with a key. */
+function Launcher({ surfaces, active, files }: { surfaces: Surface[]; active: boolean; files: boolean }) {
+  // ⌥B, ⌥T or ⌥D opens it while the launcher is showing, even from the composer; the bare letter
+  // works too when nothing that takes typing has focus. A terminal keeps its own ⌥ keys (⌥T is its
+  // new tab), so nothing here fires from one.
+  useEffect(() => {
+    if (!active) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.repeat || e.isComposing) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.closest(".xterm")) return;
+      const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+      if (!e.altKey && typing) return;
+      // With Option held a Mac reports "∫"/"†"/"∂" as the key; the code is the letter itself.
+      const s = surfaces.find((x) => !x.disabled && e.code === `Key${x.key}`);
+      if (!s) return;
+      e.preventDefault();
+      e.stopPropagation();
+      s.open();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [active, surfaces]);
   return (
     <div className="side-launcher">
-      {terminal && (
-        <button type="button" className="side-launch" onClick={() => showTerminal()}>
-          <SquareTerminal size={16} />
-          Terminal
-          <span className="side-launch-key">⌘J</span>
-        </button>
-      )}
+      <h2 className="side-launch-title">Open a surface</h2>
+      <div className="side-launch-list" role="menu" aria-label="Open a surface">
+        {surfaces.map((s) => (
+          <button key={s.id} type="button" role="menuitem" className="side-launch" disabled={s.disabled} onClick={s.open}>
+            {s.icon}
+            {s.label}
+            <kbd className="side-launch-key">⌥{s.key}</kbd>
+          </button>
+        ))}
+      </div>
       {files && <p className="side-launch-hint">Open files from the file tree.</p>}
     </div>
   );
 }
+
+function Tab({ active, title, icon, label, onSelect, onClose, closeLabel, closeTip, dirty }: {
+  active: boolean;
+  title?: string;
+  icon: ReactNode;
+  label: string;
+  onSelect(): void;
+  onClose(): void;
+  closeLabel?: string;
+  closeTip?: string;
+  dirty?: boolean;
+}) {
+  return (
+    <div className={cx("side-tab", active && "side-tab-active")} role="presentation">
+      <button type="button" role="tab" aria-selected={active} className="side-tab-name" title={title ?? label} onClick={onSelect}>
+        {icon}
+        {label}
+      </button>
+      <button type="button" className={cx("side-tab-close", dirty && "side-tab-dirty")} aria-label={closeLabel ?? `Close ${label}`} data-tooltip={closeTip ?? "Close"} data-tooltip-side="bottom" onClick={onClose}>
+        <X size={11.5} />
+      </button>
+    </div>
+  );
+}
+
+const hostOf = (url: string) => {
+  try {
+    const u = new URL(url);
+    return u.host || url;
+  } catch {
+    return url;
+  }
+};
 
 export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; toolsWidth: number }) {
   const open = usePanel((s) => s.panel);
@@ -69,22 +155,34 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
   const files = usePanel((s) => s.files);
   const activeFile = usePanel((s) => s.activeFile);
   const dirty = usePanel((s) => s.dirty);
-  const { openFile, closeFile, setView } = usePanel.getState();
-  // The terminal is in the drawer at the bottom unless Settings → General → Terminal says beside it.
-  const sideTerminal = useStore((s) => (s.settings.terminal ?? "bottom") === "side");
-  const tabs = useTerminal((s) => s.tabs);
-  const activeShell = useTerminal((s) => s.active);
-  const termFolder = useTerminal((s) => s.folder);
-  const { activateTab, closeTab } = useTerminal.getState();
+  const diff = usePanel((s) => s.diff);
+  const browsers = usePanel((s) => s.browsers);
+  const activeBrowser = usePanel((s) => s.activeBrowser);
+  const { openFile, closeFile, setView, closeDiff, closeBrowser, activateBrowser } = usePanel.getState();
+  const tabs = useSideTerminal((s) => s.tabs);
+  const activeShell = useSideTerminal((s) => s.active);
+  const termFolder = useSideTerminal((s) => s.folder);
+  const { activateTab, closeTab } = useSideTerminal.getState();
   const xterm = useRef<XTerm | undefined>(undefined);
   const drag = useEdgeDrag(width, setWidth, "panel-dragging");
-  const showing = sideTerminal && view === "terminal" && tabs.length ? "terminal" : view === "file" && activeFile ? "file" : "launcher";
+  const surfaces = useSurfaces(folder);
+
+  const browser = browsers.find((b) => b.id === activeBrowser) ?? browsers[0];
+  const shell = tabs.find((t) => t.id === activeShell) ?? tabs[0];
+  // What there is to show for each view; a view with nothing left falls to the next that has something.
+  const has: Record<Exclude<PanelView, "launcher">, boolean> = {
+    file: !!activeFile,
+    terminal: !!shell && !!termFolder,
+    diff,
+    browser: !!browser,
+  };
+  const showing: PanelView = view !== "launcher" && has[view] ? view : ((["file", "terminal", "diff", "browser"] as const).find((v) => has[v]) ?? "launcher");
+
   // Back to the terminal you were in, so typing works straight away.
   useEffect(() => {
     if (open && showing === "terminal") xterm.current?.focus();
-  }, [open, showing]);
-  useTabKeys(sideTerminal && open && showing === "terminal");
-  const shell = tabs.find((t) => t.id === activeShell) ?? tabs[0];
+  }, [open, showing, shell?.id]);
+  useTabKeys(open && showing === "terminal", "side");
   const where = folder.deviceId ? (deviceName(folder.deviceId) ?? "paired device") : (machineName() ?? "this device");
   // The tabs leave room for the toolbar above them when nothing (the file tree) sits under it instead.
   const reserve = Math.max(0, toolsWidth - (tree && folder.cwd ? treeWidth : 0));
@@ -93,6 +191,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
     dropBuffer(folder, path);
     closeFile(path);
   };
+  const anyTabs = files.length > 0 || tabs.length > 0 || diff || browsers.length > 0;
 
   return (
     <aside
@@ -104,49 +203,55 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
       {!expanded && <div className="side-grip" onPointerDown={drag} onDoubleClick={() => setWidth(560)} role="separator" aria-orientation="vertical" aria-label="Resize the panel" />}
       <div className="side-inner">
         <header className="side-head side-bar" style={{ paddingRight: reserve ? reserve + 8 : undefined }}>
-          <div className="side-tabs" role="tablist" aria-label="Open files and terminals">
+          <div className="side-tabs" role="tablist" aria-label="Side panel tabs">
             {files.map((path) => {
               const name = path.split("/").pop()!;
-              const active = showing === "file" && path === activeFile;
               return (
-                <div key={`f:${path}`} className={cx("side-tab", active && "side-tab-active")} role="presentation">
-                  <button type="button" role="tab" aria-selected={active} className="side-tab-name" title={path} onClick={() => openFile(path)}>
-                    <FileIcon name={name} size={13} />
-                    {name}
-                  </button>
-                  <button type="button" className={cx("side-tab-close", dirty[path] && "side-tab-dirty")} aria-label={`Close ${name}`} data-tooltip={dirty[path] ? "Unsaved · Close" : "Close"} data-tooltip-side="bottom" onClick={() => close(path)}>
-                    <X size={11.5} />
-                  </button>
-                </div>
+                <Tab
+                  key={`f:${path}`}
+                  active={showing === "file" && path === activeFile}
+                  title={path}
+                  icon={<FileIcon name={name} size={13} />}
+                  label={name}
+                  onSelect={() => openFile(path)}
+                  onClose={() => close(path)}
+                  dirty={dirty[path]}
+                  closeTip={dirty[path] ? "Unsaved · Close" : "Close"}
+                />
               );
             })}
-            {sideTerminal &&
-              termFolder &&
-              tabs.map((t) => {
-                const active = showing === "terminal" && t.id === shell?.id;
-                return (
-                  <div key={`t:${t.id}`} className={cx("side-tab", active && "side-tab-active")} role="presentation">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      className="side-tab-name"
-                      title={t.title ?? termFolder.label}
-                      onClick={() => {
-                        activateTab(t.id);
-                        setView("terminal");
-                      }}
-                    >
-                      <SquareTerminal size={13} className="ft-icon" />
-                      {tabLabel(t, termFolder)}
-                    </button>
-                    <button type="button" className="side-tab-close" aria-label={`Close ${tabLabel(t, termFolder)}`} data-tooltip="Close (⌥W)" data-tooltip-side="bottom" onClick={() => closeTab(t.id)}>
-                      <X size={11.5} />
-                    </button>
-                  </div>
-                );
-              })}
-            {sideTerminal && <NewTabMenu />}
+            {termFolder &&
+              tabs.map((t) => (
+                <Tab
+                  key={`t:${t.id}`}
+                  active={showing === "terminal" && t.id === shell?.id}
+                  title={t.title ?? termFolder.label}
+                  icon={<SquareTerminal size={13} className="ft-icon" />}
+                  label={tabLabel(t, termFolder)}
+                  onSelect={() => {
+                    activateTab(t.id);
+                    setView("terminal");
+                  }}
+                  onClose={() => closeTab(t.id)}
+                  closeTip="Close (⌥W)"
+                />
+              ))}
+            {diff && <Tab active={showing === "diff"} icon={<FileDiff size={13} className="ft-icon" />} label="Diff" onSelect={() => setView("diff")} onClose={closeDiff} />}
+            {browsers.map((b) => (
+              <Tab
+                key={`b:${b.id}`}
+                active={showing === "browser" && b.id === browser?.id}
+                title={b.url || "New tab"}
+                icon={<Globe size={13} className="ft-icon" />}
+                label={b.url ? hostOf(b.url) : "New tab"}
+                onSelect={() => activateBrowser(b.id)}
+                onClose={() => {
+                  dropBrowserHistory(b.id);
+                  closeBrowser(b.id);
+                }}
+              />
+            ))}
+            {anyTabs && <NewTabMenu surfaces={surfaces} />}
           </div>
         </header>
         <div className="side-body">
@@ -158,14 +263,16 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
                   {where}
                   {termFolder.cwd ? ` · ${termFolder.cwd.replace(/^\/(?:Users|home)\/[^/]+/, "~")}` : ""}
                 </span>
-                <IconButton label="Restart the shell" tooltip="New shell in this tab" className="side-action" onClick={() => restartTerminalTab()}>
+                <IconButton label="Restart the shell" tooltip="New shell in this tab" className="side-action" onClick={() => restartTerminalTab("side")}>
                   <RotateCcw size={13} />
                 </IconButton>
               </div>
-              <TerminalView key={shell.id} tab={shell} folder={termFolder} xterm={xterm} />
+              <TerminalView key={shell.id} tab={shell} folder={termFolder} xterm={xterm} place="side" />
             </div>
           )}
-          {showing === "launcher" && <Launcher files={!!folder.cwd} terminal={sideTerminal} />}
+          {showing === "diff" && <DiffView folder={folder} />}
+          {showing === "browser" && browser && <BrowserView key={browser.id} tab={browser} folder={folder} />}
+          {showing === "launcher" && <Launcher surfaces={surfaces} active={open} files={!!folder.cwd} />}
         </div>
       </div>
     </aside>

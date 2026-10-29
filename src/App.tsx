@@ -153,7 +153,6 @@ function Main() {
   const expanded = usePanel((s) => s.expanded);
   const [toolsWidth, setToolsWidth] = useState(0);
   const onToolsWidth = useCallback((w: number) => setToolsWidth(w), []);
-  const sideTerminal = useStore((s) => (s.settings.terminal ?? "bottom") === "side");
   const panelWidth = usePanel((s) => s.width);
   const treeOpen = usePanel((s) => s.tree);
   const treeWidth = usePanel((s) => s.treeWidth);
@@ -369,7 +368,7 @@ function Main() {
             <div className="main-row">
               <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
                 {usageOpen ? <UsagePage /> : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
-                {!sideTerminal && <TerminalPanel />}
+                <TerminalPanel />
               </div>
               {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
               {/* Only a real folder: a thread's, or the project the composer is set to (not every scratch folder at once). */}

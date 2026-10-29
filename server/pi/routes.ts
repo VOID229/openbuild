@@ -628,6 +628,18 @@ export function piRoutes(api: Api) {
         return Response.json(await workspaceGit.changes(cwd));
       }),
     },
+    // The side panel's diff viewer: every change in the checkout, as one patch.
+    "/api/workspaces/patch": {
+      GET: api(async (req) => {
+        const cwd = new URL(req.url).searchParams.get("cwd");
+        if (!cwd || !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+        try {
+          return Response.json(await workspaceGit.patch(cwd));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/workspaces/diff": {
       POST: gitAction((body) => workspaceGit.diff(body.cwd, body.paths)),
     },

@@ -5,7 +5,6 @@ import { cloudConfigured } from "../lib/cloud";
 import { fastTarget, findModel } from "../lib/models";
 import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
-import { defaultBinding, formatBinding, isMacPlatform, shortcutBinding } from "../lib/shortcuts";
 import { arrowNav, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DictationSettings } from "./DictationSettings";
@@ -142,7 +141,6 @@ function NotificationsSection() {
 function GeneralSection() {
   const s = useStore((st) => st.settings);
   const update = useStore((st) => st.updateSettings);
-  const terminalKey = formatBinding(shortcutBinding(s, "toggleTerminal") ?? defaultBinding("toggleTerminal"), isMacPlatform());
   return (
     <>
       <Heading>General</Heading>
@@ -160,21 +158,6 @@ function GeneralSection() {
             { value: "last-used", label: "Last used" },
           ]}
           onChange={(defaultMode) => update({ workspace: { ...s.workspace, defaultMode } })}
-        />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Terminal</div>
-          <p className="setting-desc">Where {terminalKey} opens it: a drawer under the thread, or a tab beside it with the open files.</p>
-        </div>
-        <OptionSelect
-          label="Where the terminal opens"
-          value={s.terminal ?? "bottom"}
-          options={[
-            { value: "bottom", label: "Bottom" },
-            { value: "side", label: "Side panel" },
-          ]}
-          onChange={(terminal) => update({ terminal })}
         />
       </div>
       <div className="setting-row">

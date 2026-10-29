@@ -44,13 +44,13 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   {
     id: "toggleRightSidebar",
     label: "Toggle right sidebar",
-    description: "Show or hide the side panel with files and terminals on the right.",
+    description: "Show or hide the side panel on the right: browser, terminals, diff and open files.",
     default: "mod+KeyI",
   },
   {
     id: "toggleTerminal",
     label: "Toggle terminal",
-    description: "Open or hide the terminal for the thread's folder.",
+    description: "Open or hide the terminal drawer under the thread (separate from the side panel's terminals).",
     default: "mod+KeyJ",
   },
   {
