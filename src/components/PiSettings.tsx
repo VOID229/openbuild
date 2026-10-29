@@ -101,13 +101,10 @@ export function DeviceRow({ deviceId, onChange, title = "Manage Pi on", label = 
   const remote = devices.filter((d) => !d.local);
   if (!remote.length) return null;
   return (
-    <div className="pi-row pi-device">
-      <span className="pi-row-text">
-        <span className="pi-row-name">{title}</span>
-        <span className="pi-row-desc">What this page shows and changes belongs to the device you pick.</span>
-      </span>
+    <div className="pi-device">
+      <span className="pi-device-label">{title}</span>
       <OptionSelect
-        className="pi-row-field"
+        className="pi-device-field"
         label={label}
         value={deviceId ?? ""}
         options={[
@@ -158,17 +155,27 @@ export function useJob(onDone: () => void, deviceId?: string) {
 
 export function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
   const ref = useRef<HTMLPreElement>(null);
+  const ok = !job.running && job.result?.code === 0;
+  // A finished, successful job folds its output away; running or failed jobs keep it open.
+  const [shown, setShown] = useState(false);
+  useEffect(() => setShown(false), [job.running]);
+  const open = job.lines.length > 0 && (!ok || shown);
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight });
-  }, [job.lines.length]);
+  }, [job.lines.length, open]);
   if (!job.running && !job.result && !job.lines.length) return null;
   return (
     <div className="pi-job">
       <div className="pi-job-head">
-        {job.running ? <Spinner size={12} /> : job.result?.code === 0 ? <Check size={14} className="ok" /> : <CircleAlert size={14} className="bad" />}
-        <span>{job.running ? "Working…" : job.result?.code === 0 ? `${job.result.title ?? "Done"}: done` : `${job.result?.title ?? "It"} failed (exit code ${job.result?.code ?? "?"})`}</span>
+        {job.running ? <Spinner size={12} /> : ok ? <Check size={14} className="ok" /> : <CircleAlert size={14} className="bad" />}
+        <span>{job.running ? "Working…" : ok ? `${job.result?.title ?? "Done"}: done` : `${job.result?.title ?? "It"} failed (exit code ${job.result?.code ?? "?"})`}</span>
+        {ok && job.lines.length > 0 && (
+          <button type="button" className="link-btn pi-job-toggle" onClick={() => setShown((v) => !v)}>
+            {shown ? "Hide log" : "Show log"}
+          </button>
+        )}
       </div>
-      {job.lines.length > 0 && <pre ref={ref} className="pi-job-log">{job.lines.join("\n")}</pre>}
+      {open && <pre ref={ref} className="pi-job-log">{job.lines.join("\n")}</pre>}
     </div>
   );
 }
@@ -531,27 +538,26 @@ export function PiSection() {
                   Pi {status.version}
                   {status.updateAvailable ? <span className="badge badge-accent">{status.latest} available</span> : status.latest && <span className="badge">up to date</span>}
                 </div>
-                <div className="pi-meta">
-                  {tilde(status.bin ?? "")} · {status.kind === "managed" ? "installed with Pi's installer" : status.kind === "npm" ? "installed with npm" : "custom install"}
+                <div className="pi-meta" title={`Binary ${tilde(status.bin ?? "")} · config ${tilde(status.agentDir)}`}>
+                  {tilde(status.bin ?? "")} · {status.kind === "managed" ? "Pi installer" : status.kind === "npm" ? "npm" : "custom install"}
                 </div>
               </div>
-              {status.updateAvailable ? (
-                <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => updatePi(false, deviceId))}>
-                  Update to {status.latest}
+              <div className="pi-card-actions">
+                <button type="button" className="link-btn" disabled={job.running} onClick={() => void start(() => updatePi(true, deviceId))} title="Update Pi and every installed package">
+                  Update all
                 </button>
-              ) : (
-                <button type="button" className="btn btn-sm" disabled={checking || job.running} onClick={() => void loadStatus(true)}>
-                  {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check for updates
-                </button>
-              )}
+                {status.updateAvailable ? (
+                  <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => updatePi(false, deviceId))}>
+                    Update to {status.latest}
+                  </button>
+                ) : (
+                  <button type="button" className="btn btn-sm" disabled={checking || job.running} onClick={() => void loadStatus(true)}>
+                    {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check
+                  </button>
+                )}
+              </div>
             </div>
             {status.checkError && <p className="pi-meta">{status.checkError}</p>}
-            <div className="pi-card-links">
-              <button type="button" className="link-btn" disabled={job.running} onClick={() => void start(() => updatePi(true, deviceId))}>
-                Update Pi and all packages
-              </button>
-              <span className="pi-meta">Config: {tilde(status.agentDir)}</span>
-            </div>
           </>
         ) : (
           <div className="pi-card-row">

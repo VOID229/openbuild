@@ -5627,12 +5627,15 @@ p.key-status svg {
   overflow-wrap: anywhere;
 }
 
-.pi-card-links {
-  display: flex;
-  flex-wrap: wrap;
+.pi-card-actions {
+  display: inline-flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+}
+
+.pi-job-toggle {
+  margin-left: auto;
 }
 
 .pi-job {
@@ -5791,12 +5794,28 @@ p.key-status svg {
   width: 100%;
 }
 
-/* Which device's Pi the sections below manage: a row above the Pi card, not one in a list. */
+/* Which device's Pi the sections below manage: a compact label + picker above the Pi card. */
 .pi-device {
-  margin: -4px 0 16px;
-  padding: 8px 10px 8px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -6px 0 14px;
+}
+
+.pi-device-label {
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.pi-device-field {
+  flex: none;
+  width: 220px;
+  max-width: 60%;
+}
+
+.pi-device-field .select-trigger {
+  width: 100%;
 }
 
 .pi-clamp {
@@ -6024,6 +6043,10 @@ p.pi-empty {
   .pi-card-row {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .pi-card-actions {
+    justify-content: space-between;
   }
 
   .tool-output,
