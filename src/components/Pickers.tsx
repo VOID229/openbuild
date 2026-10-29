@@ -1,4 +1,4 @@
-import { Check, KeyRound, Search, Star } from "lucide-react";
+import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   EFFORTS,
@@ -6,15 +6,16 @@ import {
   type Effort,
   type ModelInfo,
   type PlanId,
+  type ThreadRuntime,
 } from "../../shared/types";
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { composerEffort, selectionFor, useStore } from "../lib/store";
+import { MODELS_STALE, composerEffort, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
-import { effortFor } from "../lib/effort";
+import { effortFor, supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
-import { Popover, ProviderIcon, Spinner } from "./primitives";
+import { CodexMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
   off: "off",
@@ -35,7 +36,11 @@ const LONG: Record<Effort, string> = {
 
 /** A paired device's list before it arrives: the picker says it's asking, not "no models". */
 const PENDING: Detection = { plan: "pi", status: "checking", models: [] };
-const STALE_MODELS = 10 * 60 * 1000;
+const PENDING_FX: Detection = { plan: "fx", status: "checking", models: [] };
+const PENDING_CODEX: Detection = { plan: "codex", status: "checking", models: [] };
+const PENDING_CURSOR: Detection = { plan: "cursor", status: "checking", models: [] };
+/** The agent whose models a detection lists. */
+const planOf = (detection: Partial<Record<PlanId, Detection>>): "pi" | "fx" | "codex" | "cursor" => (detection.cursor ? "cursor" : detection.codex ? "codex" : detection.fx ? "fx" : "pi");
 
 /**
  * The models the composer can use: this server's, or those of the paired device the thread works
@@ -45,18 +50,28 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
   const local = useStore((s) => s.detection);
   const remote = useStore((s) => (deviceId ? s.remoteModels[deviceId] : undefined));
   const load = useStore((s) => s.loadDeviceModels);
+  // Native runtimes list their own models, not Pi provider models.
+  const runtime = useStore((s) => runtimeOf(s, s.activeChatId));
+  const native = runtime === "fx" || runtime === "codex" || runtime === "cursor";
+  const list = useStore((s) => runtime === "cursor" ? s.cursorModels[deviceId ?? ""] : runtime === "codex" ? s.codexModels[deviceId ?? ""] : runtime === "fx" ? s.fxModels[deviceId ?? ""] : undefined);
+  const loadNative = useStore((s) => runtime === "cursor" ? s.loadCursorModels : runtime === "codex" ? s.loadCodexModels : s.loadFxModels);
   const detection = useMemo(
-    () => (deviceId ? { pi: remote ?? PENDING } : local),
-    [deviceId, remote, local],
+    () => (native ? { [runtime]: list ?? (runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
+    [native, runtime, list, deviceId, remote, local],
   );
   useEffect(() => {
-    if (!deviceId) return;
+    if (!native) return;
+    const stale = list && list.status !== "checking" && Date.now() - (list.checkedAt ?? 0) > MODELS_STALE;
+    if (!list || stale) void loadNative(deviceId, !!list);
+  }, [native, list, deviceId, loadNative]);
+  useEffect(() => {
+    if (!deviceId || native) return;
     const stale =
       remote &&
       remote.status !== "checking" &&
-      Date.now() - (remote.checkedAt ?? 0) > STALE_MODELS;
+      Date.now() - (remote.checkedAt ?? 0) > MODELS_STALE;
     if (!remote || stale) void load(deviceId, !!remote);
-  }, [deviceId, remote, load]);
+  }, [deviceId, remote, load, native]);
   return detection;
 }
 
@@ -91,7 +106,9 @@ export function EffortPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?:
     !model && !auto
       ? "Select a model first"
       : !supported
-        ? `${model?.name} uses its default reasoning`
+        ? model?.id.startsWith("fx/")
+          ? "This fx version can't set reasoning effort. Update fx (`fx upgrade`) to choose it here."
+          : `${model?.name} uses its default reasoning`
         : "Reasoning effort";
 
   return (
@@ -153,10 +170,191 @@ export function EffortPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?:
   );
 }
 
+/**
+ * The speed (service tier) for the selected model, right of the effort picker. Only shown when the
+ * provider lists faster tiers for the model (ModelInfo.speeds), and offers only those plus standard.
+ */
+export function SpeedPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const selection = useStore(selectionFor);
+  const detection = useDeviceDetection(deviceId);
+  const wanted = useStore(composerSpeed);
+  const setSpeed = useStore((s) => s.setSpeed);
+  const model = isAuto(selection) ? undefined : findModel(detection, selection);
+  const speeds = model?.speeds ?? [];
+  if (!speeds.length) return null;
+  const shown = supportedSpeed(speeds, wanted);
+  const current = speeds.find((s) => s.id === shown);
+  const options: { id?: string; name: string; description?: string }[] = [{ name: "Standard", description: "Default speed and usage" }, ...speeds];
+
+  return (
+    <div className="picker">
+      <button
+        ref={anchor}
+        type="button"
+        className={cx("pill pill-plain", open && "pill-open")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        data-tooltip={open ? undefined : current?.description ? `Speed: ${current.description}` : "Speed"}
+        data-tooltip-side={dropUp ? "top" : "bottom"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {current?.name ?? "Standard"}
+      </button>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchor={anchor}
+        className="menu effort-menu speed-menu"
+        role="listbox"
+        label="Speed"
+        fixed={dropUp ? "up" : "auto"}
+      >
+        <div className="menu-label">Speed</div>
+        <div onKeyDown={(e) => arrowNav(e)}>
+          {options.map((o) => (
+            <button
+              key={o.id ?? ""}
+              type="button"
+              role="option"
+              aria-selected={shown === o.id}
+              className="menu-item"
+              onClick={() => {
+                setSpeed(o.id);
+                setOpen(false);
+              }}
+            >
+              <span className="menu-item-label">
+                {o.name}
+                {o.description && <span className="speed-desc">{o.description}</span>}
+              </span>
+              {shown === o.id && <Check size={15} className="menu-check" />}
+            </button>
+          ))}
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
+const PERMISSION_STALE = 10 * 60 * 1000;
+const RUNTIME_NAME: Partial<Record<ThreadRuntime, string>> = { codex: "Codex", cursor: "Cursor" };
+
+/**
+ * The permission mode for a Codex or Cursor thread, as that runtime lists its modes on the device
+ * (Codex: its permission profiles for the folder; Cursor: the modes its installed CLI offers).
+ * "Default" sends nothing, so the runtime's own configuration applies.
+ */
+export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: boolean; chatId?: string; deviceId?: string; cwd?: string }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const runtime = useStore((s) => runtimeOf(s, chatId));
+  const native = hasPermissionModes(runtime);
+  const key = native ? permissionKey(runtime, deviceId, cwd) : "";
+  const listing = useStore((s) => (native ? s.permissionModes[key] : undefined));
+  const load = useStore((s) => s.loadPermissionModes);
+  const picked = useStore((s) => permissionOf(s, chatId));
+  const setPermission = useStore((s) => s.setPermission);
+  useEffect(() => {
+    if (!native) return;
+    const stale = listing && listing.status !== "checking" && Date.now() - listing.checkedAt > PERMISSION_STALE;
+    if (!listing || stale) void load(runtime, deviceId, cwd, !!listing);
+  }, [native, runtime, listing, deviceId, cwd, load]);
+  if (!native) return null;
+  const modes = listing?.modes ?? [];
+  const name = RUNTIME_NAME[runtime];
+  // The runtime's own default, when it names one it lists; picking it explicitly is the same as Default.
+  const configured = modes.find((m) => m.id === listing?.defaultMode);
+  const current = picked ? modes.find((m) => m.id === picked) : undefined;
+  const label = current?.name ?? (picked ? picked : configured ? configured.name : "Default");
+  const risky = /full-access|force|danger/.test(current?.id ?? "");
+  const tooltip = listing?.status === "error" && !modes.length
+    ? `Couldn't list ${name}'s permission modes: ${listing.error}`
+    : current?.description
+      ? `Permissions: ${current.description}`
+      : picked
+        ? `Permissions: ${picked}`
+        : `Permissions: ${name}'s configured default${configured ? ` (${configured.name})` : ""}`;
+  return (
+    <div className="picker">
+      <button
+        ref={anchor}
+        type="button"
+        className={cx("pill pill-plain permission-pill", open && "pill-open", risky && "permission-risky")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Permissions: ${label}`}
+        data-tooltip={open ? undefined : tooltip}
+        data-tooltip-side={dropUp ? "top" : "bottom"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {risky ? <ShieldAlert size={14} aria-hidden /> : <ShieldCheck size={14} aria-hidden />}
+        {label}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu effort-menu speed-menu" role="listbox" label="Permissions" fixed={dropUp ? "up" : "auto"}>
+        <div className="menu-label">{name} permissions</div>
+        <div onKeyDown={(e) => arrowNav(e)}>
+          {/* Cursor lists its no-flag mode itself; Codex's default is whatever its config resolves to. */}
+          {!modes.some((m) => m.id === listing?.defaultMode) && (
+            <button type="button" role="option" aria-selected={!picked} className="menu-item" onClick={() => { setPermission(undefined, chatId); setOpen(false); }}>
+              <span className="menu-item-label">
+                Default
+                <span className="speed-desc">{name}'s own configuration</span>
+              </span>
+              {!picked && <Check size={15} className="menu-check" />}
+            </button>
+          )}
+          {listing?.status === "checking" && !modes.length && <div className="menu-item" aria-disabled><Spinner /> Asking {name}…</div>}
+          {listing?.status === "error" && !modes.length && <div className="menu-item" aria-disabled>{listing.error}</div>}
+          {modes.map((m) => {
+            const isDefault = m.id === listing?.defaultMode;
+            const selected = picked ? picked === m.id : isDefault;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                className="menu-item"
+                disabled={m.allowed === false}
+                title={m.allowed === false ? `Not allowed by ${name}'s managed requirements` : undefined}
+                onClick={() => { setPermission(isDefault ? undefined : m.id, chatId); setOpen(false); }}
+              >
+                <span className="menu-item-label">
+                  {m.name}{isDefault && " (default)"}
+                  {m.description && <span className="speed-desc">{m.description}</span>}
+                </span>
+                {selected && <Check size={15} className="menu-check" />}
+              </button>
+            );
+          })}
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
 /** Why there are no models to pick: Pi missing, not signed in anywhere, or not answering. */
 function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>> }) {
-  const d = detection.pi;
   const openSettings = useStore((s) => s.openSettings);
+  if (detection.fx || detection.codex || detection.cursor) {
+    const f = (detection.cursor ?? detection.codex ?? detection.fx)!;
+    const name = detection.cursor ? "Cursor" : detection.codex ? "Codex" : "fx";
+    if (f.status === "checking" && !f.models.length)
+      return (
+        <div className="model-empty">
+          <Spinner /> Asking {name} for models…
+        </div>
+      );
+    return (
+      <div className="model-empty">
+        {detection.cursor ? <ProviderIcon provider="cursor" /> : detection.codex ? <CodexMark size={18} /> : <FxMark size={18} />}
+        <p>{f.error ?? `${name} has no models yet. Sign in with \`${detection.cursor ? "agent" : detection.codex ? "codex" : "fx"} login\` on this device.`}</p>
+      </div>
+    );
+  }
+  const d = detection.pi;
   if (d?.status === "checking" && !d.models.length)
     return (
       <div className="model-empty">
@@ -217,8 +415,8 @@ export function toggleFavorite(id: string) {
 }
 
 /** Thinking levels of the selected model, as a row of choices (in the model picker's footer). */
-function ThinkingRow({ model }: { model?: ModelInfo }) {
-  const effort = useStore((s) => effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), model ? { plan: "pi", id: model.id } : undefined));
+function ThinkingRow({ model, plan }: { model?: ModelInfo; plan: "pi" | "fx" | "codex" | "cursor" }) {
+  const effort = useStore((s) => effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), model ? { plan, id: model.id } : undefined));
   const setEffort = useStore((s) => s.setEffort);
   const levels = model?.reasoning.efforts ?? [];
   const shown = nearestEffort(levels, effort) ?? effort;
@@ -238,7 +436,7 @@ function ThinkingRow({ model }: { model?: ModelInfo }) {
               role="radio"
               aria-checked={l === shown}
               className="mp-level"
-              onClick={() => model && setEffort(l, { plan: "pi", id: model.id })}
+              onClick={() => model && setEffort(l, { plan, id: model.id })}
             >
               {SHORT[l]}
             </button>
@@ -266,9 +464,10 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   const current = isAuto(selection)
     ? undefined
     : findModel(detection, selection);
-  const all = detection.pi?.models ?? [];
+  const plan = planOf(detection);
+  const all = detection[plan]?.models ?? [];
   // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
-  const scope = detection.pi?.scope;
+  const scope = detection[plan]?.scope;
   const scoped = hasModelScope(scope);
   // Remembered per device: following the picker to another device shows that device's choice.
   const [showAll, setShowAll] = useDevicePref("models.showAll", deviceId);
@@ -279,7 +478,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         : scopedModels(
             all,
             scope,
-            !isAuto(selection) && selection?.plan === "pi"
+            !isAuto(selection) && selection?.plan === plan
               ? selection.id
               : undefined,
           ),
@@ -368,17 +567,22 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     if (tab === RAIL_FAV) return favModels;
     return shown.filter((m) => providerOf(m) === tab);
   }, [shown, q, tab, favModels]);
-  const checking = detection.pi?.status === "checking";
+  const checking = detection[plan]?.status === "checking";
   const label = current
     ? current.name
     : all.length
       ? "Select model"
       : checking
-        ? "Loading models…"
-        : "Set up Pi";
+        ? // First fetch on a never-seen device: name the pick rather than say it's loading.
+          !isAuto(selection) && selection?.plan === plan
+          ? selection.id.split("/").pop()!
+          : "Select model"
+        : plan === "fx" || plan === "codex" || plan === "cursor"
+          ? `Set up ${plan === "cursor" ? "Cursor" : plan === "codex" ? "Codex" : "fx"}`
+          : "Set up Pi";
 
   const choose = (id: string) => {
-    setSelection({ plan: "pi", id });
+    setSelection({ plan, id });
     setOpen(false);
   };
 
@@ -391,7 +595,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() =>
-          all.length || checking ? setOpen((o) => !o) : openSettings("keys")
+          all.length || checking || plan === "fx" || plan === "codex" || plan === "cursor" ? setOpen((o) => !o) : openSettings("keys")
         }
       >
         {current ? (
@@ -485,7 +689,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
             {rows.map((m) => {
               const selected =
                 !isAuto(selection) &&
-                selection?.plan === "pi" &&
+                selection?.plan === plan &&
                 selection.id === m.id;
               const fav = favorites.indexOf(m.id);
               return (
@@ -541,7 +745,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
                 </div>
               ))}
           </div>
-          <ThinkingRow model={current} />
+          <ThinkingRow model={current} plan={plan} />
         </div>
       </Popover>
     </div>

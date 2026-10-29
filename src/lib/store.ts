@@ -2,14 +2,14 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type Device, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
-import { listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
+import { cursorModels, codexModels, fxModels, permissionModes, listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
 import { qualifyProject, setDeviceList } from "./devices";
 import { config } from "./runtime";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
-import { effortFor, effortKey } from "./effort";
-import type { Effort, ModelInfo } from "../../shared/types";
+import { effortFor, effortKey, speedFor } from "./effort";
+import type { Effort, ModelInfo, PermissionModes } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
@@ -80,8 +80,38 @@ function withPi(s: State, deviceId: string | undefined, patch: PiCache): Partial
   return { piRemote: { ...s.piRemote, [deviceId]: { ...s.piRemote[deviceId], ...patch } } };
 }
 
+/** How old a model list gets before it's asked for again (the old one stays on screen meanwhile). */
+export const MODELS_STALE = 10 * 60 * 1000;
+/** Paired devices whose Pi model list is being fetched right now. */
+const inflightDevices = new Set<string>();
+
 /** A paired device whose model list hasn't arrived yet. */
 const PENDING_PI: Detection = { plan: "pi", status: "checking", models: [] };
+const PENDING_FX: Detection = { plan: "fx", status: "checking", models: [] };
+const PENDING_CODEX: Detection = { plan: "codex", status: "checking", models: [] };
+const PENDING_CURSOR: Detection = { plan: "cursor", status: "checking", models: [] };
+
+/** Runtimes that list their own permission modes. */
+export type PermissionRuntime = "codex" | "cursor";
+export const hasPermissionModes = (runtime: ThreadRuntime | undefined): runtime is PermissionRuntime => runtime === "codex" || runtime === "cursor";
+export type PermissionListing = PermissionModes & { status: "checking" | "valid" | "error"; error?: string };
+/** Codex resolves project config layers, so its listing is per folder; Cursor's is per device. */
+export const permissionKey = (runtime: PermissionRuntime, deviceId?: string, cwd?: string) => `${runtime}|${deviceId ?? ""}|${runtime === "codex" ? cwd ?? "" : ""}`;
+
+/** The permission mode a thread (or the draft) asks for; undefined = the runtime's configured default. */
+export function permissionOf(s: Pick<State, "chats" | "settings" | "draftPermission">, chatId?: string): string | undefined {
+  const chat = chatId ? s.chats.find((c) => c.id === chatId) : undefined;
+  const runtime = chat ? chat.runtime : s.settings.threadRuntime;
+  if (!hasPermissionModes(runtime)) return undefined;
+  if (!chat) return s.draftPermission;
+  return chat.permission ?? (runtime === "cursor" && chat.cursorAllowAllTools === true ? "force" : undefined);
+}
+
+/** The runtime a thread uses (or, with no thread, the one new threads start with). */
+export function runtimeOf(s: Pick<State, "chats" | "settings">, chatId?: string): ThreadRuntime {
+  const chat = chatId ? s.chats.find((c) => c.id === chatId) : undefined;
+  return chat ? (chat.runtime ?? "pi") : (s.settings.threadRuntime ?? "pi");
+}
 
 /**
  * The paired device a thread's next turn runs on: the one its workspace lives on, or (before its
@@ -107,9 +137,14 @@ export const composerDevice = (s: Pick<State, "activeChatId" | "chats" | "settin
  * in yet reads as "checking" rather than borrowing this server's models, which it may not share.
  */
 export function deviceDetection(
-  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels">>,
+  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels" | "fxModels" | "codexModels" | "cursorModels">>,
   deviceId?: string,
+  runtime?: ThreadRuntime,
 ): Partial<Record<PlanId, Detection>> {
+  // fx threads use the models fx lists on that device, and only those.
+  if (runtime === "fx") return { fx: s.fxModels?.[deviceId ?? ""] ?? PENDING_FX };
+  if (runtime === "codex") return { codex: s.codexModels?.[deviceId ?? ""] ?? PENDING_CODEX };
+  if (runtime === "cursor") return { cursor: s.cursorModels?.[deviceId ?? ""] ?? PENDING_CURSOR };
   if (!deviceId) return s.detection;
   return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
 }
@@ -122,6 +157,13 @@ interface State {
   chats: Chat[];
   chatsLoaded: boolean;
   activeChatId?: string;
+  /** Permission mode for the unsent draft only; never a global permission default. Undefined = the runtime's default. */
+  draftPermission?: string;
+  /** Pick a permission mode for a thread (or the draft). Ignored for runtimes without permission modes. */
+  setPermission: (id: string | undefined, chatId?: string) => void;
+  /** Permission modes each native runtime reports, by `permissionKey`. Not persisted. */
+  permissionModes: Record<string, PermissionListing>;
+  loadPermissionModes: (runtime: PermissionRuntime, deviceId?: string, cwd?: string, fresh?: boolean) => Promise<void>;
   /** A model picked in a chat without sending yet. Otherwise a chat uses the model of its last reply. Kept on this device only. */
   selections: Record<string, Selection>;
   /** Set when a chat is opened from a search result, so the matching message can be highlighted. */
@@ -150,10 +192,20 @@ interface State {
   piRemote: Record<string, PiCache>;
   /**
    * The models each paired device's Pi lists, by device id. This server's models live in
-   * `detection.pi`; a device's are fetched when the composer works there. Not persisted.
+   * `detection.pi`. Persisted, and warmed for every device at launch (`warmModels`), so switching
+   * device shows the last known list at once instead of waiting.
    */
   remoteModels: Record<string, Detection>;
+  /** The models fx lists, by device id ("" = this server). Persisted like `remoteModels`. */
+  fxModels: Record<string, Detection & { defaultModel?: string }>;
+  loadFxModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  codexModels: Record<string, Detection & { defaultModel?: string }>;
+  loadCodexModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  cursorModels: Record<string, Detection & { defaultModel?: string }>;
+  loadCursorModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   loadDeviceModels: (deviceId: string, fresh?: boolean) => Promise<void>;
+  /** Fetch, in the background, every model list (each runtime, each online device) that's missing or old. */
+  warmModels: () => void;
   loadPiStatus: (fresh?: boolean, deviceId?: string) => Promise<void>;
   loadPiResources: (deviceId?: string) => Promise<void>;
   loadPiProviders: (deviceId?: string) => Promise<void>;
@@ -185,6 +237,8 @@ interface State {
   /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
   setSelection: (selection: Selection) => void;
   setEffort: (effort: Effort, selection?: Selection) => void;
+  /** Pick a service tier for the selected model (undefined = standard). */
+  setSpeed: (speed: string | undefined, selection?: Selection) => void;
   newChat: () => void;
   selectChat: (id: string) => void;
   removeChat: (id: string) => void;
@@ -192,7 +246,7 @@ interface State {
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
   /** Update chat metadata (title, pinned, archived, workspace) without changing its recency. */
-  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread" | "workspace">>) => void;
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission">>) => void;
   setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }
@@ -204,6 +258,30 @@ export const useStore = create<State>()(
   persist(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,
+      draftPermission: undefined,
+      setPermission: (id, chatId) => {
+        if (chatId) {
+          const chat = get().chats.find((c) => c.id === chatId);
+          // Clearing the legacy Cursor flag too, so "default" really means default.
+          if (chat && hasPermissionModes(chat.runtime)) get().updateChat(chatId, { permission: id, cursorAllowAllTools: undefined });
+        } else {
+          set({ draftPermission: id });
+        }
+      },
+      permissionModes: {},
+      loadPermissionModes: async (runtime, deviceId, cwd, fresh = false) => {
+        const key = permissionKey(runtime, deviceId, cwd);
+        const prev = get().permissionModes[key];
+        if (prev?.status === "checking" && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ permissionModes: { ...s.permissionModes, [key]: { modes: prev?.modes ?? [], defaultMode: prev?.defaultMode, status: "checking", checkedAt: Date.now() } } }));
+        try {
+          const r = await permissionModes(runtime, deviceId, cwd, fresh);
+          if (!Array.isArray(r?.modes)) throw new Error("No permission modes listed");
+          set((s) => ({ permissionModes: { ...s.permissionModes, [key]: { modes: r.modes, defaultMode: r.defaultMode, status: "valid", checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ permissionModes: { ...s.permissionModes, [key]: { modes: s.permissionModes[key]?.modes ?? [], defaultMode: s.permissionModes[key]?.defaultMode, status: "error", error: (err as Error).message, checkedAt: Date.now() } } }));
+        }
+      },
       detection: {},
       searchStatus: {},
       chats: [],
@@ -222,9 +300,55 @@ export const useStore = create<State>()(
       piCache: {},
       piRemote: {},
       remoteModels: {},
+      cursorModels: {},
+      loadCursorModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().cursorModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ cursorModels: { ...s.cursorModels, [key]: { plan: "cursor", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await cursorModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Cursor didn't list any models");
+          set((s) => ({ cursorModels: { ...s.cursorModels, [key]: { plan: "cursor", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ cursorModels: { ...s.cursorModels, [key]: { plan: "cursor", status: "error", error: (err as Error).message, models: s.cursorModels[key]?.models ?? [], defaultModel: s.cursorModels[key]?.defaultModel, checkedAt: Date.now() } } }));
+        }
+      },
+      codexModels: {},
+      loadCodexModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().codexModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          // Model discovery must not wait for installation/auth status checks.
+          const r = await codexModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Codex didn't list any models");
+          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "error", error: (err as Error).message, models: s.codexModels[key]?.models ?? [], checkedAt: Date.now() } } }));
+        }
+      },
+      fxModels: {},
+      loadFxModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().fxModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ fxModels: { ...s.fxModels, [key]: { plan: "fx", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await fxModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("fx didn't list any models");
+          set((s) => ({ fxModels: { ...s.fxModels, [key]: { plan: "fx", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ fxModels: { ...s.fxModels, [key]: { plan: "fx", status: "error", error: (err as Error).message, models: s.fxModels[key]?.models ?? [], checkedAt: Date.now() } } }));
+        }
+      },
       loadDeviceModels: async (deviceId, fresh = false) => {
         // Keep the old list on screen while asking again: switching device shouldn't empty the picker.
         const prev = get().remoteModels[deviceId];
+        // Launch warm-up and the composer can ask at once; one request is enough.
+        if (prev?.status === "checking" && inflightDevices.has(deviceId)) return;
+        inflightDevices.add(deviceId);
         set((s) => ({ remoteModels: { ...s.remoteModels, [deviceId]: { plan: "pi", status: "checking", models: prev?.models ?? [], scope: prev?.scope, checkedAt: prev?.checkedAt } } }));
         try {
           const r = await piModels(fresh, deviceId);
@@ -237,6 +361,8 @@ export const useStore = create<State>()(
               [deviceId]: { plan: "pi", status: "error", error: (err as Error).message, models: s.remoteModels[deviceId]?.models ?? [], scope: s.remoteModels[deviceId]?.scope, checkedAt: Date.now() },
             },
           }));
+        } finally {
+          inflightDevices.delete(deviceId);
         }
       },
       loadPiStatus: async (fresh = false, deviceId) => {
@@ -276,6 +402,20 @@ export const useStore = create<State>()(
         const devices = [local, ...remote];
         setDeviceList(devices);
         set({ devices, devicesLoaded: true });
+        get().warmModels();
+      },
+      warmModels: () => {
+        const s = get();
+        const due = (d?: Detection) => !d || (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > MODELS_STALE);
+        for (const device of s.devices) {
+          if (!device.local && device.online === false) continue;
+          const id = device.local ? undefined : device.id;
+          const key = id ?? "";
+          if (id && due(s.remoteModels[id])) void s.loadDeviceModels(id, !!s.remoteModels[id]);
+          if (due(s.codexModels[key])) void s.loadCodexModels(id, !!s.codexModels[key]);
+          if (due(s.cursorModels[key])) void s.loadCursorModels(id, !!s.cursorModels[key]);
+          if (due(s.fxModels[key])) void s.loadFxModels(id, !!s.fxModels[key]);
+        }
       },
       loadProjects: async () => {
         if (!get().devicesLoaded) await get().loadDevices().catch(() => {});
@@ -443,6 +583,12 @@ export const useStore = create<State>()(
       setSelection: (selection) => {
         const id = get().activeChatId;
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
+        else if (["fx", "codex", "cursor"].includes(runtimeOf(get()))) {
+          const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor";
+          const key = composerDevice(get()) ?? "";
+          const nativeSelections = get().settings.nativeSelections;
+          get().updateSettings({ nativeSelections: { ...nativeSelections, [runtime]: { ...nativeSelections?.[runtime], [key]: isAuto(selection) ? undefined : selection } } });
+        }
         else get().updateSettings({ selection });
       },
       setEffort: (effort, selection = selectionFor(get())) => {
@@ -458,8 +604,22 @@ export const useStore = create<State>()(
           s.updateSettings({ modelEfforts: { ...s.settings.modelEfforts, [key]: effort } });
         }
       },
+      setSpeed: (speed, selection = selectionFor(get())) => {
+        if (!selection || isAuto(selection)) return;
+        const s = get();
+        const key = effortKey(selection);
+        const chat = s.chats.find((c) => c.id === s.activeChatId);
+        if (chat) {
+          const updated = { ...chat, speeds: { ...chat.speeds, [key]: speed ?? "" } };
+          set({ chats: s.chats.map((c) => c.id === chat.id ? updated : c) });
+          void saveChat(updated);
+        } else {
+          s.updateSettings({ modelSpeeds: { ...s.settings.modelSpeeds, [key]: speed ?? "" } });
+        }
+      },
       newChat: () => set((s) => ({
         activeChatId: undefined,
+        draftPermission: undefined,
         usageOpen: false,
         searchFocus: undefined,
         settings: s.settings.workspace.defaultMode === "last-used"
@@ -562,6 +722,11 @@ export const useStore = create<State>()(
         sections: s.sections,
         view: s.view,
         piCache: s.piCache,
+        // Model lists per device and runtime, so switching never waits on a first fetch.
+        remoteModels: s.remoteModels,
+        fxModels: s.fxModels,
+        codexModels: s.codexModels,
+        cursorModels: s.cursorModels,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
@@ -576,10 +741,22 @@ export const useStore = create<State>()(
         for (const [provider, statuses] of Object.entries(p.searchStatus ?? {})) {
           searchStatus[provider as SearchProviderId] = Object.fromEntries(Object.entries(statuses ?? {}).filter(([, v]) => v.status !== "checking"));
         }
+        // Same for the per-device lists: a fetch cut off by a reload is just an old list.
+        // One that never had models is dropped so it's simply asked again.
+        const settle = <T extends Detection>(lists: Record<string, T> | undefined): Record<string, T> =>
+          Object.fromEntries(
+            Object.entries(lists ?? {}).flatMap(([k, d]) =>
+              d.status !== "checking" ? [[k, d]] : d.models?.length ? [[k, { ...d, status: "valid", checkedAt: d.checkedAt ?? 0 }]] : [],
+            ),
+          );
         return {
           ...current,
           ...p,
           detection,
+          remoteModels: settle(p.remoteModels),
+          fxModels: settle(p.fxModels),
+          codexModels: settle(p.codexModels),
+          cursorModels: settle(p.cursorModels),
           searchStatus,
           piCache: { ...current.piCache, ...p.piCache },
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
@@ -602,6 +779,11 @@ export const useStore = create<State>()(
 
 export function composerEffort(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): Effort {
   return effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), selectionFor(s));
+}
+
+/** The composer's speed for the selected model, before checking what the model offers. */
+export function composerSpeed(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): string | undefined {
+  return speedFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), selectionFor(s));
 }
 
 const AUTO: Selection = { auto: true };
@@ -643,11 +825,13 @@ function deviceDefault(detection: Partial<Record<PlanId, Detection>>): ModelRef 
  * Returns stored objects only, so it's safe as a store selector.
  */
 export function selectionFor(
-  s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection"> & Partial<Pick<State, "projects" | "remoteModels">>,
+  s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection"> & Partial<Pick<State, "projects" | "remoteModels" | "fxModels" | "codexModels" | "cursorModels">>,
 ): Selection | undefined {
   const id = s.activeChatId;
   // A thread working on a paired device can only use that device's models.
   const deviceId = composerDevice(s);
+  const runtime = runtimeOf(s, id);
+  if (runtime === "fx" || runtime === "codex" || runtime === "cursor") return nativeSelectionFor(s, id, deviceId, runtime);
   const detection = deviceDetection(s, deviceId);
   // Don't drop a chat's model while the device's list is still on its way.
   const pending = deviceId ? !s.remoteModels?.[deviceId] : false;
@@ -661,6 +845,32 @@ export function selectionFor(
   // The new-chat model may belong to this server only: on a paired device, point at one it does have.
   if (deviceId && !pending && fallback && !isAuto(fallback) && !findModel(detection, fallback)) return deviceDefault(detection) ?? fallback;
   return fallback;
+}
+
+const fxDefaults = new WeakMap<Detection, ModelRef | undefined>();
+/** Native threads: picked model, last reply, new-thread preference, then runtime default. */
+function nativeSelectionFor(
+  s: Pick<State, "chats" | "selections" | "settings"> & Partial<Pick<State, "fxModels" | "codexModels" | "cursorModels">>,
+  id: string | undefined,
+  deviceId: string | undefined,
+  plan: "fx" | "codex" | "cursor",
+): Selection | undefined {
+  const d = (plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
+  const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
+  if (id) {
+    const picked = s.selections[id];
+    const reply = s.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant" && m.model?.plan === plan)?.model;
+    if (known(picked)) return picked;
+    if (reply && known(reply)) return reply;
+  }
+  const preference = s.settings.nativeSelections?.[plan]?.[deviceId ?? ""] ?? (plan === "cursor" ? s.settings.cursorSelection : plan === "fx" ? s.settings.fxSelection : s.settings.codexSelection);
+  if (known(preference)) return preference;
+  if (!d?.models.length) return undefined;
+  if (!fxDefaults.has(d)) {
+    const def = d.models.find((m) => m.id === (d as { defaultModel?: string }).defaultModel) ?? d.models[0]!;
+    fxDefaults.set(d, { plan, id: def.id });
+  }
+  return fxDefaults.get(d);
 }
 
 /** Providers a listing left out once already: dropped for real if the next listing agrees. */
