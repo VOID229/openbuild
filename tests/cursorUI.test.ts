@@ -68,7 +68,8 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(html).toContain('aria-label="Thread runtime: Cursor"');
     expect(html).toContain("Native Cursor");
     expect(providerSvg("cursor")).toContain("M11.93 2");
-    expect(html).toContain("M11.93 2");
+    // Runtime marks use Cursor's current filled symbol; the provider catalog keeps its own asset.
+    expect(html).toContain("M11.503.131");
     expect(html).not.toContain("pi-mark");
     const chat: Chat = { id: "cursor-thread", title: "Cursor thread", runtime: "cursor", createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     reset({}, [chat]);

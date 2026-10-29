@@ -12,7 +12,7 @@ import { useStore } from "../lib/store";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, ProviderIcon, Spinner } from "./primitives";
+import { OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 /** Git state of a project (refetched when it changes or `refresh` ticks). */
@@ -339,9 +339,11 @@ const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands, extensi
 const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions, slash commands or steering. Runtime is fixed once a thread starts.";
 const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
 const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
-const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor" };
-function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
-  return runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <ProviderIcon provider="cursor" /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
+const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
+const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
+export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
+  return runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
 }
 
 /** Runtime is chosen before the first send, independently of the project's checkout. */
@@ -353,11 +355,13 @@ function RuntimeMenu() {
   const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
     { runtime: "pi", label: "Default", desc: "Tools and extensions" },
     { runtime: "durable", label: "Durable", desc: "Resumes after crashes" },
+    { runtime: "claude", label: "Claude Code", desc: "Anthropic's native coding agent" },
+    { runtime: "opencode", label: "OpenCode", desc: "OpenCode's native coding agent" },
     { runtime: "codex", label: "Codex", desc: "OpenAI's native coding agent" },
     { runtime: "cursor", label: "Cursor", desc: "Cursor's native coding agent" },
     { runtime: "fx", label: "fx", desc: "Vercel's coding agent" },
   ];
-  const tip = runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
+  const tip = runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
   return (
     <>
       <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${RUNTIME_LABEL[runtime]}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={tip} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
@@ -541,8 +545,8 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
   const branch = info?.branch ?? workspace?.branch;
   return (
     <div className="ws-bottom">
-      <span className="ws-chip" data-tooltip={runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
-        <LockKeyhole size={13} /> {runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "fx" ? "fx" : runtime === "codex" ? "Codex" : "Pi"}
+      <span className="ws-chip" data-tooltip={runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
+        <LockKeyhole size={13} /> {runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "fx" ? "fx" : runtime === "codex" ? "Codex" : "Pi"}
       </span>
       {workspace && (
         <span className="ws-where" title={workspace.cwd}>

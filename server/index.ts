@@ -75,13 +75,15 @@ function forbidden(req: Request): Response | undefined {
 const devicePathAllowed = (path: string) =>
   path === "/api/config" ||
   path === "/api/pair/self" ||
+  path === "/api/runtimes" ||
   /^\/api\/remote(\/|$)/.test(path) ||
   // Usage on this device, so the one it's paired to can show every machine's together.
   /^\/api\/usage(\/|$)/.test(path) ||
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
-  /^\/api\/(fx|codex|cursor)\/(status|models)(\/|$)/.test(path) ||
+  /^\/api\/(fx|codex|cursor|claude|opencode)\/(status|models)(\/|$)/.test(path) ||
+  /^\/api\/claude\/permissions(\/|$)/.test(path) ||
   /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path) ||
   // A terminal in a project's folder. It's a shell on this device, which Pi turns here already are.
   /^\/api\/terminals(\/|$)/.test(path) ||
@@ -416,7 +418,7 @@ function serve(port: number, hostname: string) {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
           if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
-          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.shell);
+          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.shell);
           const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
           const projected = projectChat(chat as unknown as Chat, snapshots, storage.getChat(chat.id) as Chat | undefined);
           const v = storage.putChat({ ...projected });

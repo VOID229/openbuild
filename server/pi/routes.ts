@@ -23,6 +23,9 @@ import * as durable from "../durable";
 import * as fxInstall from "../fx/install";
 import * as codexInstall from "../codex/install";
 import * as cursorInstall from "../cursor/install";
+import * as claudeInstall from "../claude/install";
+import * as opencodeInstall from "../opencode-agent/install";
+import { runtimes } from "../runtimes";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 
@@ -65,7 +68,7 @@ function isPiChat(b: any): b is PiChatRequest {
     isThreadId(b.threadId) &&
     (b.runtime === undefined || validRuntime(b.runtime)) &&
     (b.cursorAllowAllTools === undefined || (b.runtime === "cursor" && typeof b.cursorAllowAllTools === "boolean")) &&
-    (b.permission === undefined || ((b.runtime === "codex" || b.runtime === "cursor") && isPermissionId(b.permission))) &&
+    (b.permission === undefined || ((b.runtime === "codex" || b.runtime === "cursor" || b.runtime === "claude") && isPermissionId(b.permission))) &&
     str(b.cwd, 1024) &&
     str(b.model, 512) &&
     b.model.includes("/") &&
@@ -206,6 +209,10 @@ export function piRoutes(api: Api) {
         }
       }),
     },
+    // Which thread runtimes are installed on this device, for the new-thread runtime picker.
+    "/api/runtimes": {
+      GET: api(() => Response.json({ runtimes: runtimes() })),
+    },
     // ---------------------------------------------------------------- fx (Vercel's coding agent), installed on this device
     "/api/fx/status": {
       GET: api(async () => Response.json(await fxInstall.status())),
@@ -252,6 +259,42 @@ export function piRoutes(api: Api) {
         }
       }),
     },
+    // OpenCode 2's native server protocol, independent of the OpenCode API-key plans.
+    "/api/opencode/status": {
+      GET: api(async () => Response.json(await opencodeInstall.status())),
+    },
+    "/api/opencode/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await opencodeInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    // Native Claude Code (the installed CLI through the Agent SDK; independent of Pi's Anthropic provider).
+    "/api/claude/status": {
+      GET: api(async () => Response.json(await claudeInstall.status())),
+    },
+    "/api/claude/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await claudeInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    "/api/claude/permissions": {
+      GET: api(async (req) => {
+        const url = new URL(req.url), cwd = url.searchParams.get("cwd") ?? undefined;
+        try {
+          return Response.json(await claudeInstall.listPermissions(cwd && str(cwd, 1024) && projects.allowedCwd(cwd) ? cwd : undefined, url.searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
     "/api/cursor/status": {
       GET: api(async () => Response.json(await cursorInstall.status())),
     },
@@ -283,6 +326,8 @@ export function piRoutes(api: Api) {
           if (threadRuntime(req.params.id) === "durable") return bad("Steering isn't available in Durable threads yet.");
           if (threadRuntime(req.params.id) === "fx") return bad("Steering isn't available in fx threads yet.");
           if (threadRuntime(req.params.id) === "cursor") return bad("Steering isn't available in Cursor threads yet.");
+          if (threadRuntime(req.params.id) === "claude") return bad("Steering isn't available in Claude Code threads yet.");
+          if (threadRuntime(req.params.id) === "opencode") return bad("Steering isn't available in OpenCode threads yet.");
           return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
         } catch (err) {
           return fail(err, 409);
@@ -306,6 +351,8 @@ export function piRoutes(api: Api) {
         if (threadRuntime(threadId) === "fx") return bad("Shell commands aren't available in fx threads yet.");
         if (threadRuntime(threadId) === "codex") return bad("Shell commands aren't available in Codex threads yet.");
         if (threadRuntime(threadId) === "cursor") return bad("Shell commands aren't available in Cursor threads yet.");
+        if (threadRuntime(threadId) === "claude") return bad("Shell commands aren't available in Claude Code threads yet.");
+        if (threadRuntime(threadId) === "opencode") return bad("Shell commands aren't available in OpenCode threads yet.");
         try {
           claimRuntime(threadId, "pi");
         } catch (err) {
@@ -337,6 +384,8 @@ export function piRoutes(api: Api) {
           if (threadRuntime(req.params.id) === "fx") return bad("Manual compaction isn't available in fx threads yet.");
           if (threadRuntime(req.params.id) === "codex") return bad("Manual compaction isn't available in Codex threads yet.");
           if (threadRuntime(req.params.id) === "cursor") return bad("Manual compaction isn't available in Cursor threads yet.");
+          if (threadRuntime(req.params.id) === "claude") return bad("Manual compaction isn't available in Claude Code threads yet.");
+          if (threadRuntime(req.params.id) === "opencode") return bad("Manual compaction isn't available in OpenCode threads yet.");
           return Response.json(await compact(req.params.id, typeof body?.instructions === "string" ? body.instructions : undefined));
         } catch (err) {
           return fail(err);

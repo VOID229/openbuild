@@ -90,7 +90,7 @@ export interface Settings {
   /** Native Cursor preference, independent of Pi and other native runtimes. */
   cursorSelection?: ModelRef;
   /** Native model preferences by runtime and device (empty key = this server). */
-  nativeSelections?: Partial<Record<"fx" | "codex" | "cursor", Record<string, ModelRef>>>;
+  nativeSelections?: Partial<Record<"fx" | "codex" | "cursor" | "claude" | "opencode", Record<string, ModelRef>>>;
   /** Starred Pi models ("<provider>/<id>"), in order. */
   favorites: string[];
   /**
@@ -246,7 +246,7 @@ export interface Chat {
   runtime?: ThreadRuntime;
   /** Legacy (Cursor "Allow all tools"): read as permission "force". */
   cursorAllowAllTools?: boolean;
-  /** Codex/Cursor: the permission mode picked for this thread, from the runtime's own listing. Absent = its configured default. */
+  /** Codex/Cursor/Claude Code: the permission mode picked for this thread, from the runtime's own listing. Absent = its configured default. */
   permission?: string;
   /** Reasoning preferences keyed by model identity (including the auto router). */
   efforts?: Record<string, Effort>;

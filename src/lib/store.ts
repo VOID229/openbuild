@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type Device, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
-import { cursorModels, codexModels, fxModels, permissionModes, listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
+import { opencodeModels, claudeModels, cursorModels, codexModels, fxModels, permissionModes, listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
 import { qualifyProject, setDeviceList } from "./devices";
 import { config } from "./runtime";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
@@ -90,13 +90,15 @@ const PENDING_PI: Detection = { plan: "pi", status: "checking", models: [] };
 const PENDING_FX: Detection = { plan: "fx", status: "checking", models: [] };
 const PENDING_CODEX: Detection = { plan: "codex", status: "checking", models: [] };
 const PENDING_CURSOR: Detection = { plan: "cursor", status: "checking", models: [] };
+const PENDING_CLAUDE: Detection = { plan: "claude", status: "checking", models: [] };
+const PENDING_OPENCODE: Detection = { plan: "opencode", status: "checking", models: [] };
 
 /** Runtimes that list their own permission modes. */
-export type PermissionRuntime = "codex" | "cursor";
-export const hasPermissionModes = (runtime: ThreadRuntime | undefined): runtime is PermissionRuntime => runtime === "codex" || runtime === "cursor";
+export type PermissionRuntime = "codex" | "cursor" | "claude";
+export const hasPermissionModes = (runtime: ThreadRuntime | undefined): runtime is PermissionRuntime => runtime === "codex" || runtime === "cursor" || runtime === "claude";
 export type PermissionListing = PermissionModes & { status: "checking" | "valid" | "error"; error?: string };
-/** Codex resolves project config layers, so its listing is per folder; Cursor's is per device. */
-export const permissionKey = (runtime: PermissionRuntime, deviceId?: string, cwd?: string) => `${runtime}|${deviceId ?? ""}|${runtime === "codex" ? cwd ?? "" : ""}`;
+/** Codex and Claude Code resolve project config layers, so their listings are per folder; Cursor's is per device. */
+export const permissionKey = (runtime: PermissionRuntime, deviceId?: string, cwd?: string) => `${runtime}|${deviceId ?? ""}|${runtime !== "cursor" ? cwd ?? "" : ""}`;
 
 /** The permission mode a thread (or the draft) asks for; undefined = the runtime's configured default. */
 export function permissionOf(s: Pick<State, "chats" | "settings" | "draftPermission">, chatId?: string): string | undefined {
@@ -137,7 +139,7 @@ export const composerDevice = (s: Pick<State, "activeChatId" | "chats" | "settin
  * in yet reads as "checking" rather than borrowing this server's models, which it may not share.
  */
 export function deviceDetection(
-  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels" | "fxModels" | "codexModels" | "cursorModels">>,
+  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">>,
   deviceId?: string,
   runtime?: ThreadRuntime,
 ): Partial<Record<PlanId, Detection>> {
@@ -145,6 +147,8 @@ export function deviceDetection(
   if (runtime === "fx") return { fx: s.fxModels?.[deviceId ?? ""] ?? PENDING_FX };
   if (runtime === "codex") return { codex: s.codexModels?.[deviceId ?? ""] ?? PENDING_CODEX };
   if (runtime === "cursor") return { cursor: s.cursorModels?.[deviceId ?? ""] ?? PENDING_CURSOR };
+  if (runtime === "claude") return { claude: s.claudeModels?.[deviceId ?? ""] ?? PENDING_CLAUDE };
+  if (runtime === "opencode") return { opencode: s.opencodeModels?.[deviceId ?? ""] ?? PENDING_OPENCODE };
   if (!deviceId) return s.detection;
   return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
 }
@@ -203,6 +207,10 @@ interface State {
   loadCodexModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   cursorModels: Record<string, Detection & { defaultModel?: string }>;
   loadCursorModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  claudeModels: Record<string, Detection & { defaultModel?: string }>;
+  loadClaudeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  opencodeModels: Record<string, Detection & { defaultModel?: string }>;
+  loadOpencodeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   loadDeviceModels: (deviceId: string, fresh?: boolean) => Promise<void>;
   /** Fetch, in the background, every model list (each runtime, each online device) that's missing or old. */
   warmModels: () => void;
@@ -314,6 +322,34 @@ export const useStore = create<State>()(
           set((s) => ({ cursorModels: { ...s.cursorModels, [key]: { plan: "cursor", status: "error", error: (err as Error).message, models: s.cursorModels[key]?.models ?? [], defaultModel: s.cursorModels[key]?.defaultModel, checkedAt: Date.now() } } }));
         }
       },
+      opencodeModels: {},
+      loadOpencodeModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().opencodeModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ opencodeModels: { ...s.opencodeModels, [key]: { plan: "opencode", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await opencodeModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("OpenCode didn't list any models");
+          set((s) => ({ opencodeModels: { ...s.opencodeModels, [key]: { plan: "opencode", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ opencodeModels: { ...s.opencodeModels, [key]: { plan: "opencode", status: "error", error: (err as Error).message, models: s.opencodeModels[key]?.models ?? [], defaultModel: s.opencodeModels[key]?.defaultModel, checkedAt: Date.now() } } }));
+        }
+      },
+      claudeModels: {},
+      loadClaudeModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().claudeModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await claudeModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Claude Code didn't list any models");
+          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "error", error: (err as Error).message, models: s.claudeModels[key]?.models ?? [], defaultModel: s.claudeModels[key]?.defaultModel, checkedAt: Date.now() } } }));
+        }
+      },
       codexModels: {},
       loadCodexModels: async (deviceId, fresh = false) => {
         const key = deviceId ?? "";
@@ -414,6 +450,8 @@ export const useStore = create<State>()(
           if (id && due(s.remoteModels[id])) void s.loadDeviceModels(id, !!s.remoteModels[id]);
           if (due(s.codexModels[key])) void s.loadCodexModels(id, !!s.codexModels[key]);
           if (due(s.cursorModels[key])) void s.loadCursorModels(id, !!s.cursorModels[key]);
+          if (due(s.claudeModels[key])) void s.loadClaudeModels(id, !!s.claudeModels[key]);
+          if (due(s.opencodeModels[key])) void s.loadOpencodeModels(id, !!s.opencodeModels[key]);
           if (due(s.fxModels[key])) void s.loadFxModels(id, !!s.fxModels[key]);
         }
       },
@@ -583,8 +621,8 @@ export const useStore = create<State>()(
       setSelection: (selection) => {
         const id = get().activeChatId;
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
-        else if (["fx", "codex", "cursor"].includes(runtimeOf(get()))) {
-          const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor";
+        else if (["fx", "codex", "cursor", "claude", "opencode"].includes(runtimeOf(get()))) {
+          const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor" | "claude" | "opencode";
           const key = composerDevice(get()) ?? "";
           const nativeSelections = get().settings.nativeSelections;
           get().updateSettings({ nativeSelections: { ...nativeSelections, [runtime]: { ...nativeSelections?.[runtime], [key]: isAuto(selection) ? undefined : selection } } });
@@ -727,6 +765,8 @@ export const useStore = create<State>()(
         fxModels: s.fxModels,
         codexModels: s.codexModels,
         cursorModels: s.cursorModels,
+        claudeModels: s.claudeModels,
+        opencodeModels: s.opencodeModels,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
@@ -757,6 +797,8 @@ export const useStore = create<State>()(
           fxModels: settle(p.fxModels),
           codexModels: settle(p.codexModels),
           cursorModels: settle(p.cursorModels),
+          claudeModels: settle(p.claudeModels),
+          opencodeModels: settle(p.opencodeModels),
           searchStatus,
           piCache: { ...current.piCache, ...p.piCache },
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
@@ -825,13 +867,13 @@ function deviceDefault(detection: Partial<Record<PlanId, Detection>>): ModelRef 
  * Returns stored objects only, so it's safe as a store selector.
  */
 export function selectionFor(
-  s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection"> & Partial<Pick<State, "projects" | "remoteModels" | "fxModels" | "codexModels" | "cursorModels">>,
+  s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection"> & Partial<Pick<State, "projects" | "remoteModels" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">>,
 ): Selection | undefined {
   const id = s.activeChatId;
   // A thread working on a paired device can only use that device's models.
   const deviceId = composerDevice(s);
   const runtime = runtimeOf(s, id);
-  if (runtime === "fx" || runtime === "codex" || runtime === "cursor") return nativeSelectionFor(s, id, deviceId, runtime);
+  if (runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode") return nativeSelectionFor(s, id, deviceId, runtime);
   const detection = deviceDetection(s, deviceId);
   // Don't drop a chat's model while the device's list is still on its way.
   const pending = deviceId ? !s.remoteModels?.[deviceId] : false;
@@ -850,12 +892,12 @@ export function selectionFor(
 const fxDefaults = new WeakMap<Detection, ModelRef | undefined>();
 /** Native threads: picked model, last reply, new-thread preference, then runtime default. */
 function nativeSelectionFor(
-  s: Pick<State, "chats" | "selections" | "settings"> & Partial<Pick<State, "fxModels" | "codexModels" | "cursorModels">>,
+  s: Pick<State, "chats" | "selections" | "settings"> & Partial<Pick<State, "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">>,
   id: string | undefined,
   deviceId: string | undefined,
-  plan: "fx" | "codex" | "cursor",
+  plan: "fx" | "codex" | "cursor" | "claude" | "opencode",
 ): Selection | undefined {
-  const d = (plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
+  const d = (plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
   if (id) {
     const picked = s.selections[id];
@@ -863,7 +905,7 @@ function nativeSelectionFor(
     if (known(picked)) return picked;
     if (reply && known(reply)) return reply;
   }
-  const preference = s.settings.nativeSelections?.[plan]?.[deviceId ?? ""] ?? (plan === "cursor" ? s.settings.cursorSelection : plan === "fx" ? s.settings.fxSelection : s.settings.codexSelection);
+  const preference = s.settings.nativeSelections?.[plan]?.[deviceId ?? ""] ?? (plan === "cursor" ? s.settings.cursorSelection : plan === "fx" ? s.settings.fxSelection : plan === "codex" ? s.settings.codexSelection : undefined);
   if (known(preference)) return preference;
   if (!d?.models.length) return undefined;
   if (!fxDefaults.has(d)) {

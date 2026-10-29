@@ -300,7 +300,7 @@ function Typing() {
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const durable = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime === "durable");
-  const native = useStore((s) => { const runtime = s.chats.find((c) => c.id === chatId)?.runtime; return runtime === "fx" || runtime === "codex" || runtime === "cursor"; });
+  const native = useStore((s) => { const runtime = s.chats.find((c) => c.id === chatId)?.runtime; return runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "opencode"; });
   const hasWorkspace = useStore((s) => !!s.chats.find((c) => c.id === chatId)?.workspace);
   const canRetry = !durable || !hasWorkspace;
   const streaming = message.status === "streaming";

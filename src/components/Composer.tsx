@@ -556,7 +556,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       return true;
     }
     if (runtime !== "pi") {
-      setNotice(`${runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Durable"} does not support Pi's /compact command.`);
+      setNotice(`${runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Durable"} does not support Pi's /compact command.`);
       return true;
     }
     if (!chatId) return false;

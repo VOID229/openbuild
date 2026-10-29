@@ -9,7 +9,7 @@ import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
-import { Avatar, BrandIcon, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, ProviderIcon, Spinner } from "./primitives";
+import { Avatar, BrandIcon, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
@@ -248,8 +248,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
               @ {device}
             </span>
           )}
-          <span className="history-runtime" title={runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
-            {runtime === "cursor" ? <ProviderIcon provider="cursor" /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
+          <span className="history-runtime" title={runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+            {runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
       </button>
@@ -558,6 +558,8 @@ const RUNTIME_FILTERS = [
   ["fx", "fx"],
   ["codex", "Codex"],
   ["cursor", "Cursor"],
+  ["claude", "Claude Code"],
+  ["opencode", "OpenCode"],
 ] as const;
 
 function FilterMenu() {
@@ -701,12 +703,12 @@ function FilterMenu() {
           {row(
             "runtime",
             "Runtime",
-            view.runtime === "all" ? "All" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
+            view.runtime === "all" ? "All" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
             <>
               <div className="menu-label">Runtime</div>
               {RUNTIME_FILTERS.map(([value, label]) => (
                 <button key={value} type="button" role="menuitemradio" aria-checked={view.runtime === value} className="menu-item" onClick={() => setView({ runtime: value })}>
-                  {value === "cursor" ? <ProviderIcon provider="cursor" /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
+                  {value === "opencode" ? <OpencodeMark size={15} /> : value === "claude" ? <ClaudeMark size={15} /> : value === "cursor" ? <CursorMark size={15} /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
                   <span className="menu-item-label">{label}</span>
                   {view.runtime === value && <Check size={15} className="menu-check" />}
                 </button>
@@ -925,7 +927,7 @@ export function Sidebar() {
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."
-                      : `No ${view.runtime === "cursor" ? "Cursor" : view.runtime === "pi" ? "Pi" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
+                      : `No ${view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "pi" ? "Pi" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
                   </p>
                 )}
                 {archived.length > 0 && (

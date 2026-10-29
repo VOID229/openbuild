@@ -9,7 +9,7 @@ import type { PiWorkerRuntime, WorkerRun } from "./workerRuntime";
 export const workerSocket = (directory: string) => join("/tmp", `ob-pi-${process.getuid?.() ?? "user"}`, `${createHash("sha256").update(directory).digest("hex").slice(0, 20)}.sock`);
 const encoder = new TextEncoder();
 /** What this worker can run beyond the original protocol. A server needing more replaces an idle older worker. */
-export const WORKER_FEATURES = ["fx", "codex", "cursor", "idle-retire"];
+export const WORKER_FEATURES = ["fx", "codex", "cursor", "claude", "opencode", "idle-retire"];
 
 export function secureSocketPath(socket: string) {
   const parent = dirname(socket);

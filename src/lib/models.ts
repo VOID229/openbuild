@@ -110,6 +110,8 @@ export const providerName = (provider: string) =>
   providerOverride(provider)?.name ?? PROVIDER_NAMES[provider] ?? provider.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
 export function brandSvg(modelId: string): string {
+  // Native Claude Code ids are its aliases ("claude/opus", "claude/default"): all Claude models.
+  if (modelId.startsWith("claude/")) return claude;
   const id = bareId(modelId.toLowerCase());
   return BRANDS.find(([re]) => re.test(id))?.[1] ?? FALLBACK;
 }

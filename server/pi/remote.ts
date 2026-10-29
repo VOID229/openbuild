@@ -1,6 +1,6 @@
 /** Server-side client. Disconnects only stop watching; they NEVER abort ordinary Pi. */
 import { spawn } from "node:child_process";
-import { closeSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { readEvents } from "../../shared/replies";
 import { outputTail } from "../../shared/shell";
@@ -165,7 +165,7 @@ export class PiClient {
     }
   }
   async startRun(req: PiChatRequest): Promise<PiRun> {
-    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor") await this.ensureFeature(req.runtime);
+    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode") await this.ensureFeature(req.runtime);
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }
   /**
@@ -180,10 +180,14 @@ export class PiClient {
       throw Object.assign(new Error("Agent worker health is unavailable; retry shortly."), { status: 503 });
     }
     if (health.features?.includes(feature)) return;
-    if (!health.features?.includes("idle-retire")) throw Object.assign(new Error(`OpenBuild's existing agent worker cannot safely upgrade automatically. After its work finishes, use \`openbuild stop --all\` and start OpenBuild again to enable ${feature}.`), { status: 409, code: "busy" });
+    if (!health.features?.includes("idle-retire")) throw Object.assign(new Error(`OpenBuild's existing agent worker cannot safely upgrade automatically. After its work finishes, use \`openbuild stop --all\` and start OpenBuild again to enable ${feature}.`), { status: 409, code: "worker_upgrade" });
     // The worker must fence new admissions itself before retiring. Never signal it based
     // on a racy client-side idle check.
-    await this.json("/retire", {});
+    try { await this.json("/retire", {}); }
+    catch (error) {
+      if ((error as { code?: string }).code !== "busy") throw error;
+      throw Object.assign(new Error(`The existing agent worker must finish its other running threads before it can enable ${feature}. No prompt was sent. Try again once those threads finish.`), { status: 409, code: "worker_upgrade" });
+    }
     for (let i = 0; i < 100 && await this.health(); i++) await Bun.sleep(100);
     this.connected = undefined;
     await this.connect();
@@ -230,29 +234,52 @@ export class PiClient {
   /** Close watchers, not the worker or any Pi process. */
   async close() { this.closed = true; this.requests.abort(); }
 }
-const hot = globalThis as { openbuildPiClient?: PiClient };
+const hot = globalThis as { openbuildPiClient?: PiClient; openbuildOpencodeClient?: PiClient };
 const client = hot.openbuildPiClient ??= new PiClient();
-export const startRun = (req: PiChatRequest) => client.startRun(req);
-export const findRun = (id: string) => client.findRun(id);
-export const stopRun = (id: string) => client.stopRun(id);
-export const stopThread = (id: string) => client.stopThread(id);
-export const deleteThread = (id: string) => client.deleteThread(id);
+const opencodeDirectory = () => join(dataDir(), "opencode-worker");
+const opencodeClient = () => hot.openbuildOpencodeClient ??= new PiClient(opencodeDirectory());
+/** Never start another lane just to poll. Reconnect it only if it has existing journal metadata. */
+function existingClients(): PiClient[] {
+  if (hot.openbuildOpencodeClient || existsSync(join(opencodeDirectory(), "worker.json"))) return [client, opencodeClient()];
+  return [client];
+}
+export async function startRun(req: PiChatRequest) {
+  if (req.runtime !== "opencode") return client.startRun(req);
+  // OpenCode was previously admitted to the shared worker. Keep that thread there, including
+  // stable-id replays and pending turns; never migrate a native turn between running owners.
+  if (existsSync(join(client.directory, "worker.json")) && (await client.snapshots(req.threadId)).length) return client.startRun(req);
+  // A dedicated lane can load the new adapter even while an older shared worker is busy.
+  // Retiring/upgrading that worker would otherwise block new OpenCode threads indefinitely.
+  return opencodeClient().startRun(req);
+}
+export async function findRun(id: string) {
+  for (const c of existingClients()) { const run = await c.findRun(id); if (run) return run; }
+}
+export async function stopRun(id: string) {
+  for (const c of existingClients()) if (await c.stopRun(id)) return true;
+  return false;
+}
+export const stopThread = async (id: string) => { await Promise.all(existingClients().map(c => c.stopThread(id))); };
+export const deleteThread = async (id: string) => { await Promise.all(existingClients().map(c => c.deleteThread(id))); };
 export const startShell = (req: ShellRequest) => client.startShell(req);
 export const findShell = (id: string) => client.findShell(id);
 export const stopShell = (id: string) => client.stopShell(id);
-export const answer = (threadId: string, askId: string, reply: Parameters<PiClient["answer"]>[2]) => client.answer(threadId, askId, reply);
+export async function answer(threadId: string, askId: string, reply: Parameters<PiClient["answer"]>[2]) {
+  for (const c of existingClients()) if (await c.answer(threadId, askId, reply)) return true;
+  return false;
+}
 export const steer = (threadId: string, id: string, message: string, images?: PiChatRequest["images"]) => client.steer(threadId, id, message, images);
 export const compact = (threadId: string, instructions?: string) => client.compact(threadId, instructions);
-export const release = (threadId: string) => client.release(threadId);
+export const release = async (threadId: string) => { await Promise.all(existingClients().map(c => c.release(threadId))); };
 export const restartIdle = async () => {
   const { forgetModels, forgetCommands } = await import("./sessions");
   forgetModels(); forgetCommands();
   // Maintenance callers historically fire-and-forget this command.
-  await client.restartIdle().catch((error) => console.warn("[pi worker] Could not restart idle sessions:", error));
+  await Promise.all(existingClients().map(c => c.restartIdle().catch((error) => console.warn("[pi worker] Could not restart idle sessions:", error))));
 };
-export const isSessionLive = (id: string) => client.isSessionLive(id);
-export const ownsSession = (id: string) => client.ownsSession(id);
-export const refreshOwnership = () => client.refreshOwnership();
-export const recover = () => client.recover();
-export const listRuns = () => client.listRuns();
-export const snapshots = (threadId?: string) => client.snapshots(threadId);
+export const isSessionLive = (id: string) => existingClients().some(c => c.isSessionLive(id));
+export const ownsSession = (id: string) => existingClients().some(c => c.ownsSession(id));
+export const refreshOwnership = async () => { await Promise.all(existingClients().map(c => c.refreshOwnership())); };
+export const recover = async () => { await Promise.all(existingClients().map(c => c.recover())); };
+export const listRuns = async () => (await Promise.all(existingClients().map(c => c.listRuns()))).flat();
+export const snapshots = async (threadId?: string) => (await Promise.all(existingClients().map(c => c.snapshots(threadId)))).flat();

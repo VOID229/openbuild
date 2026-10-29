@@ -72,10 +72,14 @@ export const codexModels = (fresh = false, deviceId?: DeviceId) => get<{ models:
 /** Native Cursor models from the selected device's own installation and sign-in. */
 export const cursorModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/cursor/models${fresh ? "?fresh=1" : ""}`));
 
-/** The permission modes a native runtime reports on a device (Codex resolves the folder's project config). */
-export const permissionModes = (runtime: "codex" | "cursor", deviceId?: DeviceId, cwd?: string, fresh = false) => {
+/** Native Claude Code models from the device's installed CLI and its own sign-in. */
+export const claudeModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/claude/models${fresh ? "?fresh=1" : ""}`));
+export const opencodeModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/opencode/models${fresh ? "?fresh=1" : ""}`));
+
+/** The permission modes a native runtime reports on a device (Codex and Claude Code resolve the folder's project config). */
+export const permissionModes = (runtime: "codex" | "cursor" | "claude", deviceId?: DeviceId, cwd?: string, fresh = false) => {
   const q = new URLSearchParams();
-  if (cwd && runtime === "codex") q.set("cwd", cwd);
+  if (cwd && runtime !== "cursor") q.set("cwd", cwd);
   if (fresh) q.set("fresh", "1");
   return get<PermissionModes>(apiUrl(deviceId, `/api/${runtime}/permissions${q.size ? `?${q}` : ""}`));
 };

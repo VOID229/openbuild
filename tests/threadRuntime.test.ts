@@ -48,8 +48,23 @@ test("thread runtime is immutable, persistent, and legacy-safe", async () => {
       a.equal(threadRuntime('codex-discovered'), 'codex');
       storage.putChat({ id: 'codex-chat', updatedAt: 1, runtime: 'codex', messages: [{}] });
       a.equal(threadRuntime('codex-chat'), 'codex');
+      claimRuntime('claude-thread', 'claude');
+      a.equal(threadRuntime('claude-thread'), 'claude');
+      a.throws(() => claimRuntime('claude-thread', 'codex'), /cannot change/);
+      a.equal(runtimeChangeAllowed({ id: 'claude-thread', updatedAt: 1, runtime: 'claude' }), true);
+      storage.setValue('claude-session:claude-discovered', '{}');
+      a.equal(threadRuntime('claude-discovered'), 'claude');
+      claimRuntime('opencode-thread', 'opencode');
+      a.equal(threadRuntime('opencode-thread'), 'opencode');
+      a.throws(() => claimRuntime('opencode-thread', 'pi'), /cannot change/);
+      a.equal(runtimeChangeAllowed({ id: 'opencode-thread', updatedAt: 1, runtime: 'opencode' }), true);
+      a.equal(runtimeChangeAllowed({ id: 'opencode-thread', updatedAt: 1, runtime: 'claude' }), false);
+      storage.setValue('opencode-session:opencode-discovered', '{}');
+      a.equal(threadRuntime('opencode-discovered'), 'opencode');
+      storage.putChat({ id: 'opencode-chat', updatedAt: 1, runtime: 'opencode', messages: [{}] });
+      a.equal(threadRuntime('opencode-chat'), 'opencode');
     `);
-    await run(`a.equal(threadRuntime('cursor-thread'), 'cursor'); a.throws(() => claimRuntime('cursor-thread', 'codex')); a.equal(threadRuntime('new-thread'), 'durable'); a.throws(() => claimRuntime('new-thread', 'pi')); a.equal(threadRuntime('codex-thread'), 'codex'); a.throws(() => claimRuntime('codex-thread', 'fx'));`);
+    await run(`a.equal(threadRuntime('opencode-thread'), 'opencode'); a.throws(() => claimRuntime('opencode-thread', 'codex')); a.equal(threadRuntime('cursor-thread'), 'cursor'); a.throws(() => claimRuntime('cursor-thread', 'codex')); a.equal(threadRuntime('new-thread'), 'durable'); a.throws(() => claimRuntime('new-thread', 'pi')); a.equal(threadRuntime('codex-thread'), 'codex'); a.throws(() => claimRuntime('codex-thread', 'fx'));`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

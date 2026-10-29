@@ -10,7 +10,15 @@ import * as sessions from "./sessions";
 import * as fx from "../fx/sessions";
 import * as codex from "../codex/sessions";
 import * as cursor from "../cursor/sessions";
+import * as claude from "../claude/sessions";
+import * as opencode from "../opencode-agent/sessions";
 import * as shells from "./shell";
+
+/** Who runs a turn, as messages name it. */
+function agentName(runtime: PiChatRequest["runtime"], possessive = false) {
+  const name = runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : undefined;
+  return name ? (possessive ? `${name}'s agent` : name) : "Pi";
+}
 
 export interface PiRunRecord {
   id: string;
@@ -58,7 +66,7 @@ export class PiWorkerRuntime {
       const run = this.load(saved);
       run.push(saved.kind === "shell"
         ? { t: "exit", status: "error", error: "Pi worker was interrupted. The command was not rerun.", ms: Date.now() - saved.startedAt } as unknown as StreamEvent
-        : { t: "error", message: `${(saved.request as PiChatRequest).runtime === "cursor" ? "Cursor's agent" : (saved.request as PiChatRequest).runtime === "codex" ? "Codex's agent" : (saved.request as PiChatRequest).runtime === "fx" ? "fx's agent" : "Pi"} worker was interrupted. The reply was not rerun.` });
+        : { t: "error", message: `${agentName((saved.request as PiChatRequest).runtime, true)} worker was interrupted. The reply was not rerun.` });
       this.finish(run, "interrupted");
     }
   }
@@ -156,7 +164,7 @@ export class PiWorkerRuntime {
       return { run: existing, fresh: false };
     }
     if (kind === "run" && this.summaries().some((r) => r.threadId === threadId && r.kind === "run" && r.status === "pending")) {
-      throw Object.assign(new Error(`${(request as PiChatRequest).runtime === "cursor" ? "Cursor" : (request as PiChatRequest).runtime === "codex" ? "Codex" : (request as PiChatRequest).runtime === "fx" ? "fx" : "Pi"} is still working on this thread.`), { status: 409, code: "busy" });
+      throw Object.assign(new Error(`${agentName((request as PiChatRequest).runtime)} is still working on this thread.`), { status: 409, code: "busy" });
     }
     const record: PiRunRecord = { id, threadId, kind, request, status: "pending", startedAt: Date.now() };
     this.db.transaction(() => {
@@ -169,7 +177,7 @@ export class PiWorkerRuntime {
   }
   startRun(req: PiChatRequest): WorkerRun {
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);
-    if (fresh) void this.consume(run, req.runtime === "cursor" ? cursor.runTurn(req, run.signal) : req.runtime === "codex" ? codex.runTurn(req, run.signal) : req.runtime === "fx" ? fx.runTurn(req, run.signal) : sessions.runTurn(req, run.signal));
+    if (fresh) void this.consume(run, req.runtime === "opencode" ? opencode.runTurn(req, run.signal) : req.runtime === "claude" ? claude.runTurn(req, run.signal) : req.runtime === "cursor" ? cursor.runTurn(req, run.signal) : req.runtime === "codex" ? codex.runTurn(req, run.signal) : req.runtime === "fx" ? fx.runTurn(req, run.signal) : sessions.runTurn(req, run.signal));
     return run;
   }
   startShell(req: shells.ShellRequest): WorkerRun {
@@ -214,14 +222,14 @@ export class PiWorkerRuntime {
     this.db.query("INSERT OR IGNORE INTO deleted_threads VALUES (?)").run(threadId);
     this.stopThread(threadId);
   }
-  ownership() { return [...this.threads].filter((id) => sessions.isSessionLive(id) || fx.isSessionLive(id) || codex.isSessionLive(id) || cursor.isSessionLive(id)); }
+  ownership() { return [...this.threads].filter((id) => sessions.isSessionLive(id) || fx.isSessionLive(id) || codex.isSessionLive(id) || cursor.isSessionLive(id) || claude.isSessionLive(id) || opencode.isSessionLive(id)); }
   answer(threadId: string, askId: string, reply: Parameters<typeof sessions.answer>[2]) {
-    return codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
+    return opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
   steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
     return codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
   }
   compact = sessions.compact;
-  release(threadId: string) { this.stopThread(threadId); sessions.release(threadId); fx.release(threadId); codex.release(threadId); cursor.release(threadId); }
-  restartIdle() { sessions.restartIdle(); fx.restartIdle(); codex.restartIdle(); cursor.restartIdle(); }
+  release(threadId: string) { this.stopThread(threadId); sessions.release(threadId); fx.release(threadId); codex.release(threadId); cursor.release(threadId); claude.release(threadId); opencode.release(threadId); }
+  restartIdle() { sessions.restartIdle(); fx.restartIdle(); codex.restartIdle(); cursor.restartIdle(); claude.restartIdle(); opencode.restartIdle(); }
 }

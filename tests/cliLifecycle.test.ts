@@ -23,18 +23,19 @@ for (const managed of [false, true]) test(`stop preserves workers and stop --all
     };
     const server = child();
     const pi = child();
+    const opencode = child();
     const durable = child();
     const ps = join(temp, "ps");
     writeFileSync(ps, `#!/bin/sh
 case "$2" in
-  ${pi.pid}) echo '/bin/bun ${root}/server/pi/worker.ts';;
+  ${pi.pid}|${opencode.pid}) echo '/bin/bun ${root}/server/pi/worker.ts';;
   ${durable.pid}) echo '/bin/bun ${root}/server/durable/worker.ts';;
   *) echo '/bin/bun unrelated.ts';;
 esac
 `);
     chmodSync(ps, 0o755);
     writeFileSync(join(data, "server.json"), JSON.stringify({ pid: server.pid, mode: "local", port: 3100, urls: [] }));
-    for (const [folder, pid] of [["pi-worker", pi.pid], ["durable", durable.pid]] as const) {
+    for (const [folder, pid] of [["pi-worker", pi.pid], ["opencode-worker", opencode.pid], ["durable", durable.pid]] as const) {
       mkdirSync(join(data, folder));
       writeFileSync(join(data, folder, "worker.json"), JSON.stringify({ pid, protocol: 1 }));
     }
@@ -45,11 +46,13 @@ esac
     expect(cli("stop").exitCode).toBe(0);
     await server.exited;
     expect(alive(server.pid)).toBe(false);
+    expect(alive(opencode.pid)).toBe(true);
     expect(alive(pi.pid)).toBe(true);
     expect(alive(durable.pid)).toBe(true);
     expect(cli("stop").exitCode).toBe(0);
     expect(alive(pi.pid)).toBe(true);
     expect(alive(durable.pid)).toBe(true);
+    expect(alive(opencode.pid)).toBe(true);
     if (managed) {
       // After the CLI-owned server stops, exercise an installed (inactive) unit.
       // These actions are mocked; they must never reach a real user service.
@@ -60,12 +63,14 @@ fi
 exit 0
 `);
       expect(cli("stop").exitCode).toBe(0);
+      expect(alive(opencode.pid)).toBe(true);
       expect(alive(pi.pid)).toBe(true);
       expect(alive(durable.pid)).toBe(true);
     }
     expect(cli("stop", "--all").exitCode).toBe(0);
-    await Promise.all([pi.exited, durable.exited]);
+    await Promise.all([pi.exited, opencode.exited, durable.exited]);
     expect(alive(pi.pid)).toBe(false);
+    expect(alive(opencode.pid)).toBe(false);
     expect(alive(durable.pid)).toBe(false);
     expect(cli("stop", "--all").exitCode).toBe(0); // stale metadata is harmless
     const unrelated = child();

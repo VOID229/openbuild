@@ -2,8 +2,8 @@
 
 /** "pi": a model configured in the installed Pi (its provider/model id). "fx": a model fx (Vercel's
  * coding agent) can use, as "fx/<id>". Native Codex and Cursor models use "codex/<id>"
- * and "cursor/<id>" respectively. The rest are Opencode plans. */
-export type PlanId = "go" | "plus" | "black" | "zen" | "pi" | "fx" | "codex" | "cursor";
+ * and "cursor/<id>" respectively; native Claude Code models use "claude/<id>". The rest are Opencode plans. */
+export type PlanId = "go" | "plus" | "black" | "zen" | "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode";
 
 export type Protocol = "chat" | "responses" | "messages" | "gemini";
 
@@ -46,6 +46,8 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   fx: { id: "fx", label: "fx", chip: "fx", baseURL: "", prefix: "fx" },
   codex: { id: "codex", label: "Codex", chip: "Codex", baseURL: "", prefix: "codex" },
   cursor: { id: "cursor", label: "Cursor", chip: "Cursor", baseURL: "", prefix: "cursor" },
+  claude: { id: "claude", label: "Claude Code", chip: "Claude", baseURL: "", prefix: "claude" },
+  opencode: { id: "opencode", label: "OpenCode", chip: "OpenCode", baseURL: "", prefix: "opencode" },
 };
 
 /** Order of rows in Settings → API Keys (as drawn). */
@@ -407,7 +409,13 @@ export interface GitChanges {
 }
 
 /** Runtime chosen when a thread starts; absent on legacy threads means Pi. "fx" runs Vercel's fx agent. */
-export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor";
+export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor" | "claude" | "opencode";
+
+/** Whether a device has a runtime's program installed (GET /api/runtimes), and how to install it. */
+export interface RuntimeAvailability {
+  installed: boolean;
+  install: string;
+}
 
 /** A turn of a thread, run by Pi in the thread's workspace. */
 export interface PiChatRequest {
@@ -415,7 +423,7 @@ export interface PiChatRequest {
   runtime?: ThreadRuntime;
   /** Explicit per-turn Cursor Run Everything opt-in; absent/false preserves native policy. */
   cursorAllowAllTools?: boolean;
-  /** A mode from the runtime's own permission listing (Codex, Cursor); absent = the runtime's configured default. */
+  /** A mode from the runtime's own permission listing (Codex, Cursor, Claude Code); absent = the runtime's configured default. */
   permission?: string;
   cwd: string;
   /** "<provider>/<model id>" */

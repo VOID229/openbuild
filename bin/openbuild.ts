@@ -53,6 +53,7 @@ const KEEPER_LOG = join(DATA, "keeper.log");
 /** The process that runs Durable turns, so a server restart doesn't interrupt them (`server/durable/worker.ts`). */
 const DURABLE_WORKER = join(DATA, "durable", "worker.json");
 const PI_WORKER = join(DATA, "pi-worker", "worker.json");
+const OPENCODE_WORKER = join(DATA, "opencode-worker", "worker.json");
 let PORT = Number(process.env.PORT ?? 3100);
 
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
@@ -395,7 +396,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
 
 /** Only an explicit `stop --all` terminates detached runtimes. */
 function stopWorkers() {
-  for (const [file, script] of [[PI_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"]] as const) {
+  for (const [file, script] of [[PI_WORKER, "server/pi/worker.ts"], [OPENCODE_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"]] as const) {
     try {
       const { pid } = JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown };
       if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1 || pid === process.pid || !alive(pid)) continue;

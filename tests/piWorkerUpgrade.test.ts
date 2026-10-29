@@ -20,6 +20,13 @@ test("new runtimes never signal an older worker using a racy client-side idle ch
   try {
     await expect(client.startRun({ threadId: "upgrade-thread", runtime: "codex", cwd: directory, model: "codex/test", effort: "off", message: "hello", prior: 0, stream: { id: "reply-upgrade-0123456789abcdef" } })).rejects.toThrow("cannot safely upgrade automatically");
     await expect(client.startRun({ threadId: "upgrade-cursor-thread", runtime: "cursor", cwd: directory, model: "cursor/test", effort: "off", message: "hello", prior: 0, stream: { id: "reply-upgrade-cursor-0123456789abcdef" } })).rejects.toThrow("cannot safely upgrade automatically");
+    await expect(client.startRun({ threadId: "upgrade-opencode-thread", runtime: "opencode", cwd: directory, model: "opencode/test/model", effort: "off", message: "hello", prior: 0, stream: { id: "reply-upgrade-opencode-0123456789abcdef" } })).rejects.toThrow("cannot safely upgrade automatically");
+    try {
+      await client.startRun({ threadId: "upgrade-message-thread", runtime: "opencode", cwd: directory, model: "opencode/test/model", effort: "off", message: "hello", prior: 0, stream: { id: "reply-upgrade-message-0123456789abcdef" } });
+      throw new Error("Expected worker upgrade refusal");
+    } catch (error) {
+      expect((error as { code?: string }).code).toBe("worker_upgrade");
+    }
     expect(paths.every(path => path === "/health")).toBe(true);
   } finally {
     client.close();
