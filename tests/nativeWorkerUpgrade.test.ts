@@ -16,9 +16,10 @@ const request = (threadId, id, runtime = "cursor") => ({ threadId, runtime, cwd:
 const record = (req, status = "pending") => ({ id: req.stream.id, threadId: req.threadId, kind: "run", request: req, status, startedAt: 1 });
 const oldRequest = request("legacy-thread", "legacy-reply");
 const oldFinished = request("legacy-idle", "legacy-finished");
-const lanes = [], signals = [];
+const oldLive = request("legacy-live", "legacy-live-finished", "codex");
+const lanes = [], signals = [], released = [];
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => signals.push(signal));
-function lane(name, features, records = []) {
+function lane(name, features, records = [], idle = []) {
   const directory = join(data, name); mkdirSync(directory, { recursive: true });
   const socket = workerSocket(directory), paths = [], starts = [], answers = [];
   const state = { name, socket, paths, starts, answers, records };
@@ -30,17 +31,18 @@ function lane(name, features, records = []) {
     if (path === "/events") return new Response(JSON.stringify({ t: "text", v: name }) + "\n" + JSON.stringify({ t: "end" }) + "\n");
     if (path === "/snapshots") return Response.json(records.map(r => ({ ...r, events: [], eventCount: 0 })));
     if (path === "/records") return Response.json(records);
-    if (path === "/ownership") return Response.json({ live: records.filter(r => r.status === "pending").map(r => r.threadId), owned: records.map(r => r.threadId) });
+    if (path === "/ownership") return Response.json({ live: [...records.filter(r => r.status === "pending").map(r => r.threadId), ...idle], owned: records.map(r => r.threadId) });
     if (path === "/start") { starts.push(body); const r = record(body); records.push(r); return Response.json(r); }
     if (path === "/answer") { answers.push(body); return Response.json(records.some(r => r.threadId === body.threadId)); }
     if (path === "/stop") { const r = records.find(r => r.id === body.id); if (r) r.status = "aborted"; return Response.json({ found: !!r }); }
-    if (["/threads/stop", "/threads/delete", "/release", "/restartIdle", "/steer", "/compact"].includes(path)) return Response.json({ handled: true });
+    if (path === "/release") { released.push(body.threadId); idle.splice(0, idle.length, ...idle.filter(id => id !== body.threadId)); return Response.json({ ok: true }); }
+    if (["/threads/stop", "/threads/delete", "/restartIdle", "/steer", "/compact"].includes(path)) return Response.json({ handled: true });
     throw new Error("Unexpected " + name + path);
   }});
   writeFileSync(join(directory, "worker.json"), JSON.stringify({ pid: process.pid, socket, protocol: 1 }));
   lanes.push({ ...state, server }); return state;
 }
-const main = lane("pi-worker", ["cursor", "idle-retire"], [record(oldRequest), record(oldFinished, "finished"), record(request("OTHER-thread", "OTHER-reply", "pi"))]);
+const main = lane("pi-worker", ["cursor", "codex", "idle-retire"], [record(oldRequest), record(oldFinished, "finished"), record(oldLive, "finished"), record(request("OTHER-thread", "OTHER-reply", "pi"))], ["legacy-live"]);
 const historical = lane("agent-worker-0000000000000000", WORKER_FEATURES, [record(request("historical-thread", "historical-reply"))]);
 const opencode = lane("opencode-worker", ["opencode", "idle-retire"], [record(request("opencode-old", "opencode-old-reply", "opencode"), "finished")]);
 const current = lane(generation, WORKER_FEATURES);
@@ -55,20 +57,30 @@ try {
   assert.match(await new Response(replay.stream()).text(), /pi-worker/);
   await assert.rejects(remote.startRun({ ...oldRequest, message: "changed prompt" }), e => e.status === 409);
   await assert.rejects(remote.startRun(request("legacy-thread", "second-old")), e => e.code === "busy");
-  await assert.rejects(remote.startRun(request("legacy-idle", "second-idle")), e => e.code === "worker_upgrade");
+  // An idle thread on an outdated owner moves to the current lane instead of being stranded.
+  const moved = await remote.startRun({ ...request("legacy-idle", "second-idle"), stream: { id: "second-idle" } });
+  assert.match(await new Response(moved.stream()).text(), new RegExp(generation));
+  assert.deepEqual(released, []); // no live native process to close
+  await remote.startRun(request("legacy-idle", "third-idle")).then(() => assert.fail("pending turn must not be bypassed"), e => assert.equal(e.code, "busy"));
+  current.records.find(r => r.id === "second-idle").status = "finished";
+  await remote.startRun(request("legacy-idle", "third-idle")); // the latest run's lane now owns it
+  // A live idle native process is released before its session resumes elsewhere.
+  await remote.startRun(request("legacy-live", "legacy-live-next", "codex"));
+  assert.deepEqual(released, ["legacy-live"]);
   assert.equal(main.starts.length, 0);
+  assert.equal(current.starts.length, 3);
   // A new Cursor thread starts while OTHER-thread is pending in the incompatible main worker.
   const fresh = request("new-cursor", "new-cursor-reply");
   const simultaneous = await Promise.all([remote.startRun(fresh), remote.startRun(fresh)]);
   assert.equal(simultaneous[0].id, simultaneous[1].id);
-  assert.equal(current.starts.length, 1);
+  assert.equal(current.starts.length, 4);
   await assert.rejects(remote.startRun(request("new-cursor", "second-cursor")), e => e.code === "busy");
   for (const runtime of ["claude", "codex", "fx", "opencode"]) await remote.startRun(request("new-" + runtime, "new-" + runtime + "-reply", runtime));
-  assert.equal(current.starts.length, 5); // incompatible OpenCode gets generation fallback
+  assert.equal(current.starts.length, 8); // incompatible OpenCode gets generation fallback
   await assert.rejects(remote.startRun(request("new-codex", "second-codex", "codex")), e => e.code === "busy");
   const codexReplay = await remote.startRun(request("new-codex", "new-codex-reply", "codex"));
   assert.equal(codexReplay.id, "new-codex-reply");
-  assert.equal(current.starts.length, 5);
+  assert.equal(current.starts.length, 8);
   assert.equal(opencode.starts.length, 0);
   await remote.recover(); // HTTP reattachment rediscovers pending lane ownership/approvals
   assert.equal(remote.isSessionLive("new-cursor"), true);
@@ -76,8 +88,8 @@ try {
   assert.equal(current.answers.at(-1).reply.value, "approved");
   assert.equal((await remote.findRun(fresh.stream.id)).id, fresh.stream.id);
   assert.equal((await remote.findRun("historical-reply")).threadId, "historical-thread");
-  assert.equal((await remote.snapshots()).length, 10);
-  assert.equal((await remote.listRuns()).length, 10);
+  assert.equal((await remote.snapshots()).length, 14);
+  assert.equal((await remote.listRuns()).length, 14);
   await remote.steer("new-codex", "steer-1", "continue");
   assert.equal(current.paths.includes("/steer"), true);
   assert.equal(await remote.stopRun(fresh.stream.id), true);

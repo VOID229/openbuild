@@ -30,7 +30,7 @@ This is process isolation, **not automatic checkpoint recovery**. Killing the wo
 
 Use **`openbuild stop --all`** when you explicitly want to stop the detached worker and its agents too. Ordinary server restarts are intentionally different.
 
-New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes).
 
 ## Limits
 

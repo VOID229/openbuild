@@ -27,7 +27,7 @@ fx turns run in OpenBuild's detached agent worker (a compatible `pi-worker/` or 
 
 Like ordinary Pi, this is process isolation, not checkpoint recovery. If the worker or the machine dies mid-turn, the turn is marked interrupted and is not rerun. fx's session on disk keeps whatever fx committed.
 
-New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes).
 
 ## Limits
 

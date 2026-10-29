@@ -266,9 +266,23 @@ function existingClients(): PiClient[] {
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   return [client, ...(hot.openbuildOpencodeClient || existsSync(join(opencodeDirectory(), "worker.json")) ? [opencodeClient()] : []), ...agentClients.values()];
 }
-/** Journal ownership is permanent: never transfer an active OR idle native process to a new lane.
+/** A thread's agent runs across every lane, newest first: after a handoff, older lanes keep its history. */
+async function threadRuns(clients: PiClient[], threadId: string) {
+  const runs = (await Promise.all(clients.map(async (owner) => (await owner.snapshots(threadId)).filter(r => r.kind === "run").map(record => ({ owner, record }))))).flat();
+  return runs.sort((a, b) => b.record.startedAt - a.record.startedAt);
+}
+/** Close the idle owner's native process so two lanes never hold one native session. Release also
+ * stops the thread's pending work there; `!` shells live in the shared worker, so never cut one off. */
+async function handOff(owner: PiClient, threadId: string) {
+  await owner.refreshOwnership();
+  if (!owner.isSessionLive(threadId)) return;
+  if ((await owner.snapshots(threadId)).some(r => r.status === "pending")) throw Object.assign(new Error("A shell command is still running in this thread. No prompt was sent. Try again once it finishes."), { status: 409, code: "busy" });
+  await owner.release(threadId);
+}
+/** The lane holding a thread's latest run owns it. Never move a pending turn; an idle thread whose
+ * owner lacks a required feature is handed off: the owner releases its native process, then the
+ * compatible lane resumes the session from the shared mapping (codex-session:…, etc.).
  * The web server is the sole admission authority; serialize its selection + journal admission.
- * Old incompatible threads require an explicit stop --all upgrade (or a new thread).
  */
 export async function startRun(req: PiChatRequest) {
   if (!["cursor", "claude", "codex", "fx", "opencode"].includes(req.runtime ?? "")) return client.startRun(req);
@@ -285,17 +299,15 @@ export async function startRun(req: PiChatRequest) {
       if (JSON.stringify(run.record.request) !== JSON.stringify(req)) throw Object.assign(new Error("This run id already belongs to another request"), { status: 409 });
       return run;
     }
-    for (const c of clients) {
-      const records = (await c.snapshots(req.threadId)).filter(r => r.kind === "run");
-      if (!records.length) continue;
-      if (records.some(r => r.status === "pending")) throw Object.assign(new Error("The agent is still working on this thread."), { status: 409, code: "busy" });
-      if (!await c.supportsNative(req.runtime!)) throw Object.assign(new Error("This thread belongs to an older agent worker. No prompt was sent. Start a new thread, or after all work finishes use `openbuild stop --all` then start OpenBuild to upgrade its owner."), { status: 409, code: "worker_upgrade" });
-      return c.startRun(req);
-    }
+    const runs = await threadRuns(clients, req.threadId);
+    if (runs.some(({ record }) => record.status === "pending")) throw Object.assign(new Error("The agent is still working on this thread."), { status: 409, code: "busy" });
+    const owner = runs[0]?.owner;
+    if (owner && await owner.supportsNative(req.runtime!)) return owner.startRun(req);
     // Preserve the fresh OpenCode lane when compatible; never retire an incompatible one.
     const preferred = req.runtime === "opencode" ? opencodeClient() : client;
     const target = await preferred.supportsNative(req.runtime!) ? preferred : agentClient(generation);
     if (!await target.supportsNative(req.runtime!)) throw Object.assign(new Error("Agent feature lane is incompatible; no prompt was sent."), { status: 409, code: "worker_upgrade" });
+    if (owner) await handOff(owner, req.threadId);
     return target.startRun(req);
   });
   admissions.set(req.threadId, admission);
@@ -319,8 +331,7 @@ export async function answer(threadId: string, askId: string, reply: Parameters<
   return false;
 }
 async function threadOwner(threadId: string) {
-  for (const c of existingClients()) if ((await c.snapshots(threadId)).some(r => r.kind === "run")) return c;
-  return client;
+  return (await threadRuns(existingClients(), threadId))[0]?.owner ?? client;
 }
 export const steer = async (threadId: string, id: string, message: string, images?: PiChatRequest["images"]) => (await threadOwner(threadId)).steer(threadId, id, message, images);
 export const compact = async (threadId: string, instructions?: string) => (await threadOwner(threadId)).compact(threadId, instructions);

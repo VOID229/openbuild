@@ -51,7 +51,7 @@ Tools map to existing UI names (bash, read, edit/write, ls/find/grep, todo, web_
 
 Cursor runs in a **detached agent worker**, preferring the shared `pi-worker` when compatible and otherwise using a feature-versioned lane. No HTTP-owned process is introduced. Stable run IDs and the worker SQLite event journal make reconnect/duplicate admission replay existing output without resubmitting the prompt. `openbuild stop`/restart only disconnects watchers: the worker and Cursor continue, and tool effects can finish while the HTTP server is down. See [durable.md](durable.md) for ordinary worker versus Durable guarantees. Use `openbuild stop --all` only when you intend to interrupt workers.
 
-The worker advertises `cursor` and `runtime-questions`. New threads can use a feature-versioned worker without waiting for other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for legacy-owner upgrades and replay guarantees.
+The worker advertises `cursor` and `runtime-questions`. New threads can use a feature-versioned worker without waiting for other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for handoff and replay guarantees.
 
 Mappings use persistent OpenBuild storage keys `cursor-session:<threadId>` and retain native UUID, resolved workspace, UI turn count, in-flight reservation, and a conservative native history fingerprint. Native chats live under `<CURSOR_CONFIG_DIR or XDG_CONFIG_HOME/cursor or ~/.cursor>/chats/<md5(resolved cwd)>/<UUID>/store.db`.
 

@@ -59,7 +59,7 @@ Each thread keeps a warm Claude process between turns (closed after 20 idle minu
 
 This is process isolation, **not automatic replay**. Killing the worker, a power loss or a reboot interrupts the active turn, and OpenBuild doesn't rerun it, because a command or edit may already have happened. Use `openbuild stop --all` only when you mean to stop the worker and its agents too.
 
-New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes).
 
 ## Retry and edit
 
