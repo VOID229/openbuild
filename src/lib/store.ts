@@ -21,7 +21,6 @@ const DEFAULT_SETTINGS: Settings = {
   font: "fun",
   autoScroll: true,
   confirmDelete: true,
-  cmdEnter: false,
   notifications: { builds: true, piUpdates: true },
   autoRouter: false,
   avoid: [],
@@ -715,13 +714,12 @@ export const useStore = create<State>()(
       version: 4,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
-        // v1 shipped sample router chips and Cmd+Enter / auto router on; reset those to the new defaults.
+        // v1 shipped sample router chips and the auto router on; reset those to the new defaults.
         if (version < 2 && state.settings) {
           const s = state.settings;
           const isAuto = s.selection && "auto" in s.selection;
           state.settings = {
             ...s,
-            cmdEnter: false,
             autoRouter: false,
             avoid: s.avoid.filter((m) => !["deepseek-v4.1-flash", "gpt-6-luna"].includes(m.id)),
             prioritize: s.prioritize.filter((m) => !["qwen3.8-flash", "claude-opus-5-5"].includes(m.id)),
@@ -800,15 +798,19 @@ export const useStore = create<State>()(
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
           sections: { ...current.sections, ...p.sections },
           view: { ...DEFAULT_VIEW, ...p.view },
-          settings: {
-            ...DEFAULT_SETTINGS,
-            ...p.settings,
-            profile: { ...DEFAULT_SETTINGS.profile, ...p.settings?.profile },
-            naming: { ...DEFAULT_SETTINGS.naming, ...p.settings?.naming },
-            searchDigest: { ...DEFAULT_SETTINGS.searchDigest, ...p.settings?.searchDigest },
-            workspace: { ...DEFAULT_SETTINGS.workspace, ...p.settings?.workspace },
-            notifications: { ...DEFAULT_SETTINGS.notifications, ...p.settings?.notifications },
-          },
+          settings: (() => {
+            // Retired: Cmd+Enter now starts a thread in the background. Drop a saved toggle so it isn't written back.
+            const { cmdEnter: _retired, ...saved } = (p.settings ?? {}) as Settings & { cmdEnter?: boolean };
+            return {
+              ...DEFAULT_SETTINGS,
+              ...saved,
+              profile: { ...DEFAULT_SETTINGS.profile, ...saved.profile },
+              naming: { ...DEFAULT_SETTINGS.naming, ...saved.naming },
+              searchDigest: { ...DEFAULT_SETTINGS.searchDigest, ...saved.searchDigest },
+              workspace: { ...DEFAULT_SETTINGS.workspace, ...saved.workspace },
+              notifications: { ...DEFAULT_SETTINGS.notifications, ...saved.notifications },
+            };
+          })(),
         };
       },
     },

@@ -5,7 +5,7 @@
 import { readEvents, type ReplyStream } from "../../shared/replies";
 import { outputTail, shellCommand } from "../../shared/shell";
 import type { ShellEvent } from "../../shared/types";
-import { makeTitle, newWorkspace } from "./chat";
+import { makeTitle, newWorkspace, pinWorkspace } from "./chat";
 import { uid } from "./id";
 import { canResume, replyHost } from "./runtime";
 import { apiUrl, deviceServerId } from "./devices";
@@ -22,8 +22,11 @@ const PATIENCE = 10 * 60 * 1000;
 /** Commands this app is following, by message id. */
 const following = new Map<string, AbortController>();
 
-/** Run "!cmd" or "!!cmd" in `chatId` (default: the open chat, or a new one). Throws what went wrong before it started. */
-export async function runShell(text: string, chatId = useStore.getState().activeChatId): Promise<void> {
+/**
+ * Run "!cmd" or "!!cmd" in `chatId` (default: the open chat, or a new one). Throws what went wrong before it started.
+ * `background` leaves a new thread in the sidebar instead of opening it.
+ */
+export async function runShell(text: string, chatId = useStore.getState().activeChatId, background = false): Promise<void> {
   const parsed = shellCommand(text);
   if (!parsed) return;
   const st = useStore.getState();
@@ -50,8 +53,9 @@ export async function runShell(text: string, chatId = useStore.getState().active
   const chat: Chat = existing
     ? { ...existing, runtime, updatedAt: now, messages: [...existing.messages, message] }
     : { id: uid(), title: makeTitle(parsed.command, []), runtime, createdAt: now, updatedAt: now, messages: [message], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
+  if (!existing) pinWorkspace(chat.id);
   st.upsertChat(chat);
-  if (chatId === st.activeChatId) useStore.setState({ activeChatId: chat.id });
+  if (!background && chatId === st.activeChatId) useStore.setState({ activeChatId: chat.id });
   // A thread's first command sets up where it works, as its first message would.
   let workspace = chat.workspace;
   if (!workspace) {

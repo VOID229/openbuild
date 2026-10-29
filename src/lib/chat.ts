@@ -195,8 +195,11 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
   return sel && findModel(detection, sel) ? { ref: sel, routed: false } : undefined;
 }
 
-/** Send to `chatId` (default: the open chat, or a new one). Only the open chat is switched to. */
-export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId): boolean {
+/**
+ * Send to `chatId` (default: the open chat, or a new one). Only the open chat is switched to.
+ * `background` leaves the new thread in the sidebar and keeps the screen where it is.
+ */
+export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId, background = false): boolean {
   const st = useStore.getState();
   const resolved = resolveModel(text, attachments, chatId);
   const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
@@ -227,12 +230,13 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const chat: Chat = existing
     ? { ...existing, runtime: existing.runtime ?? "pi", updatedAt: now, messages: [...existing.messages, user, assistant] }
     : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", permission: permissionOf(st), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
+  if (!existing) pinWorkspace(chat.id);
   st.upsertChat(chat);
   // Name the thread from its first prompt, without waiting for the reply.
   if (chat.messages.filter((m) => m.role === "user").length === 1) void autoName(chat.id);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
-  useStore.setState(chatId === st.activeChatId ? { activeChatId: chat.id, selections } : { selections });
+  useStore.setState(!background && chatId === st.activeChatId ? { activeChatId: chat.id, selections } : { selections });
   void generate(chat.id, assistant.id);
   return true;
 }
@@ -312,10 +316,21 @@ export function drainQueue(chatId: string) {
 
 class WorkspaceError extends Error {}
 
+/**
+ * Workspace choice captured when a thread is created. Cmd+Enter then opens a fresh empty thread,
+ * which resets those settings, and the new thread's folder is chosen before that reset.
+ */
+const startedWorkspace = new Map<string, Settings["workspace"]>();
+
+export function pinWorkspace(chatId: string) {
+  startedWorkspace.set(chatId, { ...useStore.getState().settings.workspace });
+}
+
 /** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
 export async function newWorkspace(chat: Chat): Promise<Workspace> {
-  const { settings, projects } = useStore.getState();
-  const pref = settings.workspace;
+  const { projects } = useStore.getState();
+  const pref = startedWorkspace.get(chat.id) ?? useStore.getState().settings.workspace;
+  startedWorkspace.delete(chat.id);
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
   try {
     if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId });
@@ -384,7 +399,10 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const chat = st.chats.find((c) => c.id === chatId);
   const index = chat?.messages.findIndex((m) => m.id === messageId) ?? -1;
   const msg = chat?.messages[index];
-  if (!chat || !msg?.model || (resume && !msg.stream)) return;
+  if (!chat || !msg?.model || (resume && !msg.stream)) {
+    startedWorkspace.delete(chatId);
+    return;
+  }
 
   // Where the reply runs; saved on the message right away so a reload can find it. A thread whose
   // workspace is on a paired device runs there, through this server's device proxy.
@@ -397,6 +415,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
   if (!resume && (!model || (!pi && !keys?.length))) {
     const on = plannedDevice ? ` on ${deviceName(plannedDevice) ?? "that device"}` : "";
     const error = plan === "opencode" ? `OpenCode${on} can't use this model anymore. Pick another one, or check OpenCode's providers (run \`opencode\` there).` : plan === "claude" ? `Claude Code${on} can't use this model anymore. Pick another one, or check Claude Code's sign-in (run \`claude\` there).` : plan === "cursor" ? `Cursor${on} can't use this model anymore. Pick another one, or check Cursor's sign-in (\`agent login\`).` : plan === "codex" ? `Codex${on} can't use this model anymore. Pick another one, or check Codex's sign-in (\`codex login\`).` : plan === "fx" ? `fx${on} can't use this model anymore. Pick another one, or check fx's sign-in (\`fx login\`).` : pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
+    startedWorkspace.delete(chatId);
     st.patchMessage(chatId, messageId, { status: "error", error }, true);
     return;
   }
@@ -461,7 +480,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         stream.deviceId = workspace.deviceId;
         useStore.getState().patchMessage(chatId, messageId, { stream }, true);
       }
-    }
+    } else startedWorkspace.delete(chatId);
     // Durable admission is keyed by the reply's stream id, so posting the same request again picks up
     // its turn (or starts it, if the server restarted before admitting it). Pi replies are reattached.
     const repost = resume && chat.runtime === "durable" && !!workspace && !!model;

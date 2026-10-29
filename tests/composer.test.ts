@@ -18,7 +18,8 @@ await idb.set("draftfile:kept", { id: "kept", name: "k.png", mime: "image/png", 
 await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 6 * 60_000 }, saved);
 await idb.set("draftfile:orphan", { id: "orphan", name: "o.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
 
-const { selectionFor, deviceDetection } = await import("../src/lib/store");
+const { selectionFor, deviceDetection, useStore } = await import("../src/lib/store");
+const { sendMessage } = await import("../src/lib/chat");
 // A fresh copy of the module, as a page load would have (other test files may have loaded it already).
 const { draftsReady, getDraft, saveDraft } = await import("../src/lib/drafts?reload" as string);
 import type { Chat, Detection, Settings } from "../src/lib/types";
@@ -161,5 +162,52 @@ describe("drafts", () => {
     await Bun.sleep(500);
     expect(await idb.get("draft:c1", saved)).toBeUndefined();
     expect(await idb.get("draftfile:i", saved)).toBeUndefined();
+  });
+});
+
+describe("background send", () => {
+  const model = { id: "pi/test", name: "Test", protocol: "openai", input: ["text"], reasoning: { efforts: [], mode: "none", toggle: false } };
+
+  test("Cmd+Enter starts the thread without opening it, and the folder is the one chosen before the fresh thread", async () => {
+    const bodies: unknown[] = [];
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes("/api/workspaces")) bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return new Response(JSON.stringify({ error: "stop" }), { status: 500, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    const previous = useStore.getState();
+    try {
+      useStore.setState({
+        activeChatId: undefined,
+        chats: [],
+        projects: [{ id: "p", name: "App", path: "/tmp/app", git: true }],
+        detection: { pi: { plan: "pi", status: "valid", models: [model as any] } },
+        settings: {
+          ...previous.settings,
+          naming: { enabled: false, models: [] },
+          selection: { plan: "pi", id: model.id },
+          threadRuntime: "pi",
+          workspace: { mode: "local", projectId: "p", branch: "feature", defaultMode: "worktree" },
+        },
+      });
+      expect(sendMessage("hello", [], undefined, true)).toBe(true);
+      const started = useStore.getState().chats[0];
+      expect(started?.messages[0]?.content).toBe("hello");
+      expect(useStore.getState().activeChatId).toBeUndefined();
+      useStore.getState().newChat();
+      expect(useStore.getState().activeChatId).toBeUndefined();
+      expect(useStore.getState().settings.workspace.mode).toBe("worktree");
+      expect(useStore.getState().settings.workspace.branch).toBeUndefined();
+      await Bun.sleep(30);
+      expect(bodies[0]).toMatchObject({ mode: "local", projectId: "p", branch: "feature" });
+      expect(useStore.getState().chats).toHaveLength(1);
+
+      useStore.setState({ activeChatId: undefined, chats: [] });
+      expect(sendMessage("stay", [])).toBe(true);
+      expect(useStore.getState().activeChatId).toBe(useStore.getState().chats[0]?.id);
+    } finally {
+      globalThis.fetch = original;
+      useStore.setState({ settings: previous.settings, chats: previous.chats, activeChatId: previous.activeChatId, projects: previous.projects, detection: previous.detection });
+    }
   });
 });

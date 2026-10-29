@@ -175,17 +175,6 @@ function GeneralSection() {
         </div>
         <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm Before Deleting Threads" />
       </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Require Cmd+Enter To Submit</div>
-          <p className="setting-desc">
-            When enabled, press Cmd+Enter (or Ctrl+Enter) to submit.
-            <br />
-            Enter will add a new line.
-          </p>
-        </div>
-        <Toggle checked={s.cmdEnter} onChange={(v) => update({ cmdEnter: v })} label="Require Cmd+Enter To Submit" />
-      </div>
       <DictationSettings />
       <TextGeneration />
     </>

@@ -331,7 +331,6 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const [dragging, setDragging] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
   const steering = useSteeringOf(chatId);
   const replyPlan = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan);
@@ -623,18 +622,28 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   }, [queue]);
 
-  /** Send the composer's text, or `line` instead of it (a command picked from the "/" menu). */
-  const submit = (line = text.trim()) => {
+  /**
+   * Send the composer's text, or `line` instead of it (a command picked from the "/" menu).
+   * `background` sends, then opens a new empty thread, so the one just started only shows in the sidebar.
+   */
+  const submit = (line = text.trim(), background = false) => {
     if (editing) return finishEdit(true);
     if (!line && !files.length) return;
     dictation.cancel();
+    const leave = () => {
+      if (background) useStore.getState().newChat();
+    };
     if (line.startsWith("!")) {
       // Runs right away, even while a reply is coming in: it doesn't queue behind it or interrupt it.
       if (!shellCommand(line)) return;
       if (files.length) return setNotice("A command can't take attachments. Remove them to run it.");
-      void runShell(line, chatId).catch((err: Error) => setNotice(err.message));
+      const before = useStore.getState().chats.reduce((n, c) => n + c.messages.length, 0);
+      const pending = runShell(line, chatId, background);
       saveDraft(draftKey, "", []);
       setText("");
+      // A command that failed to start throws before adding a message; stay put so the notice is visible.
+      if (useStore.getState().chats.reduce((n, c) => n + c.messages.length, 0) > before) leave();
+      void pending.catch((err: Error) => setNotice(err.message));
       return;
     }
     if (!files.length && runBuiltin(line)) {
@@ -647,11 +656,13 @@ export function Composer({ variant, chatId, streaming }: Props) {
       saveDraft(draftKey, "", []);
       setText("");
       setFiles([]);
-    } else if (sendMessage(line, files)) {
-      // Sending from the new-chat screen unmounts this composer before its save effect could run.
+      leave();
+    } else if (sendMessage(line, files, chatId, background)) {
+      // Opening the thread unmounts this composer before its save effect could run.
       saveDraft(draftKey, "", []);
       setText("");
       setFiles([]);
+      leave();
     }
   };
 
@@ -692,7 +703,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
         e.preventDefault();
         // A queued message being edited only gets the command written in.
         if (editing) pickCommand(slashMatches[slashIndex]!);
-        else submit(`/${slashMatches[slashIndex]!.name}`);
+        else submit(`/${slashMatches[slashIndex]!.name}`, e.metaKey || e.ctrlKey);
         return;
       }
       if (e.key === "Escape") {
@@ -705,12 +716,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
       e.preventDefault();
       return finishEdit(false);
     }
-    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
-    const mod = e.metaKey || e.ctrlKey;
-    if (cmdEnter ? mod : !e.shiftKey && !mod) {
-      e.preventDefault();
-      submit();
-    }
+    if (e.key !== "Enter" || e.nativeEvent.isComposing || e.shiftKey) return;
+    e.preventDefault();
+    // Cmd/Ctrl+Enter sends and leaves a new empty thread. Enter sends and opens the thread.
+    submit(undefined, e.metaKey || e.ctrlKey);
   };
 
   const onPaste = (e: React.ClipboardEvent) => {
@@ -721,7 +730,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   };
 
-  const hint = cmdEnter ? `${isMac ? "⌘" : "Ctrl"}+Enter to send` : "Enter to send · Shift+Enter for a new line";
+  const modLabel = isMac ? "⌘" : "Ctrl";
+  const hint = chatId
+    ? `Enter to send · Shift+Enter for a new line · ${modLabel}+Enter to send and leave`
+    : `Enter to send · ${modLabel}+Enter to start in the sidebar`;
   // Mentioned files live in the text ("@path"), so they don't need a second chip above it.
   const chipFiles = files.filter((f) => !f.mention);
 
