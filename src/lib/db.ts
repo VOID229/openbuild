@@ -185,8 +185,19 @@ const settle = (chat: Chat): Chat => ({
   messages: chat.messages.map((m) => (m.status === "streaming" && !canResume(m.stream?.via) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m)),
 });
 
+let loading: Promise<Chat[]> | undefined;
+let initialLoad = true;
+
+/** Share in-flight reads, including preload and Main's retry after the preload deadline. */
+export function loadChats(): Promise<Chat[]> {
+  return loading ??= readChats().then((chats) => {
+    initialLoad = false;
+    return chats;
+  }).finally(() => { loading = undefined; });
+}
+
 /** Load every chat from the server. Throws when it can't be reached (the caller retries). */
-export async function loadChats(): Promise<Chat[]> {
+async function readChats(): Promise<Chat[]> {
   if ((await config).mode === "hosted") {
     // Ask the browser not to clear this site's storage under storage pressure.
     void navigator.storage?.persist?.().catch(() => {});
@@ -194,7 +205,7 @@ export async function loadChats(): Promise<Chat[]> {
   }
   await flush();
   await importLegacy();
-  const [res] = await Promise.all([fetch("/api/chats?index"), readCache()]);
+  const [res] = await Promise.all([fetch(initialLoad ? "/api/chats?index&startup" : "/api/chats?index"), readCache()]);
   if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
   const body = (await res.json()) as { index?: { id: string; v: string }[]; chats?: Chat[] };
   let chats: Map<string, Chat>;

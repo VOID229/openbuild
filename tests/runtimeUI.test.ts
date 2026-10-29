@@ -29,7 +29,8 @@ g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: str
 const { useStore } = await import("../src/lib/store");
 const { WorkspaceTop, WorkspaceBelow } = await import("../src/components/Workspace");
 const { Sidebar } = await import("../src/components/Sidebar");
-const { sendMessage, regenerate } = await import("../src/lib/chat");
+const { sendMessage, regenerate, answerQuestion } = await import("../src/lib/chat");
+const { AskCard } = await import("../src/components/ToolCalls");
 const initialSettings = useStore.getState().settings;
 const thread = (runtime?: Chat["runtime"]): Chat => ({ id: "runtime-test", title: "Test", createdAt: 0, updatedAt: 0, messages: [], runtime });
 
@@ -53,13 +54,21 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
   expect(html).not.toContain("Local checkout");
   reset({ threadRuntime: "durable" });
   expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
+  reset({ threadRuntime: "codex" });
+  const codex = markup(createElement(WorkspaceTop));
+  expect(codex).toContain('aria-label="Thread runtime: Codex"');
+  expect(codex).toContain("Native Codex");
+  reset({ threadRuntime: "cursor" });
+  const cursor = markup(createElement(WorkspaceTop));
+  expect(cursor).toContain('aria-label="Thread runtime: Cursor"');
+  expect(cursor).toContain("Native Cursor");
 });
 
 test("existing threads have a locked runtime label even before workspace preparation", () => {
-  for (const runtime of [undefined, "pi", "durable"] as const) {
+  for (const runtime of [undefined, "pi", "durable", "fx", "codex", "cursor"] as const) {
     reset({ threadRuntime: "durable" }, [thread(runtime)]);
     const html = markup(createElement(WorkspaceBelow, { chatId: "runtime-test", streaming: false }));
-    expect(html).toContain(runtime === "durable" ? "Durable" : "Pi");
+    expect(html).toContain(runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Pi");
     expect(html).not.toContain('aria-haspopup="listbox"');
     expect(html).toContain("Runtime");
   }
@@ -99,6 +108,32 @@ test("Durable regeneration cannot clear an existing turn", () => {
   const before = JSON.stringify(chat);
   regenerate(chat.id, "a");
   expect(JSON.stringify(useStore.getState().chats[0])).toBe(before);
+});
+
+test("native approvals reach their runtime and sensitive answers are not stored in chat", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: { url: string; body: any }[] = [];
+  globalThis.fetch = (async (url: any, init: any) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return Response.json({ ok: true });
+  }) as typeof fetch;
+  try {
+    for (const runtime of ["codex", "fx", "cursor"] as const) {
+      const chat = thread(runtime);
+      const part = { type: "ask" as const, id: "native-question", method: "input" as const, title: "Credential", secret: true };
+      chat.messages = [{ id: "assistant", role: "assistant", content: "", createdAt: 0, parts: [part] }];
+      reset({}, [chat]);
+      const html = markup(createElement(AskCard, { part, chatId: chat.id, messageId: "assistant" }));
+      expect(html).toContain('type="password"');
+      expect(html).not.toContain("dictation-button");
+      await answerQuestion(chat.id, "assistant", part, { value: "test-secret-value" });
+      expect(JSON.stringify(useStore.getState().chats)).not.toContain("test-secret-value");
+      expect(JSON.stringify(useStore.getState().chats)).toContain("[redacted]");
+      expect(calls.at(-1)?.url).toContain(`/api/pi/threads/${chat.id}/answer`);
+      expect(calls.at(-1)?.body.value).toBe("test-secret-value");
+    }
+    expect(calls.length).toBe(3);
+  } finally { globalThis.fetch = originalFetch; reset(); }
 });
 
 test("runtime is captured before workspace failure and survives settings changes, retries and sends", async () => {

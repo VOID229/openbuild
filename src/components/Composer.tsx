@@ -1,7 +1,7 @@
 import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
-import { drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
+import { canSteer, drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
 import { useFieldDictation } from "../lib/useFieldDictation";
@@ -14,7 +14,7 @@ import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
-import { EffortPicker, ModelPicker } from "./Pickers";
+import { EffortPicker, ModelPicker, PermissionPicker, SpeedPicker } from "./Pickers";
 import { IconButton } from "./primitives";
 import { DictationButton } from "./DictationButton";
 import { WorkspaceBelow, WorkspaceTop } from "./Workspace";
@@ -98,7 +98,7 @@ function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete,
         <Pencil size={15} />
       </IconButton>
       {onSteer && (
-        <IconButton label="Steer" tooltip="Steer · Pi reads it after its current step" tooltipSide="top" className="queued-btn queued-steer" onClick={onSteer}>
+        <IconButton label="Steer" tooltip="Steer · the agent reads it after its current step" tooltipSide="top" className="queued-btn queued-steer" onClick={onSteer}>
           <CornerUpLeft size={15} />
         </IconButton>
       )}
@@ -135,12 +135,12 @@ function SteeringRow({ item }: { item: Queued }) {
 interface TrayProps {
   chatId: string;
   queue: Queued[];
-  /** Steered into the reply, waiting for Pi to read them. */
+  /** Steered into the reply, waiting for the agent to read them. */
   steering: Queued[];
   onEdit: (item: Queued) => void;
   onFinish: (save: boolean) => void;
-  /** A reply is coming in, so a message can interrupt it, or (Pi) steer it. */
-  live?: "pi" | "other";
+  /** A reply is coming in, so a message can interrupt it, or (Pi, Codex) steer it. */
+  live?: "steer" | "other";
   onError: (message: string) => void;
 }
 
@@ -195,7 +195,7 @@ function QueueTray({ chatId, queue, steering, onEdit, onFinish, live, onError }:
           onDelete={() => removeQueued(chatId, q.id)}
           onFinish={onFinish}
           onInterrupt={live ? () => interruptWith(chatId, q.id) : undefined}
-          onSteer={live === "pi" ? () => steerQueued(chatId, q.id).catch((err: Error) => onError(err.message)) : undefined}
+          onSteer={live === "steer" ? () => steerQueued(chatId, q.id).catch((err: Error) => onError(err.message)) : undefined}
         />
       ))}
     </div>
@@ -333,7 +333,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
   const steering = useSteeringOf(chatId);
-  const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan === "pi");
+  const replyPlan = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan);
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -548,8 +548,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
       useStore.getState().newChat();
       return true;
     }
-    if (runtime === "durable") {
-      setNotice("Durable does not support Pi's /compact command.");
+    if (runtime !== "pi") {
+      setNotice(`${runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Durable"} does not support Pi's /compact command.`);
       return true;
     }
     if (!chatId) return false;
@@ -721,7 +721,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
+      {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
@@ -811,6 +811,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
           />
           <ModelPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
           <EffortPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
+          <SpeedPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
+          <PermissionPicker dropUp={variant === "dock"} chatId={chatId} deviceId={mentionDevice} cwd={mentionCwd} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>

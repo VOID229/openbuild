@@ -6,18 +6,16 @@ import { join } from "node:path";
 import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageRange, UsageReport } from "../../shared/usage";
 import * as devices from "../devices";
 import { dataDir } from "../paths";
-
-/** Answers younger than this aren't asked for again. */
-const FRESH_MS = 60_000;
+import { RETRY_MS, shouldRefresh } from "./cache";
+import { requestUsage } from "./remoteRequest";
 /** How long a first answer is waited for before the page shows without it. */
 const WAIT_MS = 3500;
-/** A remote's first scan of a big archive can take a minute or more. */
-const REMOTE_TIMEOUT_MS = 180_000;
 
 interface Cached<T> {
   at: number;
   value?: T;
   error?: string;
+  retryAt?: number;
   running?: Promise<void>;
 }
 
@@ -48,26 +46,9 @@ function save(m: Map<string, Cached<unknown>>) {
 
 /** GET a paired device's API, trying each of its addresses. */
 async function ask<T>(device: devices.StoredDevice, path: string): Promise<T> {
-  let last = "it didn't answer";
-  for (const base of device.urls) {
-    try {
-      const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { headers: { authorization: `Bearer ${device.token}` }, signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS) });
-      if (res.status === 404 || res.status === 403) {
-        devices.touchDevice(device.id, true);
-        throw Object.assign(new Error("its OpenBuild doesn't report usage yet. Update it there."), { final: true });
-      }
-      if (!res.ok) {
-        last = `it answered HTTP ${res.status}`;
-        continue;
-      }
-      devices.touchDevice(device.id, true);
-      return (await res.json()) as T;
-    } catch (err) {
-      if ((err as { final?: boolean }).final) throw err;
-      last = (err as Error).name === "TimeoutError" ? "it didn't answer in time" : "it's unreachable";
-    }
-  }
-  throw new Error(last);
+  const value = await requestUsage<T>(device.urls, path, device.token);
+  devices.touchDevice(device.id, true);
+  return value;
 }
 
 /** A device's answer: cached, refreshed in the background when stale. */
@@ -75,18 +56,22 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
   const m = await store();
   const k = `${device.id}|${key}`;
   const c = (m.get(k) ?? m.set(k, { at: 0 }).get(k)!) as Cached<T>;
-  if (!c.running && (force || Date.now() - c.at > FRESH_MS || c.value === undefined)) {
-    c.running = ask<T>(device, path).then(
+  const incomplete = !!(c.value as UsageReport | undefined)?.pending?.length
+    || !!(c.value as UsageLimitsReport | undefined)?.machines?.some((m) => m.status === "pending");
+  if (!c.running && shouldRefresh(c, incomplete, force)) {
+    const url = force ? `${path}${path.includes("?") ? "&" : "?"}fresh=1` : path;
+    c.running = ask<T>(device, url).then(
       (value) => {
         c.value = value;
         c.at = Date.now();
         c.error = undefined;
+        c.retryAt = undefined;
         save(m);
       },
       (err: Error) => {
         c.error = err.message;
-        // Keep the last answer; try again on the next request rather than at once.
-        if (c.value === undefined) c.at = Date.now() - FRESH_MS + 15_000;
+        // Back off even with no answer (or a stale one); leave its real timestamp intact.
+        c.retryAt = Date.now() + RETRY_MS;
       },
     ).finally(() => (c.running = undefined));
   }
@@ -110,9 +95,9 @@ export async function machineReports(range: UsageRange, tz: string, force: boole
     const r = theirs[i]!;
     const machine: UsageMachine = { id: d.id, name: d.name, status: r.pending ? "pending" : r.error ? "error" : "ok", at: r.at || undefined, error: r.error };
     // A remote whose own scan is still finishing (its Cursor history) is still coming in.
-    if (r.value?.pending?.length) machine.status = "pending";
+    if (!r.error && r.value?.pending?.length) machine.status = "pending";
     machines.push(machine);
-    if (r.value) reports.push({ machine, report: r.value });
+    if (r.value) reports.push({ machine, report: r.error ? { ...r.value, pending: [] } : r.value });
   });
   return { machines, reports };
 }

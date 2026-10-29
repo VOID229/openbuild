@@ -2,15 +2,18 @@
 import type { ThreadRuntime } from "../shared/types";
 import * as storage from "./storage";
 
-export const validRuntime = (value: unknown): value is ThreadRuntime => value === "pi" || value === "durable";
+export const validRuntime = (value: unknown): value is ThreadRuntime => value === "pi" || value === "durable" || value === "fx" || value === "codex" || value === "cursor";
 const key = (id: string) => `thread-runtime:${id}`;
 
 export function threadRuntime(id: string): ThreadRuntime | undefined {
   const claimed = storage.getValue(key(id));
   if (validRuntime(claimed)) return claimed;
   if (storage.getValue(`pi-session:${id}`)) return "pi";
+  if (storage.getValue(`fx-session:${id}`)) return "fx";
+  if (storage.getValue(`codex-session:${id}`)) return "codex";
+  if (storage.getValue(`cursor-session:${id}`)) return "cursor";
   const chat = storage.getChat(id);
-  if (chat && Array.isArray(chat.messages) && chat.messages.length) return chat.runtime === "durable" ? "durable" : "pi";
+  if (chat && Array.isArray(chat.messages) && chat.messages.length) return validRuntime(chat.runtime) ? chat.runtime : "pi";
   return undefined;
 }
 

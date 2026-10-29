@@ -333,7 +333,7 @@ export function WorkRun({
 }
 
 /** A question card's answer box, with a mic for dictating into it. */
-function AskField({ value, setValue, placeholder, multiline, autoFocus }: { value: string; setValue: React.Dispatch<React.SetStateAction<string>>; placeholder?: string; multiline?: boolean; autoFocus?: boolean }) {
+function AskField({ value, setValue, placeholder, multiline, autoFocus, secret }: { value: string; setValue: React.Dispatch<React.SetStateAction<string>>; placeholder?: string; multiline?: boolean; autoFocus?: boolean; secret?: boolean }) {
   const field = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
   const [error, setError] = useState<string>();
   useEffect(() => {
@@ -342,11 +342,11 @@ function AskField({ value, setValue, placeholder, multiline, autoFocus }: { valu
     return () => clearTimeout(t);
   }, [error]);
   const dictation = useFieldDictation({ value, setValue, field, onError: setError });
-  const props = { ref: field, ...dictation.fieldProps, className: cx("input ask-input", multiline && "textarea"), value, placeholder, autoFocus, onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => setValue(e.target.value) };
+  const props = { ref: field, ...(secret ? {} : dictation.fieldProps), className: cx("input ask-input", multiline && !secret && "textarea"), value, placeholder, autoFocus, onChange: (e: React.ChangeEvent<HTMLInputElement & HTMLTextAreaElement>) => setValue(e.target.value) };
   return (
     <div className={cx("ask-field", multiline && "ask-field-multiline")}>
-      {multiline ? <textarea rows={5} {...props} /> : <input {...props} />}
-      <DictationButton dictation={dictation} />
+      {multiline && !secret ? <textarea rows={5} {...props} /> : <input {...props} type={secret ? "password" : "text"} autoComplete={secret ? "off" : undefined} />}
+      {!secret && <DictationButton dictation={dictation} />}
       {error && <p className="ask-field-error" role="status">{error}</p>}
     </div>
   );
@@ -395,7 +395,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
               if (value.trim()) reply({ value: value.trim() });
             }}
           >
-            <AskField value={value} setValue={setValue} placeholder={part.options?.length ? "Other…" : "Your answer"} />
+            <AskField value={value} setValue={setValue} placeholder={part.options?.length ? "Other…" : "Your answer"} secret={part.secret} />
             <button type="submit" className="btn btn-sm btn-primary" disabled={!value.trim()}>
               Send
             </button>
@@ -423,7 +423,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
             reply({ value });
           }}
         >
-          <AskField value={value} setValue={setValue} placeholder={part.placeholder} multiline={part.method === "editor"} autoFocus={part.method !== "editor"} />
+          <AskField value={value} setValue={setValue} placeholder={part.placeholder} multiline={part.method === "editor"} autoFocus={part.method !== "editor"} secret={part.secret} />
           <div className="ask-actions">
             <button type="submit" className="btn btn-sm btn-primary">
               Send

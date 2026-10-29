@@ -97,10 +97,9 @@ const ICON_CACHE_KEY = "openbuild:plugin-icons";
 let stagedProviderIcons = new Map<string, string>();
 let stagedBrandIcons = new Map<string, string>();
 /**
- * Whether plugin initialization has settled and built-in fallbacks are safe to draw. Cached overrides
- * can be used immediately, but a cache may be incomplete or stale, so it never enables fallbacks.
- * While it's false, BrandIcon/ProviderIcon draw nothing rather than a mark a plugin may replace —
- * a missing icon for a few frames reads far better than DeepSeek's mark turning into OpenRouter's.
+ * A committed icon snapshot (including an empty one) is enough to paint the entire sidebar.
+ * Keep that snapshot while plugins refresh, then swap the registry atomically. Only a cold load
+ * without a usable snapshot waits, avoiding a built-in mark flashing before a plugin override.
  */
 let iconsReady = false;
 const applied = new Map<string, Applied>();
@@ -376,6 +375,9 @@ function hydrateIcons() {
     if (!isRecord(saved) || !isRecord(saved.providers) || !isRecord(saved.brands)) return;
     for (const [provider, svg] of Object.entries(saved.providers)) if (isSvg(svg)) providerIcons.set(provider.toLowerCase(), svg);
     for (const [prefix, svg] of Object.entries(saved.brands)) if (isSvg(svg)) brandIcons.set(prefix.toLowerCase(), svg);
+    // commitIcons writes the full registry, not just overrides for icons previously rendered.
+    // Missing entries therefore use built-ins immediately, without waiting on plugin imports.
+    iconsReady = true;
   } catch {
     // A corrupt cache means the same as none: wait for the plugins rather than guess.
   }
@@ -453,7 +455,7 @@ export function initPlugins() {
 
 // ------------------------------------------------------------------ icon overrides
 
-/** Whether initialization settled (loaded or failed), so built-in fallbacks may be drawn. */
+/** Whether a cached snapshot or settled initialization permits built-in fallbacks. */
 export function pluginIconsReady(): boolean {
   return iconsReady;
 }

@@ -58,6 +58,8 @@ export interface Settings {
   effort: Effort;
   /** Per-model reasoning defaults on the new-thread screen. */
   modelEfforts?: Record<string, Effort>;
+  /** Per-model speed (service tier id, "" = standard) on the new-thread screen. */
+  modelSpeeds?: Record<string, string>;
   /** Web search: let models call the configured search providers. */
   webSearch: boolean;
   /** Saved key ids per search provider in priority order (SearXNG: instance URLs, which aren't secret). */
@@ -81,6 +83,14 @@ export interface Settings {
   terminal?: TerminalPosition;
   /** Runtime for new threads; older settings default to Pi. */
   threadRuntime?: ThreadRuntime;
+  /** The model new fx threads use ("fx/<id>"); none = fx's own default. */
+  fxSelection?: ModelRef;
+  /** Native Codex model (codex/<id>), separate from Pi's openai-codex provider. */
+  codexSelection?: ModelRef;
+  /** Native Cursor preference, independent of Pi and other native runtimes. */
+  cursorSelection?: ModelRef;
+  /** Native model preferences by runtime and device (empty key = this server). */
+  nativeSelections?: Partial<Record<"fx" | "codex" | "cursor", Record<string, ModelRef>>>;
   /** Starred Pi models ("<provider>/<id>"), in order. */
   favorites: string[];
   /**
@@ -158,6 +168,8 @@ export interface AskPart {
   prefill?: string;
   /** A select that also takes the user's own words (question_ask's "Other"). */
   other?: boolean;
+  /** Sensitive native input: mask entry and never persist the answer. */
+  secret?: boolean;
   /** Answered (the answer, or "" for cancelled / timed out); missing while waiting. */
   answer?: string;
 }
@@ -207,7 +219,7 @@ export interface Message {
   reasoning?: string;
   attachments?: Attachment[];
   /** Assistant only */
-  model?: ModelRef & { name: string; /** The reasoning level picked for that answer. */ effort?: Effort };
+  model?: ModelRef & { name: string; /** The reasoning level picked for that answer. */ effort?: Effort; /** The service tier it ran at (absent = standard). */ speed?: string };
   routed?: boolean;
   status?: "streaming" | "done" | "error" | "stopped";
   error?: string;
@@ -232,8 +244,14 @@ export interface Message {
 export interface Chat {
   /** Fixed when the thread starts. Missing on legacy threads means Pi. */
   runtime?: ThreadRuntime;
+  /** Legacy (Cursor "Allow all tools"): read as permission "force". */
+  cursorAllowAllTools?: boolean;
+  /** Codex/Cursor: the permission mode picked for this thread, from the runtime's own listing. Absent = its configured default. */
+  permission?: string;
   /** Reasoning preferences keyed by model identity (including the auto router). */
   efforts?: Record<string, Effort>;
+  /** Speed (service tier id, "" = standard) keyed like `efforts`. */
+  speeds?: Record<string, string>;
   id: string;
   title: string;
   createdAt: number;

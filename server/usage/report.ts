@@ -6,6 +6,7 @@ import type { Price } from "../../shared/types";
 import { modelKey, priceBook, referencePrice, type PriceBook } from "../pi/pricing";
 import { cursorPriceModel, type Rec } from "./formats";
 import { generation, pendingSources, scan, scanProblems } from "./scan";
+import { REPORT_FRESH_MS } from "./cache";
 
 const HOUR = 3_600_000;
 const DAYS: Record<UsageRange, number> = { "24h": 1, "7d": 7, "30d": 30, "90d": 90 };
@@ -78,8 +79,24 @@ function pricer(book: PriceBook | undefined) {
 
 const reports = new Map<string, { version: number; book: PriceBook | undefined; at: number; value: UsageReport }>();
 
-export async function report(range: UsageRange, tz: string, force = false): Promise<UsageReport> {
+const running = new Map<string, Promise<UsageReport>>();
+
+export function report(range: UsageRange, tz: string, force = false): Promise<UsageReport> {
   const zone = validZone(tz) ? tz : "UTC";
+  const key = `${range}|${zone}`;
+  const active = running.get(key);
+  if (active) return active;
+  const hit = reports.get(key);
+  // Polling and machine switching shouldn't wait for filesystem or model-catalog work.
+  // A background source's new records invalidate this shortcut immediately.
+  if (!force && hit && hit.version === generation() && Date.now() - hit.at < REPORT_FRESH_MS)
+    return Promise.resolve({ ...hit.value, pending: [...pendingSources()] });
+  const task = refreshReport(range, zone, force).finally(() => running.delete(key));
+  running.set(key, task);
+  return task;
+}
+
+async function refreshReport(range: UsageRange, zone: string, force: boolean): Promise<UsageReport> {
   const [entries, book] = await Promise.all([scan(force), priceBook().catch((err) => void console.warn("[usage] model prices unavailable:", (err as Error).message))]);
   const version = generation();
   const key = `${range}|${zone}`;

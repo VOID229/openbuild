@@ -300,6 +300,7 @@ function Typing() {
 
 function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
   const durable = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime === "durable");
+  const native = useStore((s) => { const runtime = s.chats.find((c) => c.id === chatId)?.runtime; return runtime === "fx" || runtime === "codex" || runtime === "cursor"; });
   const hasWorkspace = useStore((s) => !!s.chats.find((c) => c.id === chatId)?.workspace);
   const canRetry = !durable || !hasWorkspace;
   const streaming = message.status === "streaming";
@@ -342,7 +343,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
           )}
           {message.content && <CopyButton text={message.content} />}
           <PluginSlot name="message:actions" context={{ message, chatId }} />
-          {isLast && !durable && message.status !== "error" && (
+          {isLast && !durable && !native && message.status !== "error" && (
             <IconButton label="Regenerate" tooltipSide="top" className="msg-action" onClick={() => regenerate(chatId, message.id)}>
               <RotateCcw size={15} />
             </IconButton>

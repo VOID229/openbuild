@@ -5,15 +5,17 @@
 // The app's thread can diverge from Pi's history (a retry, an edited resend, a legacy fork). Each
 // turn says how many user messages come before it; when Pi's session has more, it's forked back to
 // that point first (Pi's `fork`), and the thread follows the new session file from then on.
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { dataDir } from "../paths";
 import { CommandCache } from "../../shared/commandCache";
 import { partialTitle } from "../../shared/htmlRender";
 import { TOOL as HTML_TOOL } from "./extensions/html-render";
 import { TOOL as QUESTION_TOOL } from "./extensions/question-ask";
+import { FLAG as SPEED_FLAG } from "./extensions/speed";
 import { PiError, PiProcess, type PiRecord } from "./rpc";
 import { addUsage, emptyUsage } from "./usage";
 
@@ -22,8 +24,8 @@ const IDLE = 20 * 60 * 1000;
 /** Tool output kept per call (head and tail), and the diff of a file change. */
 const OUTPUT_MAX = 12_000;
 const PATCH_MAX = 60_000;
-/** OpenBuild's own extensions, loaded into every thread: question_ask, and html_render with html_preview. */
-const EXTENSIONS = ["question-ask.ts", "html-render.ts"].map((e) => join(import.meta.dir, "extensions", e));
+/** OpenBuild's own extensions, loaded into every thread: question_ask, html_render with html_preview, and speed (service tiers). */
+const EXTENSIONS = ["question-ask.ts", "html-render.ts", "speed.ts"].map((e) => join(import.meta.dir, "extensions", e));
 
 interface Live {
   threadId: string;
@@ -100,6 +102,14 @@ function clip(text: string, max: number) {
 const textOf = (result: any): string =>
   Array.isArray(result?.content) ? result.content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n") : typeof result === "string" ? result : "";
 
+/** Where a thread's speed choice is kept for its Pi process (extensions/speed.ts reads it per request). */
+const speedFile = (threadId: string) => join(dataDir(), "pi-speed", `${threadId}.json`);
+function saveSpeed(threadId: string, model: string, speed: string | undefined) {
+  const file = speedFile(threadId);
+  mkdirSync(join(file, ".."), { recursive: true });
+  writeFileSync(file, JSON.stringify({ model, speed: speed ?? null }));
+}
+
 /** The thread's Pi process, started (or restarted in another directory) as needed. */
 function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
   const existing = live.get(threadId);
@@ -117,7 +127,7 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
       : from && existsSync(from.file)
         ? ["--fork", from.file]
         : ["--session-id", threadId];
-  const proc = new PiProcess([...args, ...EXTENSIONS.flatMap((e) => ["-e", e])], cwd);
+  const proc = new PiProcess([...args, ...EXTENSIONS.flatMap((e) => ["-e", e]), `--${SPEED_FLAG}`, speedFile(threadId)], cwd);
   const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), asks: new Map(), questions: new Map(), shells: 0, ready: Promise.resolve() };
   // Extension questions can come at any time, also before a run (e.g. while starting up).
   proc.on((r) => {
@@ -421,6 +431,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         const { levels } = await proc.send<{ levels: string[] }>({ type: "get_available_thinking_levels" });
         const level = nearestLevel(levels, req.effort);
         if (level) await proc.send({ type: "set_thinking_level", level });
+        saveSpeed(req.threadId, req.model, req.speed);
 
         if (signal.aborted) return finish();
         const res = await proc.send<{ disposition?: string }>({ type: "prompt", message: req.message, images: req.images?.length ? req.images.map((i) => ({ type: "image", ...i })) : undefined }, 5 * 60_000);

@@ -10,8 +10,8 @@ import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { deviceName, deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
-import { deviceDetection, selectionFor, threadDevice, useStore } from "./store";
-import { effortFor } from "./effort";
+import { deviceDetection, hasPermissionModes, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
+import { effortFor, speedFor, supportedSpeed } from "./effort";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
 export { uid };
@@ -125,8 +125,11 @@ export function interruptWith(chatId: string, id: string) {
   stopGeneration(chatId);
 }
 
+/** Runtimes that can take a message into a running reply (Pi's steer, Codex's turn/steer). */
+export const canSteer = (runtime: string | undefined) => runtime === "pi" || runtime === "codex";
+
 /**
- * Hand a queued message to Pi's running reply; Pi reads it once its current step is done. If the
+ * Hand a queued message to the agent's running reply; Pi reads it once its current step is done. If the
  * reply ends before Pi gets to it, it goes back to the front of the queue.
  */
 export async function steerQueued(chatId: string, id: string) {
@@ -135,8 +138,9 @@ export async function steerQueued(chatId: string, id: string) {
   const st = useStore.getState();
   const chat = st.chats.find((c) => c.id === chatId);
   const msg = chat?.messages.find((m) => m.id === run?.messageId);
-  if (!run || !item || msg?.model?.plan !== "pi" || chat?.runtime === "durable") return;
-  const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(deviceDetection(st, threadDevice(st, chatId)), msg.model)?.input ?? ["text"]);
+  const runtime = chat?.runtime ?? "pi";
+  if (!run || !item || !canSteer(runtime) || msg?.model?.plan !== runtime) return;
+  const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), msg.model)?.input ?? ["text"]);
   removeQueued(chatId, id);
   setSteers(chatId, run, [...run.steers, item]);
   try {
@@ -182,7 +186,7 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
   const st = useStore.getState();
   const { settings } = st;
   // A thread on a paired device can only use the models that device's Pi lists.
-  const detection = deviceDetection(st, threadDevice(st, chatId));
+  const detection = deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId));
   const sel = selectionFor({ ...st, activeChatId: chatId });
   if (isAuto(sel)) {
     const ref = routePrompt(text, attachments.some((a) => a.text == null), detection, settings);
@@ -195,9 +199,10 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
 export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId): boolean {
   const st = useStore.getState();
   const resolved = resolveModel(text, attachments, chatId);
-  const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId)), resolved.ref);
+  const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
   if (!resolved || !model) {
-    st.openSettings("keys");
+    // fx models come from fx's own sign-in on the device; the model picker says what's missing.
+    if (!["fx", "codex", "cursor"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
     return false;
   }
   const now = Date.now();
@@ -207,7 +212,13 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
     role: "assistant",
     content: "",
     status: "streaming",
-    model: { ...resolved.ref, name: model.name, effort: effortFor(st.settings, st.chats.find((c) => c.id === chatId), resolved.routed ? { auto: true } : resolved.ref) },
+    model: {
+      ...resolved.ref,
+      name: model.name,
+      effort: effortFor(st.settings, st.chats.find((c) => c.id === chatId), resolved.routed ? { auto: true } : resolved.ref),
+      // Routed replies run at standard speed: the router picks the model, not its tier.
+      speed: resolved.routed ? undefined : supportedSpeed(model.speeds, speedFor(st.settings, st.chats.find((c) => c.id === chatId), resolved.ref)),
+    },
     routed: resolved.routed,
     createdAt: now,
     startedAt: now,
@@ -215,8 +226,9 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const chat: Chat = existing
     ? { ...existing, runtime: existing.runtime ?? "pi", updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts } };
+    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", ...(hasPermissionModes(st.settings.threadRuntime) && st.draftPermission ? { permission: st.draftPermission } : {}), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   st.upsertChat(chat);
+  if (!existing) useStore.setState({ draftPermission: undefined });
   // Name the thread from its first prompt, without waiting for the reply.
   if (chat.messages.filter((m) => m.role === "user").length === 1) void autoName(chat.id);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
@@ -234,8 +246,10 @@ export function regenerate(chatId: string, messageId: string) {
   // Durable has no rewind. Only workspace-preparation failures are safely retryable:
   // no turn could have been admitted before its workspace existed.
   if (chat?.runtime === "durable" && chat.workspace) return;
+  // fx can't rewind either: retrying a failed reply sends its message again, on top of what fx has.
+  if ((chat?.runtime === "fx" || chat?.runtime === "codex" || chat?.runtime === "cursor") && chat.workspace && msg?.status !== "error") return;
   const target = msg?.model;
-  const model = target && findModel(deviceDetection(st, threadDevice(st, chatId)), target);
+  const model = target && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), target);
   if (!msg || !target || !model) {
     st.openSettings("keys");
     return;
@@ -260,7 +274,7 @@ export function regenerate(chatId: string, messageId: string) {
     stream: undefined,
     parts: undefined,
     usage: undefined,
-    model: { plan: target.plan, id: target.id, name: model.name, effort: msg.model?.effort },
+    model: { plan: target.plan, id: target.id, name: model.name, effort: msg.model?.effort, speed: supportedSpeed(model.speeds, msg.model?.speed) },
     routed: msg.routed,
     startedAt: now,
   });
@@ -318,19 +332,22 @@ function piMessage(m: Message, input: string[]): { message: string; images: PiCh
 }
 
 /** A Pi turn for the assistant message at `index`: the user message before it, and its place in the thread. */
-function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, workspace: Workspace): PiChatRequest {
+function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, speed: string | undefined, workspace: Workspace): PiChatRequest {
   const before = chat.messages.slice(0, index);
   const userAt = before.findLastIndex((m) => m.role === "user");
   const user = before[userAt];
   if (!user) throw new WorkspaceError("There's no message to answer.");
   // Messages steered into earlier replies are user messages in Pi's history too.
   const steered = before.slice(0, userAt).reduce((n, m) => n + (m.parts?.filter((p) => p.type === "steer").length ?? 0), 0);
+  const permission = hasPermissionModes(chat.runtime) ? chat.permission ?? (chat.runtime === "cursor" && chat.cursorAllowAllTools === true ? "force" : undefined) : undefined;
   return {
     threadId: chat.id,
     runtime: chat.runtime ?? "pi",
+    ...(permission ? { permission } : {}),
     cwd: workspace.cwd,
     model: model.id,
     effort,
+    ...(speed ? { speed } : {}),
     ...piMessage(user, model.input),
     prior: before.slice(0, userAt).filter((m) => m.role === "user").length + steered,
     forkFrom: chat.forkOf,
@@ -341,7 +358,7 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
 export async function answerQuestion(chatId: string, messageId: string, part: AskPart, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) {
   if (useStore.getState().chats.find((c) => c.id === chatId)?.runtime === "durable") return;
   const { answerAsk } = await import("./pi");
-  const shown = reply.cancelled ? "" : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : (reply.value ?? "");
+  const shown = reply.cancelled ? "" : part.secret ? "[redacted]" : reply.confirmed !== undefined ? (reply.confirmed ? "Yes" : "No") : (reply.value ?? "");
   useStore.getState().patchMessage(chatId, messageId, (m) => ({ parts: m.parts?.map((p) => (p.type === "ask" && p.id === part.id ? { ...p, answer: shown } : p)) }));
   try {
     await answerAsk(chatId, part.id, reply, useStore.getState().chats.find((c) => c.id === chatId)?.workspace?.deviceId);
@@ -364,13 +381,14 @@ async function generate(chatId: string, messageId: string, resume = false) {
   // Where the reply runs; saved on the message right away so a reload can find it. A thread whose
   // workspace is on a paired device runs there, through this server's device proxy.
   const plannedDevice = threadDevice(st, chatId);
-  const model = findModel(deviceDetection(st, plannedDevice), msg.model);
+  const model = findModel(deviceDetection(st, plannedDevice, chat.runtime), msg.model);
   const plan = msg.model.plan;
-  const pi = plan === "pi";
+  // Native agent turns use the same workspace and normalized stream parts as Pi.
+  const pi = plan === "pi" || plan === "fx" || plan === "codex" || plan === "cursor";
   const keys = st.settings.keys[plan];
   if (!resume && (!model || (!pi && !keys?.length))) {
     const on = plannedDevice ? ` on ${deviceName(plannedDevice) ?? "that device"}` : "";
-    const error = pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
+    const error = plan === "cursor" ? `Cursor${on} can't use this model anymore. Pick another one, or check Cursor's sign-in (\`agent login\`).` : plan === "codex" ? `Codex${on} can't use this model anymore. Pick another one, or check Codex's sign-in (\`codex login\`).` : plan === "fx" ? `fx${on} can't use this model anymore. Pick another one, or check fx's sign-in (\`fx login\`).` : pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
     st.patchMessage(chatId, messageId, { status: "error", error }, true);
     return;
   }
@@ -442,7 +460,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
     const request = resume && !repost
       ? undefined
       : pi
-        ? piRequest(chat, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), workspace!)
+        ? piRequest(chat, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), supportedSpeed(model!.speeds, msg.model.speed), workspace!)
         : {
           plan,
           model: model!.id,

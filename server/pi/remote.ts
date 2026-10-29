@@ -72,7 +72,7 @@ export class PiClient {
     secureSocketPath(this.socket);
     try {
       const res = await fetch("http://pi/health", onSocket(this.socket, { signal: AbortSignal.timeout(500) }));
-      return res.ok ? await res.json() as { pid: number; protocol: number } : undefined;
+      return res.ok ? await res.json() as { pid: number; protocol: number; features?: string[] } : undefined;
     } catch { return undefined; }
   }
   private connect() {
@@ -164,7 +164,30 @@ export class PiClient {
       await Bun.sleep(250);
     }
   }
-  async startRun(req: PiChatRequest): Promise<PiRun> { return this.adopt(await this.json<PiRunRecord>("/start", req, true)); }
+  async startRun(req: PiChatRequest): Promise<PiRun> {
+    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor") await this.ensureFeature(req.runtime);
+    return this.adopt(await this.json<PiRunRecord>("/start", req, true));
+  }
+  /**
+   * A worker started by an older OpenBuild keeps running across updates (that's the point of it), so
+   * it may not know a newer runtime. Replace it, but only while it's idle: never cut off a turn.
+   */
+  private async ensureFeature(feature: string) {
+    await this.connect();
+    const health = await this.health();
+    if (!health) {
+      this.connected = undefined;
+      throw Object.assign(new Error("Agent worker health is unavailable; retry shortly."), { status: 503 });
+    }
+    if (health.features?.includes(feature)) return;
+    if (!health.features?.includes("idle-retire")) throw Object.assign(new Error(`OpenBuild's existing agent worker cannot safely upgrade automatically. After its work finishes, use \`openbuild stop --all\` and start OpenBuild again to enable ${feature}.`), { status: 409, code: "busy" });
+    // The worker must fence new admissions itself before retiring. Never signal it based
+    // on a racy client-side idle check.
+    await this.json("/retire", {});
+    for (let i = 0; i < 100 && await this.health(); i++) await Bun.sleep(100);
+    this.connected = undefined;
+    await this.connect();
+  }
   async findRun(id: string): Promise<PiRun | undefined> {
     const res = await this.request(`/runs?id=${encodeURIComponent(id)}`, undefined, true);
     if (res.status === 404) return;

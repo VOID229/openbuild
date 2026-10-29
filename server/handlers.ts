@@ -9,7 +9,7 @@ import { checkSearch, searchToolkit } from "./search";
 import { isPublicUrl } from "./fetch";
 
 // "pi" models run through /api/pi/chat, not the Opencode proxy.
-export const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS && p !== "pi";
+export const isPlan = (p: unknown): p is PlanId => typeof p === "string" && p in PLANS && p !== "pi" && p !== "fx" && p !== "codex" && p !== "cursor";
 export const isKey = (k: unknown): k is string => typeof k === "string" && k.trim().length > 0 && k.length < 512;
 export const isKeyList = (k: unknown): k is string[] => Array.isArray(k) && k.length > 0 && k.length <= 20 && k.every(isKey);
 const isSearchList = (s: unknown): s is SearchCredentials[] =>

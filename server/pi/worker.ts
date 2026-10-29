@@ -8,6 +8,8 @@ import type { PiWorkerRuntime, WorkerRun } from "./workerRuntime";
 
 export const workerSocket = (directory: string) => join("/tmp", `ob-pi-${process.getuid?.() ?? "user"}`, `${createHash("sha256").update(directory).digest("hex").slice(0, 20)}.sock`);
 const encoder = new TextEncoder();
+/** What this worker can run beyond the original protocol. A server needing more replaces an idle older worker. */
+export const WORKER_FEATURES = ["fx", "codex", "cursor", "idle-retire"];
 
 export function secureSocketPath(socket: string) {
   const parent = dirname(socket);
@@ -92,6 +94,7 @@ export async function serveWorker(directory: string, socket = workerSocket(direc
     const runtime = new PiWorkerRuntime(directory);
     let lastSeen = Date.now();
     let active = 0;
+    let retiring = false;
     const server = Bun.serve({
       unix: socket,
       async fetch(req, server) {
@@ -102,8 +105,18 @@ export async function serveWorker(directory: string, socket = workerSocket(direc
         try {
           const body = req.method === "POST" ? await req.json() as Record<string, any> : {};
           const id = url.searchParams.get("id") ?? "";
+          if (retiring && req.method === "POST") return Response.json({ error: "Agent worker is retiring; retry shortly.", code: "busy" }, { status: 409 });
           switch (url.pathname) {
-            case "/health": return Response.json({ pid: process.pid, protocol: 1 });
+            case "/health": return Response.json({ pid: process.pid, protocol: 1, features: WORKER_FEATURES });
+            // Admission and retirement execute synchronously in this one owner. A separate
+            // /records check followed by SIGTERM could kill a newly admitted turn.
+            case "/retire": {
+              if (req.method !== "POST") return new Response(null, { status: 405 });
+              if (active > 1 || runtime.summaries().some((r) => r.status === "pending")) return Response.json({ error: "Agent worker is still busy.", code: "busy" }, { status: 409 });
+              retiring = true;
+              setTimeout(() => shutdown(), 100);
+              return Response.json({ ok: true });
+            }
             case "/ownership": return Response.json({ live: runtime.ownership(), owned: [...new Set(runtime.summaries().map((r) => r.threadId))] });
             case "/records": return Response.json(runtime.listRuns());
             case "/snapshots": {

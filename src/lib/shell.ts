@@ -30,6 +30,9 @@ export async function runShell(text: string, chatId = useStore.getState().active
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const runtime = existing ? (existing.runtime ?? "pi") : (st.settings.threadRuntime ?? "pi");
   if (runtime === "durable") throw new Error("Shell commands aren't available in Durable threads yet.");
+  if (runtime === "fx") throw new Error("Shell commands aren't available in fx threads yet.");
+  if (runtime === "codex") throw new Error("Shell commands aren't available in Codex threads yet.");
+  if (runtime === "cursor") throw new Error("Shell commands aren't available in Cursor threads yet.");
   const now = Date.now();
   const plannedDevice = existing?.workspace?.deviceId ?? (existing ? undefined : threadDevice(st));
   const via = plannedDevice ? (deviceServerId(plannedDevice) ?? replyHost()) : replyHost();
@@ -44,7 +47,7 @@ export async function runShell(text: string, chatId = useStore.getState().active
   };
   const chat: Chat = existing
     ? { ...existing, runtime, updatedAt: now, messages: [...existing.messages, message] }
-    : { id: uid(), title: makeTitle(parsed.command, []), runtime, createdAt: now, updatedAt: now, messages: [message], efforts: { ...st.settings.modelEfforts } };
+    : { id: uid(), title: makeTitle(parsed.command, []), runtime, createdAt: now, updatedAt: now, messages: [message], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   st.upsertChat(chat);
   if (chatId === st.activeChatId) useStore.setState({ activeChatId: chat.id });
   // A thread's first command sets up where it works, as its first message would.

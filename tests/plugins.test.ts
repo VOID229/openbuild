@@ -181,7 +181,7 @@ test("Claude model icons include provider-scoped default aliases without rebrand
   expect(code).toBe(0);
 });
 
-test("icon first paint waits for plugins, with cached, missing, corrupt or blocked storage", async () => {
+test("icon snapshots paint immediately while cold loads wait for plugins", async () => {
   // Each process gets a genuinely fresh module registry and synchronous cache hydration. Browser
   // shims must not leak into the server/plugin tests (or other frontend tests) in this process.
   const directory = mkdtempSync(join(tmpdir(), "openbuild-icon-paint-"));
@@ -222,9 +222,20 @@ test("icon first paint waits for plugins, with cached, missing, corrupt or block
           renderToStaticMarkup(createElement(ProviderIcon, { provider: "deepseek" })),
         ];
         const assertOverride = () => { for (const html of paint()) expect(html).toContain("M18.654"); };
-        expect(pluginIconsReady()).toBe(false);
-        if (scenario.startsWith("cached")) assertOverride();
-        else for (const html of paint()) expect(html).not.toContain("<svg");
+        const hasSnapshot = scenario.startsWith("cached") || scenario === "empty" || scenario === "partial";
+        const assertInitialPaint = () => {
+          expect(pluginIconsReady()).toBe(hasSnapshot);
+          if (scenario.startsWith("cached")) assertOverride();
+          else for (const html of paint()) {
+            if (hasSnapshot) expect(html).toContain("<svg");
+            else expect(html).not.toContain("<svg");
+          }
+          // A cached override for one model must not hold up unrelated built-in icons.
+          const other = renderToStaticMarkup(createElement(BrandIcon, { id: "gpt-4o" }));
+          if (hasSnapshot) expect(other).toContain("<svg");
+          else expect(other).not.toContain("<svg");
+        };
+        assertInitialPaint();
 
         if (scenario.endsWith("-failure")) {
           // A failed API request releases built-ins instead of leaving the UI blank forever,
@@ -233,7 +244,7 @@ test("icon first paint waits for plugins, with cached, missing, corrupt or block
           const version = usePlugins.getState().version;
           await usePlugins.getState().refresh();
           expect(usePlugins.getState().error).toBe("Offline");
-          expect(usePlugins.getState().version).toBeGreaterThan(version);
+          if (!hasSnapshot) expect(usePlugins.getState().version).toBeGreaterThan(version);
           expect(pluginIconsReady()).toBe(true);
           if (scenario === "cached-failure") assertOverride();
           else for (const html of paint()) {
@@ -259,9 +270,7 @@ test("icon first paint waits for plugins, with cached, missing, corrupt or block
         };
         const loading = usePlugins.getState().refresh();
         await waitForEntry(1);
-        expect(pluginIconsReady()).toBe(false);
-        if (scenario === "cached") assertOverride();
-        else for (const html of paint()) expect(html).not.toContain("<svg");
+        assertInitialPaint();
         release();
         await loading;
         expect(usePlugins.getState().errors).toEqual({});

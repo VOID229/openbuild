@@ -77,8 +77,15 @@ export function UsagePage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  const busy = tab === "limits" ? lim.loading : report.loading;
-  const refresh = () => (tab === "limits" ? loadLimits(true) : loadReport(range, machine, true));
+  const [busy, setBusy] = useState(false);
+  const refresh = async () => {
+    setBusy(true);
+    try {
+      await (tab === "limits" ? loadLimits(true) : loadReport(range, machine, true));
+    } finally {
+      setBusy(false);
+    }
+  };
   // Machines are known from any answer; the last one keeps the picker steady while switching.
   const machines = report.data?.machines ?? lim.data?.machines ?? [];
 
@@ -128,7 +135,6 @@ function MachinePicker({ machines, value, onChange, disabled }: { machines: Usag
   const anchor = useRef<HTMLButtonElement>(null);
   const now = useNow(30_000);
   const current = machines.find((m) => m.id === value);
-  const issues = machines.filter((m) => m.status !== "ok").length;
   const dot = (m: UsageMachine) => <span className={cx("ustats-mstate", `ustats-mstate-${m.status}`)} aria-hidden />;
   return (
     <>
@@ -136,7 +142,6 @@ function MachinePicker({ machines, value, onChange, disabled }: { machines: Usag
       <button ref={anchor} type="button" className="ustats-machine" aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}
         data-tooltip={disabled ? "Limits are per account, from every machine" : undefined} data-tooltip-side="bottom">
         {value === "all" ? "All machines" : current?.name ?? "Machine"}
-        {value === "all" && issues > 0 && <span className={cx("ustats-mstate", machines.some((m) => m.status === "error") ? "ustats-mstate-error" : "ustats-mstate-pending")} aria-hidden />}
         <ChevronDown size={14} />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu drop-down ustats-mmenu" role="menu" label="Machine" fixed="down">
@@ -176,7 +181,7 @@ function MachinePicker({ machines, value, onChange, disabled }: { machines: Usag
 
 // ------------------------------------------------------------------ cost and tokens
 
-function SpendView({ tab, data, loading, error }: { tab: "cost" | "tokens"; data?: UsageReport; loading: boolean; error?: string }) {
+function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageReport; loading: boolean; error?: string }) {
   const [hidden, setHidden] = useState<Set<UsageProvider>>(new Set());
   if (!data) {
     return error ? <Problem lines={[error]} /> : <div className="ustats-loading"><Spinner size={18} /> Reading transcripts…</div>;
@@ -210,7 +215,6 @@ function SpendView({ tab, data, loading, error }: { tab: "cost" | "tokens"; data
               </span>
             ) : ` · ${plural(data.totals.requests, "request")}`}
             {error && <span className="ustats-stale"> · couldn't refresh</span>}
-            {(loading || !!data.pending?.length) && <span className="ustats-stale"> · {data.pending?.length ? `loading ${data.pending.map((p) => USAGE_PROVIDER_NAMES[p]).join(", ")}…` : "updating…"}</span>}
           </div>
           <ul className="ustats-providers">
             {data.providers.map((p) => {
@@ -506,7 +510,7 @@ function Chart({ data, metric, hidden }: { data: UsageReport; metric: "cost" | "
 
 // ------------------------------------------------------------------ limits
 
-function LimitsView({ data, error, loading }: { data?: UsageLimitsReport; error?: string; loading: boolean }) {
+function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string; loading: boolean }) {
   const now = useNow(30_000);
   if (!data) return error ? <Problem lines={[error]} /> : <div className="ustats-loading"><Spinner size={18} /> Asking providers…</div>;
   const ok = data.providers.filter((p) => p.windows.length);
@@ -546,7 +550,6 @@ function LimitsView({ data, error, loading }: { data?: UsageLimitsReport; error?
       )}
       <p className="ustats-foot ustats-dim">
         Checked {ago(data.checkedAt, now)}
-        {loading && " · updating…"}
       </p>
     </>
   );

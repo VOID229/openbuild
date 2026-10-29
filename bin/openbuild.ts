@@ -417,7 +417,7 @@ async function stop(quiet = false, keepWorker = true) {
   if (!serverAlive && !keeper) {
     rmSync(STATE, { force: true });
     if (!keepWorker) stopWorkers();
-    if (!quiet) console.log(keepWorker ? "OpenBuild server isn't running; detached workers left unchanged." : "OpenBuild server isn't running; Pi and Durable workers sent shutdown signals.");
+    if (!quiet) console.log(keepWorker ? "OpenBuild server isn't running; detached workers left unchanged." : "OpenBuild server isn't running; agent and Durable workers sent shutdown signals.");
     return;
   }
   // Local stop means fully stopped: no keepalive left offering to start it again.
@@ -430,7 +430,7 @@ async function stop(quiet = false, keepWorker = true) {
   }
   rmSync(STATE, { force: true });
   if (!keepWorker) stopWorkers();
-  if (!quiet) console.log(keepWorker ? "OpenBuild stopped; Pi and Durable workers left running." : "OpenBuild stopped; Pi and Durable workers sent shutdown signals.");
+  if (!quiet) console.log(keepWorker ? "OpenBuild stopped; agent and Durable workers left running." : "OpenBuild stopped; agent and Durable workers sent shutdown signals.");
 }
 
 /** Is something OpenBuild-shaped answering on the port? A server started outside `openbuild start` (systemd, `bun dev`) writes no state file. */
@@ -471,8 +471,8 @@ function help() {
   openbuild remote status       where each paired device's server stands
   openbuild set pass <pw>     set/change the local access password
   openbuild password          the same, typed at a hidden prompt instead
-  openbuild stop              stop the server; Pi and Durable work keep running
-  openbuild stop --all        also terminate Pi and Durable workers
+  openbuild stop              stop the server; agent work keep running
+  openbuild stop --all        also terminate agent and Durable workers
   openbuild restart [--yes]   restart in the same mode; running turns continue
   openbuild status            is it running, and where
   openbuild logs              follow the server log
@@ -818,7 +818,7 @@ if (service) {
   if (arg && cmd !== "start" && cmd !== "restart") fail(`usage: openbuild ${cmd}${cmd === "stop" ? " [--all]" : ""}`);
   if (mode && !["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild ${cmd} [local|lan|tailscale]`);
   if ((cmd === "stop" || cmd === "restart" || (mode && service.active)) && !stopAll && !service.workerSurvives) {
-    fail(`${UNIT} would kill detached Pi and Durable workers (KillMode is not process). Set [Service] KillMode=process with \`systemctl --user edit ${UNIT}\`, then run \`systemctl --user daemon-reload\` and retry. Existing units are not updated automatically. Use openbuild stop --all only if you intend to terminate workers too.`);
+    fail(`${UNIT} would kill detached agent and Durable workers (KillMode is not process). Set [Service] KillMode=process with \`systemctl --user edit ${UNIT}\`, then run \`systemctl --user daemon-reload\` and retry. Existing units are not updated automatically. Use openbuild stop --all only if you intend to terminate workers too.`);
   }
   if (mode || cmd === "stop") {
     // Use the unit's actual network context, not the interactive shell's defaults.
@@ -846,7 +846,7 @@ if (service) {
       if (stopAll) stopWorkers();
     }
     console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"} (${UNIT}, systemd user service).`);
-    if (cmd === "stop") console.log(stopAll ? "Pi and Durable workers sent shutdown signals." : "Pi and Durable workers left running.");
+    if (cmd === "stop") console.log(stopAll ? "agent and Durable workers sent shutdown signals." : "agent and Durable workers left running.");
   }
 } else switch (cmd) {
   case "set": {
@@ -908,7 +908,7 @@ if (service) {
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
-    // Pi and Durable turns carry on in detached workers; the new server reattaches.
+    // Agent turns carry on in detached workers; the new server reattaches.
     // --yes/-y remain accepted for compatibility; no destructive confirmation is needed.
     if (owned) await stop(true, true);
     await start(mode);

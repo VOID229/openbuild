@@ -12,6 +12,7 @@ import { terminalRoutes } from "./terminals";
 import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
+import { createChatRefresh } from "./chatRefresh";
 import { localAuth } from "./localAuth";
 import { checkWhisper, transcribe } from "./dictation";
 import { findRun, localRun, startRun } from "./runs";
@@ -24,6 +25,16 @@ import { projectChat, projectStoredChats } from "./pi/projection";
 import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as folderPicker from "./folderPicker";
+
+const refreshChats = createChatRefresh(async () => {
+  const snapshots = await piWorker.snapshots();
+  projectStoredChats(snapshots);
+  await discoverSessions();
+}, (err) => {
+  // Never fall back to transcript discovery when the worker is unavailable: it would
+  // overwrite authoritative OpenBuild stream identities.
+  console.warn("[pi-worker] Showing saved chats; worker unavailable:", (err as Error).message);
+});
 
 const isEdits = (e: unknown): e is KeyEdit[] =>
   Array.isArray(e) &&
@@ -70,6 +81,7 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
+  /^\/api\/(fx|codex|cursor)\/(status|models)(\/|$)/.test(path) ||
   /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path) ||
   // A terminal in a project's folder. It's a shell on this device, which Pi turns here already are.
   /^\/api\/terminals(\/|$)/.test(path) ||
@@ -367,16 +379,11 @@ function serve(port: number, hostname: string) {
       // `?index`: only ids and versions, so browsers fetch just the chats their cache lacks.
       "/api/chats": {
         GET: api(async (req) => {
-          try {
-            const snapshots = await piWorker.snapshots();
-            projectStoredChats(snapshots);
-            await discoverSessions();
-          } catch (err) {
-            // Saved conversations remain readable if the worker needs repair. Do not fall back to
-            // transcript discovery here: that would overwrite authoritative OB stream identities.
-            console.warn("[pi-worker] Showing saved chats; worker unavailable:", (err as Error).message);
-          }
-          if (new URL(req.url).searchParams.has("index")) return Response.json({ index: storage.chatIndex() });
+          const params = new URL(req.url).searchParams;
+          // Refreshes show the saved list promptly even if Pi is cold or transcripts are large.
+          // Discovery continues in the background; subsequent polls await its fresh result.
+          await refreshChats(params.has("startup") ? 100 : undefined);
+          if (params.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
         }),
         DELETE: api(async () => {
@@ -409,7 +416,7 @@ function serve(port: number, hostname: string) {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
           if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
-          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.shell);
+          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.shell);
           const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
           const projected = projectChat(chat as unknown as Chat, snapshots, storage.getChat(chat.id) as Chat | undefined);
           const v = storage.putChat({ ...projected });

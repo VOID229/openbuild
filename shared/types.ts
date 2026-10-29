@@ -1,7 +1,9 @@
 // Types shared by the Bun server and the React client.
 
-/** "pi": a model configured in the installed Pi (its provider/model id). The rest are Opencode plans. */
-export type PlanId = "go" | "plus" | "black" | "zen" | "pi";
+/** "pi": a model configured in the installed Pi (its provider/model id). "fx": a model fx (Vercel's
+ * coding agent) can use, as "fx/<id>". Native Codex and Cursor models use "codex/<id>"
+ * and "cursor/<id>" respectively. The rest are Opencode plans. */
+export type PlanId = "go" | "plus" | "black" | "zen" | "pi" | "fx" | "codex" | "cursor";
 
 export type Protocol = "chat" | "responses" | "messages" | "gemini";
 
@@ -41,6 +43,9 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   plus: { id: "plus", label: "Opencode Plus", chip: "Plus", baseURL: "https://opencode.ai/zen/go/v1", prefix: "opencode-go" },
   black: { id: "black", label: "Opencode Black", chip: "Black", baseURL: "https://opencode.ai/zen/v1", prefix: "opencode" },
   pi: { id: "pi", label: "Pi", chip: "Pi", baseURL: "", prefix: "pi" },
+  fx: { id: "fx", label: "fx", chip: "fx", baseURL: "", prefix: "fx" },
+  codex: { id: "codex", label: "Codex", chip: "Codex", baseURL: "", prefix: "codex" },
+  cursor: { id: "cursor", label: "Cursor", chip: "Cursor", baseURL: "", prefix: "cursor" },
 };
 
 /** Order of rows in Settings → API Keys (as drawn). */
@@ -82,7 +87,40 @@ export interface ModelInfo {
   price?: Price;
   /** `price` is another listing's ("<provider>/<model id>"): the model's own provider reports none. */
   priceFrom?: string;
+  /** Faster (or cheaper) service tiers the provider offers for this model, as it lists them. Absent: standard only. */
+  speeds?: Speed[];
 }
+
+/** A provider service tier, e.g. Codex's `priority` ("Fast") or Claude's fast mode. */
+export interface Speed {
+  /** What the provider takes in the request (Codex/OpenAI `service_tier`, Anthropic `speed`). */
+  id: string;
+  name: string;
+  description?: string;
+}
+
+/** A permission mode a native runtime offers, as that runtime reports it (Codex profiles, Cursor CLI flags). */
+export interface PermissionMode {
+  /** What the runtime takes: a Codex profile id (":workspace"), or a Cursor mode ("force", "mode:plan"). */
+  id: string;
+  name: string;
+  description?: string;
+  /** False when the runtime's managed requirements forbid selecting it. */
+  allowed?: boolean;
+}
+
+/** The permission modes a runtime offers on a device (for a folder). `defaultMode`: what it uses when nothing is chosen. */
+export interface PermissionModes {
+  modes: PermissionMode[];
+  defaultMode?: string;
+  checkedAt: number;
+}
+
+/** A permission mode id as sent in a request. */
+export const isPermissionId = (v: unknown): v is string => typeof v === "string" && /^[\w:.\-]{1,64}$/.test(v);
+
+/** A speed id as sent in a request. */
+export const isSpeedId = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9_-]{1,32}$/i.test(v);
 
 /**
  * Pi's scoped models: the `enabledModels` patterns in a device's Pi settings, and the models they
@@ -368,17 +406,23 @@ export interface GitChanges {
   gh?: boolean;
 }
 
-/** Runtime chosen when a thread starts; absent on legacy threads means Pi. */
-export type ThreadRuntime = "pi" | "durable";
+/** Runtime chosen when a thread starts; absent on legacy threads means Pi. "fx" runs Vercel's fx agent. */
+export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor";
 
 /** A turn of a thread, run by Pi in the thread's workspace. */
 export interface PiChatRequest {
   threadId: string;
   runtime?: ThreadRuntime;
+  /** Explicit per-turn Cursor Run Everything opt-in; absent/false preserves native policy. */
+  cursorAllowAllTools?: boolean;
+  /** A mode from the runtime's own permission listing (Codex, Cursor); absent = the runtime's configured default. */
+  permission?: string;
   cwd: string;
   /** "<provider>/<model id>" */
   model: string;
   effort: Effort;
+  /** A service tier from the model's `speeds`; absent = standard. */
+  speed?: string;
   message: string;
   images?: { data: string; mimeType: string }[];
   /** User messages before this one in the thread; Pi's history is cut back to match (retry, edit). */
@@ -442,7 +486,7 @@ export type StreamEvent =
       ms?: number;
     }
   /** A Pi extension asks the user something (confirm, choose, type) and waits for the answer. */
-  | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string; other?: boolean }
+  | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string; other?: boolean; secret?: boolean }
   /** That question was answered (or cancelled, or timed out). */
   | { t: "asked"; id: string; answer?: string }
   /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). */

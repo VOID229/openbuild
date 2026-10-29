@@ -2,7 +2,7 @@
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, ShieldHalf, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
@@ -12,7 +12,7 @@ import { useStore } from "../lib/store";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { IconButton, PiMark, Popover, Spinner } from "./primitives";
+import { CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, ProviderIcon, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 /** Git state of a project (refetched when it changes or `refresh` ticks). */
@@ -336,6 +336,13 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
 }
 
 const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands, extensions, or steering. Runtime is fixed once a thread starts.";
+const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions, slash commands or steering. Runtime is fixed once a thread starts.";
+const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
+const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
+const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor" };
+function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
+  return runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <ProviderIcon provider="cursor" /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+}
 
 /** Runtime is chosen before the first send, independently of the project's checkout. */
 function RuntimeMenu() {
@@ -346,12 +353,17 @@ function RuntimeMenu() {
   const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
     { runtime: "pi", label: "Default", desc: "Tools and extensions" },
     { runtime: "durable", label: "Durable", desc: "Resumes after crashes" },
+    { runtime: "codex", label: "Codex", desc: "OpenAI's native coding agent" },
+    { runtime: "cursor", label: "Cursor", desc: "Cursor's native coding agent" },
+    { runtime: "fx", label: "fx", desc: "Vercel's coding agent" },
   ];
+  const tip = runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
   return (
     <>
-      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${runtime === "durable" ? "Durable" : "Default"}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "Runtime for this new thread; fixed after the first send"} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
-        {runtime === "durable" ? <ShieldHalf size={13} /> : <PiMark size={13} />}
-        <span className="ws-pill-text">{runtime === "durable" ? "Durable" : "Default"}</span>
+      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${RUNTIME_LABEL[runtime]}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={tip} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
+        <RuntimeIcon runtime={runtime} size={13} />
+        {/* The fx mark is its name; the word beside it just repeats the logo. */}
+        {runtime !== "fx" && <span className="ws-pill-text">{RUNTIME_LABEL[runtime]}</span>}
         <ChevronDown size={13} className="pill-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
@@ -359,7 +371,7 @@ function RuntimeMenu() {
           {options.map((o) => (
             <button key={o.runtime} type="button" role="option" aria-selected={o.runtime === runtime} className="menu-item ws-option" onClick={() => { updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}>
               <span className="ws-option-icon" aria-hidden>
-                {o.runtime === "durable" ? <ShieldHalf size={15} /> : <PiMark size={15} />}
+                <RuntimeIcon runtime={o.runtime} size={15} />
               </span>
               <span className="ws-option-text">
                 <span className="menu-item-label">{o.label}</span>
@@ -529,8 +541,8 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
   const branch = info?.branch ?? workspace?.branch;
   return (
     <div className="ws-bottom">
-      <span className="ws-chip" data-tooltip={runtime === "durable" ? DURABLE_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
-        <LockKeyhole size={13} /> {runtime === "durable" ? "Durable" : "Pi"}
+      <span className="ws-chip" data-tooltip={runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
+        <LockKeyhole size={13} /> {runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "fx" ? "fx" : runtime === "codex" ? "Codex" : "Pi"}
       </span>
       {workspace && (
         <span className="ws-where" title={workspace.cwd}>

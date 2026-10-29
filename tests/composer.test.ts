@@ -18,7 +18,7 @@ await idb.set("draftfile:kept", { id: "kept", name: "k.png", mime: "image/png", 
 await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 6 * 60_000 }, saved);
 await idb.set("draftfile:orphan", { id: "orphan", name: "o.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
 
-const { selectionFor } = await import("../src/lib/store");
+const { selectionFor, deviceDetection } = await import("../src/lib/store");
 // A fresh copy of the module, as a page load would have (other test files may have loaded it already).
 const { draftsReady, getDraft, saveDraft } = await import("../src/lib/drafts?reload" as string);
 import type { Chat, Detection, Settings } from "../src/lib/types";
@@ -103,6 +103,41 @@ describe("threads on a paired device", () => {
     newer.settings = st.settings;
     expect(selectionFor(newer)).toBe(selectionFor(newer));
     expect(selectionFor(newer)).toMatchObject({ id: "qwen/4" });
+  });
+});
+
+describe("native Codex model selection", () => {
+  const listed = { plan: "codex", status: "valid", models: [model("codex/first"), model("codex/default")], defaultModel: "codex/default" } as Detection & { defaultModel: string };
+  const native = () => ({
+    activeChatId: undefined as string | undefined,
+    chats: [] as Chat[], selections: {}, detection,
+    settings: { ...settings, threadRuntime: "codex" as const },
+    codexModels: { "": listed } as Record<string, Detection & { defaultModel?: string }>,
+  });
+  test("uses its own default, not Pi's openai-codex model, with a stable selector", () => {
+    const st = native();
+    st.settings.selection = { plan: "pi", id: "openai-codex/gpt-5" };
+    expect(selectionFor(st)).toEqual({ plan: "codex", id: "codex/default" });
+    expect(selectionFor(st)).toBe(selectionFor(st));
+    expect(deviceDetection(st, undefined, "codex")).toEqual({ codex: listed });
+  });
+  test("uses the project's device list, never this server's list", () => {
+    const st = { ...native(), projects: [{ id: "dev::app", deviceId: "dev", name: "app", path: "/app", git: false }], codexModels: { "": listed, dev: { ...listed, models: [model("codex/remote")], defaultModel: "codex/remote" } } };
+    st.settings = { ...st.settings, workspace: { projectId: "dev::app" } } as typeof st.settings;
+    expect(selectionFor(st)).toEqual({ plan: "codex", id: "codex/remote" });
+  });
+  test("preserves the last native reply while discovery is pending", () => {
+    const st = native();
+    st.activeChatId = "q";
+    st.chats = [{ ...qwenChat, runtime: "codex", messages: [{ ...qwenChat.messages[1]!, model: { plan: "codex", id: "codex/last", name: "last" } }] }];
+    st.codexModels = {};
+    expect(selectionFor(st)).toMatchObject({ plan: "codex", id: "codex/last" });
+  });
+  test("native preference is independent of the Pi new-chat preference", () => {
+    const st = native();
+    st.settings = { ...st.settings, codexSelection: { plan: "codex", id: "codex/first" } } as typeof st.settings;
+    expect(selectionFor(st)).toEqual({ plan: "codex", id: "codex/first" });
+    expect(st.settings.selection).toEqual(settings.selection);
   });
 });
 

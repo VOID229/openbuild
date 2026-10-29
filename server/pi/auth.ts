@@ -4,7 +4,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { join } from "node:path";
 import * as storage from "../storage";
-import type { ModelScope } from "../../shared/types";
+import type { ModelScope, Speed } from "../../shared/types";
 import { agentDir, nodeBin, packageRoot, piEnv } from "./install";
 import { PiError } from "./rpc";
 import { parseModelScope } from "./scope";
@@ -106,6 +106,17 @@ export function providers(): Promise<PiProvider[]> {
 /** Every model Pi has a price for (signed in or not), and which providers are signed in with a subscription. */
 export function pricesFromPi() {
   return once<{ models: { provider: string; id: string; context?: number; cost: { input: number; output: number; cacheRead: number; cacheWrite: number } }[]; providers: { id: string; subscription: boolean }[] }>(["prices"]);
+}
+
+let speedsCache: { at: number; value: Promise<Record<string, Speed[]>> } | undefined;
+
+/** Service tiers per Pi model ("<provider>/<model id>"), as Codex and Claude list them (helper.mjs `speeds`). */
+export function speedsFromPi(fresh = false): Promise<Record<string, Speed[]>> {
+  if (!fresh && speedsCache && Date.now() - speedsCache.at < 30 * 60_000) return speedsCache.value;
+  const value = once<{ speeds: Record<string, Speed[]> }>(["speeds"]).then((r) => r.speeds ?? {});
+  speedsCache = { at: Date.now(), value };
+  value.catch(() => speedsCache?.value === value && (speedsCache = undefined));
+  return value;
 }
 
 /** The models Pi's `enabledModels` setting scopes this device to (undefined = no scope). */

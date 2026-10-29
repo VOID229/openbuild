@@ -18,3 +18,21 @@ export function effortFor(settings: Settings, chat: Chat | undefined, selection:
   // Keep the old global value only as a migration/default, not as a live toggle.
   return settings.effort;
 }
+
+/**
+ * The speed (service tier id) for a model; undefined = standard. Kept like effort: per model, on the
+ * thread once it exists. An explicit "" records a pick of standard, so it beats the new-thread default.
+ */
+export function speedFor(settings: Settings, chat: Chat | undefined, selection: Selection | undefined): string | undefined {
+  if (!selection || "auto" in selection) return undefined;
+  const saved = (chat ? chat.speeds : settings.modelSpeeds)?.[effortKey(selection)];
+  if (saved !== undefined) return saved || undefined;
+  if (chat) {
+    const previous = chat.messages.findLast((m) => m.role === "assistant" && m.model?.plan === selection.plan && m.model.id === selection.id);
+    return previous?.model?.speed;
+  }
+  return undefined;
+}
+
+/** A speed the model offers, or undefined (standard). */
+export const supportedSpeed = (speeds: { id: string }[] | undefined, speed: string | undefined) => (speed && speeds?.some((s) => s.id === speed) ? speed : undefined);

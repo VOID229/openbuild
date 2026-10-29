@@ -21,6 +21,7 @@ import mistral from "../assets/brands/mistral-color.svg" with { type: "text" };
 import stepfun from "../assets/brands/stepfun-color.svg" with { type: "text" };
 import opencode from "../assets/brands/opencode.svg" with { type: "text" };
 import openrouter from "../assets/brands/openrouter.svg" with { type: "text" };
+import cursor from "../assets/brands/cursor.svg" with { type: "text" };
 
 // The icons are decorative; drop their <title> so they don't produce stray hover tooltips.
 const clean = (svg: string) => svg.replace(/<title>[\s\S]*?<\/title>/, "");
@@ -51,6 +52,7 @@ export const bareId = (id: string) => id.slice(id.lastIndexOf("/") + 1);
 
 /** Pi provider ids → their brand icon, when there's one. */
 const PROVIDER_ICONS: [RegExp, string][] = (<[RegExp, string][]>[
+  [/^cursor$/, cursor],
   [/^anthropic|^claude/, claude],
   [/^openai|^azure|^codex/, openai],
   [/^xai|^grok/, grok],

@@ -1,6 +1,6 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { Device, GitInfo, ModelInfo, ModelScope, PiCommand, Project, Workspace } from "../../shared/types";
+import type { Device, GitInfo, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
@@ -66,6 +66,22 @@ export interface PiModels {
   scope?: ModelScope;
   checkedAt: number;
 }
+/** Native Codex models, independent of Pi's openai-codex provider and auth checks. */
+export const codexModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/codex/models${fresh ? "?fresh=1" : ""}`));
+
+/** Native Cursor models from the selected device's own installation and sign-in. */
+export const cursorModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/cursor/models${fresh ? "?fresh=1" : ""}`));
+
+/** The permission modes a native runtime reports on a device (Codex resolves the folder's project config). */
+export const permissionModes = (runtime: "codex" | "cursor", deviceId?: DeviceId, cwd?: string, fresh = false) => {
+  const q = new URLSearchParams();
+  if (cwd && runtime === "codex") q.set("cwd", cwd);
+  if (fresh) q.set("fresh", "1");
+  return get<PermissionModes>(apiUrl(deviceId, `/api/${runtime}/permissions${q.size ? `?${q}` : ""}`));
+};
+
+/** Models fx (Vercel's coding agent, installed on the device) can use, as "fx/<id>". */
+export const fxModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/fx/models${fresh ? "?fresh=1" : ""}`));
 export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));
 
 /** Prices for models Pi no longer lists, by "<provider>/<model id>". */

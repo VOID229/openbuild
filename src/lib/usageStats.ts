@@ -96,25 +96,38 @@ function useSlot<T>(key: string) {
 export function useUsageReport(range: UsageRange, machine: UsageScope) {
   useEffect(() => void loadReport(range, machine), [range, machine]);
   const slot = useSlot<UsageReport>(reportKey(range, machine));
-  // Still coming in on the server (Cursor's history, a paired machine): ask again once it's had time.
-  const pending = (!!slot.data?.pending?.length || !!slot.data?.machines?.some((m) => m.status === "pending")) && !slot.loading;
+  // Keep visible numbers live without activity notices. Incomplete history gets faster polls;
+  // hidden tabs do no polling, and failed machines remain stopped until explicit refresh.
+  const pending = !!slot.data?.pending?.length || !!slot.data?.machines?.some((m) => m.status === "pending");
   useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => void loadReport(range, machine, false, true), 3000);
-    return () => clearTimeout(t);
-  }, [pending, range, machine, slot.at]);
+    const refresh = () => {
+      if (document.visibilityState !== "hidden") void loadReport(range, machine, false, true);
+    };
+    const t = setInterval(refresh, pending ? 3000 : 15_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [pending, range, machine]);
   return slot;
 }
 
 export function useUsageLimits() {
   useEffect(() => void loadLimits(), []);
   const slot = useSlot<UsageLimitsReport>("limits");
-  const pending = !!slot.data?.machines?.some((m) => m.status === "pending") && !slot.loading;
+  const pending = !!slot.data?.machines?.some((m) => m.status === "pending");
   useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => void load("limits", "/api/usage/limits", false, true), 3000);
-    return () => clearTimeout(t);
-  }, [pending, slot.at]);
+    const refresh = () => {
+      if (document.visibilityState !== "hidden") void load("limits", "/api/usage/limits", false, true);
+    };
+    const t = setInterval(refresh, pending ? 3000 : 30_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [pending]);
   return slot;
 }
 

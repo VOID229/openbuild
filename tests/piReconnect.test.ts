@@ -168,7 +168,7 @@ test("Pi admission barrier waits for server ack and caches the canonical project
     const canonical = { ...saved, messages: [{ ...saved.messages[0], status: 'done', content: 'Offline result' }] };
     globalThis.fetch = async (url, init) => {
       if (init?.method === 'PUT') { puts++; await new Promise(resolve => { acknowledge = resolve; }); return Response.json({ v: 'canonical-v', chat: canonical }); }
-      if (String(url) === '/api/chats?index') return Response.json({ index: [{ id: saved.id, v: 'canonical-v' }] });
+      if (String(url) === '/api/chats?index' || String(url) === '/api/chats?index&startup') return Response.json({ index: [{ id: saved.id, v: 'canonical-v' }] });
       if (String(url) === '/api/chats/fetch') { detailReads++; throw new Error('canonical response should already be cached'); }
       return config();
     };

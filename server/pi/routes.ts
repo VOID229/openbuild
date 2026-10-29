@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isStreamId, isStreamRef } from "../../shared/replies";
-import { EFFORTS, type ModelInfo, type PiChatRequest } from "../../shared/types";
+import { EFFORTS, isPermissionId, isSpeedId, type ModelInfo, type PiChatRequest, type Speed } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import * as workspaceFiles from "../workspaceFiles";
@@ -20,6 +20,9 @@ import { answer, compact, findShell, startShell, stopShell, restartIdle, steer, 
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
 import * as durable from "../durable";
+import * as fxInstall from "../fx/install";
+import * as codexInstall from "../codex/install";
+import * as cursorInstall from "../cursor/install";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 
@@ -37,7 +40,8 @@ const fail = (err: unknown, status?: number) => {
 const str = (v: unknown, max = 4096): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 
 /** A Pi model as the app's ModelInfo; its id is "<provider>/<model id>". */
-function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook): ModelInfo {
+function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook, speeds?: Record<string, Speed[]>): ModelInfo {
+  const own = speeds?.[`${m.provider}/${m.id}`];
   return {
     id: `${m.provider}/${m.id}`,
     name: m.name || m.id,
@@ -51,6 +55,7 @@ function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook): ModelInf
     provider: m.provider,
     custom: builtins && !builtins.has(m.provider) ? true : undefined,
     ...pricing(m, book),
+    ...(own?.length ? { speeds: own } : {}),
   };
 }
 
@@ -59,10 +64,13 @@ function isPiChat(b: any): b is PiChatRequest {
     !!b &&
     isThreadId(b.threadId) &&
     (b.runtime === undefined || validRuntime(b.runtime)) &&
+    (b.cursorAllowAllTools === undefined || (b.runtime === "cursor" && typeof b.cursorAllowAllTools === "boolean")) &&
+    (b.permission === undefined || ((b.runtime === "codex" || b.runtime === "cursor") && isPermissionId(b.permission))) &&
     str(b.cwd, 1024) &&
     str(b.model, 512) &&
     b.model.includes("/") &&
     EFFORTS.includes(b.effort) &&
+    (b.speed === undefined || isSpeedId(b.speed)) &&
     typeof b.message === "string" &&
     b.message.length < 2_000_000 &&
     Number.isInteger(b.prior) &&
@@ -130,14 +138,15 @@ export function piRoutes(api: Api) {
           if (fresh) forgetPrices();
           // Without the built-in list, every provider keeps its own group; without prices, spend
           // shows only what Pi priced itself.
-          const [r, builtins, book] = await Promise.all([
+          const [r, builtins, book, speeds] = await Promise.all([
             listModels(fresh),
             auth.builtinProviders().catch(() => undefined),
             priceBook().catch((err) => void console.warn("[pi] model prices unavailable:", (err as Error).message)),
+            auth.speedsFromPi(fresh).catch((err) => void console.warn("[pi] model speeds unavailable:", (err as Error).message)),
           ]);
           // `models` stays the full list (routing, priorities and digests use it); `scope` says which
           // of them this device's Pi settings put in the picker.
-          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined)), defaultModel: r.defaultModel, scope: r.scope, checkedAt: r.checkedAt });
+          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined, speeds ?? undefined)), defaultModel: r.defaultModel, scope: r.scope, checkedAt: r.checkedAt });
         } catch (err) {
           return fail(err, 502);
         }
@@ -197,6 +206,64 @@ export function piRoutes(api: Api) {
         }
       }),
     },
+    // ---------------------------------------------------------------- fx (Vercel's coding agent), installed on this device
+    "/api/fx/status": {
+      GET: api(async () => Response.json(await fxInstall.status())),
+    },
+    "/api/fx/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await fxInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    // Native Codex CLI (independent of Pi's openai-codex provider).
+    "/api/codex/status": {
+      GET: api(async () => Response.json(await codexInstall.status())),
+    },
+    "/api/codex/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await codexInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    // Permission modes as each runtime reports them on this device (Codex: for a folder's config layers).
+    "/api/codex/permissions": {
+      GET: api(async (req) => {
+        const url = new URL(req.url), cwd = url.searchParams.get("cwd") ?? undefined;
+        try {
+          return Response.json(await codexInstall.listPermissions(cwd && str(cwd, 1024) && projects.allowedCwd(cwd) ? cwd : undefined, url.searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    "/api/cursor/permissions": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await cursorInstall.listPermissions(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    "/api/cursor/status": {
+      GET: api(async () => Response.json(await cursorInstall.status())),
+    },
+    "/api/cursor/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await cursorInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
     "/api/pi/threads/:id/answer": {
       POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/answer">) => {
         const body = await readJson(req);
@@ -214,6 +281,8 @@ export function piRoutes(api: Api) {
         }
         try {
           if (threadRuntime(req.params.id) === "durable") return bad("Steering isn't available in Durable threads yet.");
+          if (threadRuntime(req.params.id) === "fx") return bad("Steering isn't available in fx threads yet.");
+          if (threadRuntime(req.params.id) === "cursor") return bad("Steering isn't available in Cursor threads yet.");
           return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
         } catch (err) {
           return fail(err, 409);
@@ -234,6 +303,9 @@ export function piRoutes(api: Api) {
         if (!existsSync(body.cwd)) return bad("This thread's folder doesn't exist anymore (was its worktree removed?).", 410);
         if (!projects.allowedCwd(body.cwd)) return bad("That folder isn't a project in OpenBuild", 403);
         if (threadRuntime(threadId) === "durable") return bad("Shell commands aren't available in Durable threads yet.");
+        if (threadRuntime(threadId) === "fx") return bad("Shell commands aren't available in fx threads yet.");
+        if (threadRuntime(threadId) === "codex") return bad("Shell commands aren't available in Codex threads yet.");
+        if (threadRuntime(threadId) === "cursor") return bad("Shell commands aren't available in Cursor threads yet.");
         try {
           claimRuntime(threadId, "pi");
         } catch (err) {
@@ -262,6 +334,9 @@ export function piRoutes(api: Api) {
         const body = await readJson(req);
         try {
           if (threadRuntime(req.params.id) === "durable") return bad("Manual compaction isn't available in Durable threads yet.");
+          if (threadRuntime(req.params.id) === "fx") return bad("Manual compaction isn't available in fx threads yet.");
+          if (threadRuntime(req.params.id) === "codex") return bad("Manual compaction isn't available in Codex threads yet.");
+          if (threadRuntime(req.params.id) === "cursor") return bad("Manual compaction isn't available in Cursor threads yet.");
           return Response.json(await compact(req.params.id, typeof body?.instructions === "string" ? body.instructions : undefined));
         } catch (err) {
           return fail(err);
