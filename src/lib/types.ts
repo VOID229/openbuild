@@ -83,6 +83,8 @@ export interface Settings {
   terminal?: TerminalPosition;
   /** Runtime for new threads; older settings default to Pi. */
   threadRuntime?: ThreadRuntime;
+  /** Runtimes turned off in Settings → Runtimes, per device ("" = this server): hidden from the picker. */
+  disabledRuntimes?: Record<string, ThreadRuntime[]>;
   /** The model new fx threads use ("fx/<id>"); none = fx's own default. */
   fxSelection?: ModelRef;
   /** Native Codex model (codex/<id>), separate from Pi's openai-codex provider. */

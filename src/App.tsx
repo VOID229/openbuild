@@ -22,6 +22,7 @@ import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChats } from "./lib/db";
+import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
@@ -98,10 +99,16 @@ export async function preloadApp() {
   // Settings → Pi and Settings → Providers open with content, not a spinner.
   void hydrated.then(() => {
     const pi = useStore.getState();
+    preloadRuntimeStatuses();
     void Promise.all([pi.loadPiStatus(), pi.loadPiResources(), pi.loadPiProviders()]).catch(() => {});
   });
   // Devices (and so replies running on them) are known only after projects are loaded.
-  preloadingProjects ??= useStore.getState().loadProjects().then(() => resumeReplies()).catch(() => {}).finally(() => { preloadingProjects = undefined; });
+  preloadingProjects ??= useStore.getState().loadProjects().then(() => {
+    resumeReplies();
+    for (const device of useStore.getState().devices) {
+      if (!device.local && device.online !== false) preloadRuntimeStatuses(device.id);
+    }
+  }).catch(() => {}).finally(() => { preloadingProjects = undefined; });
   await Promise.race([Promise.all([hydrated, chats]), new Promise((r) => setTimeout(r, 3000))]);
 }
 

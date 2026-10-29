@@ -82,6 +82,8 @@ export async function installedVersion(): Promise<string | undefined> {
 
 let latest: { version?: string; error?: string; at: number } | undefined;
 
+export function forgetLatestVersion(): void { latest = undefined; }
+
 /** The newest published Pi, from npm (cached for an hour unless `fresh`). */
 export async function latestVersion(fresh = false): Promise<{ version?: string; error?: string }> {
   if (!fresh && latest && Date.now() - latest.at < 60 * 60 * 1000) return latest;

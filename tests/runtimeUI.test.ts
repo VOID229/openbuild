@@ -49,6 +49,39 @@ function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
   useStore.setState({ settings: { ...initialSettings, workspace: { mode: "local" }, ...settings }, chats, activeChatId: undefined, projects: [], selections: {} });
 }
 
+test("runtime settings immediately render cached versions and update buttons, not commands or row spinners", async () => {
+  const originalFetch = globalThis.fetch;
+  const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
+  const { RuntimesSection } = await import("../src/components/RuntimeSettings");
+  globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, {
+    installed: true, version: "1.0.0", latest: "2.0.0", updateAvailable: true, install: "secret-update-command",
+  }])) })) as unknown as typeof fetch;
+  try {
+    reset();
+    await loadRuntimeStatuses(true);
+    const html = markup(createElement(RuntimesSection));
+    expect(html).toContain("v1.0.0");
+    expect(html).toContain('aria-label="Update Claude Code"');
+    expect(html).toContain('aria-label="Update Codex"');
+    expect(html).toContain('aria-label="Update Pi"');
+    expect(html).toContain('class="badge badge-accent rt-update"');
+    expect(html).toContain('class="rt-update-version" aria-hidden="true">2.0.0 available');
+    expect(html).toContain('class="rt-update-action" aria-hidden="true">Update');
+    expect(html).not.toContain('class="rt-detail"');
+    expect(html).not.toContain("secret-update-command");
+    expect(html).not.toContain("Update with:");
+    expect(html).not.toContain('class="spinner');
+    globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, {
+      installed: true, version: "2.0.0", latest: "2.0.0", updateAvailable: false, install: "secret-update-command",
+    }])) })) as unknown as typeof fetch;
+    await loadRuntimeStatuses(true);
+    const updated = markup(createElement(RuntimesSection));
+    expect(updated).toContain("v2.0.0");
+    expect(updated).not.toContain('class="badge badge-accent rt-update"');
+    expect(updated).not.toContain("2.0.0 available");
+  } finally { globalThis.fetch = originalFetch; reset(); }
+});
+
 test("files and terminals keep the folder's device instead of inheriting the scratch-device preference", async () => {
   const { terminalFolder, refreshTerminal, useTerminal, useSideTerminal } = await import("../src/lib/terminal");
   const { usePanel } = await import("../src/lib/panel");

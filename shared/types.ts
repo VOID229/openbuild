@@ -417,6 +417,21 @@ export interface RuntimeAvailability {
   install: string;
 }
 
+/** A runtime's full state on a device (GET /api/runtimes/status), for Settings → Runtimes. */
+export interface RuntimeStatus extends RuntimeAvailability {
+  /** The program, or package directory, that was found. */
+  bin?: string;
+  version?: string;
+  /** Newest published version, for runtimes with a package registry to ask. */
+  latest?: string;
+  updateAvailable: boolean;
+  checkError?: string;
+  /** Whether the runtime has a sign-in it can use; undefined when it doesn't say. */
+  signedIn?: boolean;
+  /** What went wrong asking the runtime about itself. */
+  error?: string;
+}
+
 /** A turn of a thread, run by Pi in the thread's workspace. */
 export interface PiChatRequest {
   threadId: string;

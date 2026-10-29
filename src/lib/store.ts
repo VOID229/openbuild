@@ -14,7 +14,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
-export type SettingsSection = "security" | "account" | "profile" | "general" | "shortcuts" | "pi" | "keys" | "projects" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
+export type SettingsSection = "security" | "account" | "profile" | "general" | "shortcuts" | "pi" | "keys" | "runtimes" | "projects" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",

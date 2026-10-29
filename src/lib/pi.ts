@@ -1,6 +1,6 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { Device, GitInfo, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, Workspace } from "../../shared/types";
+import type { Device, GitInfo, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeStatus, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
@@ -35,6 +35,13 @@ export interface PiStatus {
 export const piStatus = (fresh = false, deviceId?: DeviceId) => get<PiStatus>(apiUrl(deviceId, `/api/pi/status${fresh ? "?fresh=1" : ""}`));
 export const installPi = (deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/install"), "POST");
 export const updatePi = (all = false, deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/update"), "POST", { all });
+
+/** Every thread runtime's state on a device: installed, version, updates, sign-in, errors. */
+export const runtimeStatuses = (fresh = false, deviceId?: DeviceId) =>
+  get<{ runtimes: Record<ThreadRuntime, RuntimeStatus> }>(apiUrl(deviceId, `/api/runtimes/status${fresh ? "?fresh=1" : ""}`)).then((r) => r.runtimes);
+
+export const updateRuntime = (runtime: ThreadRuntime, deviceId?: DeviceId) =>
+  send<{ job: string }>(apiUrl(deviceId, "/api/runtimes/update"), "POST", { runtime });
 
 /** Follow the current maintenance job's output; resolves with its exit code. */
 export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void, deviceId?: DeviceId): Promise<{ code?: number; title?: string } | undefined> {

@@ -80,7 +80,7 @@ function ErrorNote({ children }: { children: ReactNode }) {
  * Which device's Pi Settings is looking at: undefined for this one. Loads the device list if Settings
  * opened before it arrived, and drops a device that was unpaired while the page was open.
  */
-function usePiDevice(): [string | undefined, (id: string | undefined) => void] {
+export function usePiDevice(): [string | undefined, (id: string | undefined) => void] {
   const [deviceId, setDeviceId] = useState<string>();
   const devices = useStore((s) => s.devices);
   const devicesLoaded = useStore((s) => s.devicesLoaded);
@@ -95,7 +95,7 @@ function usePiDevice(): [string | undefined, (id: string | undefined) => void] {
 }
 
 /** The "Manage Pi on" row, shown once another computer is paired. */
-function DeviceRow({ deviceId, onChange }: { deviceId?: string; onChange: (id: string | undefined) => void }) {
+export function DeviceRow({ deviceId, onChange, title = "Manage Pi on", label = "Device whose Pi to manage" }: { deviceId?: string; onChange: (id: string | undefined) => void; title?: string; label?: string }) {
   const devices = useStore((s) => s.devices);
   const local = devices.find((d) => d.local);
   const remote = devices.filter((d) => !d.local);
@@ -103,12 +103,12 @@ function DeviceRow({ deviceId, onChange }: { deviceId?: string; onChange: (id: s
   return (
     <div className="pi-row pi-device">
       <span className="pi-row-text">
-        <span className="pi-row-name">Manage Pi on</span>
+        <span className="pi-row-name">{title}</span>
         <span className="pi-row-desc">What this page shows and changes belongs to the device you pick.</span>
       </span>
       <OptionSelect
         className="pi-row-field"
-        label="Device whose Pi to manage"
+        label={label}
         value={deviceId ?? ""}
         options={[
           { value: "", label: local ? `This device — ${local.name}` : "This device" },
@@ -121,7 +121,7 @@ function DeviceRow({ deviceId, onChange }: { deviceId?: string; onChange: (id: s
 }
 
 /** Output of the running (or last) maintenance job on a device, followed live. */
-function useJob(onDone: () => void, deviceId?: string) {
+export function useJob(onDone: () => void, deviceId?: string) {
   const [lines, setLines] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<{ code?: number; title?: string }>();
@@ -156,7 +156,7 @@ function useJob(onDone: () => void, deviceId?: string) {
   return { lines, running, result, follow };
 }
 
-function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
+export function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
   const ref = useRef<HTMLPreElement>(null);
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight });
@@ -445,7 +445,7 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
  * A paired device that answers 403 runs an OpenBuild whose allowlist predates managing Pi from
  * another device: say that instead of the proxy's bare "Forbidden".
  */
-function deviceRefusal(err: Error, where?: string): string {
+export function deviceRefusal(err: Error, where?: string): string {
   return err.message === "Forbidden" && where
     ? `${where} refused the request: it runs an older OpenBuild, which doesn't allow managing Pi from another computer. Update OpenBuild there and restart it.`
     : err.message;
@@ -518,7 +518,7 @@ export function PiSection() {
 
   return (
     <>
-      <Heading>Pi</Heading>
+      <Heading>Pi agent</Heading>
       <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
       <section className="pi-card">
         {!status ? (

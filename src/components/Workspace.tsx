@@ -8,7 +8,8 @@ import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { deviceName, splitProjectId } from "../lib/devices";
-import { useStore } from "../lib/store";
+import { threadDevice, useStore } from "../lib/store";
+import { RUNTIMES } from "../lib/runtimes";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
@@ -350,17 +351,16 @@ export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: n
 function RuntimeMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const runtime = useStore((s) => s.settings.threadRuntime ?? "pi");
+  const selected = useStore((s) => s.settings.threadRuntime ?? "pi");
   const updateSettings = useStore((s) => s.updateSettings);
-  const options: { runtime: ThreadRuntime; label: string; desc: string }[] = [
-    { runtime: "pi", label: "Default", desc: "Tools and extensions" },
-    { runtime: "durable", label: "Durable", desc: "Resumes after crashes" },
-    { runtime: "claude", label: "Claude Code", desc: "Anthropic's native coding agent" },
-    { runtime: "opencode", label: "OpenCode", desc: "OpenCode's native coding agent" },
-    { runtime: "codex", label: "Codex", desc: "OpenAI's native coding agent" },
-    { runtime: "cursor", label: "Cursor", desc: "Cursor's native coding agent" },
-    { runtime: "fx", label: "fx", desc: "Vercel's coding agent" },
-  ];
+  // Runtimes turned off in Settings → Runtimes for the device new threads run on aren't offered.
+  const device = useStore((s) => threadDevice(s));
+  const disabled = useStore((s) => s.settings.disabledRuntimes?.[device ?? ""]);
+  const options = useMemo(() => RUNTIMES.filter((o) => !disabled?.includes(o.runtime)), [disabled]);
+  const runtime = options.some((o) => o.runtime === selected) ? selected : (options[0]?.runtime ?? selected);
+  useEffect(() => {
+    if (runtime !== selected) updateSettings({ threadRuntime: runtime });
+  }, [runtime, selected, updateSettings]);
   const tip = runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
   return (
     <>

@@ -1,4 +1,4 @@
-import { ArrowUp, Bell, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Bell, Boxes, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
@@ -14,14 +14,16 @@ import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
 import { ShortcutsSection } from "./ShortcutSettings";
 import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
 import { PluginsSection } from "./PluginSettings";
+import { RuntimesSection } from "./RuntimeSettings";
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "general", label: "General", icon: Settings2 },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
-  { id: "pi", label: "Pi", icon: SquareTerminal },
+  { id: "pi", label: "Pi agent", icon: SquareTerminal },
   { id: "keys", label: "Providers", icon: Key },
+  { id: "runtimes", label: "Runtimes", icon: Boxes },
   { id: "projects", label: "Projects", icon: FolderGit2 },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
@@ -499,6 +501,7 @@ export function SettingsModal() {
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "pi" && <PiSection />}
           {section === "keys" && <ProvidersSection />}
+          {section === "runtimes" && <RuntimesSection />}
           {section === "projects" && <ProjectsSection />}
           {section === "appearance" && (
             <>

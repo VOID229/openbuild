@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isStreamId, isStreamRef } from "../../shared/replies";
-import { EFFORTS, isPermissionId, isSpeedId, type ModelInfo, type PiChatRequest, type Speed } from "../../shared/types";
+import { EFFORTS, isPermissionId, isSpeedId, type ModelInfo, type PiChatRequest, type Speed, type ThreadRuntime } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import * as workspaceFiles from "../workspaceFiles";
@@ -25,7 +25,7 @@ import * as codexInstall from "../codex/install";
 import * as cursorInstall from "../cursor/install";
 import * as claudeInstall from "../claude/install";
 import * as opencodeInstall from "../opencode-agent/install";
-import { runtimes } from "../runtimes";
+import { assertRuntimeUpdated, forgetRuntimeStatus, runtimeStatus, runtimes, runtimeUpdateCommand } from "../runtimes";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 
@@ -87,6 +87,35 @@ const validImages = (images: any) =>
   images === undefined || (Array.isArray(images) && images.length <= 20 && images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100)));
 
 export function piRoutes(api: Api) {
+  // Pi and Durable deliberately use the exact same maintenance path as /api/pi/update.
+  const updateRuntime = (runtime: ThreadRuntime, all = false): Response => {
+    try {
+      const command = runtimeUpdateCommand(runtime, all);
+      const running = currentJob();
+      if (running && !running.done) return Response.json({ error: "A maintenance job is already running", job: running.id }, { status: 409 });
+      const isPi = runtime === "pi" || runtime === "durable";
+      const job = startJob(isPi ? (all ? "Updating Pi and its packages" : "Updating Pi") : `Updating ${runtime}`, command, async (finished) => {
+        // Invalidate on failures too: installers can change files before failing.
+        forgetRuntimeStatus();
+        if (isPi) {
+          forgetModels();
+          if (finished.code === 0) void restartIdle().catch(err => console.warn("[pi] restart after update:", err));
+        } else {
+          ({ claude: claudeInstall, codex: codexInstall, cursor: cursorInstall, fx: fxInstall, opencode: opencodeInstall }[runtime as "claude" | "codex" | "cursor" | "fx" | "opencode"]).forgetModels();
+        }
+        if (finished.code === 0) {
+          finished.lines.push("Verifying the installed runtime version…");
+          const status = (await runtimeStatus(true))[runtime];
+          assertRuntimeUpdated(status);
+          finished.lines.push(`Verified ${runtime} ${status.version} at ${status.bin ?? "its configured path"}.`);
+        }
+      });
+      forgetRuntimeStatus();
+      return Response.json({ job: job.id });
+    } catch (err) {
+      return fail(err);
+    }
+  };
   /** A git action on a workspace the server knows: `{ cwd, … }` in, its result (or why it failed) out. */
   const gitAction = (action: (body: any) => Promise<unknown>) =>
     api(async (req: Request) => {
@@ -106,17 +135,14 @@ export function piRoutes(api: Api) {
     "/api/pi/install": {
       POST: api(() => {
         if (piBin()) return bad("Pi is already installed");
-        const job = startJob("Installing Pi", ["sh", "-c", "curl -fsSL https://pi.dev/install.sh | sh"], () => forgetModels());
+        const job = startJob("Installing Pi", ["sh", "-c", "curl -fsSL https://pi.dev/install.sh | sh"], () => { forgetModels(); forgetRuntimeStatus(); });
         return Response.json({ job: job.id });
       }),
     },
     "/api/pi/update": {
       POST: api(async (req) => {
-        const bin = piBin();
-        if (!bin) return bad("Pi isn't installed");
         const body = await readJson(req);
-        const job = startJob(body?.all ? "Updating Pi and its packages" : "Updating Pi", [bin, "update", body?.all ? "--all" : "--self"], () => restartIdle());
-        return Response.json({ job: job.id });
+        return updateRuntime("pi", !!body?.all);
       }),
     },
     "/api/pi/job": {
@@ -212,6 +238,17 @@ export function piRoutes(api: Api) {
     // Which thread runtimes are installed on this device, for the new-thread runtime picker.
     "/api/runtimes": {
       GET: api(() => Response.json({ runtimes: runtimes() })),
+    },
+    // Version, updates, sign-in and errors for every runtime, for Settings → Runtimes.
+    "/api/runtimes/status": {
+      GET: api(async (req) => Response.json({ runtimes: await runtimeStatus(new URL(req.url).searchParams.has("fresh")) })),
+    },
+    "/api/runtimes/update": {
+      POST: api(async (req) => {
+        const body = await readJson(req);
+        if (!validRuntime(body?.runtime)) return bad("Unknown runtime");
+        return updateRuntime(body.runtime);
+      }),
     },
     // ---------------------------------------------------------------- fx (Vercel's coding agent), installed on this device
     "/api/fx/status": {

@@ -1,6 +1,6 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../shared/types";
 // rpc imports these functions but does not instantiate until discovery is called.
 import { CodexProcess } from "./rpc";
@@ -8,6 +8,19 @@ export const CODEX_INSTALL = "npm install -g @openai/codex";
 export function codexBin(): string | undefined {
   if (process.env.CODEX_BIN) return existsSync(process.env.CODEX_BIN) ? process.env.CODEX_BIN : undefined;
   return Bun.which("codex", { PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` }) ?? undefined;
+}
+/** Update the installation we actually resolve, not an unrelated npm global on PATH. */
+export function codexUpdateCommand(bin: string): string[] {
+  const resolved = realpathSync(bin);
+  if (resolved.includes(`${sep}standalone${sep}releases${sep}`)) return [bin, "update"];
+  // npm's launcher lives at <prefix>/lib/node_modules/@openai/codex/bin/codex.js.
+  const suffix = join("lib", "node_modules", "@openai", "codex", "bin", "codex.js");
+  if (resolved.endsWith(`${sep}${suffix}`)) {
+    const prefix = resolved.slice(0, -suffix.length - 1);
+    return ["npm", "install", "-g", "--prefix", prefix, "@openai/codex@latest"];
+  }
+  // New standalone releases know how to update themselves. Never silently install a second copy.
+  return [bin, "update"];
 }
 export function codexEnv(): Record<string, string> { return { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>; }
 export interface CodexStatus { installed: boolean; bin?: string; version?: string; provider?: string; connected?: string[]; install: string; error?: string }
