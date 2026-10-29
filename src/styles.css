@@ -7340,9 +7340,11 @@ a.btn-primary {
 /* The panel expanded over it: the thread stays mounted (and where it was scrolled), just hidden. */
 .main-col-hidden { display: none; }
 
+/* Same 3px inset as the left floating tools: with the 34px buttons that puts the icons'
+   centre at 30px, the centre of the 12px-padded page headers (Usage's 36px segmented controls). */
 .thread-tools {
   position: absolute;
-  top: 7px;
+  top: 10px;
   right: 8px;
   z-index: 20;
   display: flex;
