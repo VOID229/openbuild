@@ -26,26 +26,33 @@ function setup() {
 import { appendFileSync } from 'node:fs';
 const out = (x) => process.stdout.write(JSON.stringify(x)+'\n');
 let timer;
-const settled = () => { out({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'finished'}}); out({type:'agent_settled'}); };
+let busy = process.argv.includes("thread_orphan");
+const settled = () => { busy = false; out({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'finished'}}); out({type:'agent_settled'}); };
 for await (const line of console) {
  const r=JSON.parse(line);
  const reply=(data={})=>out({type:'response',id:r.id,success:true,data});
- if(r.type==='get_state') reply({sessionFile:process.env.FAKE_SESSION,model:{provider:'test',id:'fake'}});
+ if(r.type==='get_state') reply({isStreaming:busy,sessionFile:process.env.FAKE_SESSION,model:{provider:'test',id:'fake'}});
  else if(r.type==='get_fork_messages') reply({messages:[]});
  else if(r.type==='get_available_thinking_levels') reply({levels:['off']});
  else if(r.type==='get_session_stats') reply({});
  else if(r.type==='prompt') {
+   busy = true;
    appendFileSync(process.env.FAKE_EFFECTS, r.message+'\n');
    reply(); out({type:'agent_start'}); out({type:'message_start',message:{role:'user'}});
    out({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'started-'}});
-   if(r.message==='ask') out({type:'extension_ui_request',method:'input',id:'question',title:'Question'});
+   if(r.message==='continue') timer=setTimeout(() => {
+     out({type:'agent_settled'});
+     out({type:'agent_start'});
+     out({type:'extension_ui_request',method:'input',id:'continued-question',title:'Continue?'});
+   }, 50);
+   else if(r.message==='ask') out({type:'extension_ui_request',method:'input',id:'question',title:'Question'});
    else if(r.message!=='hang') timer=setTimeout(settled,700);
    else { appendFileSync(process.env.FAKE_EFFECTS+'.pids',String(process.pid)+'\n'); timer=setInterval(()=>{},1000); }
  } else if(r.type==='bash') {
    out({type:'bash_execution_update',id:r.id,delta:'shell-output'});
    setTimeout(()=>reply({output:'shell-output',exitCode:0,cancelled:false,truncated:false}),200);
  } else if(r.type==='extension_ui_response') { settled(); }
- else if(r.type==='abort') { clearTimeout(timer); reply(); out({type:'agent_settled'}); }
+ else if(r.type==='abort') { appendFileSync(process.env.FAKE_EFFECTS+'.aborts','abort\n'); busy = false; clearTimeout(timer); reply(); out({type:'agent_settled'}); }
  else reply();
 }
 `);
@@ -142,3 +149,33 @@ test("crash records are interrupted and never automatically rerun; asks and expl
   await third.deleteThread("thread_deleted");
   await expect(third.startRun({ ...f.req("deleted"), threadId: "thread_deleted" })).rejects.toMatchObject({ status: 410 });
 }, 20000);
+
+
+test("extension continuation after agent_settled keeps the reply and question attached", async () => {
+  const f = setup();
+  await f.launch();
+  const c = f.client();
+  const run = await c.startRun(f.req("continuation", "continue"));
+  await until(() => run.events.some((e) => e.t === "ask"));
+  await Bun.sleep(100);
+  expect(run.ended).toBe(false);
+  expect(await c.answer("thread_continuation", "continued-question", { value: "yes" })).toBe(true);
+  await until(() => run.ended);
+  expect(run.events.some((e) => e.t === "text" && e.v === "finished")).toBe(true);
+  expect(run.events.some((e) => e.t === "error")).toBe(false);
+  const next = await c.startRun({ ...f.req("after-continuation"), threadId: "thread_continuation" });
+  await until(() => next.ended);
+  expect(next.events.some((e) => e.t === "error")).toBe(false);
+});
+
+
+test("a new message stops an unowned busy Pi run before submitting its prompt", async () => {
+  const f = setup();
+  await f.launch();
+  const run = await f.client().startRun(f.req("orphan"));
+  await until(() => run.ended);
+  expect(readFileSync(f.env.FAKE_EFFECTS + ".aborts", "utf8")).toBe("abort\n");
+  expect(readFileSync(f.env.FAKE_EFFECTS, "utf8")).toBe("normal\n");
+  expect(run.events.some((e) => e.t === "done")).toBe(true);
+  expect(run.events.some((e) => e.t === "error")).toBe(false);
+});

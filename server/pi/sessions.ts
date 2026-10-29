@@ -285,6 +285,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         const turn: NonNullable<Live["turn"]> = { taking: false, steers: [] };
         l.turn = turn;
         const proc = l.proc;
+        await l.ready;
+        // An extension can start another run after agent_settled. Older workers may have
+        // already closed its stream: stop that unowned run before rewinding or resending.
+        const initial = await proc.send<{ isStreaming?: boolean }>({ type: "get_state" });
+        if (initial.isStreaming) {
+          for (const id of l.asks.keys()) answer(req.threadId, id, { cancelled: true });
+          await proc.send({ type: "abort" });
+          await proc.send({ type: "clear_queue" });
+        }
         l.emit = send;
         for (const ask of l.asks.values()) send(ask);
 
@@ -292,6 +301,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         let settled!: () => void;
         const done = new Promise<void>((r) => (settled = r));
         let started = false;
+        let generation = 0;
         let lastText = false;
         let wroteText = false;
         let lastThought = false;
@@ -304,6 +314,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           switch (r.type) {
             case "agent_start":
               started = true;
+              generation++;
               break;
             case "message_start":
               drawing.clear();
@@ -395,7 +406,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               if (r.errorMessage) send({ t: "notice", message: `Compacting failed: ${r.errorMessage}` });
               break;
             case "agent_settled":
-              settled();
+              // This event ends one Pi run, but an extension may immediately start
+              // another (e.g. a subagent result). Keep its output and questions attached.
+              const endedGeneration = generation;
+              void proc.send<{ isStreaming?: boolean }>({ type: "get_state" }).then((state) => {
+                if (generation === endedGeneration && !state.isStreaming) settled();
+              }).catch((err) => {
+                lastError = (err as Error).message;
+                settled();
+              });
               break;
             case "process_exit":
               lastError = r.message;
