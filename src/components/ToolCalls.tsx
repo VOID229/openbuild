@@ -1,7 +1,7 @@
 // What Pi did while answering: each run of tool calls folded into one line ("Read 3 files, ran 2
 // commands") that opens to a row per call and its output or diff, with what Pi is doing right now
 // under it; and the questions Pi extensions ask on the way.
-import { Bot, Brain, Check, ChevronRight, CircleAlert, Eye, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, PanelTop, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Eye, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, PanelTop, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -356,16 +356,41 @@ function AskField({ value, setValue, placeholder, multiline, autoFocus, secret }
 export function AskCard({ part, chatId, messageId, block }: { part: AskPart; chatId: string; messageId: string; block?: number }) {
   const [value, setValue] = useState(part.prefill ?? "");
   const answered = part.answer !== undefined;
+  const [review, setReview] = useState(false);
+  const reviewable = answered && !!part.options?.length;
   const reply = (r: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void answerQuestion(chatId, messageId, part, r);
   return (
-    <div className={cx("ask", answered && "ask-answered")} role="group" aria-label={part.title} data-block={block}>
+    <div className={cx("ask", answered && "ask-answered", reviewable && "ask-reviewable", review && "ask-review-open")} role="group" aria-label={part.title} data-block={block}>
       <div className="ask-head">
         <MessageCircleQuestion size={15} />
         <span className="ask-title">{part.title}</span>
       </div>
       {part.message && <p className="ask-message">{part.message}</p>}
       {answered ? (
-        <p className="ask-answer">{part.answer ? <><Check size={13} /> {part.answer}</> : <><X size={13} /> No answer</>}</p>
+        <>
+          <p className="ask-answer">{part.answer ? <><Check size={13} /> {part.answer}</> : <><X size={13} /> No answer</>}</p>
+          {reviewable && (
+            <>
+              {/* Read-only look back at the choices that were offered. */}
+              <Fold open={review} className="ask-review">
+                <div className="ask-choices" aria-label="Options offered">
+                  {part.options!.map((o, i) => {
+                    const picked = o === part.answer;
+                    return (
+                      <div key={o} className={cx("ask-choice ask-choice-past", picked && "ask-choice-picked")}>
+                        <span className="ask-letter">{picked ? <Check size={12} /> : i < 26 ? String.fromCharCode(65 + i) : i + 1}</span>
+                        <span>{o}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Fold>
+              <button type="button" className="ask-review-toggle" aria-expanded={review} aria-label={review ? "Hide options" : "Show options"} title={review ? "Hide options" : "Show options"} onClick={() => setReview((v) => !v)}>
+                <ChevronDown size={14} />
+              </button>
+            </>
+          )}
+        </>
       ) : part.method === "confirm" ? (
         <div className="ask-actions">
           <button type="button" className="btn btn-sm btn-primary" onClick={() => reply({ confirmed: true })}>

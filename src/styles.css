@@ -5106,6 +5106,60 @@ p.key-status svg {
   box-shadow: none;
 }
 
+/* Answered question_ask: a chevron in the bottom-right re-shows the options, read-only. */
+.ask-reviewable {
+  position: relative;
+  padding-right: 40px;
+}
+
+.ask-review-toggle {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--text-3);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+.ask-review-toggle svg {
+  transition: transform var(--med) var(--ease);
+}
+
+.ask-review-open .ask-review-toggle svg {
+  transform: rotate(180deg);
+}
+
+@media (hover: hover) {
+  .ask-review-toggle:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
+.ask-choice-past {
+  cursor: default;
+  color: var(--text-2);
+  opacity: 0.6;
+}
+
+.ask-choice-past:hover {
+  background: none;
+  border-color: var(--border);
+}
+
+.ask-choice-picked {
+  opacity: 1;
+  border-color: var(--border-strong);
+}
+
+.ask-choice-picked .ask-letter {
+  color: var(--text);
+}
+
 .ask-head {
   display: flex;
   align-items: center;
