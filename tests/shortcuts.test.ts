@@ -100,6 +100,8 @@ describe("shortcut bindings", () => {
   test("reads defaults and saves overrides per action", () => {
     const defaults = { shortcuts: {} };
     expect(shortcutValue(defaults, "toggleSidebar")).toBe("mod+KeyB");
+    expect(shortcutValue(defaults, "toggleRightSidebar")).toBe("mod+KeyI");
+    expect(shortcutBinding(defaults, "toggleRightSidebar")).toEqual({ mod: true, alt: false, shift: false, code: "KeyI" });
     expect(shortcutBinding(defaults, "toggleSidebar")).toEqual({ mod: true, alt: false, shift: false, code: "KeyB" });
     expect(isDefaultShortcut(defaults, "toggleSidebar")).toBe(true);
     const custom = { shortcuts: { toggleSidebar: "alt+KeyB", newThread: "none" } };

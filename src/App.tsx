@@ -77,10 +77,12 @@ function Home() {
   );
 }
 
+let preloadingProjects: Promise<void> | undefined;
+
 /**
- * Settings, threads and projects, fetched together before the app first renders so it appears in
- * one piece instead of the sidebar filling in afterwards. A slow server doesn't hold it back for
- * long: past the deadline the app renders and whatever's missing fills in when it arrives.
+ * Fetch settings, threads and projects together. Only settings and threads gate the first render:
+ * paired-device project discovery can wait on sleeping machines and must not delay the sidebar.
+ * Past the deadline, whatever's missing fills in when it arrives.
  */
 export async function preloadApp() {
   const hydrated = new Promise<void>((resolve) => {
@@ -98,10 +100,9 @@ export async function preloadApp() {
     const pi = useStore.getState();
     void Promise.all([pi.loadPiStatus(), pi.loadPiResources(), pi.loadPiProviders()]).catch(() => {});
   });
-  const all = Promise.all([hydrated, chats, useStore.getState().loadProjects()]);
   // Devices (and so replies running on them) are known only after projects are loaded.
-  void all.then(() => resumeReplies());
-  await Promise.race([all, new Promise((r) => setTimeout(r, 3000))]);
+  preloadingProjects ??= useStore.getState().loadProjects().then(() => resumeReplies()).catch(() => {}).finally(() => { preloadingProjects = undefined; });
+  await Promise.race([Promise.all([hydrated, chats]), new Promise((r) => setTimeout(r, 3000))]);
 }
 
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
@@ -187,7 +188,7 @@ function Main() {
     if (!useStore.getState().chatsLoaded) void load(1000);
     // Projects, and the models Pi can use (cached ones stay usable meanwhile).
     ensureSelection();
-    if (!useStore.getState().projectsLoaded) void useStore.getState().loadProjects();
+    if (!useStore.getState().projectsLoaded && !preloadingProjects) void useStore.getState().loadProjects();
     void useStore.getState().refreshDetection();
     // Re-ask Pi when the tab comes back after a while (a provider signed in elsewhere, new models).
     const STALE = 10 * 60 * 1000;
@@ -255,8 +256,8 @@ function Main() {
     };
   }, [chatsLoaded]);
 
-  // Global shortcuts (Settings → Shortcuts): new thread, sidebar, terminal, dictation, settings and
-  // search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // Global shortcuts (Settings → Shortcuts): new thread, left and right sidebars, terminal, dictation,
+  // settings and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
   // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
   // a shortcut is being recorded there.
   useEffect(() => {
@@ -270,6 +271,15 @@ function Main() {
         case "toggleSidebar":
           st.setSidebarOpen(!st.sidebarOpen);
           break;
+        case "toggleRightSidebar": {
+          const { panel, tree, folder: panelFolder, setPanel, setTree } = usePanel.getState();
+          // Nothing to show without the thread's folder.
+          if (!panelFolder?.cwd) break;
+          // On a phone there's room for one at a time, as with the panel's own switch.
+          if (!panel && window.innerWidth <= 768 && tree) setTree(false);
+          setPanel(!panel);
+          break;
+        }
         case "toggleTerminal":
           // The browser's own Cmd/Ctrl+J (downloads) doesn't get it: the app is what has focus.
           // Stopped in the handler so a focused terminal doesn't also take it (Ctrl+J is a line feed there).

@@ -10,6 +10,7 @@ import type { Settings } from "./types";
 export type ShortcutId =
   | "newThread"
   | "toggleSidebar"
+  | "toggleRightSidebar"
   | "toggleTerminal"
   | "openSettings"
   | "focusSearch"
@@ -36,9 +37,15 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   },
   {
     id: "toggleSidebar",
-    label: "Toggle sidebar",
-    description: "Show or hide the thread list.",
+    label: "Toggle left sidebar",
+    description: "Show or hide the thread list on the left.",
     default: "mod+KeyB",
+  },
+  {
+    id: "toggleRightSidebar",
+    label: "Toggle right sidebar",
+    description: "Show or hide the side panel with files and terminals on the right.",
+    default: "mod+KeyI",
   },
   {
     id: "toggleTerminal",
