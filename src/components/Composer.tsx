@@ -6,6 +6,7 @@ import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands"
 import { compactThread } from "../lib/pi";
 import { useFieldDictation } from "../lib/useFieldDictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
+import { rememberDraftSelection, restoreDraftSelection } from "../lib/draftSelection";
 import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
@@ -414,6 +415,12 @@ export function Composer({ variant, chatId, streaming }: Props) {
     mounted.current = true;
   }, [text, files]);
 
+  // Restore before focusing, including when IndexedDB finishes loading a draft after mount.
+  // Input/select events save the live caret first, so ordinary typing keeps its position too.
+  useLayoutEffect(() => {
+    if (!editing && textarea.current) restoreDraftSelection(draftKey, textarea.current);
+  }, [draftKey, text, !!editing]);
+
   // Focus on mount / chat switch (skip on touch devices to avoid popping the keyboard).
   useEffect(() => {
     if (window.matchMedia("(pointer: fine)").matches) textarea.current?.focus();
@@ -784,6 +791,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           aria-label="Message"
           onChange={(e) => {
             lastTyped.current = Date.now();
+            if (!editing) rememberDraftSelection(draftKey, e.currentTarget);
             setText(e.target.value);
             setMentionDismissed(undefined);
             syncMention(e.target.value, e.target.selectionStart);
@@ -791,7 +799,10 @@ export function Composer({ variant, chatId, streaming }: Props) {
           onKeyDown={onKeyDown}
           onKeyUp={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
           onClick={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
-          onSelect={(e) => syncMention(e.currentTarget.value, e.currentTarget.selectionStart)}
+          onSelect={(e) => {
+            if (!editing) rememberDraftSelection(draftKey, e.currentTarget);
+            syncMention(e.currentTarget.value, e.currentTarget.selectionStart);
+          }}
           onPaste={onPaste}
         />
         <div className="composer-bar">
