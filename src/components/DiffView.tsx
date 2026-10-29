@@ -104,7 +104,9 @@ const FileSection = memo(function FileSection({ file, open, onToggle }: { file: 
         </span>
       </button>
       {open && (
+        // Each file scrolls sideways on its own, only as far as its longest line.
         <div className="dv-lines">
+          <div className="dv-rows">
           {file.binary ? (
             <div className="dv-empty-file">Binary file</div>
           ) : !file.lines.length ? (
@@ -125,6 +127,7 @@ const FileSection = memo(function FileSection({ file, open, onToggle }: { file: 
               ),
             )
           )}
+          </div>
         </div>
       )}
     </section>

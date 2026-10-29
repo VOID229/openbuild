@@ -7593,7 +7593,7 @@ a.btn-primary {
 
 /* The diff tab: one section per changed file, lines numbered old and new. */
 .diff-view, .browser-view { display: flex; flex-direction: column; height: 100%; }
-.dv-body { position: relative; flex: 1; min-height: 0; overflow: auto; }
+.dv-body { position: relative; flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; }
 .dv-file { border-bottom: 1px solid var(--border); }
 
 .dv-file-head {
@@ -7627,15 +7627,21 @@ a.btn-primary {
 .dv-adds { color: var(--ok); }
 .dv-dels { color: var(--danger); }
 
+/* Sideways scrolling is per file and stops at that file's longest line, so the view can't be
+   scrolled off into empty space by some other file's long line. */
 .dv-lines {
-  min-width: max-content;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   padding-bottom: 4px;
   font-family: var(--font-mono-ui);
   font-size: 11.5px;
   line-height: 1.55;
 }
 
-.dv-wrap .dv-lines { min-width: 0; }
+.dv-rows { width: max-content; min-width: 100%; }
+.dv-wrap .dv-rows { width: auto; }
+/* A long hunk header is cut off rather than widening the scroll. */
+.dv-hunk { contain: inline-size; }
 
 .dv-line { display: flex; }
 .dv-no { flex: none; width: 40px; padding-right: 8px; color: var(--text-3); opacity: 0.7; text-align: right; user-select: none; -webkit-user-select: none; }
