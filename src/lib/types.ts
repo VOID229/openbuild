@@ -58,7 +58,9 @@ export interface Settings {
   effort: Effort;
   /** Per-model reasoning defaults on the new-thread screen. */
   modelEfforts?: Record<string, Effort>;
-  /** Per-model speed (service tier id, "" = standard) on the new-thread screen. */
+  /** Last selected permission per runtime for new threads ("" = configured default). */
+  runtimePermissions?: Partial<Record<"codex" | "cursor" | "claude", string>>;
+  /** Last selected per-model speed (service tier id, "" = standard) for new threads. */
   modelSpeeds?: Record<string, string>;
   /** Web search: let models call the configured search providers. */
   webSearch: boolean;

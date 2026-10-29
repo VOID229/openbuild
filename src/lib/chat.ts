@@ -10,7 +10,7 @@ import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { deviceName, deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
-import { deviceDetection, hasPermissionModes, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
+import { deviceDetection, hasPermissionModes, permissionOf, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
 import { effortFor, speedFor, supportedSpeed } from "./effort";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
@@ -226,9 +226,8 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
   const chat: Chat = existing
     ? { ...existing, runtime: existing.runtime ?? "pi", updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", ...(hasPermissionModes(st.settings.threadRuntime) && st.draftPermission ? { permission: st.draftPermission } : {}), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
+    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", permission: permissionOf(st), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   st.upsertChat(chat);
-  if (!existing) useStore.setState({ draftPermission: undefined });
   // Name the thread from its first prompt, without waiting for the reply.
   if (chat.messages.filter((m) => m.role === "user").length === 1) void autoName(chat.id);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.

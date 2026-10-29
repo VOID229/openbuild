@@ -43,7 +43,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
   const local = model("local");
   const remote = model("remote");
   function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
-    useStore.setState({ settings: { ...base, threadRuntime: "cursor", workspace: { mode: "local" }, naming: { enabled: false, models: [] }, ...settings }, chats, activeChatId: undefined, draftPermission: undefined, permissionModes: {}, selections: {}, projects: [], settingsOpen: false, cursorModels: {}, codexModels: {}, fxModels: {} });
+    useStore.setState({ settings: { ...base, threadRuntime: "cursor", workspace: { mode: "local" }, naming: { enabled: false, models: [] }, ...settings }, chats, activeChatId: undefined, permissionModes: {}, selections: {}, projects: [], settingsOpen: false, cursorModels: {}, codexModels: {}, fxModels: {} });
   }
   function markup(element: Parameters<typeof renderToStaticMarkup>[0]) {
     const initial = useStore.getInitialState();
@@ -81,7 +81,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(markup(createElement(Sidebar))).toContain('title="Native Cursor runtime"');
   });
 
-  test("Permission picker lists the runtime's own modes, is thread-scoped and hidden for other runtimes", () => {
+  test("Permission picker lists the runtime's own modes, remembers the last choice and is hidden for other runtimes", () => {
     reset();
     const modes = { modes: [{ id: "default", name: "Configured", description: "Cursor's own allowlist" }, { id: "mode:plan", name: "Plan" }, { id: "force", name: "Run everything", description: "Force allow commands" }], defaultMode: "default", status: "valid" as const, checkedAt: Date.now() };
     useStore.setState({ permissionModes: { "cursor||": modes } });
@@ -91,7 +91,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(bar()).toContain('aria-label="Permissions: Run everything"');
     expect(bar()).toContain("permission-risky");
     useStore.getState().newChat();
-    expect(useStore.getState().draftPermission).toBeUndefined();
+    expect(useStore.getState().settings.runtimePermissions?.cursor).toBe("force");
     for (const runtime of ["pi", "durable", "fx"] as const) {
       useStore.getState().updateSettings({ threadRuntime: runtime });
       expect(bar()).toBe("");
@@ -126,14 +126,14 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(posts.at(-1).permission).toBe("force");
     expect(posts.at(-1).cursorAllowAllTools).toBeUndefined();
     expect(saved.get(first.id)?.permission).toBe("force");
-    expect(useStore.getState().draftPermission).toBeUndefined();
-    // Reload from the serialized chat; a new thread never inherits the choice.
+    expect(useStore.getState().settings.runtimePermissions?.cursor).toBe("force");
+    // Reload from the serialized chat; a new thread inherits the last selection.
     useStore.getState().setChats([JSON.parse(JSON.stringify(saved.get(first.id)))]);
     useStore.getState().newChat();
     expect(sendMessage("independent", [])).toBe(true);
     await settled();
     const second = useStore.getState().chats.find((c) => c.id !== first.id)!;
-    expect(posts.at(-1).permission).toBeUndefined();
+    expect(posts.at(-1).permission).toBe("force");
     useStore.getState().selectChat(first.id);
     expect(sendMessage("still picked", [])).toBe(true);
     await settled();
@@ -147,7 +147,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     await settled();
     expect(posts.at(-1).permission).toBeUndefined();
     expect(saved.get(first.id)?.permission).toBeUndefined();
-    expect(useStore.getState().chats.find((c) => c.id === second.id)?.permission).toBeUndefined();
+    expect(useStore.getState().chats.find((c) => c.id === second.id)?.permission).toBe("force");
     // A stale field on a runtime without permission modes must not be sent.
     useStore.getState().upsertChat({ ...useStore.getState().chats.find((c) => c.id === first.id)!, runtime: "fx", permission: "force", cursorAllowAllTools: true });
     useStore.setState({ fxModels: { "": { ...listing(local), plan: "fx" } } });

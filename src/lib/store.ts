@@ -101,11 +101,11 @@ export type PermissionListing = PermissionModes & { status: "checking" | "valid"
 export const permissionKey = (runtime: PermissionRuntime, deviceId?: string, cwd?: string) => `${runtime}|${deviceId ?? ""}|${runtime !== "cursor" ? cwd ?? "" : ""}`;
 
 /** The permission mode a thread (or the draft) asks for; undefined = the runtime's configured default. */
-export function permissionOf(s: Pick<State, "chats" | "settings" | "draftPermission">, chatId?: string): string | undefined {
+export function permissionOf(s: Pick<State, "chats" | "settings">, chatId?: string): string | undefined {
   const chat = chatId ? s.chats.find((c) => c.id === chatId) : undefined;
   const runtime = chat ? chat.runtime : s.settings.threadRuntime;
   if (!hasPermissionModes(runtime)) return undefined;
-  if (!chat) return s.draftPermission;
+  if (!chat) return s.settings.runtimePermissions?.[runtime] || undefined;
   return chat.permission ?? (runtime === "cursor" && chat.cursorAllowAllTools === true ? "force" : undefined);
 }
 
@@ -161,8 +161,6 @@ interface State {
   chats: Chat[];
   chatsLoaded: boolean;
   activeChatId?: string;
-  /** Permission mode for the unsent draft only; never a global permission default. Undefined = the runtime's default. */
-  draftPermission?: string;
   /** Pick a permission mode for a thread (or the draft). Ignored for runtimes without permission modes. */
   setPermission: (id: string | undefined, chatId?: string) => void;
   /** Permission modes each native runtime reports, by `permissionKey`. Not persisted. */
@@ -266,15 +264,15 @@ export const useStore = create<State>()(
   persist(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,
-      draftPermission: undefined,
       setPermission: (id, chatId) => {
+        const s = get();
+        const runtime = runtimeOf(s, chatId);
+        if (!hasPermissionModes(runtime)) return;
         if (chatId) {
-          const chat = get().chats.find((c) => c.id === chatId);
           // Clearing the legacy Cursor flag too, so "default" really means default.
-          if (chat && hasPermissionModes(chat.runtime)) get().updateChat(chatId, { permission: id, cursorAllowAllTools: undefined });
-        } else {
-          set({ draftPermission: id });
+          s.updateChat(chatId, { permission: id, cursorAllowAllTools: undefined });
         }
+        s.updateSettings({ runtimePermissions: { ...get().settings.runtimePermissions, [runtime]: id ?? "" } });
       },
       permissionModes: {},
       loadPermissionModes: async (runtime, deviceId, cwd, fresh = false) => {
@@ -651,13 +649,11 @@ export const useStore = create<State>()(
           const updated = { ...chat, speeds: { ...chat.speeds, [key]: speed ?? "" } };
           set({ chats: s.chats.map((c) => c.id === chat.id ? updated : c) });
           void saveChat(updated);
-        } else {
-          s.updateSettings({ modelSpeeds: { ...s.settings.modelSpeeds, [key]: speed ?? "" } });
         }
+        s.updateSettings({ modelSpeeds: { ...get().settings.modelSpeeds, [key]: speed ?? "" } });
       },
       newChat: () => set((s) => ({
         activeChatId: undefined,
-        draftPermission: undefined,
         usageOpen: false,
         searchFocus: undefined,
         settings: s.settings.workspace.defaultMode === "last-used"

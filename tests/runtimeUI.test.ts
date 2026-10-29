@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Chat, Settings } from "../src/lib/types";
+import { effortKey, speedFor } from "../src/lib/effort";
 
 // Browser shims, store persistence and fetch overrides stay in a separate process.
 if (process.env.OPENBUILD_RUNTIME_UI_CHILD !== "1") {
@@ -102,6 +103,48 @@ test("files and terminals keep the folder's device instead of inheriting the scr
   useStore.setState({ projects: [{ ...project, deviceId: "remote-imac" }], settings: { ...useStore.getState().settings, workspace: { mode: "local", projectId: project.id, deviceId: "cachyos" } } });
   expect(terminalFolder()).toMatchObject({ cwd: project.path, deviceId: "remote-imac" });
   reset();
+});
+
+test("new threads remember permissions per runtime and tiers per model, including explicit defaults", () => {
+  reset();
+  for (const [runtime, permission, speed] of [["codex", "full-access", "priority"], ["claude", "bypassPermissions", "fast"], ["cursor", "force", undefined]] as const) {
+    const selection = { plan: runtime, id: "test-model" };
+    const chat = { ...thread(runtime), id: runtime, permission: "original" };
+    useStore.getState().upsertChat(chat, false);
+    useStore.getState().updateSettings({ threadRuntime: runtime });
+    useStore.getState().selectChat(chat.id);
+    useStore.getState().setPermission(permission, chat.id);
+    useStore.getState().setSpeed(speed, selection);
+    useStore.getState().newChat();
+    const s = useStore.getState();
+    expect(permissionOf(s)).toBe(permission);
+    expect(speedFor(s.settings, undefined, selection)).toBe(speed);
+    expect(s.chats.find((c) => c.id === chat.id)?.speeds?.[effortKey(selection)]).toBe(speed ?? "");
+  }
+
+  const saved = useStore.persist.getOptions().partialize!(useStore.getState());
+  const restored = useStore.persist.getOptions().merge!(JSON.parse(JSON.stringify(saved)), useStore.getState());
+  expect(restored.settings.runtimePermissions).toEqual({ codex: "full-access", claude: "bypassPermissions", cursor: "force" });
+  expect(restored.settings.modelSpeeds).toEqual({
+    [effortKey({ plan: "codex", id: "test-model" })]: "priority",
+    [effortKey({ plan: "claude", id: "test-model" })]: "fast",
+    [effortKey({ plan: "cursor", id: "test-model" })]: "",
+  });
+
+  useStore.getState().updateSettings({ threadRuntime: "codex" });
+  expect(permissionOf(useStore.getState())).toBe("full-access");
+  useStore.getState().setPermission(undefined);
+  useStore.getState().setSpeed(undefined, { plan: "codex", id: "test-model" });
+  useStore.getState().newChat();
+  const s = useStore.getState();
+  expect(permissionOf(s)).toBeUndefined();
+  expect(s.settings.modelSpeeds?.[effortKey({ plan: "codex", id: "test-model" })]).toBe("");
+  // Remembered picks do not change existing threads, even those with no explicit settings.
+  expect(permissionOf(s, "codex")).toBe("full-access");
+  expect(permissionOf(s, "claude")).toBe("bypassPermissions");
+  expect(s.chats.find((c) => c.id === "codex")?.speeds?.[effortKey({ plan: "codex", id: "test-model" })]).toBe("priority");
+  useStore.getState().upsertChat({ ...thread("codex"), id: "defaults" }, false);
+  expect(permissionOf(useStore.getState(), "defaults")).toBeUndefined();
 });
 
 test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", () => {
@@ -260,7 +303,7 @@ test("OpenCode first send captures native runtime without overriding permission 
   globalThis.fetch = (async () => { throw new Error("workspace unavailable"); }) as unknown as typeof fetch;
   const id = "opencode/anthropic/claude-sonnet";
   try {
-    reset({ threadRuntime: "opencode", naming: { enabled: false, models: [] } });
+    reset({ threadRuntime: "opencode", naming: { enabled: false, models: [] }, runtimePermissions: { cursor: "force" } });
     useStore.setState({ opencodeModels: { "": { plan: "opencode", status: "valid", defaultModel: id, models: [{ id, name: "Sonnet", protocol: "openai", input: ["text"], reasoning: { efforts: [], mode: "none", toggle: false } } as any] } } });
     expect(sendMessage("hello", [])).toBe(true);
     const chat = useStore.getState().chats[0]!;
