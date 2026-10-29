@@ -252,12 +252,15 @@ export async function saveChatBeforeRun(chat: Chat) {
   const op: Op = { op: "put", chat, seq: ++seq };
   await enqueue(chat.id, op);
   const failed = () => new Error("Couldn't save this thread to the OpenBuild server. Check your connection and try again.");
-  do {
-    if (!await flush()) throw failed();
-  } while (await get(chat.id, outbox));
-  // A deleted chat (410), or a failed direct-send fallback when local storage is unavailable,
-  // also empties the outbox. Neither is permission to launch an orphan worker.
-  if ((acknowledged.get(chat.id) ?? 0) < op.seq) throw failed();
+  // Admission depends on THIS write's acknowledgement, not on every thread's outbox being
+  // empty. An unrelated rejected write stays queued but must not invalidate a successful PUT.
+  while ((acknowledged.get(chat.id) ?? 0) < op.seq) {
+    const drained = await flush();
+    if ((acknowledged.get(chat.id) ?? 0) >= op.seq) return;
+    // A deleted chat (410), or a failed direct-send fallback, can empty this entry without
+    // acknowledging it. Neither is permission to launch an orphan worker.
+    if (!drained || !await get(chat.id, outbox)) throw failed();
+  }
 }
 
 export function deleteChat(id: string) {

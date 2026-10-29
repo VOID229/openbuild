@@ -187,6 +187,30 @@ test("Pi admission barrier waits for server ack and caches the canonical project
   `);
 });
 
+test("an unrelated rejected outbox entry cannot block a thread whose own save was acknowledged", async () => {
+  await run(`
+    const errors = []; console.error = (...args) => errors.push(args);
+    const puts = [];
+    globalThis.fetch = async (url, init) => {
+      if (init?.method === 'PUT') {
+        const chat = JSON.parse(init.body); puts.push(chat.id);
+        if (chat.id === 'unrelated-invalid') return Response.json({ error: 'Runtime cannot change' }, { status: 400 });
+        return Response.json({ v: 'saved', chat });
+      }
+      return config();
+    };
+    const { createStore, set, get } = await import('./src/lib/kv.ts');
+    const outbox = createStore('openchat-outbox', 'ops');
+    await set('unrelated-invalid', { op: 'put', seq: 1, chat: { id: 'unrelated-invalid', messages: [] } }, outbox);
+    const { saveChatBeforeRun } = await import('./src/lib/db.ts');
+    const { config: runtimeConfig } = await import('./src/lib/runtime.ts'); await runtimeConfig;
+    await saveChatBeforeRun({ id: 'thread-1', title: 'Thread', createdAt: 1, updatedAt: 2, messages: [] });
+    assert(puts.includes('thread-1'));
+    assert(await get('unrelated-invalid', outbox), 'failed unrelated writes must stay queued');
+    process.exit(0);
+  `);
+});
+
 test("Pi admission barrier does not admit a deleted thread just because its outbox drained", async () => {
   await run(`
     globalThis.fetch = async (url, init) => init?.method === 'PUT' ? new Response(null, { status: 410 }) : config();
