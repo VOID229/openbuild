@@ -200,6 +200,15 @@ export class DurableClient {
     }
   }
 
+  async answerQuestion(threadId: string, askId: string, reply: import("./questions").QuestionReply): Promise<boolean> {
+    const res = await this.request("/answer", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ threadId, askId, ...reply }),
+    });
+    if (!res.ok) throw workerError(await res.json().catch(() => null), res.status);
+    return ((await res.json()) as { ok: boolean }).ok;
+  }
+
   async startRun(req: PiChatRequest): Promise<DurableRun> {
     const res = await this.request("/start", {
       method: "POST",

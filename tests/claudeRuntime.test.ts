@@ -14,7 +14,7 @@ const original = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env
 Object.assign(process.env, vars);
 // Imported after the environment points storage and the CLI at the fixture.
 const { forgetModels, listModels, listPermissions, status, toModel } = await import("../server/claude/install");
-const { answer, release, runTurn } = await import("../server/claude/sessions");
+const { answer, hasAsk, release, runTurn } = await import("../server/claude/sessions");
 const { doneEvent, startEvent } = await import("../server/claude/tools");
 afterAll(() => { forgetModels(); for (const [k, v] of Object.entries(original)) if (v === undefined) delete process.env[k]; else process.env[k] = v; rmSync(directory, { recursive: true, force: true }); });
 
@@ -116,6 +116,65 @@ test("tool permission prompts reach the user; 'for this session' never writes se
   expect(out.filter((e) => e.t === "tool").at(-1)).toMatchObject({ status: "error" });
   expect(text(out)).toBe("not edited");
   release(req.threadId); release(denied.threadId);
+});
+
+test("native questions use cards, sequential answers and custom input even in bypass mode", async () => {
+  for (const permission of ["default", "bypassPermissions"]) {
+    const req = { ...request("question choices"), permission };
+    let n = 0;
+    const events = await collect(req, e => {
+      if (e.t !== "ask") return;
+      expect(hasAsk(req.threadId, e.id)).toBe(true);
+      expect(e.other).toBe(true);
+      expect(e.options).toEqual(n === 0 ? ["Small", "Full"] : ["Unit", "Integration"]);
+      expect(answer(req.threadId, e.id, { value: n++ === 0 ? "My own approach" : "Unit, Integration" })).toBe(true);
+      expect(answer(req.threadId, e.id, { value: "duplicate" })).toBe(false);
+    });
+    expect(n).toBe(2);
+    expect(events.filter(e => e.t === "asked")).toHaveLength(2);
+    expect(events.some(e => e.t === "tool")).toBe(false);
+    expect(text(events)).toBe('answered {"Which approach?":"My own approach","Which checks?":"Unit, Integration"}');
+    expect(events.some(e => e.t === "error")).toBe(false);
+    release(req.threadId);
+  }
+  expect(protocol()).toContain("question-instructions When you need a decision");
+  expect(protocol()).toContain("use the native AskUserQuestion tool instead of asking in prose");
+  expect(protocol()).toContain("mode=bypassPermissions");
+});
+
+test("dismissed or malformed native questions never supply fabricated answers", async () => {
+  const req = request("question cancel");
+  const events = await collect(req, e => { if (e.t === "ask") answer(req.threadId, e.id, { cancelled: true }); });
+  expect(events.filter(e => e.t === "ask")).toHaveLength(1);
+  expect(text(events)).toBe("question dismissed");
+  expect(events.find(e => e.t === "asked")).toBeDefined();
+  expect((events.find(e => e.t === "asked") as any).answer).toBeUndefined();
+  release(req.threadId);
+  const malformed = request("question malformed");
+  const invalid = await collect(malformed);
+  expect(invalid.some(e => e.t === "ask")).toBe(false);
+  expect(text(invalid)).toBe("question dismissed");
+  expect(protocol()).toContain("Invalid AskUserQuestion input; no answer was collected.");
+  release(malformed.threadId);
+});
+
+test("native dontAsk policy is preserved rather than overriding it for questions", async () => {
+  const req = { ...request("question denied by native policy"), permission: "dontAsk" };
+  const events = await collect(req);
+  expect(events.some(e => e.t === "ask")).toBe(false);
+  expect(text(events)).toBe("question dismissed");
+  release(req.threadId);
+});
+
+test("aborting a native question clears the pending card without answering it", async () => {
+  const req = request("question abort"), stop = new AbortController();
+  let id = "";
+  const events = await collect(req, e => { if (e.t === "ask") { id = e.id; stop.abort(); } }, stop.signal);
+  expect(id).not.toBe("");
+  expect(hasAsk(req.threadId, id)).toBe(false);
+  expect(answer(req.threadId, id, { value: "late" })).toBe(false);
+  expect(events.some(e => e.t === "asked")).toBe(true);
+  release(req.threadId);
 });
 
 test("tool rows: native names and inputs map onto OpenBuild's tool UI", () => {

@@ -39,7 +39,9 @@ const server = Bun.serve({hostname:'127.0.0.1',port:0,async fetch(req) {
   if (path === '/api/session/'+sessionID+'/prompt' && req.method === 'POST') {
     const body = await req.json(); const text = body.text;
     if (typeof text !== 'string') throw new Error('Expected prompt {text}');
-    appendFileSync(process.env.FAKE_EFFECTS,text+'\n');
+    // Effects track user submissions, while native history below retains the full prompt.
+    const userText = text.startsWith('<openbuild-question-instructions>\n') ? text.split('</openbuild-question-instructions>\n\n').slice(1).join('</openbuild-question-instructions>\n\n') : text;
+    appendFileSync(process.env.FAKE_EFFECTS,userText+'\n');
     const state = load(), n = state.messages.length+1, assistantMessageID = 'assistant_'+n;
     state.messages.push({id:'msg_'+n,sessionID,type:'user',role:'user',text,parts:[{type:'text',text}]}); save(state);
     const common = {sessionID,assistantMessageID};

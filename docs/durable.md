@@ -6,7 +6,7 @@ Before the first send, choose **Pi** or **Durable** in the dropdown above the co
 
 [Pi Durable](https://github.com/earendil-works/pi/tree/main/packages/durable) is a separate, experimental harness. It commits conversations, model turns and tool tasks to storage before publishing them. Reopening that storage and starting its scheduler resumes unfinished work.
 
-OpenBuild pins its Durable dependencies rather than following an unversioned API. Ordinary Pi threads still use the installed Pi RPC process. Durable uses Pi's configured model runtime and credentials, but does **not** load Pi coding-agent extensions, skills, MCP servers or prompt templates. Its initial tool set is Durable's `read`, `write`, `edit` and `bash` in the thread's workspace. The same local authentication gate protects both runtimes; neither is a sandbox.
+OpenBuild pins its Durable dependencies rather than following an unversioned API. Ordinary Pi threads still use the installed Pi RPC process. Durable uses Pi's configured model runtime and credentials, but does **not** load Pi coding-agent extensions, skills, MCP servers or prompt templates. Its tool set is Durable's `read`, `write`, `edit` and `bash` in the thread's workspace, plus OpenBuild's restart-safe `question_ask`. The same local authentication gate protects both runtimes; neither is a sandbox.
 
 ## Restart recovery
 
@@ -33,7 +33,7 @@ Only **the worker** may own a Durable data directory. Do not open its harness st
 
 ## Initial limitations
 
-- Pi extensions and their question dialogs are not available in Durable threads.
+- Pi extensions are not loaded in Durable threads. OpenBuild separately registers `question_ask` in Durable's Harness registry: the usual question cards support choices, free text, and dismissal, with pending questions and replies persisted across worker restarts.
 - The initial UI adapter publishes completed model/tool entries, not token-by-token partial text or live shell output.
 - Steering, Pi slash commands and manual compaction are not exposed in the Durable UI; queued messages can be sent after the current reply.
 - History rewind (retry/edit of an earlier turn) and importing/forking a Pi transcript are not supported by the initial Durable adapter. These requests fail explicitly rather than silently using the wrong model history; start a new thread instead.

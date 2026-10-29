@@ -1,11 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PiChatRequest, StreamEvent } from "../shared/types";
 import { CursorProtocol, toolEvent } from "../server/cursor/protocol";
 import { forgetModels, listModels, listPermissions, modelSlug, parseHelp, parseModels, permissionModes, status } from "../server/cursor/install";
-import { runTurn, sessionPath } from "../server/cursor/sessions";
+import { answer, hasAsk, runTurn, sessionPath } from "../server/cursor/sessions";
 import { FAKE_CURSOR } from "./cursorFixture";
 const directory = mkdtempSync(join(tmpdir(), "ob-cursor-unit-"));
 const fake = join(directory, "cursor");
@@ -109,6 +109,55 @@ test("Cursor allows all tools only for an explicit per-turn opt-in", async () =>
   expect(calls().find(c => c.prompt === "permissions allowed").force).toBe(true);
   expect((await collect({ ...req, prior: 2, message: "permissions reset", cursorAllowAllTools: false })).some(e => e.t === "done")).toBe(true);
   expect(calls().find(c => c.prompt === "permissions reset").force).toBe(false);
+});
+test("Cursor fake CLI loads a per-turn plugin and receives an answer via real MCP", async () => {
+  const req = request("ask bridge"), events: StreamEvent[] = [];
+  const stream = runTurn(req, new AbortController().signal);
+  const done = (async () => {
+    const decoder = new TextDecoder(); let buffer = "";
+    for await (const bytes of stream) {
+      buffer += decoder.decode(bytes, { stream: true }); let end: number;
+      while ((end = buffer.indexOf("\n")) >= 0) { events.push(JSON.parse(buffer.slice(0, end))); buffer = buffer.slice(end + 1); }
+    }
+  })();
+  for (let i = 0; i < 200 && !events.some(e => e.t === "ask"); i++) await Bun.sleep(5);
+  const ask = events.find(e => e.t === "ask")!;
+  expect(ask).toMatchObject({ title: "Which approach?", options: ["A", "B"], other: true });
+  expect(hasAsk(req.threadId, ask.id)).toBe(true);
+  expect(answer("wrong-thread", ask.id, { value: "no" })).toBe(false);
+  expect(answer(req.threadId, ask.id, { value: "Custom" })).toBe(true);
+  await done;
+  expect(events.some(e => e.t === "text" && e.v.includes('"answer":"Custom"'))).toBe(true);
+  expect(events.some(e => e.t === "error")).toBe(false);
+  const call = calls().find(c => c.prompt === "ask bridge");
+  expect(call.rawPrompt.endsWith(req.message)).toBe(true);
+  expect(call.force).toBe(false);
+  expect(existsSync(call.pluginDir)).toBe(false);
+  expect(hasAsk(req.threadId, ask.id)).toBe(false);
+});
+test("Cursor cancellation dismisses an unanswered MCP question and removes its plugin", async () => {
+  const req = request("ask bridge"), abort = new AbortController();
+  let askId = "";
+  const done = (async () => {
+    const decoder = new TextDecoder(); let buffer = "";
+    const events: StreamEvent[] = [];
+    for await (const bytes of runTurn(req, abort.signal)) {
+      buffer += decoder.decode(bytes, { stream: true }); let end: number;
+      while ((end = buffer.indexOf("\n")) >= 0) {
+        const event = JSON.parse(buffer.slice(0, end)); buffer = buffer.slice(end + 1); events.push(event);
+        if (event.t === "ask") { askId = event.id; abort.abort(); }
+      }
+    }
+    return events;
+  })();
+  const events = await done;
+  expect(askId).not.toBe("");
+  expect(events.some(e => e.t === "asked" && e.id === askId)).toBe(true);
+  expect(events.some(e => e.t === "done" && e.finish === "aborted")).toBe(true);
+  expect(hasAsk(req.threadId, askId)).toBe(false);
+  expect(answer(req.threadId, askId, { value: "late" })).toBe(false);
+  const call = calls().filter(c => c.prompt === "ask bridge").at(-1);
+  expect(existsSync(call.pluginDir)).toBe(false);
 });
 test("Cursor graceful cancellation checkpoints without replay", async () => {
   const req = request("wait"), abort = new AbortController();

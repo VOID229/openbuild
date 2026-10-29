@@ -17,7 +17,7 @@ if (!process.env.OB_OPENCODE_ADAPTER_TEST_CHILD) {
     } finally { rmSync(data, { recursive: true, force: true }); }
   }, 30_000);
 } else {
-const { runTurn, answer, hasAsk, release, restartIdle } = await import("../server/opencode-agent/sessions");
+const { runTurn, answer, hasAsk, release, restartIdle, questionPrompt } = await import("../server/opencode-agent/sessions");
 const cwd = mkdtempSync(join(tmpdir(), "ob-opencode-adapter-"));
 const original = { url: process.env.OPENCODE_SERVER_URL, password: process.env.OPENCODE_SERVER_PASSWORD };
 const sessions = new Map<string, { id: string; location: { directory: string }; messages: any[] }>();
@@ -91,10 +91,25 @@ test("native mapping resumes without replay, applies model per later turn, image
   release(request.threadId); restartIdle();
   const later = await collect({ ...request, prior: 1, message: "new message" });
   expect(later.some(e => e.t === "done")).toBe(true);
-  expect(calls.filter(c => c.path.endsWith("/prompt")).map(c => c.body.text)).toEqual(["hello", "new message"]);
+  expect(calls.filter(c => c.path.endsWith("/prompt")).map(c => c.body.text)).toEqual([questionPrompt("hello"), questionPrompt("new message")]);
   expect(calls.some(c => c.path.endsWith("/model"))).toBe(true);
   const mismatch = await collect({ ...request, prior: 0 }); expect(mismatch.find(e => e.t === "error").message).toContain("history mismatch");
   expect((await collect({ ...req(), forkFrom: request.threadId })).find(e => e.t === "error").message).toContain("fork");
+});
+
+test("each native prompt carries question guidance without changing the submitted request", async () => {
+  const request = req("Please clarify before proceeding");
+  await collect(request);
+  await collect({ ...request, prior: 1, message: "Continue" });
+  const prompts = calls.filter(c => c.path.endsWith("/prompt"));
+  for (const prompt of prompts) {
+    expect(prompt.body.text).toContain("use the native question tool (which creates a form) instead of asking in prose");
+    expect(prompt.body.text).toContain("custom answers enabled");
+    expect(prompt.body.text).toContain("never invent the user's answer");
+    expect(prompt.body.text.match(/<openbuild-question-instructions>/g)).toHaveLength(1);
+  }
+  expect(prompts[0]!.body.text).toEndWith("\n\n" + request.message);
+  expect(request.message).toBe("Please clarify before proceeding");
 });
 
 test("a confirmed native terminal settles history even when its prompt HTTP reply is lost", async () => {
@@ -105,7 +120,7 @@ test("a confirmed native terminal settles history even when its prompt HTTP repl
   losePromptReply = false;
   const next = await collect({ ...request, prior: 1, message: "continue once" });
   expect(next.some(e => e.t === "error")).toBe(false);
-  expect(calls.filter(c => c.path.endsWith("/prompt")).map(c => c.body.text)).toEqual(["hello", "continue once"]);
+  expect(calls.filter(c => c.path.endsWith("/prompt")).map(c => c.body.text)).toEqual([questionPrompt("hello"), questionPrompt("continue once")]);
 });
 
 test("tools retain native args/metadata, reasoning and usage accumulate; child completion never terminates root", async () => {
@@ -156,6 +171,28 @@ test("simple forms ask sequentially with typed values, unsupported forms cancel 
   const events = await collect(req());
   expect(events.find(e => e.t === "error").message).toContain("unsupported complex form");
   expect(calls.some(c => c.method === "DELETE" && c.path.endsWith("/form/complex"))).toBe(true);
+});
+
+test("native forms preserve custom free text, deduplicate creation and cancel without answers", async () => {
+  behavior = id => {
+    const form = { id: "custom", sessionID: id, fields: [{ key: "approach", type: "string", custom: true, options: [{ label: "Small", value: "small" }, { label: "Full", value: "full" }] }, { key: "details", type: "string" }] };
+    emit("form.created", { form }); emit("form.created", { form });
+  };
+  const request = req(); let n = 0;
+  const events = await withAsk(request, event => {
+    if (n === 0) expect(event.other).toBe(true);
+    else expect(event.method).toBe("input");
+    expect(answer(request.threadId, event.id, { value: n++ === 0 ? "Custom approach" : "Free text" })).toBe(true);
+    expect(answer(request.threadId, event.id, { value: "duplicate" })).toBe(false);
+  });
+  expect(n).toBe(2);
+  expect(events.filter(e => e.t === "asked")).toHaveLength(2);
+  expect(calls.filter(c => c.path.endsWith("/form/custom/reply")).map(c => c.body)).toEqual([{ answer: { approach: "Custom approach", details: "Free text" } }]);
+  calls.length = 0;
+  const cancelled = req();
+  await withAsk(cancelled, event => { answer(cancelled.threadId, event.id, { cancelled: true }); });
+  expect(calls.filter(c => c.path.endsWith("/form/custom")).map(c => c.method)).toEqual(["DELETE"]);
+  expect(calls.some(c => c.path.endsWith("/form/custom/reply"))).toBe(false);
 });
 
 test("abort sends one native interrupt and closes; SSE loss fails visibly without resend", async () => {

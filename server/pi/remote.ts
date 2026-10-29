@@ -165,7 +165,10 @@ export class PiClient {
     }
   }
   async startRun(req: PiChatRequest): Promise<PiRun> {
-    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode") await this.ensureFeature(req.runtime);
+    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode") {
+      await this.ensureFeature(req.runtime);
+      await this.ensureFeature("runtime-questions");
+    }
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }
   /**

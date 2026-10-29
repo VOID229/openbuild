@@ -348,8 +348,10 @@ export function piRoutes(api: Api) {
       POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/answer">) => {
         const body = await readJson(req);
         if (!isThreadId(req.params.id) || !str(body?.askId, 128)) return bad("Expected { askId, value | confirmed | cancelled }");
-        if (threadRuntime(req.params.id) === "durable") return bad("Pi extension dialogs aren't available in Durable threads.", 400);
-        const ok = await answer(req.params.id, body.askId, { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true });
+        const reply = { value: typeof body.value === "string" ? body.value : undefined, confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined, cancelled: body.cancelled === true };
+        const ok = threadRuntime(req.params.id) === "durable"
+          ? await durable.answerQuestion(req.params.id, body.askId, reply)
+          : await answer(req.params.id, body.askId, reply);
         return ok ? Response.json({ ok }) : bad("That question isn't waiting anymore", 410);
       }),
     },

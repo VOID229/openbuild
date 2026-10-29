@@ -33,6 +33,10 @@ function question(l: Live, a: Omit<Ask, "t" | "id">, signal: AbortSignal): Promi
     l.asks.set(id, { ask, reply: finish }); signal.addEventListener("abort", abort, { once: true }); l.emit(ask);
   });
 }
+// OpenCode 2's prompt schema has no system/instructions field. Scope client guidance to
+// this submitted message; don't change workspace config or load a Pi extension.
+export const questionPrompt = (message: string) => `<openbuild-question-instructions>\nWhen you need a decision, clarification, or missing information from the user to proceed, use the native question tool (which creates a form) instead of asking in prose. Use simple string fields with single-choice options and custom answers enabled, or a plain string field for free text. Ask multiple questions as separate simple fields, not multiselect, conditional, hidden, or constrained fields. Offer concrete choices when useful. Wait for the form response before continuing; never invent the user's answer. If the user cancels, do not assume an answer or immediately ask again.\n</openbuild-question-instructions>\n\n${message}`;
+
 const sessionPath = (id: string) => `/api/session/${encodeURIComponent(id)}`;
 async function verifyHistory(c: Connection, s: Saved) {
   if (s.pending) throw new Error("OpenCode has an unfinished or ambiguous turn; refusing to resend or continue it");
@@ -179,7 +183,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             // Reserve BEFORE sending. Ambiguous acceptance/SSE loss must never cause a replay.
             save(req.threadId, { ...state, turns: req.prior + 1, pending: true }); submitted = true;
             try {
-              await c.request(`${sessionPath(root)}/prompt`, "POST", { text: req.message, ...(req.images?.length ? { files: req.images.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })) } : {}) });
+              await c.request(`${sessionPath(root)}/prompt`, "POST", { text: questionPrompt(req.message), ...(req.images?.length ? { files: req.images.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })) } : {}) });
             } catch (error) {
               // A native terminal event is stronger evidence than a lost prompt HTTP reply.
               // Still settle through completion below so a confirmed Stop isn't left pending.

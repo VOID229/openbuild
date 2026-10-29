@@ -14,6 +14,7 @@ import { isAbsolute, join } from "node:path";
 import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
 import { AcpProcess, FxError, type AcpMessage } from "./acp";
+import { elicit, elicitationMethods, QUESTION_NOTE, type QuestionReply } from "./questions";
 
 /** Close a thread's fx process after this long without use (its session stays on disk). */
 const IDLE = 20 * 60 * 1000;
@@ -30,6 +31,7 @@ interface Live {
   options: ConfigOption[];
   /** Permission requests waiting for the user, replayed to whoever watches the run. */
   asks: Map<string, { ask: Extract<StreamEvent, { t: "ask" }>; requestId: number | string; options: PermissionOption[] }>;
+  questions: Map<string, { reply: (r: QuestionReply) => void }>;
   emit?: (e: StreamEvent) => void;
 }
 
@@ -104,7 +106,7 @@ function ensure(threadId: string, cwd: string): Live {
     live.delete(threadId);
   }
   const proc = new AcpProcess(cwd);
-  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), options: [], asks: new Map(), ready: Promise.resolve("") };
+  const l: Live = { threadId, proc, busy: false, idle: Promise.resolve(), options: [], asks: new Map(), questions: new Map(), ready: Promise.resolve("") };
   // fx asks before an action its permission mode doesn't allow on its own: show it as a question.
   proc.on((m) => {
     if (m.method !== "session/request_permission" || m.id === undefined) return;
@@ -124,14 +126,27 @@ function ensure(threadId: string, cwd: string): Live {
     l.asks.set(askId, { ask, requestId: m.id, options });
     l.emit?.(ask);
   });
+  proc.on((m) => {
+    if (m.id === undefined || !m.method || !elicitationMethods.has(m.method)) return;
+    const requestId = m.id;
+    if (!l.busy || !l.emit) { proc.respond(requestId, { action: "cancel" }); return; }
+    void elicit(m.params, (a) => {
+      if (!l.busy || !l.emit) return Promise.resolve({ cancelled: true });
+      return new Promise<QuestionReply>((reply) => {
+        const id = `fx-question-${crypto.randomUUID()}`;
+        l.questions.set(id, { reply });
+        l.emit?.({ t: "ask", id, ...a });
+      });
+    }).then((r) => { if (!proc.exited) proc.respond(requestId, r); }).catch(() => { if (!proc.exited) proc.respond(requestId, { action: "decline" }); });
+  });
   // Requests fx may send that a client without those capabilities shouldn't get; refuse politely.
   proc.on((m) => {
-    if (m.id !== undefined && m.method && m.method !== "session/request_permission" && m.method !== "session/update") {
+    if (m.id !== undefined && m.method && !elicitationMethods.has(m.method) && m.method !== "session/request_permission" && m.method !== "session/update") {
       proc.respondError(m.id, -32601, "Method not supported by OpenBuild");
     }
   });
   l.ready = (async () => {
-    await proc.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false } }, 30_000);
+    await proc.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } } }, 30_000);
     const s = saved(threadId);
     let sessionId: string | undefined;
     if (s && s.cwd === cwd) {
@@ -173,6 +188,13 @@ async function setOption(l: Live, sessionId: string, configId: string, value: st
 /** Answer a permission question fx asked. */
 export function answer(threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }): boolean {
   const l = live.get(threadId);
+  const question = l?.questions.get(askId);
+  if (l && question) {
+    l.questions.delete(askId);
+    l.emit?.({ t: "asked", id: askId, answer: reply.cancelled ? undefined : reply.value });
+    question.reply(reply);
+    return true;
+  }
   const pending = l?.asks.get(askId);
   if (!l || !pending) return false;
   l.asks.delete(askId);
@@ -182,11 +204,20 @@ export function answer(threadId: string, askId: string, reply: { value?: string;
   return true;
 }
 
-export const hasAsk = (threadId: string, askId: string) => !!live.get(threadId)?.asks.has(askId);
+export const hasAsk = (threadId: string, askId: string) => !!live.get(threadId)?.asks.has(askId) || !!live.get(threadId)?.questions.has(askId);
+
+function cancelQuestions(l: Live) {
+  for (const [id, q] of l.questions) {
+    l.questions.delete(id);
+    l.emit?.({ t: "asked", id });
+    q.reply({ cancelled: true });
+  }
+}
 
 /** Stop a thread's fx process (its session stays on disk). */
 export function release(threadId: string) {
-  live.get(threadId)?.proc.close();
+  const l = live.get(threadId);
+  if (l) { cancelQuestions(l); l.proc.close(); }
   live.delete(threadId);
 }
 
@@ -356,6 +387,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         if (onAbort) signal.removeEventListener("abort", onAbort);
         if (l && free) {
           l.busy = false;
+          cancelQuestions(l);
           // Questions nobody answered are void once the turn is over.
           for (const [id, a] of l.asks) {
             l.proc.respond(a.requestId, { outcome: { outcome: "cancelled" } });
@@ -500,10 +532,10 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           prevOff();
           offExit();
         };
-        onAbort = () => proc.notify("session/cancel", { sessionId });
+        onAbort = () => { cancelQuestions(l!); proc.notify("session/cancel", { sessionId }); };
         signal.addEventListener("abort", onAbort, { once: true });
 
-        const prompt: unknown[] = [];
+        const prompt: unknown[] = [{ type: "text", text: QUESTION_NOTE }];
         for (const image of req.images ?? []) prompt.push({ type: "image", mimeType: image.mimeType, data: image.data });
         prompt.push({ type: "text", text: req.message });
         save(req.threadId, { id: sessionId, cwd: req.cwd, turns: Math.max(req.prior, s?.turns ?? 0) + 1 });

@@ -6,6 +6,7 @@ import type { PiChatRequest, StreamEvent } from "../../shared/types";
 import * as storage from "../storage";
 import { cursorBin, cursorEnv, modelSlug, permissionArgs } from "./install";
 import { CursorProtocol } from "./protocol";
+import { createQuestions, QUESTION_PREFIX, type QuestionReply } from "./questions";
 interface Saved { id: string; cwd: string; turns: number; pending: boolean; fingerprint?: string }
 const key = (id: string) => `cursor-session:${id}`;
 function saved(id: string): Saved | undefined {
@@ -27,10 +28,14 @@ function fingerprint(cwd: string, id: string): string {
   if (existsSync(path + "-wal")) { const wal = readFileSync(path + "-wal"); if (wal.length) hash.update(wal); }
   return hash.digest("hex");
 }
-interface Live { proc?: ReturnType<typeof Bun.spawn>; stop: () => void }
+interface Live { proc?: ReturnType<typeof Bun.spawn>; stop: () => void; questions?: ReturnType<typeof createQuestions> }
 const hot = globalThis as typeof globalThis & { openbuildCursorLive?: Map<string, Live> };
 const live = hot.openbuildCursorLive ??= new Map<string, Live>();
 export const isSessionLive = (id: string) => live.has(id);
+export const hasAsk = (threadId: string, askId: string) => !!live.get(threadId)?.questions?.hasAsk(askId);
+export function answer(threadId: string, askId: string, reply: QuestionReply): boolean {
+  return live.get(threadId)?.questions?.answer(askId, reply) ?? false;
+}
 export function release(id: string) { live.get(id)?.stop(); }
 export function restartIdle() {} // Cursor is a one-shot process per turn; there are no idle children.
 /** Escalation only after graceful SIGINT failed. Do not kill the worker's process
@@ -54,6 +59,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         let owned = false, reserved = false, s: Saved | undefined;
         let p: ReturnType<typeof Bun.spawn> | undefined, timer: ReturnType<typeof setTimeout> | undefined;
         let forced = false;
+        let questions: ReturnType<typeof createQuestions> | undefined;
         try {
           if (signal.aborted) { send({ t: "done", finish: "aborted" }); return; }
           if (req.forkFrom) throw new Error("Cursor does not support forking through OpenBuild; start a new thread");
@@ -68,6 +74,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (s?.pending) throw new Error("Cursor's previous turn was interrupted or its outcome is uncertain. Check tool side effects and start a new thread; the prompt will not be replayed.");
           if (s && s.turns > 0 && (!s.fingerprint || fingerprint(cwd, s.id) !== s.fingerprint)) throw new Error("Cursor native history changed externally; refusing to append to divergent history. Start a new thread.");
           const l: Live = { stop: () => {
+            questions?.close();
             if (!p || p.exitCode !== null) return;
             try { p.kill("SIGINT"); } catch {}
             if (!timer) { timer = setTimeout(() => { if (p && p.exitCode === null) { forced = true; killTree(p.pid); } }, 10000); timer.unref(); }
@@ -86,6 +93,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             s = { id, cwd, turns: 0, pending: false }; save(req.threadId, s);
           }
           if (signal.aborted) { send({ t: "done", finish: "aborted" }); return; }
+          questions = createQuestions(send); l.questions = questions;
           // Persist the identity and reservation BEFORE prompt submission. A worker crash
           // never permits a new process to accidentally resend an ambiguous prior prompt.
           s = { ...s, turns: req.prior + 1, pending: true }; save(req.threadId, s); reserved = true;
@@ -94,7 +102,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           // Cursor's configured allowlist; print mode cannot relay approvals.
           // Deliberately omit --stream-partial-output: this CLI also emits accumulated
           // duplicate flushes, some indistinguishable from valid repeated text deltas.
-          p = Bun.spawn([bin, "--print", "--output-format", "stream-json", "--trust", "--workspace", cwd, "--resume", s.id, "--model", slug, ...permission, "--", req.message], { cwd, env: cursorEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+          p = Bun.spawn([bin, "--print", "--output-format", "stream-json", "--trust", "--workspace", cwd, "--resume", s.id, "--model", slug, ...permission, "--plugin-dir", questions.pluginDir, "--", QUESTION_PREFIX + req.message], { cwd, env: cursorEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
           l.proc = p;
           if (signal.aborted) cancel();
           const protocol = new CursorProtocol(send);
@@ -131,6 +139,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (signal.aborted) send({ t: "done", finish: "aborted" });
           else send({ t: "error", message: `${e instanceof Error ? e.message : String(e)}${reserved ? "\nThe turn may have changed files. Check side effects before starting a new thread." : ""}` });
         } finally {
+          questions?.close();
           if (timer) clearTimeout(timer);
           signal.removeEventListener("abort", cancel);
           if (owned) live.delete(req.threadId);

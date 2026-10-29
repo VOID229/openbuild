@@ -10,7 +10,17 @@ OpenBuild never adds `--yolo`, `--approve-mcps`, or disables the sandbox. It pas
 
 The inspected CLI (2026.10.22-27dcf5f) uses an **always-deny decision provider in print mode** unless its existing native `approvalMode` is `unrestricted` (and team autorun policy permits it). Consequently, tools requiring approval may be rejected even if they work interactively in a terminal. For a coding session requiring those tools, either explicitly enable **Allow all tools** in OpenBuild or configure Cursor\'s native Run Everything policy. Both authorize commands broadly; OpenBuild never silently enables them. Read/tool operations not requiring approval can still work. Native denials appear as failed tool results.
 
-Print-mode interaction queries are answered/rejected by Cursor itself. There is no stdin approval/question response protocol in this adapter; OpenBuild cannot turn them into actionable approval dialogs. Web fetch/search approval, questions, mode changes, MCP approvals, and team policies remain subject to the CLI's own headless behavior. Use the native interactive CLI if you need interactive approval.
+Print-mode native interaction queries are answered/rejected by Cursor itself. There is no stdin response protocol. OpenBuild provides a separate MCP question bridge (below), not a native approval bypass. Web fetch/search approval, mode changes, MCP approvals, and team policies remain subject to the CLI's own headless behavior. Use the native interactive CLI if you need interactive approval.
+
+## Questions through an ephemeral MCP plugin
+
+Each turn starts a stateless Streamable HTTP MCP endpoint on `127.0.0.1` with an unguessable per-turn capability URL. A private temporary plugin directory contains `.cursor-plugin/plugin.json` (`name: openbuild-questions`) and `.mcp.json`, passed with `--plugin-dir`. No workspace or global MCP configuration/approval file is written. The endpoint exposes **only** `question_ask({question, options})`: it emits an OpenBuild question, waits for a routed answer, and returns the answer or an explicit cancellation. Suggested options never exclude free-text input. Answers are scoped to the active thread and question ID; stale/duplicate answers are rejected.
+
+Adapter guidance is prepended in a separate paragraph asking Cursor to use this MCP tool instead of unanswerable native print-mode questions. The original new user message follows verbatim; prior messages are not reconstructed. This is model guidance, not a guarantee that Cursor will use the tool. Native questions still cannot be answered through print stdin.
+
+**Approval limitation:** inspected CLI `2026.10.22-27dcf5f` loads plugin-sourced MCP definitions without the workspace MCP-server approval check (`4060.index.js`, approval middleware `ye` gates only the workspace `.cursor/mcp.json` config path). MCP **tool execution** remains controlled by Cursor's native `Mcp(server:tool)` allow/deny rules and team policy (`index.js`, `InteractivePermissionsService.shouldBlockMcp`). In default allowlist mode an unlisted question tool may therefore be rejected before it reaches OpenBuild. No safe scoped command-line approval override was identified. OpenBuild deliberately does **not** add `--approve-mcps` or automatically select `--force`, because those broaden unrelated permissions. A user-managed native scoped allowlist or an already explicitly chosen unrestricted mode is needed when native policy otherwise rejects it; team denial still wins. This bridge must not be described as universally available in default print mode. No paid live-model question/approval round trip has been verified.
+
+The MCP endpoint rejects browser-origin requests, unknown capability paths, oversized/malformed requests and unknown tools. It has no shell/file tools. Normal completion, errors, Stop and stream cancellation resolve pending questions as cancelled, stop the listener and remove the plugin directory. A worker/machine hard crash can leave an inert temporary directory behind; its listener dies with the worker. The capability is not an OS security boundary against processes running as the same server user.
 
 ## Models and effort
 
@@ -24,7 +34,7 @@ Unknown models/efforts are rejected before prompt submission. `off` is accepted 
 
 Implementation was checked against installed `agent --help`, `6436.index.js` (model formatting), `4945.index.js` (create-chat/state paths), `1623.index.js` (SQLite store), and `7000.index.js` (`headless.ts`, permissions/session startup). No paid test prompts were required.
 
-The command is `--print --output-format stream-json --trust --workspace <cwd> --resume <UUID> --model <discovered slug> -- <new message>`. NDJSON events include:
+The command is `--print --output-format stream-json --trust --workspace <cwd> --resume <UUID> --model <discovered slug> --plugin-dir <temporary plugin> -- <adapter guidance + verbatim new message>`. NDJSON events include:
 
 - `system/init`, `user`: session metadata/input, not assistant text.
 - `assistant.message.content[]`: text chunks flushed at tool/query/retry boundaries and at completion.
@@ -57,6 +67,6 @@ This is ordinary detached execution, not a checkpointable Durable runtime or an 
 
 ## Offline tests
 
-`bun test tests/cursorRuntime.test.ts tests/cursorServerRestart.test.ts`
+`bun test tests/cursorRuntime.test.ts tests/cursorQuestions.test.ts tests/cursorServerRestart.test.ts`
 
-Fixtures reproduce inspected NDJSON/protobuf shapes without a model/network dependency. Tests cover catalog validation, no duplicate aggregate text, structured/failed tools, prior/fork/workspace/native-history guards, malformed streams, graceful cancellation, real HTTP shutdown, once-only shell effects while offline, output projection/replay, stable-ID deduplication, runtime locking, and saved native resume after a fresh worker starts.
+Fixtures reproduce inspected NDJSON/protobuf shapes without a model/external-network dependency. The fake CLI also loads the actual temporary plugin config and asks/receives a question over real loopback HTTP. Transport tests cover MCP initialize/tool discovery, free-text answers, cancellation, capability isolation, malformed/oversized requests and listener/plugin cleanup. They do not prove a real Cursor model's tool selection or native permission approval. Tests cover catalog validation, no duplicate aggregate text, structured/failed tools, prior/fork/workspace/native-history guards, malformed streams, graceful cancellation, real HTTP shutdown, once-only shell effects while offline, output projection/replay, stable-ID deduplication, runtime locking, and saved native resume after a fresh worker starts.

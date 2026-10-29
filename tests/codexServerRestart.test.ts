@@ -32,9 +32,12 @@ for await (const line of console) {
   if (m.id === undefined) continue;
   const reply = result => out({jsonrpc:'2.0',id:m.id,result});
   if (m.method === 'initialize') reply({userAgent:'fake-codex',platformFamily:'unix',platformOs:'linux'});
+  else if (m.method === 'config/read') reply({config:{},origins:{}});
   else if (m.method === 'model/list') reply({data:[{id:'fake-1',model:'fake-1',upgrade:null,upgradeInfo:null,availabilityNux:null,displayName:'Fake Codex',description:'Offline restart fixture',modelSpecialty:null,hidden:false,supportedReasoningEfforts:[{reasoningEffort:'high',description:'High'}],defaultReasoningEffort:'high',inputModalities:['text'],supportsPersonality:false,multiAgentVersion:null,additionalSpeedTiers:[],serviceTiers:[],defaultServiceTier:null,availableAccessPrograms:null,isDefault:true}],nextCursor:null});
   else if (m.method === 'thread/start' || m.method === 'thread/resume') {
     if (m.method === 'thread/resume' && m.params.threadId !== threadId) throw new Error('Wrong resumed thread');
+    if (m.params.config?.['features.default_mode_request_user_input'] !== true) throw new Error('Question tool not enabled');
+    if (!m.params.developerInstructions?.includes('call request_user_input instead of asking in prose')) throw new Error('Missing question instructions');
     appendFileSync(process.env.FAKE_PROTOCOL,m.method+'\n');
     reply({thread:thread(m.params.cwd),model:'fake-1',modelProvider:'openai',serviceTier:null,disabledPluginIds:[],cwd:m.params.cwd,instructionSources:[],approvalPolicy:'never',approvalsReviewer:'user',sandbox:{type:'dangerFullAccess'},reasoningEffort:'high'});
   } else if (m.method === 'turn/start') {

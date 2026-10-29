@@ -4,6 +4,24 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PiClient } from "../server/pi/remote";
 
+test("question capability upgrade never interrupts an active older worker or sends a prompt", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ob-question-upgrade-"));
+  const socket = join(directory, "worker.sock");
+  const paths: string[] = [];
+  const server = Bun.serve({ unix: socket, fetch(req) {
+    const path = new URL(req.url).pathname; paths.push(path);
+    if (path === "/health") return Response.json({ pid: process.pid, protocol: 1, features: ["codex", "idle-retire"] });
+    if (path === "/retire") return Response.json({ error: "Worker busy", code: "busy" }, { status: 409 });
+    return new Response(null, { status: 404 });
+  } });
+  const client = new PiClient(directory, socket);
+  try {
+    await expect(client.startRun({ threadId: "question-upgrade", runtime: "codex", cwd: directory, model: "codex/test", effort: "off", message: "hello", prior: 0, stream: { id: "reply-question-upgrade-0123456789abcdef" } })).rejects.toThrow("enable runtime-questions");
+    expect(paths).toContain("/retire");
+    expect(paths.every(path => ["/health", "/retire"].includes(path))).toBe(true);
+  } finally { client.close(); server.stop(true); rmSync(directory, { recursive: true, force: true }); }
+});
+
 test("new runtimes never signal an older worker using a racy client-side idle check", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ob-upgrade-"));
   const socket = join(directory, "worker.sock");

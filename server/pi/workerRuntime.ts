@@ -224,7 +224,7 @@ export class PiWorkerRuntime {
   }
   ownership() { return [...this.threads].filter((id) => sessions.isSessionLive(id) || fx.isSessionLive(id) || codex.isSessionLive(id) || cursor.isSessionLive(id) || claude.isSessionLive(id) || opencode.isSessionLive(id)); }
   answer(threadId: string, askId: string, reply: Parameters<typeof sessions.answer>[2]) {
-    return opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
+    return cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
   steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
     return codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);

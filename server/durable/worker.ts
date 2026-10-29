@@ -26,7 +26,7 @@ const PROTOCOL = 1;
 export const workerVersion = (() => {
   try {
     const hash = createHash("sha256").update(`protocol:${PROTOCOL}`);
-    for (const name of ["worker.ts", "runtime.ts", "tools.ts"]) hash.update(readFileSync(join(import.meta.dir, name)));
+    for (const name of ["worker.ts", "runtime.ts", "tools.ts", "questions.ts"]) hash.update(readFileSync(join(import.meta.dir, name)));
     return hash.digest("hex").slice(0, 16);
   } catch {
     return "dev";
@@ -116,6 +116,12 @@ export function serveWorker(runtime: DurableRuntime, socket: string) {
             const after = Math.max(0, Number(url.searchParams.get("after")) || 0);
             return new Response(eventStream(found, after), { headers: { "content-type": "application/x-ndjson" } });
           }
+          case "/answer":
+            return json({ ok: await runtime.answer(String(body.threadId), String(body.askId), {
+              value: typeof body.value === "string" ? body.value : undefined,
+              confirmed: typeof body.confirmed === "boolean" ? body.confirmed : undefined,
+              cancelled: body.cancelled === true,
+            }) });
           case "/stop":
             return json({ found: await runtime.stopRun(String(body.id)) });
           case "/threads/stop":

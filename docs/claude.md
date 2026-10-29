@@ -35,11 +35,17 @@ The shield pill above the composer sets the thread's **Claude Code permission mo
 | Plan | Read-only. When the plan is ready, you choose to proceed (accepting edits or asking), or keep planning |
 | Auto | Claude Code's classifier approves safe actions and asks about the rest |
 | Don't ask | Only what your allow rules permit; everything else is denied |
-| Bypass permissions | Runs every tool without asking. Use only in a sandbox |
+| Bypass permissions | Skips ordinary tool approval, not clarifying questions. Use only in a sandbox |
 
 With nothing picked, the thread uses `permissions.defaultMode` from Claude's settings for that folder (else Ask). Modes your settings disable (`disableBypassPermissionsMode`, `disableAutoMode`, including managed settings) are greyed out. Claude Code still enforces your allow/deny rules and hooks in every mode.
 
 When Claude Code needs a decision, the reply shows a question card: **Allow once**, **Allow for this session** (when Claude suggests a rule; it's added for this session only, and OpenBuild never writes your settings files), or **Deny**. Claude's own `AskUserQuestion` tool shows its options as choices, with a free-text answer. Stopping the reply cancels any open question.
+
+### Clarifying questions
+
+OpenBuild appends question guidance to Claude's native `claude_code` system prompt: when blocked on a user decision or missing information, call **AskUserQuestion**, wait for its response, and do not substitute prose or invent an answer. This uses the native tool and SDK `canUseTool` response (`updatedInput.answers`), not a Pi extension or synthetic tool. Multiple questions are presented sequentially; custom text is retained verbatim, and multi-select answers can be entered as comma-separated choices. Dismissal denies the call without partial/fabricated answers; Stop clears pending cards.
+
+`AskUserQuestion` is a native exception to automatic tool approval: [Claude's permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions) sends it to `canUseTool` even in **bypassPermissions** and with allow rules. A blanket hook or permission override is neither needed nor installed. **Don't ask (`dontAsk`) deliberately denies interactive questions**, and explicit deny rules can block them in any mode. Select another permission mode if you want question cards; OpenBuild does not override your native policy. These instructions encourage tool use but cannot force every model to comply.
 
 ## Tool calls
 
@@ -69,4 +75,4 @@ Unlike Codex and Cursor, Claude Code threads can **retry or edit an earlier mess
 
 `bun test tests/claudeRuntime.test.ts tests/claudeServerRestart.test.ts`
 
-A fake `CLAUDE_BIN` (`tests/claudeFixture.ts`) speaks the stream-json control protocol captured from Claude Code 2.1.311 under the Agent SDK. No model, network or sign-in is needed. The tests cover model/effort/fast-mode discovery and application, clearing fast mode, permission modes from the settings layers, approvals (including "for this session" scope), tool-row mapping and diffs, history guards, rewind, resume after a process restart, and a real HTTP server SIGTERM with offline completion, replay, de-duplicated admission and a resumed follow-up.
+A fake `CLAUDE_BIN` (`tests/claudeFixture.ts`) speaks the stream-json control protocol captured from Claude Code 2.1.311 under the Agent SDK. No model, network or sign-in is needed. The tests cover model/effort/fast-mode discovery and application, clearing fast mode, permission modes from the settings layers, approvals (including "for this session" scope), native question instructions/answers in default and bypass modes, custom text, multiple questions, dismissal/malformed input/Stop, tool-row mapping and diffs, history guards, rewind, resume after a process restart, and a real HTTP server SIGTERM with offline completion, replay, de-duplicated admission and a resumed follow-up.

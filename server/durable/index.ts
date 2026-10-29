@@ -18,6 +18,7 @@ export const startRun = (request: PiChatRequest) => client.startRun(request);
 export const run = startRun;
 export const findRun = (id: string) => client.findRun(id);
 export const stopRun = (id: string) => client.stopRun(id);
+export const answerQuestion = (threadId: string, askId: string, reply: import("./questions").QuestionReply) => client.answerQuestion(threadId, askId, reply);
 export const stopThread = (threadId: string) => client.stopThread(threadId);
 /** Call on server startup, not on first client reconnect. */
 export const recover = () => client.recover();

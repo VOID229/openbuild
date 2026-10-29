@@ -91,14 +91,15 @@ export function answer(id: string, askId: string, reply: Reply): boolean {
 export function release(id: string) {
   const l = live.get(id);
   if (!l) return;
-  live.delete(id);
   for (const askId of [...l.asks.keys()]) answer(id, askId, { cancelled: true });
+  live.delete(id);
   l.exited = true; l.inbox.close();
   try { l.q.close(); } catch {}
 }
 export function restartIdle() { for (const [id, l] of live) if (!l.busy) release(id); }
 
 function ask(l: Live, a: Omit<Ask, "t" | "id">, signal: AbortSignal): Promise<Reply> {
+  if (signal.aborted) return Promise.resolve({ cancelled: true });
   return new Promise((done) => {
     const id = `claude-ask-${crypto.randomUUID()}`;
     const event: Ask = { t: "ask", id, ...a };
@@ -117,6 +118,9 @@ export function transcriptExists(id: string): boolean {
   try { return readdirSync(root).some((d) => existsSync(join(root, d, `${id}.jsonl`))); } catch { return false; }
 }
 
+// Keep Claude's native prompt/tools. This is UI guidance, not a replacement system prompt.
+const QUESTION_INSTRUCTIONS = "When you need a decision, clarification, or missing information from the user to proceed, use the native AskUserQuestion tool instead of asking in prose. Offer concrete choices when useful; the user can also enter a custom answer. Wait for the tool response before continuing. Never invent the user's answer. If the user dismisses a question, do not assume an answer or immediately ask it again.";
+
 const summary = (tool: string, input: any) => typeof input?.command === "string" ? input.command : input?.file_path ?? input?.notebook_path ?? input?.url ?? input?.pattern ?? input?.query ?? (tool.startsWith("mcp__") ? JSON.stringify(input).slice(0, 2000) : undefined);
 
 /** Claude asks before a tool its permission mode and rules don't allow: the user decides here. */
@@ -124,12 +128,15 @@ function permissions(threadId: string): CanUseTool {
   return async (tool, input, options) => {
     const l = live.get(threadId);
     if (!l?.turn) return { behavior: "deny", message: "OpenBuild has no reply waiting on this thread", toolUseID: options.toolUseID };
+    // AskUserQuestion is a native interaction exception: unlike ordinary tools it reaches
+    // canUseTool even in bypassPermissions. Do not enable allow-all rules or fake a tool.
     if (tool === "AskUserQuestion") {
       const questions = Array.isArray((input as any).questions) ? (input as any).questions : [];
+      if (!questions.length || questions.some((q: any) => typeof q?.question !== "string" || !Array.isArray(q.options) || q.options.some((o: any) => typeof o?.label !== "string"))) return { behavior: "deny", message: "Invalid AskUserQuestion input; no answer was collected.", toolUseID: options.toolUseID };
       const answers: Record<string, string> = {};
       for (const q of questions) {
         const r = await ask(l, { method: "select", title: q.header ? `${q.header}: ${q.question}` : q.question, message: q.multiSelect ? "Pick one, or type several separated by commas." : undefined, options: (q.options ?? []).map((o: any) => o.label), other: true }, options.signal);
-        if (r.cancelled) return { behavior: "deny", message: "The user dismissed the question.", toolUseID: options.toolUseID };
+        if (r.cancelled || options.signal.aborted) return { behavior: "deny", message: "The user dismissed the question. Do not assume an answer.", toolUseID: options.toolUseID };
         answers[q.question] = r.value ?? "";
       }
       return { behavior: "allow", updatedInput: { ...input, answers }, toolUseID: options.toolUseID };
@@ -169,6 +176,7 @@ async function open(req: PiChatRequest, s: Saved, start: { thinkingOff: boolean;
       ...baseOptions(cwd),
       ...identity,
       model: start.row.value,
+      systemPrompt: { type: "preset", preset: "claude_code", append: QUESTION_INSTRUCTIONS },
       includePartialMessages: true,
       canUseTool: permissions(req.threadId),
       ...(start.bypass ? { allowDangerouslySkipPermissions: true } : {}),

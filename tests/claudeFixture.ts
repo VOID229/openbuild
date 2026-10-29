@@ -45,6 +45,21 @@ async function turn(prompt) {
   appendFileSync(file(session), JSON.stringify({ type: 'user', text: t }) + '\n');
   if (process.env.FAKE_EFFECTS) appendFileSync(process.env.FAKE_EFFECTS, t + '\n');
   out({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: ['Bash','Edit'], mcp_servers: [], model: state.model, permissionMode: state.mode, slash_commands: [], output_style: 'default', skills: [], plugins: [], apiKeySource: 'none', claude_code_version: '2.1.311', ...base, uuid: crypto.randomUUID() });
+  if (t.startsWith('question')) {
+    const questions = t === 'question malformed' ? [] : [
+      { question: 'Which approach?', header: 'Approach', multiSelect: false, options: [{ label: 'Small', description: 'Minimal change' }, { label: 'Full', description: 'Complete change' }] },
+      { question: 'Which checks?', header: 'Checks', multiSelect: true, options: [{ label: 'Unit' }, { label: 'Integration' }] },
+    ];
+    const input = { questions };
+    assistant([{ type: 'tool_use', id: 'tool-question', name: 'AskUserQuestion', input }]);
+    // Native Claude always sends interactive AskUserQuestion to the permission host,
+    // even when ordinary tools are bypassed. dontAsk deliberately denies questions.
+    const r = state.mode === 'dontAsk' ? { behavior: 'deny' } : await ask({ subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input, tool_use_id: 'tool-question' });
+    log('question-decision ' + JSON.stringify(r));
+    out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-question', content: r.behavior === 'allow' ? JSON.stringify(r.updatedInput.answers) : r.message ?? 'denied', is_error: r.behavior !== 'allow' }] }, parent_tool_use_id: null, ...base, uuid: crypto.randomUUID() });
+    text(r.behavior === 'allow' ? 'answered ' + JSON.stringify(r.updatedInput.answers) : 'question dismissed');
+    return result();
+  }
   if (t.startsWith('edit')) {
     const input = { file_path: process.cwd() + '/a.txt', old_string: 'one', new_string: 'two' };
     assistant([{ type: 'tool_use', id: 'tool-edit', name: 'Edit', input }]);
@@ -80,6 +95,7 @@ for await (const line of console) {
   if (m.type === 'user') { busy = busy.then(() => turn(m)); continue; }
   if (m.type !== 'control_request') continue;
   const r = m.request, ok = response => out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, ...(response ? { response } : {}) } });
+  if (r.subtype === 'initialize' && r.appendSystemPrompt) log('question-instructions ' + r.appendSystemPrompt);
   log('control ' + r.subtype + (r.subtype === 'set_model' ? ' ' + r.model : r.subtype === 'set_permission_mode' ? ' ' + r.mode : r.subtype === 'apply_flag_settings' ? ' ' + JSON.stringify(r.settings) : ''));
   if (r.subtype === 'initialize') ok({ commands: [], agents: [], output_style: 'default', available_output_styles: ['default'], models, account: { email: 'fixture@example.com', subscriptionType: 'Claude Pro', apiProvider: 'firstParty' }, pid: process.pid, claude_code_version: '2.1.311', current_permission_mode: state.mode, fast_mode_state: 'off', fast_mode_disabled_reason: 'sdk_opt_in_required' });
   else if (r.subtype === 'set_model') { state.model = r.model; ok({ model: r.model }); }

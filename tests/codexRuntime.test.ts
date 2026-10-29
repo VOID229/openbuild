@@ -22,7 +22,7 @@ for await (const line of console) {
  else if(m.method==='thread/start') { thread='native-'+crypto.randomUUID(); writeFileSync(process.env.CODEX_TEST_DIR+'/'+thread,'0'); reply({thread:{id:thread,turns:[]}}); }
  else if(m.method==='thread/resume') {thread=m.params.threadId;const n=Number(readFileSync(process.env.CODEX_TEST_DIR+'/'+thread,'utf8'));reply({thread:{id:thread,turns:Array.from({length:n},(_,i)=>({id:'old-'+i,status:'completed'}))}});}
  else if(m.method==='permissionProfile/list') reply({data:[{id:':read-only',description:null,allowed:true},{id:':workspace',description:null,allowed:true},{id:'team',description:'Team profile',allowed:false}],nextCursor:null});
- else if(m.method==='config/read') reply({config:{default_permissions:':workspace'},origins:{}});
+ else if(m.method==='config/read') reply({config:{default_permissions:':workspace',developer_instructions:'Keep the project-specific instructions.'},origins:{}});
  else if(m.method==='experimentalFeature/list') reply({data:[{name:'guardian_approval',enabled:process.env.CODEX_TEST_NO_REVIEW!=='1'}],nextCursor:null});
  else if(m.method==='configRequirements/read') reply({requirements:process.env.CODEX_TEST_REVIEWERS?{allowedApprovalsReviewers:process.env.CODEX_TEST_REVIEWERS.split(',')}:null});
  else if(m.method==='model/list') reply({data:[{id:'catalog-id',model:'native-model',displayName:'Native model',inputModalities:['text','image'],supportedReasoningEfforts:[{reasoningEffort:'high'}],serviceTiers:[{id:'priority',name:'Fast',description:'extra usage'}],isDefault:true}],nextCursor:null});
@@ -36,6 +36,7 @@ for await (const line of console) {
   const text=m.params.input[0].text;
   if(text==='crash') { process.exit(17); }
   if(text==='abort'||text==='steer') continue;
+  if(text==='questions') {out({id:'questions-1',method:'item/tool/requestUserInput',params:{threadId:thread,turnId:turn,itemId:'questions',questions:[{id:'approach',header:'Approach',question:'Which approach?',isOther:false,isSecret:false,options:[{label:'A',description:'First approach'},{label:'B',description:'Second approach'}]},{id:'details',header:'Details',question:'Any details?',isOther:false,isSecret:false,options:null}]}});continue;}
   if(text==='secret') {out({id:'input-1',method:'item/tool/requestUserInput',params:{threadId:thread,turnId:turn,itemId:'input',questions:[{id:'password',header:'Password',question:'Enter secret',isSecret:true,isOther:true,options:null}]}});continue;}
   if(text==='children') {
    ev('item/started',{item:{id:'spawn',type:'collabAgentToolCall',tool:'spawnAgent',receiverThreadIds:['child-thread'],status:'inProgress'}});
@@ -58,6 +59,7 @@ for await (const line of console) {
   ev('item/agentMessage/delta',{itemId:'b',delta:'steered'});
   ev('turn/completed',{turn:{id:turn,status:'completed'}});
  } else if(m.method==='turn/interrupt') {reply({});ev('turn/completed',{turn:{id:turn,status:'interrupted'}});}
+ else if(m.id==='questions-1') {ev('turn/completed',{turn:{id:turn,status:'completed'}});}
  else if(m.id==='input-1') {ev('turn/completed',{turn:{id:turn,status:'completed'}});}
  else if(m.id==='permission-1') { waiting=false;ev('turn/completed',{turn:{id:turn,status:'completed'}}); }
  else if(m.id!==undefined) reply({});
@@ -82,6 +84,14 @@ test("Codex starts, persists/resumes, sends only new input, preserves configured
  const two=await collect({...req,message:'second',prior:1});
  expect(two.find(e=>e.t==='usage').usage).toMatchObject({input:15,cacheRead:5,output:3});
  const all=messages(); expect(all.some(m=>m.method==='thread/resume')).toBe(true);
+ for (const m of all.filter(m=>['thread/start','thread/resume'].includes(m.method))) {
+  expect(m.params.config).toEqual({'features.default_mode_request_user_input':true});
+  expect(m.params.developerInstructions).toStartWith('Keep the project-specific instructions.\n\n');
+  expect(m.params.developerInstructions).toContain('call request_user_input instead of asking in prose');
+  expect(m.params.developerInstructions).toContain('always allow a free-text answer');
+  expect(m.params.baseInstructions).toBeUndefined();
+  expect(m.params.collaborationMode).toBeUndefined();
+ }
  const turns=all.filter(m=>m.method==='turn/start');
  expect(turns.at(-1).params.input).toEqual([{type:'text',text:'second',text_elements:[]}]);
  expect(turns.at(-1).params.serviceTier).toBeNull();
@@ -113,6 +123,36 @@ test("Codex permission request reaches ask UI and only explicit reply grants onc
  expect(hasAsk(req.threadId,ask.id)).toBe(true); expect(answer(req.threadId,ask.id,{value:'Allow once'})).toBe(true);expect(hasAsk(req.threadId,ask.id)).toBe(false);
  while(!(await reader.read()).done) {}
  expect(messages().find(m=>m.id==='permission-1'&&!m.method)?.result).toEqual({decision:'accept'});
+});
+
+test("Codex native questions allow free text and aggregate replies by question ID before resuming", async () => {
+ const req=request('questions');const reader=runTurn(req,new AbortController().signal).getReader();const events:any[]=[];
+ const read=async()=>{const r=await reader.read();if(!r.done)events.push(...new TextDecoder().decode(r.value).trim().split('\n').map(s=>JSON.parse(s)));return r.done;};
+ while(events.filter(e=>e.t==='ask').length<2){if(await read())throw new Error('missing questions');}
+ const [choice,details]=events.filter(e=>e.t==='ask');
+ expect(choice).toMatchObject({method:'select',title:'Approach',message:'Which approach?',options:['A','B'],other:true});
+ expect(details).toMatchObject({method:'input',title:'Details',other:true});
+ expect(messages().some(m=>m.id==='questions-1'&&!m.method)).toBe(false);
+ // Out-of-order replies, including text that is not one of the model's choices.
+ expect(answer(req.threadId,details.id,{value:'Additional context'})).toBe(true);
+ expect(messages().some(m=>m.id==='questions-1'&&!m.method)).toBe(false);
+ expect(answer(req.threadId,choice.id,{value:'A different approach'})).toBe(true);
+ expect(answer(req.threadId,choice.id,{value:'Duplicate'})).toBe(false);
+ while(!await read()) {}
+ expect(messages().find(m=>m.id==='questions-1'&&!m.method).result).toEqual({answers:{details:{answers:['Additional context']},approach:{answers:['A different approach']}}});
+ expect(events.find(e=>e.t==='done').finish).toBe('stop');
+});
+
+test("Codex abort cancels every pending native question and answers the request once", async () => {
+ const before=messages().length;
+ const req=request('questions');const abort=new AbortController();const reader=runTurn(req,abort.signal).getReader();const asks:any[]=[];
+ while(asks.length<2){const r=await reader.read();if(r.done)throw new Error('missing questions');asks.push(...new TextDecoder().decode(r.value).trim().split('\n').map(s=>JSON.parse(s)).filter(e=>e.t==='ask'));}
+ abort.abort();let rest='';while(true){const r=await reader.read();if(r.done)break;rest+=new TextDecoder().decode(r.value);}
+ expect(asks.every(a=>!hasAsk(req.threadId,a.id))).toBe(true);
+ const replies=messages().slice(before).filter(m=>m.id==='questions-1'&&!m.method);
+ expect(replies).toHaveLength(1);
+ expect(replies[0].result).toEqual({answers:{approach:{answers:[]},details:{answers:[]}}});
+ expect(rest).toContain('"finish":"aborted"');
 });
 
 test("Codex secret asks redact journal answers and child tools remain visible without completing parent", async () => {

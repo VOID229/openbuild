@@ -5,6 +5,9 @@ import { CodexProcess, CodexRpcError, type RpcMessage } from "./rpc";
 import { toolEvent } from "./tools";
 import { AUTO_REVIEW, permissionParams } from "./install";
 interface Saved { id: string; cwd: string; turns: number; nativeTurns?: number; tokens?: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens?: number; outputTokens: number } }
+// request_user_input is otherwise unavailable outside Plan mode, even when the user asks for it.
+// Keep this thread-scoped: never rewrite the user's Codex configuration or change collaboration mode.
+const QUESTION_INSTRUCTIONS = `When you need a decision or clarification from the user, call request_user_input instead of asking in prose. Use it when the user asks you to use the question tool as well. Wait for the actual answer before continuing; never invent an answer. Offer concrete choices when useful, and always allow a free-text answer. Do not add an Other option yourself: OpenBuild provides free-text entry alongside the choices.`;
 const key = (id: string) => `codex-session:${id}`;
 function saved(id: string): Saved | undefined {
   const raw = storage.getValue(key(id));
@@ -82,7 +85,7 @@ function serverRequest(l: Live, m: RpcMessage) {
     const qs = Array.isArray(p.questions) ? p.questions : [];
     if (!qs.length) { respond({ answers }); return; }
     let left = qs.length;
-    for (const q of qs) question(l, { method: q.options?.length ? "select" : "input", title: q.header || q.question, message: q.question, options: q.options?.map((o: any) => o.label), other: !!q.isOther, secret: !!q.isSecret }, (r) => {
+    for (const q of qs) question(l, { method: q.options?.length ? "select" : "input", title: q.header || q.question, message: q.question, options: q.options?.map((o: any) => o.label), other: true, secret: !!q.isSecret }, (r) => {
       answers[q.id] = { answers: r.cancelled ? [] : [r.value ?? ""] };
       if (--left === 0) respond({ answers });
     });
@@ -103,15 +106,22 @@ function ensure(req: PiChatRequest): Live {
   proc.on((m) => serverRequest(current, m));
   l.ready = (async () => {
     await proc.initialize();
+    // developerInstructions overrides the native config value, so retain it before appending ours.
+    const config = await proc.request("config/read", { cwd: proc.cwd });
+    const configured = config.config?.developer_instructions;
+    const questionParams = {
+      config: { "features.default_mode_request_user_input": true },
+      developerInstructions: [typeof configured === "string" ? configured : "", QUESTION_INSTRUCTIONS].filter(Boolean).join("\n\n"),
+    };
     const s = saved(req.threadId);
     if (s) {
       if (s.cwd !== proc.cwd) throw new Error("Codex thread workspace mismatch; cannot resume in another directory");
-      const r = await proc.request("thread/resume", { threadId: s.id, cwd: s.cwd });
+      const r = await proc.request("thread/resume", { threadId: s.id, cwd: s.cwd, ...questionParams });
       if (r.thread?.id !== s.id || !Array.isArray(r.thread.turns) || r.thread.turns.length !== (s.nativeTurns ?? s.turns)) throw new Error("Codex history mismatch (possibly edited externally); refusing to replay messages");
       if (r.thread.turns.some((t: any) => t.status === "inProgress")) throw new Error("Codex has an unfinished turn; refusing to steer or resend it");
       return s.id;
     }
-    const r = await proc.request("thread/start", { cwd: proc.cwd, model: req.model.replace(/^codex\//, "") });
+    const r = await proc.request("thread/start", { cwd: proc.cwd, model: req.model.replace(/^codex\//, ""), ...questionParams });
     if (!r.thread?.id) throw new Error("Codex did not return a thread id");
     save(req.threadId, { id: r.thread.id, cwd: proc.cwd, turns: 0, nativeTurns: 0 });
     return r.thread.id;

@@ -17,6 +17,8 @@ Each fx thread gets an `fx acp` process ([Agent Client Protocol](https://agentcl
 
 fx's ACP events are mapped onto the same stream events Pi turns produce. Its tools get the names the thread UI already draws: `shell` → `bash`, `read_file` → `read`, `edit_file` → `edit` (with a diff), `write_file` → `write`, `grep_files` → `grep`, `glob_files` → `find`. So text, thinking, tool rows, live shell output, diffs, usage and context fill look the same as in a Pi thread. fx's own permission mode applies (`fx status`). If fx asks before an action, the request appears as a question card in the thread.
 
+Clarifying questions use fx's native `request_user_input` tool, not a Pi extension. OpenBuild advertises ACP form elicitation and handles `elicitation/create`, `session/elicitation`, and `_session/elicitation`, following t3code's ACP adapter. String, boolean, numeric and enum fields appear as question cards; answers are returned with their native types and field IDs. Native enum constraints still apply. Dismissing or stopping cancels the pending form; URL and unsupported complex forms are declined rather than silently accepted. The adapter reminds the model to use its tool instead of asking in prose.
+
 The model picker lists `fx models` for the device as `fx/<id>`. The thinking control maps onto fx's reasoning effort.
 
 ## Restarts

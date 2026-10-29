@@ -13,6 +13,8 @@ import type { Models } from "@earendil-works/pi-ai";
 import { Harness, createRegistry, type Conversation, type EntryRecord, type WatchHandle } from "@earendil-works/pi-durable";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { durableCodingTools } from "./tools";
+import { durableQuestions, questionTick, type DurableQuestion, type QuestionReply } from "./questions";
+import type { Context } from "@earendil-works/chord/context";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import { Run } from "../runs";
@@ -33,6 +35,7 @@ interface Manifest {
   submitted?: boolean;
   usage?: Usage;
   stopping?: boolean;
+  questions?: Record<string, DurableQuestion>;
 }
 interface Thread {
   harness: Harness;
@@ -83,6 +86,7 @@ export class DurableRuntime {
   private deleted(threadId: string) { return existsSync(this.tombstone(threadId)); }
   private retire(m: Manifest) {
     const run = this.handle(m);
+    this.dismissQuestions(m);
     m.stopping = true;
     m.ended = true;
     m.events.push({ t: "done", finish: "aborted" });
@@ -157,6 +161,7 @@ export class DurableRuntime {
         const models = await this.getModels();
         const registry = createRegistry();
         registry.install(durableCodingTools(this.options.bashTimeoutSeconds));
+        registry.install(durableQuestions((callId, question, options, ctx) => this.waitQuestion(id, callId, question, options, ctx)));
         const storage = await openNodeJsonlStorage(join(this.directory, "threads", key(id)), context, { fsync: true });
         const harness = await Harness.open(storage, { models, registry, env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }) }, context);
         return { harness, root: await harness.root(context) };
@@ -189,6 +194,59 @@ export class DurableRuntime {
     const run = this.handle(m);
     // handle() may have just hydrated the full log.
     for (const event of m.events.slice(run.events.length)) run.push(event);
+  }
+  private async waitQuestion(threadId: string, callId: string, question: string, options: string[], ctx: Context): Promise<string | undefined> {
+    const m = [...this.manifests.values()].find(m => m.request.threadId === threadId && !m.ended);
+    if (!m || m.stopping) throw new Error("Question's durable run is no longer active");
+    m.questions ??= Object.create(null);
+    let q = Object.hasOwn(m.questions!, callId) ? m.questions![callId] : undefined;
+    if (!q) {
+      q = { question, options, answered: false };
+      Object.defineProperty(m.questions, callId, { value: q, writable: true, enumerable: true, configurable: true });
+      const offset = m.events.length;
+      try { this.emit(m, [{ t: "ask", id: callId, method: "select", title: question, options, other: true }]); }
+      catch (error) {
+        delete m.questions![callId];
+        m.events.length = offset;
+        throw error;
+      }
+    } else if (q.question !== question || !isDeepStrictEqual(q.options, options)) {
+      throw new Error("Durable question call ID was reused with different arguments");
+    }
+    while (!q.answered) {
+      await questionTick(ctx);
+      if (this.closed || m.ended || m.stopping) throw new Error("Durable question interrupted");
+    }
+    return q.answer;
+  }
+  async answer(threadId: string, askId: string, reply: QuestionReply): Promise<boolean> {
+    await this.recover();
+    const m = [...this.manifests.values()].find(m => m.request.threadId === threadId && !m.ended && !m.stopping && m.questions && Object.hasOwn(m.questions, askId));
+    const q = m?.questions?.[askId];
+    if (!m || !q) return false;
+    const answer = reply.cancelled ? undefined : reply.value;
+    if (!reply.cancelled && typeof answer !== "string") return false;
+    // Idempotent acknowledgement if the worker died after fsync but before its HTTP response.
+    if (q.answered) return q.answer === answer;
+    q.answered = true;
+    if (answer !== undefined) q.answer = answer;
+    const offset = m.events.length;
+    try { this.emit(m, [{ t: "asked", id: askId, ...(answer !== undefined ? { answer } : {}) }]); }
+    catch (error) {
+      // Never let the live waiter consume a reply whose durable commit failed.
+      q.answered = false;
+      delete q.answer;
+      m.events.length = offset;
+      throw error;
+    }
+    return true;
+  }
+  private dismissQuestions(m: Manifest) {
+    const events: StreamEvent[] = [];
+    for (const [id, q] of Object.entries(m.questions ?? {})) {
+      if (!q.answered) { q.answered = true; events.push({ t: "asked", id }); }
+    }
+    if (events.length) this.emit(m, events);
   }
   private project(m: Manifest, entries: readonly EntryRecord[]) {
     const skip = new Set([...m.baseline, ...m.seen]);
@@ -257,6 +315,7 @@ export class DurableRuntime {
         await final.stop();
         if (m.ended) return;
         if (result.status === "unanswered" && !m.stopping) m.events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
+        this.dismissQuestions(m);
         m.events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
         m.ended = true;
         this.persist(m);
