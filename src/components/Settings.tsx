@@ -385,29 +385,35 @@ function SecuritySection() {
   return (
     <>
       <Heading>Security</Heading>
-      <div className="field">
-        <div className="setting-label">Instance password</div>
-        <p className="setting-desc">This instance is protected by a server password, not a cloud account. Unlocked browsers can run Pi as the server user.</p>
-        {step === "closed" ? (
-          <>
-            <div className="account-actions">
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setSaved(false);
-                  reset("current");
-                }}
-              >
-                Change password
-              </button>
-              {saved && <span className="field-help" role="status">Password changed.</span>}
-            </div>
-            <p className="field-help">
-              Changing the password signs out every other browser. On the host computer you can also run <code>openbuild set pass &lt;password&gt;</code>.
+      <div className={step === "closed" ? "setting-row" : "setting-row setting-row-top"}>
+        <div className="setting-text">
+          <div className="setting-label">Instance password</div>
+          <p className="setting-desc">Anyone who unlocks this instance can run Pi as the server user.</p>
+          {saved && step === "closed" && (
+            <p className="field-help" role="status">
+              Password changed. Other browsers were signed out.
             </p>
-          </>
-        ) : (
+          )}
+        </div>
+        {step === "closed" && (
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              setSaved(false);
+              reset("current");
+            }}
+          >
+            Change password
+          </button>
+        )}
+      </div>
+      {step === "closed" ? (
+        <p className="field-help security-cli">
+          Changing it signs out every other browser. From the host you can also run <code>openbuild set pass &lt;password&gt;</code>
+        </p>
+      ) : (
+        <div className="field">
           <form className="account-form" onSubmit={submit}>
             {step === "current" ? (
               <Field label="Current password" htmlFor="security-current">
@@ -438,8 +444,8 @@ function SecuritySection() {
               </button>
             </div>
           </form>
-        )}
-      </div>
+        </div>
+      )}
     </>
   );
 }

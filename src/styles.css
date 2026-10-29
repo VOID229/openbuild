@@ -3055,6 +3055,18 @@ svg {
   color: var(--text-3);
 }
 
+.security-cli {
+  margin-top: 12px;
+  line-height: 1.55;
+}
+
+.security-cli code {
+  font-family: var(--mono);
+  font-size: 0.92em;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
 .field-help a {
   text-decoration: underline;
   text-underline-offset: 2px;
