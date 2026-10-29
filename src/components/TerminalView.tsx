@@ -137,7 +137,8 @@ export function TerminalView({ tab, folder, xterm }: { tab: TerminalTab; folder:
  * Option+T opens a tab and Option+W closes it, from the terminal's own input only — so the browser's
  * tabs stay its business when the composer or a menu has focus. It's Option rather than ⌘T/⌘W
  * because browsers keep those two for themselves however a page asks; ⌥T and ⌥W are the terminal's,
- * here as in other terminal apps that live in a page.
+ * here as in other terminal apps that live in a page. Option+1–8 goes to that tab and Option+9 to the
+ * last one, the way browsers number theirs.
  */
 export function useTabKeys(open: boolean) {
   useEffect(() => {
@@ -145,12 +146,17 @@ export function useTabKeys(open: boolean) {
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
       // With Option held a Mac reports "†"/"∑" as the key; the code is the letter itself.
-      if (e.code !== "KeyT" && e.code !== "KeyW") return;
+      const digit = /^Digit([1-9])$/.exec(e.code)?.[1];
+      if (e.code !== "KeyT" && e.code !== "KeyW" && !digit) return;
       const el = document.activeElement;
       if (!el?.closest?.(".side-panel .xterm, .terminal-panel .xterm")) return;
       e.preventDefault();
       e.stopPropagation();
-      if (e.code === "KeyT") newTerminalTab();
+      if (digit) {
+        const { tabs, activateTab } = useTerminal.getState();
+        const tab = digit === "9" ? tabs.at(-1) : tabs[Number(digit) - 1];
+        if (tab) activateTab(tab.id);
+      } else if (e.code === "KeyT") newTerminalTab();
       else {
         const { active, closeTab } = useTerminal.getState();
         if (active) closeTab(active);

@@ -1816,6 +1816,32 @@ svg {
   overflow-y: auto;
 }
 
+.speed-menu {
+  min-width: 200px;
+}
+
+/* Two-line rows (name over description): the base row's fixed height would let them overlap. */
+.speed-menu .menu-item {
+  height: auto;
+  min-height: 34px;
+  padding: 7px 10px;
+}
+
+.speed-menu .menu-item-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.speed-desc {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+
 /* Model picker panel */
 
 .model-panel {
@@ -6214,6 +6240,10 @@ a.btn-primary {
   border-color: transparent;
 }
 
+.permission-pill { display: inline-flex; align-items: center; gap: 5px; }
+.permission-pill svg { flex-shrink: 0; opacity: 0.75; }
+.permission-risky { color: var(--danger); }
+
 /* In a thread, under the composer: where it works, and how full the context is */
 
 .ws-bottom {
@@ -6954,7 +6984,8 @@ a.btn-primary {
   margin: 0 8px 8px;
   border: 1px solid var(--border);
   border-radius: 14px;
-  background: var(--surface);
+  /* One surface, bar and screen alike: no card inside the card. */
+  background: var(--terminal-bg);
   box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
@@ -6998,10 +7029,9 @@ a.btn-primary {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 4px 0 6px;
-  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  height: 36px;
+  padding: 2px 6px 0 6px;
   font-size: 12.5px;
   user-select: none;
   -webkit-user-select: none;
@@ -7027,14 +7057,14 @@ a.btn-primary {
   gap: 1px;
   height: 26px;
   min-width: 0;
-  padding: 0 3px 0 10px;
-  border-radius: 8px;
+  padding: 0 3px 0 8px;
+  border-radius: 7px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 .terminal-tab-active {
-  background: var(--surface-3);
+  background: var(--active);
   color: var(--text);
 }
 
@@ -7094,7 +7124,7 @@ a.btn-primary {
 
 .terminal-where-icon { flex: 0 0 auto; }
 
-.terminal-action { flex: 0 0 auto; width: 26px; height: 26px; color: var(--text-3); }
+.terminal-action { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 7px; color: var(--text-3); }
 .terminal-action:disabled { opacity: 0.4; }
 
 @media (max-width: 620px) {
@@ -7545,8 +7575,8 @@ a.btn-primary {
 .side-launch-key { margin-left: auto; color: var(--text-3); font-family: var(--font-mono-ui); font-size: 12px; font-weight: 400; }
 .side-launch-hint { margin: 0; color: var(--text-3); font-size: 12.5px; }
 
-/* A terminal tab: where it runs, then the screen. */
-.side-terminal { display: flex; flex-direction: column; height: 100%; }
+/* A terminal tab: where it runs, then the screen, on one surface. */
+.side-terminal { display: flex; flex-direction: column; height: 100%; background: var(--terminal-bg); }
 
 .terminal-sub {
   flex: none;
@@ -7568,21 +7598,18 @@ a.btn-primary {
   white-space: nowrap;
 }
 
-/* The screen itself sits in the card, on the terminal's own background. */
+/* The screen fills what holds it, straight on the terminal's own background: no frame of its own. */
 .terminal-body {
   position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
-  padding: 0 8px 8px;
 }
 
 .terminal-screen {
   flex: 1;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--border);
-  border-radius: 10px;
   background: var(--terminal-bg);
   /* The terminal's own type, not the page's: xterm measures what it inherits, and the app's font
      (16px Comic Neue on the default theme) would make its cells far taller than its font size. */
@@ -7592,7 +7619,8 @@ a.btn-primary {
 }
 
 /* xterm measures itself, so its padding belongs on its own element (the fit addon subtracts it). */
-.terminal-screen .xterm { height: 100%; padding: 7px 0 5px 10px; }
+/* The left edge lines up with the tab labels above. */
+.terminal-screen .xterm { height: 100%; padding: 6px 4px 8px 14px; }
 .terminal-screen .xterm-viewport { background: transparent !important; }
 
 .terminal-note {
