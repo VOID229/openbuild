@@ -1,6 +1,7 @@
 /** Server-side client. Disconnects only stop watching; they NEVER abort ordinary Pi. */
 import { spawn } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { readEvents } from "../../shared/replies";
 import { outputTail } from "../../shared/shell";
@@ -9,7 +10,7 @@ import { Run } from "../runs";
 import { dataDir } from "../paths";
 import type { ShellRequest } from "./shell";
 import type { PiRunRecord } from "./workerRuntime";
-import { secureSocketPath, workerSocket } from "./worker";
+import { secureSocketPath, workerSocket, WORKER_FEATURES } from "./worker";
 
 const onSocket = (socket: string, init: RequestInit = {}) => ({ ...init, unix: socket }) as RequestInit;
 export type PiSnapshot = Omit<PiRunRecord, "request"> & { eventCount?: number; events: (StreamEvent | ShellEvent)[] };
@@ -74,6 +75,12 @@ export class PiClient {
       const res = await fetch("http://pi/health", onSocket(this.socket, { signal: AbortSignal.timeout(500) }));
       return res.ok ? await res.json() as { pid: number; protocol: number; features?: string[] } : undefined;
     } catch { return undefined; }
+  }
+  /** Admission capability check: connect a cold lane, but never retire an incompatible owner. */
+  async supportsNative(runtime: string) {
+    await this.connect();
+    const health = await this.health();
+    return !!health && health.protocol === 1 && [runtime, "runtime-questions"].every(f => health.features?.includes(f));
   }
   private connect() {
     return this.connected ??= this.connectNow().catch((error) => { this.connected = undefined; throw error; });
@@ -237,23 +244,62 @@ export class PiClient {
   /** Close watchers, not the worker or any Pi process. */
   async close() { this.closed = true; this.requests.abort(); }
 }
-const hot = globalThis as { openbuildPiClient?: PiClient; openbuildOpencodeClient?: PiClient };
+const hot = globalThis as { openbuildPiClient?: PiClient; openbuildOpencodeClient?: PiClient; openbuildAgentClients?: Map<string, PiClient>; openbuildNativeAdmissions?: Map<string, Promise<unknown>> };
 const client = hot.openbuildPiClient ??= new PiClient();
 const opencodeDirectory = () => join(dataDir(), "opencode-worker");
 const opencodeClient = () => hot.openbuildOpencodeClient ??= new PiClient(opencodeDirectory());
-/** Never start another lane just to poll. Reconnect it only if it has existing journal metadata. */
-function existingClients(): PiClient[] {
-  if (hot.openbuildOpencodeClient || existsSync(join(opencodeDirectory(), "worker.json"))) return [client, opencodeClient()];
-  return [client];
+const agentClients = hot.openbuildAgentClients ??= new Map<string, PiClient>();
+const admissions = hot.openbuildNativeAdmissions ??= new Map<string, Promise<unknown>>();
+const generation = `agent-worker-${createHash("sha256").update(JSON.stringify([...WORKER_FEATURES].sort())).digest("hex").slice(0, 16)}`;
+function agentClient(name: string) {
+  let c = agentClients.get(name);
+  if (!c) agentClients.set(name, c = new PiClient(join(dataDir(), name)));
+  return c;
 }
+/** Discover historical generations too, without importing/opening worker storage. */
+function existingClients(): PiClient[] {
+  try {
+    for (const name of readdirSync(dataDir())) {
+      if (/^agent-worker-[a-f0-9]{16}$/.test(name) && existsSync(join(dataDir(), name, "worker.json"))) agentClient(name);
+    }
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  return [client, ...(hot.openbuildOpencodeClient || existsSync(join(opencodeDirectory(), "worker.json")) ? [opencodeClient()] : []), ...agentClients.values()];
+}
+/** Journal ownership is permanent: never transfer an active OR idle native process to a new lane.
+ * The web server is the sole admission authority; serialize its selection + journal admission.
+ * Old incompatible threads require an explicit stop --all upgrade (or a new thread).
+ */
 export async function startRun(req: PiChatRequest) {
-  if (req.runtime !== "opencode") return client.startRun(req);
-  // OpenCode was previously admitted to the shared worker. Keep that thread there, including
-  // stable-id replays and pending turns; never migrate a native turn between running owners.
-  if (existsSync(join(client.directory, "worker.json")) && (await client.snapshots(req.threadId)).length) return client.startRun(req);
-  // A dedicated lane can load the new adapter even while an older shared worker is busy.
-  // Retiring/upgrading that worker would otherwise block new OpenCode threads indefinitely.
-  return opencodeClient().startRun(req);
+  if (!["cursor", "claude", "codex", "fx", "opencode"].includes(req.runtime ?? "")) return client.startRun(req);
+  const previous = admissions.get(req.threadId) ?? Promise.resolve();
+  const admission = previous.catch(() => {}).then(async () => {
+    const clients = existingClients();
+    // Replay must precede feature gates, even on an older worker missing question support.
+    if (req.stream?.id) for (const c of clients) {
+      const run = await c.findRun(req.stream.id);
+      if (!run) {
+        if (await c.findShell(req.stream.id)) throw Object.assign(new Error("This run id already belongs to another request"), { status: 409 });
+        continue;
+      }
+      if (JSON.stringify(run.record.request) !== JSON.stringify(req)) throw Object.assign(new Error("This run id already belongs to another request"), { status: 409 });
+      return run;
+    }
+    for (const c of clients) {
+      const records = (await c.snapshots(req.threadId)).filter(r => r.kind === "run");
+      if (!records.length) continue;
+      if (records.some(r => r.status === "pending")) throw Object.assign(new Error("The agent is still working on this thread."), { status: 409, code: "busy" });
+      if (!await c.supportsNative(req.runtime!)) throw Object.assign(new Error("This thread belongs to an older agent worker. No prompt was sent. Start a new thread, or after all work finishes use `openbuild stop --all` then start OpenBuild to upgrade its owner."), { status: 409, code: "worker_upgrade" });
+      return c.startRun(req);
+    }
+    // Preserve the fresh OpenCode lane when compatible; never retire an incompatible one.
+    const preferred = req.runtime === "opencode" ? opencodeClient() : client;
+    const target = await preferred.supportsNative(req.runtime!) ? preferred : agentClient(generation);
+    if (!await target.supportsNative(req.runtime!)) throw Object.assign(new Error("Agent feature lane is incompatible; no prompt was sent."), { status: 409, code: "worker_upgrade" });
+    return target.startRun(req);
+  });
+  admissions.set(req.threadId, admission);
+  try { return await admission; }
+  finally { if (admissions.get(req.threadId) === admission) admissions.delete(req.threadId); }
 }
 export async function findRun(id: string) {
   for (const c of existingClients()) { const run = await c.findRun(id); if (run) return run; }
@@ -271,8 +317,12 @@ export async function answer(threadId: string, askId: string, reply: Parameters<
   for (const c of existingClients()) if (await c.answer(threadId, askId, reply)) return true;
   return false;
 }
-export const steer = (threadId: string, id: string, message: string, images?: PiChatRequest["images"]) => client.steer(threadId, id, message, images);
-export const compact = (threadId: string, instructions?: string) => client.compact(threadId, instructions);
+async function threadOwner(threadId: string) {
+  for (const c of existingClients()) if ((await c.snapshots(threadId)).some(r => r.kind === "run")) return c;
+  return client;
+}
+export const steer = async (threadId: string, id: string, message: string, images?: PiChatRequest["images"]) => (await threadOwner(threadId)).steer(threadId, id, message, images);
+export const compact = async (threadId: string, instructions?: string) => (await threadOwner(threadId)).compact(threadId, instructions);
 export const release = async (threadId: string) => { await Promise.all(existingClients().map(c => c.release(threadId))); };
 export const restartIdle = async () => {
   const { forgetModels, forgetCommands } = await import("./sessions");

@@ -12,7 +12,7 @@
 // The server's pid, mode and address are kept in <data dir>/server.json, its output in
 // <data dir>/server.log. PORT changes the port (default 3100).
 import { spawn, spawnSync } from "node:child_process";
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { ask } from "./prompt";
@@ -396,7 +396,11 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
 
 /** Only an explicit `stop --all` terminates detached runtimes. */
 function stopWorkers() {
-  for (const [file, script] of [[PI_WORKER, "server/pi/worker.ts"], [OPENCODE_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"]] as const) {
+  let generations: string[] = [];
+  try { generations = readdirSync(DATA).filter(name => /^agent-worker-[a-f0-9]{16}$/.test(name)); } catch {}
+  const workers: [string, string][] = [[PI_WORKER, "server/pi/worker.ts"], [OPENCODE_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"],
+    ...generations.map(name => [join(DATA, name, "worker.json"), "server/pi/worker.ts"] as [string, string])];
+  for (const [file, script] of workers) {
     try {
       const { pid } = JSON.parse(readFileSync(file, "utf8")) as { pid?: unknown };
       if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 1 || pid === process.pid || !alive(pid)) continue;

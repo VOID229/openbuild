@@ -23,11 +23,11 @@ The model picker lists `fx models` for the device as `fx/<id>`. The thinking con
 
 ## Restarts
 
-fx turns run in OpenBuild's detached agent worker (`pi-worker/`), the same process that runs ordinary Pi turns. `openbuild stop` / `restart` / a crash of the server do **not** interrupt them. fx keeps working, its output is persisted by the worker, and the restarted server reattaches and replays it to the app. Re-posting the same reply (same stream id) reattaches instead of prompting fx again. `openbuild stop --all` terminates the worker and its fx processes.
+fx turns run in OpenBuild's detached agent worker (a compatible `pi-worker/` or feature-versioned lane). `openbuild stop` / `restart` / a crash of the server do **not** interrupt them. fx keeps working, its output is persisted by the worker, and the restarted server reattaches and replays it to the app. Re-posting the same reply (same stream id) reattaches instead of prompting fx again. `openbuild stop --all` terminates the worker and its fx processes.
 
 Like ordinary Pi, this is process isolation, not checkpoint recovery. If the worker or the machine dies mid-turn, the turn is marked interrupted and is not rerun. fx's session on disk keeps whatever fx committed.
 
-A worker started by an older OpenBuild (before fx support) is replaced automatically the first time an fx thread starts, but only while it isn't running anything.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
 
 ## Limits
 

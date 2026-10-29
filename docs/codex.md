@@ -24,13 +24,13 @@ Codex text, reasoning, command execution, file changes and turn status are norma
 
 ## Restarts and interruption
 
-Codex runs inside OpenBuild's **detached agent worker**, shared with Pi (`pi-worker/`), not inside the HTTP server. `openbuild stop`, `openbuild restart`, server SIGTERM or a server crash leave an admitted turn running. While the server is down, the worker keeps collecting and persisting output. The restarted server reattaches, replays the stream and projects the completed reply into the same message. Posting the same stream id again reattaches to that run instead of starting another Codex turn.
+Codex runs inside OpenBuild's **detached agent worker** (a compatible `pi-worker/` or feature-versioned lane), not inside the HTTP server. `openbuild stop`, `openbuild restart`, server SIGTERM or a server crash leave an admitted turn running. While the server is down, the worker keeps collecting and persisting output. The restarted server reattaches, replays the stream and projects the completed reply into the same message. Posting the same stream id again reattaches to that run instead of starting another Codex turn.
 
 This is process isolation, **not automatic checkpoint recovery**. Killing the worker, losing power or rebooting the machine interrupts an active turn. OpenBuild does not automatically replay that turn: a command or file edit may already have happened, so retrying could duplicate unsafe side effects. Output already saved can be recovered, but unfinished work is not silently rerun. A subsequent message resumes the saved Codex thread if its history is consistent and idle; an active or inconsistent saved turn is rejected rather than automatically continued.
 
 Use **`openbuild stop --all`** when you explicitly want to stop the detached worker and its agents too. Ordinary server restarts are intentionally different.
 
-An agent worker left running from an older OpenBuild version may not support Codex yet. OpenBuild never kills it based on a racy idle check. If prompted, let its work finish, run `openbuild stop --all`, then `openbuild start` once to load the new worker.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
 
 ## Limits
 

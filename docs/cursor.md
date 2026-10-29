@@ -49,9 +49,9 @@ Tools map to existing UI names (bash, read, edit/write, ls/find/grep, todo, web_
 
 ## Persistence, cancellation, and restart
 
-Cursor runs in the **existing shared detached Pi worker**, alongside Pi/fx/Codex. No second Cursor daemon or HTTP-owned process is introduced. Stable run IDs and the worker SQLite event journal make reconnect/duplicate admission replay existing output without resubmitting the prompt. `openbuild stop`/restart only disconnects watchers: the worker and Cursor continue, and tool effects can finish while the HTTP server is down. See [durable.md](durable.md) for ordinary worker versus Durable guarantees. Use `openbuild stop --all` only when you intend to interrupt workers.
+Cursor runs in a **detached agent worker**, preferring the shared `pi-worker` when compatible and otherwise using a feature-versioned lane. No HTTP-owned process is introduced. Stable run IDs and the worker SQLite event journal make reconnect/duplicate admission replay existing output without resubmitting the prompt. `openbuild stop`/restart only disconnects watchers: the worker and Cursor continue, and tool effects can finish while the HTTP server is down. See [durable.md](durable.md) for ordinary worker versus Durable guarantees. Use `openbuild stop --all` only when you intend to interrupt workers.
 
-The worker advertises a `cursor` feature. An older worker is retired/replaced only through its atomic idle-retirement endpoint; busy/unsafe-to-upgrade workers are never signalled automatically.
+The worker advertises `cursor` and `runtime-questions`. New threads can use a feature-versioned worker without waiting for other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for legacy-owner upgrades and replay guarantees.
 
 Mappings use persistent OpenBuild storage keys `cursor-session:<threadId>` and retain native UUID, resolved workspace, UI turn count, in-flight reservation, and a conservative native history fingerprint. Native chats live under `<CURSOR_CONFIG_DIR or XDG_CONFIG_HOME/cursor or ~/.cursor>/chats/<md5(resolved cwd)>/<UUID>/store.db`.
 

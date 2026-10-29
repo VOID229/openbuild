@@ -53,13 +53,13 @@ Claude Code's tools appear in OpenBuild's usual rows: `Bash` as commands with th
 
 ## Restarts and interruption
 
-Claude Code runs inside OpenBuild's **detached agent worker** (`pi-worker/`, shared with Pi, Codex, Cursor and fx), not in the HTTP server. `openbuild stop`, `openbuild restart`, a server crash or SIGTERM leave a running turn running. While the server is down the worker keeps saving its output. The restarted server reattaches, replays it, and finishes the reply in the same message. Posting the same stream id again reattaches instead of starting another turn.
+Claude Code runs inside OpenBuild's **detached agent worker** (a compatible `pi-worker/` or feature-versioned lane), not in the HTTP server. `openbuild stop`, `openbuild restart`, a server crash or SIGTERM leave a running turn running. While the server is down the worker keeps saving its output. The restarted server reattaches, replays it, and finishes the reply in the same message. Posting the same stream id again reattaches instead of starting another turn.
 
 Each thread keeps a warm Claude process between turns (closed after 20 idle minutes). The thread's Claude session id is saved as `claude-session:<thread>`. A new process **resumes** that session (`resume`) and gets only the new message; OpenBuild never resends old messages. Claude Code keeps the history in `~/.claude/projects/` (or `CLAUDE_CONFIG_DIR`), so the session is also visible to `claude --resume`.
 
 This is process isolation, **not automatic replay**. Killing the worker, a power loss or a reboot interrupts the active turn, and OpenBuild doesn't rerun it, because a command or edit may already have happened. Use `openbuild stop --all` only when you mean to stop the worker and its agents too.
 
-A worker left running from an older OpenBuild doesn't know this runtime. OpenBuild replaces it once it's idle. If it's busy, it asks you to let it finish, then run `openbuild stop --all` and `openbuild start`.
+New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Existing threads remain pinned to their journal owner; see [worker feature lanes](runtime-questions.md#worker-feature-lanes) for explicit legacy-owner upgrades.
 
 ## Retry and edit
 
