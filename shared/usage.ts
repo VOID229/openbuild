@@ -116,9 +116,34 @@ export interface UsageLimits {
   stale?: boolean;
   /** The machine it was read on (set when more than one machine is shown). */
   machine?: string;
-  /** Banked resets (Codex). */
-  resetCredits?: number;
+  /** That machine's id ("local" or a paired device), for sending a reset to where the sign-in is. */
+  machineId?: string;
+  /** Banked resets this sign-in can spend. */
+  resetCredits?: UsageResetCredits | number;
   error?: string;
+}
+
+/** Plan resets the provider lets this account spend now (Codex, Claude Code). */
+export interface UsageResetCredits {
+  available: number;
+  /** The next banked reset to expire, as epoch milliseconds. */
+  expiresAt?: number;
+  /** The provider's id for the credit a reset would spend (Claude Code pins one). */
+  creditId?: string;
+}
+
+/** Older paired servers reported only a count. */
+export function normalizeResetCredits(value: UsageLimits["resetCredits"]): UsageResetCredits | undefined {
+  const credits = typeof value === "number" ? { available: value } : value;
+  return credits && Number.isFinite(credits.available) && credits.available > 0 ? credits : undefined;
+}
+
+/** What spending a banked reset did, as the providers report it. */
+export type UsageResetOutcome = "reset" | "nothingToReset" | "noCredit" | "alreadyRedeemed";
+
+export interface UsageResetResult {
+  outcome: UsageResetOutcome;
+  warning?: string;
 }
 
 export interface UsageLimitsReport {

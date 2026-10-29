@@ -1,8 +1,10 @@
 // /api/usage: tokens and cost across the agents on this machine and paired devices;
 // /api/usage/limits: their plans' limits. `scope=local` (what devices ask each other) is this machine only.
 import { USAGE_RANGES, type UsageRange } from "../../shared/usage";
-import { limits } from "./limits";
-import { machineLimits, machineReports, mergeReports } from "./machines";
+import { bad, readJson } from "../handlers";
+import { limits, resetCredit } from "./limits";
+import { validOperationId } from "./redemptionLedger";
+import { machineLimits, machineReports, mergeReports, remoteResetCredit } from "./machines";
 import { report } from "./report";
 
 type Wrap = <R extends Request>(handler: (req: R) => Response | Promise<Response>) => (req: R) => Response | Promise<Response>;
@@ -39,6 +41,23 @@ export function usageRoutes(api: Wrap) {
         try {
           if (p.get("scope") === "local") return Response.json({ providers: await limits(force), checkedAt: Date.now() });
           return Response.json(await machineLimits(force, () => limits(force)));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/usage/limits/reset": {
+      // A peer must prove it understands durable identities before receiving any mutation.
+      GET: api(() => Response.json({ durableOperationIdentity: 1 })),
+      POST: api(async (req) => {
+        const body = await readJson(req).catch(() => undefined);
+        if (!body || typeof body.id !== "string" || !body.id || !validOperationId(body.operationId)) return bad("Expected { id: string, operationId: stable operation ID }");
+        try {
+          const p = new URL(req.url).searchParams;
+          const result = p.get("scope") === "local" || !body.machine || body.machine === "local"
+            ? await resetCredit(body.id, body.operationId)
+            : await remoteResetCredit(String(body.machine), body.id, body.operationId);
+          return Response.json(result);
         } catch (err) {
           return fail(err);
         }

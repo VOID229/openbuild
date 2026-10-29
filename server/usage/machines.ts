@@ -3,7 +3,7 @@
 // in the background, so a slow or sleeping machine never holds the page up.
 import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
-import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageRange, UsageReport } from "../../shared/usage";
+import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageRange, UsageReport, UsageResetResult } from "../../shared/usage";
 import * as devices from "../devices";
 import { dataDir } from "../paths";
 import { RETRY_MS, shouldRefresh } from "./cache";
@@ -44,9 +44,9 @@ function save(m: Map<string, Cached<unknown>>) {
   }, 1000);
 }
 
-/** GET a paired device's API, trying each of its addresses. */
-async function ask<T>(device: devices.StoredDevice, path: string): Promise<T> {
-  const value = await requestUsage<T>(device.urls, path, device.token);
+/** A paired device's API, trying each of its addresses. */
+async function ask<T>(device: devices.StoredDevice, path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
+  const value = await requestUsage<T>(device.urls, path, device.token, timeoutMs, init, timeoutMs);
   devices.touchDevice(device.id, true);
   return value;
 }
@@ -207,12 +207,12 @@ export async function machineLimits(force: boolean, local: () => Promise<UsageLi
     const ok = (x: UsageLimits) => x.windows.length > 0 && !x.stale;
     if (!prev || (ok(l) && !ok(prev)) || (ok(l) === ok(prev) && l.asOf > prev.asOf)) byId.set(l.id, l);
   };
-  mine.forEach((l) => add({ ...l, machine: devices.deviceName() }));
+  mine.forEach((l) => add({ ...l, machine: devices.deviceName(), machineId: "local" }));
   const machines: UsageMachine[] = [{ id: "local", name: devices.deviceName(), local: true, status: "ok", at: Date.now() }];
   list.forEach((d, i) => {
     const r = theirs[i]!;
     machines.push({ id: d.id, name: d.name, status: r.pending ? "pending" : r.error ? "error" : "ok", at: r.at || undefined, error: r.error });
-    r.value?.providers.forEach((l) => add({ ...l, machine: d.name }));
+    r.value?.providers.forEach((l) => add({ ...l, machine: d.name, machineId: d.id }));
   });
   // Number accounts within each provider again now that machines are combined.
   const all = [...byId.values()];
@@ -229,4 +229,28 @@ export async function machineLimits(force: boolean, local: () => Promise<UsageLi
     l.account = l.account && !/^\d+$/.test(l.account) ? l.account : String(n);
   }
   return { providers: all, checkedAt: Date.now(), machines };
+}
+
+/** Spend a banked reset on the machine that holds the sign-in. */
+export async function remoteResetCredit(machineId: string, id: string, operationId: string): Promise<UsageResetResult> {
+  const device = remoteDevices().find((d) => d.id === machineId);
+  if (!device) throw new Error("That machine is no longer paired. Pair it again to use its resets.");
+  const capability = await ask<{ durableOperationIdentity?: number }>(device, "/api/usage/limits/reset?scope=local");
+  if (capability.durableOperationIdentity !== 1) throw new Error("Update OpenBuild on that machine before redeeming resets safely.");
+  // Discard a cached reading even on response loss: the remote may have spent the credit.
+  const m = await store();
+  const key = `${device.id}|limits`;
+  m.delete(key);
+  save(m);
+  try {
+    return await ask<UsageResetResult>(device, "/api/usage/limits/reset?scope=local", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, operationId }),
+    }, 40_000);
+  } finally {
+    // An older in-flight refresh must not repopulate the invalidated cache.
+    m.delete(key);
+    save(m);
+  }
 }

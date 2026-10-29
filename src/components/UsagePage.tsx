@@ -1,11 +1,12 @@
 // Usage: tokens and cost across the agents on this machine, and their plans' limits (server/usage/).
 import { AlertTriangle, ArrowLeft, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import claudeSvg from "../assets/brands/claude-color.svg" with { type: "text" };
 import grokSvg from "../assets/brands/grok.svg" with { type: "text" };
 import openaiSvg from "../assets/brands/openai.svg" with { type: "text" };
 import opencodeSvg from "../assets/brands/opencode.svg" with { type: "text" };
-import { USAGE_PROVIDER_NAMES, USAGE_RANGES, type UsageMachine, type UsageLimitsReport, type UsageProvider, type UsageRange, type UsageReport, type UsageWindow } from "../../shared/usage";
+import { normalizeResetCredits, USAGE_PROVIDER_NAMES, USAGE_RANGES, type UsageLimits, type UsageLimitsReport, type UsageMachine, type UsageProvider, type UsageRange, type UsageReport, type UsageResetCredits, type UsageResetOutcome, type UsageWindow } from "../../shared/usage";
+import { createRedemptionClient } from "../../shared/redemptionClient";
 import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
 import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport, type UsageScope } from "../lib/usageStats";
@@ -537,7 +538,7 @@ function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string;
             )}
             {p.stale && <span className="ustats-dim ustats-small">as of {ago(p.asOf, now)}</span>}
           </h2>
-          {p.windows.map((w) => <LimitRow key={w.id} provider={p.provider} w={w} now={now} credits={w.kind === "weekly" || w.id === "primary" ? p.resetCredits : undefined} />)}
+          {p.windows.map((w) => <LimitRow key={w.id} account={p} w={w} now={now} />)}
         </section>
       ))}
       {(failed.length > 0 || data.machines?.some((m) => m.status === "error")) && (
@@ -563,9 +564,117 @@ function pace(w: UsageWindow, now: number) {
   return w.usedPercent / elapsed;
 }
 
-function LimitRow({ provider, w, now, credits }: { provider: UsageProvider; w: UsageWindow; now: number; credits?: number }) {
+/** The share of the window still ahead, which is what even spending would leave. */
+function evenPace(w: UsageWindow, now: number) {
+  if (!w.resetsAt || !w.windowMins) return;
+  const left = (w.resetsAt - now) / (w.windowMins * 60_000);
+  if (left < 0 || left > 1) return;
+  return Math.round(left * 100);
+}
+
+const RESET_OUTCOMES: Record<UsageResetOutcome, string> = {
+  reset: "Reset applied. These limits have cleared.",
+  nothingToReset: "Nothing to reset right now.",
+  noCredit: "No banked reset is available now.",
+  alreadyRedeemed: "That reset was already used.",
+};
+
+const resetClient = createRedemptionClient(() => window.localStorage, async (body) => {
+  const res = await fetch("/api/usage/limits/reset", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), redirect: "error",
+  });
+  const result = await res.json();
+  if (!res.ok) throw new Error(result?.error || `The reset failed (HTTP ${res.status}).`);
+  if (!(result?.outcome in RESET_OUTCOMES)) throw new Error("Unrecognized reset response.");
+  void loadLimits(true);
+  return result;
+}, () => crypto.randomUUID());
+
+const creditsNote = (credits: UsageResetCredits, now: number) => {
+  const expires = credits.expiresAt ? ` · expires in ${until(credits.expiresAt, now)}` : "";
+  return `${credits.available} banked${expires}`;
+};
+
+function DetailRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="ustats-limit-row">
+      <span className="ustats-dim">{label}</span>
+      <span>{children}</span>
+    </div>
+  );
+}
+
+/** What a clicked limit bar shows, and the one place a banked reset can be spent. */
+function LimitDetails({ account, w, now, onClose }: { account: UsageLimits; w: UsageWindow; now: number; onClose: () => void }) {
+  const credits = normalizeResetCredits(account.resetCredits);
+  const left = Math.max(0, 100 - w.usedPercent);
+  const timeLeft = evenPace(w, now);
+  const [confirming, setConfirming] = useState(false);
+  const state = useSyncExternalStore(resetClient.subscribe, () => resetClient.snapshot(account.id));
+  const busy = state.busy;
+  const status = state.error ?? (state.result ? state.result.warning ?? RESET_OUTCOMES[state.result.outcome] : undefined);
+  const plan = account.plan?.replace(/[_-]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const useReset = async () => {
+    setConfirming(false);
+    await resetClient.run(account.id, account.machineId);
+  };
+  return (
+    <div className="ustats-limit-pop-in">
+      <div className="ustats-limit-pop-head">
+        <Mark provider={account.provider} size={18} />
+        <span className="ustats-limit-pop-name">{USAGE_PROVIDER_NAMES[account.provider]}</span>
+        {account.account && <span className="ustats-account">{account.account}</span>}
+      </div>
+      {account.source && <div className="ustats-limit-pop-source">{account.source}</div>}
+      {(plan || account.machine) && (
+        <div className="ustats-limit-pop-group">
+          {plan && <DetailRow label="Plan">{plan}</DetailRow>}
+          <DetailRow label="Signed in">{account.machine ?? "this machine"}</DetailRow>
+        </div>
+      )}
+      <div className="ustats-limit-pop-group">
+        <DetailRow label="Left">{Math.round(left)}%</DetailRow>
+        {w.resetsAt && (
+          <DetailRow label="Resets">
+            {new Date(w.resetsAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            <span className="ustats-dim"> · in {until(w.resetsAt, now)}</span>
+          </DetailRow>
+        )}
+        {timeLeft !== undefined && <DetailRow label="Even pace">{timeLeft}% left by now</DetailRow>}
+        {w.windowMins && <DetailRow label="Window">{w.windowMins >= 1440 ? `${Math.round(w.windowMins / 1440)} days` : `${Math.round(w.windowMins / 60)} hours`}</DetailRow>}
+      </div>
+      {(credits?.available || status) ? (
+        <div className="ustats-limit-pop-reset">
+          {credits?.available ? (
+            confirming ? (
+              <div className="ustats-limit-confirm">
+                <span>Use one banked reset? This clears the current limits and can’t be undone.</span>
+                <div className="ustats-limit-confirm-actions">
+                  <button type="button" className="ustats-limit-cancel" onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+                  <button type="button" className="ustats-limit-reset" onClick={() => void useReset()} disabled={busy || !!state.result}>{busy ? "Using…" : "Use reset"}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="ustats-limit-banked">
+                <span><Ticket size={12} /> {creditsNote(credits, now)}</span>
+                <button type="button" className="ustats-limit-reset" onClick={() => setConfirming(true)} disabled={busy || !!state.result}>{busy ? "Using…" : state.error ? "Retry reset" : "Use reset"}</button>
+              </div>
+            )
+          ) : null}
+          {status && <div className="ustats-limit-reset-status" role="status">{status}</div>}
+          {status && <button type="button" className="ustats-limit-done" onClick={onClose}>Close</button>}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function LimitRow({ account, w, now }: { account: UsageLimits; w: UsageWindow; now: number }) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
   const left = Math.max(0, 100 - w.usedPercent);
   const projected = pace(w, now);
+  const credits = normalizeResetCredits(account.resetCredits);
   const level = w.usedPercent >= 90 ? "danger" : w.usedPercent >= 70 ? "warn" : "ok";
   const trend = projected === undefined ? undefined : projected > 100 ? "Runs out before it resets at this pace" : `At this pace, about ${Math.round(100 - projected)}% will be left when it resets`;
   return (
@@ -577,7 +686,24 @@ function LimitRow({ provider, w, now, credits }: { provider: UsageProvider; w: U
         </div>
         {w.limitUsd !== undefined && w.usedUsd !== undefined && <div className="ustats-dim ustats-small">{usd(w.usedUsd)} of {usd(w.limitUsd)}</div>}
       </div>
-      <div className="ustats-limit-track" data-level={level} style={{ ["--c" as string]: color(provider) }}>
+      <div
+        ref={anchor}
+        className="ustats-limit-track"
+        data-level={level}
+        style={{ ["--c" as string]: color(account.provider) }}
+        role="button"
+        tabIndex={0}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-label={`${w.label}: ${Math.round(left)}% left. Show details${credits?.available ? ` and ${credits.available} banked reset${credits.available === 1 ? "" : "s"}` : ""}`}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
+      >
         <div className="ustats-limit-fill" style={{ width: `${left}%` }}>
           {left >= 8 && <span>{Math.round(left)}%</span>}
         </div>
@@ -590,13 +716,16 @@ function LimitRow({ provider, w, now, credits }: { provider: UsageProvider; w: U
               <RotateCcw size={11} /> {until(w.resetsAt, now)}
             </span>
           )}
-          {!!credits && (
-            <span data-tooltip={`${credits} banked reset${credits === 1 ? "" : "s"}`} data-tooltip-side="top">
-              <Ticket size={11} /> {credits}
+          {!!credits?.available && (
+            <span data-tooltip={`${credits.available} banked reset${credits.available === 1 ? "" : "s"}`} data-tooltip-side="top">
+              <Ticket size={11} /> {credits.available}
             </span>
           )}
         </div>
       </div>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="ustats-limit-pop" label={`${USAGE_PROVIDER_NAMES[account.provider]} ${w.label}`} fixed="auto" align="start">
+        <LimitDetails account={account} w={w} now={now} onClose={() => setOpen(false)} />
+      </Popover>
       {w.usedPercent >= 100 ? (
         <div className="ustats-limit-warn"><AlertTriangle size={12} /> Limit reached{w.resetsAt ? ` · back in ${until(w.resetsAt, now)}` : ""}</div>
       ) : projected !== undefined && projected > 100 ? (
