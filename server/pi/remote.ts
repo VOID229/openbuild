@@ -80,7 +80,7 @@ export class PiClient {
   async supportsNative(runtime: string) {
     await this.connect();
     const health = await this.health();
-    return !!health && health.protocol === 1 && [runtime, "runtime-questions"].every(f => health.features?.includes(f));
+    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery"].every(f => health.features?.includes(f));
   }
   private connect() {
     return this.connected ??= this.connectNow().catch((error) => { this.connected = undefined; throw error; });
@@ -175,6 +175,7 @@ export class PiClient {
     if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode") {
       await this.ensureFeature(req.runtime);
       await this.ensureFeature("runtime-questions");
+      await this.ensureFeature("html-delivery");
     }
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }

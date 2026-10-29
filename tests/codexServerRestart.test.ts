@@ -3,6 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
+import { HTML_DELIVERY_NOTE } from "../server/htmlDelivery";
+/** Each native turn receives the display note once, ahead of the user's prompt. */
+const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + m + "\n").join("");
 
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 15_000;
@@ -197,7 +200,7 @@ test("Codex turn survives HTTP SIGTERM, replays once, and resumes its saved thre
     const duplicate = await request("/api/pi/chat", turnRequest);
     expect(duplicate.status).toBe(200);
     expect(await duplicate.text()).toContain("finished offline");
-    expect(readFileSync(effects, "utf8")).toBe("work once\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("work once"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\n");
     const switched = await request("/api/pi/chat", { ...turnRequest, runtime: "pi", model: "test/x", prior: 1, message: "again", stream: { id: "reply-codex-switch-0123456789abcdef" } });
     expect(switched.status).toBe(400);
@@ -207,7 +210,7 @@ test("Codex turn survives HTTP SIGTERM, replays once, and resumes its saved thre
     expect(followup.status).toBe(200);
     expect(await followup.text()).toContain("resumed saved thread");
     expect(readFileSync(protocol, "utf8")).toBe("thread/start\nthread/resume\n");
-    expect(readFileSync(effects, "utf8")).toBe("work once\nfollow up\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("work once", "follow up"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\n");
   } finally {
     for (const child of servers) {

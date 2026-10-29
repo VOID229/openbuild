@@ -3,7 +3,7 @@ import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall
 import { writeFileSync } from "node:fs";
 
 /** Zero network/key access: only use the static catalog, replace the dispatch method. */
-export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; marker?: string; tool?: boolean; command?: string; delayMs?: number } = {}) {
+export function fakeModels(options: { answer?: string; hold?: boolean; holdAfterTool?: boolean; marker?: string; tool?: boolean; command?: string; delayMs?: number } = {}) {
   const models = builtinModels();
   const model = models.getModels().find(m => m.type === "chat")!;
   let calls = 0;
@@ -13,7 +13,7 @@ export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; m
     const hasTool = input.messages.some(m => m.role === "toolResult");
     const content: AssistantMessage["content"] = options.tool && !hasTool
       ? [{ type: "text", text: "before tool" }, { type: "toolCall", id: "call1", name: "bash", arguments: { command: options.command ?? "printf durable-tool" } } satisfies ToolCall]
-      : [{ type: "text", text: "offline answer" }];
+      : [{ type: "text", text: options.answer ?? "offline answer" }];
     const message: AssistantMessage = {
       role: "assistant", api: model.api, provider: model.provider, model: model.id,
       content, stopReason: options.tool && !hasTool ? "toolUse" : "stop", timestamp: Date.now(),

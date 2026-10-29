@@ -13,6 +13,25 @@ async function until(fn: () => boolean) {
   while (!fn()) { if (Date.now() > end) throw new Error("timed out"); await Bun.sleep(10); }
 }
 describe("durable runtime (offline)", () => {
+  test("HTML output publishes a page and replays identically after reopen", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "durable-html-"));
+    const fake = fakeModels({ answer: '```openbuild-html\n<title>Demo</title><button onclick="this.textContent=42">Run</button>\n```' });
+    const req = request(fake.model);
+    let runtime = new DurableRuntime(directory, fake.models);
+    try {
+      const run = await runtime.startRun(req);
+      await until(() => run.ended);
+      const pages = run.events.filter(e => e.t === "tool" && e.name === "html_render");
+      expect(pages).toHaveLength(1);
+      expect(pages[0]).toMatchObject({ status: "done", args: { title: "Demo" } });
+      expect(run.events.some(e => e.t === "text")).toBe(false);
+      await runtime.close();
+      runtime = new DurableRuntime(directory, fake.models);
+      const replay = await runtime.findRun(run.id);
+      expect(replay?.events.filter(e => e.t === "tool" && e.name === "html_render")).toEqual(pages);
+      expect(fake.calls()).toBe(1);
+    } finally { await runtime.close(); rmSync(directory, { recursive: true, force: true }); }
+  });
   test("manifest persisted before submit is admitted on startup; concurrent retry is deduplicated", async () => {
     const directory = mkdtempSync(join(tmpdir(), "durable-admission-"));
     const fake = fakeModels();

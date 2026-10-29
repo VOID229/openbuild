@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
 import { FAKE_CLAUDE } from "./claudeFixture";
+import { HTML_DELIVERY_NOTE } from "../server/htmlDelivery";
+/** Each native turn receives the display note once, ahead of the user's prompt. */
+const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + m + "\n").join("");
 
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 15_000;
@@ -126,7 +129,7 @@ test("Claude Code turn survives HTTP SIGTERM, replays once, and resumes its save
     const duplicate = await request("/api/pi/chat", turnRequest);
     expect(duplicate.status).toBe(200);
     expect(await duplicate.text()).toContain("finished offline");
-    expect(readFileSync(effects, "utf8")).toBe("slow work once\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("slow work once"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\n");
     const switched = await request("/api/pi/chat", { ...turnRequest, runtime: "pi", model: "test/x", prior: 1, message: "again", stream: { id: "reply-claude-switch-0123456789abcdef" } });
     expect(switched.status).toBe(400);
@@ -139,7 +142,7 @@ test("Claude Code turn survives HTTP SIGTERM, replays once, and resumes its save
     // Control-only probes (model listing, status) start processes too, but never send a turn.
     const turns = readFileSync(protocol, "utf8").split("\n").filter((l) => l.startsWith("start ") || l.startsWith("turn "));
     expect(turns.flatMap((l, i) => l.startsWith("turn ") ? [turns[i - 1]!.split(" ")[1]] : [])).toEqual(["new", "resume"]);
-    expect(readFileSync(effects, "utf8")).toBe("slow work once\nfollow up\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("slow work once", "follow up"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\n");
   } finally {
     for (const child of servers) {

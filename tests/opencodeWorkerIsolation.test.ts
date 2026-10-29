@@ -65,7 +65,8 @@ try {
   assert.equal(starts, 0);
   assert.equal(paths.includes("/retire"), false, JSON.stringify(paths));
   assert.deepEqual(signals, []);
-  assert.equal(readFileSync(process.env.FAKE_EFFECTS, "utf8"), "isolated work\n");
+  const { HTML_DELIVERY_NOTE } = await import(process.env.FIXTURE_HTML_MODULE);
+  assert.equal(readFileSync(process.env.FAKE_EFFECTS, "utf8"), HTML_DELIVERY_NOTE + "isolated work\n");
   assert.equal(readFileSync(process.env.FAKE_TOOL_EFFECTS, "utf8"), "once\n");
   console.log("OpenCode completed independently; ordinary work remains pending; no retirement or signals");
 } finally {
@@ -94,6 +95,7 @@ test("OpenCode completes in its own lane while an older main worker has live ord
         FAKE_HISTORY: join(directory, "history.json"),
         FIXTURE_WORKER_MODULE: resolve("server/pi/worker.ts"),
         FIXTURE_REMOTE_MODULE: resolve("server/pi/remote.ts"),
+        FIXTURE_HTML_MODULE: resolve("server/htmlDelivery.ts"),
       },
       stdin: "ignore", stdout: "pipe", stderr: "pipe",
     });

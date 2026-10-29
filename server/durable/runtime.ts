@@ -1,3 +1,4 @@
+import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
 /**
  * The Durable runtime itself. It owns the worker's storage, so exactly one process may run it for a
  * given data directory: `worker.ts` does, and the server talks to that process (see `remote.ts`).
@@ -253,16 +254,19 @@ export class DurableRuntime {
     for (const entry of entries) {
       if (skip.has(entry.id)) continue;
       const events: StreamEvent[] = [];
+      let pageIndex = 0;
       for (const message of entry.model ?? []) {
+        const html = new HtmlDelivery(event => events.push(event), () => `html-${entry.id}-${pageIndex++}`);
         if (message.role === "assistant") {
           // Provider-reported tokens for the latest request/answer, including cached context.
           addUsage(m.usage ??= {}, message.usage);
           if (message.usage) events.push({ t: "usage", usage: { ...m.usage } });
           for (const block of message.content) {
-            if (block.type === "text" && block.text) events.push({ t: "text", v: block.text });
-            else if (block.type === "thinking" && block.thinking) events.push({ t: "reasoning", v: block.thinking });
-            else if (block.type === "toolCall") events.push({ t: "tool", id: block.id, name: block.name, args: block.arguments, status: "running" });
+            if (block.type === "text" && block.text) html.push({ t: "text", v: block.text });
+            else if (block.type === "thinking" && block.thinking) html.push({ t: "reasoning", v: block.thinking });
+            else if (block.type === "toolCall") html.push({ t: "tool", id: block.id, name: block.name, args: block.arguments, status: "running" });
           }
+          html.flush();
           if (message.stopReason === "error") events.push({ t: "error", message: message.errorMessage ?? "Model failed" });
         } else if (message.role === "toolResult") {
           events.push({ t: "tool", id: message.toolCallId, name: message.toolName, status: message.isError ? "error" : "done", output: message.content.filter(b => b.type === "text").map(b => b.text).join("\n") });
@@ -294,8 +298,8 @@ export class DurableRuntime {
     this.project(m, watch.value.entries);
     watch.start(async value => { if (!m.ended) this.project(m, value.entries); });
     const content = m.request.images?.length
-      ? [{ type: "text" as const, text: m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
-      : m.request.message;
+      ? [{ type: "text" as const, text: HTML_DELIVERY_NOTE + m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
+      : HTML_DELIVERY_NOTE + m.request.message;
     // The manifest exists before submit. Retrying after either side of this await is safe.
     const submission = await root.submit({ type: "input", content, requestId: m.id, whenBusy: "reject" }, context);
     // Persist "may have been submitted" before anything else can fail: from here on, recovery must

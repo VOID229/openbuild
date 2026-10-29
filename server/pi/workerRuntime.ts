@@ -1,4 +1,5 @@
 /** Ordinary Pi is not checkpointable. Persist output, never replay an unfinished prompt. */
+import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -177,7 +178,11 @@ export class PiWorkerRuntime {
   }
   startRun(req: PiChatRequest): WorkerRun {
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);
-    if (fresh) void this.consume(run, req.runtime === "opencode" ? opencode.runTurn(req, run.signal) : req.runtime === "claude" ? claude.runTurn(req, run.signal) : req.runtime === "cursor" ? cursor.runTurn(req, run.signal) : req.runtime === "codex" ? codex.runTurn(req, run.signal) : req.runtime === "fx" ? fx.runTurn(req, run.signal) : sessions.runTurn(req, run.signal));
+    if (fresh) {
+      const display = req.runtime && req.runtime !== "pi";
+      const input = display ? { ...req, message: HTML_DELIVERY_NOTE + req.message } : req;
+      void this.consume(run, req.runtime === "opencode" ? opencode.runTurn(input, run.signal) : req.runtime === "claude" ? claude.runTurn(input, run.signal) : req.runtime === "cursor" ? cursor.runTurn(input, run.signal) : req.runtime === "codex" ? codex.runTurn(input, run.signal) : req.runtime === "fx" ? fx.runTurn(input, run.signal) : sessions.runTurn(input, run.signal), !!display);
+    }
     return run;
   }
   startShell(req: shells.ShellRequest): WorkerRun {
@@ -188,12 +193,13 @@ export class PiWorkerRuntime {
     }
     return run;
   }
-  private async consume(run: WorkerRun, stream: ReadableStream<Uint8Array>) {
+  private async consume(run: WorkerRun, stream: ReadableStream<Uint8Array>, display = false) {
+    const html = display ? new HtmlDelivery(event => run.push(event)) : undefined;
     let status: PiRunRecord["status"] = "finished";
     try {
       for await (const event of readEvents(stream)) {
         if (event.t === "end") continue;
-        run.push(event);
+        if (html) html.push(event); else run.push(event);
         if (event.t === "error") status = "error";
         if (event.t === "done" && event.finish === "aborted") status = "aborted";
         const shell = event as unknown as ShellEvent;
@@ -201,6 +207,7 @@ export class PiWorkerRuntime {
         if (shell.t === "exit" && shell.status === "stopped") status = "aborted";
       }
     } catch (error) { run.push({ t: "error", message: (error as Error).message }); status = "error"; }
+    html?.flush();
     // A cancellation while Pi is still initializing can close runTurn without a terminal
     // event. Other devices still need to learn this was stopped rather than completed.
     if (run.signal.aborted && run.record.kind === "run" && !run.events.some((e) => e.t === "done" || e.t === "error")) {

@@ -40,10 +40,12 @@ const result = (extra = {}) => out({ type: 'result', subtype: 'success', is_erro
 let interrupted = false;
 async function turn(prompt) {
   interrupted = false;
-  const t = prompt.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
+  const raw = prompt.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
+  // Act on the user's words; the effects log keeps exactly what Claude received.
+  const t = raw.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '');
   log('turn ' + t + ' model=' + state.model + ' effort=' + state.effort + ' fast=' + state.fast + ' mode=' + state.mode);
   appendFileSync(file(session), JSON.stringify({ type: 'user', text: t }) + '\n');
-  if (process.env.FAKE_EFFECTS) appendFileSync(process.env.FAKE_EFFECTS, t + '\n');
+  if (process.env.FAKE_EFFECTS) appendFileSync(process.env.FAKE_EFFECTS, raw + '\n');
   out({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: ['Bash','Edit'], mcp_servers: [], model: state.model, permissionMode: state.mode, slash_commands: [], output_style: 'default', skills: [], plugins: [], apiKeySource: 'none', claude_code_version: '2.1.311', ...base, uuid: crypto.randomUUID() });
   if (t.startsWith('question')) {
     const questions = t === 'question malformed' ? [] : [

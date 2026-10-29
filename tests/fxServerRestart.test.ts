@@ -3,6 +3,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
+import { HTML_DELIVERY_NOTE } from "../server/htmlDelivery";
+/** Each native turn receives the display note once, ahead of the user's prompt. */
+const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + m + "\n").join("");
 
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 15_000;
@@ -148,7 +151,7 @@ test("fx thread keeps running while OB is down and the restarted server reattach
     // Re-posting after the restart reattaches instead of prompting fx a second time.
     const duplicate = await request("/api/pi/chat", { threadId: chat.id, runtime: "fx", cwd: workspace.cwd, model: "fx/fake-1", effort: "high", prior: 0, message: "work once", stream: { id: runId } });
     expect(await duplicate.text()).toContain("finished offline");
-    expect(readFileSync(effects, "utf8")).toBe("work once\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("work once"));
     // A thread's runtime is fixed.
     const switched = await request("/api/pi/chat", { threadId: chat.id, runtime: "pi", cwd: workspace.cwd, model: "test/x", effort: "off", prior: 1, message: "again", stream: { id: "reply-fx-switch-0123456789abcdef" } });
     expect(switched.status).toBe(400);

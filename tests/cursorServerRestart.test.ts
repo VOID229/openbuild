@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
 import { FAKE_CURSOR } from "./cursorFixture";
+import { HTML_DELIVERY_NOTE } from "../server/htmlDelivery";
+/** Each native turn receives the display note once, ahead of the user's prompt. */
+const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + m + "\n").join("");
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) { if (await check()) return; await Bun.sleep(25); }
@@ -85,7 +88,7 @@ test("Cursor survives HTTP shutdown, replays once and resumes saved native histo
     const protectedWrite = await json(`/api/chats/${chat.id}`, chat, "PUT");
     expect(protectedWrite.chat.messages[1].content).toBe(reply.content);
     expect(await (await request("/api/pi/chat", turn)).text()).toContain("finished offline");
-    expect(readFileSync(effects, "utf8")).toBe("work once\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("work once"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\n");
     expect((await request("/api/pi/chat", { ...turn, runtime: "pi", model: "test/x", prior: 1, stream: { id: "reply-cursor-switch-0123456789abcdef" } })).status).toBe(400);
     // Completed run replay survives loss of the detached worker too; a fresh
@@ -97,7 +100,7 @@ test("Cursor survives HTTP shutdown, replays once and resumes saved native histo
     workerMetadata();
     const calls = readFileSync(protocol, "utf8").trim().split("\n").map(s => JSON.parse(s));
     expect(calls).toHaveLength(2); expect(calls[0].id).toBe(calls[1].id); expect(calls[1].previous).toBe("work once\n");
-    expect(readFileSync(effects, "utf8")).toBe("work once\nfollow up\n");
+    expect(readFileSync(effects, "utf8")).toBe(prompts("work once", "follow up"));
     expect(readFileSync(toolEffects, "utf8")).toBe("once\nonce\n");
   } finally {
     for (const child of servers) { if (child.exitCode === null) child.kill("SIGKILL"); await child.exited; }

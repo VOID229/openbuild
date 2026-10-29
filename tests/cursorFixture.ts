@@ -13,7 +13,9 @@ if (!args.includes('--print') || args.includes('--yolo') || args.includes('--str
 const arg = flag => args[args.indexOf(flag)+1];
 const rawPrompt = args.at(-1);
 const prefixEnd = rawPrompt.indexOf('The user message follows after this paragraph.]\n\n');
-const prompt = prefixEnd < 0 ? rawPrompt : rawPrompt.slice(prefixEnd + 'The user message follows after this paragraph.]\n\n'.length);
+const received = prefixEnd < 0 ? rawPrompt : rawPrompt.slice(prefixEnd + 'The user message follows after this paragraph.]\n\n'.length);
+// Act on the user's words; the effects log keeps exactly what Cursor received.
+const prompt = received.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '');
 const id = arg('--resume'), cwd = arg('--workspace');
 const pluginDir = args.includes('--plugin-dir') ? arg('--plugin-dir') : undefined;
 if (args.includes('--approve-mcps')) throw new Error('Broad MCP approval forbidden');
@@ -21,7 +23,7 @@ const db = join(process.env.CURSOR_CONFIG_DIR,'chats',createHash('md5').update(c
 mkdirSync(dirname(db),{recursive:true});
 const previous = existsSync(db) ? readFileSync(db,'utf8') : '';
 appendFileSync(process.env.FAKE_PROTOCOL,JSON.stringify({id,cwd,prompt,rawPrompt,pluginDir,model:arg('--model'),previous,force:args.includes('--force'),mode:args.includes('--mode')?arg('--mode'):undefined})+'\n');
-appendFileSync(process.env.FAKE_EFFECTS,prompt+'\n');
+appendFileSync(process.env.FAKE_EFFECTS,received+'\n');
 const out = event => console.log(JSON.stringify({...event,session_id:id}));
 out({type:'system',subtype:'init',cwd,model:'Fake'});
 if (prompt === 'ask bridge') {

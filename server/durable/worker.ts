@@ -27,6 +27,7 @@ export const workerVersion = (() => {
   try {
     const hash = createHash("sha256").update(`protocol:${PROTOCOL}`);
     for (const name of ["worker.ts", "runtime.ts", "tools.ts", "questions.ts"]) hash.update(readFileSync(join(import.meta.dir, name)));
+    hash.update(readFileSync(join(import.meta.dir, "../htmlDelivery.ts")));
     return hash.digest("hex").slice(0, 16);
   } catch {
     return "dev";
