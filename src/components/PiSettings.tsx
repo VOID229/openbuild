@@ -1,3 +1,6 @@
+import { RuntimeAccounts } from "./RuntimeAccounts";
+import { RUNTIMES } from "../lib/runtimes";
+import type { ThreadRuntime } from "../../shared/types";
 // Settings → Pi (install, version, updates, problems, extensions, skills, prompt templates and
 // packages), Settings → Providers (sign in through Pi), and Settings → Projects.
 import {
@@ -753,7 +756,20 @@ function LoginFlow({ provider, type, deviceId, onEnd }: { provider: PiProvider; 
 }
 
 export function ProvidersSection() {
+  const [runtime, setRuntime] = useState<ThreadRuntime>("pi");
   const [deviceId, setDeviceId] = usePiDevice();
+  return <>
+    <Heading>Providers & accounts</Heading>
+    <DeviceRow deviceId={deviceId} onChange={setDeviceId} title="Manage on" label="Device whose accounts to manage" />
+    <OptionSelect label="Runtime" value={runtime} options={RUNTIMES.map((r) => ({ value: r.runtime, label: r.runtime === "pi" ? "Pi" : r.label }))} onChange={setRuntime} />
+    {runtime === "pi" || runtime === "durable" ? <PiProvidersSection key={deviceId ?? "local"} deviceId={deviceId} /> : <>
+      <p className="pi-meta">{runtime === "opencode" ? "Manage provider connections with OpenCode’s /connect command or opencode auth login. OpenBuild uses the device’s OpenCode configuration; a remote OpenCode server manages its own credentials." : runtime === "fx" ? "Run fx and use /login to connect providers on this device. OpenBuild uses fx’s saved connections." : runtime === "codex" ? "Sign in with ChatGPT using codex login, or configure API access and custom providers in config.toml in the account directory." : runtime === "claude" ? "Sign in with your Claude account using claude auth login. API keys and cloud providers use Claude Code’s native settings and environment." : "Sign in with your Cursor account using cursor-agent login. Cursor also supports CURSOR_API_KEY; CLI settings live in cli-config.json."}</p>
+      <RuntimeAccounts key={`${runtime}:${deviceId ?? ""}`} runtime={runtime} deviceId={deviceId} />
+    </>}
+  </>;
+}
+
+function PiProvidersSection({ deviceId }: { deviceId?: string }) {
   const providers = useStore((s) => piCacheOn(s, deviceId).providers);
   const loadPiProviders = useStore((s) => s.loadPiProviders);
   const [error, setError] = useState<string>();
@@ -874,8 +890,6 @@ export function ProvidersSection() {
 
   return (
     <>
-      <Heading>Providers</Heading>
-      <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
       {login && (
         <LoginFlow
           key={`${deviceId ?? ""}:${login.provider.id}:${login.type}`}

@@ -77,10 +77,10 @@ export class PiClient {
     } catch { return undefined; }
   }
   /** Admission capability check: connect a cold lane, but never retire an incompatible owner. */
-  async supportsNative(runtime: string) {
+  async supportsNative(runtime: string, accounts = false) {
     await this.connect();
     const health = await this.health();
-    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery"].every(f => health.features?.includes(f));
+    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery", ...(accounts ? ["runtime-accounts"] : [])].every(f => health.features?.includes(f));
   }
   private connect() {
     return this.connected ??= this.connectNow().catch((error) => { this.connected = undefined; throw error; });
@@ -176,6 +176,7 @@ export class PiClient {
       await this.ensureFeature(req.runtime);
       await this.ensureFeature("runtime-questions");
       await this.ensureFeature("html-delivery");
+      if (req.runtimeAccount) await this.ensureFeature("runtime-accounts");
     }
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }
@@ -302,11 +303,11 @@ export async function startRun(req: PiChatRequest) {
     const runs = await threadRuns(clients, req.threadId);
     if (runs.some(({ record }) => record.status === "pending")) throw Object.assign(new Error("The agent is still working on this thread."), { status: 409, code: "busy" });
     const owner = runs[0]?.owner;
-    if (owner && await owner.supportsNative(req.runtime!)) return owner.startRun(req);
+    if (owner && await owner.supportsNative(req.runtime!, !!req.runtimeAccount)) return owner.startRun(req);
     // Preserve the fresh OpenCode lane when compatible; never retire an incompatible one.
     const preferred = req.runtime === "opencode" ? opencodeClient() : client;
-    const target = await preferred.supportsNative(req.runtime!) ? preferred : agentClient(generation);
-    if (!await target.supportsNative(req.runtime!)) throw Object.assign(new Error("Agent feature lane is incompatible; no prompt was sent."), { status: 409, code: "worker_upgrade" });
+    const target = await preferred.supportsNative(req.runtime!, !!req.runtimeAccount) ? preferred : agentClient(generation);
+    if (!await target.supportsNative(req.runtime!, !!req.runtimeAccount)) throw Object.assign(new Error("Agent feature lane is incompatible; no prompt was sent."), { status: 409, code: "worker_upgrade" });
     if (owner) await handOff(owner, req.threadId);
     return target.startRun(req);
   });

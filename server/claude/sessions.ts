@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { CanUseTool, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
-import { FAST, baseOptions, isClaudePermission, listPermissions, modelRow, type ClaudePermission } from "./install";
+import { claudeEnv, FAST, baseOptions, isClaudePermission, listPermissions, modelRow, type ClaudePermission } from "./install";
 import { doneEvent, startEvent, type ToolEvent } from "./tools";
 
 interface Saved {
@@ -114,7 +114,7 @@ function ask(l: Live, a: Omit<Ask, "t" | "id">, signal: AbortSignal): Promise<Re
 
 /** Claude Code keeps each session as ~/.claude/projects/<folder>/<id>.jsonl. */
 export function transcriptExists(id: string): boolean {
-  const root = join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
+  const root = join(claudeEnv().CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude"), "projects");
   try { return readdirSync(root).some((d) => existsSync(join(root, d, `${id}.jsonl`))); } catch { return false; }
 }
 

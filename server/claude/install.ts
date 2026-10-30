@@ -1,3 +1,4 @@
+import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
 // The installed Claude Code CLI, driven through Anthropic's Agent SDK (as t3code does). OpenBuild
 // never bundles or substitutes its own Claude binary, and never handles Claude's credentials: the
 // CLI uses whatever sign-in (`claude login`) and settings it has on this device.
@@ -11,7 +12,7 @@ export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 export const FAST = "fast";
 
 export function claudeEnv(): Record<string, string> {
-  return { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_AGENT_SDK_CLIENT_APP: "openbuild" } as Record<string, string>;
+  return accountEnvironment("claude", { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_AGENT_SDK_CLIENT_APP: "openbuild" } as Record<string, string>);
 }
 export function claudeBin(): string | undefined {
   if (process.env.CLAUDE_BIN) return existsSync(process.env.CLAUDE_BIN) ? process.env.CLAUDE_BIN : undefined;
@@ -84,15 +85,17 @@ export function toModel(m: any): ModelInfo {
 }
 
 export interface ClaudeModels { models: ModelInfo[]; defaultModel?: string; checkedAt: number }
-let cache: { at: number; value: Promise<ClaudeModels & { raw: any[] }> } | undefined;
+const accountCaches = new Map<string, { at: number; value: Promise<ClaudeModels & { raw: any[] }> }>();
 function catalog(fresh = false) {
+  const cacheKey = accountCacheKey();
+  const cache = accountCaches.get(cacheKey);
   if (!fresh && cache && Date.now() - cache.at < 60_000) return cache.value;
   const value = probe(homedir(), (q) => q.supportedModels()).then((raw) => {
     if (!Array.isArray(raw) || !raw.length) throw new Error("Claude Code listed no models; run `claude` once to sign in");
     return { raw, models: raw.map(toModel), defaultModel: raw.some((m) => m.value === "default") ? "claude/default" : `claude/${raw[0]!.value}`, checkedAt: Date.now() };
   });
-  cache = { at: Date.now(), value };
-  value.catch(() => { if (cache?.value === value) cache = undefined; });
+  accountCaches.set(cacheKey, { at: Date.now(), value });
+  value.catch(() => { if (accountCaches.get(cacheKey)?.value === value) accountCaches.delete(cacheKey); });
   return value;
 }
 export async function listModels(fresh = false): Promise<ClaudeModels> {
@@ -107,7 +110,7 @@ export async function modelRow(id: string): Promise<any> {
   if (!row) throw new Error(`Claude Code doesn't offer model ${value} on this device`);
   return row;
 }
-export const forgetModels = () => { cache = undefined; permissionCache.clear(); };
+export const forgetModels = () => { accountCaches.clear(); permissionCache.clear(); };
 
 // ------------------------------------------------------------------ permissions
 
@@ -127,7 +130,7 @@ function readJson(path: string): any {
 }
 /** Claude's settings layers for a folder, lowest precedence first (user, project, local, managed). */
 function settingsLayers(cwd?: string): any[] {
-  const config = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
+  const config = claudeEnv().CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude");
   const managed = process.platform === "darwin" ? "/Library/Application Support/ClaudeCode/managed-settings.json" : "/etc/claude-code/managed-settings.json";
   return [join(config, "settings.json"), ...(cwd ? [join(cwd, ".claude/settings.json"), join(cwd, ".claude/settings.local.json")] : []), managed].map(readJson).filter(Boolean);
 }
@@ -135,7 +138,7 @@ function settingsLayers(cwd?: string): any[] {
 const permissionCache = new Map<string, { at: number; value: Promise<PermissionModes> }>();
 /** Claude Code's permission modes for a folder, with the one its settings start in. */
 export function listPermissions(cwd?: string, fresh = false): Promise<PermissionModes> {
-  const key = cwd ?? "";
+  const key = JSON.stringify([accountCacheKey(), cwd ?? ""]);
   const hit = permissionCache.get(key);
   if (!fresh && hit && Date.now() - hit.at < 60_000) return hit.value;
   const value = (async () => {

@@ -1,3 +1,4 @@
+import { ThreadAccountSelect } from "./RuntimeAccounts";
 // Where a thread works. On the new-thread screen the heading picks the project ("What should we
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
@@ -401,6 +402,7 @@ export function WorkspaceTop() {
         <ModeMenu />
       </>}
       <RuntimeMenu />
+      <ThreadAccountSelect />
     </div>
   );
 }

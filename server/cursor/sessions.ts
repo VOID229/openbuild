@@ -16,7 +16,7 @@ function saved(id: string): Saved | undefined {
   return s;
 }
 function save(id: string, s: Saved) { storage.setValue(key(id), JSON.stringify(s)); }
-const configDir = () => process.env.CURSOR_CONFIG_DIR?.trim() || (process.env.XDG_CONFIG_HOME?.trim() ? join(process.env.XDG_CONFIG_HOME, "cursor") : join(homedir(), ".cursor"));
+const configDir = () => cursorEnv().CURSOR_CONFIG_DIR?.trim() || (process.env.XDG_CONFIG_HOME?.trim() ? join(process.env.XDG_CONFIG_HOME, "cursor") : join(homedir(), ".cursor"));
 export const sessionDir = () => join(configDir(), "chats");
 export function sessionPath(cwd: string, id: string) { return join(sessionDir(), createHash("md5").update(resolve(cwd)).digest("hex"), id, "store.db"); }
 function fingerprint(cwd: string, id: string): string {

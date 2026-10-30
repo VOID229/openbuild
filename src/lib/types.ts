@@ -38,6 +38,8 @@ export interface NamingModel extends ModelRef {
 export type TerminalPosition = "bottom" | "side";
 
 export interface Settings {
+  runtimeAccounts?: import("../../shared/types").RuntimeAccount[];
+  threadAccountId?: string;
   theme: Theme;
   font: FontStyle;
   autoScroll: boolean;
@@ -254,6 +256,7 @@ export interface Message {
 }
 
 export interface Chat {
+  runtimeAccount?: import("../../shared/types").RuntimeAccount;
   /** Fixed when the thread starts. Missing on legacy threads means Pi. */
   runtime?: ThreadRuntime;
   /** Legacy (Cursor "Allow all tools"): read as permission "force". */

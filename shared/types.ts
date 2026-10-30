@@ -433,7 +433,16 @@ export interface RuntimeStatus extends RuntimeAvailability {
 }
 
 /** A turn of a thread, run by Pi in the thread's workspace. */
+export interface RuntimeAccount {
+  id: string;
+  name: string;
+  runtime: "codex" | "claude" | "cursor";
+  configDir: string;
+  deviceId?: string;
+}
+
 export interface PiChatRequest {
+  runtimeAccount?: RuntimeAccount;
   threadId: string;
   runtime?: ThreadRuntime;
   /** Explicit per-turn Cursor Run Everything opt-in; absent/false preserves native policy. */

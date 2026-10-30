@@ -1,3 +1,4 @@
+import { withRuntimeAccount } from "../runtimeAccounts";
 /** Ordinary Pi is not checkpointable. Persist output, never replay an unfinished prompt. */
 import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
 import { Database } from "bun:sqlite";
@@ -177,6 +178,15 @@ export class PiWorkerRuntime {
     return { run: this.load(record), fresh: true };
   }
   startRun(req: PiChatRequest): WorkerRun {
+    return withRuntimeAccount(req, () => this.startAccountRun(req));
+  }
+  private startAccountRun(req: PiChatRequest): WorkerRun {
+    const prior = this.db.query<{ record: string }, [string]>("SELECT record FROM runs WHERE json_extract(record, '$.threadId') = ? AND json_extract(record, '$.kind') = 'run' LIMIT 1").get(req.threadId);
+    if (prior) {
+      const old = JSON.parse(prior.record).request as PiChatRequest;
+      const identity = (r: PiChatRequest) => JSON.stringify([r.runtimeAccount?.runtime, r.runtimeAccount?.configDir]);
+      if (identity(old) !== identity(req)) throw Object.assign(new Error("A thread’s account is fixed after its first turn. Start a new thread to switch accounts."), { status: 409 });
+    }
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);
     if (fresh) {
       const display = req.runtime && req.runtime !== "pi";

@@ -1,9 +1,10 @@
+import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../shared/types";
 export const CURSOR_INSTALL = "curl https://cursor.com/install -fsS | bash";
-export function cursorEnv(): Record<string, string> { return { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>; }
+export function cursorEnv(): Record<string, string> { return accountEnvironment("cursor", { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>); }
 export function cursorBin(): string | undefined {
   if (process.env.CURSOR_BIN) return existsSync(process.env.CURSOR_BIN) ? process.env.CURSOR_BIN : undefined;
   return Bun.which("cursor-agent", { PATH: cursorEnv().PATH }) ?? Bun.which("agent", { PATH: cursorEnv().PATH }) ?? undefined;
@@ -62,11 +63,13 @@ export function parseModels(output: string): { result: CursorModels; variants: M
   });
   return { result: { models, defaultModel: [...groups].find(([, e]) => e.default)?.[0] ? `cursor/${[...groups].find(([, e]) => e.default)![0]}` : undefined, checkedAt: Date.now() }, variants, slugs: new Set(entries.map(e => e.slug)) };
 }
-let cache: { at: number; value: Promise<ReturnType<typeof parseModels>> } | undefined;
+const accountCaches = new Map<string, { at: number; value: Promise<ReturnType<typeof parseModels>> }>();
 function catalog(fresh = false) {
+  const cacheKey = accountCacheKey();
+  const cache = accountCaches.get(cacheKey);
   if (!fresh && cache && Date.now() - cache.at < 60000) return cache.value;
   const value = command(["models"]).then(parseModels);
-  cache = { at: Date.now(), value }; value.catch(() => { if (cache?.value === value) cache = undefined; }); return value;
+  accountCaches.set(cacheKey, { at: Date.now(), value }); value.catch(() => { if (accountCaches.get(cacheKey)?.value === value) accountCaches.delete(cacheKey); }); return value;
 }
 export async function listModels(fresh = false): Promise<CursorModels> { return (await catalog(fresh)).result; }
 export async function modelSlug(model: string, effort?: Effort): Promise<string> {
@@ -84,7 +87,7 @@ export async function modelSlug(model: string, effort?: Effort): Promise<string>
   if (c.slugs.has(slug)) return slug;
   throw new Error(`Choose an effort for Cursor model ${slug}`);
 }
-export const forgetModels = () => { cache = undefined; permissions = undefined; };
+export const forgetModels = () => { accountCaches.clear(); permissions = undefined; };
 
 /** The installed CLI's options, from its own `--help`: flag → { argument choices, description }. */
 export function parseHelp(output: string): Map<string, { choices?: string[]; description: string }> {

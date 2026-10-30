@@ -1,3 +1,4 @@
+import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, sep } from "node:path";
@@ -22,7 +23,7 @@ export function codexUpdateCommand(bin: string): string[] {
   // New standalone releases know how to update themselves. Never silently install a second copy.
   return [bin, "update"];
 }
-export function codexEnv(): Record<string, string> { return { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>; }
+export function codexEnv(): Record<string, string> { return accountEnvironment("codex", { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>); }
 export interface CodexStatus { installed: boolean; bin?: string; version?: string; provider?: string; connected?: string[]; install: string; error?: string }
 export async function status(): Promise<CodexStatus> {
   const bin = codexBin();
@@ -41,8 +42,10 @@ export async function status(): Promise<CodexStatus> {
   } finally { clearTimeout(timer); }
 }
 export interface CodexModels { models: ModelInfo[]; defaultModel?: string; checkedAt: number }
-let cache: { at: number; value: Promise<CodexModels> } | undefined;
+const accountCaches = new Map<string, { at: number; value: Promise<CodexModels> }>();
 export function listModels(fresh = false): Promise<CodexModels> {
+  const cacheKey = accountCacheKey();
+  const cache = accountCaches.get(cacheKey);
   if (!fresh && cache && Date.now() - cache.at < 60000) return cache.value;
   const value = (async () => {
     const proc = new CodexProcess(homedir());
@@ -67,11 +70,11 @@ export function listModels(fresh = false): Promise<CodexModels> {
       return { models, defaultModel: d ? `codex/${d.model ?? d.id}` : undefined, checkedAt: Date.now() };
     } finally { proc.close(); }
   })();
-  cache = { at: Date.now(), value };
-  value.catch(() => { if (cache?.value === value) cache = undefined; });
+  accountCaches.set(cacheKey, { at: Date.now(), value });
+  value.catch(() => { if (accountCaches.get(cacheKey)?.value === value) accountCaches.delete(cacheKey); });
   return value;
 }
-export const forgetModels = () => { cache = undefined; permissionCache.clear(); };
+export const forgetModels = () => { accountCaches.clear(); permissionCache.clear(); };
 
 // Codex's built-in profiles report no description; name them for display only. Any other
 // profile (user-defined `[permissions.<id>]`) shows its own id and description.
@@ -92,7 +95,7 @@ export function permissionParams(id: string | undefined): Record<string, string>
 const permissionCache = new Map<string, { at: number; value: Promise<PermissionModes> }>();
 /** The permission profiles Codex offers for `cwd` (project layers included), as it lists them. */
 export function listPermissions(cwd?: string, fresh = false): Promise<PermissionModes> {
-  const key = cwd ?? "";
+  const key = JSON.stringify([accountCacheKey(), cwd ?? ""]);
   const hit = permissionCache.get(key);
   if (!fresh && hit && Date.now() - hit.at < 60000) return hit.value;
   const value = (async () => {

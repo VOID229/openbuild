@@ -3,7 +3,7 @@ import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
 import { CodexProcess, CodexRpcError, type RpcMessage } from "./rpc";
 import { toolEvent } from "./tools";
-import { AUTO_REVIEW, permissionParams } from "./install";
+import { codexEnv, AUTO_REVIEW, permissionParams } from "./install";
 interface Saved { id: string; cwd: string; turns: number; nativeTurns?: number; tokens?: { inputTokens: number; cachedInputTokens: number; cacheWriteInputTokens?: number; outputTokens: number } }
 // request_user_input is otherwise unavailable outside Plan mode, even when the user asks for it.
 // Keep this thread-scoped: never rewrite the user's Codex configuration or change collaboration mode.
@@ -66,7 +66,7 @@ export async function steer(id: string, steerId: string, message: string, images
 const input = (text: string, images?: PiChatRequest["images"]) => [{ type: "text", text, text_elements: [] }, ...(images ?? []).map((i) => ({ type: "image", url: `data:${i.mimeType};base64,${i.data}` }))];
 export function release(id: string) { live.get(id)?.proc.close(); live.delete(id); }
 export function restartIdle() { for (const [id, l] of live) if (!l.busy) release(id); }
-export const sessionDir = () => join(process.env.CODEX_HOME ?? join(process.env.HOME ?? "", ".codex"), "sessions");
+export const sessionDir = () => join(codexEnv().CODEX_HOME ?? join(process.env.HOME ?? "", ".codex"), "sessions");
 function question(l: Live, ask: Omit<Ask, "t" | "id">, reply: (r: Reply) => void) {
   const id = `codex-ask-${crypto.randomUUID()}`;
   const event: Ask = { t: "ask", id, ...ask };
