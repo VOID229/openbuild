@@ -1,3 +1,4 @@
+import { userVisiblePrompt } from "../shared/promptDisplay";
 // Bring in the threads people had with the native runtimes (Claude Code, Codex, Cursor, OpenCode)
 // before they used OpenBuild. Pi's sessions are discovered continuously (pi/discovery.ts); these
 // are imported once, when the user picks them in the first-run dialog. Each import writes the same
@@ -68,7 +69,7 @@ class Thread {
 
   user(id: string, content: string, at: number, attachments: Attachment[] = []) {
     this.reply = undefined;
-    this.messages.push({ id, role: "user", content, createdAt: at, ...(attachments.length ? { attachments } : {}) });
+    this.messages.push({ id, role: "user", content: userVisiblePrompt(content), createdAt: at, ...(attachments.length ? { attachments } : {}) });
   }
   /** The reply to the latest prompt (started by its first output). */
   private open(id: string, at: number): Message {

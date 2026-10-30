@@ -1,3 +1,4 @@
+import { userVisiblePrompt } from "../../shared/promptDisplay";
 // Chat persistence. Chats are stored by the local OpenChat server in a database on disk
 // (server/storage.ts), not in the browser: browser storage belongs to one origin, so the app on
 // another port (or in another browser) used to see a different, older set of chats.
@@ -182,7 +183,10 @@ const settle = (chat: Chat): Chat => ({
   // A reload mid-generation leaves "streaming" messages behind. Replies still running where this app
   // can reach them are picked back up (chat.ts resumeReplies); the rest are marked stopped.
   // Pi running elsewhere is the server's to judge (it re-reads the transcript).
-  messages: chat.messages.map((m) => (m.status === "streaming" && !canResume(m.stream?.via) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m)),
+  messages: chat.messages.map((original) => {
+    const m = original.role === "user" ? { ...original, content: userVisiblePrompt(original.content) } : original;
+    return (m.status === "streaming" && !canResume(m.stream?.via) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m);
+  }),
 });
 
 let loading: Promise<Chat[]> | undefined;

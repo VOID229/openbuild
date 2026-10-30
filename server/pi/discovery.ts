@@ -1,3 +1,4 @@
+import { userVisiblePrompt } from "../../shared/promptDisplay";
 // Read Pi's persisted transcripts without opening/migrating them or starting an agent.
 import { realpathSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -28,7 +29,7 @@ const textOf = (content: any): string => typeof content === "string" ? content :
 // at …]", "[Image converted from …]"). They're for the model, not the bubble.
 const IMAGE_NOTE = /^\[Image(?::| converted| omitted)[^\n]*\]$/gm;
 const promptText = (content: any): string => {
-  const text = textOf(content);
+  const text = userVisiblePrompt(textOf(content));
   return Array.isArray(content) && content.some((b: any) => b.type === "image") ? text.replace(IMAGE_NOTE, "").trim() : text;
 };
 

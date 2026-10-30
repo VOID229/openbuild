@@ -1,3 +1,4 @@
+import { userVisiblePrompt } from "../../shared/promptDisplay";
 import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
 import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -184,6 +185,7 @@ function Attachments({ files, chatId }: { files: Attachment[]; chatId: string })
 }
 
 function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
+  message = { ...message, content: userVisiblePrompt(message.content) };
   return (
     <div className="msg msg-user" data-message-id={message.id}>
       {message.attachments?.length ? <Attachments files={message.attachments} chatId={chatId} /> : null}

@@ -23,6 +23,15 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     const result = entry("result1", "answer1", "toolResult", [{ type: "text", text: "/old/project" }], { toolCallId: "tool1" });
     const lines = [header, user, assistant, result];
     const jsonl = (entries) => entries.map((e) => JSON.stringify(e)).join("\\n") + "\\n";
+    // Recovery after a restart reads model-facing prompts from disk.
+    const { withProfileContext } = await import("./src/lib/profile.ts");
+    const { HTML_DELIVERY_NOTE } = await import("./server/htmlDelivery.ts");
+    const injected = HTML_DELIVERY_NOTE + withProfileContext("Actual message", { name: "gal", bio: "private preferences", location: "", language: "" });
+    for (const content of [injected, [{ type: "text", text: injected }]]) {
+      const recovered = projectSession(jsonl([header, entry("recovered", null, "user", content)]), file, Date.now());
+      assert.equal(recovered.messages[0].content, "Actual message");
+      assert.equal(recovered.title, "Actual message");
+    }
     await writeFile(file, jsonl(lines));
     await discoverSessions();
     let chats = storage.listChats();
