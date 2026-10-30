@@ -33,7 +33,7 @@ OpenBuild isn't selling anything, collecting any data or offering any compute.
 
 ## installation
 
-Supports macOS and Linux. Requires Git and Bun 1.3.8 or newer on PATH (see [Bun installation](https://bun.sh/docs/installation)). The installer installs the latest published stable GitHub release into `~/.local/share/openbuild/app` and links `openbuild` and `ob` into Bun's bin directory. It refuses to overwrite an existing installation.
+Supports macOS and Linux. Requires Git and Bun 1.3.8 or newer on PATH (see [Bun installation](https://bun.sh/docs/installation)). The installer installs the latest published stable GitHub release into `~/.local/share/openbuild/app` and links `openbuild` and `ob` into Bun's bin directory. Rerunning it over an existing install asks whether to delete the app folder and reinstall the latest stable release, or quit. Use `ob update` for normal updates. Add `-s -- --reinstall` to skip the question.
 
 #### *looks nice*
 

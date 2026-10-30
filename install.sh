@@ -3,8 +3,10 @@
 # Everything runs from main, on the last line, so a truncated download does nothing.
 # Pass --dry-run to play the installer without checking, downloading or changing anything:
 #   curl -fsSL <url> | sh -s -- --dry-run
+# Rerunning over an install asks first; pass --reinstall to skip the question.
 set -eu
 
+repo=https://github.com/VOID229/openbuild.git
 steps='Checking requirements|Finding the latest release|Downloading OpenBuild|Installing dependencies|Linking the ob command'
 ui_height=15
 ui_pid=
@@ -14,6 +16,9 @@ fancy=0
 background=dark
 cloned=0
 install_dir=
+target=
+backup=
+reinstall=0
 current=1
 detail=
 
@@ -33,7 +38,8 @@ cleanup() {
   fi
   [ -z "$tmp" ] || rm -rf "$tmp"
   if [ "$code" -ne 0 ] && [ "$cloned" -eq 1 ]; then
-    cd / && rm -rf "$install_dir"
+    cd / && rm -rf "$target"
+    [ -z "$backup" ] || [ ! -e "$backup" ] || mv "$backup" "$install_dir"
   fi
   exit "$code"
 }
@@ -207,12 +213,46 @@ dry_run() {
   step 5 v0.0.0; pause 0.8
 }
 
+# Installs from before the marker existed are recognised by the installer's own clone URL.
+is_install() {
+  [ -d "$install_dir" ] && [ ! -L "$install_dir" ] || return 1
+  [ "$(cat "$install_dir/.git/openbuild-installed" 2>/dev/null)" = "$(cd "$install_dir" && pwd -P)" ] && return 0
+  [ "$(git -C "$install_dir" remote get-url origin 2>/dev/null)" = "$repo" ]
+}
+
+# Runs before the animation, reading the terminal because stdin is the piped script.
+confirm_reinstall() {
+  [ -e "$install_dir" ] || [ -L "$install_dir" ] || return 0
+  is_install || die "Installation path is not an OpenBuild install: $install_dir. Move it or choose OPENBUILD_INSTALL_DIR."
+  [ "$reinstall" -eq 0 ] || return 0
+  ( : </dev/tty ) 2>/dev/null || die "OpenBuild is already installed in $install_dir. Add --reinstall to replace it."
+  printf 'OpenBuild is already installed in %s.\n' "$install_dir"
+  printf 'Reinstalling deletes that folder and installs the latest release there.\n'
+  printf '[r] Reinstall  [q] Quit: ' >/dev/tty
+  answer=
+  IFS= read -r answer </dev/tty || answer=
+  case $answer in
+    r|R|reinstall) reinstall=1 ;;
+    *) printf 'Nothing changed.\n'; exit 0 ;;
+  esac
+}
+
+# The old app stays in place until the new one is ready; cleanup puts it back on failure.
+swap_install() {
+  cd /
+  backup=$install_dir.old.$$
+  mv "$install_dir" "$backup"
+  mv "$target" "$install_dir"
+  target=$install_dir
+}
+
 install() {
   step 1
   command -v git >/dev/null 2>&1 || die 'Install Git first.'
   command -v bun >/dev/null 2>&1 || die 'Install Bun 1.3.8 or newer first: https://bun.sh/docs/installation'
   bun -e 'const [a,b,c] = Bun.version.split(".").map(Number); process.exit(a > 1 || (a === 1 && (b > 3 || (b === 3 && c >= 8))) ? 0 : 1)' </dev/null || die 'Bun 1.3.8 or newer is required.'
-  [ ! -e "$install_dir" ] && [ ! -L "$install_dir" ] || die "Installation path already exists: $install_dir. Use the existing checkout or choose OPENBUILD_INSTALL_DIR."
+  target=$install_dir
+  [ "$reinstall" -eq 0 ] || target=$install_dir.new.$$
   mkdir -p "$(dirname "$install_dir")"
 
   step 2
@@ -229,15 +269,19 @@ install() {
 
   step 3 "$release_tag"
   cloned=1
-  run git clone --branch "$release_tag" -- https://github.com/VOID229/openbuild.git "$install_dir" || die 'Could not download OpenBuild.'
-  cd "$install_dir"
-  pwd -P >.git/openbuild-installed
+  run git clone --branch "$release_tag" -- "$repo" "$target" || die 'Could not download OpenBuild.'
+  cd "$target"
 
   step 4 "$release_tag"
   run bun install --frozen-lockfile || die 'Could not install dependencies.'
 
   step 5 "$release_tag"
+  [ "$reinstall" -eq 0 ] || swap_install
+  cd "$install_dir"
+  pwd -P >.git/openbuild-installed
   run bun run cli:install || die 'Could not link the ob command.'
+  cloned=0
+  [ -z "$backup" ] || rm -rf "$backup"
 }
 
 main() {
@@ -245,6 +289,7 @@ main() {
   for arg in "$@"; do
     case $arg in
       --dry-run) dry=1 ;;
+      --reinstall) reinstall=1 ;;
       *) die "Unknown option: $arg" ;;
     esac
   done
@@ -261,15 +306,19 @@ main() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/openbuild.XXXXXX")
   log=$tmp/log
   : >"$log"
+  [ "$dry" -eq 1 ] || confirm_reinstall
   detect_ui
   start_ui
 
   if [ "$dry" -eq 1 ]; then dry_run; else install; fi
   stop_ui done
-  cloned=0
 
   if [ "$dry" -eq 1 ]; then
     printf 'Dry run: nothing was checked, downloaded or changed.\n'
+    return
+  fi
+  if [ "$reinstall" -eq 1 ]; then
+    printf 'OpenBuild reinstalled in %s\nIf it is running, run ob restart to use the new version.\n' "$install_dir"
     return
   fi
   printf 'OpenBuild installed in %s\n' "$install_dir"
