@@ -215,6 +215,41 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(useStore.getState().settingsOpen).toBe(false);
   });
 
+  test("profile context follows edits and clearing in an existing agent thread", async () => {
+    reset({ profile: { name: "Gal", bio: "Be brief", location: "Israel", language: "Hebrew" } });
+    useStore.setState({ cursorModels: { "": listing(local) } });
+    const messages: string[] = [];
+    globalThis.fetch = (async (url: any, init: any) => {
+      const path = String(url);
+      if (path.endsWith("/api/workspaces")) return Response.json({ workspace: { projectId: "", projectName: "", cwd: "/tmp/cursor-ui" } });
+      if (path.endsWith("/api/pi/chat")) {
+        messages.push(JSON.parse(init.body).message);
+        return ndjson({ t: "text", v: "Answer" }, { t: "end" });
+      }
+      return Response.json({});
+    }) as typeof fetch;
+    expect(sendMessage("hello", [])).toBe(true);
+    await settled();
+    const chat = useStore.getState().chats[0]!;
+    expect(messages[0]).toContain("The user's name is Gal.");
+    expect(messages[0]).toContain("The user is located in Israel.");
+    expect(messages[0]).toContain("The user speaks: Hebrew.");
+    expect(messages[0]).toContain("Be brief");
+    expect(chat.messages[0]!.content).toBe("hello");
+
+    useStore.getState().updateSettings({ profile: { name: "Updated", bio: "", location: "", language: "" } });
+    expect(sendMessage("again", [], chat.id)).toBe(true);
+    await settled();
+    expect(messages[1]).toContain("The user's name is Updated.");
+    expect(messages[1]).not.toContain("Gal");
+    expect(messages[1]).not.toContain("speaks");
+
+    useStore.getState().updateSettings({ profile: { name: " ", bio: "\n", location: "", language: "" } });
+    expect(sendMessage("plain", [], chat.id)).toBe(true);
+    await settled();
+    expect(messages[2]).toBe("plain");
+  });
+
   test("Cursor sends runtime/model/metadata effort without API keys and resumes on its device", async () => {
     reset({ workspace: { mode: "local", deviceId: "mac" }, effort: "high" });
     useStore.setState({ cursorModels: { mac: listing(remote) } });

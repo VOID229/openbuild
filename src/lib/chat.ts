@@ -12,6 +12,7 @@ import { deviceName, deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
 import { deviceDetection, hasPermissionModes, permissionOf, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
 import { effortFor, speedFor, supportedSpeed } from "./effort";
+import { profileContext, withProfileContext } from "./profile";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
 export { uid };
@@ -43,7 +44,6 @@ export function makeTitle(text: string, attachments: Attachment[]) {
 }
 
 function systemPrompt(settings: Settings, model: ModelInfo, canSearch: boolean) {
-  const { name, bio, location, language } = settings.profile;
   const about = `you're ${model.name}, running in OpenBuild through the OpenCode API, here to help them build${canSearch ? ", and you can search the web" : ""}`;
   const lines = [
     `You are ${model.name}, a coding assistant in OpenBuild, a local app for building software that connects to models through the OpenCode API.`,
@@ -52,10 +52,8 @@ function systemPrompt(settings: Settings, model: ModelInfo, canSearch: boolean) 
     "Format responses in Markdown where it helps readability: headings, lists, tables, and fenced code blocks with a language tag. Write math in LaTeX using $...$ inline or $$...$$ for display.",
     `Current date: ${new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}.`,
   ];
-  if (name.trim()) lines.push(`The user's name is ${name.trim()}.`);
-  if (location.trim()) lines.push(`The user is located in ${location.trim()}.`);
-  if (language.trim()) lines.push(`The user speaks: ${language.trim()}. Reply in the language the user writes in.`);
-  if (bio.trim()) lines.push(`About the user, including their preferences (follow them):\n${bio.trim()}`);
+  const profile = profileContext(settings.profile);
+  if (profile) lines.push(profile);
   return lines.join("\n");
 }
 
@@ -349,7 +347,7 @@ function piMessage(m: Message, input: string[]): { message: string; images: PiCh
     .map((a) => `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`);
   const texts = files.filter((a) => a.text != null).map((a) => `<file name="${a.name}">\n${a.text}\n</file>`);
   return {
-    message: [...texts, ...notes, m.content].filter(Boolean).join("\n\n") || " ",
+    message: withProfileContext([...texts, ...notes, m.content].filter(Boolean).join("\n\n") || " ", useStore.getState().settings.profile),
     images: images.map((a) => ({ data: a.dataUrl.slice(a.dataUrl.indexOf(",") + 1), mimeType: a.mime })),
   };
 }
