@@ -183,7 +183,14 @@ a {
   cursor: pointer;
 }
 
+/* Browsers also count a stray Shift as keyboard use, so rings wait for real
+   keyboard navigation (see lib/keyboardNav). Text fields keep theirs on click. */
 :focus-visible {
+  outline: none;
+}
+
+:where([data-keyboard-nav]) :focus-visible,
+:where(textarea, [contenteditable], input:not([type="checkbox"], [type="radio"], [type="range"])):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
@@ -585,7 +592,7 @@ svg {
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.menu-item:focus-visible {
+:where([data-keyboard-nav]) .menu-item:focus-visible {
   background: var(--hover);
   outline: none;
 }
@@ -1016,7 +1023,7 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.history-row:has(:focus-visible) {
+:where([data-keyboard-nav]) .history-row:has(:focus-visible) {
   --row-bg: color-mix(in srgb, var(--text) 5%, var(--bg));
 }
 
@@ -1184,7 +1191,7 @@ svg {
   transition: opacity var(--fast) var(--ease);
 }
 
-.history-row:has(:focus-visible) .history-actions {
+:where([data-keyboard-nav]) .history-row:has(:focus-visible) .history-actions {
   opacity: 1;
   pointer-events: auto;
 }
@@ -1838,7 +1845,7 @@ svg {
   transition: opacity var(--fast) var(--ease);
 }
 
-.attachment-remove:focus-visible {
+:where([data-keyboard-nav]) .attachment-remove:focus-visible {
   opacity: 1;
 }
 
@@ -2016,7 +2023,7 @@ svg {
   transition: background-color var(--fast) var(--ease);
 }
 
-.model-row:focus-visible {
+:where([data-keyboard-nav]) .model-row:focus-visible {
   background: var(--hover);
   outline: none;
 }
@@ -2524,7 +2531,7 @@ svg {
   cursor: pointer;
 }
 
-.link:focus-visible {
+:where([data-keyboard-nav]) .link:focus-visible {
   outline-offset: 2px;
   border-radius: 2px;
 }
@@ -6335,7 +6342,7 @@ a.btn-primary {
 }
 
 .pp-row:hover .pp-remove,
-.pp-remove:focus-visible {
+:where([data-keyboard-nav]) .pp-remove:focus-visible {
   opacity: 1;
 }
 
@@ -6509,7 +6516,7 @@ a.btn-primary {
   color: var(--text-2);
 }
 
-.usage:focus-visible {
+:where([data-keyboard-nav]) .usage:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 1px;
 }
@@ -6917,7 +6924,7 @@ a.btn-primary {
 }
 
 .mp-row:hover .mp-star,
-.mp-star:focus-visible,
+:where([data-keyboard-nav]) .mp-star:focus-visible,
 .mp-star-on {
   opacity: 1;
 }
@@ -6954,7 +6961,7 @@ a.btn-primary {
   }
 }
 
-.mp-scope:focus-visible {
+:where([data-keyboard-nav]) .mp-scope:focus-visible {
   background: var(--hover);
   color: var(--text);
   outline: none;
@@ -8090,7 +8097,7 @@ a.btn-primary {
   .ft-row:hover { background: var(--hover); }
 }
 
-.ft-row:focus-visible { outline: none; background: var(--hover); }
+:where([data-keyboard-nav]) .ft-row:focus-visible { outline: none; background: var(--hover); }
 .ft-active { background: var(--active); color: var(--text); }
 .ft-chevron { display: grid; flex: none; place-items: center; width: 14px; color: var(--text-3); }
 .ft-chevron svg { transition: transform var(--fast) var(--ease); }
@@ -8501,7 +8508,7 @@ a.btn-primary {
   background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--c) 9%, transparent) 6px 7px);
   outline: 1px solid var(--border); outline-offset: -1px;
 }
-.ustats-limit-track:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+:where([data-keyboard-nav]) .ustats-limit-track:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ustats-limit-track[aria-expanded="true"] { outline-color: var(--border-strong); }
 .ustats-limit-fill {
   height: 100%; border-radius: 9px; display: flex; align-items: center; padding-left: 11px;
@@ -8625,18 +8632,18 @@ a.btn-primary {
   opacity: 0.55;
 }
 .rt-update[data-updating] .rt-update-version,
-.rt-update:focus-visible:not(:disabled) .rt-update-version {
+:where([data-keyboard-nav]) .rt-update:focus-visible:not(:disabled) .rt-update-version {
   opacity: 0;
   filter: blur(2px);
   transform: translateY(-110%);
 }
 .rt-update[data-updating] .rt-update-action,
-.rt-update:focus-visible:not(:disabled) .rt-update-action {
+:where([data-keyboard-nav]) .rt-update:focus-visible:not(:disabled) .rt-update-action {
   opacity: 1;
   filter: none;
   transform: translateY(0);
 }
-.rt-update:focus-visible {
+:where([data-keyboard-nav]) .rt-update:focus-visible {
   outline: 2px solid var(--ink);
   outline-offset: 3px;
 }

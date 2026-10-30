@@ -8,11 +8,13 @@ import "./styles.css";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LocalAccess } from "./components/LocalAccess";
+import { trackKeyboardNav } from "./lib/keyboardNav";
 import { lockViewport } from "./lib/viewport";
 
 // iOS Safari only applies :active (the press effect on touch screens) when a touch listener exists.
 document.addEventListener("touchstart", () => {}, { passive: true });
 lockViewport();
+trackKeyboardNav();
 
 // Importing App starts config/state hydration. Delay even those imports until unlocked.
 let application: Promise<import("react").ReactNode> | undefined;
