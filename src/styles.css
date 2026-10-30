@@ -955,12 +955,50 @@ svg {
   background: var(--border-strong);
 }
 
+.history-wrap {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .history {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   margin: 0 -4px;
   padding: 0 4px 12px;
+  scrollbar-width: none;
+}
+
+.history::-webkit-scrollbar {
+  display: none;
+}
+
+/* A 3px bar in a wider grab area (Sidebar.tsx ScrollThumb). */
+.scroll-thumb {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: -6px;
+  width: 9px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease);
+}
+
+.scroll-thumb::after {
+  content: "";
+  position: absolute;
+  inset: 2px 3px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.scroll-thumb-on {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .history-heading {

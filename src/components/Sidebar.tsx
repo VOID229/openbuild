@@ -348,6 +348,65 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   );
 });
 
+/** Thin overlay scrollbar for `target`: fades in as it scrolls, and out a second after the last scroll.
+ * The native one can stay stuck on screen when a trackpad scroll is stopped dead, with no momentum phase. */
+function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | null> }) {
+  const thumb = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = target.current;
+    const bar = thumb.current;
+    if (!el || !bar) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let drag: { y: number; top: number; scale: number } | undefined;
+    const size = () => {
+      const height = Math.max(24, (el.clientHeight * el.clientHeight) / el.scrollHeight);
+      return { height, travel: el.clientHeight - height, range: el.scrollHeight - el.clientHeight };
+    };
+    const hide = () => {
+      if (!drag && !bar.matches(":hover")) bar.classList.remove("scroll-thumb-on");
+    };
+    const onScroll = () => {
+      const { height, travel, range } = size();
+      if (range <= 0) return bar.classList.remove("scroll-thumb-on");
+      bar.style.height = `${height}px`;
+      bar.style.transform = `translateY(${(el.scrollTop / range) * travel}px)`;
+      bar.classList.add("scroll-thumb-on");
+      clearTimeout(timer);
+      timer = setTimeout(hide, 1000);
+    };
+    const onDown = (e: PointerEvent) => {
+      const { travel, range } = size();
+      drag = { y: e.clientY, top: el.scrollTop, scale: range / travel };
+      bar.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (drag) el.scrollTop = drag.top + (e.clientY - drag.y) * drag.scale;
+    };
+    const onUp = () => {
+      drag = undefined;
+      clearTimeout(timer);
+      timer = setTimeout(hide, 1000);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    bar.addEventListener("pointerdown", onDown);
+    bar.addEventListener("pointermove", onMove);
+    bar.addEventListener("pointerup", onUp);
+    bar.addEventListener("pointercancel", onUp);
+    bar.addEventListener("pointerleave", onUp);
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener("scroll", onScroll);
+      bar.removeEventListener("pointerdown", onDown);
+      bar.removeEventListener("pointermove", onMove);
+      bar.removeEventListener("pointerup", onUp);
+      bar.removeEventListener("pointercancel", onUp);
+      bar.removeEventListener("pointerleave", onUp);
+    };
+  }, [target]);
+  return <div ref={thumb} className="scroll-thumb" aria-hidden />;
+}
+
 /** Section whose header toggles its rows with a height animation. */
 function Collapsible({ label, open, onToggle, children }: { label: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
   return (
@@ -996,6 +1055,7 @@ export function Sidebar() {
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
   const [closedView, setClosedView] = useState(false);
+  const historyRef = useRef<HTMLElement>(null);
   const updateChat = useStore((s) => s.updateChat);
   const today = useToday();
 
@@ -1136,7 +1196,9 @@ export function Sidebar() {
 
           <div className="sidebar-divider" />
 
-          <nav className="history" aria-label="Thread history">
+          <div className="history-wrap">
+          <ScrollThumb target={historyRef} />
+          <nav ref={historyRef} className="history" aria-label="Thread history">
             {deferredQuery ? (
               <section className="history-group">
                 <h3 className="history-heading">{hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"}` : "Results"}</h3>
@@ -1201,6 +1263,7 @@ export function Sidebar() {
               </>
             )}
           </nav>
+          </div>
 
           <PluginSlot name="sidebar:footer" />
 
