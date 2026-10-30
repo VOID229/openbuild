@@ -1585,7 +1585,7 @@ svg {
   margin: 0 36px;
 }
 
-.stash-tab,
+.stash-tab-btn,
 .stash-head {
   display: flex;
   align-items: center;
@@ -1599,6 +1599,9 @@ svg {
 }
 
 .stash-tab {
+  display: flex;
+  align-items: center;
+  padding-right: 2px;
   border: 1px solid var(--border);
   border-bottom: 0;
   border-radius: 12px 12px 0 0;
@@ -1619,7 +1622,7 @@ svg {
 }
 
 @media (hover: hover) {
-  .stash-tab:hover,
+  .stash-tab-btn:hover,
   .stash-head:hover {
     color: var(--text);
   }

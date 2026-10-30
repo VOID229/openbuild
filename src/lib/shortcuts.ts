@@ -64,7 +64,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   {
     id: "stashDraft",
     label: "Stash draft",
-    description: "Set the composer's draft aside to reuse in any thread. With an empty composer, bring one back.",
+    description: "Set the composer's draft aside to reuse in any thread.",
     default: "mod+KeyS",
   },
   {

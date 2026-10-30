@@ -216,10 +216,12 @@ interface StashTrayProps {
   onUse: (item: Stashed) => void;
 }
 
-/** A tab on top of the composer; open, a list over what's above it, without moving anything. */
+/** A tab on top of the composer; with several, opening into a list over what's above it, without moving anything. */
 function StashTray({ items, open, active, onToggle, onClose, onHover, onUse }: StashTrayProps) {
   const tray = useRef<HTMLDivElement>(null);
   useDismiss(open, onClose, [tray]);
+  // One stash has no list to choose from: the tab pastes it, and carries its remove button.
+  const only = items.length === 1 ? items[0] : undefined;
   // Keep focus (and the keyboard) in the textarea.
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
   const header = (
@@ -258,9 +260,22 @@ function StashTray({ items, open, active, onToggle, onClose, onHover, onUse }: S
           </div>
         </div>
       ) : (
-        <button type="button" className="stash-tab" aria-expanded={false} aria-label={`Open stash, ${items.length} saved`} onMouseDown={keepFocus} onClick={onToggle}>
-          {header}
-        </button>
+        <div className="stash-tab">
+          {only ? (
+            <button type="button" className="stash-tab-btn" aria-label="Paste stash" onMouseDown={keepFocus} onClick={() => onUse(only)}>
+              {header}
+            </button>
+          ) : (
+            <button type="button" className="stash-tab-btn" aria-expanded={false} aria-label={`Open stash, ${items.length} saved`} onMouseDown={keepFocus} onClick={onToggle}>
+              {header}
+            </button>
+          )}
+          {only && (
+            <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => removeStash(only.id)}>
+              <X size={15} />
+            </IconButton>
+          )}
+        </div>
       )}
     </div>
   );
