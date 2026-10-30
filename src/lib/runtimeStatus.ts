@@ -7,6 +7,13 @@ type Entry = { at: number; statuses: Statuses };
 const cache = new Map<string, Entry>();
 const pending = new Map<string, Promise<Statuses>>();
 const storageKey = (deviceId?: string) => `openbuild:runtime-status:v1:${deviceId ?? ""}`;
+const listeners = new Set<(statuses: Statuses, deviceId?: string) => void>();
+
+export function subscribeRuntimeStatuses(listener: (statuses: Statuses, deviceId?: string) => void) {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
 const ttl = 5 * 60_000;
 
 function entry(deviceId?: string): Entry | undefined {
@@ -33,6 +40,7 @@ export function loadRuntimeStatuses(fresh = false, deviceId?: string): Promise<S
     const next = { at: Date.now(), statuses };
     cache.set(key, next);
     try { localStorage.setItem(storageKey(deviceId), JSON.stringify(next)); } catch { /* Best effort. */ }
+    for (const listener of listeners) listener(statuses, deviceId);
     return statuses;
   }).finally(() => { if (pending.get(key) === request) pending.delete(key); });
   pending.set(key, request);

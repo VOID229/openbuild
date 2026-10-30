@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../src/lib/runtimeStatus";
+import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../src/lib/runtimeStatus";
 
 const statuses = (version: string) => Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, { installed: true, version, install: "test", updateAvailable: false }]));
 
@@ -75,4 +75,25 @@ test("manual check queued behind a preload still requests fresh status", async (
     await Promise.all([preload, refresh]);
     expect(calls).toEqual(["/api/devices/cache-test-race/api/runtimes/status", "/api/devices/cache-test-race/api/runtimes/status?fresh=1"]);
   } finally { globalThis.fetch = original; }
+});
+
+test("fresh status notifies notices with device scope and stops after unsubscribe", async () => {
+  const original = globalThis.fetch;
+  const seen: Array<{ version?: string; deviceId?: string }> = [];
+  const unsubscribe = subscribeRuntimeStatuses((next, deviceId) => seen.push({ version: next.claude.version, deviceId }));
+  try {
+    globalThis.fetch = (async () => Response.json({ runtimes: statuses("updated") })) as unknown as typeof fetch;
+    await loadRuntimeStatuses(true);
+    await loadRuntimeStatuses(true, "another-device");
+    expect(seen).toEqual([
+      { version: "updated", deviceId: undefined },
+      { version: "updated", deviceId: "another-device" },
+    ]);
+    unsubscribe();
+    await loadRuntimeStatuses(true);
+    expect(seen).toHaveLength(2);
+  } finally {
+    unsubscribe();
+    globalThis.fetch = original;
+  }
 });

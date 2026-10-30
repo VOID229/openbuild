@@ -1,9 +1,11 @@
 import { X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { followJob, updateRuntime } from "../lib/pi";
+import { loadRuntimeStatuses } from "../lib/runtimeStatus";
 import { runtimeName } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { useRuntimeUpdates, useUpdateAvailable } from "../lib/update";
-import { IconButton } from "./primitives";
+import { IconButton, Spinner } from "./primitives";
 
 /** "Pi 1.4.0", "Pi 1.4.0 and Codex 0.48.0", "Pi 1.4.0, Codex 0.48.0 and Claude Code 2.1.0". */
 function listPhrase(items: string[]): string {
@@ -17,11 +19,22 @@ export function Notices() {
   const build = useUpdateAvailable(prefs.builds);
   const updates = useRuntimeUpdates(prefs.runtimeUpdates, prefs.updateRuntimes);
   const [buildClosed, setBuildClosed] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
+  const busy = useRef(false);
+  const live = useRef<AbortController | undefined>(undefined);
+  useEffect(() => () => live.current?.abort(), []);
+  useEffect(() => {
+    if (!feedback) return;
+    const timer = setTimeout(() => setFeedback(""), 5000);
+    return () => clearTimeout(timer);
+  }, [feedback]);
   // Closing a notice skips that release; the next one from the same runtime shows again.
   const shown = updates.filter((u) => prefs.dismissedUpdates?.[u.runtime] !== u.version);
   const showBuild = prefs.builds && build && !buildClosed;
-  if (!showBuild && !shown.length) return null;
-  const { openSettings, updateSettings } = useStore.getState();
+  if (!showBuild && !shown.length && !updating && !feedback && !error) return null;
+  const { updateSettings } = useStore.getState();
   const dismiss = () =>
     updateSettings({
       notifications: {
@@ -29,6 +42,35 @@ export function Notices() {
         dismissedUpdates: { ...prefs.dismissedUpdates, ...Object.fromEntries(shown.map((u) => [u.runtime, u.version])) },
       },
     });
+  const startUpdate = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    setUpdating(true);
+    setError("");
+    setFeedback("");
+    const controller = new AbortController();
+    live.current = controller;
+    const completed: string[] = [];
+    try {
+      for (const update of shown) {
+        await updateRuntime(update.runtime);
+        let lastLine = "";
+        const result = await followJob((line) => { if (line.trim()) lastLine = line; }, controller.signal);
+        if (controller.signal.aborted) return;
+        if (result?.code !== 0) throw new Error(lastLine || `Could not confirm the ${runtimeName(update.runtime)} update. Please try again.`);
+        const statuses = await loadRuntimeStatuses(true);
+        const status = statuses[update.runtime];
+        if (!status.installed || status.updateAvailable) throw new Error(`${runtimeName(update.runtime)} still needs an update. Please try again.`);
+        completed.push(`${runtimeName(update.runtime)}${status.version ? ` ${status.version}` : ""}`);
+        setFeedback(`${listPhrase(completed)} updated.`);
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "Update failed. Please try again.");
+    } finally {
+      busy.current = false;
+      if (!controller.signal.aborted) setUpdating(false);
+    }
+  };
   return (
     <div className="notices">
       {showBuild && (
@@ -42,15 +84,24 @@ export function Notices() {
           </IconButton>
         </div>
       )}
-      {shown.length > 0 && (
+      {(shown.length > 0 || updating) && (
         <div className="notice" role="status">
           <span className="notice-text">
-            {listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} {shown.length === 1 ? "is" : "are"} available.
+            {updating ? "Updating runtimes…" : `${listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} ${shown.length === 1 ? "is" : "are"} available.`}
           </span>
-          <button type="button" className="btn btn-sm" onClick={() => openSettings("runtimes")}>
-            Update
+          <button type="button" className="btn btn-sm" disabled={updating} aria-busy={updating} onClick={() => void startUpdate()}>
+            {updating && <Spinner size={12} />}
+            {updating ? "Updating…" : "Update"}
           </button>
           <IconButton label="Dismiss" tooltip={false} onClick={dismiss}>
+            <X size={15} />
+          </IconButton>
+        </div>
+      )}
+      {(feedback || error) && (
+        <div className="notice" role={error ? "alert" : "status"}>
+          <span className="notice-text">{[feedback, error].filter(Boolean).join(" ")}</span>
+          <IconButton label="Dismiss update result" tooltip={false} onClick={() => { setFeedback(""); setError(""); }}>
             <X size={15} />
           </IconButton>
         </div>

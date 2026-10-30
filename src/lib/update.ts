@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ThreadRuntime } from "../../shared/types";
 import { isHosted } from "./runtime";
-import { cachedRuntimeStatuses, loadRuntimeStatuses } from "./runtimeStatus";
+import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "./runtimeStatus";
 import { UPDATABLE_RUNTIMES } from "./runtimes";
 
 // Noticing that the server now serves a newer app than this tab is running, e.g. after a pull and
@@ -72,6 +72,9 @@ export function useRuntimeUpdates(enabled = true, only?: ThreadRuntime[]): Runti
   const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses());
   useEffect(() => {
     if (!enabled || isHosted()) return;
+    const unsubscribe = subscribeRuntimeStatuses((next, deviceId) => {
+      if (deviceId === undefined) setStatuses(next);
+    });
     let cancelled = false;
     const load = async () => {
       if (document.visibilityState !== "visible") return;
@@ -86,6 +89,7 @@ export function useRuntimeUpdates(enabled = true, only?: ThreadRuntime[]): Runti
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelled = true;
+      unsubscribe();
       clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
