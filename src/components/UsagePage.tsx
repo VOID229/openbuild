@@ -533,9 +533,6 @@ function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string;
             {USAGE_PROVIDER_NAMES[p.provider]}
             {p.account && <span className="ustats-account">{p.account}</span>}
             {p.plan && <span className="ustats-plan">{p.plan}</span>}
-            {(p.source || p.machine) && (data.machines?.length ?? 0) + (p.account ? 1 : 0) > 1 && (
-              <span className="ustats-dim ustats-small ustats-source">{[p.machine, p.source].filter(Boolean).join(" · ")}</span>
-            )}
             {p.stale && <span className="ustats-dim ustats-small">as of {ago(p.asOf, now)}</span>}
           </h2>
           {p.windows.map((w) => <LimitRow key={w.id} account={p} w={w} now={now} />)}
@@ -625,11 +622,9 @@ function LimitDetails({ account, w, now, onClose }: { account: UsageLimits; w: U
         <span className="ustats-limit-pop-name">{USAGE_PROVIDER_NAMES[account.provider]}</span>
         {account.account && <span className="ustats-account">{account.account}</span>}
       </div>
-      {account.source && <div className="ustats-limit-pop-source">{account.source}</div>}
-      {(plan || account.machine) && (
+      {plan && (
         <div className="ustats-limit-pop-group">
           {plan && <DetailRow label="Plan">{plan}</DetailRow>}
-          <DetailRow label="Signed in">{account.machine ?? "this machine"}</DetailRow>
         </div>
       )}
       <div className="ustats-limit-pop-group">
