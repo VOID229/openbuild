@@ -1,4 +1,4 @@
-import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { ArrowUp, Bookmark, BookOpen, Check, ChevronDown, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { canSteer, drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
@@ -11,9 +11,11 @@ import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/fil
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
+import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../lib/shortcuts";
+import { addStash, pasteStash, removeStash, stashAction, useStash, type Stashed } from "../lib/stash";
 import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
-import { cx } from "../lib/ui";
+import { ago, cx, useDismiss } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker, PermissionPicker, SpeedPicker } from "./Pickers";
 import { IconButton } from "./primitives";
@@ -203,6 +205,67 @@ function QueueTray({ chatId, queue, steering, onEdit, onFinish, live, onError }:
   );
 }
 
+interface StashTrayProps {
+  items: Stashed[];
+  open: boolean;
+  /** The row Up/Down and Enter act on while the list is open. */
+  active: number;
+  onToggle: () => void;
+  onClose: () => void;
+  onHover: (i: number) => void;
+  onUse: (item: Stashed) => void;
+}
+
+/** A tab on top of the composer; open, a list over what's above it, without moving anything. */
+function StashTray({ items, open, active, onToggle, onClose, onHover, onUse }: StashTrayProps) {
+  const tray = useRef<HTMLDivElement>(null);
+  useDismiss(open, onClose, [tray]);
+  // Keep focus (and the keyboard) in the textarea.
+  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
+  const header = (
+    <>
+      <Bookmark size={15} />
+      <span className="stash-label">Stash</span>
+      <span className="stash-count">{items.length}</span>
+    </>
+  );
+  return (
+    <div ref={tray} className="stash">
+      {open ? (
+        <div className="stash-panel">
+          <button type="button" className="stash-head" aria-expanded aria-label="Close stash" onMouseDown={keepFocus} onClick={onToggle}>
+            {header}
+            <ChevronDown size={16} />
+          </button>
+          <div className="stash-list">
+            {items.map((item, i) => {
+              const chips = item.files.filter((f) => !f.mention);
+              const image = chips.find((f) => f.mime.startsWith("image/"));
+              return (
+                <div key={item.id} className={cx("stash-row", i === active && "stash-row-active")} onMouseEnter={() => onHover(i)}>
+                  <button type="button" className="stash-use" onMouseDown={keepFocus} onClick={() => onUse(item)}>
+                    <FileText className="queued-file" size={15} />
+                    <span className="queued-text">{item.text.trim() || chips[0]?.name}</span>
+                    {image && <img className="queued-thumb" src={image.dataUrl} alt="" />}
+                    <span className="stash-time">{ago(item.createdAt)}</span>
+                  </button>
+                  <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => removeStash(item.id)}>
+                    <X size={15} />
+                  </IconButton>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="stash-tab" aria-expanded={false} aria-label={`Open stash, ${items.length} saved`} onMouseDown={keepFocus} onClick={onToggle}>
+          {header}
+        </button>
+      )}
+    </div>
+  );
+}
+
 const SOURCE_ICON = { extension: Puzzle, prompt: FileText, skill: BookOpen, openbuild: Slash } as const;
 
 /** A tiny colored badge for a file's extension, like an editor's file icon. */
@@ -334,6 +397,9 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const queue = useQueueOf(chatId);
   const steering = useSteeringOf(chatId);
   const replyPlan = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan);
+  const stashed = useStash((s) => s.items);
+  const [stashOpen, setStashOpen] = useState(false);
+  const [stashIndex, setStashIndex] = useState(0);
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -622,6 +688,53 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   }, [queue]);
 
+  const pasteStashed = (item: Stashed) => {
+    dictation.cancel();
+    const next = pasteStash({ text, files }, item);
+    fill(next);
+    removeStash(item.id);
+    setStashOpen(false);
+    lastTyped.current = Date.now();
+    requestAnimationFrame(() => {
+      const el = textarea.current;
+      el?.focus();
+      el?.setSelectionRange(next.text.length, next.text.length);
+    });
+  };
+
+  const toggleStash = () => {
+    setStashIndex(0);
+    setStashOpen((open) => !open);
+  };
+
+  /** The stash shortcut. The box holds a queued message while it's edited, not a draft. */
+  const onStashShortcut = () => {
+    if (editing) return;
+    const action = stashAction(hasContent, stashed.length);
+    if (action === "stash") {
+      dictation.cancel();
+      addStash(text, files);
+      saveDraft(draftKey, "", []);
+      fill({ text: "", files: [] });
+      setStashOpen(false);
+      textarea.current?.focus();
+    } else if (action === "use") {
+      pasteStashed(stashed[0]!);
+    } else if (action === "open") {
+      toggleStash();
+      textarea.current?.focus();
+    }
+  };
+  const stashShortcut = useRef(onStashShortcut);
+  stashShortcut.current = onStashShortcut;
+  useEffect(() => {
+    const onShortcut = (e: Event) => {
+      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft") stashShortcut.current();
+    };
+    window.addEventListener(SHORTCUT_EVENT, onShortcut);
+    return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);
+  }, []);
+
   /**
    * Send the composer's text, or `line` instead of it (a command picked from the "/" menu).
    * `background` sends, then opens a new empty thread, so the one just started only shows in the sidebar.
@@ -666,7 +779,22 @@ export function Composer({ variant, chatId, streaming }: Props) {
     }
   };
 
+  const stashList = stashOpen && !editing ? stashed : [];
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (stashList.length && !e.nativeEvent.isComposing) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = stashList.length;
+        setStashIndex((i) => (Math.min(i, n - 1) + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        pasteStashed(stashList[Math.min(stashIndex, stashList.length - 1)]!);
+        return;
+      }
+    }
     if (mentionMatches.length && !e.nativeEvent.isComposing) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
@@ -740,6 +868,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
+      {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} />}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
@@ -803,6 +932,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           aria-label="Message"
           onChange={(e) => {
             lastTyped.current = Date.now();
+            setStashOpen(false);
             if (!editing) rememberDraftSelection(draftKey, e.currentTarget);
             setText(e.target.value);
             setMentionDismissed(undefined);

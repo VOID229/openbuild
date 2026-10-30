@@ -265,7 +265,7 @@ function Main() {
   }, [chatsLoaded]);
 
   // Global shortcuts (Settings → Shortcuts): new thread, left and right sidebars, terminal, dictation,
-  // settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // stash, settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
   // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
   // a shortcut is being recorded there.
   useEffect(() => {
@@ -303,8 +303,10 @@ function Main() {
           if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();
           else focusComposer();
           break;
+        case "stashDraft":
         case "toggleDictation":
-          // Dictation lives in each field (useFieldDictation); the focused one, else the composer, takes it.
+          // Dictation lives in each field (useFieldDictation), the focused one, else the composer, taking it.
+          // The draft lives in the composer.
           window.dispatchEvent(new CustomEvent<ShortcutEventDetail>(SHORTCUT_EVENT, { detail: { action: id } }));
           break;
       }
@@ -320,6 +322,8 @@ function Main() {
         if (def.typingSensitive && typing) continue;
         // Without a field that takes dictation there's nothing to dictate into.
         if (def.id === "toggleDictation" && !document.querySelector("[data-dictation]")) continue;
+        // A file editor keeps its own save, and a terminal its own Ctrl+S.
+        if (def.id === "stashDraft" && el?.closest(".cm-editor, .xterm")) continue;
         e.preventDefault();
         e.stopPropagation();
         run(def.id);

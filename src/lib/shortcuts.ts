@@ -15,7 +15,8 @@ export type ShortcutId =
   | "openSettings"
   | "openUsage"
   | "focusSearch"
-  | "toggleDictation";
+  | "toggleDictation"
+  | "stashDraft";
 
 export interface ShortcutDef {
   id: ShortcutId;
@@ -59,6 +60,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Toggle dictation",
     description: "Start or stop dictating into the focused field, or the composer.",
     default: "alt+KeyM",
+  },
+  {
+    id: "stashDraft",
+    label: "Stash draft",
+    description: "Set the composer's draft aside to reuse in any thread. With an empty composer, bring one back.",
+    default: "mod+KeyS",
   },
   {
     id: "openSettings",
@@ -357,7 +364,7 @@ export function formatBinding(binding: KeyBinding, mac = isMacPlatform()): strin
 export function bindingNote(binding: KeyBinding, mac = isMacPlatform()): string | undefined {
   const value = serializeBinding(binding);
   const key = formatBinding(binding, mac);
-  if (value === "mod+KeyS") return `${key} saves an open file in OpenBuild.`;
+  if (value === "mod+KeyS") return `${key} still saves an open file while its editor has focus.`;
   if (value === "mod+KeyR") return `Your browser keeps ${key} for reloading the page.`;
   if (value === "mod+KeyQ") return `Your browser or system keeps ${key} for quitting.`;
   if (

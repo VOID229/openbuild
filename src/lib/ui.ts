@@ -2,6 +2,17 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
+/** "just now", "5m ago", "3h ago", "4d ago", then a date. */
+export function ago(at: number | undefined): string | undefined {
+  if (!at) return undefined;
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h ago`;
+  if (minutes < 60 * 24 * 14) return `${Math.round(minutes / 60 / 24)}d ago`;
+  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 /** A duration in its two largest units: "45s", "7m 9s", "1hr 2m", "1d 3hr". */
 export function duration(ms: number) {
   const total = Math.max(1, Math.round(ms / 1000));

@@ -1537,6 +1537,113 @@ svg {
   min-width: 0;
 }
 
+/* The stash: a tab on top of the composer, opening into a list over what's above it. */
+
+.stash {
+  position: relative;
+  display: flex;
+  justify-content: flex-end;
+  height: 33px;
+  margin: 0 36px;
+}
+
+.stash-tab,
+.stash-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 33px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease);
+}
+
+.stash-tab {
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: var(--surface-2);
+  animation: rise 200ms var(--ease) both;
+}
+
+.stash-head {
+  width: 100%;
+}
+
+.stash-count {
+  color: var(--text-3);
+}
+
+.stash-head .stash-count {
+  margin-left: auto;
+}
+
+@media (hover: hover) {
+  .stash-tab:hover,
+  .stash-head:hover {
+    color: var(--text);
+  }
+}
+
+.stash-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  max-height: min(300px, 45dvh);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 14px 14px 0 0;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+  animation: rise 140ms var(--ease) both;
+}
+
+.stash-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 6px 6px;
+}
+
+.stash-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 3px;
+  border-radius: 8px;
+}
+
+.stash-row-active {
+  background: var(--hover);
+}
+
+.stash-use {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 0 4px 0 7px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 13.5px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.stash-time {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
 /* Queued messages: a thin tray tucked behind the top of the composer. */
 
 .queue {

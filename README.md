@@ -88,6 +88,10 @@ Client modules are ordinary TSX with no build step: `react` and `openbuild` reso
 
 Five examples ship in `plugins/`: **Daily note** (a composer button, a server route and a plugin Settings page), **OpenRouter logo for DeepSeek** (icon overrides), **Claude provider for pi-claude** and **Codex (2) for codex-multi** (provider grouping, the second with a badged icon), and **Quiet UI** (manifest-only tokens/CSS, off by default). `openbuild.config.example.ts` shows how to change the plugin folder or global CSS. Full reference: [docs/plugins.md](docs/plugins.md). Plugins are trusted code — `OPENBUILD_SAFE=1` (or `?safe`) starts with none.
 
+### Stash
+
+**Cmd/Ctrl+S** stashes what's in the composer, attachments included, to reuse in any thread or a new one. With an empty composer it brings back the only stash, or opens the list when there are several (the Stash tab on the composer does too). A stash stays in that browser, surviving reloads and restarts, until it's used or removed with its ✕. In a file editor Cmd/Ctrl+S still saves the file. Settings → Shortcuts can change the key.
+
 ### Local Whisper dictation
 
 Settings → General → **Local dictation** replaces browser speech recognition with your private whisper.cpp server. Tap the mic to record, then again to transcribe (up to two minutes). The transcript is appended to the draft. Audio is sent through the authenticated OpenBuild backend, not to a public transcription service, and OpenBuild doesn't save recordings. With the toggle off, browser dictation works as before.
