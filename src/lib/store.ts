@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
-type SidebarSections = { pinned: boolean; today: boolean; closed: boolean };
+type SidebarSections = { pinned: boolean; today: boolean; snoozed: boolean; closed: boolean };
 
 /** Sidebar list options from the filter menu. */
 export interface SidebarView {
@@ -256,7 +256,7 @@ interface State {
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
   /** Update chat metadata (title, pinned, closed, workspace) without changing its recency. */
-  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "done" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission">>) => void;
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "done" | "snoozedUntil" | "woke" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission">>) => void;
   setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }
@@ -298,7 +298,7 @@ export const useStore = create<State>()(
       chatsLoaded: false,
       selections: {},
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
-      sections: { pinned: true, today: true, closed: false },
+      sections: { pinned: true, today: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",

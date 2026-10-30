@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, MessageCircle, PanelLeft, Pencil, Pin, PinOff, RotateCcw, Search, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { removeWorktree } from "../lib/pi";
@@ -11,6 +11,7 @@ import type { Device } from "../../shared/types";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
+import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
 function fitFlyout(el: HTMLElement | null) {
@@ -38,13 +39,48 @@ const isWaiting = (chat: Chat) => {
 /** Midnight at the start of today. */
 const startOfToday = () => new Date().setHours(0, 0, 0, 0);
 
-/** Closed by the user, or a thread from before today that isn't pinned, working or done. */
+/** Closed by the user, or a thread from before today that isn't pinned, working, done or woken. */
 const isClosed = (chat: Chat, today = startOfToday()) =>
-  !!chat.archived || (!chat.pinned && !chat.done && !isWorking(chat) && chat.updatedAt < today);
+  !!chat.archived || (!chat.pinned && !chat.done && !chat.woke && !isWorking(chat) && chat.updatedAt < today);
 
 /** Closing a thread files it under "Closed" (and unpins it); reopening one puts it back in "Done". */
 const closePatch = (chat: Chat, today?: number) =>
-  isClosed(chat, today) ? { archived: false, done: true } : { archived: true, done: false, pinned: false };
+  isClosed(chat, today) ? { archived: false, done: true } : { archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false };
+
+/** Snoozing hides a thread under "Snoozed"; waking it by hand puts it back where it was. */
+const snoozePatch = (until: number) => ({ snoozedUntil: until, woke: false });
+const wakePatch = { snoozedUntil: undefined };
+/** A snooze that runs out on its own surfaces the thread under "Woke", even if it was closed. */
+const wokePatch = { snoozedUntil: undefined, woke: true, archived: false };
+
+const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+/** When a snooze ends, as briefly as it reads: "18:00" today, "Mon 9:00" this week, else "Nov 3, 9:00". */
+function snoozeLabel(t: number) {
+  const day = new Date(t).setHours(0, 0, 0, 0);
+  const today = startOfToday();
+  if (day === today) return clock(t);
+  if (day - today < 7 * DAY) return `${new Date(t).toLocaleDateString([], { weekday: "short" })} ${clock(t)}`;
+  return `${new Date(t).toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock(t)}`;
+}
+
+/** The snooze menu's presets, each with the time it ends. */
+function snoozeOptions(now = new Date()) {
+  const at = (days: number, hour: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + days);
+    return d.setHours(hour, 0, 0, 0);
+  };
+  const options = [
+    { label: "In 1 hour", until: now.getTime() + 60 * 60 * 1000 },
+    { label: "In 3 hours", until: now.getTime() + 3 * 60 * 60 * 1000 },
+  ].map((o) => ({ ...o, hint: clock(o.until) }));
+  if (now.getHours() < 18) options.push({ label: "This evening", until: at(0, 18), hint: clock(at(0, 18)) });
+  options.push({ label: "Tomorrow", until: at(1, 9), hint: clock(at(1, 9)) });
+  const monday = at((8 - now.getDay()) % 7 || 7, 9);
+  options.push({ label: "Next week", until: monday, hint: `${new Date(monday).toLocaleDateString([], { weekday: "short" })} ${clock(monday)}` });
+  return options;
+}
 
 /** Start of today, refreshed at midnight so the day's threads roll over into "Closed". */
 function useToday() {
@@ -232,8 +268,17 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
               <Spinner size={13} waiting />
             ) : streaming ? (
               <Spinner size={13} />
+            ) : chat.snoozedUntil ? (
+              <span className="history-snooze" title={`Snoozed until ${new Date(chat.snoozedUntil).toLocaleString()}`}>
+                <AlarmClock size={12} />
+                {snoozeLabel(chat.snoozedUntil)}
+              </span>
             ) : chat.unread ? (
               <span className="unread-dot" aria-label="New reply" />
+            ) : chat.woke ? (
+              <span className="history-woke" title="Snooze ended" aria-label="Snooze ended">
+                <AlarmClockCheck size={13} />
+              </span>
             ) : null}
           </span>
         </span>
@@ -268,14 +313,20 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
         >
           {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
         </IconButton>
-        <IconButton
-          label={closed ? "Reopen" : "Close"}
-          tooltipSide="top"
-          className="history-action"
-          onClick={() => updateChat(chat.id, closePatch(chat))}
-        >
-          {closed ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-        </IconButton>
+        {chat.snoozedUntil ? (
+          <IconButton label="Wake" tooltipSide="top" className="history-action" onClick={() => updateChat(chat.id, wakePatch)}>
+            <ClockArrowUp size={14} />
+          </IconButton>
+        ) : (
+          <IconButton
+            label={closed ? "Reopen" : "Close"}
+            tooltipSide="top"
+            className="history-action"
+            onClick={() => updateChat(chat.id, closePatch(chat))}
+          >
+            {closed ? <SquareArrowUp size={14} /> : <Check size={14} />}
+          </IconButton>
+        )}
         {/* Touch screens only: opens the same menu as right-click / long-press. */}
         <IconButton
           label="More actions"
@@ -372,18 +423,136 @@ function DeleteThreadDialog({ chat, onClose }: { chat: Chat; onClose: () => void
   );
 }
 
+const SNOOZE_UNITS = {
+  minutes: { label: "Minutes", ms: 60_000 },
+  hours: { label: "Hours", ms: 60 * 60_000 },
+  days: { label: "Days", ms: DAY },
+  weeks: { label: "Weeks", ms: 7 * DAY },
+};
+
+/** Snooze a thread until a time, or for a length of time, of the user's choosing. */
+function SnoozeDialog({ chat, onClose }: { chat: Chat; onClose: () => void }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const updateChat = useStore((s) => s.updateChat);
+  const [mode, setMode] = useState<"date" | "duration">("date");
+  const [day, setDay] = useState(() => startOfToday() + DAY);
+  const [time, setTime] = useState(9 * 60);
+  const [amount, setAmount] = useState(2);
+  const [unit, setUnit] = useState<keyof typeof SNOOZE_UNITS>("hours");
+  const until = mode === "date" ? new Date(day).setHours(Math.floor(time / 60), time % 60, 0, 0) : Date.now() + amount * SNOOZE_UNITS[unit].ms;
+  const valid = until > Date.now();
+  const now = new Date();
+
+  useEffect(() => {
+    dialog.current?.showModal();
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="confirm-dialog snooze-dialog"
+      aria-labelledby="thread-snooze-title"
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+    >
+      <form
+        method="dialog"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!valid) return;
+          updateChat(chat.id, snoozePatch(until));
+          onClose();
+        }}
+      >
+        <h2 id="thread-snooze-title">Snooze “{chat.title}”</h2>
+        <p>It moves to Snoozed and comes back under Woke at this time.</p>
+        <div className="segmented snooze-mode" role="radiogroup" aria-label="Snooze until">
+          {(
+            [
+              ["date", "Date and time"],
+              ["duration", "Duration"],
+            ] as const
+          ).map(([value, label]) => (
+            <button key={value} type="button" role="radio" aria-checked={mode === value} className="segment" onClick={() => setMode(value)}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === "date" ? (
+          <div className="snooze-fields">
+            <div className="snooze-field">
+              <span className="snooze-label">Date</span>
+              <DateField label="Date" value={day} min={Date.now()} onChange={setDay} />
+            </div>
+            <div className="snooze-field">
+              <span className="snooze-label">Time</span>
+              <TimeField label="Time" value={time} min={day === startOfToday() ? now.getHours() * 60 + now.getMinutes() + 1 : 0} onChange={setTime} />
+            </div>
+          </div>
+        ) : (
+          <div className="snooze-fields">
+            <div className="snooze-field">
+              <span className="snooze-label">Snooze for</span>
+              <div className="input snooze-stepper">
+                <button type="button" aria-label="Less" disabled={amount <= 1} onClick={() => setAmount((n) => Math.max(1, n - 1))}>
+                  <Minus size={15} />
+                </button>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  aria-label="Snooze for"
+                  min={1}
+                  value={amount || ""}
+                  onChange={(e) => setAmount(Math.max(0, Math.floor(Number(e.target.value)) || 0))}
+                  autoFocus
+                />
+                <button type="button" aria-label="More" onClick={() => setAmount((n) => n + 1)}>
+                  <Plus size={15} />
+                </button>
+              </div>
+            </div>
+            <div className="snooze-field">
+              <span className="snooze-label">Unit</span>
+              <ChoiceField
+                label="Unit"
+                value={unit}
+                options={Object.entries(SNOOZE_UNITS).map(([value, { label }]) => ({ value: value as keyof typeof SNOOZE_UNITS, label }))}
+                onChange={setUnit}
+              />
+            </div>
+          </div>
+        )}
+        <div className="snooze-when">{valid ? `Wakes ${snoozeLabel(until)}` : "Pick a time in the future."}</div>
+        <div className="confirm-actions">
+          <button type="button" className="btn btn-sm" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn btn-sm btn-primary" disabled={!valid}>
+            <AlarmClock size={14} /> Snooze
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
 function ChatContextMenu({
   state,
   sidebarRef,
   onClose,
   onRename,
   onDelete,
+  onSnooze,
 }: {
   state?: MenuState;
   sidebarRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onRename: (id: string) => void;
   onDelete: (id: string) => void;
+  /** Opens the custom snooze time picker. */
+  onSnooze: (id: string) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const last = useRef(state);
@@ -394,12 +563,12 @@ function ChatContextMenu({
   const open = !!state;
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
-  const [copyOpen, setCopyOpen] = useState(false);
+  const [sub, setSub] = useState<"copy" | "snooze">();
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
     if (!open || !mounted || !state) return;
-    setCopyOpen(false);
+    setSub(undefined);
     const el = ref.current;
     const w = el?.offsetWidth ?? 220;
     const h = el?.offsetHeight ?? 220;
@@ -435,6 +604,48 @@ function ChatContextMenu({
     fn();
     onClose();
   };
+  const flyout = (id: "copy" | "snooze", icon: React.ReactNode, label: string, items: React.ReactNode) => (
+    <div className="filter-row" onMouseEnter={() => setSub(id)}>
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={sub === id}
+        className={cx("menu-item", sub === id && "menu-item-active")}
+        onClick={() => setSub(sub === id ? undefined : id)}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowRight") return;
+          e.preventDefault();
+          setSub(id);
+          requestAnimationFrame(() => e.currentTarget.parentElement?.querySelector<HTMLElement>(".filter-flyout button")?.focus());
+        }}
+      >
+        {icon}
+        <span className="menu-item-label">{label}</span>
+        <ChevronRight size={14} className="filter-chevron" />
+      </button>
+      {sub === id && (
+        <div
+          ref={fitFlyout}
+          className="popover menu filter-flyout"
+          data-state="open"
+          role="menu"
+          aria-label={label}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            arrowNav(e);
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              setSub(undefined);
+              (e.currentTarget.parentElement?.firstElementChild as HTMLElement | null)?.focus();
+            }
+          }}
+        >
+          {items}
+        </div>
+      )}
+    </div>
+  );
   return (
     <div
       ref={ref}
@@ -445,10 +656,10 @@ function ChatContextMenu({
       style={{ position: "fixed", left: pos?.left ?? state?.x, top: pos?.top ?? state?.y, transformOrigin: pos?.origin }}
       onKeyDown={(e) => arrowNav(e, ":scope > button, :scope > .filter-row > button")}
       onContextMenu={(e) => e.preventDefault()}
-      // Like a native menu, the Copy submenu stays open until another item is hovered.
+      // Like a native menu, a submenu stays open until another item is hovered.
       onMouseOver={(e) => {
         const item = (e.target as Element).closest(".menu-item");
-        if (item && !item.closest(".filter-row")) setCopyOpen(false);
+        if (item && !item.closest(".filter-row")) setSub(undefined);
       }}
     >
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => window.open(chatUrl(chat.id), "_blank", "noopener"))}>
@@ -463,66 +674,57 @@ function ChatContextMenu({
         className="menu-item"
         onClick={act(() => updateChat(chat.id, closePatch(chat)))}
       >
-        {isClosed(chat) ? <ArchiveRestore size={15} /> : <Archive size={15} />} {isClosed(chat) ? "Reopen" : "Close"}
+        {isClosed(chat) ? <SquareArrowUp size={15} /> : <Check size={15} />} {isClosed(chat) ? "Reopen" : "Close"}
       </button>
+      {chat.snoozedUntil ? (
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, wakePatch))}>
+          <ClockArrowUp size={15} /> Wake
+        </button>
+      ) : (
+        flyout(
+          "snooze",
+          <AlarmClock size={15} />,
+          "Snooze",
+          <>
+            {snoozeOptions().map((o) => (
+              <button key={o.label} type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, snoozePatch(o.until)))}>
+                <span className="menu-item-label">{o.label}</span>
+                <span className="menu-item-hint">{o.hint}</span>
+              </button>
+            ))}
+            <div className="menu-sep" />
+            <button type="button" role="menuitem" className="menu-item" onClick={act(() => onSnooze(chat.id))}>
+              <span className="menu-item-label">Custom…</span>
+            </button>
+          </>,
+        )
+      )}
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
         {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
       </button>
-      <div className="filter-row" onMouseEnter={() => setCopyOpen(true)}>
-        <button
-          type="button"
-          role="menuitem"
-          aria-haspopup="menu"
-          aria-expanded={copyOpen}
-          className={cx("menu-item", copyOpen && "menu-item-active")}
-          onClick={() => setCopyOpen(!copyOpen)}
-          onKeyDown={(e) => {
-            if (e.key !== "ArrowRight") return;
-            e.preventDefault();
-            setCopyOpen(true);
-            requestAnimationFrame(() => e.currentTarget.parentElement?.querySelector<HTMLElement>(".filter-flyout button")?.focus());
-          }}
-        >
-          <Copy size={15} />
-          <span className="menu-item-label">Copy</span>
-          <ChevronRight size={14} className="filter-chevron" />
-        </button>
-        {copyOpen && (
-          <div
-            ref={fitFlyout}
-            className="popover menu filter-flyout"
-            data-state="open"
-            role="menu"
-            aria-label="Copy"
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              arrowNav(e);
-              if (e.key === "ArrowLeft") {
-                e.preventDefault();
-                setCopyOpen(false);
-                (e.currentTarget.parentElement?.firstElementChild as HTMLElement | null)?.focus();
-              }
-            }}
+      {flyout(
+        "copy",
+        <Copy size={15} />,
+        "Copy",
+        <>
+          <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chat.id))}>
+            <Fingerprint size={15} /> Session ID
+          </button>
+          <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chatMarkdown(chat)))}>
+            <FileText size={15} /> As Markdown
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={!chat.workspace?.branch}
+            title={chat.workspace?.branch ? undefined : "This thread has no git branch"}
+            onClick={act(() => copyText(chat.workspace!.branch!))}
           >
-            <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chat.id))}>
-              <Fingerprint size={15} /> Session ID
-            </button>
-            <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chatMarkdown(chat)))}>
-              <FileText size={15} /> As Markdown
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="menu-item"
-              disabled={!chat.workspace?.branch}
-              title={chat.workspace?.branch ? undefined : "This thread has no git branch"}
-              onClick={act(() => copyText(chat.workspace!.branch!))}
-            >
-              <GitBranch size={15} /> Branch
-            </button>
-          </div>
-        )}
-      </div>
+            <GitBranch size={15} /> Branch
+          </button>
+        </>,
+      )}
       {chat.workspace?.worktree && (
         <button
           type="button"
@@ -788,6 +990,8 @@ export function Sidebar() {
   const closeMenu = useCallback(() => setMenu(undefined), []);
   const [deletingId, setDeletingId] = useState<string>();
   const deleting = useStore((s) => s.chats.find((c) => c.id === deletingId));
+  const [snoozingId, setSnoozingId] = useState<string>();
+  const snoozing = useStore((s) => s.chats.find((c) => c.id === snoozingId));
 
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
@@ -808,17 +1012,33 @@ export function Sidebar() {
   }, [chats, view.models, view.sort, view.subagents, view.runtime, activeChatId]);
 
   const hits = useMemo(() => (deferredQuery ? searchChats(visible, deferredQuery) : []), [visible, deferredQuery]);
-  const pinned = useMemo(() => (view.includePinned ? visible.filter((c) => c.pinned && !c.archived) : []), [visible, view.includePinned]);
+  // Snoozed threads leave every other section until they wake.
+  const awake = useMemo(() => visible.filter((c) => !c.snoozedUntil), [visible]);
+  const snoozed = useMemo(() => visible.filter((c) => c.snoozedUntil).sort((a, b) => a.snoozedUntil! - b.snoozedUntil!), [visible]);
+  const pinned = useMemo(() => (view.includePinned ? awake.filter((c) => c.pinned && !c.archived) : []), [awake, view.includePinned]);
   // Pinned threads keep their spot. Everything else that is generating lives in "Working", then
-  // stays in "Done" until the user closes it. Other threads from today are under "Today", and
-  // the rest (closed, or from an earlier day) under "Closed".
-  const rest = useMemo(() => visible.filter((c) => !isClosed(c, today) && !(c.pinned && view.includePinned)), [visible, view.includePinned, today]);
+  // stays in "Done" until the user closes it; a snooze that ran out stays in "Woke" the same way.
+  // Other threads from today are under "Today", and the rest (closed, or from an earlier day) under "Closed".
+  const rest = useMemo(() => awake.filter((c) => !isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
   // Subagent threads, when listed, keep to their own section, working or not.
   const subagents = useMemo(() => rest.filter((c) => c.subagent), [rest]);
   const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c)), [rest]);
-  const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && c.done), [rest]);
-  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.done), [rest]);
-  const closed = useMemo(() => visible.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [visible, view.includePinned, today]);
+  const woke = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && c.woke), [rest]);
+  const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && c.done), [rest]);
+  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && !c.done), [rest]);
+  const closed = useMemo(() => awake.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
+
+  // Snoozes that run out, now or while the app was closed, wake their threads into "Woke".
+  useEffect(() => {
+    const next = Math.min(...chats.map((c) => c.snoozedUntil ?? Infinity));
+    if (next === Infinity) return;
+    const wake = () => {
+      for (const c of useStore.getState().chats) if (c.snoozedUntil && c.snoozedUntil <= Date.now()) updateChat(c.id, wokePatch);
+    };
+    // Timers can't wait longer than about 24 days; the effect re-arms after each wake anyway.
+    const timer = setTimeout(wake, Math.min(Math.max(0, next - Date.now()), 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [chats, updateChat]);
 
   // A reply that finishes while the app is open moves its thread into "Done", reopening it if it was
   // closed. (The server marks replies that finish elsewhere; see server/pi/projection.ts.)
@@ -942,6 +1162,12 @@ export function Sidebar() {
                     {subagents.map((c) => row(c))}
                   </section>
                 )}
+                {woke.length > 0 && (
+                  <section className="history-group">
+                    <h3 className="history-heading">Woke</h3>
+                    {woke.map((c) => row(c))}
+                  </section>
+                )}
                 {done.length > 0 && (
                   <section className="history-group">
                     <h3 className="history-heading">Done</h3>
@@ -959,7 +1185,12 @@ export function Sidebar() {
                     {todays.map((c) => row(c))}
                   </Collapsible>
                 )}
-                {filtered && !pinned.length && !subagents.length && !done.length && !working.length && !todays.length && !closed.length && (
+                {snoozed.length > 0 && (
+                  <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")}>
+                    {snoozed.map((c) => row(c))}
+                  </Collapsible>
+                )}
+                {filtered && !pinned.length && !subagents.length && !woke.length && !done.length && !working.length && !todays.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."
@@ -1006,13 +1237,14 @@ export function Sidebar() {
               title={closedView ? "Back to threads" : "Closed threads"}
               onClick={() => setClosedView((v) => !v)}
             >
-              <Archive size={18} />
+              <SquareCheck size={18} />
             </button>
           </div>
         </div>
       </aside>
-      <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} />
+      <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} onSnooze={setSnoozingId} />
       {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
+      {snoozing && <SnoozeDialog chat={snoozing} onClose={() => setSnoozingId(undefined)} />}
     </>
   );
 }

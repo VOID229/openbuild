@@ -283,6 +283,10 @@ export interface Chat {
   archived?: boolean;
   /** A reply finished since the user last closed the thread: listed under "Done". */
   done?: boolean;
+  /** Hidden under "Snoozed" until this time (ms). */
+  snoozedUntil?: number;
+  /** Its snooze ran out on its own: listed under "Woke" until closed or a new reply finishes. */
+  woke?: boolean;
   /** "user" titles are never overwritten by automatic naming. */
   titleSource?: "auto" | "user";
   /** A reply finished while the chat wasn't open. */
