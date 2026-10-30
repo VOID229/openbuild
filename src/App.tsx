@@ -5,6 +5,7 @@ import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { Lightbox, useLightbox } from "./components/Lightbox";
 import { Notices } from "./components/Notices";
+import { SessionImport } from "./components/SessionImport";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
 import { FileTree } from "./components/FileTree";
@@ -387,6 +388,7 @@ function Main() {
       </div>
       <SettingsModal />
       <Notices />
+      {chatsLoaded && <SessionImport />}
       <Lightbox />
       <TooltipLayer />
       <PluginSlot name="app:overlay" />

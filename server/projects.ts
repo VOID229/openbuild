@@ -144,7 +144,7 @@ export function scratchWorkspace(): Workspace {
   return { projectId: "", projectName: "", cwd: realpathSync(dir) };
 }
 
-/** A registered project, an OpenBuild workspace, or the exact cwd of a discovered Pi session. */
+/** A registered project, an OpenBuild workspace, or the exact cwd of a discovered Pi session or imported thread. */
 export function allowedCwd(cwd: string): boolean {
   let real: string;
   try {
@@ -159,6 +159,13 @@ export function allowedCwd(cwd: string): boolean {
     try {
       const session = JSON.parse(value);
       if (existsSync(session.file) && realpathSync(session.cwd) === real) return true;
+    } catch {}
+  }
+  // Threads imported from a native runtime (sessionImport.ts) work where their session did.
+  for (const [, value] of storage.listValues("imported-session:")) {
+    try {
+      const session = JSON.parse(value);
+      if (realpathSync(session.cwd) === real) return true;
     } catch {}
   }
   for (const dir of [worktreesDir(), scratchDir()]) {

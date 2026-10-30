@@ -109,6 +109,11 @@ export function getChat(id: string): StoredChat | undefined {
   try { return row ? JSON.parse(row.data) : undefined; } catch { return undefined; }
 }
 
+/** Whether a chat with this id was ever stored here (deleted ones too: they stay deleted). */
+export function chatExists(id: string): boolean {
+  return !!db.query<{ id: string }, [string]>("SELECT id FROM chats WHERE id = ?").get(id);
+}
+
 /** Save a chat. Returns its new version, or false when it was deleted (it stays deleted). */
 export function putChat(chat: StoredChat): string | false {
   const row = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM chats WHERE id = ?").get(chat.id);

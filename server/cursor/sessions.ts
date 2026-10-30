@@ -19,7 +19,7 @@ function save(id: string, s: Saved) { storage.setValue(key(id), JSON.stringify(s
 const configDir = () => cursorEnv().CURSOR_CONFIG_DIR?.trim() || (process.env.XDG_CONFIG_HOME?.trim() ? join(process.env.XDG_CONFIG_HOME, "cursor") : join(homedir(), ".cursor"));
 export const sessionDir = () => join(configDir(), "chats");
 export function sessionPath(cwd: string, id: string) { return join(sessionDir(), createHash("md5").update(resolve(cwd)).digest("hex"), id, "store.db"); }
-function fingerprint(cwd: string, id: string): string {
+export function fingerprint(cwd: string, id: string): string {
   const path = sessionPath(cwd, id);
   if (!existsSync(path)) throw new Error("Cursor's saved chat is missing; refusing to start an empty replacement. Restore its native session or start a new thread.");
   const hash = createHash("sha256").update(readFileSync(path));

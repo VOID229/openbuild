@@ -25,6 +25,7 @@ import { projectChat, projectStoredChats } from "./pi/projection";
 import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as folderPicker from "./folderPicker";
+import * as sessionImport from "./sessionImport";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -431,6 +432,18 @@ function serve(port: number, hostname: string) {
           else await piWorker.deleteThread(req.params.id);
           storage.deleteChat(req.params.id);
           return Response.json({ ok: true });
+        }),
+      },
+
+      // The one-time offer to import native runtimes' sessions (sessionImport.ts). POST is the
+      // answer: the runtimes to import, [] to skip. Either way it's never offered again.
+      "/api/session-import": {
+        GET: api(async () => Response.json(await sessionImport.offer())),
+        POST: api(async (req, server: Bun.Server<unknown>) => {
+          server.timeout(req, 0);
+          const body = await readJson(req);
+          if (!Array.isArray(body?.runtimes) || !body.runtimes.every(sessionImport.isImportRuntime)) return bad("Expected { runtimes: string[] }");
+          return Response.json(await sessionImport.answer([...new Set<sessionImport.ImportRuntime>(body.runtimes)]));
         }),
       },
 
