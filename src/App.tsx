@@ -265,7 +265,7 @@ function Main() {
   }, [chatsLoaded]);
 
   // Global shortcuts (Settings → Shortcuts): new thread, left and right sidebars, terminal, dictation,
-  // settings and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
+  // settings, usage and search. Enter still focuses the composer when the sidebar is open, and both that and a bare
   // search key leave focused fields and buttons alone. Nothing runs while Settings is open or while
   // a shortcut is being recorded there.
   useEffect(() => {
@@ -294,6 +294,10 @@ function Main() {
           break;
         case "openSettings":
           st.openSettings();
+          break;
+        case "openUsage":
+          st.setUsageOpen(true);
+          if (window.innerWidth <= 768) st.setSidebarOpen(false);
           break;
         case "focusSearch":
           if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();

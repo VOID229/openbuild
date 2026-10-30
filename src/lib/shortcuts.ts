@@ -13,6 +13,7 @@ export type ShortcutId =
   | "toggleRightSidebar"
   | "toggleTerminal"
   | "openSettings"
+  | "openUsage"
   | "focusSearch"
   | "toggleDictation";
 
@@ -64,6 +65,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Open settings",
     description: "Open this window.",
     default: "mod+Comma",
+  },
+  {
+    id: "openUsage",
+    label: "Usage & limits",
+    description: "Open usage and limits.",
+    default: "mod+KeyU",
   },
   {
     id: "focusSearch",
