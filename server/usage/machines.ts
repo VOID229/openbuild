@@ -6,7 +6,8 @@ import { join } from "node:path";
 import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageRange, UsageReport, UsageResetResult } from "../../shared/usage";
 import * as devices from "../devices";
 import { dataDir } from "../paths";
-import { RETRY_MS, shouldRefresh } from "./cache";
+import { REMOTE_FRESH_MS, RETRY_MS, shouldRefresh } from "./cache";
+import { preferLimits } from "./limitSelection";
 import { requestUsage } from "./remoteRequest";
 /** How long a first answer is waited for before the page shows without it. */
 const WAIT_MS = 3500;
@@ -60,7 +61,7 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
     || !!(c.value as UsageLimitsReport | undefined)?.machines?.some((m) => m.status === "pending");
   if (!c.running && shouldRefresh(c, incomplete, force)) {
     const url = force ? `${path}${path.includes("?") ? "&" : "?"}fresh=1` : path;
-    c.running = ask<T>(device, url).then(
+    c.running = ask<T>(device, url, undefined, key === "limits" ? 30_000 : undefined).then(
       (value) => {
         c.value = value;
         c.at = Date.now();
@@ -76,7 +77,8 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
     ).finally(() => (c.running = undefined));
   }
   // The first answer is worth a short wait; after that the cached one is shown straight away.
-  if (c.running && c.value === undefined) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
+  if (c.running && force && key === "limits") await c.running;
+  else if (c.running && c.value === undefined) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
   return { value: c.value, at: c.at, error: c.error, pending: !!c.running };
 }
 
@@ -204,15 +206,14 @@ export async function machineLimits(force: boolean, local: () => Promise<UsageLi
   const byId = new Map<string, UsageLimits>();
   const add = (l: UsageLimits) => {
     const prev = byId.get(l.id);
-    const ok = (x: UsageLimits) => x.windows.length > 0 && !x.stale;
-    if (!prev || (ok(l) && !ok(prev)) || (ok(l) === ok(prev) && l.asOf > prev.asOf)) byId.set(l.id, l);
+    if (!prev || preferLimits(l, prev)) byId.set(l.id, l);
   };
   mine.forEach((l) => add({ ...l, machine: devices.deviceName(), machineId: "local" }));
   const machines: UsageMachine[] = [{ id: "local", name: devices.deviceName(), local: true, status: "ok", at: Date.now() }];
   list.forEach((d, i) => {
     const r = theirs[i]!;
     machines.push({ id: d.id, name: d.name, status: r.pending ? "pending" : r.error ? "error" : "ok", at: r.at || undefined, error: r.error });
-    r.value?.providers.forEach((l) => add({ ...l, machine: d.name, machineId: d.id }));
+    r.value?.providers.forEach((l) => add({ ...l, stale: l.stale || !!r.error || Date.now() - l.asOf >= REMOTE_FRESH_MS, machine: d.name, machineId: d.id }));
   });
   // Number accounts within each provider again now that machines are combined.
   const all = [...byId.values()];

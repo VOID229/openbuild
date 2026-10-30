@@ -1,6 +1,7 @@
 // Plan limits, asked of each provider with the sign-in its CLI saved on this machine: the same
 // requests the CLIs make for their own usage screens. Nothing here refreshes or rewrites a sign-in;
 // an expired one is reported, and the CLI renews it the next time it runs.
+import { preferLimits } from "./limitSelection";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -483,18 +484,31 @@ const MIN_REFRESH_MS = 10_000;
 const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits[]> }>();
 
 async function readAccounts(provider: UsageProvider, list: () => Promise<Account[]>): Promise<UsageLimits[]> {
-  const seen = new Set<string>();
-  const accounts = (await list()).filter((a) => !seen.has(a.key) && seen.add(a.key));
-  const id = (a: Account) => `${provider}:${a.key}`;
-  const results = await Promise.all(accounts.map((a) => a.read().then(
-    (r): UsageLimits => ({ provider, id: id(a), asOf: Date.now(), ...r }),
-    (err): UsageLimits | undefined => {
-      if (err instanceof Missing) return undefined;
-      const message = err?.name === "TimeoutError" ? `${USAGE_PROVIDER_NAMES[provider]} didn't answer in time.` : (err as Error).message;
-      return { provider, id: id(a), asOf: Date.now(), windows: [], error: message };
-    },
-  ).then((r) => r && { ...r, ...(accounts.length > 1 ? { account: a.tag ?? "1" } : {}), source: a.source })));
-  return results.filter((r): r is NonNullable<typeof r> => !!r);
+  const groups = new Map<string, Account[]>();
+  for (const account of await list()) {
+    const group = groups.get(account.key) ?? [];
+    group.push(account);
+    groups.set(account.key, group);
+  }
+  const results = await Promise.all([...groups.values()].map(async (accounts) => {
+    let best: UsageLimits | undefined;
+    for (const a of accounts) {
+      let reading: UsageLimits;
+      try {
+        reading = { provider, id: `${provider}:${a.key}`, asOf: Date.now(), ...await a.read() };
+      } catch (err) {
+        if (err instanceof Missing) continue;
+        const message = (err as Error)?.name === "TimeoutError" ? `${USAGE_PROVIDER_NAMES[provider]} didn't answer in time.` : (err as Error).message;
+        reading = { provider, id: `${provider}:${a.key}`, asOf: Date.now(), windows: [], error: message };
+      }
+      reading = { ...reading, ...(groups.size > 1 ? { account: a.tag ?? "1" } : {}), source: a.source };
+      if (!best || preferLimits(reading, best)) best = reading;
+      // Prefer the CLI when it works (it can redeem reset credits), but try Pi if it fails.
+      if (reading.windows.length && !reading.stale && !reading.error) break;
+    }
+    return best;
+  }));
+  return results.filter((r): r is UsageLimits => !!r);
 }
 
 /** Limits for each account signed in on this machine. */
