@@ -10,32 +10,19 @@ import { deviceName } from "../lib/devices";
 import { machineName } from "../lib/runtime";
 import { useStore } from "../lib/store";
 import { defaultHeight, newTerminalTab, refreshTerminal, restartTerminalTab, useTerminal } from "../lib/terminal";
-import { cx } from "../lib/ui";
+import { cx, trackDrag } from "../lib/ui";
 import { IconButton } from "./primitives";
 import { tabLabel, TerminalView, useTabKeys } from "./TerminalView";
 
 /**
  * Drag the top edge to make the drawer taller or shorter, double-click it for the default height.
- * The pointer is captured, so the drag holds however fast it moves, and the drawer's own height
- * transition is off for the length of it, so the edge stays under the pointer instead of trailing it.
+ * The drawer's own height transition is off for the length of the drag, so the edge stays under the
+ * pointer instead of trailing it.
  */
 function useDrag(setHeight: (height: number) => void) {
   return (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
-    e.preventDefault();
-    const grip = e.currentTarget;
-    grip.setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => setHeight(window.innerHeight - ev.clientY - 8);
-    const up = () => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", up);
-      grip.removeEventListener("pointercancel", up);
-      document.body.classList.remove("terminal-dragging");
-    };
-    document.body.classList.add("terminal-dragging");
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", up);
-    grip.addEventListener("pointercancel", up);
+    trackDrag(e, "terminal-dragging", (ev) => setHeight(window.innerHeight - ev.clientY - 8));
   };
 }
 

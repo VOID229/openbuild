@@ -2,6 +2,36 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
+/**
+ * Follow a resize grip until the drag ends, with `className` on the body meanwhile. The pointer is
+ * captured, so fast drags hold. However the drag ends, the class comes off: the grip can leave the
+ * page mid-drag, and a release can go unseen (a context menu, the window losing focus), so the end
+ * is watched for on the window, and a move with no button down ends it too.
+ */
+export function trackDrag(e: React.PointerEvent<HTMLElement>, className: string, onMove: (ev: PointerEvent) => void) {
+  e.preventDefault();
+  const id = e.pointerId;
+  e.currentTarget.setPointerCapture(id);
+  const move = (ev: PointerEvent) => {
+    if (ev.pointerId !== id) return;
+    if (ev.buttons) onMove(ev);
+    else end();
+  };
+  const finish = (ev: PointerEvent) => {
+    if (ev.pointerId === id) end();
+  };
+  const end = () => {
+    window.removeEventListener("pointermove", move, true);
+    for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) window.removeEventListener(type, finish, true);
+    window.removeEventListener("blur", end);
+    document.body.classList.remove(className);
+  };
+  document.body.classList.add(className);
+  window.addEventListener("pointermove", move, true);
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"] as const) window.addEventListener(type, finish, true);
+  window.addEventListener("blur", end);
+}
+
 /** "just now", "5m ago", "3h ago", "4d ago", then a date. */
 export function ago(at: number | undefined): string | undefined {
   if (!at) return undefined;

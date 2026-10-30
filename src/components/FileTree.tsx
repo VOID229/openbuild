@@ -8,7 +8,7 @@ import type { TreeEntry, WorkspaceEntry } from "../../shared/types";
 import { loadEntries, matchEntries } from "../lib/fileMentions";
 import { folderKey, usePanel } from "../lib/panel";
 import type { TerminalFolder } from "../lib/terminal";
-import { cx } from "../lib/ui";
+import { cx, trackDrag } from "../lib/ui";
 import { FileError, listDir } from "../lib/workspaceFiles";
 import { IconButton } from "./primitives";
 
@@ -183,26 +183,13 @@ function SearchResults({ folder, query, open, reveal }: { folder: TerminalFolder
   );
 }
 
-/** Drag a panel's left edge to make it wider or narrower (the pointer is captured, so fast drags hold). */
+/** Drag a panel's left edge to make it wider or narrower. */
 export function useEdgeDrag(width: number, setWidth: (w: number) => void, className: string) {
   return (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
-    e.preventDefault();
-    const grip = e.currentTarget;
-    grip.setPointerCapture(e.pointerId);
     const startX = e.clientX;
     const start = width;
-    const move = (ev: PointerEvent) => setWidth(start + (startX - ev.clientX));
-    const up = () => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", up);
-      grip.removeEventListener("pointercancel", up);
-      document.body.classList.remove(className);
-    };
-    document.body.classList.add(className);
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", up);
-    grip.addEventListener("pointercancel", up);
+    trackDrag(e, className, (ev) => setWidth(start + (startX - ev.clientX)));
   };
 }
 

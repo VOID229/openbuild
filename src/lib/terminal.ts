@@ -217,12 +217,41 @@ export function toggleTerminal(): void {
   else showTerminal();
 }
 
+/** What was showing in the thread left for the new-thread screen, to bring back on going back to one. */
+let leftOpen: { panel: boolean; tree: boolean; expanded: boolean; drawer: boolean } | undefined;
+
+/**
+ * The new-thread screen is a thread of its own, so what's open in a thread doesn't follow you there:
+ * the panel, the tree and the drawer close, and come back with the next thread you open. A thread
+ * started from this screen keeps what's open here instead.
+ */
+function crossNewThread(from: TerminalFolder | undefined, to: TerminalFolder): void {
+  if (!from || !!from.thread === !!to.thread) return;
+  const panel = usePanel.getState();
+  const drawer = useTerminal.getState();
+  if (from.thread) {
+    leftOpen = { panel: panel.panel, tree: panel.tree, expanded: panel.expanded, drawer: drawer.open };
+    if (panel.panel) panel.setPanel(false);
+    if (panel.tree) panel.setTree(false);
+    if (drawer.open) drawer.hide();
+    return;
+  }
+  const back = leftOpen;
+  leftOpen = undefined;
+  if (!back || to.fresh) return;
+  panel.setPanel(back.panel);
+  panel.setTree(back.tree);
+  panel.setExpanded(back.expanded);
+  useTerminal.setState({ open: back.drawer });
+}
+
 /**
  * Follow the thread: opening another thread shows that folder's shells and files, not the last
  * one's. A drawer that's showing starts a shell in a folder that has none.
  */
 export function refreshTerminal(): void {
   const folder = terminalFolder();
+  crossNewThread(usePanel.getState().folder, folder);
   usePanel.getState().showFolder(folder);
   useTerminal.getState().showFolder(folder, useTerminal.getState().open);
   useSideTerminal.getState().showFolder(folder);

@@ -24,7 +24,7 @@ ob pair --host # pair this machine for a client to use remotely
 ob pair --client # pair a remote host to use in the openbuild server
 ```
 
-It will ask for device name, LAN or Tailscale then show a code.
+It will ask for device name, LAN or Tailscale, then show a code.
 Put that code in the client pair after choosing the same connection type.
 
 OpenBuild works with your existing coding agents like [Pi](pi.dev), [Codex](developers.openai.com/codex), [Claude Code](code.claude.com), [Cursor](cursor.com), [OpenCode](opencode.ai), and [Fx](fx.sh) with your paid Subs or connected API keys.
