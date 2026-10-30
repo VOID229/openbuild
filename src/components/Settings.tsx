@@ -1,4 +1,4 @@
-import { ArrowUp, Bell, Boxes, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
@@ -8,6 +8,7 @@ import { useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
+import { DevicesSection } from "./DeviceSettings";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
@@ -26,6 +27,7 @@ const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
   { id: "keys", label: "Providers", icon: Key },
   { id: "runtimes", label: "Runtimes", icon: Boxes },
   { id: "projects", label: "Projects", icon: FolderGit2 },
+  { id: "devices", label: "Devices", icon: MonitorSmartphone },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "plugins", label: "Plugins", icon: Puzzle },
@@ -532,6 +534,7 @@ export function SettingsModal() {
           {section === "keys" && <ProvidersSection />}
           {section === "runtimes" && <RuntimesSection />}
           {section === "projects" && <ProjectsSection />}
+          {section === "devices" && <DevicesSection />}
           {section === "appearance" && (
             <>
               <AppearanceSection />

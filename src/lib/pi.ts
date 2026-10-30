@@ -1,6 +1,6 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { Device, GitInfo, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeStatus, ThreadRuntime, Workspace } from "../../shared/types";
+import type { Device, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeStatus, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
@@ -186,6 +186,11 @@ export const removePackage = (source: string, deviceId?: DeviceId) => send<{ job
 /** Paired devices (online and offline) this OpenBuild can use. */
 export const listDevices = () => get<{ devices: Device[] }>("/api/devices").then((r) => r.devices);
 export const removeDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}`, "DELETE");
+/** Restart a paired device's server (or start it while stopped); resolves once it answers again. */
+export const restartDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}/restart`, "POST");
+/** Devices that use this server, and revoking one so its token stops working here. */
+export const listPairedClients = () => get<{ clients: PairedClient[] }>("/api/paired-clients").then((r) => r.clients);
+export const revokePairedClient = (id: string) => send(`/api/paired-clients/${encodeURIComponent(id)}`, "DELETE");
 
 // ------------------------------------------------------------------ projects and workspaces
 

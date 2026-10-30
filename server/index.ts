@@ -238,7 +238,7 @@ function serve(port: number, hostname: string) {
       // Controlling this server from a paired device. While the server is stopped, the keeper
       // (server/keeper.ts) answers the same paths on the same port, so starting it again works.
       "/api/remote/status": {
-        GET: api(() => Response.json({ running: true, paired: true, device: machine() })),
+        GET: api(() => Response.json({ running: true, paired: true, device: machine(), keeper: devices.keeperRunning() })),
       },
       "/api/remote/start": {
         POST: api(() => Response.json({ ok: true, running: true, already: true })),
@@ -263,24 +263,7 @@ function serve(port: number, hostname: string) {
 
       // Paired devices this server's UI can use (tokens stay on the server).
       "/api/devices": {
-        GET: api(async () => {
-          const list = devices.listDevices();
-          const probes = await Promise.all(
-            list.map(async (device) => {
-              for (const base of device.urls) {
-                try {
-                  const res = await fetch(`${base.replace(/\/$/, "")}/api/auth/status`, { signal: AbortSignal.timeout(1500) });
-                  if (res.ok) {
-                    devices.touchDevice(device.id, true);
-                    return { ...device, online: true, lastSeenAt: Date.now() };
-                  }
-                } catch {}
-              }
-              return { ...device, online: false };
-            }),
-          );
-          return Response.json({ devices: probes });
-        }),
+        GET: api(async () => Response.json({ devices: await Promise.all(devices.readDevices().map(devices.probeDevice)) })),
       },
       "/api/devices/:id": {
         DELETE: api(async (req: Bun.BunRequest<"/api/devices/:id">) => {
@@ -288,6 +271,25 @@ function serve(port: number, hostname: string) {
           // Revoke on the host too, so unpairing removes its trust rather than only this copy.
           if (device) await devices.revokeDevice(device);
           return devices.removeDevice(req.params.id) ? Response.json({ ok: true }) : bad("No such device", 404);
+        }),
+      },
+      // Restart a paired device's server (or start it while it's stopped). Waits until it answers again.
+      "/api/devices/:id/restart": {
+        POST: api(async (req: Bun.BunRequest<"/api/devices/:id/restart">) => {
+          const device = devices.deviceCredentials(req.params.id);
+          if (!device) return bad("No such device", 404);
+          const { error } = await devices.restartDevice(device);
+          return error ? bad(error, 502) : Response.json({ ok: true });
+        }),
+      },
+      // Devices that use this server (they entered its pairing code), and revoking one of them.
+      "/api/paired-clients": {
+        GET: api(() => Response.json({ clients: devices.pairedClients() })),
+      },
+      "/api/paired-clients/:id": {
+        DELETE: api((req: Bun.BunRequest<"/api/paired-clients/:id">) => {
+          devices.forgetPairedClient(req.params.id);
+          return Response.json({ ok: true });
         }),
       },
       // Everything the UI needs on that device: /api/devices/<id>/api/projects, /api/pi/chat, …

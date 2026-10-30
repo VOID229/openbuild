@@ -229,10 +229,6 @@ export function forgetPairedClient(id: string): void {
 
 // ------------------------------------------------------------------ client side: paired hosts
 
-export function listDevices(): Device[] {
-  return readJson<StoredDevice[]>(DEVICES, []).map(({ token: _token, ...device }) => device);
-}
-
 export function readDevices(): StoredDevice[] {
   return readJson<StoredDevice[]>(DEVICES, []);
 }
@@ -280,6 +276,97 @@ export function touchDevice(id: string, online: boolean): void {
   try {
     writeJson(DEVICES, list);
   } catch {}
+}
+
+// ------------------------------------------------------------------ client side: controlling a paired host
+
+interface RemoteAnswer {
+  status: number;
+  body?: { running?: boolean; keeper?: boolean; error?: string };
+}
+
+/** Call a paired host with its token, trying each saved address. Undefined when none answered. */
+async function remoteCall(device: StoredDevice, path: string, method: "GET" | "POST", timeoutMs: number): Promise<RemoteAnswer | undefined> {
+  for (const base of device.urls) {
+    try {
+      const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
+        method,
+        headers: { authorization: `Bearer ${device.token}` },
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return { status: res.status, body: await res.json().catch(() => undefined) };
+    } catch {}
+  }
+  return undefined;
+}
+
+/**
+ * Where a paired host's server stands. A stopped server's keeper still answers /api/remote/status,
+ * so "stopped" (startable from here) is told apart from "unreachable".
+ */
+export async function probeDevice(device: StoredDevice): Promise<Device> {
+  const { token: _token, ...shown } = device;
+  const answer = await remoteCall(device, "/api/remote/status", "GET", 1500);
+  const status: Device["status"] = !answer
+    ? "offline"
+    : answer.status === 401
+      ? "revoked"
+      : answer.status === 200 && answer.body?.running === false
+        ? "stopped"
+        : answer.status < 500
+          ? "online"
+          : "offline";
+  if (status === "online" || status === "stopped") touchDevice(device.id, true);
+  return {
+    ...shown,
+    status,
+    online: status === "online",
+    restartable: status === "stopped" || answer?.body?.keeper,
+    lastSeenAt: status === "online" || status === "stopped" ? Date.now() : shown.lastSeenAt,
+  };
+}
+
+/** Poll until the host's server is running (or stopped, with its keeper answering). */
+async function waitForServer(device: StoredDevice, running: boolean, timeoutMs: number): Promise<boolean> {
+  for (const end = Date.now() + timeoutMs; Date.now() < end; ) {
+    await Bun.sleep(500);
+    const answer = await remoteCall(device, "/api/remote/status", "GET", 1500);
+    if (answer?.status === 200 && !!answer.body?.running === running) return true;
+  }
+  return false;
+}
+
+/**
+ * Restart a paired host's server, or start it when it's stopped. The same steps as
+ * `openbuild remote server stop` then `start`, so it needs the host's keeper: a server started some
+ * other way (`bun dev`) would stay down, so that one is refused before anything stops.
+ */
+export async function restartDevice(device: StoredDevice): Promise<{ error?: string }> {
+  const status = await remoteCall(device, "/api/remote/status", "GET", 4000);
+  if (!status) return { error: `Couldn't reach ${device.name}.` };
+  if (status.status === 401) return { error: `${device.name} no longer trusts this pairing. Unpair it and pair again.` };
+  if (status.status !== 200) return { error: `${device.name} has no remote control. Update OpenBuild there.` };
+  if (status.body?.running) {
+    if (status.body.keeper === false) return { error: `${device.name} wasn't started with \`openbuild start\`, so it couldn't come back after stopping.` };
+    const stop = await remoteCall(device, "/api/remote/stop", "POST", 4000);
+    if (!stop || stop.status >= 300) return { error: `${device.name} didn't accept the stop.` };
+    if (!(await waitForServer(device, false, 10_000))) return { error: `${device.name} didn't stop in time.` };
+  }
+  const start = await remoteCall(device, "/api/remote/start", "POST", 4000);
+  if (!start || start.status >= 300) return { error: `${device.name} didn't accept the start.` };
+  return (await waitForServer(device, true, 30_000)) ? {} : { error: `Asked ${device.name} to start, but it isn't answering yet.` };
+}
+
+/** Whether this server's keeper is running, so a paired device could start it again after a stop. */
+export function keeperRunning(): boolean {
+  try {
+    const { pid } = JSON.parse(readFileSync(join(DATA, "keeper.json"), "utf8")) as { pid?: unknown };
+    if (typeof pid !== "number") return false;
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether a paired token can be used at all (the file is readable and holds this device). */

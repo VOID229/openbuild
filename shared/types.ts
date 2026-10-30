@@ -363,8 +363,23 @@ export interface Device {
   lastSeenAt?: number;
   /** Reachable right now (checked when the device list is loaded). */
   online?: boolean;
+  /**
+   * Where its server stands: running, stopped (its keeper answers, so it can be started from
+   * here), unreachable, or no longer trusting this pairing.
+   */
+  status?: "online" | "stopped" | "offline" | "revoked";
+  /** It has a keeper, so stopping its server for a restart can't strand it. Unknown on older builds. */
+  restartable?: boolean;
   /** This server (always shown first in device pickers). */
   local?: boolean;
+}
+
+/** A device that uses this server (it entered this server's pairing code). */
+export interface PairedClient {
+  id: string;
+  name: string;
+  createdAt: number;
+  lastSeenAt?: number;
 }
 
 export interface GitInfo {

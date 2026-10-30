@@ -32,7 +32,6 @@ import {
   logoutProvider,
   piModels,
   readResourceFile,
-  removeDevice,
   removePackage,
   removeProject,
   removeResource,
@@ -1092,34 +1091,6 @@ export function ProjectsSection() {
           {!shown.length && <li className="pi-empty">{projects.length ? "No projects on this device." : "No projects yet. Add one with New project… in the project picker."}</li>}
         </ul>
       </section>
-      {remote.length > 0 && (
-        <section className="pi-block">
-          <SubHeading>Devices</SubHeading>
-          <ul className="pi-list">
-            {remote.map((d) => (
-              <li key={d.id} className="pi-row">
-                <span className={cx("pi-status-dot", d.online === false && "pi-status-dot-off")} aria-hidden />
-                <div className="pi-row-text">
-                  <span className="pi-row-name">{d.name}</span>
-                  <span className="pi-row-desc">
-                    {d.online === false ? "Offline" : "Online"} · {d.mode === "tailscale" ? "Tailscale" : "LAN"} · {d.urls[0] ?? "no address"}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => {
-                    if (!confirm(`Unpair ${d.name}? Its projects disappear from this device. You can pair it again with a new code.`)) return;
-                    void removeDevice(d.id).then(() => loadDevices()).then(() => loadProjects());
-                  }}
-                >
-                  Unpair
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   );
 }

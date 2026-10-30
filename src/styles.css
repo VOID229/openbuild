@@ -5813,6 +5813,32 @@ p.key-status svg {
   opacity: 0.5;
 }
 
+/* Stopped (its keeper answers, so it can be started) and no longer trusting this pairing. */
+.pi-status-dot-warn {
+  background: #d39b2a;
+}
+
+.pi-status-dot-bad {
+  background: var(--danger);
+}
+
+/* Settings → Devices: the server's state, quietly after the device's name. */
+.device-status {
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.device-error {
+  margin-top: 4px;
+  font-size: 12.5px;
+}
+
+.device-error svg {
+  margin-top: 1px;
+}
+
 .pi-row-text {
   display: flex;
   flex: 1;
