@@ -374,11 +374,13 @@ function DeleteThreadDialog({ chat, onClose }: { chat: Chat; onClose: () => void
 
 function ChatContextMenu({
   state,
+  sidebarRef,
   onClose,
   onRename,
   onDelete,
 }: {
   state?: MenuState;
+  sidebarRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onRename: (id: string) => void;
   onDelete: (id: string) => void;
@@ -413,13 +415,20 @@ function ChatContextMenu({
   useEffect(() => {
     if (!open) return;
     const close = () => onClose();
-    window.addEventListener("scroll", close, true);
+    const onScroll = (event: Event) => {
+      const target = event.target;
+      const sidebar = sidebarRef.current;
+      // Streaming output scrolls the conversation. Only scrolling the sidebar or
+      // its ancestors can move the thread the menu was opened from.
+      if (target === document || (sidebar && target instanceof Node && (sidebar.contains(target) || target.contains(sidebar)))) close();
+    };
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     return () => {
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
     };
-  }, [open, onClose]);
+  }, [open, onClose, sidebarRef]);
 
   if (!mounted || !chat) return null;
   const act = (fn: () => void) => () => {
@@ -764,6 +773,7 @@ function FilterMenu() {
 }
 
 export function Sidebar() {
+  const sidebarRef = useRef<HTMLElement>(null);
   const open = useStore((s) => s.sidebarOpen);
   const chats = useStore((s) => s.chats);
   const activeChatId = useStore((s) => s.activeChatId);
@@ -862,7 +872,7 @@ export function Sidebar() {
   return (
     <>
       <div className={cx("sidebar-scrim", open && mobile && "sidebar-scrim-visible")} onClick={() => setSidebarOpen(false)} aria-hidden />
-      <aside className={cx("sidebar", open ? "sidebar-open" : "sidebar-closed")} aria-hidden={!open} inert={!open}>
+      <aside ref={sidebarRef} className={cx("sidebar", open ? "sidebar-open" : "sidebar-closed")} aria-hidden={!open} inert={!open}>
         <div className="sidebar-inner">
           <div className="brand-row">
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
@@ -1001,7 +1011,7 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
-      <ChatContextMenu state={menu} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} />
+      <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} />
       {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
     </>
   );
