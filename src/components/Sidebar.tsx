@@ -1,6 +1,7 @@
-import { AlarmClock, AlarmClockCheck, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
+import { regenerateTitle, threadTranscript } from "../lib/naming";
 import { removeWorktree } from "../lib/pi";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
@@ -128,8 +129,9 @@ interface RowProps {
   active: boolean;
   hit?: SearchHit;
   renaming: boolean;
+  regenerating: boolean;
   onSelect: (chat: Chat, hit?: SearchHit) => void;
-  onMenu: (chatId: string, x: number, y: number, fromButton?: boolean) => void;
+  onMenu: (chatId: string, x: number, y: number, fromButton?: boolean, snooze?: boolean) => void;
   onRenameDone: () => void;
 }
 
@@ -189,7 +191,7 @@ function rowDevice(devices: Device[], deviceId: string | undefined): string | un
   return devices.find((d) => d.local)?.name;
 }
 
-const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, onMenu, onRenameDone }: RowProps) {
+const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regenerating, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
@@ -266,7 +268,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           <span className="history-status">
             {waiting ? (
               <Spinner size={13} waiting />
-            ) : streaming ? (
+            ) : streaming || regenerating ? (
               <Spinner size={13} />
             ) : chat.snoozedUntil ? (
               <span className="history-snooze" title={`Snoozed until ${new Date(chat.snoozedUntil).toLocaleString()}`}>
@@ -319,10 +321,26 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           </IconButton>
         ) : (
           <IconButton
+            label="Snooze"
+            tooltipSide="top"
+            aria-haspopup="menu"
+            className="history-action"
+            // As with the ⋯ button: a second click toggles the menu closed rather than reopening it.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(chat.id, r.right, r.bottom + 4, true, true);
+            }}
+          >
+            <AlarmClock size={14} />
+          </IconButton>
+        )}
+        {!chat.snoozedUntil && (
+          <IconButton
             label={closed ? "Reopen" : "Close"}
             tooltipSide="top"
             className="history-action"
-            onClick={() => updateChat(chat.id, closePatch(chat))}
+            onClick={() => toggleClosed(chat)}
           >
             {closed ? <SquareArrowUp size={14} /> : <Check size={14} />}
           </IconButton>
@@ -428,11 +446,37 @@ interface MenuState {
   y: number;
   /** Opened from the row's ⋯ button: right-align the menu under it. */
   end?: boolean;
+  /** Opened from the row's snooze button: just the snooze options. */
+  snooze?: boolean;
 }
 
 /** Delete a thread for good, stopping any reply still running. */
+/** Rows the sidebar lists, top to bottom; kept current by Sidebar. */
+let threadOrder: string[] = [];
+
+/** Before the open thread leaves the list: move to the row that takes its place, or the one above if it was last. */
+function leaveThread(id: string) {
+  const s = useStore.getState();
+  if (s.activeChatId !== id) return;
+  const at = threadOrder.indexOf(id);
+  const next = at < 0 ? threadOrder[0] : (threadOrder[at + 1] ?? threadOrder[at - 1]);
+  if (next) s.selectChat(next);
+  else s.newChat();
+}
+
+function toggleClosed(chat: Chat) {
+  if (!isClosed(chat)) leaveThread(chat.id);
+  useStore.getState().updateChat(chat.id, closePatch(chat));
+}
+
+function snoozeThread(id: string, until: number) {
+  leaveThread(id);
+  useStore.getState().updateChat(id, snoozePatch(until));
+}
+
 function deleteThread(id: string) {
   stopGeneration(id);
+  leaveThread(id);
   useStore.getState().removeChat(id);
 }
 
@@ -492,7 +536,6 @@ const SNOOZE_UNITS = {
 /** Snooze a thread until a time, or for a length of time, of the user's choosing. */
 function SnoozeDialog({ chat, onClose }: { chat: Chat; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const updateChat = useStore((s) => s.updateChat);
   const [mode, setMode] = useState<"date" | "duration">("date");
   const [day, setDay] = useState(() => startOfToday() + DAY);
   const [time, setTime] = useState(9 * 60);
@@ -521,7 +564,7 @@ function SnoozeDialog({ chat, onClose }: { chat: Chat; onClose: () => void }) {
         onSubmit={(e) => {
           e.preventDefault();
           if (!valid) return;
-          updateChat(chat.id, snoozePatch(until));
+          snoozeThread(chat.id, until);
           onClose();
         }}
       >
@@ -602,6 +645,7 @@ function ChatContextMenu({
   sidebarRef,
   onClose,
   onRename,
+  onRegenerate,
   onDelete,
   onSnooze,
 }: {
@@ -609,6 +653,7 @@ function ChatContextMenu({
   sidebarRef: React.RefObject<HTMLElement | null>;
   onClose: () => void;
   onRename: (id: string) => void;
+  onRegenerate: (id: string) => void;
   onDelete: (id: string) => void;
   /** Opens the custom snooze time picker. */
   onSnooze: (id: string) => void;
@@ -622,7 +667,7 @@ function ChatContextMenu({
   const open = !!state;
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
-  const [sub, setSub] = useState<"copy" | "snooze">();
+  const [sub, setSub] = useState<"rename" | "copy" | "snooze">();
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
@@ -663,7 +708,21 @@ function ChatContextMenu({
     fn();
     onClose();
   };
-  const flyout = (id: "copy" | "snooze", icon: React.ReactNode, label: string, items: React.ReactNode) => (
+  const snoozeItems = (
+    <>
+      {snoozeOptions().map((o) => (
+        <button key={o.label} type="button" role="menuitem" className="menu-item" onClick={act(() => snoozeThread(chat.id, o.until))}>
+          <span className="menu-item-label">{o.label}</span>
+          <span className="menu-item-hint">{o.hint}</span>
+        </button>
+      ))}
+      <div className="menu-sep" />
+      <button type="button" role="menuitem" className="menu-item" onClick={act(() => onSnooze(chat.id))}>
+        <span className="menu-item-label">Custom…</span>
+      </button>
+    </>
+  );
+  const flyout = (id: "rename" | "copy" | "snooze", icon: React.ReactNode, label: string, items: React.ReactNode) => (
     <div className="filter-row" onMouseEnter={() => setSub(id)}>
       <button
         type="button"
@@ -709,7 +768,7 @@ function ChatContextMenu({
     <div
       ref={ref}
       role="menu"
-      aria-label={`Actions for ${chat.title}`}
+      aria-label={current?.snooze ? `Snooze ${chat.title}` : `Actions for ${chat.title}`}
       className="popover menu context-menu"
       data-state={visible && pos ? "open" : "closed"}
       style={{ position: "fixed", left: pos?.left ?? state?.x, top: pos?.top ?? state?.y, transformOrigin: pos?.origin }}
@@ -721,17 +780,18 @@ function ChatContextMenu({
         if (item && !item.closest(".filter-row")) setSub(undefined);
       }}
     >
+      {current?.snooze ? snoozeItems : <>
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => window.open(chatUrl(chat.id), "_blank", "noopener"))}>
         <ExternalLink size={15} /> Open in new tab
       </button>
-      <button type="button" role="menuitem" className="menu-item" onClick={act(() => onRename(chat.id))}>
-        <Pencil size={15} /> Rename
+      <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
+        {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
       </button>
       <button
         type="button"
         role="menuitem"
         className="menu-item"
-        onClick={act(() => updateChat(chat.id, closePatch(chat)))}
+        onClick={act(() => toggleClosed(chat))}
       >
         {isClosed(chat) ? <SquareArrowUp size={15} /> : <Check size={15} />} {isClosed(chat) ? "Reopen" : "Close"}
       </button>
@@ -744,23 +804,29 @@ function ChatContextMenu({
           "snooze",
           <AlarmClock size={15} />,
           "Snooze",
-          <>
-            {snoozeOptions().map((o) => (
-              <button key={o.label} type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, snoozePatch(o.until)))}>
-                <span className="menu-item-label">{o.label}</span>
-                <span className="menu-item-hint">{o.hint}</span>
-              </button>
-            ))}
-            <div className="menu-sep" />
-            <button type="button" role="menuitem" className="menu-item" onClick={act(() => onSnooze(chat.id))}>
-              <span className="menu-item-label">Custom…</span>
-            </button>
-          </>,
+          snoozeItems,
         )
       )}
-      <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
-        {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
-      </button>
+      {flyout(
+        "rename",
+        <Pencil size={15} />,
+        "Rename",
+        <>
+          <button type="button" role="menuitem" className="menu-item" onClick={act(() => onRename(chat.id))}>
+            <Pencil size={15} /> Rename
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={!threadTranscript(chat)}
+            title={threadTranscript(chat) ? undefined : "This thread has no messages yet"}
+            onClick={act(() => onRegenerate(chat.id))}
+          >
+            <RefreshCw size={15} /> Regenerate
+          </button>
+        </>,
+      )}
       {flyout(
         "copy",
         <Copy size={15} />,
@@ -810,6 +876,7 @@ function ChatContextMenu({
       >
         <Trash size={15} /> Delete
       </button>
+      </>}
     </div>
   );
 }
@@ -1046,6 +1113,7 @@ export function Sidebar() {
   const deferredQuery = useDeferredValue(query.trim());
   const [menu, setMenu] = useState<MenuState>();
   const [renamingId, setRenamingId] = useState<string>();
+  const [regenerating, setRegenerating] = useState<ReadonlySet<string>>(new Set());
   const closeMenu = useCallback(() => setMenu(undefined), []);
   const [deletingId, setDeletingId] = useState<string>();
   const deleting = useStore((s) => s.chats.find((c) => c.id === deletingId));
@@ -1087,6 +1155,27 @@ export function Sidebar() {
   const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && c.done), [rest]);
   const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && !c.done), [rest]);
   const closed = useMemo(() => awake.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
+
+  // What's on screen, in order. Collapsed sections don't count, unless the open thread is in one.
+  useEffect(() => {
+    const listed = deferredQuery
+      ? hits.map((h) => h.chat)
+      : closedView
+        ? closed
+        : (
+            [
+              [pinned, sections.pinned],
+              [subagents, sections.subagents],
+              [woke, sections.woke],
+              [done, sections.done],
+              [working, sections.working],
+              [todays, sections.today],
+              [snoozed, sections.snoozed],
+              [closed, sections.closed],
+            ] as const
+          ).flatMap(([list, open]) => (open || list.some((c) => c.id === activeChatId) ? list : []));
+    threadOrder = listed.map((c) => c.id);
+  });
 
   // Snoozes that run out, now or while the app was closed, wake their threads into "Woke".
   useEffect(() => {
@@ -1130,11 +1219,22 @@ export function Sidebar() {
     [mobile, selectChat, setSearchFocus, setSidebarOpen],
   );
   const onMenu = useCallback(
-    (chatId: string, x: number, y: number, fromButton?: boolean) =>
-      setMenu((m) => (fromButton && m?.chatId === chatId ? undefined : { chatId, x, y, end: fromButton })),
+    (chatId: string, x: number, y: number, fromButton?: boolean, snooze?: boolean) =>
+      setMenu((m) => (fromButton && m?.chatId === chatId && !m.snooze === !snooze ? undefined : { chatId, x, y, end: fromButton, snooze })),
     [],
   );
   const onRenameDone = useCallback(() => setRenamingId(undefined), []);
+  const onRegenerate = useCallback((id: string) => {
+    setRegenerating((ids) => new Set(ids).add(id));
+    void regenerateTitle(id).then((ok) => {
+      setRegenerating((ids) => {
+        const next = new Set(ids);
+        next.delete(id);
+        return next;
+      });
+      if (!ok) window.alert("Couldn't regenerate the title. Check the text generation models in Settings.");
+    });
+  }, []);
 
   const row = (c: Chat, hit?: SearchHit) => (
     <ChatRow
@@ -1143,6 +1243,7 @@ export function Sidebar() {
       hit={hit}
       active={c.id === activeChatId}
       renaming={renamingId === c.id}
+      regenerating={regenerating.has(c.id)}
       onRenameDone={onRenameDone}
       onMenu={onMenu}
       onSelect={onSelect}
@@ -1301,7 +1402,7 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
-      <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onDelete={setDeletingId} onSnooze={setSnoozingId} />
+      <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onRegenerate={onRegenerate} onDelete={setDeletingId} onSnooze={setSnoozingId} />
       {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
       {snoozing && <SnoozeDialog chat={snoozing} onClose={() => setSnoozingId(undefined)} />}
     </>

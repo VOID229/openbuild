@@ -1,5 +1,5 @@
 // Short texts written by a model on the side: thread titles (as soon as the first user prompt is
-// sent) and commit messages. The text generation models picked in Settings are tried in order;
+// sent, or on request from the thread menu) and commit messages. The text generation models picked in Settings are tried in order;
 // with none picked, the thread's own model is used at the lowest reasoning it supports (no
 // thinking when possible).
 import { streamOnce } from "./api";
@@ -14,6 +14,8 @@ const NAMING_SYSTEM =
   "No quotes, no trailing punctuation, no emojis, no explanation.";
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + "…" : s);
+
+const REGENERATE_SYSTEM = `${NAMING_SYSTEM} You are given a transcript to title, not a request to answer. Favor what the latest messages are about.`;
 
 export function cleanTitle(raw: string) {
   let t = raw
@@ -77,6 +79,42 @@ export async function generateText(opts: { system: string; content: string; sess
     if (!failed && out) return out;
   }
   return "";
+}
+
+/** The opening prompt and as many of the latest messages as fit in `budget` characters, oldest first. */
+export function threadTranscript(chat: Pick<Chat, "messages">, budget = 6000) {
+  const blocks = chat.messages.flatMap((m) => {
+    const text = (m.role === "shell" ? `$ ${m.content}` : m.content).trim() || (m.attachments ?? []).map((a) => a.name).join(", ");
+    return text ? [`${m.role === "assistant" ? "Assistant" : "User"}: ${clip(text, 1500)}`] : [];
+  });
+  const [first, ...rest] = blocks;
+  if (!first) return "";
+  const latest: string[] = [];
+  let left = budget - first.length;
+  for (const block of rest.reverse()) {
+    if (block.length > left) break;
+    left -= block.length;
+    latest.unshift(block);
+  }
+  return [first, ...(latest.length < rest.length ? ["[…]"] : []), ...latest].join("\n\n");
+}
+
+/**
+ * Retitle a thread from where it is now. False when no model gave a title. Whoever asks for this
+ * owns the result, so it counts as the user's title: it replaces a manual one and outlives a name
+ * Pi gave the session.
+ */
+export async function regenerateTitle(chatId: string) {
+  const chat = useStore.getState().chats.find((c) => c.id === chatId);
+  const transcript = chat && threadTranscript(chat);
+  if (!transcript) return false;
+  const content = `Transcript to title:\n\n${transcript}`;
+  const title = await generateText({ system: REGENERATE_SYSTEM, content, sessionId: `${chatId}-title`, chat, clean: cleanTitle });
+  if (!title) return false;
+  // The user may have renamed it while we were waiting.
+  const latest = useStore.getState().chats.find((c) => c.id === chatId);
+  if (latest?.title === chat.title) useStore.getState().updateChat(chatId, { title, titleSource: "user" });
+  return true;
 }
 
 export async function autoName(chatId: string) {
