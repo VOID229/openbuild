@@ -5857,13 +5857,6 @@ p.key-status svg {
   overflow-wrap: anywhere;
 }
 
-.pi-card-actions {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 12px;
-}
-
 .pi-job-toggle {
   margin-left: auto;
 }
@@ -6322,10 +6315,6 @@ p.pi-empty {
   .pi-card-row {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .pi-card-actions {
-    justify-content: space-between;
   }
 
   .tool-output,
@@ -8861,25 +8850,6 @@ a.btn-primary {
   overflow: hidden;
   font-size: 12.5px;
   overflow-wrap: anywhere;
-}
-
-/* Keep the update check's feedback inside its existing icon slot. */
-.pi-check-icon {
-  display: inline-grid;
-  width: 14px;
-  height: 14px;
-  place-items: center;
-}
-.pi-check-icon > * {
-  grid-area: 1 / 1;
-  display: inline-flex;
-  transition: opacity 150ms ease;
-}
-.pi-check-success { opacity: 0; }
-.pi-check-icon[data-success] .pi-check-default { opacity: 0; }
-.pi-check-icon[data-success] .pi-check-success { opacity: 1; }
-@media (prefers-reduced-motion: reduce) {
-  .pi-check-icon > * { transition: none; }
 }
 
 /* Model picker footer: the new thread's runtime, as a row of marks */

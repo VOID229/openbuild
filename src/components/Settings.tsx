@@ -134,7 +134,7 @@ function NotificationsSection() {
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">New Builds</div>
-          <p className="setting-desc">Offer a reload when the OpenBuild server is running newer code than this window, e.g. after a pull and restart.</p>
+          <p className="setting-desc">Notify when a release is available on this server’s update track, and offer a reload after the server starts running newer code.</p>
         </div>
         <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New Builds" />
       </div>

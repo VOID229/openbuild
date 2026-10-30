@@ -34,7 +34,6 @@ export interface PiStatus {
 
 export const piStatus = (fresh = false, deviceId?: DeviceId) => get<PiStatus>(apiUrl(deviceId, `/api/pi/status${fresh ? "?fresh=1" : ""}`));
 export const installPi = (deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/install"), "POST");
-export const updatePi = (all = false, deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/update"), "POST", { all });
 
 /** Every thread runtime's state on a device: installed, version, updates, sign-in, errors. */
 export const runtimeStatuses = (fresh = false, deviceId?: DeviceId) =>

@@ -10,7 +10,13 @@ plugins/my-plugin/
   styles.css      CSS for both
 ```
 
-Plugins are read from `plugins/` in the repo (if it exists), or `pluginsDir` in `openbuild.config.ts`, or the data folder's `plugins/` as a fallback.
+User plugins live in the data folder's `plugins/`, outside the application checkout. On the first start with this layout, OpenBuild copies the checkout's existing plugin folders there once, including custom plugins and changes to the examples. Existing user folders are never overwritten. Later app updates neither replace these copies nor restore deleted plugins. Plugin enable/disable choices and settings remain in the data directory.
+
+`pluginsDir` in `openbuild.config.ts` still overrides this location. Keep explicit paths outside the application checkout for independent updates. The default data folder is `~/.local/share/openbuild` on Linux and `~/Library/Application Support/OpenBuild` on macOS (or `OPENCHAT_DATA_DIR`). Settings → Plugins shows the active folder.
+
+If an older installation has edits inside the checkout's `plugins/`, start OpenBuild once to copy them before updating. Verify the copies in the active folder, then commit or stash the old checkout changes so `ob update` can proceed. The updater refuses source changes rather than discarding them.
+
+The plugin API remains version 1. This storage change does not change manifests, SDK imports, hooks, or plugin settings.
 
 The whole plugin system is **off by default**. `Settings → Plugins` has the master switch: until it's on, nothing from the folder runs — no UI slots, styles, server routes or hooks. With it on, the same page lists everything found (including broken plugins) and turns each one on or off without deleting it.
 

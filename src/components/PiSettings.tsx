@@ -12,7 +12,6 @@ import {
   FolderGit2,
   Pencil,
   Plus,
-  RefreshCw,
   Save,
   Search,
   Trash2,
@@ -38,7 +37,6 @@ import {
   renameProject,
   startLogin,
   toggleResource,
-  updatePi,
   writeResourceFile,
   type AuthEvent,
   type AuthPrompt,
@@ -409,6 +407,7 @@ function Packages({ packages, job, deviceId, onChanged }: { packages: string[]; 
         </button>
       </form>
       {error && <ErrorNote>{error}</ErrorNote>}
+      <JobLog job={job} />
     </section>
   );
 }
@@ -472,42 +471,22 @@ export function PiSection() {
   const loadPiResources = useStore((s) => s.loadPiResources);
   const setPiCache = useStore((s) => s.setPiCache);
   const [statusError, setStatusError] = useState<string>();
-  const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState<{ deviceId?: string }>();
   const [editing, setEditing] = useState<PiResource>();
   const refreshDetection = useStore((s) => s.refreshDetection);
   const loadDeviceModels = useStore((s) => s.loadDeviceModels);
   const where = deviceName(deviceId);
 
   const loadStatus = useCallback(
-    async (fresh = false, quiet = false, confirmCheck = false) => {
-      if (!quiet) {
-        setChecking(true);
-        setCheckResult(undefined);
-      }
+    async (fresh = false) => {
       try {
         await loadPiStatus(fresh, deviceId);
         setStatusError(undefined);
-        if (confirmCheck) {
-          const checked = piCacheOn(useStore.getState(), deviceId).status;
-          if (checked?.installed && checked.latest && !checked.checkError) {
-            setCheckResult({ deviceId });
-          }
-        }
       } catch (err) {
         setStatusError(deviceRefusal(err as Error, where));
-      } finally {
-        if (!quiet) setChecking(false);
       }
     },
     [loadPiStatus, deviceId, where],
   );
-  useEffect(() => {
-    if (!checkResult) return;
-    const timer = setTimeout(() => setCheckResult(undefined), 2000);
-    return () => clearTimeout(timer);
-  }, [checkResult]);
-  const checkSucceeded = !!checkResult && checkResult.deviceId === deviceId;
 
   const loadResources = useCallback(async () => {
     await loadPiResources(deviceId).catch(() => {});
@@ -522,10 +501,9 @@ export function PiSection() {
 
   useEffect(() => {
     setStatusError(undefined);
-    setCheckResult(undefined);
     setEditing(undefined);
     // Revalidate quietly; the cached status and resources are already on screen.
-    void loadStatus(false, true);
+    void loadStatus();
     void loadResources();
     // Pick up a job that was already running there (e.g. an update started before a reload).
     void job.follow().catch(() => {});
@@ -547,43 +525,13 @@ export function PiSection() {
     <>
       <Heading>Pi agent</Heading>
       <DeviceRow deviceId={deviceId} onChange={setDeviceId} />
-      <section className="pi-card">
-        {!status ? (
-          statusError ? <ErrorNote>{statusError}</ErrorNote> : <Spinner />
-        ) : status.installed ? (
-          <>
-            <div className="pi-card-row">
-              <div className="pi-card-text">
-                <div className="pi-version">
-                  Pi {status.version}
-                  {status.updateAvailable ? <span className="badge badge-accent">{status.latest} available</span> : status.latest && <span className="badge">up to date</span>}
-                </div>
-                <div className="pi-meta" title={`Binary ${tilde(status.bin ?? "")} · config ${tilde(status.agentDir)}`}>
-                  {tilde(status.bin ?? "")} · {status.kind === "managed" ? "Pi installer" : status.kind === "npm" ? "npm" : "custom install"}
-                </div>
-              </div>
-              <div className="pi-card-actions">
-                <button type="button" className="link-btn" disabled={job.running} onClick={() => void start(() => updatePi(true, deviceId))} title="Update Pi and every installed package">
-                  Update all
-                </button>
-                {status.updateAvailable ? (
-                  <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => updatePi(false, deviceId))}>
-                    Update to {status.latest}
-                  </button>
-                ) : (
-                  <button type="button" className="btn btn-sm" aria-label={checking ? "Checking for Pi updates" : checkSucceeded ? "Checked for Pi updates" : "Check for Pi updates"} aria-busy={checking} disabled={checking || job.running} onClick={() => void loadStatus(true, false, true)}>
-                    <span className="pi-check-icon" data-success={checkSucceeded || undefined} aria-hidden="true">
-                      <span className="pi-check-default">{checking ? <Spinner size={12} /> : <RefreshCw size={14} />}</span>
-                      <Check size={14} className="pi-check-success ok" />
-                    </span>
-                    Check
-                  </button>
-                )}
-              </div>
-            </div>
-            {status.checkError && <p className="pi-meta">{status.checkError}</p>}
-          </>
-        ) : (
+      {!status ? (
+        statusError ? <ErrorNote>{statusError}</ErrorNote> : <Spinner />
+      ) : (
+        statusError && <ErrorNote>{statusError}</ErrorNote>
+      )}
+      {status && !status.installed && (
+        <section className="pi-card">
           <div className="pi-card-row">
             <div className="pi-card-text">
               <div className="pi-version">Pi isn't installed</div>
@@ -595,10 +543,9 @@ export function PiSection() {
               Install Pi
             </button>
           </div>
-        )}
-        {statusError && status && <ErrorNote>{statusError}</ErrorNote>}
-        <JobLog job={job} />
-      </section>
+          <JobLog job={job} />
+        </section>
+      )}
 
       {status?.installed && (
         <>

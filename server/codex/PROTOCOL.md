@@ -1,6 +1,6 @@
 # Native Codex protocol evidence and integration
 
-Inspected installed `/home/cloudy/.local/bin/codex`, `codex-cli 0.164.0`:
+Inspected installed `~/.local/bin/codex`, `codex-cli 0.164.0`:
 
 ```
 codex app-server --help

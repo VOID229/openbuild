@@ -100,3 +100,28 @@ export function useRuntimeUpdates(enabled = true, only?: ThreadRuntime[]): Runti
     return status?.updateAvailable && status.latest ? [{ runtime, version: status.latest }] : [];
   });
 }
+
+/** Release availability for this server, separate from the tab's bundle reload notice. */
+export function useReleaseUpdate(enabled = true) {
+  const [release, setRelease] = useState<{ track: string; latest: string; available: boolean }>();
+  useEffect(() => {
+    if (!enabled || isHosted()) return;
+    let cancelled = false;
+    let pending = false;
+    const check = async () => {
+      if (pending || document.visibilityState !== "visible") return;
+      pending = true;
+      try {
+        const res = await fetch("/api/releases");
+        if (res.ok && !cancelled) setRelease(await res.json());
+      } catch { /* Retry when online or on the next interval. */ }
+      finally { pending = false; }
+    };
+    void check();
+    const timer = setInterval(() => void check(), RUNTIME_CHECK_EVERY);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("online", check);
+    return () => { cancelled = true; clearInterval(timer); document.removeEventListener("visibilitychange", check); window.removeEventListener("online", check); };
+  }, [enabled]);
+  return enabled && release?.available ? release : undefined;
+}

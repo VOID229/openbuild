@@ -4,7 +4,7 @@
 // folders, re-imports changed server sources and tells open browsers to reload client modules, so
 // plugin changes (including new folders) apply without restarting OpenBuild.
 //
-// A plugin is a folder (by default `plugins/`, or `pluginsDir` in openbuild.config.ts):
+// A plugin is a folder in <data dir>/plugins (or pluginsDir in openbuild.config.ts):
 //
 //   plugins/my-plugin/
 //     plugin.json    manifest (required)
@@ -32,6 +32,7 @@ import {
 } from "../shared/plugins";
 import { bad, readJson } from "./handlers";
 import { dataDir } from "./paths";
+import { prepareUserPlugins } from "./pluginFiles";
 import * as storage from "./storage";
 
 const STATE_KEY = "plugins-state";
@@ -335,9 +336,7 @@ async function loadConfig() {
   const defaultDir = join(ROOT, "plugins");
   pluginsDir = config.pluginsDir
     ? relative(config.pluginsDir)
-    : existsSync(defaultDir)
-      ? defaultDir
-      : join(dataDir(), "plugins");
+    : prepareUserPlugins(defaultDir, join(dataDir(), "plugins"));
   const css = config.customCss ? relative(config.customCss) : join(dataDir(), "custom.css");
   customCssPath = existsSync(css) ? css : undefined;
   safeMode = process.env.OPENBUILD_SAFE === "1" || config.safeMode === true;

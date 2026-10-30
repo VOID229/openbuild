@@ -2,8 +2,9 @@
 // and custom CSS live. Everything here is optional; the defaults work with no config file.
 export default {
   // Folders with plugin.json. Relative paths are resolved from this file.
-  // Default: <repo>/plugins if it exists, else <data dir>/plugins.
-  pluginsDir: "plugins",
+  // Default: <data dir>/plugins, outside the installation.
+  // Leave unset to keep plugins independent of updates.
+  // pluginsDir: "/absolute/path/to/my/plugins",
 
   // Global CSS applied after OpenBuild's styles, for tweaks that aren't a plugin.
   // Default: <data dir>/custom.css, if it exists.

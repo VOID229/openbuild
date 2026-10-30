@@ -1,3 +1,4 @@
+import { checkRelease } from "./releases";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
@@ -199,6 +200,7 @@ function serve(port: number, hostname: string) {
 
       // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
+      "/api/releases": { GET: api(async () => Response.json(await checkRelease())) },
       "/api/config": {
         GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine() })),
       },

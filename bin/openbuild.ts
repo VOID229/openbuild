@@ -15,6 +15,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
+import { checkRelease, installRelease, setReleaseTrack } from "../server/releases";
 import { ask } from "./prompt";
 import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { dataDir } from "../server/paths";
@@ -480,6 +481,8 @@ function help() {
   openbuild stop --all        also terminate agent and Durable workers
   openbuild restart [--yes]   restart in the same mode; running turns continue
   openbuild status            is it running, and where
+  openbuild update            install the latest release on your track
+  openbuild --set-track stable|nightly   choose releases (default: stable)
   openbuild logs              follow the server log
   openbuild open              open it in the browser
 
@@ -854,6 +857,18 @@ if (service) {
     if (cmd === "stop") console.log(stopAll ? "agent and Durable workers sent shutdown signals." : "agent and Durable workers left running.");
   }
 } else switch (cmd) {
+  case "--set-track": {
+    try { setReleaseTrack(arg ?? ""); console.log(`Release track set to ${arg}. Run ob update to install it.`); }
+    catch (error) { fail((error as Error).message); }
+    break;
+  }
+  case "update": {
+    try {
+      const result = await installRelease();
+      console.log(`OpenBuild ${result.current} (${result.track}). Run ob restart to use it; running agents are preserved.`);
+    } catch (error) { fail((error as Error).message); }
+    break;
+  }
   case "set": {
     if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild set pass <password>`);
     // Everything after `pass`, so a password with spaces works unquoted too.
@@ -939,4 +954,11 @@ if (service) {
     break;
   default:
     fail(`unknown command "${cmd}". Run: openbuild help`);
+}
+
+if (["start", "restart", "status"].includes(cmd ?? "")) {
+  try {
+    const release = await checkRelease();
+    if (release.available) console.log(`OpenBuild ${release.latest} is available (${release.track}). Run ob update.`);
+  } catch { /* Offline/rate-limited checks must not fail lifecycle commands. */ }
 }

@@ -4,7 +4,7 @@ import { followJob, updateRuntime } from "../lib/pi";
 import { loadRuntimeStatuses } from "../lib/runtimeStatus";
 import { runtimeName } from "../lib/runtimes";
 import { useStore } from "../lib/store";
-import { useRuntimeUpdates, useUpdateAvailable } from "../lib/update";
+import { useRuntimeUpdates, useUpdateAvailable, useReleaseUpdate } from "../lib/update";
 import { IconButton, Spinner } from "./primitives";
 
 /** "Pi 1.4.0", "Pi 1.4.0 and Codex 0.48.0", "Pi 1.4.0, Codex 0.48.0 and Claude Code 2.1.0". */
@@ -16,6 +16,10 @@ function listPhrase(items: string[]): string {
 /** Notices at the top of the window; Settings → Notifications turns each kind off. */
 export function Notices() {
   const prefs = useStore((s) => s.settings.notifications);
+  const release = useReleaseUpdate(prefs.builds);
+  const [dismissedRelease, setDismissedRelease] = useState("");
+  const releaseKey = release ? `${release.track}:${release.latest}` : "";
+  const showRelease = !!release && dismissedRelease !== releaseKey;
   const build = useUpdateAvailable(prefs.builds);
   const updates = useRuntimeUpdates(prefs.runtimeUpdates, prefs.updateRuntimes);
   const [buildClosed, setBuildClosed] = useState(false);
@@ -33,7 +37,7 @@ export function Notices() {
   // Closing a notice skips that release; the next one from the same runtime shows again.
   const shown = updates.filter((u) => prefs.dismissedUpdates?.[u.runtime] !== u.version);
   const showBuild = prefs.builds && build && !buildClosed;
-  if (!showBuild && !shown.length && !updating && !feedback && !error) return null;
+  if (!showRelease && !showBuild && !shown.length && !updating && !feedback && !error) return null;
   const { updateSettings } = useStore.getState();
   const dismiss = () =>
     updateSettings({
@@ -73,6 +77,12 @@ export function Notices() {
   };
   return (
     <div className="notices">
+      {showRelease && (
+        <div className="notice" role="status">
+          <span className="notice-text">OpenBuild {release.latest} is available ({release.track}). Run <code>ob update</code> on this server, then <code>ob restart</code>.</span>
+          <IconButton label="Dismiss release update" tooltip={false} onClick={() => setDismissedRelease(releaseKey)}><X size={15} /></IconButton>
+        </div>
+      )}
       {showBuild && (
         <div className="notice" role="status">
           <span className="notice-text">OpenBuild was updated.</span>
