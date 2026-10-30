@@ -16,7 +16,8 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, 
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { checkRelease, installRelease, setReleaseTrack } from "../server/releases";
-import { ask } from "./prompt";
+import { ask, confirm } from "./prompt";
+import { uninstallPlan, removeInstallation } from "./uninstall";
 import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
@@ -397,6 +398,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
 
 /** Only an explicit `stop --all` terminates detached runtimes. */
 function stopWorkers() {
+  const stopped: number[] = [];
   let generations: string[] = [];
   try { generations = readdirSync(DATA).filter(name => /^agent-worker-[a-f0-9]{16}$/.test(name)); } catch {}
   const workers: [string, string][] = [[PI_WORKER, "server/pi/worker.ts"], [OPENCODE_WORKER, "server/pi/worker.ts"], [DURABLE_WORKER, "server/durable/worker.ts"],
@@ -408,11 +410,12 @@ function stopWorkers() {
       // Metadata may outlive a worker and its PID may be reused. Only signal a
       // process whose argv identifies this installation's matching runtime.
       const command = run("ps", ["-p", String(pid), "-o", "args="]);
-      if (command.ok && command.out.split(/\s+/).includes(join(ROOT, script))) process.kill(pid, "SIGTERM");
+      if (command.ok && command.out.split(/\s+/).includes(join(ROOT, script))) { process.kill(pid, "SIGTERM"); stopped.push(pid); }
     } catch {}
     // Never remove worker metadata: Pi startup retains its old PID as a
     // process-group fence before admitting new work. Each runtime owns cleanup.
   }
+  return stopped;
 }
 
 /** By default only stop the server/keeper; detached turns keep running. */
@@ -481,6 +484,7 @@ function help() {
   openbuild stop --all        also terminate agent and Durable workers
   openbuild restart [--yes]   restart in the same mode; running turns continue
   openbuild status            is it running, and where
+  openbuild uninstall         remove OpenBuild and its data (asks y/N)
   openbuild update            install the latest release on your track
   openbuild --set-track stable|nightly   choose releases (default: stable)
   openbuild logs              follow the server log
@@ -813,6 +817,41 @@ async function remoteServer(action: "start" | "stop", raw: string[]) {
   fail(`asked ${device.name} to start, but it didn't answer yet. Check it there with: openbuild status`);
 }
 
+async function uninstall() {
+  if (!process.stdin.isTTY) fail("run ob uninstall in a terminal to review and confirm removal.");
+  const plan = uninstallPlan(ROOT, DATA);
+  console.log(`Remove OpenBuild data: ${plan.data}`);
+  console.log("This deletes all chats, settings, plugins, scratch projects and managed worktrees, including uncommitted work. Running agent turns will stop.");
+  console.log(plan.installed ? `Remove installed app: ${plan.root}` : `Keep source checkout: ${plan.root}`);
+  for (const link of plan.links) console.log(`Remove command link: ${link}`);
+  console.log("OpenBuild credentials and device pairings will be removed. External project folders and native agent sessions are kept.");
+  if (!(await confirm("Uninstall OpenBuild permanently?", false))) { console.log("Uninstall cancelled."); return; }
+  const managed = systemdService(ROOT, run);
+  if (managed) {
+    const result = run("systemctl", ["--user", "disable", "--now", UNIT]);
+    if (!result.ok) fail(result.err || "Could not disable the OpenBuild service; nothing was deleted.");
+    const fragment = run("systemctl", ["--user", "show", UNIT, "--property=FragmentPath", "--value"]).out;
+    const userUnit = join(process.env.XDG_CONFIG_HOME || join(process.env.HOME!, ".config"), "systemd", "user", UNIT);
+    if (fragment === userUnit) rmSync(userUnit, { force: true });
+    rmSync(systemdNetworkOverridePath(), { force: true });
+    run("systemctl", ["--user", "daemon-reload"]);
+    disableServe(serviceNetwork());
+  }
+  await stop(true, true);
+  const workers = stopWorkers();
+  for (let i = 0; i < 40 && workers.some(alive); i++) await Bun.sleep(100);
+  for (const pid of workers.filter(alive)) { try { process.kill(pid, "SIGKILL"); } catch {} }
+  for (const device of devices.readDevices()) {
+    if (!(await devices.revokeDevice(device))) console.log(`Could not reach ${device.name}; remove this pairing on that device too.`);
+  }
+  const vault = await import("../server/vault");
+  for (const scope of vault.scopes()) await vault.setKeys(scope, []);
+  const secretsFile = process.env.OPENCHAT_SECRETS_FILE || join(process.env.XDG_CONFIG_HOME || join(process.env.HOME!, ".config"), "openbuild", "secrets.json");
+  rmSync(secretsFile, { force: true });
+  removeInstallation(plan);
+  console.log("OpenBuild uninstalled.");
+}
+
 const args = process.argv.slice(2);
 const stopAll = args.includes("--all");
 const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y" && a !== "--all");
@@ -857,6 +896,9 @@ if (service) {
     if (cmd === "stop") console.log(stopAll ? "agent and Durable workers sent shutdown signals." : "agent and Durable workers left running.");
   }
 } else switch (cmd) {
+  case "uninstall":
+    try { await uninstall(); } catch (error) { fail((error as Error).message); }
+    break;
   case "--set-track": {
     try { setReleaseTrack(arg ?? ""); console.log(`Release track set to ${arg}. Run ob update to install it.`); }
     catch (error) { fail((error as Error).message); }

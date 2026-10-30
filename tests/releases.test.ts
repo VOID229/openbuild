@@ -101,13 +101,51 @@ test("curl installer selects a stable tag under sh and bash and refuses overwrit
     const { mkdirSync, chmodSync } = require("node:fs");
     const bin = join(temp, "bin"); mkdirSync(bin);
     writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *api.github.com*) echo v1.2.3;; esac\n');
-    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] && [ "$2" = --branch ] && [ "$3" = v1.2.3 ] || exit 1\nfor target do :; done\nmkdir -p "$target"\n');
+    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] && [ "$2" = --branch ] && [ "$3" = v1.2.3 ] || exit 1\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     for (const shell of ["sh", "bash"]) {
       const options = { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: join(temp, `${shell} install`) }, stdout: "pipe" as const, stderr: "pipe" as const };
       const script = join(import.meta.dir, "..", "install.sh");
       expect(Bun.spawnSync([shell, script], options).exitCode).toBe(0);
       expect(Bun.spawnSync([shell, script], options).exitCode).toBe(1);
+    }
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("curl installer removes a failed checkout so it can be retried", () => {
+  const temp = mkdtempSync(join(tmpdir(), "ob-track-installer-"));
+  try {
+    const { mkdirSync, chmodSync, existsSync } = require("node:fs");
+    const bin = join(temp, "bin"); mkdirSync(bin);
+    const target = join(temp, "install");
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *api.github.com*) echo v1.2.3;; install*) echo dependency failure; exit 1;; esac\n');
+    writeFileSync(join(bin, "git"), '#!/bin/sh\nfor target do :; done\nmkdir -p "$target/.git"\n');
+    chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
+    const result = Bun.spawnSync(["sh", join(import.meta.dir, "..", "install.sh")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target }, stdout: "pipe", stderr: "pipe" });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain("dependency failure");
+    expect(existsSync(target)).toBe(false);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("curl installer dry run works piped and touches nothing", () => {
+  const temp = mkdtempSync(join(tmpdir(), "ob-track-installer-"));
+  try {
+    const { mkdirSync, chmodSync, existsSync } = require("node:fs");
+    const bin = join(temp, "bin"); mkdirSync(bin);
+    for (const name of ["bun", "git"]) { writeFileSync(join(bin, name), "#!/bin/sh\nexit 9\n"); chmodSync(join(bin, name), 0o755); }
+    const target = join(temp, "install");
+    for (const shell of ["sh", "bash"]) {
+      const result = Bun.spawnSync([shell, "-s", "--", "--dry-run"], {
+        stdin: Bun.file(join(import.meta.dir, "..", "install.sh")),
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.toString()).toContain("Dry run");
+      expect(result.stdout.toString()).not.toContain("\x1b");
+      expect(existsSync(target)).toBe(false);
     }
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });

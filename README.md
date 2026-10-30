@@ -46,6 +46,8 @@ curl -fsSL https://shade-io.com/openbuild/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/install.sh | bash
 ```
 
+Add `-s -- --dry-run` after `sh` or `bash` to preview the installer without checking, downloading or changing anything.
+
 After installation, open a new terminal if needed, then run:
 
 ```sh
@@ -93,6 +95,8 @@ to run agents on your device.
 
 You wont need to enter the password on each page reload or server restart.
 your browser stores an random token cookie and the server verifies its hash to keep you logged in. it auto expires after 30 days of idle.
+
+Uninstall with `ob uninstall` in a terminal. Review the paths, then confirm with `y` (default: No). This stops OpenBuild and its workers and removes its data, credentials, pairings, command links, and installer-created app folder. Chats, plugins, scratch projects, and managed worktrees are deleted, including unfinished work. Source checkouts, external projects, Bun, and native agent sessions are kept. Older installs without an install marker keep their app folder; remove that folder separately after uninstalling.
 
 ## License
 
