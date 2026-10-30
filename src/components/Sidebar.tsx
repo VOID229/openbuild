@@ -1392,9 +1392,10 @@ export function Sidebar() {
             <button
               type="button"
               className={`archive-toggle${closedView ? " active" : ""}`}
-              aria-label={closedView ? "Back to threads" : "Show closed threads"}
+              aria-label={closedView ? "Back to threads" : "Only show closed threads"}
               aria-pressed={closedView}
-              title={closedView ? "Back to threads" : "Closed threads"}
+              data-tooltip={closedView ? "Back to threads" : "Only show closed threads"}
+              data-tooltip-side="top"
               onClick={() => setClosedView((v) => !v)}
             >
               <SquareCheck size={18} />
