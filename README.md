@@ -6,7 +6,7 @@ it's meant to be self hosted on localhost, LAN or Tailscale and used freely with
 
 OpenBuild is free and self-hosted. Your chosen agents, model providers, and search services receive the requests you send them and may charge for usage.
 
-```
+```sh
 ## basic
 ob start # start the openbuild server
 ob restart # restart the openbuild server
@@ -18,7 +18,7 @@ OpenBuild supports remote devices, you don't need to have multiple instances of 
 
 it runs a headless OpenBuild server on the remote machine and connects to it over LAN or Tailscale
 
-```
+```sh
 ## pairing
 ob pair --host # pair this machine for a client to use remotely
 ob pair --client # pair a remote host to use in the openbuild server
@@ -37,12 +37,12 @@ Supports macOS and Linux. Requires Git and Bun 1.3.8 or newer on PATH (see [Bun 
 
 #### *looks nice*
 
-```
+```sh
 curl -fsSL https://shade-io.com/openbuild/install.sh | sh
 ```
 #### *if you have trust issues*
 
-```
+```sh
 curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/install.sh | bash
 ```
 
@@ -59,7 +59,7 @@ A local password is required before starting. Install or connect your preferred 
 
 #### *Or*
 
-```
+```sh
 git clone https://github.com/VOID229/openbuild # clone the repo
 cd openbuild
 bun install
@@ -85,7 +85,7 @@ Updates require a clean Git checkout and preserve local branches and commits. Th
 
 being extra careful is always worth it, set a password to protect your machines
 
-```
+```sh
 ob password # must be 4 or more characters
 ```
 
