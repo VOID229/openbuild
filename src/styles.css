@@ -5478,6 +5478,11 @@ p.key-status svg {
   padding-bottom: 6px;
 }
 
+.ws-option-missing .ws-option-icon,
+.ws-option-missing .menu-item-label {
+  opacity: 0.45;
+}
+
 .ws-option-icon {
   display: inline-grid;
   place-items: center;
@@ -8644,4 +8649,22 @@ a.btn-primary {
 .pi-check-icon[data-success] .pi-check-success { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .pi-check-icon > * { transition: none; }
+}
+
+/* Model picker footer: the new thread's runtime, as a row of marks */
+.mp-runtime {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  padding: 0;
+}
+
+.mp-runtime-missing svg {
+  opacity: 0.4;
+}
+
+.mp-runtime-fixed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

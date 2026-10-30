@@ -10,7 +10,8 @@ import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { deviceName, splitProjectId } from "../lib/devices";
 import { threadDevice, useStore } from "../lib/store";
-import { RUNTIMES } from "../lib/runtimes";
+import { RUNTIMES, runtimeName } from "../lib/runtimes";
+import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
@@ -343,22 +344,41 @@ const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and
 const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Steering uses tool hooks (or a follow-up at completion). Runtime is fixed once a thread starts.";
 const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
 const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
-const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
+export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
 export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
   return runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+}
+
+/**
+ * The runtimes a new thread can pick on the device it will run on, and the one picked (falling back
+ * to the first usable one when the saved pick is turned off or not installed there).
+ */
+export function useRuntimeOptions() {
+  const selected = useStore((s) => s.settings.threadRuntime ?? "pi");
+  // Runtimes turned off in Settings → Runtimes for the device new threads run on aren't offered.
+  const device = useStore((s) => threadDevice(s));
+  const disabled = useStore((s) => s.settings.disabledRuntimes?.[device ?? ""]);
+  const options = useMemo(() => RUNTIMES.filter((o) => !disabled?.includes(o.runtime)), [disabled]);
+  // Runtimes not installed on that device are shown grayed out and lead to Settings → Runtimes instead.
+  const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses(device));
+  useEffect(() => {
+    setStatuses(cachedRuntimeStatuses(device));
+    void loadRuntimeStatuses(false, device).then(setStatuses, () => {});
+    return subscribeRuntimeStatuses((next, id) => { if ((id ?? "") === (device ?? "")) setStatuses(next); });
+  }, [device]);
+  const missing = (r: ThreadRuntime) => statuses?.[r]?.installed === false;
+  const usable = options.filter((o) => !missing(o.runtime));
+  const runtime = usable.some((o) => o.runtime === selected) ? selected : (usable[0]?.runtime ?? options[0]?.runtime ?? selected);
+  return { options, missing, runtime, selected };
 }
 
 /** Runtime is chosen before the first send, independently of the project's checkout. */
 function RuntimeMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const selected = useStore((s) => s.settings.threadRuntime ?? "pi");
   const updateSettings = useStore((s) => s.updateSettings);
-  // Runtimes turned off in Settings → Runtimes for the device new threads run on aren't offered.
-  const device = useStore((s) => threadDevice(s));
-  const disabled = useStore((s) => s.settings.disabledRuntimes?.[device ?? ""]);
-  const options = useMemo(() => RUNTIMES.filter((o) => !disabled?.includes(o.runtime)), [disabled]);
-  const runtime = options.some((o) => o.runtime === selected) ? selected : (options[0]?.runtime ?? selected);
+  const openSettings = useStore((s) => s.openSettings);
+  const { options, missing, runtime, selected } = useRuntimeOptions();
   useEffect(() => {
     if (runtime !== selected) updateSettings({ threadRuntime: runtime });
   }, [runtime, selected, updateSettings]);
@@ -373,18 +393,29 @@ function RuntimeMenu() {
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
         <div onKeyDown={(e) => arrowNav(e)}>
-          {options.map((o) => (
-            <button key={o.runtime} type="button" role="option" aria-selected={o.runtime === runtime} className="menu-item ws-option" onClick={() => { updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}>
-              <span className="ws-option-icon" aria-hidden>
-                <RuntimeIcon runtime={o.runtime} size={15} />
-              </span>
-              <span className="ws-option-text">
-                <span className="menu-item-label">{o.label}</span>
-                <span className="ws-option-path">{o.desc}</span>
-              </span>
-              {o.runtime === runtime && <Check size={15} className="menu-check" />}
-            </button>
-          ))}
+          {options.map((o) => {
+            const absent = missing(o.runtime);
+            return (
+              <button
+                key={o.runtime}
+                type="button"
+                role="option"
+                aria-selected={o.runtime === runtime}
+                aria-disabled={absent || undefined}
+                className={cx("menu-item ws-option", absent && "ws-option-missing")}
+                onClick={() => { if (absent) openSettings("runtimes"); else updateSettings({ threadRuntime: o.runtime }); setOpen(false); }}
+              >
+                <span className="ws-option-icon" aria-hidden>
+                  <RuntimeIcon runtime={o.runtime} size={15} />
+                </span>
+                <span className="ws-option-text">
+                  <span className="menu-item-label">{o.label}</span>
+                  <span className="ws-option-path">{absent ? `Not installed · Set up ${runtimeName(o.runtime)}…` : o.desc}</span>
+                </span>
+                {o.runtime === runtime && <Check size={15} className="menu-check" />}
+              </button>
+            );
+          })}
         </div>
       </Popover>
     </>

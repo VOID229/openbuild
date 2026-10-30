@@ -13,8 +13,10 @@ import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
 import { composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
-import { effortFor, supportedSpeed } from "../lib/effort";
+import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
+import { RUNTIME_LABEL, RuntimeIcon, useRuntimeOptions } from "./Workspace";
+import { runtimeName } from "../lib/runtimes";
 import { OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
@@ -418,37 +420,44 @@ export function toggleFavorite(id: string) {
   updateSettings({ favorites });
 }
 
-/** Thinking levels of the selected model, as a row of choices (in the model picker's footer). */
-function ThinkingRow({ model, plan }: { model?: ModelInfo; plan: "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode" }) {
-  const effort = useStore((s) => effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), model ? { plan, id: model.id } : undefined));
-  const setEffort = useStore((s) => s.setEffort);
-  const levels = model?.reasoning.efforts ?? [];
-  const shown = nearestEffort(levels, effort) ?? effort;
+/**
+ * The model picker's footer: the new thread's runtime, whose models the list above shows. Once a
+ * thread has started its runtime is fixed, so the row just names it.
+ */
+function RuntimeRow() {
+  const started = useStore((s) => s.chats.some((c) => c.id === s.activeChatId));
+  const fixed = useStore((s) => runtimeOf(s, s.activeChatId));
+  const updateSettings = useStore((s) => s.updateSettings);
+  const openSettings = useStore((s) => s.openSettings);
+  const { options, missing, runtime } = useRuntimeOptions();
   return (
     <div className="mp-foot">
-      <span className="mp-foot-label">Thinking</span>
-      {levels.length ? (
-        <span
-          className="mp-levels"
-          role="radiogroup"
-          aria-label="Thinking level"
-        >
-          {levels.map((l) => (
-            <button
-              key={l}
-              type="button"
-              role="radio"
-              aria-checked={l === shown}
-              className="mp-level"
-              onClick={() => model && setEffort(l, { plan, id: model.id })}
-            >
-              {SHORT[l]}
-            </button>
-          ))}
+      <span className="mp-foot-label">Runtime</span>
+      {started ? (
+        <span className="mp-foot-value mp-runtime-fixed" data-tooltip="Fixed once a thread starts" data-tooltip-side="top">
+          <RuntimeIcon runtime={fixed} size={14} />
+          {RUNTIME_LABEL[fixed]}
         </span>
       ) : (
-        <span className="mp-foot-value">
-          {model ? "model default" : "pick a model"}
+        <span className="mp-levels" role="radiogroup" aria-label="Runtime" onKeyDown={(e) => arrowNav(e)}>
+          {options.map((o) => {
+            const absent = missing(o.runtime);
+            return (
+              <button
+                key={o.runtime}
+                type="button"
+                role="radio"
+                aria-checked={o.runtime === runtime}
+                aria-label={RUNTIME_LABEL[o.runtime]}
+                className={cx("mp-level mp-runtime", absent && "mp-runtime-missing")}
+                data-tooltip={absent ? `${runtimeName(o.runtime)} isn't installed · Set up…` : RUNTIME_LABEL[o.runtime]}
+                data-tooltip-side="top"
+                onClick={() => (absent ? openSettings("runtimes") : updateSettings({ threadRuntime: o.runtime }))}
+              >
+                <RuntimeIcon runtime={o.runtime} size={15} />
+              </button>
+            );
+          })}
         </span>
       )}
     </div>
@@ -564,6 +573,14 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  // Switching runtime in the footer swaps the whole list: start over on its favorites or first provider.
+  const lastPlan = useRef(plan);
+  useEffect(() => {
+    // Wait for a list that's still arriving, so the tab isn't picked from nothing.
+    if (lastPlan.current === plan || (!providers.length && detection[plan]?.status === "checking")) return;
+    lastPlan.current = plan;
+    setTab(favModels.length ? RAIL_FAV : (providers[0] ?? RAIL_FAV));
+  }, [plan, favModels.length, providers, detection]);
 
   const q = query.trim();
   const rows: ModelInfo[] = useMemo(() => {
@@ -749,7 +766,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
                 </div>
               ))}
           </div>
-          <ThinkingRow model={current} plan={plan} />
+          <RuntimeRow />
         </div>
       </Popover>
     </div>
