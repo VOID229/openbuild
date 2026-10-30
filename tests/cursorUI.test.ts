@@ -62,7 +62,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     throw new Error("Reply did not settle");
   }
 
-  test("Cursor selector, locked label and sidebar use Cursor branding", () => {
+  test("Cursor selector and sidebar use Cursor branding without a redundant footer label", () => {
     reset();
     const html = markup(createElement(WorkspaceTop));
     expect(html).toContain('aria-label="Thread runtime: Cursor"');
@@ -74,8 +74,8 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     const chat: Chat = { id: "cursor-thread", title: "Cursor thread", runtime: "cursor", createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     reset({}, [chat]);
     const locked = markup(createElement(WorkspaceBelow, { chatId: chat.id, streaming: false }));
-    expect(locked).toContain("Cursor");
-    expect(locked).toContain("No Pi extensions");
+    expect(locked).not.toContain("No Pi extensions");
+    expect(locked).not.toContain("lucide-lock-keyhole");
     expect(locked).not.toContain('aria-haspopup="listbox"');
     useStore.setState((s) => ({ view: { ...s.view, runtime: "cursor" } }));
     expect(markup(createElement(Sidebar))).toContain('title="Native Cursor runtime"');

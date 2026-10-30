@@ -3,7 +3,7 @@ import { ThreadAccountSelect } from "./RuntimeAccounts";
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, LockKeyhole, Plus, Search, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
@@ -578,9 +578,6 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
   const branch = info?.branch ?? workspace?.branch;
   return (
     <div className="ws-bottom">
-      <span className="ws-chip" data-tooltip={runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "This thread uses Pi. Runtime cannot be changed after the first send."} data-tooltip-side="top">
-        <LockKeyhole size={13} /> {runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "fx" ? "fx" : runtime === "codex" ? "Codex" : "Pi"}
-      </span>
       {workspace && (
         <span className="ws-where" title={workspace.cwd}>
           <span className="ws-chip" data-tooltip={workspace.deviceId ? `Runs on ${deviceName(workspace.deviceId) ?? "a paired device"}` : undefined} data-tooltip-side="top">

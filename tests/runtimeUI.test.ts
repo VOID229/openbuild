@@ -174,13 +174,14 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
   expect(opencode).toContain('fill-rule="evenodd"');
 });
 
-test("existing threads have a locked runtime label even before workspace preparation", () => {
+test("existing threads omit the redundant runtime chip and never offer a runtime picker", () => {
   for (const runtime of [undefined, "pi", "durable", "fx", "codex", "cursor", "claude", "opencode"] as const) {
     reset({ threadRuntime: "durable" }, [thread(runtime)]);
     const html = markup(createElement(WorkspaceBelow, { chatId: "runtime-test", streaming: false }));
-    expect(html).toContain(runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "durable" ? "Durable" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Pi");
+    expect(html).not.toContain("Runtime cannot be changed");
+    expect(html).not.toContain("lucide-lock-keyhole");
     expect(html).not.toContain('aria-haspopup="listbox"');
-    expect(html).toContain("Runtime");
+    expect(html).toContain('aria-label="Open a terminal here"');
   }
 });
 
