@@ -639,8 +639,19 @@ svg {
 /* A folder path field's completion list (src/components/PathField.tsx): as wide as the field, with
    the folder names in the same mono face as the path being typed. */
 .path-menu {
+  display: flex;
+  flex-direction: column;
   min-width: 220px;
   max-height: min(300px, 50vh);
+  padding: 0;
+  overflow: hidden;
+}
+
+/* The folders scroll on their own; the hint below stays put as the list's footer. */
+.path-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 6px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -664,13 +675,10 @@ svg {
 }
 
 .path-hint {
-  position: sticky;
-  bottom: 0;
-  margin: 4px -6px -6px;
-  padding: 6px 12px;
+  flex: none;
+  margin: 0;
+  padding: 6px 16px;
   border-top: 1px solid var(--border);
-  border-radius: 0 0 12px 12px;
-  background: var(--surface);
   font-size: 11.5px;
   color: var(--text-3);
   white-space: nowrap;

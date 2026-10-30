@@ -163,30 +163,32 @@ export function PathField({ value, onChange, deviceId, className, label, placeho
         }}
       />
       <Popover open={shown} onClose={() => setOpen(false)} anchor={input} className="menu path-menu" role="listbox" label={`Folders in ${parts.dir}`} fixed="auto" style={width ? { width } : undefined}>
-        {matches.map((name, i) => {
-          const entry = byName.get(name);
-          return (
-            <button
-              key={name}
-              id={`${listId}-${i}`}
-              type="button"
-              role="option"
-              aria-selected={i === chosen}
-              className={cx("menu-item path-item", i === chosen && "path-item-active")}
-              // Keep the focus in the field, so the form's blur (and the list) behave while picking.
-              onMouseDown={(e) => {
-                e.preventDefault();
-                complete(i);
-              }}
-              onMouseEnter={() => {
-                if (picked) setActive(i);
-              }}
-            >
-              {entry?.git ? <FolderGit2 size={15} className="path-icon" /> : <Folder size={15} className="path-icon" />}
-              <span className="menu-item-label">{name}</span>
-            </button>
-          );
-        })}
+        <div className="path-list">
+          {matches.map((name, i) => {
+            const entry = byName.get(name);
+            return (
+              <button
+                key={name}
+                id={`${listId}-${i}`}
+                type="button"
+                role="option"
+                aria-selected={i === chosen}
+                className={cx("menu-item path-item", i === chosen && "path-item-active")}
+                // Keep the focus in the field, so the form's blur (and the list) behave while picking.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  complete(i);
+                }}
+                onMouseEnter={() => {
+                  if (picked) setActive(i);
+                }}
+              >
+                {entry?.git ? <FolderGit2 size={15} className="path-icon" /> : <Folder size={15} className="path-icon" />}
+                <span className="menu-item-label">{name}</span>
+              </button>
+            );
+          })}
+        </div>
         <p className="path-hint" aria-hidden>
           Tab completes · {chosen === undefined ? "↑↓ picks" : "↵ opens"}
         </p>
