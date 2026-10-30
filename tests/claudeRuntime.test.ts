@@ -14,7 +14,7 @@ const original = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env
 Object.assign(process.env, vars);
 // Imported after the environment points storage and the CLI at the fixture.
 const { forgetModels, listModels, listPermissions, status, toModel } = await import("../server/claude/install");
-const { answer, hasAsk, release, runTurn } = await import("../server/claude/sessions");
+const { answer, hasAsk, release, runTurn, steer, canSteer } = await import("../server/claude/sessions");
 const { doneEvent, startEvent } = await import("../server/claude/tools");
 afterAll(() => { forgetModels(); for (const [k, v] of Object.entries(original)) if (v === undefined) delete process.env[k]; else process.env[k] = v; rmSync(directory, { recursive: true, force: true }); });
 
@@ -220,3 +220,28 @@ test("editing an earlier message forks Claude's session at that point instead of
   expect(text(after)).toBe("reply 3 to fourth");
   release(req.threadId);
 });
+
+ test("native steering carries images, records messages once, resumes and rewinds after steers", async () => {
+  const req = request("slow steering");
+  const releaseFile = join(directory, "steer-release");
+  process.env.FAKE_RELEASE = releaseFile;
+  process.env.FAKE_TOOL_EFFECTS = join(directory, "steer-tool");
+  const events: StreamEvent[] = [];
+  const running = collect(req, e => events.push(e));
+  for (let i = 0; i < 300 && !events.some(e => e.t === "text"); i++) await Bun.sleep(10);
+  expect(canSteer(req.threadId)).toBe(true);
+  expect(await steer(req.threadId, "s1", "change direction", [{data:"aGVsbG8=",mimeType:"image/png"}])).toEqual({handled:false});
+  await steer(req.threadId, "s2", "also this");
+  for (let i = 0; i < 300 && events.filter(e => e.t === "steer").length < 2; i++) await Bun.sleep(10);
+  expect(events.filter(e => e.t === "steer")).toEqual([{t:"steer",id:"s1",text:"change direction"},{t:"steer",id:"s2",text:"also this"}]);
+  writeFileSync(releaseFile, "go");
+  expect((await running).some(e => e.t === "error")).toBe(false);
+  expect(canSteer(req.threadId)).toBe(false);
+  await expect(steer(req.threadId,"late","late")).rejects.toThrow("isn't working");
+  release(req.threadId);
+  const next = await collect({...req, message:"after steers", prior:3});
+  expect(text(next)).toBe("reply 4 to after steers");
+  expect(next.some(e => e.t === "error")).toBe(false);
+  release(req.threadId);
+  delete process.env.FAKE_RELEASE; delete process.env.FAKE_TOOL_EFFECTS;
+ });

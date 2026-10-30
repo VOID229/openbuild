@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { PiChatRequest, StreamEvent } from "../shared/types";
 import { CursorProtocol, toolEvent } from "../server/cursor/protocol";
 import { forgetModels, listModels, listPermissions, modelSlug, parseHelp, parseModels, permissionModes, status } from "../server/cursor/install";
-import { answer, hasAsk, runTurn, sessionPath } from "../server/cursor/sessions";
+import { answer, hasAsk, runTurn, sessionPath, steer, canSteer } from "../server/cursor/sessions";
 import { FAKE_CURSOR } from "./cursorFixture";
 const directory = mkdtempSync(join(tmpdir(), "ob-cursor-unit-"));
 const fake = join(directory, "cursor");
@@ -166,4 +166,48 @@ test("Cursor graceful cancellation checkpoints without replay", async () => {
   await Bun.sleep(25); abort.abort();
   expect((await promise).find(e => e.t === "done").finish).toBe("aborted");
   expect((await collect({ ...req, prior: 1, message: "after cancel" })).some(e => e.t === "done")).toBe(true);
+});
+
+test("Cursor injects queued steering through a native tool hook and resumes with correct history", async () => {
+  rmSync(vars.FAKE_RELEASE, {force:true});
+  const req = request("steering work");
+  const running = collect(req);
+  for (let i = 0; i < 300 && !canSteer(req.threadId); i++) await Bun.sleep(10);
+  expect(canSteer(req.threadId)).toBe(true);
+  await expect(steer(req.threadId,"image","image",[{data:"aA==",mimeType:"image/png"}])).rejects.toThrow("image attachments");
+  await steer(req.threadId,"s1","new direction");
+  await steer(req.threadId,"s2","also this");
+  writeFileSync(vars.FAKE_RELEASE, "go");
+  const events = await running;
+  expect(events.filter(e => e.t === "steer")).toEqual([{t:"steer",id:"s1",text:"new direction"},{t:"steer",id:"s2",text:"also this"}]);
+  expect(events.filter(e => e.t === "text").map(e => e.v).join("")).toContain("new direction");
+  expect(canSteer(req.threadId)).toBe(false);
+  expect((await collect({...req, prior:3, message:"after steering"})).some(e => e.t === "error")).toBe(false);
+});
+
+test("Cursor hook delivery waits for the root and never continues an aborted turn", async () => {
+  const {createQuestions} = await import("../server/cursor/questions");
+  const events: StreamEvent[] = [];
+  const bridge = createQuestions(e => events.push(e));
+  try {
+    const hooks = JSON.parse(readFileSync(join(bridge.pluginDir,"hooks","hooks.json"),"utf8"));
+    async function hook(name: string, input: unknown) {
+      const child = Bun.spawn(["sh","-c",hooks.hooks[name][0].command],{stdin:"pipe",stdout:"pipe",stderr:"pipe"});
+      child.stdin.write(JSON.stringify(input)); child.stdin.end();
+      const output = JSON.parse(await new Response(child.stdout).text());
+      expect(await child.exited).toBe(0);
+      return output;
+    }
+    bridge.steer("pending","follow up");
+    expect(await hook("postToolUse",{subagent_id:"child"})).toEqual({});
+    expect(await hook("stop",{status:"aborted"})).toEqual({});
+    expect(events).toEqual([]);
+    expect(await hook("stop",{status:"completed"})).toEqual({followup_message:"follow up"});
+    expect(await hook("postToolUse",{})).toEqual({});
+    expect(events).toEqual([{t:"steer",id:"pending",text:"follow up"}]);
+    bridge.steer("failed-tool","try another approach");
+    expect(await hook("postToolUseFailure",{})).toEqual({additional_context:"try another approach"});
+    bridge.steer("cancelled","do not deliver"); bridge.stopSteering();
+    expect(await hook("stop",{status:"completed"})).toEqual({});
+  } finally {bridge.close();}
 });

@@ -234,7 +234,7 @@ test("OpenCode native selection is device-scoped and never borrows Pi models or 
   expect(useStore.getState().settings.nativeSelections?.opencode?.[""]).toEqual({ plan: "opencode", id });
   expect(hasPermissionModes("opencode")).toBe(false);
   expect(permissionOf(useStore.getState())).toBeUndefined();
-  expect(canSteer("opencode")).toBe(false);
+  expect(canSteer("opencode")).toBe(true);
 });
 
 test("OpenCode loads and refreshes its own models, preserving cached models on errors", async () => {

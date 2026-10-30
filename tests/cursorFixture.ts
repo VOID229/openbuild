@@ -37,7 +37,7 @@ process.on('SIGINT',()=>{ writeFileSync(db,previous+'aborted\n'); process.exit(1
 if (prompt === 'bad stream') { console.log('not json'); setInterval(()=>{},1000); }
 else {
  out({type:'assistant',message:{role:'assistant',content:[{type:'text',text:'Started-'}]}});
- if (prompt === 'work once') while (!existsSync(process.env.FAKE_RELEASE)) await Bun.sleep(25);
+ if (prompt === 'work once' || prompt === 'steering work') while (!existsSync(process.env.FAKE_RELEASE)) await Bun.sleep(25);
  if (prompt === 'wait') while (true) await Bun.sleep(25);
  const command = "printf 'once\\n' >> \\\"$FAKE_TOOL_EFFECTS\\\"";
  const tool = {shellToolCall:{args:{command:'printf hi',workingDirectory:cwd},result:{success:{stdout:'hi\n',stderr:'',exitCode:0}}}};
@@ -45,6 +45,15 @@ else {
  const executed = Bun.spawnSync(['sh','-c', 'printf "once\\n" >> "$FAKE_TOOL_EFFECTS"']);
  if (executed.exitCode !== 0) throw new Error('Fixture shell failed');
  out({type:'tool_call',subtype:'completed',call_id:'tool-1',tool_call:tool});
+ if (prompt === 'steering work') {
+   const hooks = JSON.parse(readFileSync(join(pluginDir,'hooks','hooks.json'),'utf8'));
+   const hook = Bun.spawn(['sh','-c',hooks.hooks.postToolUse[0].command],{stdin:'pipe',stdout:'pipe',stderr:'pipe'});
+   hook.stdin.write(JSON.stringify({tool_name:'Shell',tool_output:'ok'})); hook.stdin.end();
+   const injected = await new Response(hook.stdout).text();
+   if (await hook.exited !== 0) throw new Error('Steering hook failed: ' + await new Response(hook.stderr).text());
+   appendFileSync(db, injected);
+   out({type:'assistant',message:{role:'assistant',content:[{type:'text',text:injected}]}});
+ }
  out({type:'assistant',message:{role:'assistant',content:[{type:'text',text:previous ? 'resumed saved thread' : 'finished offline'}]}});
  writeFileSync(db,previous+prompt+'\n');
  out({type:'result',subtype:'success',is_error:false,result:'Started-'+(previous ? 'resumed saved thread':'finished offline'),usage:{inputTokens:3,outputTokens:4,cacheReadTokens:2,cacheWriteTokens:1}});

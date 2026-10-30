@@ -51,6 +51,9 @@ class Inbox implements AsyncIterable<SDKUserMessage> {
 }
 
 interface Turn {
+  steers: Map<string, { id: string; text: string }>;
+  settled: boolean;
+  awaiting: Set<string>;
   emit: (e: StreamEvent) => void;
   onMessage: (m: SDKMessage) => void;
   fail: (e: Error) => void;
@@ -87,6 +90,17 @@ export function answer(id: string, askId: string, reply: Reply): boolean {
   l.asks.delete(askId); p.reply(reply);
   l.turn?.emit({ t: "asked", id: askId, answer: reply.cancelled ? undefined : reply.value ?? (reply.confirmed ? "Allow once" : undefined) });
   return true;
+}
+/** Submit native streaming input while the current reply is active. */
+export const canSteer = (id: string) => !!live.get(id)?.turn && !live.get(id)!.turn!.settled;
+export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  const l = live.get(id);
+  if (!l?.turn || l.turn.settled || l.exited) throw new Error("Claude Code isn't working on this thread");
+  const input = userMessage({ message, images }, l.sessionId);
+  l.turn.awaiting.add(input.uuid!);
+  l.turn.steers.set(input.uuid!, { id: steerId, text: message });
+  l.inbox.push(input);
+  return { handled: false };
 }
 export function release(id: string) {
   const l = live.get(id);
@@ -178,6 +192,7 @@ async function open(req: PiChatRequest, s: Saved, start: { thinkingOff: boolean;
       model: start.row.value,
       systemPrompt: { type: "preset", preset: "claude_code", append: QUESTION_INSTRUCTIONS },
       includePartialMessages: true,
+      extraArgs: { "replay-user-messages": null },
       canUseTool: permissions(req.threadId),
       ...(start.bypass ? { allowDangerouslySkipPermissions: true } : {}),
       ...(start.thinkingOff ? { thinking: { type: "disabled" as const } } : start.row.supportsAdaptiveThinking ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),
@@ -200,7 +215,7 @@ async function open(req: PiChatRequest, s: Saved, start: { thinkingOff: boolean;
   return l;
 }
 
-const userMessage = (req: PiChatRequest, sessionId: string): SDKUserMessage => ({
+const userMessage = (req: Pick<PiChatRequest, "message" | "images">, sessionId: string): SDKUserMessage => ({
   type: "user",
   session_id: sessionId,
   parent_tool_use_id: null,
@@ -291,10 +306,20 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           };
           const contextOf = (u: any) => u ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) + (u.output_tokens ?? 0) : undefined;
           proc.turn = {
+            steers: new Map(),
+            awaiting: new Set(),
+            settled: false,
             emit: send,
             fail: (e) => fail(e),
             onMessage: (m: any) => {
               const sub = m.parent_tool_use_id ?? null;
+              if (!sub && m.type === "user" && proc.turn?.steers.has(m.uuid)) {
+                const item = proc.turn.steers.get(m.uuid)!;
+                proc.turn.steers.delete(m.uuid);
+                const state = saved(req.threadId)!;
+                save(req.threadId, { ...state, turns: state.turns + 1, anchors: [...state.anchors, anchor] });
+                send({ t: "steer", id: item.id, text: item.text });
+              }
               if (m.type === "system" && m.subtype === "init" && m.session_id && m.session_id !== s!.id) {
                 // A fork gets its own id: from here on the thread follows the new transcript.
                 s = { ...s!, id: m.session_id }; save(req.threadId, s); proc.sessionId = m.session_id;
@@ -334,13 +359,18 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
                 if (windows.length) usage.contextWindow = Math.max(...(windows as number[]));
                 send({ t: "usage", usage: { ...usage } });
                 if (req.speed === FAST && m.fast_mode_state && m.fast_mode_state !== "on") send({ t: "notice", message: m.fast_mode_state === "cooldown" ? "Fast mode is cooling down after a rate limit; this reply used standard speed." : `Fast mode wasn't used${m.fast_mode_disabled_reason ? ` (${m.fast_mode_disabled_reason.replace(/_/g, " ")})` : ""}.` });
-                finish(m);
+                // An input arriving at the end may start another native turn. Keep this
+                // reply attached until Claude acknowledges all submitted inputs.
+                const answered: string[] = m.user_message_uuids ?? (m.user_message_uuid ? [m.user_message_uuid] : []);
+                for (const uuid of answered) proc.turn!.awaiting.delete(uuid);
+                if (aborted || m.is_error || (!proc.turn!.steers.size && (!answered.length || !proc.turn!.awaiting.size))) { proc.turn!.settled = true; finish(m); }
               }
             },
           };
 
           onAbort = () => {
             if (aborted) return; aborted = true;
+            proc.turn!.settled = true;
             for (const id of [...proc.asks.keys()]) answer(req.threadId, id, { cancelled: true });
             void withTimeout(proc.q.interrupt(), 10_000, "the stop").catch(() => release(req.threadId));
             // Never leave a turn hanging if the CLI ignores the interrupt.
@@ -358,10 +388,10 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           finally {
             // Wherever the turn got to, a later rewind to the next message resumes from there.
             const cur = saved(req.threadId);
-            if (cur) save(req.threadId, { ...cur, anchors: [...cur.anchors.slice(0, req.prior), anchor] });
+            if (cur) save(req.threadId, { ...cur, anchors: [...cur.anchors.slice(0, req.prior), ...Array(cur.turns - req.prior).fill(anchor)] });
           }
           for (const [id, t] of tools) send({ ...t.start, status: aborted ? "error" : "done", output: aborted ? "Stopped" : t.start.output }), tools.delete(id);
-          if (aborted || signal.aborted) { send({ t: "done", finish: "aborted", usage }); return; }
+          if (aborted || signal.aborted) { release(req.threadId); send({ t: "done", finish: "aborted", usage }); return; }
           if (result.subtype !== "success" || result.is_error) throw new Error((result.errors?.length ? result.errors.join("\n") : result.result) || `Claude Code turn failed (${result.subtype})`);
           send({ t: "done", finish: "stop", usage });
         } catch (e) {

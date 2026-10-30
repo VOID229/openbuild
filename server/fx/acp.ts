@@ -111,7 +111,7 @@ export class AcpProcess {
     this.write({ jsonrpc: "2.0", id, error: { code, message } });
   }
 
-  async request<T = any>(method: string, params: unknown, timeoutMs = 60_000): Promise<T> {
+  async request<T = any>(method: string, params: unknown, timeoutMs = 60_000, onSent?: (id: number) => void): Promise<T> {
     if (this.exited) throw new FxError(`Fx isn't running (exited with code ${this.exitCode})`);
     this.lastUsed = Date.now();
     const id = this.nextId++;
@@ -124,6 +124,7 @@ export class AcpProcess {
         resolve: (r) => (clearTimeout(timer), resolve(r)),
         reject: (e) => (clearTimeout(timer), reject(e)),
       });
+      onSent?.(id);
       this.write({ jsonrpc: "2.0", id, method, params });
     });
   }

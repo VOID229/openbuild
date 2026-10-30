@@ -23,6 +23,8 @@ const PATCH_MAX = 60_000;
 
 interface Live {
   threadId: string;
+  steering?: { accepting: boolean; sessionId: string; byRpc: Map<number, FxSteer>; items: Map<string, FxSteer> };
+  supportsSteering?: boolean;
   proc: AcpProcess;
   ready: Promise<string>;
   busy: boolean;
@@ -33,6 +35,31 @@ interface Live {
   asks: Map<string, { ask: Extract<StreamEvent, { t: "ask" }>; requestId: number | string; options: PermissionOption[] }>;
   questions: Map<string, { reply: (r: QuestionReply) => void }>;
   emit?: (e: StreamEvent) => void;
+}
+
+interface FxSteer { id: string; text: string; delivered: boolean; completion?: Promise<void> }
+function consumed(l: Live, item: FxSteer) {
+  if (item.delivered) return;
+  item.delivered = true;
+  const state = saved(l.threadId);
+  if (state) save(l.threadId, { ...state, turns: state.turns + 1 });
+  l.emit?.({ t: "steer", id: item.id, text: item.text });
+}
+export const canSteer = (id: string) => !!live.get(id)?.steering?.accepting;
+export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  const l = live.get(id), turn = l?.steering;
+  if (!l || !turn?.accepting || l.proc.exited) throw new FxError("fx isn't working on this thread");
+  if (!l.supportsSteering) throw new FxError("This fx version does not advertise ACP steering; update fx first");
+  if (images?.length) throw new FxError("fx ACP steering supports text only; send images as a queued follow-up");
+  if (!message.trim() || new TextEncoder().encode(message).length > 65536) throw new FxError("fx steering requires nonempty text of at most 64 KiB");
+  const old = turn.items.get(steerId);
+  if (old) { if (old.text !== message) throw new FxError("Steering ID was reused with different input"); return { handled: false }; }
+  const item: FxSteer = { id: steerId, text: message, delivered: false };
+  turn.items.set(steerId, item);
+  item.completion = l.proc.request<any>("session/prompt", { sessionId: turn.sessionId, prompt: [{ type: "text", text: message }], _meta: { fx: { steer: true } } }, 0, rpc => turn.byRpc.set(rpc, item)).then(result => {
+    if (result?._meta?.fx?.steering === "absorbed" || (result?.stopReason && result.stopReason !== "cancelled" && result?._meta?.fx?.steering !== "dropped")) consumed(l, item);
+  }).catch(error => { l.emit?.({ t: "notice", message: `fx steering: ${error.message}. Undelivered input stays queued.` }); });
+  return { handled: false };
 }
 
 interface ConfigOption {
@@ -48,7 +75,7 @@ interface PermissionOption {
 }
 
 const hot = globalThis as { openbuildFxLive?: Map<string, Live>; openbuildFxReaper?: ReturnType<typeof setInterval> };
-const live = (hot.openbuildFxLive ??= new Map());
+const live: Map<string, Live> = (hot.openbuildFxLive ??= new Map());
 if (hot.openbuildFxReaper) clearInterval(hot.openbuildFxReaper);
 hot.openbuildFxReaper = setInterval(() => {
   for (const [id, l] of live) {
@@ -146,7 +173,8 @@ function ensure(threadId: string, cwd: string): Live {
     }
   });
   l.ready = (async () => {
-    await proc.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } } }, 30_000);
+    const init = await proc.request("initialize", { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false, elicitation: { form: {} } } }, 30_000);
+    l.supportsSteering = init?.agentCapabilities?._meta?.fx?.steering === true;
     const s = saved(threadId);
     let sessionId: string | undefined;
     if (s && s.cwd === cwd) {
@@ -386,6 +414,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         off?.();
         if (onAbort) signal.removeEventListener("abort", onAbort);
         if (l && free) {
+          l.steering = undefined;
           l.busy = false;
           cancelQuestions(l);
           // Questions nobody answered are void once the turn is over.
@@ -442,6 +471,11 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (m.method !== "session/update" || m.params?.sessionId !== sessionId) return;
           const u = m.params.update ?? {};
           switch (u.sessionUpdate) {
+            case "user_message_chunk": {
+              const item = l!.steering?.byRpc.get(u._meta?.fx?.steering?.requestId);
+              if (item) consumed(l!, item);
+              break;
+            }
             case "agent_message_chunk": {
               const text = u.content?.type === "text" ? String(u.content.text ?? "") : "";
               if (!text) break;
@@ -532,18 +566,21 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           prevOff();
           offExit();
         };
-        onAbort = () => { cancelQuestions(l!); proc.notify("session/cancel", { sessionId }); };
+        onAbort = () => { if (l!.steering) l!.steering.accepting = false; cancelQuestions(l!); proc.notify("session/cancel", { sessionId }); };
         signal.addEventListener("abort", onAbort, { once: true });
 
         const prompt: unknown[] = [{ type: "text", text: QUESTION_NOTE }];
         for (const image of req.images ?? []) prompt.push({ type: "image", mimeType: image.mimeType, data: image.data });
         prompt.push({ type: "text", text: req.message });
         save(req.threadId, { id: sessionId, cwd: req.cwd, turns: Math.max(req.prior, s?.turns ?? 0) + 1 });
+        l.steering = { accepting: true, sessionId, byRpc: new Map(), items: new Map() };
         const result = await proc.request<{ stopReason?: string; usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } }>(
           "session/prompt",
           { sessionId, prompt },
           0,
         );
+        l.steering.accepting = false;
+        await Promise.all([...l.steering.items.values()].map(item => item.completion));
         // Give trailing notifications (usage) a moment to arrive.
         await new Promise((r) => setTimeout(r, 50));
         const u = result?.usage;

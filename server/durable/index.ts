@@ -7,7 +7,6 @@
  */
 import type { PiChatRequest } from "../../shared/types";
 import { DurableClient } from "./remote";
-import { DurableUnsupportedError } from "./runtime";
 
 export { DurableRun } from "./remote";
 export { DurableRuntime, DurableUnsupportedError } from "./runtime";
@@ -23,6 +22,4 @@ export const stopThread = (threadId: string) => client.stopThread(threadId);
 /** Call on server startup, not on first client reconnect. */
 export const recover = () => client.recover();
 export const compact = (threadId: string, instructions?: string) => client.compact(threadId, instructions);
-export async function steer(_threadId: string, _steerId: string, _message: string, _images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
-  throw new DurableUnsupportedError("Durable steering is not yet supported");
-}
+export const steer = (threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) => client.steer(threadId, steerId, message, images);

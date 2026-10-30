@@ -337,12 +337,12 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
   );
 }
 
-const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands, extensions, or steering. Runtime is fixed once a thread starts.";
-const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions, slash commands or steering. Runtime is fixed once a thread starts.";
-const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
-const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
-const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
-const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction, shell commands or steering. Runtime is fixed once a thread starts.";
+const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands or extensions. Runtime is fixed once a thread starts.";
+const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions or slash commands. Steering accepts text only. Runtime is fixed once a thread starts.";
+const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
+const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Steering uses tool hooks (or a follow-up at completion). Runtime is fixed once a thread starts.";
+const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
+const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
 const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
 export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
   return runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;

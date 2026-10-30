@@ -362,11 +362,7 @@ export function piRoutes(api: Api) {
           return bad("Expected { steerId, message, images? }");
         }
         try {
-          if (threadRuntime(req.params.id) === "durable") return bad("Steering isn't available in Durable threads yet.");
-          if (threadRuntime(req.params.id) === "fx") return bad("Steering isn't available in fx threads yet.");
-          if (threadRuntime(req.params.id) === "cursor") return bad("Steering isn't available in Cursor threads yet.");
-          if (threadRuntime(req.params.id) === "claude") return bad("Steering isn't available in Claude Code threads yet.");
-          if (threadRuntime(req.params.id) === "opencode") return bad("Steering isn't available in OpenCode threads yet.");
+          if (threadRuntime(req.params.id) === "durable") return Response.json(await durable.steer(req.params.id, body.steerId, body.message, body.images));
           return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
         } catch (err) {
           return fail(err, 409);

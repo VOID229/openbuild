@@ -70,3 +70,7 @@ This is ordinary detached execution, not a checkpointable Durable runtime or an 
 `bun test tests/cursorRuntime.test.ts tests/cursorQuestions.test.ts tests/cursorServerRestart.test.ts`
 
 Fixtures reproduce inspected NDJSON/protobuf shapes without a model/external-network dependency. The fake CLI also loads the actual temporary plugin config and asks/receives a question over real loopback HTTP. Transport tests cover MCP initialize/tool discovery, free-text answers, cancellation, capability isolation, malformed/oversized requests and listener/plugin cleanup. They do not prove a real Cursor model's tool selection or native permission approval. Tests cover catalog validation, no duplicate aggregate text, structured/failed tools, prior/fork/workspace/native-history guards, malformed streams, graceful cancellation, real HTTP shutdown, once-only shell effects while offline, output projection/replay, stable-ID deduplication, runtime locking, and saved native resume after a fresh worker starts.
+
+## Steering
+
+Steer queues text into the temporary per-turn plugin. Cursor receives it through native `postToolUse`/`postToolUseFailure` hook context after a tool finishes; if no tool follows, the `stop` hook requests a follow-up on completion. It does not interrupt tools. No user/project hook settings are changed. Images remain unsupported. Undelivered messages return to the queue. Native policy and other hooks can prevent delivery.

@@ -140,7 +140,7 @@ interface TrayProps {
   steering: Queued[];
   onEdit: (item: Queued) => void;
   onFinish: (save: boolean) => void;
-  /** A reply is coming in, so a message can interrupt it, or (Pi, Codex) steer it. */
+  /** A reply is coming in, so a message can interrupt it, steer it when the runtime supports it. */
   live?: "steer" | "other";
   onError: (message: string) => void;
 }

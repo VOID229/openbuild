@@ -244,7 +244,7 @@ export class PiWorkerRuntime {
     return cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
   steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
-    return codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
+    return fx.canSteer(threadId) ? fx.steer(threadId, steerId, message, images) : cursor.canSteer(threadId) ? cursor.steer(threadId, steerId, message, images) : claude.canSteer(threadId) ? claude.steer(threadId, steerId, message, images) : opencode.canSteer(threadId) ? opencode.steer(threadId, steerId, message, images) : codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
   }
   compact = sessions.compact;
   release(threadId: string) { this.stopThread(threadId); sessions.release(threadId); fx.release(threadId); codex.release(threadId); cursor.release(threadId); claude.release(threadId); opencode.release(threadId); }

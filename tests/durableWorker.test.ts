@@ -136,3 +136,21 @@ test("the worker is started detached and a new server process reuses it", async 
   process.kill(state.pid, "SIGTERM");
   rmSync(dir, { recursive: true, force: true });
 }, 60_000);
+
+test("steering forwards through the worker and survives server reattachment", async () => {
+  await waitForWorker();
+  const first = new DurableClient(directory, socket);
+  const req = {...request("worker-steer", "worker-steering-thread"),model:modelName};
+  const run = await first.startRun(req);
+  await first.steer(req.threadId,"s1","change direction",[{data:"aGk=",mimeType:"image/png"}]);
+  first.close();
+  const second = new DurableClient(directory, socket);
+  try {
+    const attached = (await second.findRun(run.id))!;
+    await until(()=>attached.ended);
+    expect(attached.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"s1",text:"change direction"}]);
+    const next = await second.startRun({...req,prior:2,message:"next",stream:{id:"worker-after-steer"}});
+    await until(()=>next.ended);
+    expect(next.events.some(e=>e.t==="error")).toBe(false);
+  } finally {second.close();}
+},30000);

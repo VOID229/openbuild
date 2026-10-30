@@ -23,7 +23,9 @@ import { dataDir } from "../paths";
 import { agentDir, packageRoot } from "../pi/install";
 import { addUsage } from "../pi/usage";
 
+interface DurableSteer { id: string; text: string; images?: PiChatRequest["images"] }
 interface Manifest {
+  steers?: DurableSteer[];
   version: 1;
   id: string;
   request: PiChatRequest;
@@ -249,12 +251,50 @@ export class DurableRuntime {
     }
     if (events.length) this.emit(m, events);
   }
+  private submitSteer(root: Conversation, m: Manifest, item: DurableSteer) {
+    const content = item.images?.length
+      ? [{ type: "text" as const, text: item.text }, ...item.images.map(image => ({ type: "image" as const, ...image }))]
+      : item.text;
+    return root.submit({ type: "input", content, whenBusy: "steer", requestId: JSON.stringify(["openbuild-steer", m.id, item.id]),
+      entry: { kind: "openbuild.steer", data: { run: m.id, id: item.id, text: item.text } } }, context);
+  }
+  async steer(threadId: string, id: string, text: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+    if (this.closed) throw new Error("Durable runtime is closed");
+    await this.recover();
+    return this.serial("$admission", async () => {
+      if (this.deleted(threadId)) throw new DurableUnsupportedError("This durable thread was deleted");
+      const input: DurableSteer = { id, text, ...(images?.length ? { images: images.map(i => ({ data: i.data, mimeType: i.mimeType })) } : {}) };
+      const previous = [...this.manifests.values()].findLast(m => m.request.threadId === threadId && m.steers?.some(s => s.id === id));
+      if (previous) {
+        if (!isDeepStrictEqual(previous.steers!.find(s => s.id === id), input)) throw new DurableUnsupportedError("Steering ID was reused with different input");
+        if (previous.events.some(e => e.t === "steer" && e.id === id)) return { handled: false };
+        if (!previous.ended) {
+          if (previous.stopping) throw new DurableUnsupportedError("Durable is stopping this thread");
+          await this.submitSteer((await this.thread(threadId)).root, previous, input);
+          return { handled: false };
+        }
+        // Stop withdrew this unread input. Its queue item can steer a later run.
+      }
+      const m = [...this.manifests.values()].find(m => m.request.threadId === threadId && !m.ended && !m.stopping);
+      if (!m) throw new DurableUnsupportedError("Durable isn't working on this thread");
+      const { root } = await this.thread(threadId);
+      (m.steers ??= []).push(input);
+      try { this.persist(m); } // intent survives either side of upstream's idempotent submit
+      catch (error) { m.steers!.pop(); throw error; }
+      await this.submitSteer(root, m, input);
+      return { handled: false };
+    });
+  }
   private project(m: Manifest, entries: readonly EntryRecord[]) {
     const skip = new Set([...m.baseline, ...m.seen]);
     for (const entry of entries) {
       if (skip.has(entry.id)) continue;
       const events: StreamEvent[] = [];
       let pageIndex = 0;
+      if (entry.kind === "openbuild.steer") {
+        const data = entry.data as { run?: string; id?: string; text?: string } | undefined;
+        if (data?.run === m.id && m.steers?.some(item => item.id === data.id)) events.push({ t: "steer", id: data.id, text: data.text ?? "" });
+      }
       for (const message of entry.model ?? []) {
         const html = new HtmlDelivery(event => events.push(event), () => `html-${entry.id}-${pageIndex++}`);
         if (message.role === "assistant") {
@@ -306,25 +346,33 @@ export class DurableRuntime {
     // replay instead of terminalizing, and upstream dedupes the requestId.
     m.submitted = true;
     this.persist(m);
+    if (!m.stopping) for (const item of m.steers ?? []) await this.submitSteer(root, m, item);
     harness.resume();
     if (m.stopping) await root.abort(context);
     void (async () => {
       try {
         const result = await submission.wait(context);
-        if (m.ended) return;
-        // Acquire a fresh snapshot after wait: the asynchronous watch may not yet have delivered the answer.
-        const final = await root.watch(context);
-        if (m.ended) { await final.stop(); return; }
-        this.project(m, final.value.entries);
-        await final.stop();
-        if (m.ended) return;
-        if (result.status === "unanswered" && !m.stopping) m.events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
-        this.dismissQuestions(m);
-        m.events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
-        m.ended = true;
-        this.persist(m);
-        for (const event of m.events.slice(run.events.length)) run.push(event);
-        run.end();
+        while (!m.ended) {
+          const count = m.steers?.length ?? 0;
+          // A late steer can start a continuation after the original input settles.
+          // Keep the reply open until every admitted input has settled.
+          if (!m.stopping) await Promise.all((m.steers ?? []).map(async item => (await this.submitSteer(root, m, item)).wait(context)));
+          const ended = await this.serial("$admission", async () => {
+            if (m.ended) return true;
+            if ((m.steers?.length ?? 0) !== count) return false;
+            const final = await root.watch(context);
+            try { this.project(m, final.value.entries); } finally { await final.stop(); }
+            if (result.status === "unanswered" && !m.stopping) m.events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
+            this.dismissQuestions(m);
+            m.events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
+            m.ended = true;
+            this.persist(m);
+            for (const event of m.events.slice(run.events.length)) run.push(event);
+            run.end();
+            return true;
+          });
+          if (ended) break;
+        }
       } catch (error) {
         // Close/crash is NOT a terminal run. Leave metadata pending for automatic recovery.
         if (!this.closed) console.error("Durable run paused; reopen to recover", m.id, error);
@@ -384,7 +432,7 @@ export class DurableRuntime {
       // Rejected admissions (busy/model/workspace errors) can leave extra user turns in the UI.
       // They never entered Durable's transcript. A larger UI count is therefore harmless: submit
       // only this new input against the server-owned history. A smaller count is still a rewind.
-      if (req.prior < previous.length) throw new DurableUnsupportedError("Durable history rewinds/imports are not supported; start a new thread");
+      if (req.prior < previous.length + previous.reduce((n, m) => n + m.events.filter(e => e.t === "steer").length, 0)) throw new DurableUnsupportedError("Durable history rewinds/imports are not supported; start a new thread");
       const separator = req.model.indexOf("/");
       if (separator < 1 || !(await this.getModels()).getModel(req.model.slice(0, separator), req.model.slice(separator + 1))) {
         throw new Error(`Durable model is not available in Pi's configured ModelRuntime: ${req.model}`);
@@ -415,16 +463,16 @@ export class DurableRuntime {
   }
   async stopRun(id: string): Promise<boolean> {
     await this.recover();
-    const m = this.manifests.get(id);
-    if (!m) return false;
-    if (!m.ended) {
-      m.stopping = true; this.persist(m);
-      // A run with no live drive (for example an admission failure from an earlier process) cannot
-      // be aborted: end it, so Stop actually unsticks the thread.
-      if (!this.driving.has(m.id)) this.retire(m);
-      else await (await this.thread(m.request.threadId)).root.abort(context);
-    }
-    return true;
+    return this.serial("$admission", async () => {
+      const m = this.manifests.get(id);
+      if (!m) return false;
+      if (!m.ended) {
+        m.stopping = true; this.persist(m);
+        if (!this.driving.has(m.id)) this.retire(m);
+        else await (await this.thread(m.request.threadId)).root.abort(context);
+      }
+      return true;
+    });
   }
   /** Deletion fence: permanent, persisted before cancellation, never inferred from missing chat metadata. */
   async stopThread(threadId: string): Promise<void> {

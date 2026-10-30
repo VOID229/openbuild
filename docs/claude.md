@@ -67,7 +67,7 @@ Unlike Codex and Cursor, Claude Code threads can **retry or edit an earlier mess
 
 ## Limits
 
-- No Pi extensions, Pi slash commands, `/compact`, `!` shell commands or steering in Claude Code threads.
+- No Pi extensions, Pi slash commands, `/compact`, `!` shell commands in Claude Code threads.
 - Forking a thread into a new thread isn't supported; retry/edit within the thread instead.
 - If Claude's saved transcript is deleted, the thread refuses to continue rather than starting over silently. Start a new thread.
 
@@ -76,3 +76,7 @@ Unlike Codex and Cursor, Claude Code threads can **retry or edit an earlier mess
 `bun test tests/claudeRuntime.test.ts tests/claudeServerRestart.test.ts`
 
 A fake `CLAUDE_BIN` (`tests/claudeFixture.ts`) speaks the stream-json control protocol captured from Claude Code 2.1.311 under the Agent SDK. No model, network or sign-in is needed. The tests cover model/effort/fast-mode discovery and application, clearing fast mode, permission modes from the settings layers, approvals (including "for this session" scope), native question instructions/answers in default and bypass modes, custom text, multiple questions, dismissal/malformed input/Stop, tool-row mapping and diffs, history guards, rewind, resume after a process restart, and a real HTTP server SIGTERM with offline completion, replay, de-duplicated admission and a resumed follow-up.
+
+## Steering
+
+Queued messages can be sent with **Steer** while a reply runs. Native input is submitted without replaying the original prompt; steered messages count toward the saved user history. Images are included. New and idle threads move to a worker that supports native steering; already-running older workers finish normally.

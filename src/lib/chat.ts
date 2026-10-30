@@ -123,8 +123,8 @@ export function interruptWith(chatId: string, id: string) {
   stopGeneration(chatId);
 }
 
-/** Runtimes that can take a message into a running reply (Pi's steer, Codex's turn/steer). */
-export const canSteer = (runtime: string | undefined) => runtime === "pi" || runtime === "codex";
+/** Runtimes with native streaming input, steering APIs, or tool-boundary hook delivery. */
+export const canSteer = (runtime: string | undefined) => runtime === "pi" || runtime === "codex" || runtime === "claude" || runtime === "opencode" || runtime === "cursor" || runtime === "fx" || runtime === "durable";
 
 /**
  * Hand a queued message to the agent's running reply; Pi reads it once its current step is done. If the

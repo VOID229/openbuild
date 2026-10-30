@@ -17,7 +17,7 @@ if (!process.env.OB_OPENCODE_ADAPTER_TEST_CHILD) {
     } finally { rmSync(data, { recursive: true, force: true }); }
   }, 30_000);
 } else {
-const { runTurn, answer, hasAsk, release, restartIdle, questionPrompt } = await import("../server/opencode-agent/sessions");
+const { runTurn, answer, hasAsk, release, restartIdle, questionPrompt, steer, canSteer } = await import("../server/opencode-agent/sessions");
 const cwd = mkdtempSync(join(tmpdir(), "ob-opencode-adapter-"));
 const original = { url: process.env.OPENCODE_SERVER_URL, password: process.env.OPENCODE_SERVER_PASSWORD };
 const sessions = new Map<string, { id: string; location: { directory: string }; messages: any[] }>();
@@ -232,4 +232,26 @@ test("external history edits, active sessions and unsupported native variants ar
   expect((await collect({ ...req(), effort: "max" })).find(e => e.t === "error").message).toContain("does not offer variant");
   expect(calls.filter(c => c.path.endsWith("/prompt"))).toHaveLength(1);
 });
+
+test("steers active OpenCode input with images and preserves history for the next turn", async () => {
+  let root = "";
+  behavior = id => { root = id; };
+  const request = req();
+  const running = collect(request);
+  await waitFor(() => !!root);
+  expect(canSteer(request.threadId)).toBe(true);
+  await steer(request.threadId, "s1", "new direction", [{data:"aGk=",mimeType:"image/png"}]);
+  await steer(request.threadId, "s2", "also this");
+  const prompts = calls.filter(c => c.path.endsWith("/prompt"));
+  expect(prompts[1]!.body).toMatchObject({text:questionPrompt("new direction"),delivery:"steer",files:[{uri:"data:image/png;base64,aGk="}]});
+  finish(root);
+  const events = await running;
+  expect(events.filter(e => e.t === "steer")).toEqual([{t:"steer",id:"s1",text:"new direction"},{t:"steer",id:"s2",text:"also this"}]);
+  expect(canSteer(request.threadId)).toBe(false);
+  await expect(steer(request.threadId,"late","late")).rejects.toThrow("isn't working");
+  behavior = id => finish(id);
+  const next = await collect({...request,prior:3,message:"follow up"});
+  expect(next.some(e => e.t === "error")).toBe(false);
+});
+
 }

@@ -14,13 +14,19 @@ function saved(id: string): Saved | undefined {
 const save = (id: string, s: Saved) => storage.setValue(key(id), JSON.stringify(s));
 type Reply = { value?: string; confirmed?: boolean; cancelled?: boolean };
 type Ask = Extract<StreamEvent, { t: "ask" }>;
-interface Live { busy: boolean; connection?: Connection; emit: (e: StreamEvent) => void; asks: Map<string, { ask: Ask; reply: (r: Reply) => void }>; abort: () => void }
+interface Live { steer?: (id: string, message: string, images?: PiChatRequest["images"]) => Promise<{ handled: boolean }>; busy: boolean; connection?: Connection; emit: (e: StreamEvent) => void; asks: Map<string, { ask: Ask; reply: (r: Reply) => void }>; abort: () => void }
 const live = new Map<string, Live>();
 export const isSessionLive = (id: string) => !!live.get(id)?.connection?.alive;
 export const hasAsk = (id: string, askId: string) => !!live.get(id)?.asks.has(askId);
 export function answer(id: string, askId: string, reply: Reply): boolean {
   const l = live.get(id), p = l?.asks.get(askId); if (!l || !p) return false;
   l.asks.delete(askId); l.emit({ t: "asked", id: askId, answer: reply.cancelled ? undefined : reply.value ?? (reply.confirmed ? "Allow once" : undefined) }); p.reply(reply); return true;
+}
+export const canSteer = (id: string) => !!live.get(id)?.steer;
+export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  const submit = live.get(id)?.steer;
+  if (!submit) throw new Error("OpenCode isn't working on this thread");
+  return submit(steerId, message, images);
 }
 export function release(id: string) { const l = live.get(id); if (!l) return; if (l.busy) l.abort(); else live.delete(id); }
 export function restartIdle() { for (const [id, l] of live) if (!l.busy) live.delete(id); }
@@ -123,9 +129,24 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           const usage: Usage = {}; let submitted = false, terminal = false, definitive = false;
           let finish!: (value: string) => void, fail!: (e: Error) => void;
           const completion = new Promise<string>((resolve, reject) => { finish = resolve; fail = reject; }); completion.catch(() => {});
-          const end = (value: string) => { if (!terminal) { terminal = true; finish(value); } };
-          const failure = (e: unknown) => { if (!terminal) { terminal = true; fail(e instanceof Error ? e : new Error(String(e))); } };
+          const end = (value: string) => { if (!terminal) { terminal = true; current.steer = undefined; finish(value); } };
+          const failure = (e: unknown) => { if (!terminal) { terminal = true; current.steer = undefined; fail(e instanceof Error ? e : new Error(String(e))); } };
           const current = l;
+          let steerAmbiguous = false;
+          let steerTail: Promise<unknown> = Promise.resolve();
+          const submitSteer = (id: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> => {
+            const operation = steerTail.then(async () => {
+              if (terminal || aborted.aborted) throw new Error("OpenCode isn't working on this thread");
+              state.turns++;
+              save(req.threadId, { ...state, pending: true });
+              await c.request(`${sessionPath(root)}/prompt`, "POST", { text: questionPrompt(message), delivery: "steer", ...(images?.length ? { files: images.map(i => ({ uri: `data:${i.mimeType};base64,${i.data}` })) } : {}) });
+              send({ t: "steer", id, text: message });
+              return { handled: false };
+            });
+            steerTail = operation.catch(error => { steerAmbiguous = true; current.steer = undefined; throw error; });
+            steerTail.catch(() => {});
+            return operation;
+          };
           const tasks = new Set<string>();
           const event = ({ type, data: d }: NativeEvent) => {
             if (terminal) return;
@@ -181,7 +202,8 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (aborted.aborted) interrupt();
           if (!terminal) {
             // Reserve BEFORE sending. Ambiguous acceptance/SSE loss must never cause a replay.
-            save(req.threadId, { ...state, turns: req.prior + 1, pending: true }); submitted = true;
+            state.turns = req.prior + 1;
+            save(req.threadId, { ...state, pending: true }); submitted = true; current.steer = submitSteer;
             try {
               await c.request(`${sessionPath(root)}/prompt`, "POST", { text: questionPrompt(req.message), ...(req.images?.length ? { files: req.images.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })) } : {}) });
             } catch (error) {
@@ -191,13 +213,13 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             }
           }
           let result: string;
-          try { result = await completion; }
-          finally { if (submitted && definitive) save(req.threadId, { ...state, turns: req.prior + 1, pending: false }); }
+          try { result = await completion; await steerTail; }
+          finally { if (submitted && definitive && !steerAmbiguous) save(req.threadId, { ...state, turns: state.turns, pending: false }); }
           send({ t: "done", finish: result, usage });
         } catch (e) { send({ t: "error", message: e instanceof Error ? e.message : String(e) }); }
         finally {
           stopAbort?.(); askStop.abort(); streamStop.abort(); off?.();
-          if (owned && l) { l.busy = false; l.emit = () => {}; l.asks.clear(); }
+          if (owned && l) { l.steer = undefined; l.busy = false; l.emit = () => {}; l.asks.clear(); }
           send({ t: "end" }); if (!closed) { closed = true; controller.close(); }
         }
       })();

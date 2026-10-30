@@ -43,7 +43,11 @@ Every new native prompt includes a scoped `<openbuild-question-instructions>` bl
 ## Adapter exports and checks
 
 - `install.ts`: `OPENCODE_INSTALL`, `opencodeBin`, `status`, `listModels(fresh)`, `forgetModels`.
-- `sessions.ts`: `runTurn(req,signal)`, `answer`, `hasAsk`, `release`, `restartIdle`, `isSessionLive`. No steering support.
+- `sessions.ts`: `runTurn(req,signal)`, `answer`, `hasAsk`, `release`, `restartIdle`, `isSessionLive`. Native active-turn steering uses `delivery: "steer"`.
 - `connection.ts`: transport/owned server lifecycle; `tools.ts`: native tool projection.
 
 Offline tests: `bun test tests/opencodeAdapter.test.ts tests/opencodeTools.test.ts tests/opencodeConnection.test.ts tests/opencodeServerRestart.test.ts`. They use fake HTTP/SSE servers and isolated native session fixtures, never real home sessions. Question coverage includes per-turn guidance, sequential typed fields, custom free text, duplicate form events/replies, cancellation without submission, and visibly rejected complex forms. The protocol suite runs in a subprocess with a temporary `OPENCHAT_DATA_DIR`; lifecycle tests also verify discovery reaps owned children and removes inherited credentials. The restart fixture checks that a detached worker finishes a tool while the HTTP server is absent and that pending approvals remain answerable after HTTP restart.
+
+## Steering
+
+Queued messages can be sent with **Steer** while a reply runs. Native input is submitted without replaying the original prompt; steered messages count toward the saved user history. Images are included. New and idle threads move to a worker that supports native steering; already-running older workers finish normally.

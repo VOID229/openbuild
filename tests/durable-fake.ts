@@ -7,8 +7,10 @@ export function fakeModels(options: { answer?: string; hold?: boolean; holdAfter
   const models = builtinModels();
   const model = models.getModels().find(m => m.type === "chat")!;
   let calls = 0;
+  const inputs: unknown[] = [];
   models.streamSimple = (_model, input, request) => {
     calls++;
+    inputs.push(structuredClone(input.messages));
     const stream = createAssistantMessageEventStream();
     const hasTool = input.messages.some(m => m.role === "toolResult");
     const content: AssistantMessage["content"] = options.tool && !hasTool
@@ -40,5 +42,5 @@ export function fakeModels(options: { answer?: string; hold?: boolean; holdAfter
     });
     return stream;
   };
-  return { models, model: `${model.provider}/${model.id}`, calls: () => calls };
+  return { models, model: `${model.provider}/${model.id}`, calls: () => calls, inputs: () => inputs };
 }

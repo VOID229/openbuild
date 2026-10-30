@@ -36,6 +36,13 @@ export const hasAsk = (threadId: string, askId: string) => !!live.get(threadId)?
 export function answer(threadId: string, askId: string, reply: QuestionReply): boolean {
   return live.get(threadId)?.questions?.answer(askId, reply) ?? false;
 }
+export const canSteer = (id: string) => !!live.get(id)?.questions && live.get(id)?.proc?.exitCode === null;
+export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  if (images?.length) throw new Error("Cursor image attachments are not supported by this adapter");
+  if (!canSteer(id)) throw new Error("Cursor isn't working on this thread");
+  live.get(id)!.questions!.steer(steerId, message);
+  return { handled: false };
+}
 export function release(id: string) { live.get(id)?.stop(); }
 export function restartIdle() {} // Cursor is a one-shot process per turn; there are no idle children.
 /** Escalation only after graceful SIGINT failed. Do not kill the worker's process
@@ -74,6 +81,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           if (s?.pending) throw new Error("Cursor's previous turn was interrupted or its outcome is uncertain. Check tool side effects and start a new thread; the prompt will not be replayed.");
           if (s && s.turns > 0 && (!s.fingerprint || fingerprint(cwd, s.id) !== s.fingerprint)) throw new Error("Cursor native history changed externally; refusing to append to divergent history. Start a new thread.");
           const l: Live = { stop: () => {
+            questions?.stopSteering();
             questions?.close();
             if (!p || p.exitCode !== null) return;
             try { p.kill("SIGINT"); } catch {}
@@ -93,7 +101,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
             s = { id, cwd, turns: 0, pending: false }; save(req.threadId, s);
           }
           if (signal.aborted) { send({ t: "done", finish: "aborted" }); return; }
-          questions = createQuestions(send); l.questions = questions;
+          questions = createQuestions(send, () => { s = { ...s!, turns: s!.turns + 1 }; save(req.threadId, s); }); l.questions = questions;
           // Persist the identity and reservation BEFORE prompt submission. A worker crash
           // never permits a new process to accidentally resend an ambiguous prior prompt.
           s = { ...s, turns: req.prior + 1, pending: true }; save(req.threadId, s); reserved = true;

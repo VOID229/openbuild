@@ -9,7 +9,7 @@ curl -fsSL https://fx.sh/setup.sh | bash
 fx login          # Vercel AI Gateway, Codex or Grok
 ```
 
-It's the out-of-the-box option. fx brings its own models, sign-in, permission mode, skills, MCP servers and `AGENTS.md` handling, and OpenBuild leaves those settings alone. Pi extensions, Pi slash commands, `!` shell commands, steering and `/compact` aren't available in fx threads.
+It's the out-of-the-box option. fx brings its own models, sign-in, permission mode, skills, MCP servers and `AGENTS.md` handling, and OpenBuild leaves those settings alone. Pi extensions, Pi slash commands, `!` shell commands and `/compact` aren't available in fx threads.
 
 ## How it works
 
@@ -32,5 +32,11 @@ New threads use a feature-versioned lane when the shared worker lacks required f
 ## Limits
 
 - No rewind: Retry/regenerate and editing an earlier message don't roll fx's context back. Send a follow-up instead.
-- No Pi extensions (`question_ask`, `html_render`), slash commands, steering, `!` commands or manual compaction.
+- No Pi extensions (`question_ask`, `html_render`), slash commands, `!` commands or manual compaction.
 - Paired devices: the thread uses the `fx` installed on the device its workspace lives on.
+
+## Steering
+
+A queued message's **Steer** button sends native ACP `session/prompt` with `_meta.fx.steer: true`. The installed fx must advertise `agentCapabilities._meta.fx.steering`; older versions return an update-required error. Steering accepts nonempty text up to 64 KiB; images remain queued for a normal follow-up. See [fx ACP steering](https://fx.sh/docs/using-fx/acp).
+
+Delivered updates appear where fx replays them as `user_message_chunk`, correlated by native request ID. Only delivered updates count toward history. fx completes steering requests with the active turn, so OpenBuild keeps its stream attached through those acknowledgements (including a late update that starts another native turn). Stop cancels the native turn; unread updates return to the queue. No prompt is automatically retried after a transport failure. Compatible worker lanes are required for new/idle fx replies; an already-running older worker finishes normally.

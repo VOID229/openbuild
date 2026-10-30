@@ -38,6 +38,8 @@ const assistant = (content) => { const uuid = crypto.randomUUID(); out({ type: '
 const text = (t) => { frame({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { id: 'm' + n } } }); frame({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } } }); frame({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: t } } }); const uuid = crypto.randomUUID(); out({ type: 'assistant', message: { id: 'm' + n, role: 'assistant', content: [{ type: 'text', text: t }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, uuid, ...base }); appendFileSync(file(session), JSON.stringify({ type: 'assistant', uuid }) + '\n'); };
 const result = (extra = {}) => out({ type: 'result', subtype: 'success', is_error: false, result: 'ok', duration_ms: 5, duration_api_ms: 5, num_turns: 1, total_cost_usd: 0, usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 2, cache_creation_input_tokens: 1 }, modelUsage: { 'claude-opus-5-5': { contextWindow: 200000 } }, permission_denials: [], fast_mode_state: state.fast ? 'on' : 'off', ...base, uuid: crypto.randomUUID(), ...extra });
 let interrupted = false;
+let folding;
+let folded = [];
 async function turn(prompt) {
   interrupted = false;
   const raw = prompt.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
@@ -73,6 +75,7 @@ async function turn(prompt) {
     return result();
   }
   if (t.startsWith('slow')) {
+    folding = true; folded = [];
     text('Started-');
     while (!interrupted && !(process.env.FAKE_RELEASE && existsSync(process.env.FAKE_RELEASE))) await Bun.sleep(25);
     if (interrupted) return result({ subtype: 'error_during_execution', is_error: true, errors: ['interrupted'] });
@@ -80,8 +83,9 @@ async function turn(prompt) {
     assistant([{ type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command } }]);
     const ran = Bun.spawnSync(['sh', '-c', command]);
     out({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: ran.stdout.toString() }] }, parent_tool_use_id: null, tool_use_result: { stdout: ran.stdout.toString(), stderr: '' }, ...base, uuid: crypto.randomUUID() });
+    folding = false;
     text('finished offline');
-    result();
+    result({ user_message_uuids: [prompt.uuid, ...folded] });
     if (process.env.FAKE_EFFECTS) writeFileSync(process.env.FAKE_EFFECTS + '.finished', 'done');
     return;
   }
@@ -94,7 +98,14 @@ for await (const line of console) {
   if (!line.trim()) continue;
   const m = JSON.parse(line);
   if (m.type === 'control_response') { const r = pending.get(m.response.request_id); pending.delete(m.response.request_id); r?.(m.response.response ?? {}); continue; }
-  if (m.type === 'user') { busy = busy.then(() => turn(m)); continue; }
+  if (m.type === 'user') {
+    if (folding) {
+      folded.push(m.uuid);
+      appendFileSync(file(session), JSON.stringify({ type: 'user', text: m.message.content }) + '\n');
+      out(m);
+    } else busy = busy.then(() => turn(m));
+    continue;
+  }
   if (m.type !== 'control_request') continue;
   const r = m.request, ok = response => out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, ...(response ? { response } : {}) } });
   if (r.subtype === 'initialize' && r.appendSystemPrompt) log('question-instructions ' + r.appendSystemPrompt);
