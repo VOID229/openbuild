@@ -97,6 +97,34 @@ test("imports Claude Code sessions once, ready to continue, and never offers aga
   `);
 });
 
+test("counts only sessions with a prompt, and keeps the history before a compaction", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-"));
+  await run(dir, `
+    import { strict as assert } from "node:assert";
+    import { mkdir, writeFile } from "node:fs/promises";
+    import { join } from "node:path";
+    const cwd = process.env.OPENCHAT_DATA_DIR + "-work";
+    await mkdir(cwd, { recursive: true });
+    const projects = join(process.env.CLAUDE_CONFIG_DIR, "projects", "work");
+    await mkdir(projects, { recursive: true });
+    const base = { timestamp: "2026-01-01T00:00:00Z", isSidechain: false, cwd, entrypoint: "cli" };
+    const user = (uuid, parentUuid, content, extra = {}) => ({ ...base, type: "user", uuid, parentUuid, message: { role: "user", content }, ...extra });
+    const reply = (uuid, parentUuid, text) => ({ ...base, type: "assistant", uuid, parentUuid, message: { role: "assistant", model: "claude-test-1", content: [{ type: "text", text }] } });
+    const session = (n, rs) => writeFile(join(projects, n.repeat(8) + "-1111-4111-8111-111111111111.jsonl"), rs.map((r) => JSON.stringify(r)).join("\\n") + "\\n");
+    await session("1", [{ type: "file-history-snapshot", messageId: "m", snapshot: {} }]);
+    await session("2", [{ type: "summary", summary: "Old", leafUuid: "gone" }]);
+    await session("3", [user("c1", null, "<command-name>/clear</command-name>")]);
+    const boundary = { ...base, type: "system", subtype: "compact_boundary", uuid: "b", parentUuid: null, logicalParentUuid: "a1" };
+    await session("4", [user("u1", null, "Before"), reply("a1", "u1", "Earlier"), boundary, user("s", "b", "Summary", { isCompactSummary: true }), reply("a2", "s", "Continuing")]);
+    const mod = await import("./server/sessionImport.ts");
+    const storage = await import("./server/storage.ts");
+    assert.deepEqual(await mod.offer(), { pending: true, runtimes: { claude: 1 } });
+    assert.deepEqual(await mod.answer(["claude"]), { imported: { claude: 1 }, errors: {} });
+    const [chat] = storage.listChats();
+    assert.deepEqual(chat.messages.map((m) => [m.role, m.content]), [["user", "Before"], ["assistant", "Earlier\\n\\nContinuing"]]);
+  `);
+}, 30_000);
+
 test("skipping is an answer too: nothing is imported and the offer never comes back", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-skip-"));
   await run(dir, `${claudeFixture}

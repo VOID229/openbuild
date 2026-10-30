@@ -163,7 +163,8 @@ async function claudeSessions(): Promise<Found[]> {
     for (const f of files) {
       const id = f.slice(0, -6), file = join(claudeRoot(), dir, f);
       if (own.has(id)) continue;
-      try { if (claudeEntrypoint(file)?.startsWith("sdk-")) continue; } catch { continue; }
+      // Sessions nobody prompted in (opened and quit, only slash commands) never become threads: don't count them.
+      try { if (claudeEntrypoint(file)?.startsWith("sdk-") || !projectClaude(id, file)) continue; } catch { continue; }
       found.push({ nativeId: id, load: async () => projectClaude(id, file) });
     }
   }
@@ -181,7 +182,8 @@ export function projectClaude(sessionId: string, file: string): { chat: Chat; ma
   let leaf = records.findLast((r) => (r.type === "user" || r.type === "assistant") && r.uuid && !r.isSidechain);
   if (!leaf) return;
   const branch: any[] = [], seen = new Set<string>();
-  while (leaf && !seen.has(leaf.uuid)) { seen.add(leaf.uuid); branch.push(leaf); leaf = byUuid.get(leaf.parentUuid); }
+  // A compaction's boundary has no parentUuid: its logicalParentUuid leads back to the earlier history.
+  while (leaf && !seen.has(leaf.uuid)) { seen.add(leaf.uuid); branch.push(leaf); leaf = byUuid.get(leaf.parentUuid ?? leaf.logicalParentUuid); }
   branch.reverse();
   const cwd = branch.find((r) => typeof r.cwd === "string")?.cwd;
   if (!cwd) return;
