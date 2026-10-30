@@ -273,7 +273,10 @@ export interface Chat {
   updatedAt: number;
   messages: Message[];
   pinned?: boolean;
+  /** Closed by the user: listed under "Closed" until reopened or a new reply finishes. */
   archived?: boolean;
+  /** A reply finished since the user last closed the thread: listed under "Done". */
+  done?: boolean;
   /** "user" titles are never overwritten by automatic naming. */
   titleSource?: "auto" | "user";
   /** A reply finished while the chat wasn't open. */

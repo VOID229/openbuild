@@ -20,24 +20,6 @@ function fitFlyout(el: HTMLElement | null) {
   if (rect.bottom > window.innerHeight - 8 && row.bottom - rect.height >= 8) el.classList.add("filter-flyout-up");
 }
 
-const DAY = 24 * 60 * 60 * 1000;
-
-/** Recent chats split into the static date sections. */
-function bucketChats(chats: Chat[], field: "updatedAt" | "createdAt") {
-  const today = new Date().setHours(0, 0, 0, 0);
-  const buckets: { label: string; chats: Chat[] }[] = [
-    { label: "Today", chats: [] },
-    { label: "Yesterday", chats: [] },
-    { label: "Last 7 days", chats: [] },
-    { label: "Older", chats: [] },
-  ];
-  for (const c of chats) {
-    const t = c[field];
-    buckets[t >= today ? 0 : t >= today - DAY ? 1 : t >= today - 7 * DAY ? 2 : 3]!.chats.push(c);
-  }
-  return buckets.filter((b) => b.chats.length);
-}
-
 /** The model of the chat's latest reply. */
 const modelOf = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
 
@@ -52,6 +34,29 @@ const isWaiting = (chat: Chat) => {
   const last = lastReply(chat);
   return last?.status === "streaming" && !!last.parts?.some((p) => p.type === "ask" && p.answer === undefined);
 };
+
+/** Midnight at the start of today. */
+const startOfToday = () => new Date().setHours(0, 0, 0, 0);
+
+/** Closed by the user, or a thread from before today that isn't pinned, working or done. */
+const isClosed = (chat: Chat, today = startOfToday()) =>
+  !!chat.archived || (!chat.pinned && !chat.done && !isWorking(chat) && chat.updatedAt < today);
+
+/** Closing a thread files it under "Closed" (and unpins it); reopening one puts it back in "Done". */
+const closePatch = (chat: Chat, today?: number) =>
+  isClosed(chat, today) ? { archived: false, done: true } : { archived: true, done: false, pinned: false };
+
+/** Start of today, refreshed at midnight so the day's threads roll over into "Closed". */
+function useToday() {
+  const [today, setToday] = useState(startOfToday);
+  useEffect(() => {
+    const timer = setTimeout(() => setToday(startOfToday()), today + DAY - Date.now() + 1000);
+    return () => clearTimeout(timer);
+  }, [today]);
+  return today;
+}
+
+const DAY = 24 * 60 * 60 * 1000;
 
 const chatUrl = threadPath;
 
@@ -152,6 +157,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
+  const closed = isClosed(chat);
   const model = modelOf(chat);
   const runtime = chat.runtime ?? "pi";
   const device = useStore((s) => rowDevice(s.devices, chat.workspace?.deviceId));
@@ -220,7 +226,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
               <Bot size={13} />
             </span>
           )}
-          {hit && chat.archived && <span className="badge">archived</span>}
+          {hit && isClosed(chat) && <span className="badge">closed</span>}
           <span className="history-status">
             {waiting ? (
               <Spinner size={13} waiting />
@@ -263,12 +269,12 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, onSelect, o
           {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
         </IconButton>
         <IconButton
-          label={chat.archived ? "Unarchive" : "Archive"}
+          label={closed ? "Reopen" : "Close"}
           tooltipSide="top"
           className="history-action"
-          onClick={() => updateChat(chat.id, { archived: !chat.archived, pinned: chat.archived ? chat.pinned : false })}
+          onClick={() => updateChat(chat.id, closePatch(chat))}
         >
-          {chat.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
+          {closed ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </IconButton>
         {/* Touch screens only: opens the same menu as right-click / long-press. */}
         <IconButton
@@ -446,9 +452,9 @@ function ChatContextMenu({
         type="button"
         role="menuitem"
         className="menu-item"
-        onClick={act(() => updateChat(chat.id, { archived: !chat.archived, pinned: chat.archived ? chat.pinned : false }))}
+        onClick={act(() => updateChat(chat.id, closePatch(chat)))}
       >
-        {chat.archived ? <ArchiveRestore size={15} /> : <Archive size={15} />} {chat.archived ? "Unarchive" : "Archive"}
+        {isClosed(chat) ? <ArchiveRestore size={15} /> : <Archive size={15} />} {isClosed(chat) ? "Reopen" : "Close"}
       </button>
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, { pinned: !chat.pinned }))}>
         {chat.pinned ? <PinOff size={15} /> : <Pin size={15} />} {chat.pinned ? "Unpin" : "Pin"}
@@ -775,7 +781,9 @@ export function Sidebar() {
 
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
-  const [archiveView, setArchiveView] = useState(false);
+  const [closedView, setClosedView] = useState(false);
+  const updateChat = useStore((s) => s.updateChat);
+  const today = useToday();
 
   const view = useStore((s) => s.view);
 
@@ -788,18 +796,31 @@ export function Sidebar() {
       : byRuntime;
     return view.sort === "created" ? [...byModel].sort((a, b) => b.createdAt - a.createdAt) : byModel;
   }, [chats, view.models, view.sort, view.subagents, view.runtime, activeChatId]);
-  const field = view.sort === "created" ? "createdAt" : "updatedAt";
 
   const hits = useMemo(() => (deferredQuery ? searchChats(visible, deferredQuery) : []), [visible, deferredQuery]);
   const pinned = useMemo(() => (view.includePinned ? visible.filter((c) => c.pinned && !c.archived) : []), [visible, view.includePinned]);
-  // Pinned threads keep their spot; everything else that is still generating lives in "Working"
-  // (and moves to "Today" once its reply finishes).
-  const rest = useMemo(() => visible.filter((c) => !c.archived && !(c.pinned && view.includePinned)), [visible, view.includePinned]);
+  // Pinned threads keep their spot. Everything else that is generating lives in "Working", then
+  // stays in "Done" until the user closes it. Other threads from today are under "Today", and
+  // the rest (closed, or from an earlier day) under "Closed".
+  const rest = useMemo(() => visible.filter((c) => !isClosed(c, today) && !(c.pinned && view.includePinned)), [visible, view.includePinned, today]);
   // Subagent threads, when listed, keep to their own section, working or not.
   const subagents = useMemo(() => rest.filter((c) => c.subagent), [rest]);
   const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c)), [rest]);
-  const buckets = useMemo(() => bucketChats(rest.filter((c) => !c.subagent && !isWorking(c)), field), [rest, field]);
-  const archived = useMemo(() => visible.filter((c) => c.archived), [visible]);
+  const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && c.done), [rest]);
+  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.done), [rest]);
+  const closed = useMemo(() => visible.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [visible, view.includePinned, today]);
+
+  // A reply that finishes while the app is open moves its thread into "Done", reopening it if it was
+  // closed. (The server marks replies that finish elsewhere; see server/pi/projection.ts.)
+  const workingIds = useRef<Set<string>>(undefined);
+  useEffect(() => {
+    const now = new Set(chats.filter(isWorking).map((c) => c.id));
+    for (const id of workingIds.current ?? []) {
+      const c = chats.find((c) => c.id === id);
+      if (c && !now.has(id) && (!c.done || c.archived)) updateChat(id, { done: true, archived: false });
+    }
+    workingIds.current = now;
+  }, [chats, updateChat]);
   const filtered = view.models.length > 0 || view.runtime !== "all";
 
   const usageOpen = useStore((s) => s.usageOpen);
@@ -892,11 +913,11 @@ export function Sidebar() {
                 {hits.map((h) => row(h.chat, h))}
                 {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
               </section>
-            ) : archiveView ? (
+            ) : closedView ? (
               <section className="history-group">
-                <h3 className="history-heading">{`Archived (${archived.length})`}</h3>
-                {archived.map((c) => row(c))}
-                {!archived.length && <p className="history-empty">No archived threads.</p>}
+                <h3 className="history-heading">{`Closed (${closed.length})`}</h3>
+                {closed.map((c) => row(c))}
+                {!closed.length && <p className="history-empty">No closed threads.</p>}
               </section>
             ) : (
               <>
@@ -911,28 +932,33 @@ export function Sidebar() {
                     {subagents.map((c) => row(c))}
                   </section>
                 )}
+                {done.length > 0 && (
+                  <section className="history-group">
+                    <h3 className="history-heading">Done</h3>
+                    {done.map((c) => row(c))}
+                  </section>
+                )}
                 {working.length > 0 && (
                   <section className="history-group">
                     <h3 className="history-heading">Working</h3>
                     {working.map((c) => row(c))}
                   </section>
                 )}
-                {buckets.map((b) => (
-                  <section key={b.label} className="history-group">
-                    <h3 className="history-heading">{b.label}</h3>
-                    {b.chats.map((c) => row(c))}
-                  </section>
-                ))}
-                {filtered && !pinned.length && !subagents.length && !working.length && !buckets.length && !archived.length && (
+                {todays.length > 0 && (
+                  <Collapsible label="Today" open={sections.today} onToggle={() => toggleSection("today")}>
+                    {todays.map((c) => row(c))}
+                  </Collapsible>
+                )}
+                {filtered && !pinned.length && !subagents.length && !done.length && !working.length && !todays.length && !closed.length && (
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."
                       : `No ${view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "pi" ? "Pi" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
                   </p>
                 )}
-                {archived.length > 0 && (
-                  <Collapsible label={`Archived (${archived.length})`} open={sections.archived} onToggle={() => toggleSection("archived")}>
-                    {archived.map((c) => row(c))}
+                {closed.length > 0 && (
+                  <Collapsible label={`Closed (${closed.length})`} open={sections.closed} onToggle={() => toggleSection("closed")}>
+                    {closed.map((c) => row(c))}
                   </Collapsible>
                 )}
               </>
@@ -964,11 +990,11 @@ export function Sidebar() {
             </button>
             <button
               type="button"
-              className={`archive-toggle${archiveView ? " active" : ""}`}
-              aria-label={archiveView ? "Back to threads" : "Show archived threads"}
-              aria-pressed={archiveView}
-              title={archiveView ? "Back to threads" : "Archived threads"}
-              onClick={() => setArchiveView((v) => !v)}
+              className={`archive-toggle${closedView ? " active" : ""}`}
+              aria-label={closedView ? "Back to threads" : "Show closed threads"}
+              aria-pressed={closedView}
+              title={closedView ? "Back to threads" : "Closed threads"}
+              onClick={() => setClosedView((v) => !v)}
             >
               <Archive size={18} />
             </button>

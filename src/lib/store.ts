@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
-type SidebarSections = { pinned: boolean; archived: boolean };
+type SidebarSections = { pinned: boolean; today: boolean; closed: boolean };
 
 /** Sidebar list options from the filter menu. */
 export interface SidebarView {
@@ -250,8 +250,8 @@ interface State {
   removeAllChats: () => void;
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
-  /** Update chat metadata (title, pinned, archived, workspace) without changing its recency. */
-  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission">>) => void;
+  /** Update chat metadata (title, pinned, closed, workspace) without changing its recency. */
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "done" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission">>) => void;
   setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }
@@ -293,7 +293,7 @@ export const useStore = create<State>()(
       chatsLoaded: false,
       selections: {},
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
-      sections: { pinned: true, archived: false },
+      sections: { pinned: true, today: true, closed: false },
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
@@ -679,7 +679,7 @@ export const useStore = create<State>()(
         let updated: Chat | undefined;
         set((s) => ({
           chats: s.chats.map((c) => (c.id === id ? (updated = { ...c, ...patch }) : c)),
-          // Archiving the chat you're on leaves you on a new (empty) chat.
+          // Closing the chat you're on leaves you on a new (empty) chat.
           ...(patch.archived && s.activeChatId === id ? { activeChatId: undefined, searchFocus: undefined } : {}),
         }));
         if (updated) void saveChat(updated);
