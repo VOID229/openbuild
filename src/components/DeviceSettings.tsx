@@ -1,11 +1,11 @@
 // Settings → Devices: the devices this OpenBuild is paired with, where their servers stand, and
 // unpairing or restarting them. Also the devices that use this one, so their access can be revoked.
-import { CircleAlert, Play, RefreshCw, RotateCw, Unlink } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, PairedClient } from "../../shared/types";
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient } from "../lib/pi";
 import { useStore } from "../lib/store";
-import { cx } from "../lib/ui";
+import { ago, cx } from "../lib/ui";
 import { IconButton, SettingsHeading, Spinner } from "./primitives";
 
 const STATUS: Record<NonNullable<Device["status"]>, { label: string; dot?: string }> = {
@@ -14,17 +14,6 @@ const STATUS: Record<NonNullable<Device["status"]>, { label: string; dot?: strin
   offline: { label: "Unreachable", dot: "pi-status-dot-off" },
   revoked: { label: "Pairing revoked", dot: "pi-status-dot-bad" },
 };
-
-/** "just now", "5m ago", "3h ago", "4d ago", then a date. */
-function ago(at: number | undefined): string | undefined {
-  if (!at) return undefined;
-  const minutes = Math.round((Date.now() - at) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  if (minutes < 60 * 24) return `${Math.round(minutes / 60)}h ago`;
-  if (minutes < 60 * 24 * 14) return `${Math.round(minutes / 60 / 24)}d ago`;
-  return new Date(at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-}
 
 const host = (url: string | undefined) => (url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : "no address");
 
@@ -124,18 +113,27 @@ export function DevicesSection() {
   const loadDevices = useStore((s) => s.loadDevices);
   const loadProjects = useStore((s) => s.loadProjects);
   const [clients, setClients] = useState<PairedClient[]>();
-  const [refreshing, setRefreshing] = useState(false);
+  // "checking" only for a manual click; the on-open probe runs silently in the background.
+  const [check, setCheck] = useState<"idle" | "checking" | "done">("idle");
+  const doneTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const local = devices.find((d) => d.local);
   const remote = devices.filter((d) => !d.local);
 
   const loadClients = useCallback(() => void listPairedClients().then(setClients, () => setClients([])), []);
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.all([loadDevices().catch(() => {}), listPairedClients().then(setClients, () => setClients([]))]);
-    setRefreshing(false);
-  }, [loadDevices]);
-  // Statuses are probed fresh each time the page opens.
-  useEffect(() => void refresh(), [refresh]);
+  const probe = useCallback(
+    () => Promise.all([loadDevices().catch(() => {}), listPairedClients().then(setClients, () => setClients([]))]),
+    [loadDevices],
+  );
+  const refresh = async () => {
+    clearTimeout(doneTimer.current);
+    setCheck("checking");
+    await probe();
+    setCheck("done");
+    doneTimer.current = setTimeout(() => setCheck("idle"), 2200);
+  };
+  // Statuses are probed fresh each time the page opens, quietly.
+  useEffect(() => void probe(), [probe]);
+  useEffect(() => () => clearTimeout(doneTimer.current), []);
 
   const changed = async () => {
     await loadDevices().catch(() => {});
@@ -161,9 +159,14 @@ export function DevicesSection() {
       <section className="pi-block">
         <div className="pi-subhead">
           <h3>Paired devices</h3>
-          <IconButton label="Check again" tooltipSide="left" className="key-icon-btn" disabled={refreshing} onClick={() => void refresh()}>
-            {refreshing ? <Spinner size={14} /> : <RefreshCw size={14} />}
-          </IconButton>
+          <span className="device-check">
+            <span className={cx("device-check-note", check !== "idle" && "is-shown")} aria-live="polite">
+              {check === "checking" ? "Checking…" : check === "done" ? "Up to date" : ""}
+            </span>
+            <IconButton label="Check again" tooltipSide="left" className="key-icon-btn" disabled={check === "checking"} onClick={() => void refresh()}>
+              {check === "checking" ? <Spinner size={14} /> : check === "done" ? <Check size={14} className="device-check-ok" /> : <RefreshCw size={14} />}
+            </IconButton>
+          </span>
         </div>
         <ul className="pi-list">
           {remote.map((d) => (

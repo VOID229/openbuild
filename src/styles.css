@@ -5867,6 +5867,29 @@ p.key-status svg {
   margin-bottom: 4px;
 }
 
+.device-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.device-check-note {
+  font-size: 12.5px;
+  color: var(--text-3);
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.device-check-note.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+.device-check-ok {
+  color: var(--ok);
+}
+
 .pi-subhead h3 {
   display: flex;
   align-items: center;
