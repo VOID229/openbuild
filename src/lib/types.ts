@@ -205,8 +205,14 @@ export interface SteerPart {
   attachments?: Attachment[];
 }
 
-/** A reply in order: what Pi wrote and thought, the tools it ran in between, questions it asked, and messages steered in. */
-export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart | SteerPart;
+/** A note from Pi during the reply (a retry, a compaction), where it happened. */
+export interface NoticePart {
+  type: "notice";
+  text: string;
+}
+
+/** A reply in order: what Pi wrote and thought, the tools it ran in between, questions it asked, messages steered in, and Pi's notes. */
+export type Part = { type: "text"; text: string } | ThoughtPart | ToolPart | AskPart | SteerPart | NoticePart;
 
 /** A command the user ran from the composer: "!" (the agent reads it and its output) or "!!" (it doesn't). */
 export interface ShellRun {

@@ -18,7 +18,7 @@ export interface PiSnapshot {
 /** Pure replay; timings are based on saved timestamps, never on when the server reconnects. */
 export function projectReply(message: Message, snapshot: PiSnapshot): Message {
   const parts: Part[] = [];
-  let content = "", notice: string | undefined, error: string | undefined;
+  let content = "", error: string | undefined;
   let usage: Message["usage"], finish: string | undefined;
   for (const event of snapshot.events as StreamEvent[]) {
     switch (event.t) {
@@ -58,7 +58,7 @@ export function projectReply(message: Message, snapshot: PiSnapshot): Message {
         parts.push({ type: "steer", id: event.id, text: event.text, ...(old?.type === "steer" ? { attachments: old.attachments } : {}) });
         break;
       }
-      case "notice": notice = notice ? `${notice}\n${event.message}` : event.message; break;
+      case "notice": parts.push({ type: "notice", text: event.message }); break;
       case "error": error = event.message; break;
       case "usage": usage = event.usage; break;
       case "done": finish = event.finish; usage = event.usage ?? usage; break;
@@ -70,7 +70,7 @@ export function projectReply(message: Message, snapshot: PiSnapshot): Message {
     if (p.type === "tool" && p.status === "running") p.status = "error";
     if (p.type === "ask" && p.answer === undefined) p.answer = "";
   }
-  return { ...message, content, parts: parts.length ? parts : undefined, status, error, finish, usage, notice,
+  return { ...message, content, parts: parts.length ? parts : undefined, status, error, finish, usage, notice: undefined,
     reasoning: undefined, reasoningMs: undefined,
     ...(ended ? { workedMs: Math.max(0, (snapshot.endedAt ?? snapshot.startedAt) - (message.startedAt ?? snapshot.startedAt)) } : {}),
   };

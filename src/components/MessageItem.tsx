@@ -251,6 +251,8 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
       <HtmlRender key={b.id} part={b} block={i} />
     ) : b.type === "ask" ? (
       <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} block={i} />
+    ) : b.type === "notice" ? (
+      <div key={`n${i}`} className="msg-notice" data-block={i}>{b.text}</div>
     ) : b.type === "steer" ? (
       // Sent while Pi worked, shown where Pi read it.
       <div key={`s${i}`} className="msg-user msg-steer" data-block={i}>
@@ -268,7 +270,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   const last = blocks.at(-1);
   const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
   // Pages stay out too, between the fold and the answer, in the order they were shown.
-  if (message.status === "done" && blocks.some(Array.isArray)) {
+  if (message.status === "done" && blocks.some((b) => Array.isArray(b) || b.type === "notice")) {
     const work = (final ? blocks.slice(0, -1) : blocks).map((b, i) => [b, i] as const);
     return (
       <>

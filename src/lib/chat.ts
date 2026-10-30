@@ -576,9 +576,10 @@ async function generate(chatId: string, messageId: string, resume = false) {
         if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { searches });
       } else if (ev.t === "notice") {
         if (pi) {
-          // Pi's notes (retries, compaction, extension messages) add up.
-          notice = notice ? `${notice}\n${ev.message}` : ev.message;
-          if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { notice });
+          // Pi's notes (retries, compaction, extension messages) go in order, so later work pushes them up.
+          endThought();
+          parts.push({ type: "notice", text: ev.message });
+          flushParts();
         } else {
           // A key failed and a fallback key was used; refresh key statuses in Settings.
           notice = ev.message;
