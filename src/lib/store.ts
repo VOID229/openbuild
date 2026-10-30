@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
-type SidebarSections = { pinned: boolean; today: boolean; snoozed: boolean; closed: boolean };
+type SidebarSections = { pinned: boolean; subagents: boolean; woke: boolean; done: boolean; working: boolean; today: boolean; snoozed: boolean; closed: boolean };
 
 /** Sidebar list options from the filter menu. */
 export interface SidebarView {
@@ -298,7 +298,7 @@ export const useStore = create<State>()(
       chatsLoaded: false,
       selections: {},
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
-      sections: { pinned: true, today: true, snoozed: false, closed: false },
+      sections: { pinned: true, subagents: true, woke: true, done: true, working: true, today: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
@@ -458,12 +458,17 @@ export const useStore = create<State>()(
         }
       },
       loadProjects: async () => {
-        if (!get().devicesLoaded) await get().loadDevices().catch(() => {});
-        const { devices } = get();
+        // This device's projects don't depend on the device list, and probing paired devices can
+        // take seconds (each one is pinged): fetch both at once so the home heading isn't left on
+        // "What should we work on?" while a sleeping device times out.
+        const devicesReady = get().devicesLoaded ? undefined : get().loadDevices().catch(() => {});
         const local = await listProjects().catch(() => [] as Project[]);
         // This device's projects show at once: a paired device that's asleep must not leave the
-        // picker empty while its request hangs on a dead tailnet address.
-        set({ projects: local, projectsLoaded: true });
+        // picker empty while its request hangs on a dead tailnet address. Paired devices' projects
+        // already listed stay until their fresh lists arrive.
+        set((s) => ({ projects: [...local, ...s.projects.filter((p) => p.deviceId)], projectsLoaded: true }));
+        await devicesReady;
+        const { devices } = get();
         const remote = await Promise.all(
           devices
             .filter((d) => !d.local)

@@ -1152,36 +1152,32 @@ export function Sidebar() {
             ) : (
               <>
                 {pinned.length > 0 && (
-                  <Collapsible label="Pinned" open={sections.pinned} onToggle={() => toggleSection("pinned")}>
+                  <Collapsible label={`Pinned (${pinned.length})`} open={sections.pinned} onToggle={() => toggleSection("pinned")}>
                     {pinned.map((c) => row(c))}
                   </Collapsible>
                 )}
                 {subagents.length > 0 && (
-                  <section className="history-group">
-                    <h3 className="history-heading">Subagents</h3>
+                  <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")}>
                     {subagents.map((c) => row(c))}
-                  </section>
+                  </Collapsible>
                 )}
                 {woke.length > 0 && (
-                  <section className="history-group">
-                    <h3 className="history-heading">Woke</h3>
+                  <Collapsible label={`Woke (${woke.length})`} open={sections.woke} onToggle={() => toggleSection("woke")}>
                     {woke.map((c) => row(c))}
-                  </section>
+                  </Collapsible>
                 )}
                 {done.length > 0 && (
-                  <section className="history-group">
-                    <h3 className="history-heading">Done</h3>
+                  <Collapsible label={`Done (${done.length})`} open={sections.done} onToggle={() => toggleSection("done")}>
                     {done.map((c) => row(c))}
-                  </section>
+                  </Collapsible>
                 )}
                 {working.length > 0 && (
-                  <section className="history-group">
-                    <h3 className="history-heading">Working</h3>
+                  <Collapsible label={`Working (${working.length})`} open={sections.working} onToggle={() => toggleSection("working")}>
                     {working.map((c) => row(c))}
-                  </section>
+                  </Collapsible>
                 )}
                 {todays.length > 0 && (
-                  <Collapsible label="Today" open={sections.today} onToggle={() => toggleSection("today")}>
+                  <Collapsible label={`Today (${todays.length})`} open={sections.today} onToggle={() => toggleSection("today")}>
                     {todays.map((c) => row(c))}
                   </Collapsible>
                 )}
