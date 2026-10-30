@@ -19,3 +19,6 @@ reviews/
 
 # Isolated git worktrees this checkout creates for parallel work
 .worktrees/
+
+# Plugins are personal: they live in the data folder and never ship with the app
+/plugins/

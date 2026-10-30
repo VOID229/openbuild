@@ -140,8 +140,7 @@ export function PluginsSection() {
 
       {!info?.plugins.length && !loading && (
         <p className="settings-hint">
-          No plugins yet. Create <code>{info ? `${info.dir}/my-plugin/plugin.json` : "plugins/my-plugin/plugin.json"}</code> — see{" "}
-          <code>plugins/daily-note</code> for an example with a button, a server route and styles.
+          No plugins yet. Create <code>{info ? `${info.dir}/my-plugin/plugin.json` : "plugins/my-plugin/plugin.json"}</code> to make your own.
         </p>
       )}
 

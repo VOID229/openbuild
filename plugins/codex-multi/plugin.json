@@ -1,8 +1,0 @@
-{
-  "id": "codex-multi",
-  "name": "Codex (2) for codex-multi",
-  "version": "0.1.0",
-  "apiVersion": 1,
-  "description": "Recognises pi-codex-multi's second ChatGPT/Codex login (openai-codex-2) as a Codex provider of its own, with the ChatGPT mark and a \"2\" badge, instead of leaving its models in the catch-all Custom group.",
-  "client": "client.tsx"
-}

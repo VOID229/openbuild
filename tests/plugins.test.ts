@@ -5,13 +5,25 @@ import { join } from "node:path";
 import { validateManifest, type PluginManifest } from "../shared/plugins";
 import { createLocalAuth } from "../server/localAuth";
 import type { ModelInfo } from "../shared/types";
-import openrouterDeepseek from "../plugins/openrouter-deepseek/client";
-import piClaude from "../plugins/pi-claude/client";
-import codexMulti from "../plugins/codex-multi/client";
-import providerOrderPlugin from "../plugins/provider-order/client";
 import { providerOf, providerName, providerSvg } from "../src/lib/models";
 import { providerGroups } from "../src/lib/modelSearch";
 import { addProviderOrder, clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
+
+const DEEPSEEK_ICON = `<svg viewBox="0 0 24 24"><path d="M18.654 0z" style="color:var(--text)"/></svg>`;
+const CLAUDE_ICON = `<svg viewBox="0 0 24 24"><path fill="#D97757" d="M0 0z"/></svg>`;
+const CLAUDE2_ICON = `<svg viewBox="0 0 24 24"><defs><mask id="claude2-cut-_R_0_"></mask><mask id="claude2-two-_R_0_"></mask></defs><g mask="url(#claude2-cut-_R_0_)"></g><rect mask="url(#claude2-two-_R_0_)"/></svg>`;
+const iconPlugin = { icons: { providers: { deepseek: DEEPSEEK_ICON }, brands: { deepseek: DEEPSEEK_ICON } } };
+const claudePlugin = {
+  providers: {
+    "pi-claude": { group: "claude", name: "Claude" },
+    "claude-code": { group: "claude", name: "Claude" },
+    claude: { name: "Claude" },
+    "claude-code-2": { group: "claude-code-2", name: "Claude (2)" },
+  },
+  icons: { providers: { "claude-code-2": CLAUDE2_ICON }, brands: { "claude-code/": CLAUDE_ICON, "claude-code-2/": CLAUDE2_ICON } },
+};
+const codexPlugin = { providers: { "openai-codex-2": { group: "openai-codex-2", name: "Codex (2)" } } };
+const orderPlugin = { providerOrder: ["openai-codex", "openai-codex-2", "claude", "claude-code-2", "opencode", "opencode-go", "xai", "openrouter"] };
 
 const manifest = (patch: Partial<PluginManifest> = {}) => ({
   id: "example",
@@ -31,17 +43,9 @@ test("plugin manifests are validated, including paths and api version", () => {
   expect(validateManifest(manifest({ hide: [""] })).error).toContain("hide");
 });
 
-test("the OpenRouter plugin overrides the DeepSeek provider and brand marks", () => {
-  const icons = openrouterDeepseek.icons;
-  expect(icons.providers.deepseek).toContain("<svg");
-  expect(icons.providers.deepseek).toContain("M18.654");
-  expect(icons.providers.deepseek).toContain("color:var(--text)");
-  expect(icons.brands.deepseek).toBe(icons.providers.deepseek);
-});
-
 test("provider overrides move pi-claude out of Custom and into Claude", () => {
   try {
-    setProviderOverrides(piClaude.providers);
+    setProviderOverrides(claudePlugin.providers);
     const model = { id: "pi-claude/claude-opus-5-5", provider: "pi-claude", custom: true } as const;
     expect(providerOf(model)).toBe("claude");
     expect(providerName("claude")).toBe("Claude");
@@ -54,7 +58,7 @@ test("provider overrides move pi-claude out of Custom and into Claude", () => {
 
 test("Claude Code accounts have separate Claude groups and a badged second icon", () => {
   try {
-    setProviderOverrides(piClaude.providers);
+    setProviderOverrides(claudePlugin.providers);
     const first: ModelInfo = { id: "claude-code/claude-opus-5-5", provider: "claude-code", custom: true, name: "Claude Opus 5.5", protocol: "chat", reasoning: { efforts: [], mode: "effort", toggle: false }, input: ["text", "image"] };
     const second: ModelInfo = { ...first, id: "claude-code-2/claude-opus-5-5", provider: "claude-code-2" };
     expect(providerOf(first)).toBe("claude");
@@ -67,21 +71,14 @@ test("Claude Code accounts have separate Claude groups and a badged second icon"
     expect(groups[0]!.models).toEqual([first]);
     expect(groups[1]!.models).toEqual([second]);
 
-    const icon = piClaude.icons.providers["claude-code-2"];
-    expect(icon).toContain("<svg");
-    expect(icon).toContain('fill="currentColor"');
-    expect(icon).toContain('fill="#D97757"');
-    expect(icon).toContain("claude2-two-_R_0_");
-    expect(icon).toContain("claude2-cut-_R_0_");
-    expect(icon).not.toContain("<title>");
   } finally {
     clearProviderOverrides();
   }
 });
 
-test("the codex-multi plugin gives the second Codex login its own Codex group", () => {
+test("provider overrides give a second Codex login its own Codex group", () => {
   try {
-    setProviderOverrides(codexMulti.providers);
+    setProviderOverrides(codexPlugin.providers);
     const second = { id: "openai-codex-2/gpt-5.6-luna", provider: "openai-codex-2", custom: true } as const;
     expect(providerOf(second)).toBe("openai-codex-2");
     expect(providerName("openai-codex-2")).toBe("Codex (2)");
@@ -89,22 +86,16 @@ test("the codex-multi plugin gives the second Codex login its own Codex group", 
     expect(providerOf(first)).toBe("openai-codex");
     expect(providerName("openai-codex")).toBe("Codex");
 
-    const icon = codexMulti.icons.providers["openai-codex-2"];
-    expect(icon).toContain("<svg");
-    expect(icon).toContain('fill="currentColor"');
-    // The "2" badge is cut out with two masks whose ids the host makes unique per instance.
-    expect(icon).toContain("codex2-two-_R_0_");
-    expect(icon).toContain("codex2-cut-_R_0_");
   } finally {
     clearProviderOverrides();
   }
 });
 
-test("the provider-order plugin puts the rail in Codex → Claude → OpenCode → Grok → OpenRouter order", () => {
+test("providerOrder puts the rail in the listed order", () => {
   try {
-    setProviderOverrides(piClaude.providers);
-    setProviderOverrides(codexMulti.providers);
-    addProviderOrder(providerOrderPlugin.providerOrder);
+    setProviderOverrides(claudePlugin.providers);
+    setProviderOverrides(codexPlugin.providers);
+    addProviderOrder(orderPlugin.providerOrder);
     const model = (provider: string, custom = true): ModelInfo => ({ id: `${provider}/m`, provider, custom, name: provider, protocol: "chat", reasoning: { efforts: [], mode: "effort", toggle: false }, input: ["text"] });
     // Deliberately scrambled input: the plugin's order must win over Pi's model order.
     // "alpha"/"beta" are not named, so they keep their relative order after the listed groups.
@@ -138,6 +129,9 @@ test("the provider-order plugin puts the rail in Codex → Claude → OpenCode �
 });
 
 test("Claude model icons include provider-scoped default aliases without rebranding other providers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "openbuild-brand-icons-"));
+  const client = join(directory, "client.mjs");
+  writeFileSync(client, `export default ${JSON.stringify(claudePlugin)};`);
   const script = `
     import { expect } from "bun:test";
     import { createElement } from "react";
@@ -149,7 +143,7 @@ test("Claude model icons include provider-scoped default aliases without rebrand
     globalThis.localStorage = { getItem() { return null; }, setItem() {}, removeItem() {} };
     globalThis.fetch = async () => Response.json({ enabled: true, safe: false, disabled: [], plugins: [{
       id: "pi-claude", name: "Claude", version: "0.2.0", apiVersion: 1, client: true,
-      clientUrl: ${JSON.stringify(new URL("../plugins/pi-claude/client.tsx", import.meta.url).href)},
+      clientUrl: ${JSON.stringify(`file://${client}`)},
     }] });
     const { usePlugins, pluginBrandSvg } = await import("./src/lib/plugins.tsx");
     const { BrandIcon } = await import("./src/components/primitives.tsx");
@@ -173,12 +167,14 @@ test("Claude model icons include provider-scoped default aliases without rebrand
     expect(pluginBrandSvg("other/default")).toBeUndefined();
     expect(pluginBrandSvg("other/claude-opus-5-5")).toBeUndefined();
   `;
-  const child = Bun.spawn([process.execPath, "-e", script], {
-    cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-  });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  if (code !== 0) throw new Error(`${out}\n${err}`);
-  expect(code).toBe(0);
+  try {
+    const child = Bun.spawn([process.execPath, "-e", script], {
+      cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
+    });
+    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    if (code !== 0) throw new Error(`${out}\n${err}`);
+    expect(code).toBe(0);
+  } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
 test("icon snapshots paint immediately while cold loads wait for plugins", async () => {
@@ -189,7 +185,7 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
   writeFileSync(client, `export default async () => {
     globalThis.__iconEntered = (globalThis.__iconEntered ?? 0) + 1;
     await globalThis.__iconGate;
-    return { icons: ${JSON.stringify(openrouterDeepseek.icons)} };
+    return { icons: ${JSON.stringify(iconPlugin.icons)} };
   };`);
   try {
     for (const scenario of ["missing", "blocked", "corrupt", "malformed", "empty", "partial", "cached", "cold-failure", "cached-failure"]) {
@@ -198,7 +194,7 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
         import { createElement } from "react";
         import { renderToStaticMarkup } from "react-dom/server";
         const scenario = ${JSON.stringify(scenario)};
-        const icons = ${JSON.stringify(openrouterDeepseek.icons)};
+        const icons = ${JSON.stringify(iconPlugin.icons)};
         const cache = scenario === "corrupt" ? "{" : scenario === "malformed" ? "null" :
           scenario.startsWith("cached") ? JSON.stringify(icons) : scenario === "partial" ?
           JSON.stringify({ providers: {}, brands: { unrelated: "<svg/>" } }) :

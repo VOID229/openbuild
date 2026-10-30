@@ -1,9 +1,0 @@
-{
-  "id": "provider-order",
-  "name": "Provider rail order",
-  "version": "0.1.0",
-  "apiVersion": 1,
-  "description": "Puts the model picker's provider rail in a fixed order — Codex, Claude, OpenCode, Grok, OpenRouter — with each account's second login (Codex (2), Claude (2)) right after the first, instead of Pi's model order.",
-  "client": "client.tsx",
-  "styles": "styles.css"
-}

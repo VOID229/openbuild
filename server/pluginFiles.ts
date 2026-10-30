@@ -1,7 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Seed a user's independent plugin copies once. Updates never refresh or overwrite them. */
+/** Move plugins out of a checkout from before they were personal, once. Updates never touch the copies. */
 export function prepareUserPlugins(bundled: string, destination: string): string {
   mkdirSync(destination, { recursive: true, mode: 0o700 });
   const marker = join(destination, ".openbuild-initialized");

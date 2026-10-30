@@ -10,7 +10,7 @@ plugins/my-plugin/
   styles.css      CSS for both
 ```
 
-User plugins live in the data folder's `plugins/`, outside the application checkout. On the first start with this layout, OpenBuild copies the checkout's existing plugin folders there once, including custom plugins and changes to the examples. Existing user folders are never overwritten. Later app updates neither replace these copies nor restore deleted plugins. Plugin enable/disable choices and settings remain in the data directory.
+Plugins are personal. OpenBuild ships none; yours live in the data folder's `plugins/`, outside the application checkout. If an older checkout still has a `plugins/` folder, OpenBuild copies its folders there once on first start. Existing user folders are never overwritten. Later app updates neither replace these copies nor restore deleted plugins. Plugin enable/disable choices and settings remain in the data directory.
 
 `pluginsDir` in `openbuild.config.ts` still overrides this location. Keep explicit paths outside the application checkout for independent updates. The default data folder is `~/.local/share/openbuild` on Linux and `~/Library/Application Support/OpenBuild` on macOS (or `OPENCHAT_DATA_DIR`). Settings → Plugins shows the active folder.
 
@@ -19,8 +19,6 @@ If an older installation has edits inside the checkout's `plugins/`, start OpenB
 The plugin API remains version 1. This storage change does not change manifests, SDK imports, hooks, or plugin settings.
 
 The whole plugin system is **off by default**. `Settings → Plugins` has the master switch: until it's on, nothing from the folder runs — no UI slots, styles, server routes or hooks. With it on, the same page lists everything found (including broken plugins) and turns each one on or off without deleting it.
-
-The folder ships six examples: `daily-note` (a composer button + server route + settings page), `openrouter-deepseek` (icon overrides), `pi-claude` and `codex-multi` (provider grouping and a badged provider icon), `bare-model-names` (rewrites Pi's OpenRouter model names through the SDK's `subscribe`/`useStore`) and `quiet-ui` (manifest-only tokens and CSS, off by default).
 
 ## Manifest
 
@@ -100,11 +98,11 @@ Components receive the slot's context as props.
 
 `toolRenderers` is keyed by Pi tool name (`bash`, `edit`, …). A registered renderer replaces the built-in tool row and receives `{ part, cwd }`.
 
-`icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are model id prefixes (case-insensitive, longest match wins): a provider-scoped prefix such as `claude-code-2/` takes precedence over a bare prefix such as `claude`. Bare prefixes still match the model id without its provider, so `deepseek` matches `deepseek/deepseek-v4.1-flash`. The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme. `plugins/openrouter-deepseek` is a working example.
+`icons.providers` keys are provider ids (exact, case-insensitive). `icons.brands` keys are model id prefixes (case-insensitive, longest match wins): a provider-scoped prefix such as `claude-code-2/` takes precedence over a bare prefix such as `claude`. Bare prefixes still match the model id without its provider, so `deepseek` matches `deepseek/deepseek-v4.1-flash`. The values are SVG markup, inlined into the existing icon slot; use `currentColor` to follow the theme.
 
-`providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group. `plugins/pi-claude` and `plugins/codex-multi` are working examples.
+`providers` maps a raw Pi provider id to a group and/or display name. Setting `group` moves its models out of the catch-all Custom group and into that provider's group, so its icon and name come from the group.
 
-`providerOrder` lists provider groups for the model picker's rail, top to bottom. Names are matched case-insensitively against the group ids that `providers` and `providerOf` produce (`openai-codex`, `claude`, `claude-code-2`, …). Groups it doesn't name follow in Pi's own order, and Custom stays last. Lists from several plugins merge in load order, first mention winning. `plugins/provider-order` is a working example.
+`providerOrder` lists provider groups for the model picker's rail, top to bottom. Names are matched case-insensitively against the group ids that `providers` and `providerOf` produce (`openai-codex`, `claude`, `claude-code-2`, …). Groups it doesn't name follow in Pi's own order, and Custom stays last. Lists from several plugins merge in load order, first mention winning.
 
 ### SDK
 
@@ -154,7 +152,7 @@ Copy `openbuild.config.example.ts` to `openbuild.config.ts` (repo root or data f
 
 ```ts
 export default {
-  pluginsDir: "plugins",
+  pluginsDir: "/absolute/path/to/my/plugins",
   customCss: "custom.css", // applied after the app's styles
   safeMode: false,         // or OPENBUILD_SAFE=1
   disabledPlugins: [],
@@ -185,4 +183,3 @@ The safe escape hatch is `OPENBUILD_SAFE=1` (or `?safe`): the app starts with no
 - No remote install or registry; plugins are folders on disk.
 - Only the built-in slots above; new ones are added in the components that render `<PluginSlot>`.
 - Plugin sections stay selected after a plugin is disabled; pick another section.
-- `plugins/` example files are not typechecked by `bun run typecheck`.

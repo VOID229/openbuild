@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { prepareUserPlugins } from "../server/pluginFiles";
@@ -26,5 +26,14 @@ test("plugin migration preserves custom copies and never refreshes them after up
     expect(readFileSync(join(user, "example", "plugin.json"), "utf8")).toBe("customized example");
     expect(existsSync(join(user, "mine"))).toBe(false);
     expect(existsSync(join(user, "new-example"))).toBe(false);
+  } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("a fresh install starts with no plugins", () => {
+  const temp = mkdtempSync(join(tmpdir(), "ob-user-plugins-"));
+  const user = join(temp, "data", "plugins");
+  try {
+    prepareUserPlugins(join(temp, "app", "plugins"), user);
+    expect(readdirSync(user)).toEqual([".openbuild-initialized"]);
   } finally { rmSync(temp, { recursive: true, force: true }); }
 });

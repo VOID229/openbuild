@@ -77,7 +77,7 @@ ob restart                     # use the installed update
 
 Track selection is saved per machine. OpenBuild checks GitHub releases at most hourly while the app is open, and after CLI start/restart/status commands. The app shows an update notice under Settings → Notifications → New Builds. Offline checks never prevent startup. Nightly follows prereleases, not every commit to main.
 
-User plugins are kept in the data directory outside the application checkout; app updates never replace them or their settings. Existing checkout plugins are copied there once at startup without overwriting user folders. An explicit `pluginsDir` remains supported; use a folder outside the checkout.
+Plugins are personal: OpenBuild ships none, and yours are kept in the data directory outside the application checkout, so app updates never replace them or their settings. Plugins left in an older checkout are copied there once at startup without overwriting user folders. An explicit `pluginsDir` remains supported; use a folder outside the checkout.
 
 Updates require a clean Git checkout and preserve local branches and commits. They install a release tag and its frozen dependencies; they never reset local edits. Running agents continue until you explicitly restart. Switching tracks can install an older release from the other track. A track with no published releases reports that there is nothing to install.
 

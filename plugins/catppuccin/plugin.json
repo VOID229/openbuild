@@ -1,9 +1,0 @@
-{
-  "id": "catppuccin",
-  "name": "Catppuccin",
-  "version": "0.1.0",
-  "apiVersion": 1,
-  "description": "Catppuccin Latte colors in light mode and Mocha colors in dark mode.",
-  "styles": "styles.css",
-  "defaultEnabled": false
-}
