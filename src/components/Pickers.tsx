@@ -11,7 +11,7 @@ import {
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { MODELS_STALE, composerEffort, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
+import { composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { effortFor, supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
@@ -61,18 +61,20 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
     () => (native ? { [runtime]: list ?? (runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
     [native, runtime, list, deviceId, remote, local],
   );
+  // Fetch when the list is missing or stale; a failed one is retried shortly while it's on screen.
   useEffect(() => {
     if (!native) return;
-    const stale = list && list.status !== "checking" && Date.now() - (list.checkedAt ?? 0) > MODELS_STALE;
-    if (!list || stale) void loadNative(deviceId, !!list);
+    const wait = modelsDueIn(list);
+    if (wait === Infinity) return;
+    const t = setTimeout(() => void loadNative(deviceId, !!list), wait);
+    return () => clearTimeout(t);
   }, [native, list, deviceId, loadNative]);
   useEffect(() => {
     if (!deviceId || native) return;
-    const stale =
-      remote &&
-      remote.status !== "checking" &&
-      Date.now() - (remote.checkedAt ?? 0) > MODELS_STALE;
-    if (!remote || stale) void load(deviceId, !!remote);
+    const wait = modelsDueIn(remote);
+    if (wait === Infinity) return;
+    const t = setTimeout(() => void load(deviceId, !!remote), wait);
+    return () => clearTimeout(t);
   }, [deviceId, remote, load, native]);
   return detection;
 }

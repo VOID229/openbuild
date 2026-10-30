@@ -81,6 +81,11 @@ function withPi(s: State, deviceId: string | undefined, patch: PiCache): Partial
 
 /** How old a model list gets before it's asked for again (the old one stays on screen meanwhile). */
 export const MODELS_STALE = 10 * 60 * 1000;
+/** A failed list is retried much sooner: a device that was briefly unreachable shouldn't keep its error for ten minutes. */
+export const MODELS_ERROR_RETRY = 30 * 1000;
+/** How long until a model list should be fetched again (0 = now, Infinity = it's being fetched). */
+export const modelsDueIn = (d?: Detection): number =>
+  !d ? 0 : d.status === "checking" ? Infinity : Math.max(0, (d.checkedAt ?? 0) + (d.status === "error" ? MODELS_ERROR_RETRY : MODELS_STALE) - Date.now());
 /** Paired devices whose Pi model list is being fetched right now. */
 const inflightDevices = new Set<string>();
 
@@ -439,7 +444,7 @@ export const useStore = create<State>()(
       },
       warmModels: () => {
         const s = get();
-        const due = (d?: Detection) => !d || (d.status !== "checking" && Date.now() - (d.checkedAt ?? 0) > MODELS_STALE);
+        const due = (d?: Detection) => modelsDueIn(d) === 0;
         for (const device of s.devices) {
           if (!device.local && device.online === false) continue;
           const id = device.local ? undefined : device.id;
@@ -795,7 +800,8 @@ export const useStore = create<State>()(
         const settle = <T extends Detection>(lists: Record<string, T> | undefined): Record<string, T> =>
           Object.fromEntries(
             Object.entries(lists ?? {}).flatMap(([k, d]) =>
-              d.status !== "checking" ? [[k, d]] : d.models?.length ? [[k, { ...d, status: "valid", checkedAt: d.checkedAt ?? 0 }]] : [],
+              // A saved error is fetched again at once rather than shown as current.
+              d.status === "error" ? [[k, { ...d, checkedAt: 0 }]] : d.status !== "checking" ? [[k, d]] : d.models?.length ? [[k, { ...d, status: "valid", checkedAt: d.checkedAt ?? 0 }]] : [],
             ),
           );
         return {
