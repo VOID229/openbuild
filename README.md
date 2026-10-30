@@ -67,3 +67,7 @@ to run agents on your device.
 
 You wont need to enter the password on each page reload or server restart.
 your browser stores an random token cookie and the server verifies its hash to keep you logged in. it auto expires after 30 days of idle.
+
+## License
+
+OpenBuild is licensed under the [MIT License](LICENSE). This license applies to the entire project, including all prior commits and revisions.

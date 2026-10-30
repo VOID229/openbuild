@@ -69,5 +69,6 @@
   "bin": {
     "openbuild": "bin/openbuild.ts",
     "ob": "bin/openbuild.ts"
-  }
+  },
+  "license": "MIT"
 }
