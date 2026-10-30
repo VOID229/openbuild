@@ -42,6 +42,11 @@ export function clearProviderOverrides() {
   order.length = 0;
 }
 
+/** Everything plugins set, for caching across page loads (see plugins.tsx). */
+export function snapshotProviderOverrides(): { overrides: Record<string, ProviderOverride>; order: string[] } {
+  return { overrides: Object.fromEntries(overrides), order: [...order] };
+}
+
 export function providerOverride(id: string): ProviderOverride | undefined {
   return overrides.get(id.toLowerCase());
 }

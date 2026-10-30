@@ -15,7 +15,7 @@ import { Component, type ComponentType, type ErrorInfo, type ReactNode } from "r
 import { create } from "zustand";
 import { PLUGIN_API_VERSION, type PluginInfo, type PluginSettingsSection, type PluginsResponse } from "../../shared/plugins";
 import { useStore } from "./store";
-import { addProviderOrder, clearProviderOverrides, setProviderOverrides } from "./pluginOverrides";
+import { addProviderOrder, clearProviderOverrides, setProviderOverrides, snapshotProviderOverrides, type ProviderOverride } from "./pluginOverrides";
 import type { ToolPart } from "./types";
 
 // ------------------------------------------------------------------ the host bridge
@@ -96,6 +96,10 @@ const brandIcons = new Map<string, string>();
 const ICON_CACHE_KEY = "openbuild:plugin-icons";
 let stagedProviderIcons = new Map<string, string>();
 let stagedBrandIcons = new Map<string, string>();
+// Provider groups/names are staged and cached the same way: without this, a reload lists
+// plugin-grouped providers (e.g. claude-code-2) under Custom until the client modules import.
+let stagedOverrides: Record<string, ProviderOverride> = {};
+let stagedOrder: string[] = [];
 /**
  * A committed icon snapshot (including an empty one) is enough to paint the entire sidebar.
  * Keep that snapshot while plugins refresh, then swap the registry atomically. Only a cold load
@@ -261,7 +265,8 @@ function unloadAll() {
   // and blanking them here would flash the built-in marks while the client modules re-import.
   stagedProviderIcons = new Map();
   stagedBrandIcons = new Map();
-  clearProviderOverrides();
+  stagedOverrides = {};
+  stagedOrder = [];
   runtimeErrors.clear();
   bump();
 }
@@ -306,8 +311,8 @@ function register(info: PluginInfo, config: ClientPlugin, entry: Applied) {
     if (isSvg(svg)) stagedBrandIcons.set(prefix.toLowerCase(), svg);
   }
 
-  if (config.providers) setProviderOverrides(config.providers);
-  if (Array.isArray(config.providerOrder)) addProviderOrder(config.providerOrder);
+  if (config.providers && typeof config.providers === "object") Object.assign(stagedOverrides, config.providers);
+  if (Array.isArray(config.providerOrder)) stagedOrder.push(...config.providerOrder);
 
   if (config.settings?.component && typeof config.settings.component === "function") {
     settingsSections.set(`plugin:${info.id}`, {
@@ -349,10 +354,13 @@ function commitIcons() {
   brandIcons.clear();
   for (const [provider, svg] of stagedProviderIcons) providerIcons.set(provider, svg);
   for (const [prefix, svg] of stagedBrandIcons) brandIcons.set(prefix, svg);
+  clearProviderOverrides();
+  setProviderOverrides(stagedOverrides);
+  addProviderOrder(stagedOrder);
   iconsReady = true;
   try {
     // Written even when empty: "no overrides" is just as worth remembering as overrides are.
-    localStorage.setItem(ICON_CACHE_KEY, JSON.stringify({ providers: Object.fromEntries(providerIcons), brands: Object.fromEntries(brandIcons) }));
+    localStorage.setItem(ICON_CACHE_KEY, JSON.stringify({ providers: Object.fromEntries(providerIcons), brands: Object.fromEntries(brandIcons), ...snapshotProviderOverrides() }));
   } catch {
     // Storage may be full or blocked; the icons still work for this page load.
   }
@@ -375,6 +383,9 @@ function hydrateIcons() {
     if (!isRecord(saved) || !isRecord(saved.providers) || !isRecord(saved.brands)) return;
     for (const [provider, svg] of Object.entries(saved.providers)) if (isSvg(svg)) providerIcons.set(provider.toLowerCase(), svg);
     for (const [prefix, svg] of Object.entries(saved.brands)) if (isSvg(svg)) brandIcons.set(prefix.toLowerCase(), svg);
+    // Provider groups and names too (snapshots from before they were cached simply lack these).
+    if (isRecord(saved.overrides)) setProviderOverrides(saved.overrides as Record<string, ProviderOverride>);
+    if (Array.isArray(saved.order)) addProviderOrder(saved.order);
     // commitIcons writes the full registry, not just overrides for icons previously rendered.
     // Missing entries therefore use built-ins immediately, without waiting on plugin imports.
     iconsReady = true;
