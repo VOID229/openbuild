@@ -29,6 +29,8 @@ interface Surface {
   open(): void;
   /** Not in a folder that can have it (the diff needs a project folder). */
   disabled?: boolean;
+  /** Shown in place of the key, saying why it's unavailable. */
+  note?: string;
 }
 
 /** The OpenChat preset: a browser tab at this address. */
@@ -56,7 +58,7 @@ function useSurfaces(folder: TerminalFolder): Surface[] {
     // A new shell each time: the launcher and the + menu both mean "another one".
     { id: "terminal", label: "Terminal", icon: <SquareTerminal size={16} />, key: "T", open: () => (useSideTerminal.getState().tabs.length ? useSideTerminal.getState().addTab() : showSideTerminal()) },
     { id: "diff", label: "Diff", icon: <FileDiff size={16} />, key: "D", open: openDiff, disabled: !folder.cwd },
-    { id: "openchat", label: "OpenChat", icon: <MessageSquare size={16} />, key: "O", open: openChat },
+    { id: "openchat", label: "OpenChat", icon: <MessageSquare size={16} />, key: "O", open: openChat, disabled: true, note: "Maintenance" },
   ];
 }
 
@@ -115,7 +117,7 @@ function useSurfaceKeys(open: boolean, launcher: boolean, surfaces: Surface[], c
         if (!e.altKey || e.code !== "KeyO" || el?.closest(".xterm")) return;
         e.preventDefault();
         e.stopPropagation();
-        latest.current.find((x) => x.id === "openchat")?.open();
+        latest.current.find((x) => x.id === "openchat" && !x.disabled)?.open();
         return;
       }
       // The drawer's terminal keeps its keys. In the panel's own terminal, ⌥T and ⌥W are its tab
@@ -162,7 +164,7 @@ function Launcher({ surfaces, files }: { surfaces: Surface[]; files: boolean }) 
           <button key={s.id} type="button" role="menuitem" className="side-launch" disabled={s.disabled} onClick={s.open}>
             {s.icon}
             {s.label}
-            <kbd className="side-launch-key">⌥{s.key}</kbd>
+            {s.note ? <span className="side-launch-note">{s.note}</span> : <kbd className="side-launch-key">⌥{s.key}</kbd>}
           </button>
         ))}
       </div>

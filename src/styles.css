@@ -7788,6 +7788,7 @@ a.btn-primary {
 }
 
 .side-launch:disabled .side-launch-key { opacity: 0.5; }
+.side-launch-note { margin-left: auto; color: var(--text-3); font-size: 12px; }
 .side-launch-hint { margin: 6px 0 0; color: var(--text-3); font-size: 12.5px; }
 
 /* The diff tab: one section per changed file, lines numbered old and new. */
