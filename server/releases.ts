@@ -49,8 +49,11 @@ export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus>
     }
     const latest = selectRelease(releases, track);
     const head = git(["rev-parse", "HEAD"], root);
-    let current = head.slice(0, 12);
-    try { current = git(["describe", "--tags", "--exact-match", "HEAD"], root); } catch {}
+    // A stable release can share its commit with a nightly: name HEAD by its track's tag, and
+    // treat it as current when any of its tags is the latest, so it isn't installed again.
+    const tags = git(["tag", "--points-at", "HEAD"], root).split("\n").filter(Boolean);
+    const onTrack = (tag: string) => releases.some(r => r.tag_name === tag && r.prerelease === (track === "nightly"));
+    const current = (latest && tags.includes(latest.tag_name) ? latest.tag_name : tags.find(onTrack) ?? tags[0]) ?? head.slice(0, 12);
     let available = !!latest && current !== latest.tag_name;
     // Do not suggest downgrading a checkout already ahead of the release.
     if (latest && available && !releases.some(r => r.tag_name === current && r.prerelease !== (track === "nightly"))) {

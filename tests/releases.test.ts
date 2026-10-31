@@ -36,6 +36,13 @@ test("track persistence, cached release checks, switching tracks, offline recove
     expect((await checkRelease(false, temp)).latest).toBe("v1.1.0-nightly.1");
     expect((await checkRelease(false, temp)).available).toBe(true);
     expect(calls).toBe(2);
+    // A stable release and a nightly on the same commit are both current on their tracks.
+    git("tag", "v1.1.0-nightly.1");
+    expect(await checkRelease(true, temp)).toMatchObject({ current: "v1.1.0-nightly.1", available: false });
+    setReleaseTrack("stable");
+    expect(await checkRelease(true, temp)).toMatchObject({ current: "v1.0.0", available: false });
+    setReleaseTrack("nightly");
+    git("tag", "-d", "v1.1.0-nightly.1");
     writeFileSync(join(temp, "local.txt"), "preserve me");
     await expect(installRelease(temp)).rejects.toThrow("local changes");
     globalThis.fetch = (async () => new Response("limited", { status: 403 })) as unknown as typeof fetch;
