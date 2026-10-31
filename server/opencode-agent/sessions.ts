@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
+import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
 import { workerConnection, locationQuery, type Connection, type NativeEvent } from "./connection";
 import { toolEvent, type NativeTool } from "./tools";
@@ -95,6 +95,42 @@ async function handleForm(c: Connection, l: Live, form: any, signal: AbortSignal
   }
   await c.request(path + "/reply", "POST", { answer });
 }
+/** A one-off answer in a session of its own, which is deleted afterwards. */
+export async function complete(r: { model: string; effort?: Effort; system: string; prompt: string; images?: PiChatRequest["images"]; cwd: string }, signal: AbortSignal): Promise<string> {
+  const c = await workerConnection();
+  const model = await selectedModel(c, { model: r.model, effort: r.effort ?? "off", cwd: r.cwd } as PiChatRequest);
+  const created = await c.request("/api/session", "POST", { location: { directory: resolve(r.cwd) }, model }, signal);
+  const id: string | undefined = created.data?.id;
+  if (!id) throw new Error("OpenCode did not return a session id");
+  const stop = new AbortController();
+  const texts = new Map<string, string>();
+  let off: (() => void) | undefined, onAbort: (() => void) | undefined;
+  try {
+    const finished = new Promise<void>((done, fail) => {
+      onAbort = () => fail(new Error("OpenCode request aborted"));
+      signal.addEventListener("abort", onAbort, { once: true });
+      void c.subscribe(({ type, data: d }) => {
+        if (d.sessionID !== id) return;
+        if (/^session\.text\.(delta|ended)$/.test(type)) {
+          const key = `${d.assistantMessageID}:${d.ordinal}`;
+          texts.set(key, typeof d.text === "string" ? d.text : (texts.get(key) ?? "") + (d.delta ?? ""));
+        } else if (type === "session.execution.succeeded") done();
+        else if (type === "session.execution.failed" || type === "session.execution.interrupted") fail(new Error(d.error?.message ?? "OpenCode didn't finish"));
+      }, fail, stop.signal).then((unsubscribe) => { off = unsubscribe; }).then(() =>
+        // The prefix marks the session as OpenBuild's, so session import skips it if the delete fails.
+        c.request(`${sessionPath(id)}/prompt`, "POST", { text: questionPrompt(`${r.system}\n\n${r.prompt}`), ...(r.images?.length ? { files: r.images.map((i) => ({ uri: `data:${i.mimeType};base64,${i.data}` })) } : {}) }),
+      ).catch(fail);
+    });
+    await finished;
+    return [...texts.values()].join("\n\n").trim();
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    stop.abort();
+    off?.();
+    await c.request(sessionPath(id), "DELETE").catch(() => {});
+  }
+}
+
 export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder(); const local = new AbortController();
   return new ReadableStream<Uint8Array>({

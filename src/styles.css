@@ -3742,6 +3742,19 @@ svg {
 .select-trigger {
   display: flex;
   align-items: center;
+/* Rows are tight: the model's name keeps its room and the provider tag gives way first. */
+.naming-row .select-value {
+  flex: 1 1 auto;
+}
+
+.naming-row .select-hint {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -3782,6 +3795,12 @@ svg {
 
 .select-value {
   flex: 1;
+.select-trigger-icon {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0 8px 0 10px;
+}
+
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4494,6 +4513,9 @@ p.key-status svg {
 /* Touch screens: a fixed, app-like screen. The page itself never scrolls, bounces or zooms; only
    the panels inside it scroll. --app-h is the height above the keyboard (see lib/viewport.ts). */
 @media (pointer: coarse) {
+  .naming-row .select-wrap:has(.select-trigger-icon) {
+    margin-left: 0;
+  }
   html,
   body {
     overflow: hidden;

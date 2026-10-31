@@ -1,6 +1,6 @@
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { Device, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeStatus, ThreadRuntime, Workspace } from "../../shared/types";
+import type { ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 
 async function json<T>(res: Response): Promise<T> {
@@ -110,8 +110,8 @@ export const steerThread = (threadId: string, steerId: string, message: string, 
 export const compactThread = (threadId: string, instructions?: string, deviceId?: string) =>
   send<{ tokensBefore: number; estimatedTokensAfter?: number }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/compact`), "POST", { instructions });
 
-export const completeOnce = (model: string, system: string, prompt: string, signal?: AbortSignal) =>
-  fetch("/api/pi/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, system, prompt }), signal })
+export const completeOnce = (req: { runtime: TextRuntime; model: string; effort?: Effort; system: string; prompt: string; images?: { data: string; mimeType: string }[] }, signal?: AbortSignal) =>
+  fetch("/api/pi/complete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(req), signal })
     .then((r) => json<{ text: string }>(r))
     .then((r) => r.text);
 

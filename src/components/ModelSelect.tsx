@@ -1,11 +1,11 @@
 // Custom select controls used in Settings, styled like the composer's pickers.
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { type Effort } from "../../shared/types";
 import { findModel, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { useStore } from "../lib/store";
+import { planDetection, useStore } from "../lib/store";
 import type { ModelRef } from "../lib/types";
 import { arrowNav, cx, useDevicePref, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
@@ -17,16 +17,18 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
   const [showAll, setShowAll] = useDevicePref("models.showAll");
   const list = useRef<HTMLDivElement>(null);
   const search = useRef<HTMLInputElement>(null);
-  const detection = useStore((s) => s.detection);
+  // The runtime is picked apart (Settings); the composer's Pi menu has no selection to go by.
+  const plan = selected?.plan ?? "pi";
+  const detection = useStore((s) => planDetection(s, plan));
   // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
-  const scope = detection.pi?.scope;
+  const scope = plan === "pi" ? detection?.scope : undefined;
   const scoped = hasModelScope(scope);
-  const all = detection.pi?.models ?? [];
+  const all = detection?.models ?? [];
 
   useFocusOnShow(search);
 
   const models = useMemo(
-    () => (showAll ? all : scopedModels(all, scope, selected?.plan === "pi" ? selected.id : undefined)),
+    () => (showAll ? all : scopedModels(all, scope, selected?.id)),
     [all, scope, showAll, selected],
   );
 
@@ -49,7 +51,7 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
           } else if (e.key === "Enter") {
             e.preventDefault();
             const first = groups[0];
-            if (first?.models[0]) onPick({ plan: "pi", id: first.models[0].id });
+            if (first?.models[0]) onPick({ plan, id: first.models[0].id });
           }
         }}
       />
@@ -72,9 +74,9 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
           <div key={g.provider} role="group" aria-label={providerName(g.provider)}>
             <div className="menu-label">{providerName(g.provider)}</div>
             {g.models.map((m) => {
-              const isSelected = selected?.plan === "pi" && selected.id === m.id;
+              const isSelected = selected?.id === m.id;
               return (
-                <button key={m.id} type="button" role="option" aria-selected={isSelected} className="menu-item" onClick={() => onPick({ plan: "pi", id: m.id })}>
+                <button key={m.id} type="button" role="option" aria-selected={isSelected} className="menu-item" onClick={() => onPick({ plan, id: m.id })}>
                   <BrandIcon id={m.id} />
                   <span className="menu-item-label">{m.name}</span>
                   {isSelected && <Check size={15} className="menu-check" />}
@@ -89,7 +91,9 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
               ? `No models match “${query.trim()}”.`
               : scoped && !showAll
                 ? "No models from this device's Pi scope."
-                : "Sign in to a provider in Settings → Providers to choose a model."}
+                : plan === "pi"
+                  ? "Sign in to a provider in Settings → Providers to choose a model."
+                  : "This runtime has no models to choose from."}
           </p>
         )}
       </div>
@@ -101,8 +105,8 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
 export function ModelSelect({ value, onChange, label }: { value: ModelRef; onChange: (ref: ModelRef) => void; label: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const detection = useStore((s) => s.detection);
-  const current = findModel(detection, value);
+  const detection = useStore((s) => planDetection(s, value.plan));
+  const current = findModel({ [value.plan]: detection }, value);
 
   return (
     <span className="select-wrap select-grow">
@@ -181,8 +185,8 @@ export function EffortSelect({ value, levels, onChange, label }: { value: Effort
   );
 }
 
-/** Themed dropdown for a short fixed list of options. */
-export function OptionSelect<T extends string>({ value, options, onChange, label, className }: { value: T; options: { value: T; label: string }[]; onChange: (v: T) => void; label: string; className?: string }) {
+/** Themed dropdown for a short fixed list of options. An option's icon stands in for its label on the closed trigger. */
+export function OptionSelect<T extends string>({ value, options, onChange, label, className }: { value: T; options: { value: T; label: string; icon?: ReactNode }[]; onChange: (v: T) => void; label: string; className?: string }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const current = options.find((o) => o.value === value);
@@ -191,13 +195,14 @@ export function OptionSelect<T extends string>({ value, options, onChange, label
       <button
         ref={anchor}
         type="button"
-        className={cx("select-trigger select-trigger-md", open && "select-trigger-open")}
+        className={cx("select-trigger", current?.icon ? "select-trigger-icon" : "select-trigger-md", open && "select-trigger-open")}
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={label}
+        aria-label={current?.icon ? `${label}: ${current.label}` : label}
+        data-tooltip={current?.icon && !open ? current.label : undefined}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className="select-value">{current?.label ?? value}</span>
+        {current?.icon ?? <span className="select-value">{current?.label ?? value}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu" role="listbox" label={label} fixed="auto">
@@ -214,6 +219,7 @@ export function OptionSelect<T extends string>({ value, options, onChange, label
                 setOpen(false);
               }}
             >
+              {o.icon}
               <span className="menu-item-label">{o.label}</span>
               {value === o.value && <Check size={15} className="menu-check" />}
             </button>

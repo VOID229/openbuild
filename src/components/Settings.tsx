@@ -1,10 +1,11 @@
 import { ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { lowestEffort, nearestEffort, type ThreadRuntime } from "../../shared/types";
+import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type TextRuntime, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
-import { fastTarget, findModel } from "../lib/models";
-import { UPDATABLE_RUNTIMES, runtimeName } from "../lib/runtimes";
-import { useStore, type SettingsSection } from "../lib/store";
+import { fastTarget } from "../lib/models";
+import { UPDATABLE_RUNTIMES, runtimeEnabled, runtimeName } from "../lib/runtimes";
+import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../lib/runtimeStatus";
+import { loadPlanModels, planDetection, useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
 import { arrowNav, cx, usePresence } from "../lib/ui";
 import { AccountSection } from "./Account";
@@ -224,19 +225,44 @@ function TextGeneration() {
   const detection = useStore((s) => s.detection);
   const settings = useStore((s) => s.settings);
   const update = useStore((s) => s.updateSettings);
-  const plans = (["pi"] as const).filter((p) => detection[p]?.models.length);
-  const setModels = (models: NamingModel[]) => update({ naming: { ...naming, models } });
+  // Reasoning levels come from runtime lists that load after this renders.
+  useStore((s) => TEXT_RUNTIMES.map((r) => planDetection(s, r)?.checkedAt ?? 0).join());
+  const [statuses, setStatuses] = useState<Record<ThreadRuntime, RuntimeStatus> | undefined>(() => cachedRuntimeStatuses());
+  // Rows are stored as a plan: a runtime other than Pi is a plan of its own.
+  const usable = TEXT_RUNTIMES.filter((r) => (r === "pi" ? !!detection.pi?.models.length : statuses?.[r]?.installed) && runtimeEnabled(settings, r));
+  const runtimeOptions = (plan: TextRuntime) => [...new Set([plan, ...usable])].map((r) => ({ value: r, label: runtimeName(r), icon: <RuntimeIcon runtime={r} size={16} /> }));
+  const setModels = (models: NamingModel[]) => update({ naming: { ...useStore.getState().settings.naming, models } });
+  const modelsOf = (plan: TextRuntime) => planDetection(useStore.getState(), plan)?.models ?? [];
 
-  const addModel = () => {
+  useEffect(() => {
+    void loadRuntimeStatuses().then(setStatuses).catch(() => {});
+    for (const m of naming.models) void loadPlanModels(m.plan);
+  }, []);
+
+  const firstModel = async (plan: TextRuntime, taken: Set<string>): Promise<NamingModel | undefined> => {
+    await loadPlanModels(plan);
+    const list = modelsOf(plan).filter((m) => !taken.has(`${plan}:${m.id}`));
+    const preferred = (planDetection(useStore.getState(), plan) as { defaultModel?: string } | undefined)?.defaultModel;
+    const model = list.find((m) => m.id === preferred) ?? list[0];
+    return model && { plan, id: model.id, effort: lowestEffort(model.reasoning.efforts) };
+  };
+
+  const addModel = async () => {
     const taken = new Set(naming.models.map((m) => `${m.plan}:${m.id}`));
     const fast = fastTarget(detection, settings);
-    const pick =
-      fast && !taken.has(`${fast.plan}:${fast.id}`)
-        ? fast
-        : plans.flatMap((plan) => (detection[plan]?.models ?? []).map((m) => ({ plan, id: m.id }))).find((m) => !taken.has(`${m.plan}:${m.id}`));
-    if (!pick) return;
-    const model = findModel(detection, pick);
-    setModels([...naming.models, { ...pick, effort: lowestEffort(model?.reasoning.efforts ?? []) }]);
+    if (fast && !taken.has(`${fast.plan}:${fast.id}`)) {
+      const model = detection[fast.plan]?.models.find((m) => m.id === fast.id);
+      return setModels([...naming.models, { ...fast, effort: lowestEffort(model?.reasoning.efforts ?? []) }]);
+    }
+    for (const plan of usable) {
+      const pick = await firstModel(plan, taken);
+      if (pick) return setModels([...useStore.getState().settings.naming.models, pick]);
+    }
+  };
+
+  const setRuntime = async (i: number, plan: TextRuntime) => {
+    const pick = await firstModel(plan, new Set());
+    if (pick) setModels(useStore.getState().settings.naming.models.map((m, j) => (j === i ? pick : m)));
   };
 
   return (
@@ -250,7 +276,7 @@ function TextGeneration() {
       <div className="naming-list">
         {!naming.models.length && <p className="naming-empty">Uses the thread's own model at its lowest reasoning. Select models to override.</p>}
         {naming.models.map((entry, i) => {
-          const model = findModel(detection, entry);
+          const model = planDetection(useStore.getState(), entry.plan)?.models.find((m) => m.id === entry.id);
           const efforts = model?.reasoning.efforts ?? [];
           return (
             <div key={`${entry.plan}:${entry.id}:${i}`} className="naming-row">
@@ -259,7 +285,7 @@ function TextGeneration() {
                 label={`Text generation model ${i + 1}`}
                 value={entry}
                 onChange={(ref) => {
-                  const next = findModel(detection, ref);
+                  const next = planDetection(useStore.getState(), ref.plan)?.models.find((m) => m.id === ref.id);
                   setModels(naming.models.map((m, j) => (j === i ? { ...ref, effort: nearestEffort(next?.reasoning.efforts ?? [], m.effort) ?? m.effort } : m)));
                 }}
               />
@@ -268,6 +294,12 @@ function TextGeneration() {
                 levels={efforts}
                 value={nearestEffort(efforts, entry.effort) ?? entry.effort}
                 onChange={(effort) => setModels(naming.models.map((m, j) => (j === i ? { ...m, effort } : m)))}
+              />
+              <OptionSelect
+                label={`Runtime for text generation model ${i + 1}`}
+                value={entry.plan as TextRuntime}
+                options={runtimeOptions(entry.plan as TextRuntime)}
+                onChange={(plan) => void setRuntime(i, plan)}
               />
               <span className="naming-actions">
                 {i > 0 && (
@@ -287,10 +319,10 @@ function TextGeneration() {
             </div>
           );
         })}
-        <button type="button" className="add-key" disabled={!plans.length} onClick={addModel}>
+        <button type="button" className="add-key" disabled={!usable.length} onClick={() => void addModel()}>
           <Plus size={14} /> {naming.models.length ? "add model" : "select model"}
         </button>
-        {!plans.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose models.</p>}
+        {!usable.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose models.</p>}
       </div>
       <div className="setting-row">
         <div className="setting-text">

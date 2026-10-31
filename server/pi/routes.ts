@@ -15,7 +15,9 @@ import { currentJob, jobStream, startJob } from "./jobs";
 import * as resources from "./resources";
 import { forgetPrices, lookup, priceBook, pricing, type PriceBook } from "./pricing";
 import { problems } from "./rpc";
-import { complete, forgetModels, isThreadId, listCommands, listModels, modelEfforts } from "./sessions";
+import { TEXT_RUNTIMES } from "../../shared/types";
+import { complete } from "../textGeneration";
+import { forgetModels, isThreadId, listCommands, listModels, modelEfforts } from "./sessions";
 import { answer, compact, findShell, startShell, stopShell, restartIdle, steer, startRun } from "./remote";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
@@ -437,13 +439,17 @@ export function piRoutes(api: Api) {
         }
       }),
     },
-    // One-off completion with no tools (thread titles).
+    // One-off completion with no tools, on any runtime (thread titles, commit messages).
     "/api/pi/complete": {
       POST: api(async (req) => {
         const body = await readJson(req);
-        if (!str(body?.model, 512) || !str(body?.system, 8000) || !str(body?.prompt, 20_000)) return bad("Expected { model, system, prompt }");
+        const images = body?.images ?? [];
+        const imagesOk = Array.isArray(images) && images.length <= 4 && images.every((image) => str(image?.data, 16_000_000) && str(image?.mimeType, 64));
+        const runtime = body?.runtime ?? "pi";
+        const effort = EFFORTS.includes(body?.effort) ? body.effort : undefined;
+        if (!TEXT_RUNTIMES.includes(runtime) || !str(body?.model, 512) || !str(body?.system, 8000) || !str(body?.prompt, 20_000) || !imagesOk) return bad("Expected { model, system, prompt, runtime?, effort?, images? }");
         try {
-          return Response.json({ text: await complete(body.model, body.system, body.prompt, req.signal) });
+          return Response.json({ text: await complete({ runtime, model: body.model, effort, system: body.system, prompt: body.prompt, images }, req.signal) });
         } catch (err) {
           return fail(err, 502);
         }

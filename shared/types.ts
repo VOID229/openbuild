@@ -428,6 +428,10 @@ export interface GitChanges {
 /** Runtime chosen when a thread starts; absent on legacy threads means Pi. "fx" runs Vercel's fx agent. */
 export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor" | "claude" | "opencode";
 
+/** Runtimes that can write short texts. Durable runs Pi's models, so Pi stands in for it. */
+export type TextRuntime = Exclude<ThreadRuntime, "durable">;
+export const TEXT_RUNTIMES: TextRuntime[] = ["pi", "claude", "opencode", "codex", "cursor", "fx"];
+
 /** Whether a device has a runtime's program installed (GET /api/runtimes), and how to install it. */
 export interface RuntimeAvailability {
   installed: boolean;
@@ -456,6 +460,13 @@ export interface RuntimeAccount {
   runtime: "codex" | "claude" | "cursor";
   configDir: string;
   deviceId?: string;
+}
+
+/** Another Claude Code login on a device, with the models that sign-in offers. */
+export interface ClaudeAccountModels {
+  account: RuntimeAccount;
+  /** Ids and provider use the account's id: "claude2/opus". Empty when the listing failed. */
+  models: ModelInfo[];
 }
 
 export interface PiChatRequest {

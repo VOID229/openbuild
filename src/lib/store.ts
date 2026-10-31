@@ -9,7 +9,7 @@ import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { effortFor, effortKey, speedFor } from "./effort";
-import type { Effort, ModelInfo, PermissionModes } from "../../shared/types";
+import type { ClaudeAccountModels, Effort, ModelInfo, PermissionModes, RuntimeAccount } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
@@ -155,6 +155,53 @@ export function deviceDetection(
   if (runtime === "opencode") return { opencode: s.opencodeModels?.[deviceId ?? ""] ?? PENDING_OPENCODE };
   if (!deviceId) return s.detection;
   return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
+}
+
+type ClaudeList = Detection & { defaultModel?: string; accounts?: ClaudeAccountModels[] };
+const claudeViews = new WeakMap<Detection, Map<string, ClaudeList>>();
+/**
+ * Claude Code's models with each account's under its own provider. A session lives in one config
+ * directory and can't resume in another, so a started thread lists only its own account.
+ */
+export function claudeDetection(d: ClaudeList, chat?: Pick<Chat, "messages" | "runtimeAccount">): ClaudeList {
+  if (!d.accounts?.length) return d;
+  const account = chat?.messages.length ? chat.runtimeAccount?.id ?? "claude" : "";
+  const views = claudeViews.get(d) ?? new Map<string, ClaudeList>();
+  claudeViews.set(d, views);
+  if (!views.has(account)) {
+    const models = [...d.models, ...d.accounts.flatMap((a) => a.models)];
+    const own = account ? models.filter((m) => m.provider === account) : models;
+    views.set(account, { ...d, models: own.length ? own : d.models });
+  }
+  return views.get(account)!;
+}
+
+/** The detected account a Claude model belongs to; the default account has none. */
+export function claudeModelAccount(s: Pick<State, "claudeModels">, deviceId: string | undefined, modelId: string): RuntimeAccount | undefined {
+  const account = s.claudeModels[deviceId ?? ""]?.accounts?.find((a) => modelId.startsWith(`${a.account.id}/`))?.account;
+  return account && { ...account, deviceId };
+}
+
+/** This server's models for a plan, which for a runtime other than Pi is its own list. */
+export function planDetection(s: Pick<State, "detection" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">, plan: PlanId): Detection | undefined {
+  if (plan === "fx") return s.fxModels[""];
+  if (plan === "codex") return s.codexModels[""];
+  if (plan === "cursor") return s.cursorModels[""];
+  if (plan === "claude") return s.claudeModels[""];
+  if (plan === "opencode") return s.opencodeModels[""];
+  return s.detection[plan];
+}
+
+/** Fetch a runtime's models on this server, once. Pi's load with the app. */
+export function loadPlanModels(plan: PlanId): Promise<void> {
+  const s = useStore.getState();
+  if (planDetection(s, plan) || plan === "pi") return Promise.resolve();
+  if (plan === "fx") return s.loadFxModels();
+  if (plan === "codex") return s.loadCodexModels();
+  if (plan === "cursor") return s.loadCursorModels();
+  if (plan === "claude") return s.loadClaudeModels();
+  if (plan === "opencode") return s.loadOpencodeModels();
+  return Promise.resolve();
 }
 
 interface State {

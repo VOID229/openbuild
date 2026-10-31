@@ -5,8 +5,9 @@
 // The app's thread can diverge from Pi's history (a retry, an edited resend, a legacy fork). Each
 // turn says how many user messages come before it; when Pi's session has more, it's forked back to
 // that point first (Pi's `fork`), and the thread follows the new session file from then on.
+import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { EFFORTS, type Effort, type ModelScope, type PiChatRequest, type PiCommand, type StreamEvent, type Usage } from "../../shared/types";
 import * as storage from "../storage";
@@ -611,19 +612,26 @@ export function restartIdle() {
   forgetCommands();
 }
 
-/** A one-off completion with no tools or session (thread titles). */
-export async function complete(model: string, system: string, prompt: string, signal: AbortSignal): Promise<string> {
+/** A one-off completion with no tools or session (thread titles). Pi reads images from `@path` arguments. */
+export async function complete(model: string, system: string, prompt: string, signal: AbortSignal, images: { data: string; mimeType?: string }[] = []): Promise<string> {
   const { piBin, piEnv } = await import("./install");
   const bin = piBin();
   if (!bin) throw new PiError("Pi isn't installed.");
-  const proc = Bun.spawn(
-    [bin, "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", "--model", model, "--thinking", "off", "--system-prompt", system, "--", prompt],
-    { cwd: homedir(), stdout: "pipe", stderr: "pipe", stdin: "ignore", env: piEnv() },
-  );
-  const kill = () => proc.kill();
-  signal.addEventListener("abort", kill, { once: true });
-  const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-  signal.removeEventListener("abort", kill);
-  if (code !== 0) throw new PiError(err.trim().split("\n").pop() || `pi exited with code ${code}`);
-  return out.trim();
+  const dir = images.length ? await mkdtemp(join(tmpdir(), "openbuild-complete-")) : undefined;
+  try {
+    const files = images.map((_, i) => join(dir!, `image-${i}`));
+    await Promise.all(images.map((image, i) => Bun.write(files[i]!, Buffer.from(image.data, "base64"))));
+    const proc = Bun.spawn(
+      [bin, "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", "--model", model, "--thinking", "off", "--system-prompt", system, "--", ...files.map((f) => `@${f}`), prompt],
+      { cwd: homedir(), stdout: "pipe", stderr: "pipe", stdin: "ignore", env: piEnv() },
+    );
+    const kill = () => proc.kill();
+    signal.addEventListener("abort", kill, { once: true });
+    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    signal.removeEventListener("abort", kill);
+    if (code !== 0) throw new PiError(err.trim().split("\n").pop() || `pi exited with code ${code}`);
+    return out.trim();
+  } finally {
+    if (dir) await rm(dir, { recursive: true, force: true });
+  }
 }
