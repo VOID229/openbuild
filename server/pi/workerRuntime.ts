@@ -188,7 +188,7 @@ export class PiWorkerRuntime {
     const prior = this.db.query<{ record: string }, [string]>("SELECT record FROM runs WHERE json_extract(record, '$.threadId') = ? AND json_extract(record, '$.kind') = 'run' LIMIT 1").get(req.threadId);
     if (prior) {
       const old = JSON.parse(prior.record).request as PiChatRequest;
-      const identity = (r: PiChatRequest) => JSON.stringify([r.runtimeAccount?.runtime, r.runtimeAccount?.configDir]);
+      const identity = (r: PiChatRequest) => JSON.stringify([r.runtimeAccount?.runtime, r.runtimeAccount?.configDir, r.runtimeAccount?.shadowHome]);
       if (identity(old) !== identity(req)) throw Object.assign(new Error("A thread’s account is fixed after its first turn. Start a new thread to switch accounts."), { status: 409 });
     }
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);

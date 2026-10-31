@@ -80,7 +80,7 @@ export class PiClient {
   async supportsNative(runtime: string, accounts = false) {
     await this.connect();
     const health = await this.health();
-    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery", ...(["claude", "opencode", "cursor"].includes(runtime) ? ["native-steering"] : []), ...(runtime === "fx" ? ["fx-steering"] : []), ...(accounts ? ["runtime-accounts"] : [])].every(f => health.features?.includes(f));
+    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery", ...(["claude", "opencode", "cursor"].includes(runtime) ? ["native-steering"] : []), ...(runtime === "fx" ? ["fx-steering"] : []), ...(accounts ? ["runtime-accounts", "account-config"] : [])].every(f => health.features?.includes(f));
   }
   private connect() {
     return this.connected ??= this.connectNow().catch((error) => { this.connected = undefined; throw error; });
@@ -176,7 +176,7 @@ export class PiClient {
       await this.ensureFeature(req.runtime);
       await this.ensureFeature("runtime-questions");
       await this.ensureFeature("html-delivery");
-      if (req.runtimeAccount) await this.ensureFeature("runtime-accounts");
+      if (req.runtimeAccount) { await this.ensureFeature("runtime-accounts"); await this.ensureFeature("account-config"); }
     }
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }

@@ -15,6 +15,15 @@ const CHOICES: AccountRuntime[] = ["claude", "codex", "cursor"];
 const STEPS = ["Runtime", "Identity", "Config"];
 const VARIABLES = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 
+function Field({ label, hint, value, onChange, placeholder, autoFocus }: { label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean }) {
+  return (
+    <label className="ar-field">
+      <span><b>{label}</b><small>{hint}</small></span>
+      <input className="input" aria-label={label} autoFocus={autoFocus} spellCheck={false} placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
+    </label>
+  );
+}
+
 /** The first free `claude2`, `claude3`, … on this device. */
 export function nextAccountName(runtime: AccountRuntime, taken: string[]): string {
   const names = new Set(taken.map((n) => n.toLowerCase()));
@@ -34,6 +43,16 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
+  const [binPath, setBinPath] = useState("");
+  const [shadowHome, setShadowHome] = useState("");
+  const [compact, setCompact] = useState("");
+  const [launchArgs, setLaunchArgs] = useState("");
+  const options = {
+    ...(binPath.trim() ? { binPath: binPath.trim() } : {}),
+    ...(launchArgs.trim() ? { launchArgs: launchArgs.trim() } : {}),
+    ...(runtime === "codex" && shadowHome.trim() ? { shadowHome: shadowHome.trim() } : {}),
+    ...(runtime === "claude" && compact.trim() ? { autoCompactWindow: Number(compact.replaceAll(",", "")) } : {}),
+  };
 
   const taken = (r: AccountRuntime) => [
     ...accounts.filter((a) => a.runtime === r && (a.deviceId ?? "") === (deviceId ?? "")).map((a) => a.name),
@@ -46,26 +65,31 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
+  // Empty fields use the example shown in them.
+  const suggested = nextAccountName(runtime, taken(runtime));
+  const label = name.trim() || suggested;
+  const directory = path.trim() || `~/.${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(?<=[a-z])(\d+)$/, "-$1")}`;
   const next = () => {
     if (step === 0) {
-      const suggested = nextAccountName(runtime, taken(runtime));
-      setName(suggested);
-      setPath(`~/.${suggested.replace(/(\d+)$/, "-$1")}`);
+      setName(""); setPath("");
+      setBinPath(""); setShadowHome(""); setCompact(""); setLaunchArgs("");
     }
-    if (step === 1 && !name.trim()) { setError("Enter a label."); return; }
-    if (step === 1 && (name.trim().toLowerCase() === runtime || taken(runtime).some((n) => n.toLowerCase() === name.trim().toLowerCase()))) { setError("This label is already in use."); return; }
+    if (step === 1 && (label.toLowerCase() === runtime || taken(runtime).some((n) => n.toLowerCase() === label.toLowerCase()))) { setError("This label is already in use."); return; }
     setError(""); setStep(step + 1);
   };
   const add = () => {
-    const configDir = path.trim();
+    const configDir = directory;
     if (!/^(\/|~\/|[A-Za-z]:[\\/])/.test(configDir)) { setError("Enter an absolute directory, or one starting with ~/."); return; }
-    if (accounts.some((a) => a.runtime === runtime && (a.deviceId ?? "") === (deviceId ?? "") && a.configDir === configDir)) { setError("This directory is already listed."); return; }
-    update({ runtimeAccounts: [...accounts, { id: crypto.randomUUID(), runtime, name: name.trim(), configDir, deviceId }] });
+    if (options.shadowHome && !/^(\/|~\/|[A-Za-z]:[\\/])/.test(options.shadowHome)) { setError("Enter an absolute shadow home, or one starting with ~/."); return; }
+    if (accounts.some((a) => a.runtime === runtime && (a.deviceId ?? "") === (deviceId ?? "") && (a.shadowHome ?? a.configDir) === (options.shadowHome ?? configDir))) { setError("This directory is already listed."); return; }
+    const window = options.autoCompactWindow;
+    if (window !== undefined && !(Number.isInteger(window) && window >= 100_000 && window <= 1_000_000)) { setError("Auto-compact must be between 100,000 and 1,000,000 tokens."); return; }
+    update({ runtimeAccounts: [...accounts, { id: crypto.randomUUID(), runtime, name: label, configDir, deviceId, ...options }] });
     if (runtime === "claude") void reload(deviceId, true);
     onClose();
   };
   if (!mounted) return null;
-  const draft: RuntimeAccount = { id: "", name, runtime, configDir: path.trim() };
+  const draft: RuntimeAccount = { id: "", name: label, runtime, configDir: directory, ...options };
   return createPortal(
     <div className="modal-root ar-root" data-state={visible ? "open" : "closed"}>
       <div className="modal-backdrop" onClick={onClose} aria-hidden />
@@ -97,15 +121,16 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
           {step === 1 && (
             <label className="ar-field">
               <span><b>Label</b><small>{runtime === "claude" ? "Shown in the model picker’s provider list." : "Shown in the account picker for new threads."}</small></span>
-              <input className="input" aria-label="Label" autoFocus value={name} onChange={(e) => setName(e.target.value)} />
+              <input className="input" aria-label="Label" autoFocus spellCheck={false} placeholder={suggested} value={name} onChange={(e) => setName(e.target.value)} />
             </label>
           )}
           {step === 2 && (
             <>
-              <label className="ar-field">
-                <span><b>{VARIABLES[runtime]} path</b><small>Keeps this account’s sign-in and history separate.</small></span>
-                <input className="input" aria-label={`${VARIABLES[runtime]} path`} autoFocus spellCheck={false} value={path} onChange={(e) => setPath(e.target.value)} />
-              </label>
+              <Field label="Binary path" hint={`The ${runtimeName(runtime)} program this account runs. Empty uses the device’s.`} placeholder={runtime === "cursor" ? "cursor-agent" : runtime} value={binPath} onChange={setBinPath} />
+              <Field label={`${VARIABLES[runtime]} path`} hint={runtime === "codex" ? "Codex home and config directory." : "Keeps this account’s sign-in and history separate."} placeholder={directory} value={path} onChange={setPath} autoFocus />
+              {runtime === "codex" && <Field label="Shadow home path" hint={`Optional. Keeps auth.json here while sharing everything else from ${VARIABLES.codex}.`} placeholder="~/.codex-shadow/personal" value={shadowHome} onChange={setShadowHome} />}
+              {runtime === "claude" && <Field label="Auto-compact after" hint="Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude’s default." placeholder="e.g. 300000" value={compact} onChange={setCompact} />}
+              <Field label="Launch arguments" hint={runtime === "codex" ? "Passed to codex app-server when it starts." : "Passed to the CLI when a session starts."} placeholder={runtime === "claude" ? "e.g. --chrome" : ""} value={launchArgs} onChange={setLaunchArgs} />
               <div className="ar-login">
                 <small>Sign in by running this in a terminal on {where}:</small>
                 <code>{accountCommand(draft)}</code>

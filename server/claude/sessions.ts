@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { CanUseTool, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
-import { claudeEnv, FAST, baseOptions, isClaudePermission, listPermissions, modelRow, type ClaudePermission } from "./install";
+import { claudeArgs, claudeEnv, FAST, baseOptions, isClaudePermission, listPermissions, modelRow, type ClaudePermission } from "./install";
 import { doneEvent, startEvent, type ToolEvent } from "./tools";
 
 interface Saved {
@@ -192,7 +192,7 @@ async function open(req: PiChatRequest, s: Saved, start: { thinkingOff: boolean;
       model: start.row.value,
       systemPrompt: { type: "preset", preset: "claude_code", append: QUESTION_INSTRUCTIONS },
       includePartialMessages: true,
-      extraArgs: { "replay-user-messages": null },
+      extraArgs: { ...claudeArgs(), "replay-user-messages": null },
       canUseTool: permissions(req.threadId),
       ...(start.bypass ? { allowDangerouslySkipPermissions: true } : {}),
       ...(start.thinkingOff ? { thinking: { type: "disabled" as const } } : start.row.supportsAdaptiveThinking ? { thinking: { type: "adaptive" as const, display: "summarized" as const } } : {}),

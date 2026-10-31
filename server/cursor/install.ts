@@ -1,4 +1,4 @@
-import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
+import { accountBin, accountCacheKey, accountEnvironment } from "../runtimeAccounts";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +6,8 @@ import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../s
 export const CURSOR_INSTALL = "curl https://cursor.com/install -fsS | bash";
 export function cursorEnv(): Record<string, string> { return accountEnvironment("cursor", { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}` } as Record<string, string>); }
 export function cursorBin(): string | undefined {
+  const custom = accountBin("cursor", cursorEnv().PATH!);
+  if (custom !== undefined) return custom || undefined;
   if (process.env.CURSOR_BIN) return existsSync(process.env.CURSOR_BIN) ? process.env.CURSOR_BIN : undefined;
   return Bun.which("cursor-agent", { PATH: cursorEnv().PATH }) ?? Bun.which("agent", { PATH: cursorEnv().PATH }) ?? undefined;
 }

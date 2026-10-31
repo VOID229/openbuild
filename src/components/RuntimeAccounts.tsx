@@ -6,9 +6,11 @@ import { OptionSelect } from "./ModelSelect";
 const variables = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
 export function accountCommand(a: RuntimeAccount): string {
-  const path = a.configDir.startsWith("~/") ? '"$HOME"/' + quote(a.configDir.slice(2)) : quote(a.configDir);
-  const command = a.runtime === "claude" ? "claude auth login" : a.runtime === "cursor" ? "cursor-agent login" : `codex -c 'cli_auth_credentials_store="file"' login`;
-  return `${variables[a.runtime]}=${path} ${command}`;
+  const shell = (p: string) => p.startsWith("~/") ? '"$HOME"/' + quote(p.slice(2)) : quote(p);
+  const bin = a.binPath?.trim();
+  const program = bin ? (bin.includes("/") ? shell(bin) : quote(bin)) : a.runtime === "cursor" ? "cursor-agent" : a.runtime;
+  const command = a.runtime === "claude" ? `${program} auth login` : a.runtime === "cursor" ? `${program} login` : `${program} -c 'cli_auth_credentials_store="file"' login`;
+  return `${variables[a.runtime]}=${shell(a.shadowHome ?? a.configDir)} ${command}`;
 }
 export function ThreadAccountSelect() {
   const settings = useStore((s) => s.settings);

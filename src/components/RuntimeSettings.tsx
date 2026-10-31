@@ -1,6 +1,6 @@
 // Settings → Runtimes: every thread runtime on a device (installed, version, updates, sign-in,
 // errors), and a switch that hides a runtime from the new-thread picker on that device.
-import { CircleAlert, Copy, Plus, RefreshCw } from "lucide-react";
+import { CircleAlert, Plus, RefreshCw } from "lucide-react";
 import { AddRuntime } from "./AddRuntime";
 import { useCallback, useEffect, useState } from "react";
 import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
@@ -11,7 +11,7 @@ import { RUNTIMES, runtimeEnabled, setRuntimeEnabled } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
 import { DeviceRow, deviceRefusal, JobLog, useJob, usePiDevice } from "./PiSettings";
-import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 import { RuntimeIcon } from "./Workspace";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -56,7 +56,7 @@ function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate 
   );
 }
 
-function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, where, updating, updateDisabled, quiet, onUpdate }: {
+function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, updating, updateDisabled, quiet, onUpdate }: {
   runtime: ThreadRuntime;
   label: string;
   desc: string;
@@ -64,14 +64,12 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, w
   enabled: boolean;
   lastOn: boolean;
   onToggle: (on: boolean) => void;
-  where?: string;
   updating: boolean;
   updateDisabled: boolean;
   quiet?: boolean;
   onUpdate: () => void;
 }) {
   const name = runtime === "pi" ? "Pi" : label;
-  const missing = status && !status.installed;
   return (
     <li className={cx("rt-row", !enabled && "pi-row-off")}>
       <div className="pi-row">
@@ -94,15 +92,6 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, w
           onChange={onToggle}
         />
       </div>
-      {missing && (
-        <div className="rt-detail">
-          <span className="pi-meta">Install it in a terminal on {where ?? "this computer"}:</span>
-          <code className="rt-cmd">{status.install}</code>
-          <IconButton label="Copy install command" tooltipSide="left" className="key-icon-btn" onClick={() => void navigator.clipboard?.writeText(status.install)}>
-            <Copy size={13} />
-          </IconButton>
-        </div>
-      )}
       {status?.error && (
         <p className="pi-error rt-detail" role="alert">
           <CircleAlert size={14} /> <span className="rt-error">{status.error}</span>
@@ -211,7 +200,6 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
               enabled={enabled}
               lastOn={enabledCount <= 1}
               onToggle={(on) => toggle(r.runtime, on)}
-              where={where}
               updating={updating === r.runtime}
               updateDisabled={checking || !!updating || job.running}
               quiet={findDevice(deviceId)?.external}

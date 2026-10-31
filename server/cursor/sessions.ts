@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { PiChatRequest, StreamEvent } from "../../shared/types";
 import * as storage from "../storage";
+import { accountArgs } from "../runtimeAccounts";
 import { cursorBin, cursorEnv, modelSlug, permissionArgs } from "./install";
 import { CursorProtocol } from "./protocol";
 import { createQuestions, QUESTION_PREFIX, type QuestionReply } from "./questions";
@@ -110,7 +111,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           // Cursor's configured allowlist; print mode cannot relay approvals.
           // Deliberately omit --stream-partial-output: this CLI also emits accumulated
           // duplicate flushes, some indistinguishable from valid repeated text deltas.
-          p = Bun.spawn([bin, "--print", "--output-format", "stream-json", "--trust", "--workspace", cwd, "--resume", s.id, "--model", slug, ...permission, "--plugin-dir", questions.pluginDir, "--", QUESTION_PREFIX + req.message], { cwd, env: cursorEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+          p = Bun.spawn([bin, "--print", "--output-format", "stream-json", "--trust", "--workspace", cwd, "--resume", s.id, "--model", slug, ...permission, "--plugin-dir", questions.pluginDir, ...accountArgs("cursor"), "--", QUESTION_PREFIX + req.message], { cwd, env: cursorEnv(), stdin: "ignore", stdout: "pipe", stderr: "pipe" });
           l.proc = p;
           if (signal.aborted) cancel();
           const protocol = new CursorProtocol(send);

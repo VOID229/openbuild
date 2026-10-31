@@ -63,7 +63,7 @@ New threads use a feature-versioned lane when the shared worker lacks required f
 
 ## Multiple accounts
 
-OpenBuild finds other Claude Code logins on each device by itself: a `claude2`-style wrapper on `PATH` or a shell alias that sets `CLAUDE_CONFIG_DIR`, and signed-in siblings such as `~/.claude-2`. Each one appears below Claude in the model picker's provider rail (`claude`, `claude2`, `claude3`), with the models that sign-in offers. Settings → Runtimes → **Add runtime** adds a login OpenBuild can't find, or prepares one to sign in to. Picking one starts the new thread on that account. A started thread stays on its account, because its session lives in that configuration directory.
+OpenBuild finds other Claude Code logins on each device by itself: a `claude2`-style wrapper on `PATH` or a shell alias that sets `CLAUDE_CONFIG_DIR`, and signed-in siblings such as `~/.claude-2`. Each one appears below Claude in the model picker's provider rail (`claude`, `claude2`, `claude3`), with the models that sign-in offers. Settings → Runtimes → **Add runtime** adds a login OpenBuild can't find, or prepares one to sign in to, and can set its binary, launch arguments and auto-compact point. A Codex account can use a shadow home that keeps its own `auth.json` and links everything else from `CODEX_HOME`. Picking one starts the new thread on that account. A started thread stays on its account, because its session lives in that configuration directory.
 
 ## Retry and edit
 

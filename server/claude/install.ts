@@ -1,4 +1,4 @@
-import { accountCacheKey, accountEnvironment, withRuntimeAccount } from "../runtimeAccounts";
+import { accountArgs, accountBin, accountCacheKey, accountEnvironment, withRuntimeAccount } from "../runtimeAccounts";
 import { claudeAccounts } from "./accounts";
 // The installed Claude Code CLI, driven through Anthropic's Agent SDK (as t3code does). OpenBuild
 // never bundles or substitutes its own Claude binary, and never handles Claude's credentials: the
@@ -16,6 +16,8 @@ export function claudeEnv(): Record<string, string> {
   return accountEnvironment("claude", { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_AGENT_SDK_CLIENT_APP: "openbuild" } as Record<string, string>);
 }
 export function claudeBin(): string | undefined {
+  const custom = accountBin("claude", `${claudeEnv().PATH}:/opt/homebrew/bin:/usr/local/bin`);
+  if (custom !== undefined) return custom || undefined;
   if (process.env.CLAUDE_BIN) return existsSync(process.env.CLAUDE_BIN) ? process.env.CLAUDE_BIN : undefined;
   return Bun.which("claude", { PATH: `${claudeEnv().PATH}:/opt/homebrew/bin:/usr/local/bin` }) ?? undefined;
 }
@@ -25,12 +27,26 @@ export function requireBin(): string {
   return bin;
 }
 
+/** The account's launch arguments in the SDK's shape: `--flag value` → { flag: "value" }. */
+export function claudeArgs(): Record<string, string | null> {
+  const args: Record<string, string | null> = {};
+  const words = accountArgs("claude");
+  for (let i = 0; i < words.length; i++) {
+    const match = /^--([^=]+)(?:=(.*))?$/.exec(words[i]!);
+    if (!match) throw new Error(`Claude Code launch arguments must be --flags, not "${words[i]}"`);
+    const next = words[i + 1];
+    args[match[1]!] = match[2] ?? (next && !next.startsWith("-") ? (i++, next) : null);
+  }
+  return args;
+}
+
 /** The options every OpenBuild Claude process starts with: the CLI's own prompt, tools and settings. */
 export function baseOptions(cwd: string) {
   return {
     cwd,
     pathToClaudeCodeExecutable: requireBin(),
     env: claudeEnv(),
+    extraArgs: claudeArgs(),
     // Load CLAUDE.md, skills, hooks, MCP servers and permission rules like the CLI does.
     settingSources: ["user", "project", "local"] as ("user" | "project" | "local")[],
     systemPrompt: { type: "preset" as const, preset: "claude_code" as const },
@@ -109,7 +125,7 @@ export async function listAccountModels(fresh = false, saved?: unknown): Promise
     listModels(fresh),
     Promise.all(claudeAccounts(saved).map(async (account): Promise<ClaudeAccountModels> => {
       const req = { runtime: "claude", runtimeAccount: account } as PiChatRequest;
-      const models = await withRuntimeAccount(req, () => catalog(fresh)).then((c) => c.models, () => []);
+      const models = await (async () => withRuntimeAccount(req, () => catalog(fresh)))().then((c) => c.models, () => []);
       return { account, models: models.map((m) => ({ ...m, id: m.id.replace(/^claude\//, `${account.id}/`), provider: account.id, providerName: account.name })) };
     })),
   ]);

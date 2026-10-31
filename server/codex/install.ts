@@ -1,4 +1,4 @@
-import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
+import { accountBin, accountCacheKey, accountEnvironment } from "../runtimeAccounts";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +7,8 @@ import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../s
 import { CodexProcess } from "./rpc";
 export const CODEX_INSTALL = "npm install -g @openai/codex";
 export function codexBin(): string | undefined {
+  const custom = accountBin("codex", `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin`);
+  if (custom !== undefined) return custom || undefined;
   if (process.env.CODEX_BIN) return existsSync(process.env.CODEX_BIN) ? process.env.CODEX_BIN : undefined;
   return Bun.which("codex", { PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` }) ?? undefined;
 }

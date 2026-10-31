@@ -460,6 +460,14 @@ export interface RuntimeAccount {
   runtime: "codex" | "claude" | "cursor";
   configDir: string;
   deviceId?: string;
+  /** The runtime's executable for this account: a path or a name on PATH. */
+  binPath?: string;
+  /** Extra command-line arguments, written as in a shell. */
+  launchArgs?: string;
+  /** Codex: an account-only home that shares everything in `configDir` except its auth.json. */
+  shadowHome?: string;
+  /** Claude Code: compact after this many tokens. */
+  autoCompactWindow?: number;
 }
 
 /** Another Claude Code login on a device, with the models that sign-in offers. */

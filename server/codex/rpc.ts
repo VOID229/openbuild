@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { accountArgs } from "../runtimeAccounts";
 import { codexBin, codexEnv } from "./install";
 
 export interface RpcMessage { id?: number | string; method?: string; params?: any; result?: any; error?: { code: number; message: string } }
@@ -15,7 +16,7 @@ export class CodexProcess {
   constructor(readonly cwd: string, env?: Record<string, string>) {
     const bin = codexBin();
     if (!bin) throw new Error("Codex isn't installed. Install @openai/codex or set CODEX_BIN.");
-    this.child = spawn(bin, ["app-server"], { cwd, env: env ?? codexEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    this.child = spawn(bin, ["app-server", ...accountArgs("codex")], { cwd, env: env ?? codexEnv(), stdio: ["pipe", "pipe", "pipe"] });
     this.child.stdin.on("error", (e) => this.fail(e));
     this.child.stderr.on("data", (b) => { this.stderr = (this.stderr + b).slice(-16000); });
     const lines = createInterface({ input: this.child.stdout });
