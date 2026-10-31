@@ -71,9 +71,11 @@ export async function installRelease(root = ROOT, progress?: (step: "download" |
   progress?.("download", status.latest);
   // Preserve the old installation’s plugin copies even when updating before the next startup.
   prepareUserPlugins(join(root, "plugins"), join(dataDir(), "plugins"));
-  // Fetch from the canonical repository, never an arbitrary checkout remote.
-  git(["fetch", REPO, `refs/tags/${status.latest}`], root);
-  const target = git(["rev-parse", "FETCH_HEAD^{commit}"], root);
+  // Fetch from the canonical repository, never an arbitrary checkout remote. Store the tag
+  // locally: checkRelease names the installed version with `git describe`, so without it
+  // every later check would see an untagged HEAD and download the same release again.
+  git(["fetch", REPO, `+refs/tags/${status.latest}:refs/tags/${status.latest}`], root);
+  const target = git(["rev-parse", `refs/tags/${status.latest}^{commit}`], root);
   const previous = git(["rev-parse", "HEAD"], root);
   const install = () => {
     const p = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], { cwd: root, stdio: progress ? ["ignore", "pipe", "pipe"] : ["inherit", "inherit", "inherit"] });

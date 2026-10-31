@@ -80,6 +80,8 @@ test("updates fetch a release, keep branches, and roll back after failed depende
     setReleaseTrack("stable");
     globalThis.fetch = (async () => Response.json([release("v1.1.0")])) as unknown as typeof fetch;
     expect((await installRelease(checkout)).current).toBe("v1.1.0");
+    // The installed release is recognised, so updating again downloads nothing.
+    expect(await checkRelease(true, checkout)).toMatchObject({ current: "v1.1.0", available: false });
     expect(readFileSync(join(temp, "data", "plugins", "custom", "plugin.json"), "utf8")).toBe("original user plugin");
     expect(command(["git", "rev-parse", branch], checkout)).toBe(originalHead);
     const installed = command(["git", "rev-parse", "HEAD"], checkout);
