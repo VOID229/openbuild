@@ -36,7 +36,9 @@ OpenBuild isn't selling anything, collecting any data or offering any compute.
 #### *looks nice*
 
 ```sh
-curl -fsSL https://shade-io.com/openbuild/install.sh | sh # stable
+# stable
+curl -fsSL https://shade-io.com/openbuild/install.sh | sh
+# nightly
 curl -fsSL https://shade-io.com/openbuild/nightly/install.sh | sh # nightly
 ```
 
