@@ -1,4 +1,4 @@
-import { AlarmClock, AlarmClockCheck, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
@@ -9,6 +9,7 @@ import { DEFAULT_VIEW, useStore } from "../lib/store";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
+import { limitReason } from "../../shared/usage";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
@@ -35,6 +36,12 @@ const isWorking = (chat: Chat) => lastReply(chat)?.status === "streaming";
 const isWaiting = (chat: Chat) => {
   const last = lastReply(chat);
   return last?.status === "streaming" && !!last.parts?.some((p) => p.type === "ask" && p.answer === undefined);
+};
+
+/** Why the chat's latest reply was cut off by a usage limit or an empty balance, if it was. */
+const limitOf = (chat: Chat) => {
+  const last = lastReply(chat);
+  return last?.status === "error" ? limitReason(last.error) : undefined;
 };
 
 /** Midnight at the start of today. */
@@ -195,6 +202,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
   const updateChat = useStore((s) => s.updateChat);
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
+  const limit = limitOf(chat);
   const closed = isClosed(chat);
   const model = modelOf(chat);
   const runtime = chat.runtime ?? "pi";
@@ -274,6 +282,10 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               <span className="history-snooze" title={`Snoozed until ${new Date(chat.snoozedUntil).toLocaleString()}`}>
                 <AlarmClock size={12} />
                 {snoozeLabel(chat.snoozedUntil)}
+              </span>
+            ) : limit ? (
+              <span className="history-limit" title={limit === "credits" ? "Out of credits" : "Usage limit reached"} aria-label={limit === "credits" ? "Out of credits" : "Usage limit reached"}>
+                <BatteryWarning size={13} />
               </span>
             ) : chat.unread ? (
               <span className="unread-dot" aria-label="New reply" />
@@ -1144,16 +1156,20 @@ export function Sidebar() {
   const awake = useMemo(() => visible.filter((c) => !c.snoozedUntil), [visible]);
   const snoozed = useMemo(() => visible.filter((c) => c.snoozedUntil).sort((a, b) => a.snoozedUntil! - b.snoozedUntil!), [visible]);
   const pinned = useMemo(() => (view.includePinned ? awake.filter((c) => c.pinned && !c.archived) : []), [awake, view.includePinned]);
-  // Pinned threads keep their spot. Everything else that is generating lives in "Working", then
+  // Pinned threads keep their spot. A thread blocked on a question from the user lives in "Attention".
+  // One cut off by a usage limit or an empty balance lives in "Limits", not "Done": its work isn't finished.
+  // Everything else that is generating lives in "Working", then
   // stays in "Done" until the user closes it; a snooze that ran out stays in "Woke" the same way.
   // Other threads from today are under "Today", and the rest (closed, or from an earlier day) under "Closed".
   const rest = useMemo(() => awake.filter((c) => !isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
   // Subagent threads, when listed, keep to their own section, working or not.
   const subagents = useMemo(() => rest.filter((c) => c.subagent), [rest]);
-  const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c)), [rest]);
-  const woke = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && c.woke), [rest]);
-  const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && c.done), [rest]);
-  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !c.woke && !c.done), [rest]);
+  const attention = useMemo(() => rest.filter((c) => !c.subagent && isWaiting(c)), [rest]);
+  const working = useMemo(() => rest.filter((c) => !c.subagent && isWorking(c) && !isWaiting(c)), [rest]);
+  const limits = useMemo(() => rest.filter((c) => !c.subagent && limitOf(c)), [rest]);
+  const woke = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && c.woke), [rest]);
+  const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && !c.woke && c.done), [rest]);
+  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && !c.woke && !c.done), [rest]);
   const closed = useMemo(() => awake.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
 
   // What's on screen, in order. Collapsed sections don't count, unless the open thread is in one.
@@ -1165,6 +1181,8 @@ export function Sidebar() {
         : (
             [
               [pinned, sections.pinned],
+              [attention, sections.attention],
+              [limits, sections.limits],
               [subagents, sections.subagents],
               [woke, sections.woke],
               [done, sections.done],
@@ -1319,6 +1337,16 @@ export function Sidebar() {
                     {pinned.map((c) => row(c))}
                   </Collapsible>
                 )}
+                {attention.length > 0 && (
+                  <Collapsible label={`Attention (${attention.length})`} open={sections.attention} onToggle={() => toggleSection("attention")}>
+                    {attention.map((c) => row(c))}
+                  </Collapsible>
+                )}
+                {limits.length > 0 && (
+                  <Collapsible label={`Limits (${limits.length})`} open={sections.limits} onToggle={() => toggleSection("limits")}>
+                    {limits.map((c) => row(c))}
+                  </Collapsible>
+                )}
                 {subagents.length > 0 && (
                   <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")}>
                     {subagents.map((c) => row(c))}
@@ -1349,7 +1377,7 @@ export function Sidebar() {
                     {snoozed.map((c) => row(c))}
                   </Collapsible>
                 )}
-                {filtered && !pinned.length && !subagents.length && !woke.length && !done.length && !working.length && !todays.length && !snoozed.length && !closed.length && (
+                {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !todays.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."

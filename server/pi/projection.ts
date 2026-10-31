@@ -2,6 +2,8 @@
 // Merge only matching stream IDs: an edited/retried/deleted message must never be resurrected.
 import type { ShellEvent, StreamEvent } from "../../shared/types";
 import type { Chat, Message, Part, ToolPart } from "../../src/lib/types";
+import { userVisiblePrompt } from "../../shared/promptDisplay";
+import { limitReason } from "../../shared/usage";
 import * as storage from "../storage";
 
 export interface PiSnapshot {
@@ -101,7 +103,7 @@ export function projectChat(chat: Chat, snapshots: PiSnapshot[], previous?: Chat
     if (snapshot.endedAt) {
       updatedAt = Math.max(updatedAt, snapshot.endedAt);
       const old = previous?.messages.find(m => m.id === message.id) ?? message;
-      if (message.role === "assistant" && old.status === "streaming" && projected.status === "done") completed = true;
+      if (message.role === "assistant" && old.status === "streaming" && (projected.status === "done" || limitReason(projected.error))) completed = true;
     }
     return projected;
   });

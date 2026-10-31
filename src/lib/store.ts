@@ -41,7 +41,7 @@ const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
-type SidebarSections = { pinned: boolean; subagents: boolean; woke: boolean; done: boolean; working: boolean; today: boolean; snoozed: boolean; closed: boolean };
+type SidebarSections = { pinned: boolean; attention: boolean; limits: boolean; subagents: boolean; woke: boolean; done: boolean; working: boolean; today: boolean; snoozed: boolean; closed: boolean };
 
 /** Sidebar list options from the filter menu. */
 export interface SidebarView {
@@ -298,7 +298,7 @@ export const useStore = create<State>()(
       chatsLoaded: false,
       selections: {},
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
-      sections: { pinned: true, subagents: true, woke: true, done: true, working: true, today: true, snoozed: false, closed: false },
+      sections: { pinned: true, attention: true, limits: true, subagents: true, woke: true, done: true, working: true, today: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",

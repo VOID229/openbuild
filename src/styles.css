@@ -1208,6 +1208,11 @@ svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.history-limit {
+  display: inline-flex;
+  color: var(--danger);
+}
+
 
 /* Started by another agent, not the user. */
 .history-subagent {
