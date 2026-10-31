@@ -19,6 +19,7 @@ install_dir=
 target=
 backup=
 reinstall=0
+track=stable
 current=1
 detail=
 
@@ -257,15 +258,29 @@ install() {
 
   step 2
   release_tag=$(bun -e '
-    const response = await fetch("https://api.github.com/repos/VOID229/openbuild/releases/latest", {
-      headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild" },
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
-    const release = await response.json();
-    if (release.draft || release.prerelease || !/^v?\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/.test(release.tag_name)) throw new Error("Invalid stable release tag");
+    const track = process.argv[1];
+    const nightly = track === "nightly";
+    const base = "https://api.github.com/repos/VOID229/openbuild/releases";
+    const signal = AbortSignal.timeout(10000);
+    const releases = [];
+    for (let page = 1; page <= (nightly ? 20 : 1); page++) {
+      const response = await fetch(nightly ? `${base}?per_page=100&page=${page}` : `${base}/latest`, {
+        headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild" }, signal,
+      });
+      if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
+      const result = await response.json();
+      const batch = nightly ? result : [result];
+      releases.push(...batch);
+      if (batch.length < 100) break;
+    }
+    const tag = nightly
+      ? /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+      : /^v?\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/;
+    const release = releases.filter(r => !r.draft && r.prerelease === nightly && tag.test(r.tag_name))
+      .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))[0];
+    if (!release) throw new Error(`No published ${track} release`);
     console.log(release.tag_name);
-  ' </dev/null 2>>"$log") || die 'Could not find a published stable release. Check your connection or install from source.'
+  ' "$track" </dev/null 2>>"$log") || die "Could not find a published $track release. Check your connection or install from source."
 
   step 3 "$release_tag"
   cloned=1
@@ -280,6 +295,7 @@ install() {
   cd "$install_dir"
   pwd -P >.git/openbuild-installed
   run bun run cli:install || die 'Could not link the ob command.'
+  run bun -e 'import { setReleaseTrack } from "./server/releases.ts"; setReleaseTrack(process.argv[1]);' "$track" || die 'Could not save the update track.'
   cloned=0
   [ -z "$backup" ] || rm -rf "$backup"
 }
@@ -288,11 +304,13 @@ main() {
   dry=0
   for arg in "$@"; do
     case $arg in
+      --nightly) track=nightly ;;
       --dry-run) dry=1 ;;
       --reinstall) reinstall=1 ;;
       *) die "Unknown option: $arg" ;;
     esac
   done
+  steps="Checking requirements|Finding the latest $track release|Downloading OpenBuild|Installing dependencies|Linking the ob command"
   case "$(uname -s)" in
     Darwin|Linux) ;;
     *) die 'This installer supports macOS and Linux.' ;;

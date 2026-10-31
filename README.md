@@ -36,13 +36,22 @@ OpenBuild isn't selling anything, collecting any data or offering any compute.
 #### *looks nice*
 
 ```sh
-curl -fsSL https://shade-io.com/openbuild/install.sh | sh
+curl -fsSL https://shade-io.com/openbuild/install.sh | sh # stable
+curl -fsSL https://shade-io.com/openbuild/nightly/install.sh | sh # nightly
 ```
+
 #### *if you have trust issues*
 
 ```sh
+# stable
 curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/install.sh | bash
+
+# nightly
+curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/nightly/install.sh | sh
 ```
+
+Installs the newest published prerelease and selects the nightly update track.
+The regular installer selects the stable release and update track.
 
 #### *Or*
 
