@@ -15,8 +15,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
-import { checkRelease, installRelease, setReleaseTrack } from "../server/releases";
+import { checkRelease, installRelease, releaseTrack, setReleaseTrack } from "../server/releases";
 import { ask, confirm } from "./prompt";
+import { stage } from "./motion";
 import { uninstallPlan, removeInstallation } from "./uninstall";
 import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { dataDir } from "../server/paths";
@@ -61,6 +62,7 @@ let PORT = Number(process.env.PORT ?? 3100);
 const dim = (s: string) => (process.stdout.isTTY ? `\x1b[2m${s}\x1b[0m` : s);
 const bold = (s: string) => (process.stdout.isTTY ? `\x1b[1m${s}\x1b[0m` : s);
 const fail = (msg: string): never => {
+  stage.end("fail");
   console.error(`openbuild: ${msg}`);
   process.exit(1);
 };
@@ -237,6 +239,13 @@ function disableServe(s?: Pick<State, "servePort" | "serveHttpPort">) {
 async function start(mode: Mode, managed?: { active: boolean; restart: boolean }) {
   if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild start [local|lan|tailscale]`);
   if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
+  const STOPPING = "Stopping the server", PREPARING = "Preparing the network", STARTING = "Starting the server", PUBLISHING = "Publishing on Tailscale";
+  const opened = (switching: boolean) => stage.open({
+    scene: "lifecycle",
+    power: switching ? 1 : 0,
+    steps: [...(switching ? [STOPPING] : []), PREPARING, STARTING, ...(mode === "tailscale" ? [PUBLISHING] : [])],
+  });
+  let owned = false;
   if (!managed) {
     const current = running();
     // A stopped server leaves the keeper holding the port. A local start takes it back.
@@ -248,7 +257,8 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
         ensureKeeper(current);
         return;
       }
-      console.log(dim(`Switching from ${current.mode} to ${mode}…`));
+      owned = opened(true);
+      stage.print(dim(`Switching from ${current.mode} to ${mode}…`));
       await stop(true, true);
     } else if (await serving(PORT)) {
       // Two servers on one port split requests between them (especially with Tailscale): some API
@@ -260,6 +270,9 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     }
   }
 
+  owned ||= opened(!!managed?.active);
+  stage.step(PREPARING);
+  stage.update({ power: 1 });
   // Explicitly reset network settings inherited from an earlier mode.
   const env: Record<string, string> = { ...(process.env as Record<string, string>), NODE_ENV: "production", PORT: String(PORT), OPENCHAT_ALLOWED_HOSTS: "", OPENBUILD_PUBLIC_HTTPS: "" };
   const urls: string[] = [];
@@ -312,6 +325,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     }
   }
 
+  stage.step(STARTING);
   mkdirSync(DATA, { recursive: true });
   let pid: number | undefined;
   let restoreService: (() => void) | undefined;
@@ -358,6 +372,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
   }
 
   if (tailscale && tailscale.self && tailscale.self.https) {
+    stage.step(PUBLISHING);
     servePort = freeServePort(tailscale.bin);
     // An older start may have put HTTPS on the app's own port, where it answers TLS instead of
     // the plain-HTTP fallback. That entry is never useful; clear it when we use another port.
@@ -388,12 +403,13 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     writeFileSync(STATE, JSON.stringify(state, null, 2));
     ensureKeeper(state);
   }
-  console.log(`OpenBuild is running ${mode === "local" ? "on this computer" : mode === "lan" ? "on your network" : "on your tailnet"}:`);
-  for (const u of urls) console.log(`  ${bold(u)}`);
-  for (const n of notes) console.log(dim(`  ${n}`));
-  console.log(dim("  Access requires your local server password. Unlocked browsers can run Pi as you."));
-  if (mode === "lan") console.log(dim("  Plain HTTP does not encrypt passwords or sessions. Prefer Tailscale HTTPS."));
-  console.log(dim(`  Logs: openbuild logs · stop: openbuild stop`));
+  stage.print(`OpenBuild is running ${mode === "local" ? "on this computer" : mode === "lan" ? "on your network" : "on your tailnet"}:`);
+  for (const u of urls) stage.print(`  ${bold(u)}`);
+  for (const n of notes) stage.print(dim(`  ${n}`));
+  stage.print(dim("  Access requires your local server password. Unlocked browsers can run Pi as you."));
+  if (mode === "lan") stage.print(dim("  Plain HTTP does not encrypt passwords or sessions. Prefer Tailscale HTTPS."));
+  stage.print(dim(`  Logs: openbuild logs · stop: openbuild stop`));
+  if (owned) stage.end();
 }
 
 /** Only an explicit `stop --all` terminates detached runtimes. */
@@ -418,6 +434,8 @@ function stopWorkers() {
   return stopped;
 }
 
+const STOP_STEP = "Stopping the server";
+
 /** By default only stop the server/keeper; detached turns keep running. */
 async function stop(quiet = false, keepWorker = true) {
   const s = readState();
@@ -429,6 +447,9 @@ async function stop(quiet = false, keepWorker = true) {
     if (!quiet) console.log(keepWorker ? "OpenBuild server isn't running; detached workers left unchanged." : "OpenBuild server isn't running; agent and Durable workers sent shutdown signals.");
     return;
   }
+  const owned = !quiet && stage.open({ scene: "lifecycle", steps: [STOP_STEP] });
+  stage.step(STOP_STEP);
+  stage.update({ power: 0 });
   // Local stop means fully stopped: no keepalive left offering to start it again.
   await stopKeeper();
   disableServe(s);
@@ -439,6 +460,7 @@ async function stop(quiet = false, keepWorker = true) {
   }
   rmSync(STATE, { force: true });
   if (!keepWorker) stopWorkers();
+  if (owned) stage.end();
   if (!quiet) console.log(keepWorker ? "OpenBuild stopped; agent and Durable workers left running." : "OpenBuild stopped; agent and Durable workers sent shutdown signals.");
 }
 
@@ -520,8 +542,14 @@ async function pairHost() {
   const mode = await chooseTransport("Share this device");
   if (!localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
   devices.setDeviceName(name);
+  const WAITING = "Waiting for the other device";
+  const STARTING = "Starting the server";
+  const animated = stage.open({ scene: "pair", power: 0, sonar: true, steps: [STARTING, WAITING] });
+  stage.update({ power: 1 });
+  stage.step(STARTING);
   // A headless server is all a paired client needs. Reuse the ordinary start command.
   await start(mode);
+  stage.discard();
   const state = readState();
   if (!state) fail("couldn't read the server state after starting it.");
   // A server left over from an older version has no pairing routes. Say so instead of waiting
@@ -543,11 +571,16 @@ async function pairHost() {
         "Restart it (`openbuild restart`) or stop the old process, then run `openbuild pair --host` again.",
     );
   const pending = devices.createPairing({ name, mode, urls: state!.urls });
-  console.log(`\n  Pairing code: ${bold(pending.code)}`);
-  console.log(dim("  Valid for 15 minutes, for one device."));
-  for (const url of state!.urls) console.log(dim(`  ${url}`));
-  console.log(`\n${PAIRING_HINT(name)}`);
-  console.log(dim("  Waiting for the other device… (Ctrl+C cancels)"));
+  if (animated) {
+    stage.step(WAITING);
+    stage.update({ code: pending.code, lines: [...PAIRING_HINT(name).trim().split("\n"), ...state!.urls, "Valid for 15 minutes, for one device.", "Ctrl+C cancels"] });
+  } else {
+    console.log(`\n  Pairing code: ${bold(pending.code)}`);
+    console.log(dim("  Valid for 15 minutes, for one device."));
+    for (const url of state!.urls) console.log(dim(`  ${url}`));
+    console.log(`\n${PAIRING_HINT(name)}`);
+    console.log(dim("  Waiting for the other device… (Ctrl+C cancels)"));
+  }
 
   const cleanup = () => {
     const current = devices.readPairing();
@@ -555,6 +588,7 @@ async function pairHost() {
   };
   process.once("SIGINT", () => {
     cleanup();
+    stage.abort();
     console.log("\nPairing cancelled.");
     process.exit(130);
   });
@@ -564,6 +598,7 @@ async function pairHost() {
       if (!current) return fail("the pairing code expired. Run `openbuild pair --host` again.");
       const claimedBy = current.claimedBy;
       if (claimedBy) {
+        stage.end();
         console.log(`\n  Paired with ${bold(claimedBy)}.`);
         console.log(dim(`  ${claimedBy} can now add projects and run threads on ${name}.`));
         devices.cancelPairing();
@@ -631,7 +666,11 @@ async function pairClient() {
   const mode = await chooseTransport("Connect");
   const code = await ask("Pairing code: ");
   if (!code) fail("no pairing code entered.");
-  console.log(dim(mode === "lan" ? "Looking for a device on your network…" : "Looking for a device on your tailnet…"));
+  const SEARCHING = mode === "lan" ? "Looking for a device on your network" : "Looking for a device on your tailnet";
+  stage.open({ scene: "pair", power: 0, sonar: true, steps: [SEARCHING] });
+  stage.update({ power: 1 });
+  stage.print(dim(`${SEARCHING}…`));
+  stage.discard();
   async function* candidates(): AsyncGenerator<PairCandidate> {
     let foundAny = false;
     for await (const candidate of discoverPairing(mode === "lan" ? lanCandidates() : tailscaleCandidates())) {
@@ -639,6 +678,8 @@ async function pairClient() {
       yield candidate;
     }
     if (foundAny) return;
+    stage.update({ power: 0 });
+    stage.end();
     console.log(dim("No OpenBuild is waiting to pair here. If you know its address, enter it below."));
     const typed = await ask("Host address (host, host:port, or https://…, Enter to cancel): ");
     if (!typed) fail("nothing to pair with.");
@@ -669,6 +710,7 @@ async function pairClient() {
         serverId: body.device.serverId || body.device.id,
         pairedAt: Date.now(),
       });
+      stage.end();
       console.log(`\n  Paired with ${bold(String(body.device.name || candidate.name))}.`);
       console.log(dim(`  Its projects now appear in Settings → Projects, under that device.`));
       console.log(dim("  Refresh the OpenBuild app if it was already open."));
@@ -885,6 +927,8 @@ if (service) {
     console.log(result.out || result.err);
     if (service.active) for (const url of serviceNetwork()?.urls ?? []) console.log(`  ${bold(url)}`);
   } else {
+    stage.open({ scene: "lifecycle", power: cmd === "start" ? 0 : 1, steps: [cmd === "start" ? "Starting the server" : STOP_STEP] });
+    stage.update({ power: cmd === "start" ? 1 : 0 });
     const result = run("systemctl", ["--user", cmd!, UNIT]);
     if (!result.ok) fail(result.err || result.out || `systemd ${cmd} failed`);
     if (cmd === "stop") {
@@ -892,6 +936,7 @@ if (service) {
       disableServe(serviceNetwork());
       if (stopAll) stopWorkers();
     }
+    stage.end();
     console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"} (${UNIT}, systemd user service).`);
     if (cmd === "stop") console.log(stopAll ? "agent and Durable workers sent shutdown signals." : "agent and Durable workers left running.");
   }
@@ -900,13 +945,29 @@ if (service) {
     try { await uninstall(); } catch (error) { fail((error as Error).message); }
     break;
   case "--set-track": {
-    try { setReleaseTrack(arg ?? ""); console.log(`Release track set to ${arg}. Run ob update to install it.`); }
+    try {
+      const before = releaseTrack();
+      setReleaseTrack(arg ?? "");
+      stage.open({ scene: "track", track: { from: before === "nightly" ? 1 : 0, to: arg === "nightly" ? 1 : 0 } });
+      stage.end();
+      console.log(`Release track set to ${arg}. Run ob update to install it.`);
+    }
     catch (error) { fail((error as Error).message); }
     break;
   }
   case "update": {
     try {
-      const result = await installRelease();
+      const CHECKING = "Checking for a new release", DOWNLOADING = "Downloading", INSTALLING = "Installing dependencies";
+      const animated = stage.open({ scene: "update", power: 0, steps: [CHECKING, DOWNLOADING, INSTALLING] });
+      stage.update({ power: 1 });
+      let changed = false;
+      const result = await installRelease(undefined, animated ? (step, tag) => {
+        changed = true;
+        stage.step(step === "download" ? DOWNLOADING : INSTALLING, step === "download" ? tag : undefined);
+      } : undefined);
+      // Nothing to install: leave only the check that ran.
+      if (!changed) stage.update({ steps: [{ label: CHECKING }], current: 0 });
+      stage.end();
       console.log(`OpenBuild ${result.current} (${result.track}). Run ob restart to use it; running agents are preserved.`);
     } catch (error) { fail((error as Error).message); }
     break;
@@ -972,8 +1033,14 @@ if (service) {
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
     // Agent turns carry on in detached workers; the new server reattaches.
     // --yes/-y remain accepted for compatibility; no destructive confirmation is needed.
-    if (owned) await stop(true, true);
+    const opened = owned && stage.open({ scene: "lifecycle", steps: [STOP_STEP, "Preparing the network", "Starting the server", ...(mode === "tailscale" ? ["Publishing on Tailscale"] : [])] });
+    if (owned) {
+      stage.step(STOP_STEP);
+      stage.update({ power: 0 });
+      await stop(true, true);
+    }
     await start(mode);
+    if (opened) stage.end();
     break;
   }
   case "status":

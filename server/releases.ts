@@ -62,11 +62,13 @@ export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus>
   value.catch(() => { if (cache?.value === value) cache = undefined; });
   return value;
 }
-export async function installRelease(root = ROOT) {
+/** With `progress`, the caller owns the terminal, so dependency output stays captured. */
+export async function installRelease(root = ROOT, progress?: (step: "download" | "install", tag: string) => void) {
   if (git(["status", "--porcelain"], root)) throw new Error("Your checkout has local changes. Commit or stash them before updating.");
   const status = await checkRelease(true, root);
   if (!status.latest) throw new Error(`No published ${status.track} releases yet.`);
   if (!status.available) return status;
+  progress?.("download", status.latest);
   // Preserve the old installation’s plugin copies even when updating before the next startup.
   prepareUserPlugins(join(root, "plugins"), join(dataDir(), "plugins"));
   // Fetch from the canonical repository, never an arbitrary checkout remote.
@@ -74,12 +76,13 @@ export async function installRelease(root = ROOT) {
   const target = git(["rev-parse", "FETCH_HEAD^{commit}"], root);
   const previous = git(["rev-parse", "HEAD"], root);
   const install = () => {
-    const p = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], { cwd: root, stdio: ["inherit", "inherit", "inherit"] });
-    if (p.exitCode !== 0) throw new Error("Dependency installation failed.");
+    const p = Bun.spawnSync([process.execPath, "install", "--frozen-lockfile"], { cwd: root, stdio: progress ? ["ignore", "pipe", "pipe"] : ["inherit", "inherit", "inherit"] });
+    if (p.exitCode !== 0) throw new Error(`Dependency installation failed.${progress ? `\n${p.stderr?.toString().trim() ?? ""}` : ""}`);
   };
   try {
     // A detached release checkout leaves local branches and commits intact.
     git(["switch", "--detach", target], root);
+    progress?.("install", status.latest);
     install();
   } catch (error) {
     git(["switch", "--detach", previous], root);
