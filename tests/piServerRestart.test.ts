@@ -27,6 +27,7 @@ import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 const out = value => process.stdout.write(JSON.stringify(value)+'\n');
 for await (const line of console) {
   const r = JSON.parse(line);
+  if (typeof r.message === 'string') r.message = r.message.replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
   const reply = (data={}) => out({ type:'response', id:r.id, success:true, data });
   if (r.type === 'get_state') reply({ sessionFile:process.env.FAKE_SESSION, model:{provider:'test',id:'fake'} });
   else if (r.type === 'get_fork_messages') reply({messages:[]});

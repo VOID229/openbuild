@@ -44,7 +44,7 @@ async function turn(prompt) {
   interrupted = false;
   const raw = prompt.message.content.filter(c => c.type === 'text').map(c => c.text).join('');
   // Act on the user's words; the effects log keeps exactly what Claude received.
-  const t = raw.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '');
+  const t = raw.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '').replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
   log('turn ' + t + ' model=' + state.model + ' effort=' + state.effort + ' fast=' + state.fast + ' mode=' + state.mode);
   appendFileSync(file(session), JSON.stringify({ type: 'user', text: t }) + '\n');
   if (process.env.FAKE_EFFECTS) appendFileSync(process.env.FAKE_EFFECTS, raw + '\n');

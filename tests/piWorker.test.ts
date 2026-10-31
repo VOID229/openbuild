@@ -30,6 +30,7 @@ let busy = process.argv.includes("thread_orphan");
 const settled = () => { busy = false; out({type:'message_update',assistantMessageEvent:{type:'text_delta',delta:'finished'}}); out({type:'agent_settled'}); };
 for await (const line of console) {
  const r=JSON.parse(line);
+ if (typeof r.message === 'string') r.message = r.message.replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
  const reply=(data={})=>out({type:'response',id:r.id,success:true,data});
  if(r.type==='get_state') reply({isStreaming:busy,sessionFile:process.env.FAKE_SESSION,model:{provider:'test',id:'fake'}});
  else if(r.type==='get_fork_messages') reply({messages:[]});

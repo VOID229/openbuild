@@ -15,7 +15,7 @@ const rawPrompt = args.at(-1);
 const prefixEnd = rawPrompt.indexOf('The user message follows after this paragraph.]\n\n');
 const received = prefixEnd < 0 ? rawPrompt : rawPrompt.slice(prefixEnd + 'The user message follows after this paragraph.]\n\n'.length);
 // Act on the user's words; the effects log keeps exactly what Cursor received.
-const prompt = received.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '');
+const prompt = received.replace(/^\[OpenBuild display instructions:[\s\S]*?\]\n\n/, '').replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
 const id = arg('--resume'), cwd = arg('--workspace');
 const pluginDir = args.includes('--plugin-dir') ? arg('--plugin-dir') : undefined;
 if (args.includes('--approve-mcps')) throw new Error('Broad MCP approval forbidden');

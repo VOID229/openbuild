@@ -5,8 +5,9 @@ import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
 import { FAKE_OPENCODE } from "./opencodeFixture";
 import { HTML_DELIVERY_NOTE } from "../server/htmlDelivery";
+import { PLUGIN_GUIDANCE_NOTE } from "../server/pluginGuidance";
 /** Each native turn receives the display note once, ahead of the user's prompt. */
-const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + m + "\n").join("");
+const prompts = (...messages: string[]) => messages.map(m => HTML_DELIVERY_NOTE + PLUGIN_GUIDANCE_NOTE + m + "\n").join("");
 
 async function until(check: () => boolean | Promise<boolean>, label: string) {
   const deadline = Date.now() + 15_000;
