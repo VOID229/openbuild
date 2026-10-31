@@ -116,8 +116,10 @@ export interface Settings {
 
 export interface NewWorkspace {
   projectId?: string;
-  /** Without a project: the paired device whose scratch folder new threads work in. None = this server. */
+  /** The paired device new threads run on, whose scratch folder they use without a project. None = this server. */
   deviceId?: string;
+  /** The last choice on each device ("" = this server): a project, or null for its scratch folder. */
+  lastProjects?: Record<string, string | null>;
   mode: "local" | "worktree";
   /** Default workspace mode for new threads; last-used preserves the mode picker selection. */
   defaultMode?: "local" | "worktree" | "last-used";
@@ -248,10 +250,10 @@ export interface Message {
   reasoningMs?: number;
   /** Pi replies: how long the whole turn took, from sending to done. */
   workedMs?: number;
-  searches?: SearchCall[];
-  /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   /** Files of steers made during this reply, by steer id, until the finished reply's parts hold them. */
   steerFiles?: Record<string, Attachment[]>;
+  searches?: SearchCall[];
+  /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   notice?: string;
   /** Where the reply runs, so it can be picked back up after a reload or a dropped connection. */
   stream?: ReplyStream;

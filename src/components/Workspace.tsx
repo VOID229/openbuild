@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
-import { deviceName, splitProjectId } from "../lib/devices";
+import { chooseDevice, chooseProject, deviceName, splitProjectId, workspaceDevice } from "../lib/devices";
 import { threadDevice, useStore } from "../lib/store";
 import { RUNTIMES, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
@@ -68,7 +68,7 @@ function ProjectList({ onDone, onNew }: { onDone: () => void; onNew: () => void 
   const q = query.trim().toLowerCase();
   const shown = useMemo(() => projects.filter((p) => !q || p.name.toLowerCase().includes(q) || p.path.toLowerCase().includes(q)), [projects, q]);
   const pick = (projectId?: string) => {
-    updateSettings({ workspace: { ...pref, projectId, branch: undefined } });
+    updateSettings({ workspace: chooseProject(pref, projectId) });
     onDone();
   };
   return (
@@ -108,7 +108,7 @@ function ProjectList({ onDone, onNew }: { onDone: () => void; onNew: () => void 
                 if (!confirm(`Remove ${p.name} from OpenBuild? The folder and its threads stay as they are.`)) return;
                 const ref = splitProjectId(p.id);
                 void removeProject(ref.id, ref.deviceId).then(() => {
-                  if (pref.projectId === p.id) updateSettings({ workspace: { ...pref, projectId: undefined, branch: undefined } });
+                  if (pref.projectId === p.id) updateSettings({ workspace: chooseProject(pref) });
                   return loadProjects();
                 });
               }}
@@ -137,7 +137,7 @@ function ProjectList({ onDone, onNew }: { onDone: () => void; onNew: () => void 
   );
 }
 
-/** Without a project, the device line under the heading picks which device's scratch folder new threads use. */
+/** The device line under the heading picks where new threads run, moving to what was last used there. */
 function DeviceMenu() {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
@@ -149,7 +149,8 @@ function DeviceMenu() {
   useEffect(() => {
     if (pref.deviceId && devicesLoaded && !devices.some((d) => d.id === pref.deviceId && !d.local)) updateSettings({ workspace: { ...pref, deviceId: undefined } });
   }, [pref, devices, devicesLoaded, updateSettings]);
-  const current = devices.find((d) => (pref.deviceId ? d.id === pref.deviceId : d.local));
+  const deviceId = workspaceDevice(pref);
+  const current = devices.find((d) => (deviceId ? d.id === deviceId : d.local));
   const name = current?.name ?? machineName();
   if (!devices.some((d) => !d.local)) return name ? <p className="home-machine"><Laptop size={13} /> {name}</p> : null;
   return (
@@ -171,7 +172,8 @@ function DeviceMenu() {
                 className="menu-item ws-option"
                 disabled={d.online === false}
                 onClick={() => {
-                  updateSettings({ workspace: { ...pref, deviceId: d.local ? undefined : d.id } });
+                  const { projects, chats } = useStore.getState();
+                  if (!selected) updateSettings({ workspace: chooseDevice(pref, d.local ? undefined : d.id, projects, chats) });
                   setOpen(false);
                 }}
               >
@@ -201,7 +203,6 @@ export function ProjectHeading() {
   }, [open]);
   const anchor = useRef<HTMLButtonElement>(null);
   const project = useStore((s) => s.projects.find((p) => p.id === s.settings.workspace.projectId));
-  const machine = project?.deviceName ?? machineName();
   const trigger = (label: string) => (
     <button ref={anchor} type="button" className={cx("home-pick", open && "home-pick-open")} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
       {label}
@@ -210,15 +211,7 @@ export function ProjectHeading() {
   return (
     <div className="home-head">
       <h1 className="home-title">{project ? <>What should we build in {trigger(project.name)}?</> : <>What should we {trigger("work on")}?</>}</h1>
-      {project ? (
-        machine && (
-          <p className="home-machine">
-            <Laptop size={13} /> {machine}
-          </p>
-        )
-      ) : (
-        <DeviceMenu />
-      )}
+      <DeviceMenu />
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="pp" label="Choose a project" fixed="auto">
         {step === "projects" ? (
           <ProjectList onDone={() => setOpen(false)} onNew={() => setStep("new")} />

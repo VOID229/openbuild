@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, GitBranch, Laptop, Monitor, Search } fro
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addProject, browseFolders, cloneProject, folderPickerAvailable, pickFolder } from "../lib/pi";
 import { useStore } from "../lib/store";
-import { splitProjectId } from "../lib/devices";
+import { chooseProject, workspaceDevice } from "../lib/devices";
 import { machineName } from "../lib/runtime";
 import { arrowNav, cx, useFocusOnShow, usePresence } from "../lib/ui";
 import { PathField } from "./PathField";
@@ -37,7 +37,7 @@ export function NewProjectSource({ onPick, onBack }: { onPick: (start: NewProjec
   const [query, setQuery] = useState("");
   const search = useRef<HTMLInputElement>(null);
   useFocusOnShow(search);
-  const current = pref.projectId ? splitProjectId(pref.projectId).deviceId : pref.deviceId;
+  const current = workspaceDevice(pref);
   // Clones go to the paired device new threads are on, when it's online; the dialog can change it.
   const cloneOn = devices.find((d) => !d.local && d.id === current && d.online !== false)?.id;
   const options = useMemo(() => {
@@ -192,7 +192,7 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
       const p = clone ? await cloneProject(url.trim(), target, deviceId) : await addProject(target, deviceId, { name: name.trim() || undefined, create: true });
       await loadProjects();
       // New threads start in the new project.
-      updateSettings({ workspace: { ...pref, projectId: deviceId ? `${deviceId}::${p.id}` : p.id, branch: undefined } });
+      updateSettings({ workspace: chooseProject(pref, deviceId ? `${deviceId}::${p.id}` : p.id) });
       onClose();
     } catch (err) {
       setError((err as Error).message);
