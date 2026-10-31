@@ -14,6 +14,8 @@ test("usage limits and empty balances are told apart from ordinary failures", ()
   ]) expect(limitReason(error)).toBe("credits");
   for (const error of [
     "You've hit your limit · resets 3pm",
+    "You've hit your 5-hour limit · resets 12:20pm (Asia/Jerusalem)",
+    "You've hit your 7-day limit · resets Nov 2",
     "You've hit your usage limit. Upgrade to get more.",
     "Claude usage limit reached",
     "You're out of extra usage",

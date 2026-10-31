@@ -157,7 +157,7 @@ export interface UsageLimitsReport {
 }
 
 const NO_CREDITS = /credit balance|out of credits?|no credits?|(?:more|enough|insufficient) credits?|insufficient[ _](?:balance|funds|quota)|payment required|billing|\b(?:http|status|code|error)\D{0,8}402\b|^402\b/i;
-const USAGE_LIMIT = /rate[ _-]?limit|usage[ _-]?limit|too many requests|quota|resource[ _]?(?:has been )?exhausted|limit (?:reached|exceeded)|(?:hit|reached) (?:your|the) (?:\w+ )*limit|out of (?:\w+ )?usage|\b(?:http|status|code|error)\D{0,8}429\b|^429\b/i;
+const USAGE_LIMIT = /rate[ _-]?limit|usage[ _-]?limit|too many requests|quota|resource[ _]?(?:has been )?exhausted|limit (?:reached|exceeded)|(?:hit|reached) (?:your|the) (?:[\w-]+ )*limit|out of (?:\w+ )?usage|\b(?:http|status|code|error)\D{0,8}429\b|^429\b/i;
 
 /** Why a reply's error means the account ran out, rather than the work failing; undefined for any other error. */
 export function limitReason(error: string | undefined): "credits" | "usage" | undefined {
