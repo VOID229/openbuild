@@ -11,7 +11,7 @@ export function userVisiblePrompt(text: string): string {
       const at = start.indexOf(marker);
       if (at < 0) return "";
       end = at + marker.length;
-    } else if (start.startsWith("[OpenBuild display instructions:")) {
+    } else if (start.startsWith("[OpenBuild display instructions:") || start.startsWith("[OpenBuild plugin instructions:")) {
       const at = start.indexOf("]");
       if (at < 0) return "";
       end = at + 1;

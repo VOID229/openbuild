@@ -1,4 +1,5 @@
 import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
+import { PLUGIN_GUIDANCE_NOTE } from "../pluginGuidance";
 /**
  * The Durable runtime itself. It owns the worker's storage, so exactly one process may run it for a
  * given data directory: `worker.ts` does, and the server talks to that process (see `remote.ts`).
@@ -338,8 +339,8 @@ export class DurableRuntime {
     this.project(m, watch.value.entries);
     watch.start(async value => { if (!m.ended) this.project(m, value.entries); });
     const content = m.request.images?.length
-      ? [{ type: "text" as const, text: HTML_DELIVERY_NOTE + m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
-      : HTML_DELIVERY_NOTE + m.request.message;
+      ? [{ type: "text" as const, text: HTML_DELIVERY_NOTE + PLUGIN_GUIDANCE_NOTE + m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
+      : HTML_DELIVERY_NOTE + PLUGIN_GUIDANCE_NOTE + m.request.message;
     // The manifest exists before submit. Retrying after either side of this await is safe.
     const submission = await root.submit({ type: "input", content, requestId: m.id, whenBusy: "reject" }, context);
     // Persist "may have been submitted" before anything else can fail: from here on, recovery must

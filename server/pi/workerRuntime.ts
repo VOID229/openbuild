@@ -1,6 +1,7 @@
 import { withRuntimeAccount } from "../runtimeAccounts";
 /** Ordinary Pi is not checkpointable. Persist output, never replay an unfinished prompt. */
 import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
+import { PLUGIN_GUIDANCE_NOTE } from "../pluginGuidance";
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -190,7 +191,7 @@ export class PiWorkerRuntime {
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);
     if (fresh) {
       const display = req.runtime && req.runtime !== "pi";
-      const input = display ? { ...req, message: HTML_DELIVERY_NOTE + req.message } : req;
+      const input = { ...req, message: (display ? HTML_DELIVERY_NOTE : "") + PLUGIN_GUIDANCE_NOTE + req.message };
       void this.consume(run, req.runtime === "opencode" ? opencode.runTurn(input, run.signal) : req.runtime === "claude" ? claude.runTurn(input, run.signal) : req.runtime === "cursor" ? cursor.runTurn(input, run.signal) : req.runtime === "codex" ? codex.runTurn(input, run.signal) : req.runtime === "fx" ? fx.runTurn(input, run.signal) : sessions.runTurn(input, run.signal), !!display);
     }
     return run;
