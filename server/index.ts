@@ -1,3 +1,4 @@
+import { createPreview, localPreviewTarget, forwardPreview, previewWebsocket, stopPreviews } from "./preview";
 import { checkRelease } from "./releases";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
@@ -75,6 +76,7 @@ function forbidden(req: Request): Response | undefined {
  * It can't read saved keys, change this device's password, manage plugins, or list other devices.
  */
 const devicePathAllowed = (path: string) =>
+  /^\/api\/preview\/relay\/[0-9]+$/.test(path) ||
   path === "/api/config" ||
   path === "/api/pair/self" ||
   path === "/api/runtimes" ||
@@ -177,6 +179,7 @@ const proxyRoute = async (req: Bun.BunRequest<"/api/devices/:id/*">, server: Bun
 
 function serve(port: number, hostname: string) {
   return Bun.serve({
+    websocket: previewWebsocket,
     port,
     // Loopback by default, even with password protection.
     hostname,
@@ -310,6 +313,38 @@ function serve(port: number, hostname: string) {
 
       // Saved keys as opaque ids, never secrets.
       "/api/keys": {
+      "/api/preview": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (typeof body?.url !== "string") return bad("Expected a localhost URL");
+          const remote = typeof body.deviceId === "string" ? devices.deviceCredentials(body.deviceId) : undefined;
+          if (body.deviceId && !remote) return bad("No such paired device", 404);
+          try {
+            return Response.json({ url: createPreview(new URL(body.url), new URL(req.url), remote) });
+          } catch (err) { return bad((err as Error).message); }
+        }),
+      },
+      "/api/preview/open": {
+        GET: api(req => {
+          const params = new URL(req.url).searchParams;
+          const deviceId = params.get("deviceId");
+          const remote = deviceId ? devices.deviceCredentials(deviceId) : undefined;
+          if (deviceId && !remote) return bad("No such paired device", 404);
+          try {
+            const url = createPreview(new URL(params.get("url") || ""), new URL(req.url), remote);
+            return new Response(null, { status: 302, headers: { location: url, "cache-control": "no-store", "referrer-policy": "no-referrer" } });
+          } catch (err) { return bad((err as Error).message); }
+        }),
+      },
+      // Only a paired OpenBuild server can relay to this machine's loopback ports.
+      "/api/preview/relay/:port": api((req, server) => {
+        if (!devices.authenticateDevice(req)) return bad("Forbidden", 403);
+        try {
+          const url = new URL(req.url);
+          return forwardPreview(req, localPreviewTarget(req.params.port, url.searchParams.get("path") || "/"), server) as Promise<Response>;
+        } catch { return bad("Invalid preview target"); }
+      }),
+
         GET: api(async () => Response.json({ backend: await vault.backend(), keys: await vault.listIds() } satisfies KeyInventory)),
       },
 
@@ -491,13 +526,15 @@ await loadPlugins().catch((err) => console.error("[plugins] Startup failed:", er
 // the next one, so the app is always at the address you expect.
 // HOST can list several addresses (comma-separated), e.g. localhost and a Tailscale IP.
 const hosts = (process.env.HOST || "127.0.0.1").split(",").map((h) => h.trim()).filter(Boolean);
-const hot = globalThis as { openbuildServers?: ReturnType<typeof serve>[] };
+const hot = globalThis as { openbuildServers?: ReturnType<typeof serve>[]; openbuildStopPreviews?: () => void };
 const previous = hot.openbuildServers;
 for (const p of previous ?? []) p.stop(true);
 const port = previous?.[0]?.port ?? Number(process.env.PORT ?? 3100);
 const servers: ReturnType<typeof serve>[] = [];
 try {
   for (const host of hosts) servers.push(serve(port, host));
+hot.openbuildStopPreviews?.();
+hot.openbuildStopPreviews = stopPreviews;
 } catch (err) {
   if ((err as { code?: string }).code !== "EADDRINUSE") throw err;
   for (const s of servers) s.stop(true);

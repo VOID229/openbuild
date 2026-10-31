@@ -28,6 +28,7 @@ test("server gates every device API and only unlocks with a local session", asyn
     const call = (path: string, init?: RequestInit) => fetch(new URL(path, url), init);
     expect(await (await call("/api/auth/status")).json()).toEqual({ configured: true, authenticated: false });
     for (const [path, method] of [
+      ["/api/preview", "POST"], ["/api/preview/open?url=http://localhost:4321", "GET"], ["/api/preview/relay/4321", "GET"],
       ["/api/config", "GET"], ["/api/chats", "GET"], ["/api/state", "PUT"],
       ["/api/keys/secrets", "GET"], ["/api/pi/chat", "POST"], ["/api/pi/providers", "GET"],
       ["/api/unknown", "GET"], ["/api/dictation/check", "GET"], ["/api/dictation/transcribe", "POST"],
@@ -36,6 +37,10 @@ test("server gates every device API and only unlocks with a local session", asyn
     expect(login.status).toBe(200);
     const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
     expect((await call("/api/config", { headers: { cookie } })).status).toBe(200);
+    const preview = await call("/api/preview", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ url: "http://localhost:4321" }) });
+    expect(preview.status).toBe(200);
+    expect(new URL((await preview.json()).url).origin).not.toBe(new URL(url!).origin);
+    expect((await call("/api/preview/relay/4321", { headers: { cookie } })).status).toBe(403);
     // Another allowed host is still a foreign origin, not a CSRF bypass.
     expect((await call("/api/chats", { headers: { cookie, origin: "http://localhost:9999" } })).status).toBe(403);
     expect((await call("/api/auth/logout", { method: "POST", headers: { cookie } })).status).toBe(200);

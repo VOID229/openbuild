@@ -2,15 +2,14 @@
 // Made for looking at what the thread is building (a dev server's localhost page), next to it.
 //
 // It's a frame, not a standalone browser. Pages keep their normal framing restrictions;
-// use the toolbar's external-open button if a page won't embed. Localhost is mapped to
-// this server's hostname when the app is opened from another computer.
+// use the toolbar's external-open button if a page won't embed. Localhost pages use an isolated preview proxy on the project's machine.
 import { ArrowLeft, ArrowRight, ExternalLink, Globe, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { usePanel, type BrowserTab } from "../lib/panel";
+import { isLocalUrl } from "../lib/links";
 import type { TerminalFolder } from "../lib/terminal";
 import { IconButton } from "./primitives";
 
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
 
 /** What was typed, as an address: a bare host gets http(s), a bare port is localhost, words are a search. */
 export function normalizeUrl(input: string): string {
@@ -23,19 +22,6 @@ export function normalizeUrl(input: string): string {
   if (!/\s/.test(text) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(text)) return `https://${text}`;
   // Google's embeddable results (igu=1): most search engines refuse to be framed.
   return `https://www.google.com/search?igu=1&q=${encodeURIComponent(text)}`;
-}
-
-/** Where the frame actually goes: localhost on this server, when the app is open from elsewhere. */
-function frameUrl(url: string, folder: TerminalFolder): string {
-  if (folder.deviceId || typeof location === "undefined" || LOCAL_HOSTS.has(location.hostname)) return url;
-  try {
-    const u = new URL(url);
-    if (!LOCAL_HOSTS.has(u.hostname)) return url;
-    u.hostname = location.hostname;
-    return u.toString();
-  } catch {
-    return url;
-  }
 }
 
 /** Each tab's back/forward list, for this page's life (a cross-origin frame's own history is out of reach). */
@@ -71,7 +57,30 @@ export function BrowserView({ tab, folder }: { tab: BrowserTab; folder: Terminal
     history.at = at;
     go(history.list[at]!, false);
   };
-  const src = tab.url ? frameUrl(tab.url, folder) : "";
+  const [preview, setPreview] = useState<{ key: string; url?: string; error?: string }>();
+  const previewKey = `${folder.deviceId ?? ""}:${tab.url}:${reloads}`;
+  useEffect(() => {
+    if (!isLocalUrl(tab.url)) return;
+    if (location.protocol === "https:") {
+      setPreview({ key: previewKey, error: "Localhost previews currently need HTTP access to OpenBuild. HTTPS requires a separate TLS preview route." });
+      return;
+    }
+    const controller = new AbortController();
+    void fetch("/api/preview", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url: tab.url, deviceId: folder.deviceId }), signal: controller.signal,
+    }).then(async response => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Couldn't open localhost preview");
+      setPreview({ key: previewKey, url: result.url });
+    }).catch(error => {
+      if (!controller.signal.aborted) setPreview({ key: previewKey, error: error.message });
+    });
+    return () => controller.abort();
+  }, [tab.url, folder.deviceId, previewKey]);
+  const local = isLocalUrl(tab.url);
+  const src = local ? (preview?.key === previewKey ? preview.url : "") : tab.url;
+  const previewError = preview?.key === previewKey ? preview.error : undefined;
 
   return (
     <div className="browser-view">
@@ -118,7 +127,9 @@ export function BrowserView({ tab, folder }: { tab: BrowserTab; folder: Terminal
         </IconButton>
       </form>
       <div className="bv-body">
-        {src ? (
+        {local && !src ? (
+          <div className="bv-empty" role="status"><p>{previewError || "Connecting to localhost…"}</p></div>
+        ) : src ? (
           <iframe
             key={`${src}#${reloads}`}
             className="bv-frame"

@@ -1,8 +1,7 @@
 // Links in a thread that point at localhost: a dev server the thread started, on the machine the
 // thread runs on. A plain click opens them in the side panel's browser (reusing a tab already on
 // that address), which reaches the right machine even when the app is open from another computer.
-// ⌘-click (Ctrl-click off a Mac) opens a real browser tab instead; opened from elsewhere, its
-// localhost becomes the server's host name, since this computer's own localhost has nothing there.
+// ⌘-click (Ctrl-click off a Mac) opens a real browser tab through the same preview proxy.
 import type { MouseEvent } from "react";
 import { usePanel } from "./panel";
 import type { TerminalFolder } from "./terminal";
@@ -19,17 +18,12 @@ export function isLocalUrl(url: string): boolean {
   }
 }
 
-/** Where a localhost address really is from this browser: on this server, when the app is open from elsewhere. */
+/** Open a loopback page through the project's authenticated preview proxy. */
 export function reachableUrl(url: string, folder?: Pick<TerminalFolder, "deviceId">): string {
-  if (folder?.deviceId || typeof location === "undefined" || LOCAL_HOSTS.has(location.hostname)) return url;
-  try {
-    const u = new URL(url);
-    if (!LOCAL_HOSTS.has(u.hostname)) return url;
-    u.hostname = location.hostname;
-    return u.toString();
-  } catch {
-    return url;
-  }
+  if (!isLocalUrl(url)) return url;
+  const params = new URLSearchParams({ url });
+  if (folder?.deviceId) params.set("deviceId", folder.deviceId);
+  return `/api/preview/open?${params}`;
 }
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
