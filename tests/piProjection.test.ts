@@ -19,6 +19,15 @@ test("worker replay repairs offline output, completion and stale saves without r
         {t:'tool',id:'tool-1',name:'bash',status:'done',output:'/work',ms:15},
         {t:'ask',id:'ask-1',method:'select',title:'Continue?',options:['Yes']},
       ]};
+      const leaked = '[OpenBuild user profile context (current)]\\nprivate\\n[End OpenBuild user profile context]\\n\\nhello';
+      a.equal(projectReply(message,{...snapshot,events:[{t:'steer',id:'s1',text:leaked}]}).parts[0].text,'hello');
+      const file = {id:'f1',name:'image.png',mime:'image/png',dataUrl:'data:image/png;base64,AA==',size:1};
+      const steering = {...snapshot,events:[{t:'steer',id:'s1',text:'look'}]};
+      a.deepEqual(projectReply({...message,steerFiles:{s1:[file]}},steering).parts[0].attachments,[file]);
+      const landed = projectReply({...message,steerFiles:{s1:[file]}},{...steering,status:'finished',endedAt:20});
+      a.deepEqual(landed.parts[0].attachments,[file]); a.equal(landed.steerFiles,undefined);
+      const replayed = {...landed,status:'streaming',parts:[{type:'steer',id:'s1',text:'look'}]};
+      a.deepEqual(projectReply(replayed,{...steering,status:'finished',endedAt:20},landed).parts[0].attachments,[file]);
       const pending = projectReply(message,snapshot);
       a.equal(pending.status,'streaming'); a.equal(pending.parts.at(-1).answer,undefined);
       a.equal(pending.parts[2].output,'/work'); a.equal(pending.parts[2].args.command,'pwd');

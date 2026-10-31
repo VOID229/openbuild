@@ -17,8 +17,13 @@ export interface PiSnapshot {
   endedAt?: number;
 }
 
+const steerFiles = (message: Message | undefined, id: string | undefined) => {
+  const part = message?.parts?.find(p => p.type === "steer" && p.id === id);
+  return (part?.type === "steer" ? part.attachments : undefined) ?? (id ? message?.steerFiles?.[id] : undefined);
+};
+
 /** Pure replay; timings are based on saved timestamps, never on when the server reconnects. */
-export function projectReply(message: Message, snapshot: PiSnapshot): Message {
+export function projectReply(message: Message, snapshot: PiSnapshot, previous?: Message): Message {
   const parts: Part[] = [];
   let content = "", error: string | undefined;
   let usage: Message["usage"], finish: string | undefined;
@@ -56,8 +61,10 @@ export function projectReply(message: Message, snapshot: PiSnapshot): Message {
         break;
       }
       case "steer": {
-        const old = message.parts?.find(p => p.type === "steer" && p.id === event.id);
-        parts.push({ type: "steer", id: event.id, text: event.text, ...(old?.type === "steer" ? { attachments: old.attachments } : {}) });
+        // The log has no files, and a tab that replayed it may have saved the steer without them.
+        const attachments = steerFiles(message, event.id) ?? steerFiles(previous, event.id);
+        // Logs from before steers carried their display text still hold the model's prompt.
+        parts.push({ type: "steer", id: event.id, text: userVisiblePrompt(event.text), ...(attachments ? { attachments } : {}) });
         break;
       }
       case "notice": parts.push({ type: "notice", text: event.message }); break;
@@ -74,7 +81,7 @@ export function projectReply(message: Message, snapshot: PiSnapshot): Message {
   }
   return { ...message, content, parts: parts.length ? parts : undefined, status, error, finish, usage, notice: undefined,
     reasoning: undefined, reasoningMs: undefined,
-    ...(ended ? { workedMs: Math.max(0, (snapshot.endedAt ?? snapshot.startedAt) - (message.startedAt ?? snapshot.startedAt)) } : {}),
+    ...(ended ? { workedMs: Math.max(0, (snapshot.endedAt ?? snapshot.startedAt) - (message.startedAt ?? snapshot.startedAt)), steerFiles: undefined } : {}),
   };
 }
 
@@ -88,7 +95,7 @@ export function projectChat(chat: Chat, snapshots: PiSnapshot[], previous?: Chat
     const snapshot = id && byId.get(id);
     if (!snapshot) return message;
     let projected = message;
-    if (message.role === "assistant" && snapshot.kind === "run") projected = projectReply(message, snapshot);
+    if (message.role === "assistant" && snapshot.kind === "run") projected = projectReply(message, snapshot, previous?.messages.find(m => m.id === message.id));
     else if (message.role === "shell" && snapshot.kind === "shell" && message.shell) {
       let output = "";
       let exit: Extract<ShellEvent, { t: "exit" }> | undefined;

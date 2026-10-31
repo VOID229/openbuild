@@ -24,7 +24,8 @@ import { dataDir } from "../paths";
 import { agentDir, packageRoot } from "../pi/install";
 import { addUsage } from "../pi/usage";
 
-interface DurableSteer { id: string; text: string; images?: PiChatRequest["images"] }
+/** `text` is what the model reads; `display` is what the user wrote, when they differ. */
+interface DurableSteer { id: string; text: string; display?: string; images?: PiChatRequest["images"] }
 interface Manifest {
   steers?: DurableSteer[];
   version: 1;
@@ -257,14 +258,14 @@ export class DurableRuntime {
       ? [{ type: "text" as const, text: item.text }, ...item.images.map(image => ({ type: "image" as const, ...image }))]
       : item.text;
     return root.submit({ type: "input", content, whenBusy: "steer", requestId: JSON.stringify(["openbuild-steer", m.id, item.id]),
-      entry: { kind: "openbuild.steer", data: { run: m.id, id: item.id, text: item.text } } }, context);
+      entry: { kind: "openbuild.steer", data: { run: m.id, id: item.id, text: item.display ?? item.text } } }, context);
   }
-  async steer(threadId: string, id: string, text: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
+  async steer(threadId: string, id: string, text: string, images?: PiChatRequest["images"], display?: string): Promise<{ handled: boolean }> {
     if (this.closed) throw new Error("Durable runtime is closed");
     await this.recover();
     return this.serial("$admission", async () => {
       if (this.deleted(threadId)) throw new DurableUnsupportedError("This durable thread was deleted");
-      const input: DurableSteer = { id, text, ...(images?.length ? { images: images.map(i => ({ data: i.data, mimeType: i.mimeType })) } : {}) };
+      const input: DurableSteer = { id, text, ...(display !== undefined ? { display } : {}), ...(images?.length ? { images: images.map(i => ({ data: i.data, mimeType: i.mimeType })) } : {}) };
       const previous = [...this.manifests.values()].findLast(m => m.request.threadId === threadId && m.steers?.some(s => s.id === id));
       if (previous) {
         if (!isDeepStrictEqual(previous.steers!.find(s => s.id === id), input)) throw new DurableUnsupportedError("Steering ID was reused with different input");

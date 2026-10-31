@@ -136,7 +136,7 @@ export async function serveWorker(directory: string, socket = workerSocket(direc
             case "/threads/stop": runtime.stopThread(String(body.threadId)); return Response.json({ ok: true });
             case "/threads/delete": runtime.deleteThread(String(body.threadId)); return Response.json({ ok: true });
             case "/answer": return Response.json(runtime.answer(body.threadId, body.askId, body.reply));
-            case "/steer": return Response.json(await runtime.steer(body.threadId, body.steerId, body.message, body.images));
+            case "/steer": return Response.json(await runtime.steer(body.threadId, body.steerId, body.message, body.images, body.display));
             case "/compact": return Response.json(await runtime.compact(body.threadId, body.instructions));
             case "/release": runtime.release(body.threadId); return Response.json({ ok: true });
             case "/restartIdle": runtime.restartIdle(); return Response.json({ ok: true });

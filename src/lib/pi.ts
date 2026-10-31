@@ -104,8 +104,8 @@ export const piCommands = (cwd?: string, deviceId?: string) =>
 export const answerAsk = (threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }, deviceId?: string) =>
   send(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/answer`), "POST", { askId, ...reply });
 
-export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[], deviceId?: string) =>
-  send<{ handled: boolean }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/steer`), "POST", { steerId, message, images });
+export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[], deviceId?: string, display?: string) =>
+  send<{ handled: boolean }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/steer`), "POST", { steerId, message, images, display });
 
 export const compactThread = (threadId: string, instructions?: string, deviceId?: string) =>
   send<{ tokensBefore: number; estimatedTokensAfter?: number }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/compact`), "POST", { instructions });

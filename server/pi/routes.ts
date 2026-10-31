@@ -368,12 +368,12 @@ export function piRoutes(api: Api) {
     "/api/pi/threads/:id/steer": {
       POST: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/steer">) => {
         const body = await readJson(req);
-        if (!isThreadId(req.params.id) || !str(body?.steerId, 128) || typeof body?.message !== "string" || body.message.length >= 2_000_000 || !validImages(body.images)) {
-          return bad("Expected { steerId, message, images? }");
+        if (!isThreadId(req.params.id) || !str(body?.steerId, 128) || typeof body?.message !== "string" || body.message.length >= 2_000_000 || !validImages(body.images) || (body.display !== undefined && typeof body.display !== "string")) {
+          return bad("Expected { steerId, message, images?, display? }");
         }
         try {
-          if (threadRuntime(req.params.id) === "durable") return Response.json(await durable.steer(req.params.id, body.steerId, body.message, body.images));
-          return Response.json(await steer(req.params.id, body.steerId, body.message, body.images));
+          if (threadRuntime(req.params.id) === "durable") return Response.json(await durable.steer(req.params.id, body.steerId, body.message, body.images, body.display));
+          return Response.json(await steer(req.params.id, body.steerId, body.message, body.images, body.display));
         } catch (err) {
           return fail(err, 409);
         }

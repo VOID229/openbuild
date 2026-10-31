@@ -222,7 +222,7 @@ export class PiClient {
   async stopThread(threadId: string) { await this.json("/threads/stop", { threadId }); }
   async deleteThread(threadId: string) { await this.json("/threads/delete", { threadId }); }
   answer(threadId: string, askId: string, reply: { value?: string; confirmed?: boolean; cancelled?: boolean }) { return this.json<boolean>("/answer", { threadId, askId, reply }); }
-  steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) { return this.json<{ handled: boolean }>("/steer", { threadId, steerId, message, images }); }
+  steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) { return this.json<{ handled: boolean }>("/steer", { threadId, steerId, message, images, display }); }
   compact(threadId: string, instructions?: string) { return this.json<{ tokensBefore: number; estimatedTokensAfter?: number }>("/compact", { threadId, instructions }); }
   async release(threadId: string) { await this.json("/release", { threadId }); this.live.delete(threadId); }
   async restartIdle() { await this.json("/restartIdle", {}); await this.refreshOwnership(); }
@@ -334,7 +334,7 @@ export async function answer(threadId: string, askId: string, reply: Parameters<
 async function threadOwner(threadId: string) {
   return (await threadRuns(existingClients(), threadId))[0]?.owner ?? client;
 }
-export const steer = async (threadId: string, id: string, message: string, images?: PiChatRequest["images"]) => (await threadOwner(threadId)).steer(threadId, id, message, images);
+export const steer = async (threadId: string, id: string, message: string, images?: PiChatRequest["images"], display?: string) => (await threadOwner(threadId)).steer(threadId, id, message, images, display);
 export const compact = async (threadId: string, instructions?: string) => (await threadOwner(threadId)).compact(threadId, instructions);
 export const release = async (threadId: string) => { await Promise.all(existingClients().map(c => c.release(threadId))); };
 export const restartIdle = async () => {

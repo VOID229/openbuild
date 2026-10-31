@@ -5,7 +5,7 @@ import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode }
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
 import { useStore } from "../lib/store";
-import type { Message, Part, SearchCall, ThoughtPart, ToolPart } from "../lib/types";
+import type { Message, Part, SearchCall, SteerPart, ThoughtPart, ToolPart } from "../lib/types";
 import { copyText, cx, duration } from "../lib/ui";
 import { Linkify } from "./Linkify";
 import { openLightbox } from "./Lightbox";
@@ -202,6 +202,21 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   );
 }
 
+/** Sent while Pi worked, shown where Pi read it. */
+function SteerMessage({ part, chatId, block }: { part: SteerPart; chatId: string; block: number }) {
+  const text = userVisiblePrompt(part.text ?? "");
+  return (
+    <div className="msg-user msg-steer" data-block={block}>
+      {part.attachments?.length ? <Attachments files={part.attachments} chatId={chatId} /> : null}
+      {text.trim() && (
+        <div className="bubble">
+          <Linkify text={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 type Block = Part | (ToolPart | ThoughtPart)[];
 
 /** A page the agent shows (html_render): out in the reply, not folded into the work around it. A
@@ -256,15 +271,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
     ) : b.type === "notice" ? (
       <div key={`n${i}`} className="msg-notice" data-block={i}>{b.text}</div>
     ) : b.type === "steer" ? (
-      // Sent while Pi worked, shown where Pi read it.
-      <div key={`s${i}`} className="msg-user msg-steer" data-block={i}>
-        {b.attachments?.length ? <Attachments files={b.attachments} chatId={chatId} /> : null}
-        {b.text?.trim() && (
-          <div className="bubble">
-            <Linkify text={b.text} />
-          </div>
-        )}
-      </div>
+      <SteerMessage key={`s${i}`} part={b} chatId={chatId} block={i} />
     ) : null;
   // Done, and it ran tools or thought: fold all of that (and what it wrote along the way) behind
   // "Worked for Xs", leaving the answer out in the open. Only once it's over: while Pi works, what

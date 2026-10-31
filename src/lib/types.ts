@@ -250,6 +250,8 @@ export interface Message {
   workedMs?: number;
   searches?: SearchCall[];
   /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
+  /** Files of steers made during this reply, by steer id, until the finished reply's parts hold them. */
+  steerFiles?: Record<string, Attachment[]>;
   notice?: string;
   /** Where the reply runs, so it can be picked back up after a reload or a dropped connection. */
   stream?: ReplyStream;

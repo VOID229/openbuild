@@ -200,8 +200,8 @@ export class DurableClient {
     }
   }
 
-  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
-    const res = await this.request("/steer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, steerId, message, images }) });
+  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string): Promise<{ handled: boolean }> {
+    const res = await this.request("/steer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, steerId, message, images, display }) });
     if (!res.ok) throw workerError(await res.json().catch(() => null), res.status);
     return await res.json() as { handled: boolean };
   }

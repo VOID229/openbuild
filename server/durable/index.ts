@@ -22,4 +22,4 @@ export const stopThread = (threadId: string) => client.stopThread(threadId);
 /** Call on server startup, not on first client reconnect. */
 export const recover = () => client.recover();
 export const compact = (threadId: string, instructions?: string) => client.compact(threadId, instructions);
-export const steer = (threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) => client.steer(threadId, steerId, message, images);
+export const steer = (threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) => client.steer(threadId, steerId, message, images, display);

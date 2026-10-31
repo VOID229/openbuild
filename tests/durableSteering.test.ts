@@ -30,6 +30,18 @@ test("Durable places multiple steers once, includes images, waits for answers an
   await until(()=>next.ended); expect(next.events.some(e=>e.t==="error")).toBe(false);
  } finally {await runtime.close();rmSync(directory,{recursive:true,force:true});}
 });
+test("Durable shows what the user wrote for a steer while the model reads the full prompt",async()=>{
+ const directory=mkdtempSync(join(tmpdir(),"durable-steer-display-"));
+ const fake=fakeModels({delayMs:80}); const runtime=new DurableRuntime(directory,fake.models);
+ const request=req(fake.model);
+ try {
+  const run=await runtime.startRun(request);
+  await runtime.steer(request.threadId,"s1","[private context]\n\nnew direction",undefined,"new direction");
+  await until(()=>run.ended);
+  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"s1",text:"new direction"}]);
+  expect(JSON.stringify(fake.inputs().at(-1))).toContain("[private context]");
+ } finally {await runtime.close();rmSync(directory,{recursive:true,force:true});}
+});
 test("Durable recovers steer intent from either side of upstream submit without duplicates",async()=>{
  const directory=mkdtempSync(join(tmpdir(),"durable-steer-recover-"));
  const held=fakeModels({hold:true}); const request=req(held.model);

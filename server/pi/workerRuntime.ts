@@ -1,5 +1,6 @@
 import { withRuntimeAccount } from "../runtimeAccounts";
 /** Ordinary Pi is not checkpointable. Persist output, never replay an unfinished prompt. */
+import { userVisiblePrompt } from "../../shared/promptDisplay";
 import { HtmlDelivery, HTML_DELIVERY_NOTE } from "../htmlDelivery";
 import { PLUGIN_GUIDANCE_NOTE } from "../pluginGuidance";
 import { Database } from "bun:sqlite";
@@ -48,6 +49,8 @@ export class PiWorkerRuntime {
   private db: Database;
   private runs = new Map<string, WorkerRun>();
   private threads = new Set<string>();
+  /** What the user wrote for steers awaiting delivery. Runtimes echo the model's prompt, which must not reach the log. */
+  private steerDisplays = new Map<string, string>();
   private shellTails = new Map<string, ShellEvent[]>();
   constructor(readonly directory: string) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -210,6 +213,10 @@ export class PiWorkerRuntime {
     try {
       for await (const event of readEvents(stream)) {
         if (event.t === "end") continue;
+        if (event.t === "steer") {
+          event.text = (event.id && this.steerDisplays.get(event.id)) ?? userVisiblePrompt(event.text);
+          if (event.id) this.steerDisplays.delete(event.id);
+        }
         if (html) html.push(event); else run.push(event);
         if (event.t === "error") status = "error";
         if (event.t === "done" && event.finish === "aborted") status = "aborted";
@@ -244,7 +251,18 @@ export class PiWorkerRuntime {
   answer(threadId: string, askId: string, reply: Parameters<typeof sessions.answer>[2]) {
     return cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
-  steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
+  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) {
+    if (display !== undefined) this.steerDisplays.set(steerId, display);
+    try {
+      const result = await this.deliverSteer(threadId, steerId, message, images);
+      if (result.handled) this.steerDisplays.delete(steerId);
+      return result;
+    } catch (error) {
+      this.steerDisplays.delete(steerId);
+      throw error;
+    }
+  }
+  private deliverSteer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
     return fx.canSteer(threadId) ? fx.steer(threadId, steerId, message, images) : cursor.canSteer(threadId) ? cursor.steer(threadId, steerId, message, images) : claude.canSteer(threadId) ? claude.steer(threadId, steerId, message, images) : opencode.canSteer(threadId) ? opencode.steer(threadId, steerId, message, images) : codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
   }
   compact = sessions.compact;

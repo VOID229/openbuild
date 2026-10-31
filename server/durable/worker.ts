@@ -129,7 +129,7 @@ export function serveWorker(runtime: DurableRuntime, socket: string) {
             await runtime.stopThread(String(body.threadId));
             return json({ ok: true });
           case "/steer":
-            return json(await runtime.steer(String(body.threadId), String(body.steerId), String(body.message), body.images));
+            return json(await runtime.steer(String(body.threadId), String(body.steerId), String(body.message), body.images, typeof body.display === "string" ? body.display : undefined));
           case "/compact":
             return json({ id: await runtime.compact(String(body.threadId), typeof body.instructions === "string" ? body.instructions : undefined) });
           case "/shutdown":

@@ -13,6 +13,7 @@ import { resumeShells, runShell, shellCommand } from "./shell";
 import { deviceDetection, hasPermissionModes, permissionOf, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
 import { effortFor, speedFor, supportedSpeed } from "./effort";
 import { profileContext, withProfileContext } from "./profile";
+import { userVisiblePrompt } from "../../shared/promptDisplay";
 import type { AskPart, Chat, Message, ModelRef, Part, SearchCall, Settings, ToolPart } from "./types";
 
 export { uid };
@@ -141,9 +142,11 @@ export async function steerQueued(chatId: string, id: string) {
   const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), msg.model)?.input ?? ["text"]);
   removeQueued(chatId, id);
   setSteers(chatId, run, [...run.steers, item]);
+  // The worker's log only has the steer's text: saved here, its files survive a reload or restart.
+  if (item.files.length) st.patchMessage(chatId, run.messageId, (m) => ({ steerFiles: { ...m.steerFiles, [id]: item.files } }), true);
   try {
     // An extension took it as input; there's nothing more to show for it.
-    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId)).handled) setSteers(chatId, run, run.steers.filter((q) => q !== item));
+    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId, item.text)).handled) setSteers(chatId, run, run.steers.filter((q) => q !== item));
   } catch (err) {
     if (run.steers.includes(item)) {
       setSteers(chatId, run, run.steers.filter((q) => q !== item));
@@ -551,7 +554,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
           setSteers(chatId, run, run.steers.filter((q) => q !== item));
         }
         endThought();
-        parts.push({ type: "steer", id: ev.id, text: item ? item.text : ev.text, attachments: item?.files.length ? item.files : undefined });
+        const saved = ev.id ? useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.steerFiles?.[ev.id] : undefined;
+        parts.push({ type: "steer", id: ev.id, text: item ? item.text : userVisiblePrompt(ev.text), attachments: item?.files.length ? item.files : saved });
         flushParts();
       } else if (ev.t === "reasoning") {
         if (pi) {
