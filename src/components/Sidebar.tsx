@@ -1155,7 +1155,8 @@ export function Sidebar() {
   // Snoozed threads leave every other section until they wake.
   const awake = useMemo(() => visible.filter((c) => !c.snoozedUntil), [visible]);
   const snoozed = useMemo(() => visible.filter((c) => c.snoozedUntil).sort((a, b) => a.snoozedUntil! - b.snoozedUntil!), [visible]);
-  const pinned = useMemo(() => (view.includePinned ? awake.filter((c) => c.pinned && !c.archived) : []), [awake, view.includePinned]);
+  // Closing a thread unpins it, so a closed thread that is pinned was pinned from search or "Closed": it belongs here.
+  const pinned = useMemo(() => (view.includePinned ? awake.filter((c) => c.pinned) : []), [awake, view.includePinned]);
   // Pinned threads keep their spot. A thread blocked on a question from the user lives in "Attention".
   // One cut off by a usage limit or an empty balance lives in "Limits", not "Done": its work isn't finished.
   // Everything else that is generating lives in "Working", then
