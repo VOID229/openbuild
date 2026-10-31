@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageProvider, UsageRange, UsageReport, UsageResetResult } from "../../shared/usage";
 import * as devices from "../devices";
 import { dataDir } from "../paths";
-import { REMOTE_FRESH_MS, RETRY_MS, shouldRefresh } from "./cache";
+import { REMOTE_FRESH_MS, retryDelay, shouldRefresh } from "./cache";
 import { preferLimits } from "./limitSelection";
 import { requestUsage } from "./remoteRequest";
 /** How long a first answer is waited for before the page shows without it. */
@@ -17,6 +17,8 @@ interface Cached<T> {
   value?: T;
   error?: string;
   retryAt?: number;
+  /** Failed refreshes in a row; each one doubles the wait before the next. */
+  failures?: number;
   running?: Promise<void>;
 }
 
@@ -67,12 +69,14 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
         c.at = Date.now();
         c.error = undefined;
         c.retryAt = undefined;
+        c.failures = 0;
         save(m);
       },
       (err: Error) => {
         c.error = err.message;
         // Back off even with no answer (or a stale one); leave its real timestamp intact.
-        c.retryAt = Date.now() + RETRY_MS;
+        c.failures = (c.failures ?? 0) + 1;
+        c.retryAt = Date.now() + retryDelay(c.failures);
       },
     ).finally(() => (c.running = undefined));
   }
@@ -225,19 +229,21 @@ export async function machineLimits(force: boolean, local: () => Promise<UsageLi
       add({ ...l, id, stale: l.stale || !!r.error || Date.now() - l.asOf >= REMOTE_FRESH_MS, machine: d.name, machineId: d.id, ...(d.external && { external: true }) });
     });
   });
-  // Number accounts within each provider again now that machines are combined.
+  // Number accounts within each provider again now that machines are combined. An external
+  // machine's accounts are numbered among themselves, apart from the user's own.
   const all = [...byId.values()];
   for (const l of all) if (own.has(l.id)) delete l.external;
+  const group = (l: UsageLimits) => (l.external ? `${l.provider}@${l.machineId}` : l.provider);
   const counts = new Map<string, number>();
-  for (const l of all) counts.set(l.provider, (counts.get(l.provider) ?? 0) + 1);
+  for (const l of all) counts.set(group(l), (counts.get(group(l)) ?? 0) + 1);
   const seen = new Map<string, number>();
   for (const l of all) {
-    if ((counts.get(l.provider) ?? 0) < 2) {
+    if ((counts.get(group(l)) ?? 0) < 2) {
       delete l.account;
       continue;
     }
-    const n = (seen.get(l.provider) ?? 0) + 1;
-    seen.set(l.provider, n);
+    const n = (seen.get(group(l)) ?? 0) + 1;
+    seen.set(group(l), n);
     l.account = l.account && !/^\d+$/.test(l.account) ? l.account : String(n);
   }
   return { providers: all, checkedAt: Date.now(), machines };

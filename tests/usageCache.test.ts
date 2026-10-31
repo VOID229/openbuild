@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PENDING_FRESH_MS, REMOTE_FRESH_MS, RETRY_MS, shouldRefresh } from "../server/usage/cache";
+import { MAX_RETRY_MS, PENDING_FRESH_MS, REMOTE_FRESH_MS, RETRY_MS, retryDelay, shouldRefresh } from "../server/usage/cache";
 
 describe("usage snapshot caching", () => {
   const at = 1_000_000;
@@ -28,11 +28,18 @@ describe("usage snapshot caching", () => {
     }
   });
 
-  test("failed machines stay stopped until explicit refresh, even with incomplete cached data", () => {
-    const failed = { ...cached, error: "it's unreachable" };
-    expect(shouldRefresh(failed, true, false, at + 86_400_000)).toBe(false);
-    expect(shouldRefresh(failed, false, false, at + 86_400_000)).toBe(false);
-    expect(shouldRefresh(failed, true, true, at)).toBe(true);
+  test("a failed first read is retried once its back-off passes, not left failed", () => {
+    const failed = { at: 0, error: "it didn't answer in time", retryAt: at + RETRY_MS };
+    expect(shouldRefresh(failed, false, false, at)).toBe(false);
+    expect(shouldRefresh(failed, false, false, at + RETRY_MS)).toBe(true);
+    expect(shouldRefresh(failed, false, true, at)).toBe(true);
+  });
+
+  test("repeated failures back off further, up to a cap", () => {
+    expect(retryDelay(1)).toBe(RETRY_MS);
+    expect(retryDelay(2)).toBe(RETRY_MS * 2);
+    expect(retryDelay(3)).toBe(RETRY_MS * 4);
+    expect(retryDelay(50)).toBe(MAX_RETRY_MS);
   });
 
   test("explicit refresh skips freshness and retry cooldowns", () => {

@@ -97,7 +97,7 @@ export function useUsageReport(range: UsageRange, machine: UsageScope) {
   useEffect(() => void loadReport(range, machine), [range, machine]);
   const slot = useSlot<UsageReport>(reportKey(range, machine));
   // Keep visible numbers live without activity notices. Incomplete history gets faster polls;
-  // hidden tabs do no polling, and failed machines remain stopped until explicit refresh.
+  // hidden tabs do no polling, and the server retries failed machines on its own back-off.
   const pending = !!slot.data?.pending?.length || !!slot.data?.machines?.some((m) => m.status === "pending");
   useEffect(() => {
     const refresh = () => {

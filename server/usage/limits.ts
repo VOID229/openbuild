@@ -4,8 +4,10 @@
 import { preferLimits } from "./limitSelection";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { detectAccounts } from "../claude/accounts";
 import { agentDir } from "../pi/install";
 import { dataDir } from "../paths";
 import { RedemptionLedger, type RedemptionContext } from "./redemptionLedger";
@@ -111,12 +113,36 @@ const CLAUDE_WINDOWS: [key: string, label: string, mins: number][] = [
   ["seven_day_sonnet", "Weekly · Sonnet", 10080],
 ];
 
-/** Claude Code config dirs: the default, CLAUDE_CONFIG_DIR, and siblings like ~/.claude-2 (one per account). */
+/** Claude Code config dirs: the default, CLAUDE_CONFIG_DIR, siblings like ~/.claude-2 and the dirs `claude2` wrappers point at (one per account). */
 export async function claudeDirs(): Promise<string[]> {
   const dirs = [join(home(), ".claude")];
   if (process.env.CLAUDE_CONFIG_DIR) dirs.push(tilde(process.env.CLAUDE_CONFIG_DIR));
   dirs.push(...(await siblings(/^\.claude[-_.].+/)));
+  dirs.push(...detectAccounts(home()).map((a) => a.configDir!).filter(Boolean));
   return [...new Set(dirs)];
+}
+
+/** Claude Code's sign-in for a config dir: `.credentials.json`, or on a Mac the Keychain entry it keeps instead. */
+async function claudeCreds(dir: string): Promise<any> {
+  try {
+    return (await readJson(join(dir, ".credentials.json"))).claudeAiOauth;
+  } catch (err) {
+    if (process.platform !== "darwin" || !(err instanceof Missing)) throw err;
+  }
+  // Claude Code names the entry by a hash of CLAUDE_CONFIG_DIR; the default dir (no variable) has none.
+  const hash = (p: string) => `-${createHash("sha256").update(p.normalize("NFC")).digest("hex").slice(0, 8)}`;
+  const suffixes = dir === join(home(), ".claude") ? ["", hash(dir)] : [hash(dir), hash(`${dir}/`)];
+  for (const suffix of suffixes) {
+    const p = Bun.spawn(["security", "find-generic-password", "-s", `Claude Code-credentials${suffix}`, "-w"], { stdout: "pipe", stderr: "ignore" });
+    let text = (await new Response(p.stdout).text()).trim();
+    if ((await p.exited) !== 0 || !text) continue;
+    // `security` prints a secret holding non-ASCII bytes as hex.
+    if (/^[0-9a-f]+$/i.test(text) && text.length % 2 === 0) text = Buffer.from(text, "hex").toString("utf8");
+    try {
+      return JSON.parse(text).claudeAiOauth;
+    } catch {}
+  }
+  throw new Missing();
 }
 
 /** Dot-directories in the home folder matching `re` (other accounts' config dirs). */
@@ -140,7 +166,7 @@ async function claudeAccounts(): Promise<Account[]> {
   for (const dir of await claudeDirs()) {
     let creds: any;
     try {
-      creds = (await readJson(join(dir, ".credentials.json"))).claudeAiOauth;
+      creds = await claudeCreds(dir);
     } catch {
       continue;
     }
@@ -205,7 +231,7 @@ const CLAUDE_CLAIM_OUTCOMES: Record<string, UsageResetOutcome> = {
 
 /** Spend one Claude reset, exactly as Claude Code's own usage UI does. */
 async function claudeReset(dir: string, context: RedemptionContext): Promise<UsageResetOutcome> {
-  const creds = await readJson(join(dir, ".credentials.json")).then((j) => j?.claudeAiOauth, () => undefined);
+  const creds = await claudeCreds(dir).catch(() => undefined);
   const token = typeof creds?.accessToken === "string" ? creds.accessToken.trim() : "";
   const organization = await claudeOrganization(dir);
   if (!token || !organization) throw new ResetFailure("Sign in to Claude Code again to redeem resets.");
