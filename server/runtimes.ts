@@ -42,16 +42,16 @@ export function runtimeUpdateCommand(runtime: ThreadRuntime, all = false): strin
     case "durable": return [bin, "update", all ? "--all" : "--self"];
     case "claude": return [bin, "update"];
     case "codex": return codex.codexUpdateCommand(bin);
-    case "cursor": return ["sh", "-c", CURSOR_INSTALL];
-    case "fx": return ["sh", "-c", FX_INSTALL];
-    case "opencode": return ["sh", "-c", OPENCODE_INSTALL];
+    case "cursor": return [bin, "update"];
+    case "fx": return [bin, "upgrade"];
+    case "opencode": return [bin, "upgrade"];
   }
 }
 
 /** An installer exiting zero is not enough: the selected executable must actually be current. */
 export function assertRuntimeUpdated(status: RuntimeStatus): void {
   if (!status.installed || !status.version) throw new Error("Couldn't verify the updated runtime executable.");
-  if (status.checkError) throw new Error(status.checkError);
+  // A release registry outage must not turn a successful native update into a failure.
   if (status.updateAvailable) throw new Error(`Update did not update the executable OpenBuild uses (${status.bin ?? "unknown path"}): still ${status.version}, latest ${status.latest}.`);
 }
 

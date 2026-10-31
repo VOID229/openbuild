@@ -229,11 +229,7 @@ svg {
 }
 
 .notice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   max-width: 100%;
-  padding: 4px 4px 4px 14px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -241,7 +237,27 @@ svg {
   font-size: 13.5px;
   color: var(--text-2);
   pointer-events: auto;
-  animation: rise 200ms var(--ease) both;
+  animation: notice-in 200ms var(--ease) both;
+}
+
+.notice-leaving {
+  pointer-events: none;
+  animation: notice-out 180ms var(--ease) both;
+}
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(-10px) scale(0.98); }
+}
+
+@keyframes notice-out {
+  to { opacity: 0; transform: translateY(-10px) scale(0.98); }
+}
+
+.notice-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 14px;
 }
 
 .notice .icon-btn {
@@ -255,6 +271,44 @@ svg {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Opens inside the notice, as wide as its top row whatever the text's length. */
+.notice-details {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 0;
+  min-width: 100%;
+  visibility: hidden;
+  transition: grid-template-rows 200ms var(--ease), visibility 200ms;
+}
+
+.notice-details[data-open] {
+  grid-template-rows: 1fr;
+  visibility: visible;
+}
+
+.notice-details > div {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notice-details p {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 14px 10px;
+  overflow: auto;
+  border-top: 1px solid var(--border);
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice,
+  .notice-leaving { animation: none; }
+  .notice-details { transition: none; }
 }
 
 /* ==========================================================================
@@ -3315,6 +3369,15 @@ svg {
   gap: 24px;
   padding: 16px 0;
   border-bottom: 1px solid var(--border);
+}
+
+/* A setting whose control is a list under its label (Notifications → Notify for). */
+.setting-group {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.setting-group .pi-list {
+  margin-top: 12px;
 }
 
 .setting-row-top {

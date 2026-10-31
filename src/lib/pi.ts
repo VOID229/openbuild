@@ -43,8 +43,8 @@ export const updateRuntime = (runtime: ThreadRuntime, deviceId?: DeviceId) =>
   send<{ job: string }>(apiUrl(deviceId, "/api/runtimes/update"), "POST", { runtime });
 
 /** Follow the current maintenance job's output; resolves with its exit code. */
-export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void, deviceId?: DeviceId): Promise<{ code?: number; title?: string } | undefined> {
-  const res = await fetch(apiUrl(deviceId, "/api/pi/job"), { signal });
+export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void, deviceId?: DeviceId, jobId?: string): Promise<{ code?: number; title?: string } | undefined> {
+  const res = await fetch(apiUrl(deviceId, "/api/pi/job" + (jobId ? `?id=${encodeURIComponent(jobId)}` : "")), { signal });
   if (!res.ok || !res.body || res.status === 204) return undefined;
   // Only a real job stream counts as running: an empty answer must not flash a progress panel.
   onStart?.();

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
 import { deviceName } from "../lib/devices";
 import { updateRuntime } from "../lib/pi";
-import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../lib/runtimeStatus";
+import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
 import { RUNTIMES, runtimeEnabled, setRuntimeEnabled } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
@@ -27,18 +27,18 @@ function StatusBadges({ status, name, updating, updateDisabled, onUpdate }: {
   return (
     <>
       {status.version && <span className="badge">v{status.version}</span>}
-      {status.updateAvailable ? (
+      {status.installed ? (
         <button
           type="button"
-          className="badge badge-accent rt-update"
+          className={status.updateAvailable ? "badge badge-accent rt-update" : "badge rt-update"}
           disabled={updateDisabled}
           data-updating={updating || undefined}
           aria-label={updating ? `Updating ${name}` : `Update ${name}`}
-          aria-description={`${status.latest} available`}
+          aria-description={status.updateAvailable ? `${status.latest} available` : "Run the native updater"}
           aria-busy={updating}
           onClick={onUpdate}
         >
-          <span className="rt-update-version" aria-hidden="true">{status.latest} available</span>
+          <span className="rt-update-version" aria-hidden="true">{status.updateAvailable ? `${status.latest} available` : status.latest ? "up to date" : "Check for update"}</span>
           <span className="rt-update-action" aria-hidden="true">
             {updating && <Spinner size={10} />}
             {updating ? "Updating…" : "Update"}
@@ -151,13 +151,15 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
     void load();
   }, [key, load]);
 
+  useEffect(() => subscribeRuntimeStatuses((next, device) => { if (device === deviceId) setStatuses(next); }), [deviceId]);
+
   const job = useJob(() => { void load(true); }, deviceId);
   const startUpdate = async (runtime: ThreadRuntime) => {
     setUpdating(runtime);
     setError(undefined);
     try {
-      await updateRuntime(runtime, deviceId);
-      await job.follow();
+      const { job: id } = await updateRuntime(runtime, deviceId);
+      await job.follow(id);
     } catch (err) {
       setError(deviceRefusal(err as Error, where));
     } finally {

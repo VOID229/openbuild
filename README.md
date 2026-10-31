@@ -2,9 +2,9 @@
 
 OpenBuild is the bigger brother of [OpenChat](https://openchat.shade-io.com)
 
-it's meant to be self hosted on localhost, LAN or Tailscale and used freely with your preferences.
+It's meant to be self hosted on localhost, LAN or Tailscale and used freely with your preferences.
 
-nothing costs money, nothing gets your data, it's yours.
+Nothing costs money, nothing gets your data, it's yours.
 
 ```sh
 ## basic
@@ -16,7 +16,7 @@ ob stop --all # stop the openbuild server and all agents
 
 OpenBuild supports remote devices, you don't need to have multiple instances of its website running on each machine and opened in different browser tabs.
 
-it runs a headless OpenBuild server on the remote machine and connects to it over LAN or Tailscale
+It runs a headless OpenBuild server on the remote machine and connects to it over LAN or Tailscale
 
 ```sh
 ## pairing
@@ -24,7 +24,7 @@ ob pair --host # pair this machine for a client to use remotely
 ob pair --client # pair a remote host to use in the openbuild server
 ```
 
-It will ask for device name, LAN or Tailscale then show a code.
+It will ask for device name, LAN or Tailscale, then show a code.
 Put that code in the client pair after choosing the same connection type.
 
 OpenBuild works with your existing coding agents like [Pi](https://pi.dev), [Codex](https://developers.openai.com/codex), [Claude Code](https://code.claude.com), [Cursor](https://cursor.com), [OpenCode](https://opencode.ai), and [Fx](https://fx.sh) with your paid Subs or connected API keys.
@@ -55,7 +55,7 @@ bun link
 
 ## Security
 
-being extra careful is always worth it, set a password to protect your machines
+Being extra careful is always worth it, set a password to protect your machines
 
 ```sh
 ob password # must be 4 or more characters

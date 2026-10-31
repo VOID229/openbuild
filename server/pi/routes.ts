@@ -145,9 +145,19 @@ export function piRoutes(api: Api) {
         return updateRuntime("pi", !!body?.all);
       }),
     },
+    "/api/releases/update": {
+      POST: api(() => {
+        const running = currentJob();
+        if (running && !running.done) return Response.json({ error: "A maintenance job is already running" }, { status: 409 });
+        const job = startJob("Updating OpenBuild", [process.execPath, new URL("../../bin/openbuild.ts", import.meta.url).pathname, "update"]);
+        return Response.json({ job: job.id });
+      }),
+    },
     "/api/pi/job": {
-      GET: api(() => {
+      GET: api((req) => {
         const job = currentJob();
+        const expected = new URL(req.url).searchParams.get("id");
+        if (expected && job?.id !== expected) return Response.json({ error: "This maintenance job is no longer available. Check runtime status before retrying." }, { status: 409 });
         return job ? new Response(jobStream(job), { headers: ndjson }) : new Response(null, { status: 204 });
       }),
     },

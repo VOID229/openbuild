@@ -14,10 +14,10 @@ export const RUNTIMES: { runtime: ThreadRuntime; label: string; desc: string }[]
 ];
 
 /**
- * The runtimes OpenBuild can tell are out of date (server/runtimes.ts asks each one's registry).
- * Durable runs Pi's own package, so it shares Pi's release and isn't listed twice.
+ * The runtimes whose releases Settings → Notifications can announce (server/runtimes.ts reports
+ * which have an update). Durable runs Pi's own package, so it shares Pi's release and isn't listed twice.
  */
-export const UPDATABLE_RUNTIMES: ThreadRuntime[] = ["pi", "claude", "codex"];
+export const UPDATABLE_RUNTIMES: ThreadRuntime[] = RUNTIMES.map((r) => r.runtime).filter((r) => r !== "durable");
 
 /** How a runtime is named in prose (Pi isn't "Default" there). */
 export const runtimeName = (runtime: ThreadRuntime): string =>

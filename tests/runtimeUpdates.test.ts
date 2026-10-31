@@ -64,14 +64,14 @@ test("runtime maintenance commands, HTTP validation, jobs and status caching (is
       a.deepEqual(runtimeUpdateCommand('pi', true), [bin, 'update', '--all']);
       a.deepEqual(runtimeUpdateCommand('claude'), [bin, 'update']);
       a.deepEqual(runtimeUpdateCommand('codex'), [bin, 'update']);
-      // npm installs update their own prefix, even if another npm global wins on PATH.
+      // All installations delegate to the selected CLI itself.
       const npmPrefix = dir + '/custom-node';
       const launcher = npmPrefix + '/lib/node_modules/@openai/codex/bin/codex.js';
       mkdirSync(npmPrefix + '/lib/node_modules/@openai/codex/bin', { recursive: true });
       writeFileSync(launcher, '');
       const npmBin = dir + '/npm-codex';
       symlinkSync(launcher, npmBin);
-      a.deepEqual(codexUpdateCommand(npmBin), ['npm', 'install', '-g', '--prefix', npmPrefix, '@openai/codex@latest']);
+      a.deepEqual(codexUpdateCommand(npmBin), [npmBin, 'update']);
       const standalone = dir + '/standalone/releases/1.0.0/bin/codex';
       mkdirSync(dir + '/standalone/releases/1.0.0/bin', { recursive: true });
       writeFileSync(standalone, '');
@@ -82,9 +82,7 @@ test("runtime maintenance commands, HTTP validation, jobs and status caching (is
       assertRuntimeUpdated({ installed: true, version: '2.0.0', latest: '2.0.0', updateAvailable: false, install: '' });
       for (const runtime of ['fx', 'cursor', 'opencode']) {
         const command = runtimeUpdateCommand(runtime);
-        a.equal(command[0], 'sh');
-        a.equal(command[1], '-c');
-        a.ok(command[2].length > 10);
+        a.deepEqual(command, [bin, runtime === 'cursor' ? 'update' : 'upgrade']);
       }
       a.throws(() => runtimeUpdateCommand('durable'), /installed locally/);
       // Don't actually run any installer; only the fake Claude command is executed.

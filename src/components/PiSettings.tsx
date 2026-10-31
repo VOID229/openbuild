@@ -127,7 +127,7 @@ export function useJob(onDone: () => void, deviceId?: string) {
   // One stream at a time: picking another device drops the previous device's log instead of
   // appending to it.
   const live = useRef<AbortController>(undefined);
-  const follow = useCallback(async () => {
+  const follow = useCallback(async (jobId?: string) => {
     live.current?.abort();
     const ctrl = (live.current = new AbortController());
     setLines([]);
@@ -138,6 +138,7 @@ export function useJob(onDone: () => void, deviceId?: string) {
         ctrl.signal,
         () => setRunning(true),
         deviceId,
+        jobId,
       );
       if (!ctrl.signal.aborted) setResult(r);
     } catch {
@@ -159,7 +160,7 @@ export function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
   // A finished, successful job folds its output away; running or failed jobs keep it open.
   const [shown, setShown] = useState(false);
   useEffect(() => setShown(false), [job.running]);
-  const open = job.lines.length > 0 && (!ok || shown);
+  const open = job.lines.length > 0 && (job.running || shown);
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight });
   }, [job.lines.length, open]);
@@ -169,7 +170,7 @@ export function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
       <div className="pi-job-head">
         {job.running ? <Spinner size={12} /> : ok ? <Check size={14} className="ok" /> : <CircleAlert size={14} className="bad" />}
         <span>{job.running ? "Working…" : ok ? `${job.result?.title ?? "Done"}: done` : `${job.result?.title ?? "It"} failed (exit code ${job.result?.code ?? "?"})`}</span>
-        {ok && job.lines.length > 0 && (
+        {!job.running && job.lines.length > 0 && (
           <button type="button" className="link-btn pi-job-toggle" onClick={() => setShown((v) => !v)}>
             {shown ? "Hide log" : "Show log"}
           </button>

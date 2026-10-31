@@ -17,6 +17,7 @@ import { ShortcutsSection } from "./ShortcutSettings";
 import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
 import { PluginsSection } from "./PluginSettings";
 import { RuntimesSection } from "./RuntimeSettings";
+import { RuntimeIcon } from "./Workspace";
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
 const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
@@ -146,28 +147,28 @@ function NotificationsSection() {
         <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Runtime Updates" />
       </div>
       {n.runtimeUpdates && (
-        <div className="setting-row setting-row-stack">
+        <div className="setting-group">
           <div className="setting-text">
             <div className="setting-label">Notify for</div>
             <p className="setting-desc">Which runtime releases to announce. Only runtimes installed here can have an update.</p>
           </div>
-          <div className="chips" role="group" aria-label="Runtimes to announce updates for">
+          <ul className="pi-list" aria-label="Runtimes to announce updates for">
             {UPDATABLE_RUNTIMES.map((runtime) => {
               const on = chosen.includes(runtime);
+              const name = runtimeName(runtime);
               return (
-                <button
-                  key={runtime}
-                  type="button"
-                  className={cx("chip", "chip-tag", on && "chip-on")}
-                  aria-pressed={on}
-                  title={`${on ? "Announce" : "Don't announce"} ${runtimeName(runtime)} updates`}
-                  onClick={() => toggleRuntime(runtime, !on)}
-                >
-                  {runtimeName(runtime)}
-                </button>
+                <li key={runtime} className={cx("pi-row", !on && "pi-row-off")}>
+                  <span className="rt-icon" aria-hidden>
+                    <RuntimeIcon runtime={runtime} size={16} />
+                  </span>
+                  <span className="pi-row-text">
+                    <span className="pi-row-name">{name}</span>
+                  </span>
+                  <Toggle checked={on} label={`Announce ${name} updates`} onChange={(next) => toggleRuntime(runtime, next)} />
+                </li>
               );
             })}
-          </div>
+          </ul>
         </div>
       )}
     </>

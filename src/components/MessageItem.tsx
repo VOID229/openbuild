@@ -269,17 +269,23 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
   // Done, and it ran tools or thought: fold all of that (and what it wrote along the way) behind
   // "Worked for Xs", leaving the answer out in the open. Only once it's over: while Pi works, what
   // it writes stays where it is, and the answer keeps its key so it isn't redrawn when the rest folds.
-  const last = blocks.at(-1);
+  // The answer is the last text, even when notices (e.g. "Fast mode wasn't used") land after it.
+  let finalAt = blocks.length - 1;
+  while (finalAt >= 0 && !Array.isArray(blocks[finalAt]) && (blocks[finalAt] as Part).type === "notice") finalAt--;
+  const last = blocks[finalAt];
   const final = last && !Array.isArray(last) && last.type === "text" ? last : undefined;
   // Pages stay out too, between the fold and the answer, in the order they were shown.
-  if (message.status === "done" && blocks.some((b) => Array.isArray(b) || b.type === "notice")) {
-    const work = (final ? blocks.slice(0, -1) : blocks).map((b, i) => [b, i] as const);
+  const indexed = blocks.map((b, i) => [b, i] as const);
+  const work = final ? indexed.slice(0, finalAt) : indexed;
+  const after = final ? indexed.slice(finalAt + 1) : [];
+  if (message.status === "done" && work.some(([b]) => Array.isArray(b) || b.type === "notice")) {
     return (
       <>
         {[
           <Worked key="worked" message={message} folding={watched.current}>{work.filter(([b]) => !isShownPage(b)).map(([b, i]) => render(b, i))}</Worked>,
           ...work.filter(([b]) => isShownPage(b)).map(([b, i]) => render(b, i)),
-          final && render(final, blocks.length - 1),
+          final && render(final, finalAt),
+          ...after.map(([b, i]) => render(b, i)),
         ]}
       </>
     );
