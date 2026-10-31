@@ -95,7 +95,7 @@ function ProfileSection() {
       <Field label="Name" htmlFor="profile-name">
         <input id="profile-name" className="input" value={profile.name} autoComplete="name" onChange={(e) => updateProfile({ name: e.target.value })} />
       </Field>
-      <Field label="Bio" htmlFor="profile-bio">
+      <Field label="Instructions" htmlFor="profile-bio">
         <textarea
           id="profile-bio"
           className="input textarea"

@@ -236,8 +236,8 @@ Render as a markdown-style H1: leading `#`, then title, with a **prominent under
 2. **Name field**
    - Label (markdown look): `#Name` with light underline under the label.
    - Value input example shown: `Shade`
-3. **Bio field**
-   - Label: `#Bio` with underline.
+3. **Instructions field**
+   - Label: `#Instructions` with underline.
    - Multiline textarea. Example UI content as drawn:
      ```
      I'm a developer, learning design and
@@ -251,7 +251,7 @@ Render as a markdown-style H1: leading `#`, then title, with a **prominent under
    - Label: `#language` with underline (diagram uses lowercase `language`).
    - Value example: `English, German`
 
-Field chrome: simple outlined rounded inputs (Name single-line; Bio taller multiline; Location & Language single-line).
+Field chrome: simple outlined rounded inputs (Name single-line; Instructions taller multiline; Location & Language single-line).
 
 ---
 
@@ -345,7 +345,7 @@ Thin separator under the Theme row. No other Appearance controls are drawn — *
 Several settings labels use a **rendered markdown look**:
 
 - Section titles: `# Profile`, `# General`, `# API Keys`, `# Appearance`
-- Field labels: `#Name`, `#Bio`, `#Location`, `#language`
+- Field labels: `#Name`, `#Instructions`, `#Location`, `#language`
 
 **Implement as:**
 
@@ -413,7 +413,7 @@ Notes that look like `# Profile` / `#Name` **inside the settings content panel**
 - [ ] `think harder` lightbulb button above composer when applicable
 - [ ] `think faster` **zap** button above composer while generation in progress (as drawn)
 - [ ] Settings modal with blur backdrop + left nav + content
-- [ ] Profile: avatar+pencil, `#Name`/`#Bio`/`#Location`/`#language` fields
+- [ ] Profile: avatar+pencil, `#Name`/`#Instructions`/`#Location`/`#language` fields
 - [ ] General: three toggles + auto-router copy + avoid/prioritize chips
 - [ ] API Keys: four Opencode rows, masked, `replace`
 - [ ] Appearance: Theme `light` | `dark` | `system` — **default `system`**
