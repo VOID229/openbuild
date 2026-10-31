@@ -18,18 +18,39 @@ import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
 import { OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
-/** Git state of a project (refetched when it changes or `refresh` ticks). */
+// The last git state read for each project, kept across reloads so the branch shows at once while
+// a fresh read (slow on a big repository or a paired device) catches up.
+const GIT_CACHE = "openbuild:project-git";
+const gitCache: Record<string, GitInfo> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(GIT_CACHE) ?? "{}");
+  } catch {
+    return {};
+  }
+})();
+function cacheGit(projectId: string, info: GitInfo) {
+  gitCache[projectId] = info;
+  try {
+    localStorage.setItem(GIT_CACHE, JSON.stringify(gitCache));
+  } catch {}
+}
+
+/** Git state of a project (refetched when it changes or `refresh` ticks; the last read shows meanwhile). */
 function useProjectGit(projectId: string | undefined, refresh: number) {
-  const [info, setInfo] = useState<GitInfo>();
+  const [info, setInfo] = useState<GitInfo | undefined>(() => (projectId ? gitCache[projectId] : undefined));
   const [loading, setLoading] = useState(false);
   useEffect(() => {
-    setInfo(undefined);
+    setInfo(projectId ? gitCache[projectId] : undefined);
     if (!projectId) return;
     let live = true;
-    setLoading(true);
+    // With a cached read there's nothing to wait for: refresh quietly.
+    setLoading(!gitCache[projectId]);
     const ref = splitProjectId(projectId);
     projectGit(ref.id, ref.deviceId)
-      .then((g) => live && setInfo(g))
+      .then((g) => {
+        cacheGit(projectId, g);
+        if (live) setInfo(g);
+      })
       .catch(() => {})
       .finally(() => live && setLoading(false));
     return () => {

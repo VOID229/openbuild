@@ -1,6 +1,6 @@
 // Settings → Devices: the devices this OpenBuild is paired with, where their servers stand, and
 // unpairing or restarting them. Also the devices that use this one, so their access can be revoked.
-import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink, UserRoundX } from "lucide-react";
+import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink, UserRoundCheck, UserRoundX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, PairedClient } from "../../shared/types";
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
@@ -101,7 +101,7 @@ function PairedDeviceRow({ device, onChanged }: { device: Device; onChanged: () 
           disabled={!!busy}
           onClick={toggleExternal}
         >
-          {busy === "external" ? <Spinner size={14} /> : <UserRoundX size={14} />}
+          {busy === "external" ? <Spinner size={14} /> : device.external ? <UserRoundCheck size={14} /> : <UserRoundX size={14} />}
         </IconButton>
         <IconButton label={`Unpair ${device.name}`} tooltip="Unpair" tooltipSide="top" className="key-icon-btn key-remove" disabled={!!busy} onClick={unpair}>
           {busy === "unpair" ? <Spinner size={14} /> : <Unlink size={14} />}

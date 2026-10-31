@@ -212,14 +212,15 @@ svg {
   display: none !important;
 }
 
-/* Notices at the top of the window (a newer OpenBuild build or Pi release); below modals */
+/* Notices at the top of the window (a newer OpenBuild build or Pi release); below popovers
+   (z 40), so an open picker or menu draws over them, and below modals */
 
 .notices {
   position: fixed;
   top: max(12px, env(safe-area-inset-top));
   left: 0;
   right: 0;
-  z-index: 90;
+  z-index: 35;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1519,11 +1520,29 @@ svg {
 }
 
 .home-center {
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: var(--content-w);
-  padding-top: max(80px, 24vh);
   padding-bottom: 48px;
   animation: rise 360ms var(--ease) backwards;
+  --home-top: max(80px, 24vh);
+}
+
+/* The gap above the heading gives way as a long draft grows the composer, so the box stays whole on
+   screen instead of the page scrolling under it. Only the gap shrinks; the content keeps its size. */
+.home-center::before {
+  content: "";
+  flex: 0 1 var(--home-top);
+  min-height: 24px;
+}
+
+.home-center > * {
+  flex-shrink: 0;
+}
+
+.home-center > .btn {
+  align-self: flex-start;
 }
 
 .home-title {
@@ -4295,7 +4314,7 @@ p.key-status svg {
   }
 
   .home-center {
-    padding-top: calc(18vh + env(safe-area-inset-top));
+    --home-top: calc(18vh + env(safe-area-inset-top));
     padding-bottom: max(32px, env(safe-area-inset-bottom));
   }
 

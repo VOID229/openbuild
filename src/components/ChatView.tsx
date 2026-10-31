@@ -86,7 +86,26 @@ function resolveAnchor(a: Anchor, root: HTMLElement): Element | undefined {
  *  the message at the top of the view and how far down it they were. A message rather than a scroll
  *  offset, so whatever was opened above it closing on the way back can't move them. */
 type Place = { stick: true } | { stick: false; message: string; offset: number };
-const places = new Map<string, Place>();
+// Kept for the tab's session, so reloading the page puts the reader back where they were too.
+const PLACES_KEY = "openbuild:thread-places";
+const places = new Map<string, Place>(
+  (() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(PLACES_KEY) ?? "[]") as [string, Place][];
+    } catch {
+      return [];
+    }
+  })(),
+);
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    try {
+      sessionStorage.setItem(PLACES_KEY, JSON.stringify([...places]));
+    } catch {
+      // Storage blocked or full: places just don't outlive the page.
+    }
+  });
+}
 
 export function ChatView({ chat }: { chat: Chat }) {
   const autoScroll = useStore((s) => s.settings.autoScroll);
