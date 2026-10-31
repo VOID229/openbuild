@@ -70,7 +70,7 @@ export async function installRelease(root = ROOT, progress?: (step: "download" |
   if (git(["status", "--porcelain"], root)) throw new Error("Your checkout has local changes. Commit or stash them before updating.");
   const status = await checkRelease(true, root);
   if (!status.latest) throw new Error(`No published ${status.track} releases yet.`);
-  if (!status.available) return status;
+  if (!status.available) return { ...status, installed: false };
   progress?.("download", status.latest);
   // Preserve the old installation’s plugin copies even when updating before the next startup.
   prepareUserPlugins(join(root, "plugins"), join(dataDir(), "plugins"));
@@ -95,5 +95,5 @@ export async function installRelease(root = ROOT, progress?: (step: "download" |
     throw error;
   }
   cache = undefined;
-  return { ...status, current: status.latest, available: false };
+  return { ...status, current: status.latest, available: false, installed: true };
 }

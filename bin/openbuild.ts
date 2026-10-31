@@ -406,9 +406,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
   stage.print(`OpenBuild is running ${mode === "local" ? "on this computer" : mode === "lan" ? "on your network" : "on your tailnet"}:`);
   for (const u of urls) stage.print(`  ${bold(u)}`);
   for (const n of notes) stage.print(dim(`  ${n}`));
-  stage.print(dim("  Access requires your local server password. Unlocked browsers can run Pi as you."));
   if (mode === "lan") stage.print(dim("  Plain HTTP does not encrypt passwords or sessions. Prefer Tailscale HTTPS."));
-  stage.print(dim(`  Logs: openbuild logs · stop: openbuild stop`));
   if (owned) stage.end();
 }
 
@@ -444,7 +442,7 @@ async function stop(quiet = false, keepWorker = true) {
   if (!serverAlive && !keeper) {
     rmSync(STATE, { force: true });
     if (!keepWorker) stopWorkers();
-    if (!quiet) console.log(keepWorker ? "OpenBuild server isn't running; detached workers left unchanged." : "OpenBuild server isn't running; agent and Durable workers sent shutdown signals.");
+    if (!quiet) console.log(keepWorker ? "OpenBuild isn't running." : "OpenBuild isn't running, agents were shut down.");
     return;
   }
   const owned = !quiet && stage.open({ scene: "lifecycle", steps: [STOP_STEP] });
@@ -461,7 +459,7 @@ async function stop(quiet = false, keepWorker = true) {
   rmSync(STATE, { force: true });
   if (!keepWorker) stopWorkers();
   if (owned) stage.end();
-  if (!quiet) console.log(keepWorker ? "OpenBuild stopped; agent and Durable workers left running." : "OpenBuild stopped; agent and Durable workers sent shutdown signals.");
+  if (!quiet) console.log(keepWorker ? "OpenBuild stopped." : "OpenBuild stopped, agents were shut down.");
 }
 
 /** Is something OpenBuild-shaped answering on the port? A server started outside `openbuild start` (systemd, `bun dev`) writes no state file. */
@@ -937,8 +935,7 @@ if (service) {
       if (stopAll) stopWorkers();
     }
     stage.end();
-    console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"} (${UNIT}, systemd user service).`);
-    if (cmd === "stop") console.log(stopAll ? "agent and Durable workers sent shutdown signals." : "agent and Durable workers left running.");
+    console.log(`OpenBuild ${cmd === "stop" ? "stopped" : cmd === "restart" ? "restarted" : "started"}${cmd === "stop" && stopAll ? ", agents were shut down" : ""}.`);
   }
 } else switch (cmd) {
   case "uninstall":
@@ -968,7 +965,9 @@ if (service) {
       // Nothing to install: leave only the check that ran.
       if (!changed) stage.update({ steps: [{ label: CHECKING }], current: 0 });
       stage.end();
-      console.log(`OpenBuild ${result.current} (${result.track}). Run ob restart to use it; running agents are preserved.`);
+      console.log(result.installed
+        ? `Updated to OpenBuild ${result.current} (${result.track}). Run ob restart to use it.`
+        : `OpenBuild ${result.current} (${result.track}) is up to date.`);
     } catch (error) { fail((error as Error).message); }
     break;
   }
