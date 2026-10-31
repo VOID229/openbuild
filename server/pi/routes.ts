@@ -282,7 +282,8 @@ export function piRoutes(api: Api) {
     "/api/codex/models": {
       GET: api(async (req) => {
         try {
-          return Response.json(await codexInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+          const url = new URL(req.url), accounts = url.searchParams.get("accounts");
+          return Response.json(await codexInstall.listAccountModels(url.searchParams.has("fresh"), accounts ? JSON.parse(accounts) : undefined));
         } catch (err) {
           return fail(err, 502);
         }

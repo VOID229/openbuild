@@ -149,7 +149,7 @@ export function deviceDetection(
 ): Partial<Record<PlanId, Detection>> {
   // fx threads use the models fx lists on that device, and only those.
   if (runtime === "fx") return { fx: s.fxModels?.[deviceId ?? ""] ?? PENDING_FX };
-  if (runtime === "codex") return { codex: s.codexModels?.[deviceId ?? ""] ?? PENDING_CODEX };
+  if (runtime === "codex") return { codex: codexDetection(s.codexModels?.[deviceId ?? ""] ?? PENDING_CODEX) };
   if (runtime === "cursor") return { cursor: s.cursorModels?.[deviceId ?? ""] ?? PENDING_CURSOR };
   if (runtime === "claude") return { claude: claudeDetection(s.claudeModels?.[deviceId ?? ""] ?? PENDING_CLAUDE) };
   if (runtime === "opencode") return { opencode: s.opencodeModels?.[deviceId ?? ""] ?? PENDING_OPENCODE };
@@ -176,6 +176,25 @@ export function claudeDetection(d: ClaudeList, chat?: Pick<Chat, "messages" | "r
   return views.get(account)!;
 }
 
+/** Codex accounts use the same provider view and session isolation as Claude. */
+export function codexDetection(d: ClaudeList, chat?: Pick<Chat, "messages" | "runtimeAccount">): ClaudeList {
+  if (!d.accounts?.length) return d;
+  const saved = chat?.runtimeAccount;
+  const matched = saved && d.accounts.find((a) => a.account.id === saved.id || (a.account.configDir === saved.configDir && a.account.shadowHome === saved.shadowHome));
+  const account = chat?.messages.length ? matched?.account.id ?? saved?.id ?? "codex" : "";
+  const views = claudeViews.get(d) ?? new Map<string, ClaudeList>();
+  claudeViews.set(d, views);
+  if (!views.has(account)) {
+    const models = [...d.models, ...d.accounts.flatMap((a) => a.models)];
+    views.set(account, { ...d, models: account ? models.filter((m) => m.provider === account) : models });
+  }
+  return views.get(account)!;
+}
+export function codexModelAccount(s: Pick<State, "codexModels">, deviceId: string | undefined, modelId: string): RuntimeAccount | undefined {
+  const account = s.codexModels[deviceId ?? ""]?.accounts?.find((a) => modelId.startsWith(`${a.account.id}/`))?.account;
+  return account && { ...account, deviceId };
+}
+
 /** The detected account a Claude model belongs to; the default account has none. */
 export function claudeModelAccount(s: Pick<State, "claudeModels">, deviceId: string | undefined, modelId: string): RuntimeAccount | undefined {
   const account = s.claudeModels[deviceId ?? ""]?.accounts?.find((a) => modelId.startsWith(`${a.account.id}/`))?.account;
@@ -185,7 +204,7 @@ export function claudeModelAccount(s: Pick<State, "claudeModels">, deviceId: str
 /** This server's models for a plan, which for a runtime other than Pi is its own list. */
 export function planDetection(s: Pick<State, "detection" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">, plan: PlanId): Detection | undefined {
   if (plan === "fx") return s.fxModels[""];
-  if (plan === "codex") return s.codexModels[""];
+  if (plan === "codex") return s.codexModels[""] && codexDetection(s.codexModels[""]!);
   if (plan === "cursor") return s.cursorModels[""];
   if (plan === "claude") return s.claudeModels[""];
   if (plan === "opencode") return s.opencodeModels[""];
@@ -252,7 +271,7 @@ interface State {
   /** The models fx lists, by device id ("" = this server). Persisted like `remoteModels`. */
   fxModels: Record<string, Detection & { defaultModel?: string }>;
   loadFxModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
-  codexModels: Record<string, Detection & { defaultModel?: string }>;
+  codexModels: Record<string, ClaudeList>;
   loadCodexModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   cursorModels: Record<string, Detection & { defaultModel?: string }>;
   loadCursorModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
@@ -404,14 +423,14 @@ export const useStore = create<State>()(
         const key = deviceId ?? "";
         const prev = get().codexModels[key];
         if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
-        set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, accounts: prev?.accounts, checkedAt: Date.now() } } }));
         try {
           // Model discovery must not wait for installation/auth status checks.
-          const r = await codexModels(fresh, deviceId);
+          const r = await codexModels(fresh, deviceId, (get().settings.runtimeAccounts ?? []).filter((a) => a.runtime === "codex" && (a.deviceId ?? "") === key));
           if (!Array.isArray(r?.models)) throw new Error("Codex didn't list any models");
-          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "valid", models: r.models, defaultModel: r.defaultModel, accounts: keepAccounts(prev?.accounts, r.accounts), checkedAt: r.checkedAt ?? Date.now() } } }));
         } catch (err) {
-          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "error", error: (err as Error).message, models: s.codexModels[key]?.models ?? [], checkedAt: Date.now() } } }));
+          set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "error", error: (err as Error).message, models: s.codexModels[key]?.models ?? [], accounts: prev?.accounts, checkedAt: Date.now() } } }));
         }
       },
       fxModels: {},
@@ -969,7 +988,8 @@ function nativeSelectionFor(
   plan: "fx" | "codex" | "cursor" | "claude" | "opencode",
 ): Selection | undefined {
   const listed = (plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
-  const d = plan === "claude" && listed ? claudeDetection(listed, s.chats.find((c) => c.id === id)) : listed;
+  const chat = s.chats.find((c) => c.id === id);
+  const d = listed ? plan === "claude" ? claudeDetection(listed, chat) : plan === "codex" ? codexDetection(listed, chat) : listed : undefined;
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
   if (id) {
     const picked = s.selections[id];

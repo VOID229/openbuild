@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import type { PiChatRequest } from "../shared/types";
 import { CodexProcess } from "../server/codex/rpc";
 import { answer, hasAsk, release, runTurn, steer } from "../server/codex/sessions";
-import { forgetModels, listModels, listPermissions } from "../server/codex/install";
+import { forgetModels, listAccountModels, listModels, listPermissions } from "../server/codex/install";
 
 const directory = mkdtempSync(join(tmpdir(), "ob-codex-unit-"));
 const fake = join(directory, "codex");
@@ -15,7 +15,7 @@ import {appendFileSync,existsSync,readFileSync,writeFileSync} from 'node:fs';
 const out = m => process.stdout.write(JSON.stringify(m)+'\n');
 let thread, turn, waiting;
 for await (const line of console) {
- const m=JSON.parse(line); appendFileSync(process.env.CODEX_TEST_LOG,JSON.stringify(m)+'\n');
+ const m=JSON.parse(line); appendFileSync(process.env.CODEX_TEST_LOG,JSON.stringify({...m,codexHome:process.env.CODEX_HOME})+'\n');
  const reply=result=>out({id:m.id,result});
  const ev=(method,params={})=>out({method,params:{threadId:thread,turnId:turn,...params}});
  if (m.method==='initialize') reply({});
@@ -224,4 +224,20 @@ test("Codex auto-review sends the workspace profile with the auto reviewer, and 
  expect(turn('review plain').permissions).toBe(':workspace');
  expect(turn('review plain').approvalsReviewer).toBeUndefined();
  expect(resumes()).toBe(1);
+});
+
+
+test("Codex account catalogs keep provider identities and run with separate homes", async () => {
+ const result = await listAccountModels(true, [
+  { name: "codex2", configDir: join(directory, "account2") },
+  { name: "codex3", configDir: join(directory, "account3") },
+  { name: "broken", configDir: "relative" },
+ ]);
+ expect(result.models[0]?.id).toBe("codex/native-model");
+ expect(result.accounts.map((a) => a.models.map((m) => [m.id, m.provider]))).toEqual([
+  [["codex2/native-model", "codex2"]], [["codex3/native-model", "codex3"]],
+ ]);
+ const homes = messages().filter((m) => m.method === "model/list").map((m) => m.codexHome);
+ expect(homes).toContain(join(directory, "account2"));
+ expect(homes).toContain(join(directory, "account3"));
 });

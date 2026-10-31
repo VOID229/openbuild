@@ -11,7 +11,7 @@ import {
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
+import { codexDetection, claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
@@ -61,7 +61,7 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
   const loadNative = useStore((s) => runtime === "opencode" ? s.loadOpencodeModels : runtime === "claude" ? s.loadClaudeModels : runtime === "cursor" ? s.loadCursorModels : runtime === "codex" ? s.loadCodexModels : s.loadFxModels);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const detection = useMemo(
-    () => (native ? { [runtime]: (runtime === "claude" && list ? claudeDetection(list, chat) : list) ?? (runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
+    () => (native ? { [runtime]: (runtime === "claude" && list ? claudeDetection(list, chat) : runtime === "codex" && list ? codexDetection(list, chat) : list) ?? (runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
     [native, runtime, list, chat, deviceId, remote, local],
   );
   // Fetch when the list is missing or stale; a failed one is retried shortly while it's on screen.

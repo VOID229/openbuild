@@ -18,7 +18,7 @@ export function ThreadAccountSelect() {
   const device = useStore((s) => threadDevice(s));
   const accounts = (settings.runtimeAccounts ?? []).filter((a) => a.runtime === settings.threadRuntime && (a.deviceId ?? "") === (device ?? ""));
   // Claude's accounts are providers in the model picker.
-  if (!accounts.length || settings.threadRuntime === "claude") return null;
+  if (!accounts.length || ["claude", "codex"].includes(settings.threadRuntime ?? "")) return null;
   return <OptionSelect label="Account for new thread" value={accounts.some((a) => a.id === settings.threadAccountId) ? settings.threadAccountId! : ""} options={[{ value: "", label: "Default account" }, ...accounts.map((a) => ({ value: a.id, label: a.name }))]} onChange={(threadAccountId) => update({ threadAccountId })} />;
 }
 export function RuntimeAccounts({ runtime, deviceId }: { runtime: ThreadRuntime; deviceId?: string }) {

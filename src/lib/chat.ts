@@ -10,7 +10,7 @@ import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
 import { deviceName, deviceServerId } from "./devices";
 import { resumeShells, runShell, shellCommand } from "./shell";
-import { claudeModelAccount, deviceDetection, hasPermissionModes, permissionOf, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
+import { codexModelAccount, claudeModelAccount, deviceDetection, hasPermissionModes, permissionOf, runtimeOf, selectionFor, threadDevice, useStore } from "./store";
 import { effortFor, speedFor, supportedSpeed } from "./effort";
 import { profileContext, withProfileContext } from "./profile";
 import { userVisiblePrompt } from "../../shared/promptDisplay";
@@ -228,11 +228,11 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
     startedAt: now,
   };
   const existing = chatId ? st.chats.find((c) => c.id === chatId) : undefined;
-  // The account behind the picked Claude model, until the thread's first turn settles it.
-  const account = runtimeOf(st, chatId) === "claude" && !existing?.messages.length ? claudeModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : undefined;
+  // The account behind the picked native model, until the thread's first turn settles it.
+  const account = runtimeOf(st, chatId) === "claude" && !existing?.messages.length ? claudeModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : runtimeOf(st, chatId) === "codex" && !existing?.messages.length ? codexModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : undefined;
   const chat: Chat = existing
     ? { ...existing, runtime: existing.runtime ?? "pi", runtimeAccount: account ?? existing.runtimeAccount, updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", runtimeAccount: st.settings.threadRuntime === "claude" ? account : st.settings.runtimeAccounts?.find((a) => a.id === st.settings.threadAccountId && a.runtime === st.settings.threadRuntime && (a.deviceId ?? "") === (threadDevice(st) ?? "")), permission: permissionOf(st), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
+    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", runtimeAccount: ["claude", "codex"].includes(st.settings.threadRuntime ?? "") ? account : st.settings.runtimeAccounts?.find((a) => a.id === st.settings.threadAccountId && a.runtime === st.settings.threadRuntime && (a.deviceId ?? "") === (threadDevice(st) ?? "")), permission: permissionOf(st), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   if (!existing) pinWorkspace(chat.id);
   st.upsertChat(chat);
   // Name the thread from its first prompt, without waiting for the reply.
@@ -372,8 +372,8 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
     runtimeAccount: chat.runtimeAccount,
     ...(permission ? { permission } : {}),
     cwd: workspace.cwd,
-    // The account travels separately; Claude Code knows the model as claude/<alias> on all of them.
-    model: chat.runtime === "claude" ? model.id.replace(/^[^/]+/, "claude") : model.id,
+    // The account travels separately; native runtimes receive their usual model prefix.
+    model: chat.runtime === "claude" || chat.runtime === "codex" ? model.id.replace(/^[^/]+/, chat.runtime) : model.id,
     effort,
     ...(speed ? { speed } : {}),
     ...piMessage(user, model.input),

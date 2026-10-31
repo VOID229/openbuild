@@ -37,6 +37,7 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
   const accounts = useStore((s) => s.settings.runtimeAccounts) ?? [];
   const detected = useStore((s) => s.claudeModels[deviceId ?? ""]?.accounts);
   const update = useStore((s) => s.updateSettings);
+  const reloadCodex = useStore((s) => s.loadCodexModels);
   const reload = useStore((s) => s.loadClaudeModels);
   const [step, setStep] = useState(0);
   const [runtime, setRuntime] = useState<AccountRuntime>("claude");
@@ -86,6 +87,7 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
     if (window !== undefined && !(Number.isInteger(window) && window >= 100_000 && window <= 1_000_000)) { setError("Auto-compact must be between 100,000 and 1,000,000 tokens."); return; }
     update({ runtimeAccounts: [...accounts, { id: crypto.randomUUID(), runtime, name: label, configDir, deviceId, ...options }] });
     if (runtime === "claude") void reload(deviceId, true);
+    if (runtime === "codex") void reloadCodex(deviceId, true);
     onClose();
   };
   if (!mounted) return null;
@@ -120,7 +122,7 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
           )}
           {step === 1 && (
             <label className="ar-field">
-              <span><b>Label</b><small>{runtime === "claude" ? "Shown in the model picker’s provider list." : "Shown in the account picker for new threads."}</small></span>
+              <span><b>Label</b><small>{runtime === "claude" || runtime === "codex" ? "Shown in the model picker’s provider list." : "Shown in the account picker for new threads."}</small></span>
               <input className="input" aria-label="Label" autoFocus spellCheck={false} placeholder={suggested} value={name} onChange={(e) => setName(e.target.value)} />
             </label>
           )}

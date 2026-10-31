@@ -73,7 +73,7 @@ export interface PiModels {
   checkedAt: number;
 }
 /** Native Codex models, independent of Pi's openai-codex provider and auth checks. */
-export const codexModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/codex/models${fresh ? "?fresh=1" : ""}`));
+export const codexModels = (fresh = false, deviceId?: DeviceId, accounts: RuntimeAccount[] = []) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number; accounts?: ClaudeAccountModels[] }>(apiUrl(deviceId, `/api/codex/models?${new URLSearchParams({ ...(fresh ? { fresh: "1" } : {}), ...(accounts.length ? { accounts: JSON.stringify(accounts.map(({ id: _, runtime: __, deviceId: ___, ...account }) => account)) } : {}) })}`));
 
 /** Native Cursor models from the selected device's own installation and sign-in. */
 export const cursorModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/cursor/models${fresh ? "?fresh=1" : ""}`));

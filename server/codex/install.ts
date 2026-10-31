@@ -1,8 +1,9 @@
-import { accountBin, accountCacheKey, accountEnvironment } from "../runtimeAccounts";
+import { codexAccounts } from "./accounts";
+import { accountBin, accountCacheKey, accountEnvironment, withRuntimeAccount } from "../runtimeAccounts";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../shared/types";
+import type { ClaudeAccountModels, PiChatRequest, Effort, ModelInfo, PermissionMode, PermissionModes } from "../../shared/types";
 // rpc imports these functions but does not instantiate until discovery is called.
 import { CodexProcess } from "./rpc";
 export const CODEX_INSTALL = "npm install -g @openai/codex";
@@ -66,6 +67,18 @@ export function listModels(fresh = false): Promise<CodexModels> {
   accountCaches.set(cacheKey, { at: Date.now(), value });
   value.catch(() => { if (accountCaches.get(cacheKey)?.value === value) accountCaches.delete(cacheKey); });
   return value;
+}
+/** Discover each saved login independently; a failed login cannot borrow another's models. */
+export async function listAccountModels(fresh = false, saved?: unknown): Promise<CodexModels & { accounts: ClaudeAccountModels[] }> {
+  const accounts = codexAccounts(saved);
+  const [primary, listed] = await Promise.all([
+    listModels(fresh).catch(() => ({ models: [], checkedAt: Date.now() })),
+    Promise.all(accounts.map(async (account): Promise<ClaudeAccountModels> => {
+      const models = await (async () => withRuntimeAccount({ runtime: "codex", runtimeAccount: account } as PiChatRequest, () => listModels(fresh)))().then((r) => r.models, () => []);
+      return { account, models: models.map((m) => ({ ...m, id: m.id.replace(/^codex\//, `${account.id}/`), provider: account.id, providerName: account.name })) };
+    })),
+  ]);
+  return { ...primary, accounts: listed };
 }
 export const forgetModels = () => { accountCaches.clear(); permissionCache.clear(); };
 
