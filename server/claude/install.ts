@@ -1,11 +1,12 @@
-import { accountCacheKey, accountEnvironment } from "../runtimeAccounts";
+import { accountCacheKey, accountEnvironment, withRuntimeAccount } from "../runtimeAccounts";
+import { claudeAccounts } from "./accounts";
 // The installed Claude Code CLI, driven through Anthropic's Agent SDK (as t3code does). OpenBuild
 // never bundles or substitutes its own Claude binary, and never handles Claude's credentials: the
 // CLI uses whatever sign-in (`claude login`) and settings it has on this device.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Effort, ModelInfo, PermissionMode, PermissionModes } from "../../shared/types";
+import type { ClaudeAccountModels, Effort, ModelInfo, PermissionMode, PermissionModes, PiChatRequest } from "../../shared/types";
 
 export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 /** Claude Code's own fast mode, offered as a speed on models that support it. */
@@ -101,6 +102,18 @@ function catalog(fresh = false) {
 export async function listModels(fresh = false): Promise<ClaudeModels> {
   const { models, defaultModel, checkedAt } = await catalog(fresh);
   return { models, defaultModel, checkedAt };
+}
+/** Every account's models, listed under its own sign-in. A login that can't list yet stays empty. */
+export async function listAccountModels(fresh = false, saved?: unknown): Promise<ClaudeModels & { accounts: ClaudeAccountModels[] }> {
+  const [primary, accounts] = await Promise.all([
+    listModels(fresh),
+    Promise.all(claudeAccounts(saved).map(async (account): Promise<ClaudeAccountModels> => {
+      const req = { runtime: "claude", runtimeAccount: account } as PiChatRequest;
+      const models = await withRuntimeAccount(req, () => catalog(fresh)).then((c) => c.models, () => []);
+      return { account, models: models.map((m) => ({ ...m, id: m.id.replace(/^claude\//, `${account.id}/`), provider: account.id, providerName: account.name })) };
+    })),
+  ]);
+  return { ...primary, accounts };
 }
 /** The SDK's model row for an OpenBuild id, or an error when this sign-in doesn't offer it. */
 export async function modelRow(id: string): Promise<any> {

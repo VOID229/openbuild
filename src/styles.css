@@ -566,6 +566,25 @@ svg {
   flex-shrink: 0;
 }
 
+.brand-icon:has(.brand-badge) {
+  position: relative;
+}
+
+.brand-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  min-width: 9px;
+  padding: 0 1px;
+  border-radius: 3px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 9px;
+  text-align: center;
+}
+
 .brand-icon svg {
   width: 1em;
   height: 1em;
@@ -1189,6 +1208,11 @@ svg {
   white-space: nowrap;
 }
 
+.history-limit {
+  display: inline-flex;
+  color: var(--danger);
+}
+
 .history-woke {
   display: inline-flex;
   color: var(--text-2);
@@ -1208,11 +1232,6 @@ svg {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.history-limit {
-  display: inline-flex;
-  color: var(--danger);
-}
-
 
 /* Started by another agent, not the user. */
 .history-subagent {
@@ -3723,6 +3742,19 @@ svg {
   width: 62px;
 }
 
+/* Rows are tight: the model's name keeps its room and the provider tag gives way first. */
+.naming-row .select-value {
+  flex: 1 1 auto;
+}
+
+.naming-row .select-hint {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .naming-empty {
   margin: 0;
   font-size: 13px;
@@ -3742,19 +3774,6 @@ svg {
 .select-trigger {
   display: flex;
   align-items: center;
-/* Rows are tight: the model's name keeps its room and the provider tag gives way first. */
-.naming-row .select-value {
-  flex: 1 1 auto;
-}
-
-.naming-row .select-hint {
-  flex-shrink: 1000;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
   gap: 8px;
   width: 100%;
   min-width: 0;
@@ -3776,6 +3795,12 @@ svg {
   width: 180px;
 }
 
+.select-trigger-icon {
+  width: auto;
+  flex-shrink: 0;
+  padding: 0 8px 0 10px;
+}
+
 .select-trigger-open {
   background: var(--hover);
   border-color: color-mix(in srgb, var(--text) 25%, transparent);
@@ -3795,12 +3820,6 @@ svg {
 
 .select-value {
   flex: 1;
-.select-trigger-icon {
-  width: auto;
-  flex-shrink: 0;
-  padding: 0 8px 0 10px;
-}
-
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4494,6 +4513,9 @@ p.key-status svg {
   .naming-row .select-wrap:not(.select-grow) {
     margin-left: 28px;
   }
+  .naming-row .select-wrap:has(.select-trigger-icon) {
+    margin-left: 0;
+  }
   .naming-actions {
     width: auto;
     margin-left: auto;
@@ -4513,9 +4535,6 @@ p.key-status svg {
 /* Touch screens: a fixed, app-like screen. The page itself never scrolls, bounces or zooms; only
    the panels inside it scroll. --app-h is the height above the keyboard (see lib/viewport.ts). */
 @media (pointer: coarse) {
-  .naming-row .select-wrap:has(.select-trigger-icon) {
-    margin-left: 0;
-  }
   html,
   body {
     overflow: hidden;
@@ -8959,3 +8978,32 @@ a.btn-primary {
   align-items: center;
   gap: 6px;
 }
+
+/* Settings → Runtimes → Add runtime */
+.rt-add { margin-top: 10px; }
+.ar-root { z-index: 110; }
+.ar { width: min(560px, 100%); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; padding: 0; }
+.ar-head { padding: 22px 24px 16px; border-bottom: 1px solid var(--border); }
+.ar-head h2 { margin: 0; font-size: 20px; font-weight: 600; }
+.ar-head p { margin: 4px 0 14px; color: var(--text-2); font-size: 13px; }
+.ar-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0; padding: 4px; list-style: none; border-radius: 10px; background: var(--surface-2); }
+.ar-steps li { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid transparent; border-radius: 7px; color: var(--text-2); font-size: 13px; }
+.ar-steps .ar-step-on { border-color: var(--border-strong); color: var(--text); }
+.ar-num { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--active); font-size: 11px; }
+.ar-num-done { background: var(--ink); color: var(--ink-fg); }
+.ar-body { padding: 20px 24px; overflow-y: auto; }
+.ar-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.ar-choice { display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; }
+.ar-choice:hover { background: var(--hover); }
+.ar-choice[aria-checked="true"] { border-color: var(--ink); }
+.ar-check { margin-left: auto; }
+.ar-field { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: center; }
+.ar-field span { display: grid; gap: 2px; }
+.ar-field b { font-weight: 500; font-size: 14px; }
+.ar-field small, .ar-login small { color: var(--text-2); font-size: 12px; }
+.ar-login { display: grid; gap: 6px; margin-top: 18px; }
+.ar-login code { padding: 8px 10px; border-radius: 7px; background: var(--surface-2); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; user-select: all; }
+.ar-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 24px; border-top: 1px solid var(--border); }
+@media (max-width: 520px) { .ar-field { grid-template-columns: 1fr; gap: 8px; } }
+
+.row-actions { display: flex; gap: 8px; flex: none; }

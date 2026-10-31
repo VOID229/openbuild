@@ -61,6 +61,10 @@ This is process isolation, **not automatic replay**. Killing the worker, a power
 
 New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes).
 
+## Multiple accounts
+
+OpenBuild finds other Claude Code logins on each device by itself: a `claude2`-style wrapper on `PATH` or a shell alias that sets `CLAUDE_CONFIG_DIR`, and signed-in siblings such as `~/.claude-2`. Each one appears below Claude in the model picker's provider rail (`claude`, `claude2`, `claude3`), with the models that sign-in offers. Settings → Runtimes → **Add runtime** adds a login OpenBuild can't find, or prepares one to sign in to. Picking one starts the new thread on that account. A started thread stays on its account, because its session lives in that configuration directory.
+
 ## Retry and edit
 
 Unlike Codex and Cursor, Claude Code threads can **retry or edit an earlier message**. OpenBuild remembers where each of your messages ended in Claude's transcript and **forks** the session there (`forkSession` + `resumeSessionAt`): the new branch carries the history up to that point, and nothing after it is replayed. The old transcript is left as it was. Retrying the first message starts a fresh session. Files Claude changed after that point are **not** reverted.

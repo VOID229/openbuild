@@ -79,7 +79,7 @@ export const codexModels = (fresh = false, deviceId?: DeviceId) => get<{ models:
 export const cursorModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/cursor/models${fresh ? "?fresh=1" : ""}`));
 
 /** Native Claude Code models from the device's installed CLI and its own sign-in. */
-export const claudeModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/claude/models${fresh ? "?fresh=1" : ""}`));
+export const claudeModels = (fresh = false, deviceId?: DeviceId, accounts: Pick<RuntimeAccount, "name" | "configDir">[] = []) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number; accounts?: ClaudeAccountModels[] }>(apiUrl(deviceId, `/api/claude/models?${new URLSearchParams({ ...(fresh ? { fresh: "1" } : {}), ...(accounts.length ? { accounts: JSON.stringify(accounts.map(({ name, configDir }) => ({ name, configDir }))) } : {}) })}`));
 export const opencodeModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/opencode/models${fresh ? "?fresh=1" : ""}`));
 
 /** The permission modes a native runtime reports on a device (Codex and Claude Code resolve the folder's project config). */

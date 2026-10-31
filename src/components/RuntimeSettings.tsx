@@ -1,6 +1,7 @@
 // Settings → Runtimes: every thread runtime on a device (installed, version, updates, sign-in,
 // errors), and a switch that hides a runtime from the new-thread picker on that device.
-import { CircleAlert, Copy, RefreshCw } from "lucide-react";
+import { CircleAlert, Copy, Plus, RefreshCw } from "lucide-react";
+import { AddRuntime } from "./AddRuntime";
 import { useCallback, useEffect, useState } from "react";
 import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
 import { deviceName, findDevice } from "../lib/devices";
@@ -20,9 +21,9 @@ function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate 
   name: string;
   updating: boolean;
   updateDisabled: boolean;
-  onUpdate: () => void;
   /** An external device: updating stays possible, but nothing asks for it. */
   quiet?: boolean;
+  onUpdate: () => void;
 }) {
   if (!status) return null;
   if (!status.installed) return <span className="badge">not installed</span>;
@@ -66,8 +67,8 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, w
   where?: string;
   updating: boolean;
   updateDisabled: boolean;
-  onUpdate: () => void;
   quiet?: boolean;
+  onUpdate: () => void;
 }) {
   const name = runtime === "pi" ? "Pi" : label;
   const missing = status && !status.installed;
@@ -130,6 +131,8 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
   const [updating, setUpdating] = useState<ThreadRuntime>();
   const [error, setError] = useState<string>();
   const [checking, setChecking] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const closeAdding = useCallback(() => setAdding(false), []);
   const where = deviceName(deviceId);
 
   const load = useCallback(
@@ -185,10 +188,13 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
     <>
       <div className="pi-subhead">
         <p className="setting-desc">Turned-off runtimes are hidden from the runtime picker for new threads on {where ?? "this device"}. Existing threads keep their runtime.</p>
-        <button type="button" className="btn btn-sm" disabled={checking || !!updating || job.running} onClick={() => void load(true)}>
-          {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check for updates
-        </button>
+        <div className="row-actions">
+          <button type="button" className="btn btn-sm" disabled={checking || !!updating || job.running} onClick={() => void load(true)}>
+            {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check for updates
+          </button>
+        </div>
       </div>
+      <AddRuntime open={adding} deviceId={deviceId} where={where ?? "this device"} onClose={closeAdding} />
       {error && (
         <p className="pi-error" role="alert">
           <CircleAlert size={14} /> {error}
@@ -208,13 +214,16 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
               where={where}
               updating={updating === r.runtime}
               updateDisabled={checking || !!updating || job.running}
+              quiet={findDevice(deviceId)?.external}
               onUpdate={() => void startUpdate(r.runtime)}
             />
           );
         })}
       </ul>
+      <div className="rt-add">
+        <button type="button" className="btn btn-sm" onClick={() => setAdding(true)}><Plus size={14} /> Add runtime</button>
+      </div>
       <JobLog job={job} />
-              quiet={findDevice(deviceId)?.external}
     </>
   );
 }

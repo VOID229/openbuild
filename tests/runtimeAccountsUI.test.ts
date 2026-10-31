@@ -7,7 +7,7 @@ test("runtime account settings keep store snapshots stable with no saved account
     import { createElement } from "react";
     import { renderToStaticMarkup } from "react-dom/server";
     import { resolve } from "node:path";
-    const state = { settings: {}, updateSettings() {} };
+    const state = { claudeModels: {}, settings: {}, updateSettings() {} };
     let checks = 0;
     mock.module(resolve("src/lib/store.ts"), () => ({
       useStore(selector) {

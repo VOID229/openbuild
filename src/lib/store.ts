@@ -151,7 +151,7 @@ export function deviceDetection(
   if (runtime === "fx") return { fx: s.fxModels?.[deviceId ?? ""] ?? PENDING_FX };
   if (runtime === "codex") return { codex: s.codexModels?.[deviceId ?? ""] ?? PENDING_CODEX };
   if (runtime === "cursor") return { cursor: s.cursorModels?.[deviceId ?? ""] ?? PENDING_CURSOR };
-  if (runtime === "claude") return { claude: s.claudeModels?.[deviceId ?? ""] ?? PENDING_CLAUDE };
+  if (runtime === "claude") return { claude: claudeDetection(s.claudeModels?.[deviceId ?? ""] ?? PENDING_CLAUDE) };
   if (runtime === "opencode") return { opencode: s.opencodeModels?.[deviceId ?? ""] ?? PENDING_OPENCODE };
   if (!deviceId) return s.detection;
   return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
@@ -256,7 +256,7 @@ interface State {
   loadCodexModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   cursorModels: Record<string, Detection & { defaultModel?: string }>;
   loadCursorModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
-  claudeModels: Record<string, Detection & { defaultModel?: string }>;
+  claudeModels: Record<string, ClaudeList>;
   loadClaudeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   opencodeModels: Record<string, Detection & { defaultModel?: string }>;
   loadOpencodeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
@@ -390,13 +390,13 @@ export const useStore = create<State>()(
         const key = deviceId ?? "";
         const prev = get().claudeModels[key];
         if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
-        set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, accounts: prev?.accounts, checkedAt: Date.now() } } }));
         try {
-          const r = await claudeModels(fresh, deviceId);
+          const r = await claudeModels(fresh, deviceId, (get().settings.runtimeAccounts ?? []).filter((a) => a.runtime === "claude" && (a.deviceId ?? "") === key));
           if (!Array.isArray(r?.models)) throw new Error("Claude Code didn't list any models");
-          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "valid", models: r.models, defaultModel: r.defaultModel, accounts: keepAccounts(prev?.accounts, r.accounts), checkedAt: r.checkedAt ?? Date.now() } } }));
         } catch (err) {
-          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "error", error: (err as Error).message, models: s.claudeModels[key]?.models ?? [], defaultModel: s.claudeModels[key]?.defaultModel, checkedAt: Date.now() } } }));
+          set((s) => ({ claudeModels: { ...s.claudeModels, [key]: { plan: "claude", status: "error", error: (err as Error).message, models: s.claudeModels[key]?.models ?? [], accounts: prev?.accounts, defaultModel: s.claudeModels[key]?.defaultModel, checkedAt: Date.now() } } }));
         }
       },
       codexModels: {},
@@ -968,7 +968,8 @@ function nativeSelectionFor(
   deviceId: string | undefined,
   plan: "fx" | "codex" | "cursor" | "claude" | "opencode",
 ): Selection | undefined {
-  const d = (plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
+  const listed = (plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
+  const d = plan === "claude" && listed ? claudeDetection(listed, s.chats.find((c) => c.id === id)) : listed;
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
   if (id) {
     const picked = s.selections[id];
@@ -985,6 +986,10 @@ function nativeSelectionFor(
   }
   return fxDefaults.get(d);
 }
+
+/** A login whose listing failed keeps its last models, so a hiccup can't send a thread to the default account. */
+const keepAccounts = (previous: ClaudeAccountModels[] | undefined, next: ClaudeAccountModels[] = []) =>
+  next.map((a) => a.models.length ? a : previous?.find((p) => p.account.id === a.account.id) ?? a);
 
 /** Providers a listing left out once already: dropped for real if the next listing agrees. */
 let droppedOnce = new Set<string>();

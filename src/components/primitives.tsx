@@ -220,7 +220,9 @@ export const ProviderIcon = memo(function ProviderIcon({ provider, className }: 
   const override = pluginProviderSvg(provider);
   if (!override && !pluginIconsReady()) return <span className={cx("brand-icon", className)} aria-hidden />;
   const svg = override ?? providerSvg(provider);
-  if (svg) return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) }} />;
+  // A second Claude login shares the mark, so its number tells them apart.
+  const account = /^claude(\d+)$/.exec(provider)?.[1];
+  if (svg) return <span className={cx("brand-icon", className)} aria-hidden dangerouslySetInnerHTML={{ __html: svg.replaceAll("_R_0_", uid) + (account ? `<span class="brand-badge">${account}</span>` : "") }} />;
   return (
     <span className={cx("brand-icon provider-letter", className)} aria-hidden>
       {providerName(provider).charAt(0)}

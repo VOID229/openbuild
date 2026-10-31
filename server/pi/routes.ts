@@ -328,7 +328,8 @@ export function piRoutes(api: Api) {
     "/api/claude/models": {
       GET: api(async (req) => {
         try {
-          return Response.json(await claudeInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+          const url = new URL(req.url), accounts = url.searchParams.get("accounts");
+          return Response.json(await claudeInstall.listAccountModels(url.searchParams.has("fresh"), accounts ? JSON.parse(accounts) : undefined));
         } catch (err) {
           return fail(err, 502);
         }
