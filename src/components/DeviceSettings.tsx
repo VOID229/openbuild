@@ -1,9 +1,9 @@
 // Settings → Devices: the devices this OpenBuild is paired with, where their servers stand, and
 // unpairing or restarting them. Also the devices that use this one, so their access can be revoked.
-import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink } from "lucide-react";
+import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink, UserRoundX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, PairedClient } from "../../shared/types";
-import { listPairedClients, removeDevice, restartDevice, revokePairedClient } from "../lib/pi";
+import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { ago, cx } from "../lib/ui";
 import { IconButton, SettingsHeading, Spinner } from "./primitives";
@@ -18,7 +18,7 @@ const STATUS: Record<NonNullable<Device["status"]>, { label: string; dot?: strin
 const host = (url: string | undefined) => (url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : "no address");
 
 function PairedDeviceRow({ device, onChanged }: { device: Device; onChanged: () => Promise<void> }) {
-  const [busy, setBusy] = useState<"restart" | "unpair">();
+  const [busy, setBusy] = useState<"restart" | "unpair" | "external">();
   const [error, setError] = useState<string>();
   const status = device.status ?? (device.online === false ? "offline" : "online");
   const { label, dot } = STATUS[status];
@@ -53,6 +53,19 @@ function PairedDeviceRow({ device, onChanged }: { device: Device; onChanged: () 
     }
   };
 
+  const toggleExternal = async () => {
+    setBusy("external");
+    setError(undefined);
+    try {
+      await setDeviceExternal(device.id, !device.external);
+      await onChanged();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
   return (
     <li className="pi-row device-row">
       <span className={cx("pi-status-dot", dot)} aria-hidden />
@@ -60,6 +73,7 @@ function PairedDeviceRow({ device, onChanged }: { device: Device; onChanged: () 
         <span className="pi-row-name">
           {device.name}
           <span className="device-status">{busy === "restart" ? (starting ? "Starting…" : "Restarting…") : label}</span>
+          {device.external && <span className="device-status">· External</span>}
         </span>
         <span className="pi-row-desc" title={device.urls.join("\n")}>
           {[device.machine && device.machine !== device.name && device.machine, device.mode === "tailscale" ? "Tailscale" : "LAN", host(device.urls[0]), seen && `seen ${seen}`]
@@ -78,6 +92,17 @@ function PairedDeviceRow({ device, onChanged }: { device: Device; onChanged: () 
             {busy === "restart" ? <Spinner size={14} /> : starting ? <Play size={14} /> : <RotateCw size={14} />}
           </IconButton>
         )}
+        <IconButton
+          label={device.external ? `Mark ${device.name} as yours` : `Mark ${device.name} as external`}
+          tooltip={device.external ? "Mark as yours" : "Mark as external: not yours, so no usage or update prompts"}
+          tooltipSide="top"
+          className="key-icon-btn"
+          aria-pressed={!!device.external}
+          disabled={!!busy}
+          onClick={toggleExternal}
+        >
+          {busy === "external" ? <Spinner size={14} /> : <UserRoundX size={14} />}
+        </IconButton>
         <IconButton label={`Unpair ${device.name}`} tooltip="Unpair" tooltipSide="top" className="key-icon-btn key-remove" disabled={!!busy} onClick={unpair}>
           {busy === "unpair" ? <Spinner size={14} /> : <Unlink size={14} />}
         </IconButton>

@@ -370,6 +370,8 @@ export interface Device {
   status?: "online" | "stopped" | "offline" | "revoked";
   /** It has a keeper, so stopping its server for a restart can't strand it. Unknown on older builds. */
   restartable?: boolean;
+  /** Someone else's machine, paired for a job: left out of usage and update prompts, its limits labelled. */
+  external?: boolean;
   /** This server (always shown first in device pickers). */
   local?: boolean;
 }

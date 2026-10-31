@@ -185,6 +185,8 @@ export const removePackage = (source: string, deviceId?: DeviceId) => send<{ job
 /** Paired devices (online and offline) this OpenBuild can use. */
 export const listDevices = () => get<{ devices: Device[] }>("/api/devices").then((r) => r.devices);
 export const removeDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}`, "DELETE");
+/** Mark a paired device as someone else's, or as the user's own again. */
+export const setDeviceExternal = (id: string, external: boolean) => send(`/api/devices/${encodeURIComponent(id)}`, "PATCH", { external });
 /** Restart a paired device's server (or start it while stopped); resolves once it answers again. */
 export const restartDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}/restart`, "POST");
 /** Devices that use this server, and revoking one so its token stops working here. */

@@ -271,6 +271,11 @@ function serve(port: number, hostname: string) {
         GET: api(async () => Response.json({ devices: await Promise.all(devices.readDevices().map(devices.probeDevice)) })),
       },
       "/api/devices/:id": {
+        PATCH: api(async (req: Bun.BunRequest<"/api/devices/:id">) => {
+          const body = await readJson(req).catch(() => undefined);
+          if (typeof body?.external !== "boolean") return bad("Expected { external: boolean }");
+          return devices.setDeviceExternal(req.params.id, body.external) ? Response.json({ ok: true }) : bad("No such device", 404);
+        }),
         DELETE: api(async (req: Bun.BunRequest<"/api/devices/:id">) => {
           const device = devices.deviceCredentials(req.params.id);
           // Revoke on the host too, so unpairing removes its trust rather than only this copy.
@@ -308,11 +313,6 @@ function serve(port: number, hostname: string) {
         OPTIONS: api(proxyRoute),
       },
 
-      "/api/dictation/check": { GET: api(checkWhisper) },
-      "/api/dictation/transcribe": { POST: api(transcribe) },
-
-      // Saved keys as opaque ids, never secrets.
-      "/api/keys": {
       "/api/preview": {
         POST: api(async (req) => {
           const body = await readJson(req);
@@ -345,6 +345,11 @@ function serve(port: number, hostname: string) {
         } catch { return bad("Invalid preview target"); }
       }),
 
+      "/api/dictation/check": { GET: api(checkWhisper) },
+      "/api/dictation/transcribe": { POST: api(transcribe) },
+
+      // Saved keys as opaque ids, never secrets.
+      "/api/keys": {
         GET: api(async () => Response.json({ backend: await vault.backend(), keys: await vault.listIds() } satisfies KeyInventory)),
       },
 
@@ -528,13 +533,13 @@ await loadPlugins().catch((err) => console.error("[plugins] Startup failed:", er
 const hosts = (process.env.HOST || "127.0.0.1").split(",").map((h) => h.trim()).filter(Boolean);
 const hot = globalThis as { openbuildServers?: ReturnType<typeof serve>[]; openbuildStopPreviews?: () => void };
 const previous = hot.openbuildServers;
+hot.openbuildStopPreviews?.();
+hot.openbuildStopPreviews = stopPreviews;
 for (const p of previous ?? []) p.stop(true);
 const port = previous?.[0]?.port ?? Number(process.env.PORT ?? 3100);
 const servers: ReturnType<typeof serve>[] = [];
 try {
   for (const host of hosts) servers.push(serve(port, host));
-hot.openbuildStopPreviews?.();
-hot.openbuildStopPreviews = stopPreviews;
 } catch (err) {
   if ((err as { code?: string }).code !== "EADDRINUSE") throw err;
   for (const s of servers) s.stop(true);

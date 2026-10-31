@@ -234,8 +234,21 @@ export function readDevices(): StoredDevice[] {
 }
 
 export function addDevice(device: StoredDevice): void {
-  const list = readDevices().filter((d) => d.id !== device.id);
-  writeJson(DEVICES, [...list, device]);
+  const all = readDevices();
+  const list = all.filter((d) => d.id !== device.id);
+  // Pairing again renews the token; it doesn't change whose machine it is.
+  const external = all.find((d) => d.id === device.id)?.external;
+  writeJson(DEVICES, [...list, external ? { ...device, external } : device]);
+}
+
+export function setDeviceExternal(id: string, external: boolean): boolean {
+  const list = readDevices();
+  const device = list.find((d) => d.id === id);
+  if (!device) return false;
+  if (external) device.external = true;
+  else delete device.external;
+  writeJson(DEVICES, list);
+  return true;
 }
 
 export function removeDevice(id: string): boolean {

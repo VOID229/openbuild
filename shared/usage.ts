@@ -55,6 +55,8 @@ export interface UsageMachine {
   id: string;
   name: string;
   local?: boolean;
+  /** A device marked external: its limits show, its usage doesn't count. */
+  external?: boolean;
   /** pending: still being read (its numbers fill in shortly); error: couldn't be reached. */
   status: "ok" | "pending" | "error";
   /** When its numbers were read. */
@@ -118,6 +120,8 @@ export interface UsageLimits {
   machine?: string;
   /** That machine's id ("local" or a paired device), for sending a reset to where the sign-in is. */
   machineId?: string;
+  /** Read only on devices marked external, so it isn't one of the user's own accounts. */
+  external?: boolean;
   /** Banked resets this sign-in can spend. */
   resetCredits?: UsageResetCredits | number;
   error?: string;

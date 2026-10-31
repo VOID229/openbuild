@@ -3,7 +3,7 @@
 // in the background, so a slow or sleeping machine never holds the page up.
 import { readFile, rename } from "node:fs/promises";
 import { join } from "node:path";
-import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageRange, UsageReport, UsageResetResult } from "../../shared/usage";
+import type { UsageLimits, UsageLimitsReport, UsageMachine, UsageProvider, UsageRange, UsageReport, UsageResetResult } from "../../shared/usage";
 import * as devices from "../devices";
 import { dataDir } from "../paths";
 import { REMOTE_FRESH_MS, RETRY_MS, shouldRefresh } from "./cache";
@@ -88,7 +88,7 @@ export const remoteDevices = () => devices.readDevices();
 
 /** One report per machine; `machine` picks one (this one is "local") or "all". */
 export async function machineReports(range: UsageRange, tz: string, force: boolean, local: () => Promise<UsageReport>) {
-  const list = remoteDevices();
+  const list = remoteDevices().filter((d) => !d.external);
   const path = `/api/usage?scope=local&range=${range}&tz=${encodeURIComponent(tz)}`;
   const [mine, ...theirs] = await Promise.all([local(), ...list.map((d) => remote<UsageReport>(d, `report:${range}:${tz}`, path, force))]);
   const machines: UsageMachine[] = [{ id: "local", name: devices.deviceName(), local: true, status: mine.pending?.length ? "pending" : "ok", at: mine.generatedAt }];
@@ -199,12 +199,18 @@ export function mergeReports(parts: { machine: UsageMachine; report: UsageReport
 
 // ------------------------------------------------------------------ limits
 
+/** Providers whose limit ids identify the signed-in account. */
+const ACCOUNT_IDS = new Set<UsageProvider>(["claude", "codex"]);
+
 /** Limits from every machine; an account signed in on several shows once, from its freshest reading. */
 export async function machineLimits(force: boolean, local: () => Promise<UsageLimits[]>): Promise<UsageLimitsReport> {
   const list = remoteDevices();
   const [mine, ...theirs] = await Promise.all([local(), ...list.map((d) => remote<UsageLimitsReport>(d, "limits", "/api/usage/limits?scope=local", force))]);
   const byId = new Map<string, UsageLimits>();
+  // Ids seen on the user's own machines: an account also signed in there isn't external.
+  const own = new Set<string>();
   const add = (l: UsageLimits) => {
+    if (!l.external) own.add(l.id);
     const prev = byId.get(l.id);
     if (!prev || preferLimits(l, prev)) byId.set(l.id, l);
   };
@@ -212,11 +218,16 @@ export async function machineLimits(force: boolean, local: () => Promise<UsageLi
   const machines: UsageMachine[] = [{ id: "local", name: devices.deviceName(), local: true, status: "ok", at: Date.now() }];
   list.forEach((d, i) => {
     const r = theirs[i]!;
-    machines.push({ id: d.id, name: d.name, status: r.pending ? "pending" : r.error ? "error" : "ok", at: r.at || undefined, error: r.error });
-    r.value?.providers.forEach((l) => add({ ...l, stale: l.stale || !!r.error || Date.now() - l.asOf >= REMOTE_FRESH_MS, machine: d.name, machineId: d.id }));
+    machines.push({ id: d.id, name: d.name, ...(d.external && { external: true }), status: r.pending ? "pending" : r.error ? "error" : "ok", at: r.at || undefined, error: r.error });
+    r.value?.providers.forEach((l) => {
+      // Cursor and Grok ids name the provider, not the account, so an external one would replace the user's.
+      const id = d.external && !ACCOUNT_IDS.has(l.provider) ? `${l.id}@${d.id}` : l.id;
+      add({ ...l, id, stale: l.stale || !!r.error || Date.now() - l.asOf >= REMOTE_FRESH_MS, machine: d.name, machineId: d.id, ...(d.external && { external: true }) });
+    });
   });
   // Number accounts within each provider again now that machines are combined.
   const all = [...byId.values()];
+  for (const l of all) if (own.has(l.id)) delete l.external;
   const counts = new Map<string, number>();
   for (const l of all) counts.set(l.provider, (counts.get(l.provider) ?? 0) + 1);
   const seen = new Map<string, number>();

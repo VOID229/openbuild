@@ -88,7 +88,11 @@ export function UsagePage() {
     }
   };
   // Machines are known from any answer; the last one keeps the picker steady while switching.
-  const machines = report.data?.machines ?? lim.data?.machines ?? [];
+  const machines = (report.data?.machines ?? lim.data?.machines ?? []).filter((m) => !m.external);
+  // The picked device may have been marked external or unpaired since.
+  useEffect(() => {
+    if (machine !== "all" && report.data?.machines && !machines.some((m) => m.id === machine)) setMachine("all");
+  }, [machine, report.data, machines]);
 
   return (
     <div className="ustats">
@@ -533,6 +537,7 @@ function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string;
             {USAGE_PROVIDER_NAMES[p.provider]}
             {p.account && <span className="ustats-account">{p.account}</span>}
             {p.plan && <span className="ustats-plan">{p.plan}</span>}
+            {p.external && <span className="ustats-plan">External{p.machine ? ` · ${p.machine}` : ""}</span>}
             {p.stale && <span className="ustats-dim ustats-small">as of {ago(p.asOf, now)}</span>}
           </h2>
           {p.windows.map((w) => <LimitRow key={w.id} account={p} w={w} now={now} />)}
@@ -622,6 +627,7 @@ function LimitDetails({ account, w, now, onClose }: { account: UsageLimits; w: U
         <span className="ustats-limit-pop-name">{USAGE_PROVIDER_NAMES[account.provider]}</span>
         {account.account && <span className="ustats-account">{account.account}</span>}
       </div>
+      {account.external && <div className="ustats-limit-pop-source">External{account.machine ? ` · ${account.machine}` : ""}</div>}
       {plan && (
         <div className="ustats-limit-pop-group">
           {plan && <DetailRow label="Plan">{plan}</DetailRow>}

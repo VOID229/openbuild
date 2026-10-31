@@ -3,7 +3,7 @@
 import { CircleAlert, Copy, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
-import { deviceName } from "../lib/devices";
+import { deviceName, findDevice } from "../lib/devices";
 import { updateRuntime } from "../lib/pi";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
 import { RUNTIMES, runtimeEnabled, setRuntimeEnabled } from "../lib/runtimes";
@@ -15,12 +15,14 @@ import { RuntimeIcon } from "./Workspace";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
-function StatusBadges({ status, name, updating, updateDisabled, onUpdate }: {
+function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate }: {
   status?: RuntimeStatus;
   name: string;
   updating: boolean;
   updateDisabled: boolean;
   onUpdate: () => void;
+  /** An external device: updating stays possible, but nothing asks for it. */
+  quiet?: boolean;
 }) {
   if (!status) return null;
   if (!status.installed) return <span className="badge">not installed</span>;
@@ -30,7 +32,7 @@ function StatusBadges({ status, name, updating, updateDisabled, onUpdate }: {
       {status.installed ? (
         <button
           type="button"
-          className={status.updateAvailable ? "badge badge-accent rt-update" : "badge rt-update"}
+          className={status.updateAvailable && !quiet ? "badge badge-accent rt-update" : "badge rt-update"}
           disabled={updateDisabled}
           data-updating={updating || undefined}
           aria-label={updating ? `Updating ${name}` : `Update ${name}`}
@@ -53,7 +55,7 @@ function StatusBadges({ status, name, updating, updateDisabled, onUpdate }: {
   );
 }
 
-function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, where, updating, updateDisabled, onUpdate }: {
+function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, where, updating, updateDisabled, quiet, onUpdate }: {
   runtime: ThreadRuntime;
   label: string;
   desc: string;
@@ -65,6 +67,7 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, w
   updating: boolean;
   updateDisabled: boolean;
   onUpdate: () => void;
+  quiet?: boolean;
 }) {
   const name = runtime === "pi" ? "Pi" : label;
   const missing = status && !status.installed;
@@ -78,7 +81,7 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, w
           <span className="pi-row-name">
             {name}
             <span className="rt-badges">
-              <StatusBadges status={status} name={name} updating={updating} updateDisabled={updateDisabled} onUpdate={onUpdate} />
+              <StatusBadges status={status} name={name} updating={updating} updateDisabled={updateDisabled} quiet={quiet} onUpdate={onUpdate} />
             </span>
           </span>
           <span className="pi-row-desc">{status?.bin ? `${desc} · ${tilde(status.bin)}` : desc}</span>
@@ -211,6 +214,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
         })}
       </ul>
       <JobLog job={job} />
+              quiet={findDevice(deviceId)?.external}
     </>
   );
 }
