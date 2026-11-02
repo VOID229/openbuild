@@ -1,3 +1,4 @@
+import hermesLogo from "../assets/brands/hermes.svg" with { type: "text" };
 import { Boxes, CircleUserRound } from "lucide-react";
 import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
@@ -205,6 +206,12 @@ export const OpencodeMark = memo(function OpencodeMark({ size = 14, className }:
       <path d="M16 6H8v12h8V6zm4 16H4V2h16v20z" />
     </svg>
   );
+});
+
+/** Hermes's official helmet logo. Keep the original SVG, including its brand colors. */
+const hermesLogoUrl = `data:image/svg+xml,${encodeURIComponent(hermesLogo)}`;
+export const HermesMark = memo(function HermesMark({ size = 14, className }: { size?: number; className?: string }) {
+  return <img src={hermesLogoUrl} width={size} height={size} className={className} alt="" aria-hidden style={{ flexShrink: 0 }} />;
 });
 
 /** A Pi provider's icon: its brand mark, or its initial on a tile. */

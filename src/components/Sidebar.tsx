@@ -11,7 +11,7 @@ import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
-import { Avatar, BrandIcon, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { Avatar, BrandIcon, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 
@@ -313,8 +313,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               @ {device}
             </span>
           )}
-          <span className="history-runtime" title={runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
-            {runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
+          <span className="history-runtime" title={(runtime as string) === "hermes" ? "Hermes runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+            {(runtime as string) === "hermes" ? <HermesMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
       </button>

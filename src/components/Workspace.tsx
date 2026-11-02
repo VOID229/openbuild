@@ -3,7 +3,7 @@ import { ThreadAccountSelect } from "./RuntimeAccounts";
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
-import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitCommitHorizontal, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
@@ -15,7 +15,7 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 // The last git state read for each project, kept across reloads so the branch shows at once while
@@ -303,7 +303,10 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
   const anchor = useRef<HTMLButtonElement>(null);
   const pref = useStore((s) => s.settings.workspace);
   const updateSettings = useStore((s) => s.updateSettings);
-  const shown = pref.branch && info?.branches.includes(pref.branch) ? pref.branch : info?.branch;
+  // A detached checkout has no branch: it's on a commit, which stands in for the current branch.
+  const current = info?.branch ?? info?.head;
+  const shown = pref.branch && info?.branches.includes(pref.branch) ? pref.branch : current;
+  const ShownIcon = info?.head && shown === info.head ? GitCommitHorizontal : GitBranch;
   // Switching the checkout's branch would carry uncommitted changes along (or fail).
   const locked = pref.mode === "local" && !!info?.dirty;
   return (
@@ -318,30 +321,30 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
         data-tooltip-side="top"
         onClick={() => setOpen((o) => !o)}
       >
-        <GitBranch size={14} />
+        <ShownIcon size={14} />
         <span className="ws-pill-text">{pref.mode === "worktree" ? `from ${shown ?? "…"}` : (shown ?? "…")}</span>
         {loading ? <Spinner size={11} /> : <ChevronDown size={13} className="pill-chevron" />}
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Branch" fixed="auto">
         <div className="menu-label menu-label-top">{pref.mode === "worktree" ? "Start the worktree from" : "Work on branch"}</div>
-        {locked && <p className="ws-note">{info!.dirty} uncommitted change{info!.dirty === 1 ? "" : "s"} in the checkout, so it stays on {info!.branch}. Use a new worktree to work on another branch.</p>}
+        {locked && <p className="ws-note">{info!.dirty} uncommitted change{info!.dirty === 1 ? "" : "s"} in the checkout, so it stays on {current}. Use a new worktree to work on another branch.</p>}
         <div className="select-list ws-branches" onKeyDown={(e) => arrowNav(e)}>
-          {(info?.branches ?? []).map((b) => (
+          {(info?.head ? [info.head, ...info.branches] : (info?.branches ?? [])).map((b) => (
             <button
               key={b}
               type="button"
               role="option"
               aria-selected={b === shown}
               className="menu-item"
-              disabled={locked && b !== info?.branch}
+              disabled={locked && b !== current}
               onClick={() => {
-                updateSettings({ workspace: { ...pref, branch: b === info?.branch ? undefined : b } });
+                updateSettings({ workspace: { ...pref, branch: b === current ? undefined : b } });
                 setOpen(false);
               }}
             >
-              <GitBranch size={14} />
+              {b === info?.head ? <GitCommitHorizontal size={14} /> : <GitBranch size={14} />}
               <span className="menu-item-label">{b}</span>
-              {b === info?.branch && <span className="badge">current</span>}
+              {b === current && <span className="badge">current</span>}
               {b === shown && <Check size={15} className="menu-check" />}
             </button>
           ))}
@@ -359,8 +362,8 @@ const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules an
 const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
 const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
 export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
-export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
-  return runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime | "hermes"; size: number }) {
+  return runtime === "hermes" ? <HermesMark size={size} /> : runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
 }
 
 /**
