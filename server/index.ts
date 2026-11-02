@@ -13,6 +13,7 @@ import { discoverSessions } from "./pi/discovery";
 import { localAuth } from "./localAuth";
 import { checkWhisper, transcribe } from "./dictation";
 import { findRun, localRun, startRun } from "./runs";
+import { requestRunStop } from "./runStops";
 import * as storage from "./storage";
 import * as vault from "./vault";
 import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
@@ -272,6 +273,7 @@ function serve(port: number, hostname: string) {
       "/api/chat/runs/:id/stop": {
         POST: api(async (req: Bun.BunRequest<"/api/chat/runs/:id/stop">) => {
           if (isStreamId(req.params.id)) {
+            requestRunStop(req.params.id);
             const run = findRun(req.params.id);
             if (run) run.stop();
             else await durable.stopRun(req.params.id);

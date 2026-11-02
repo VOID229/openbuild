@@ -125,8 +125,12 @@ export function mergeChats(preferred: Chat, other: Chat): Chat {
   for (const m of other.messages) byId.set(m.id, m);
   for (const m of preferred.messages) {
     const o = byId.get(m.id);
-    // Prefer the finished version of a reply over one still streaming.
-    byId.set(m.id, o && m.status === "streaming" && o.status !== "streaming" ? o : m);
+    // A retry reuses the message id, not its run id. An older finished attempt must not cancel
+    // the new streaming attempt (nor can an older preferred snapshot undo the newer retry).
+    const differentRun = o && o.stream?.id !== m.stream?.id;
+    const newerOther = differentRun && (o.startedAt ?? o.createdAt) > (m.startedAt ?? m.createdAt);
+    const finishedSameRun = o && !differentRun && m.status === "streaming" && o.status !== "streaming";
+    byId.set(m.id, newerOther || finishedSameRun ? o! : m);
   }
   const order = new Map([...other.messages, ...preferred.messages].map((m, i) => [m.id, i]));
   const messages = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || order.get(a.id)! - order.get(b.id)!);
@@ -157,6 +161,7 @@ export class SyncEngine {
   private importingKeys = false;
   private stopped = false;
   private pullChain: Promise<void> = Promise.resolve();
+  private pullRetry?: ReturnType<typeof setTimeout>;
   private unwatch?: () => void;
   private pushTimer?: ReturnType<typeof setTimeout>;
   private pushing?: Promise<void>;
@@ -239,6 +244,7 @@ export class SyncEngine {
   stop() {
     this.stopped = true;
     clearTimeout(this.draftTimer);
+    clearTimeout(this.pullRetry);
     this.unwatch?.();
     clearTimeout(this.pushTimer);
     this.cleanups.forEach((fn) => fn());
@@ -288,7 +294,13 @@ export class SyncEngine {
         return this.fail(err);
       }
       if (!page) return;
-      this.pullChain = this.pullChain.then(() => this.applyPage(page, since)).catch((err) => this.fail(err));
+      this.pullChain = this.pullChain.then(() => this.applyPage(page, since)).catch((err) => {
+        this.fail(err);
+        // A download/decryption failure does not change the query result, so there may never be
+        // another subscription update to retry it. Re-watch from the last committed cursor.
+        clearTimeout(this.pullRetry);
+        if (!this.stopped) this.pullRetry = setTimeout(() => this.watch(), 1000);
+      });
     };
     this.unwatch = w.onUpdate(take);
     take();
@@ -325,7 +337,13 @@ export class SyncEngine {
 
   private async applyRecord(r: RemoteRecord) {
     if ((this.state.known[r.key] ?? 0) >= r.seq) return; // Already have it (often our own write).
-    this.state.known[r.key] = r.seq;
+    await this.applyRecordValue(r);
+    // Commit only after download, decryption and application succeed; otherwise the retry would
+    // skip the failed record and advance the cursor past data that was never applied.
+    this.state.known[r.key] = Math.max(this.state.known[r.key] ?? 0, r.seq);
+  }
+
+  private async applyRecordValue(r: RemoteRecord) {
     if (r.key === "keys" && r.deleted) return;
     const id = chatIdOf(r.key);
 
@@ -344,7 +362,7 @@ export class SyncEngine {
       if (!res.ok) throw new Error(`Couldn't download a synced item (HTTP ${res.status})`);
       data = await res.arrayBuffer();
     }
-    if (!iv || !data) return;
+    if (!iv || !data) throw new Error("A synced item is missing its encrypted data");
     const value = await open<unknown>(this.key, r.key, iv, data);
     if (isDraftRecord(r.key)) return this.applyDraft(r.key, value as StoredDraft);
     const json = JSON.stringify(value);

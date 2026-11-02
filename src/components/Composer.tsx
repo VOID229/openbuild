@@ -1,6 +1,7 @@
 import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Mic, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
+import { EXTERNAL_VIA } from "../../shared/replies";
 import { drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
@@ -297,6 +298,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const cmdEnter = useStore((s) => s.settings.cmdEnter);
   const queue = useQueueOf(chatId);
   const piReply = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.model?.plan === "pi");
+  const external = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.stream?.via === EXTERNAL_VIA);
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -696,7 +698,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
+      {queue.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (piReply && runtime === "pi" ? "pi" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
@@ -788,6 +790,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>
+          ) : external && streaming ? (
+            <span className="composer-mode" role="status">External Pi · control it in its terminal</span>
           ) : (
             shellMode && (
               <span className="composer-mode">
@@ -812,8 +816,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
               <Mic size={17} />
             </button>
             {queueing && !hasContent && !editing ? (
-              <button type="button" className="round-btn" aria-label="Stop generating" data-tooltip="Stop" data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
-                <Square size={13} fill="currentColor" />
+              <button type="button" className="round-btn" aria-label={external ? "External Pi session (read-only)" : "Stop generating"} disabled={external} data-tooltip={external ? "Stop or steer this Pi session in its terminal" : "Stop"} data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
+                {external ? <SquareTerminal size={17} /> : <Square size={13} fill="currentColor" />}
               </button>
             ) : (
               <button

@@ -4,6 +4,7 @@
 // {t:"end"}. Only a stop (or the run finishing) ends it.
 import { readEvents } from "../shared/replies";
 import type { StreamEvent } from "../shared/types";
+import { runStopRequested } from "./runStops";
 
 const encoder = new TextEncoder();
 /** Keep a quiet connection (silent thinking, a slow search) from being closed as idle. */
@@ -36,10 +37,18 @@ export class Run {
     this.ctrl.abort();
   }
 
-  /** Resolves once there are more than `seen` events, or the run has ended. */
-  next(seen: number): Promise<void> {
-    if (this.events.length > seen || this.ended) return Promise.resolve();
-    return new Promise((resolve) => this.waiters.add(resolve));
+  /** Resolves once there are more events, the run ends, or this watcher stops waiting. */
+  next(seen: number, signal?: AbortSignal): Promise<void> {
+    if (this.events.length > seen || this.ended || signal?.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        this.waiters.delete(done);
+        signal?.removeEventListener("abort", done);
+        resolve();
+      };
+      this.waiters.add(done);
+      signal?.addEventListener("abort", done, { once: true });
+    });
   }
 
   private wake() {
@@ -50,12 +59,26 @@ export class Run {
   /** The whole reply as NDJSON, from the start. Cancelling it (the client left) doesn't stop the run. */
   stream(): ReadableStream<Uint8Array> {
     let sent = 0;
+    let cancelled = false;
+    let cancelWait: (() => void) | undefined;
     return new ReadableStream({
       pull: async (controller) => {
+        if (cancelled) return;
         if (sent >= this.events.length && !this.ended) {
-          let timer: ReturnType<typeof setTimeout> | undefined;
-          const beat = await Promise.race([this.next(sent).then(() => false), new Promise<boolean>((r) => (timer = setTimeout(() => r(true), HEARTBEAT)))]);
-          clearTimeout(timer);
+          const waiting = new AbortController();
+          cancelWait = () => waiting.abort();
+          let beat = false;
+          const timer = setTimeout(() => {
+            beat = true;
+            waiting.abort();
+          }, HEARTBEAT);
+          try {
+            await this.next(sent, waiting.signal);
+          } finally {
+            clearTimeout(timer);
+            cancelWait = undefined;
+          }
+          if (cancelled) return;
           if (beat) return controller.enqueue(encoder.encode("\n"));
         }
         if (sent < this.events.length) {
@@ -65,6 +88,10 @@ export class Run {
         }
         controller.enqueue(encoder.encode(line({ t: "end" })));
         controller.close();
+      },
+      cancel: () => {
+        cancelled = true;
+        cancelWait?.();
       },
     });
   }
@@ -76,13 +103,16 @@ export function startRun(produce: (signal: AbortSignal) => Promise<Response>): R
   void (async () => {
     try {
       const res = await produce(run.signal);
-      if (run.signal.aborted) return;
+      if (run.signal.aborted) {
+        void res.body?.cancel().catch(() => {});
+        return;
+      }
       if (!res.ok || !res.body) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
         run.push({ t: "error", status: res.status, message: body?.error ?? `Request failed (HTTP ${res.status})` });
         return;
       }
-      for await (const e of readEvents(res.body)) run.push(e);
+      for await (const e of readEvents(res.body, run.signal)) run.push(e);
     } catch (err) {
       if (!run.signal.aborted) run.push({ t: "error", message: `The reply was interrupted: ${(err as Error).message}` });
     } finally {
@@ -110,7 +140,13 @@ export function localRun(id: string, start: () => Run): Run {
   if (existing) return existing;
   // Forget the oldest finished replies if a lot have piled up.
   if (runs.size >= MAX_RUNS) for (const [key, r] of runs) if (r.ended && runs.size >= MAX_RUNS) runs.delete(key);
-  const run = start();
+  let run: Run;
+  if (runStopRequested(id)) {
+    run = new Run();
+    run.stop();
+    run.push({ t: "done", finish: "aborted" });
+    run.end();
+  } else run = start();
   runs.set(id, run);
   void (async () => {
     while (!run.ended) await run.next(run.events.length);

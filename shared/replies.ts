@@ -51,26 +51,39 @@ export async function openEvents(key: string, id: string, iv: ArrayBuffer, data:
   return JSON.parse(dec.decode(plain)) as StreamEvent[];
 }
 
-/** Parse an NDJSON body into events (blank heartbeat lines are skipped). */
-export async function* readEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
+/** Parse NDJSON (skipping heartbeat lines). Leaving early or aborting cancels only this reader. */
+export async function* readEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<StreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = "";
+  let finished = false;
+  // Don't await cancellation: an uncooperative source must not keep Stop/iterator cleanup waiting.
+  const cancel = () => { void reader.cancel(signal?.reason).catch(() => {}); };
+  signal?.addEventListener("abort", cancel, { once: true });
   try {
+    signal?.throwIfAborted();
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      signal?.throwIfAborted();
+      if (done) {
+        finished = true;
+        break;
+      }
       buf += decoder.decode(value, { stream: true });
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
+        signal?.throwIfAborted();
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
         if (line) yield JSON.parse(line) as StreamEvent;
       }
     }
+    signal?.throwIfAborted();
     buf += decoder.decode();
     if (buf.trim()) yield JSON.parse(buf) as StreamEvent;
   } finally {
+    signal?.removeEventListener("abort", cancel);
+    if (!finished) cancel();
     reader.releaseLock();
   }
 }
