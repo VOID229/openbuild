@@ -386,6 +386,8 @@ export interface PairedClient {
 
 export interface GitInfo {
   branch?: string;
+  /** The short commit hash when HEAD is detached (no `branch`). */
+  head?: string;
   branches: string[];
   /** Uncommitted changes (number of changed paths). */
   dirty: number;

@@ -20,6 +20,7 @@ import { ask, confirm } from "./prompt";
 import { stage } from "./motion";
 import { uninstallPlan, removeInstallation } from "./uninstall";
 import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
+import { remoteRequest } from "./remoteRequest";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
@@ -781,43 +782,15 @@ async function unpair(raw: string[]) {
   }
 }
 
-interface RemoteAnswer {
-  ok: boolean;
-  status?: number;
-  body?: any;
-  error?: string;
-  base?: string;
-}
-
-/** Call a paired device directly with its token, trying each saved address. */
-async function remoteRequest(device: PairedDevice, path: string, method: "GET" | "POST"): Promise<RemoteAnswer> {
-  let failure: RemoteAnswer | undefined;
-  for (const base of device.urls) {
-    try {
-      const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
-        method,
-        headers: { authorization: `Bearer ${device.token}` },
-        signal: AbortSignal.timeout(8000),
-      });
-      const body = await res.json().catch(() => null);
-      if (res.status === 401)
-        return { ok: false, status: 401, body, base, error: "the other device no longer trusts this pairing; unpair and pair again" };
-      if (res.ok) return { ok: true, status: res.status, body, base };
-      failure = { ok: false, status: res.status, body, base, error: `HTTP ${res.status}` };
-    } catch (err) {
-      failure = { ok: false, error: (err as Error).message, base };
-    }
-  }
-  return failure ?? { ok: false, error: "no address saved for this device" };
-}
-
 async function remoteStatus() {
   const list = devices.readDevices();
   if (!list.length) return console.log("No paired devices. Add one with: openbuild pair --client");
-  for (const device of list) {
-    const answer = await remoteRequest(device, "/api/remote/status", "GET");
+  console.log(dim("Checking paired devices…"));
+  const answers = await Promise.all(list.map(device => remoteRequest(device, "/api/remote/status", "GET")));
+  for (const [i, device] of list.entries()) {
+    const answer = answers[i]!;
     if (answer.status === 401) console.log(`${deviceLabel(device)}: ${answer.error}.`);
-    else if (answer.status === 200 && answer.body?.running) console.log(`${deviceLabel(device)}: running (${device.urls[0] ?? "no address"})`);
+    else if (answer.status === 200 && answer.body?.running) console.log(`${deviceLabel(device)}: running (${answer.base ?? "no address"})`);
     else if (answer.status === 200)
       console.log(`${deviceLabel(device)}: stopped, still paired (start it with openbuild remote server start --device ${device.name})`);
     else if (answer.status === 404) console.log(`${deviceLabel(device)}: running, but that OpenBuild has no remote control (update it)`);

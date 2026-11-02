@@ -115,8 +115,9 @@ export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = 
 }
 
 export async function gitInfo(cwd: string): Promise<GitInfo> {
-  const [branch, branches, status, counts] = await Promise.all([
+  const [branch, head, branches, status, counts] = await Promise.all([
     git(cwd, ["branch", "--show-current"]),
+    git(cwd, ["rev-parse", "--short", "HEAD"]),
     git(cwd, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)", "refs/heads"]),
     git(cwd, ["status", "--porcelain"]),
     git(cwd, ["rev-list", "--left-right", "--count", "@{upstream}...HEAD"]),
@@ -124,6 +125,7 @@ export async function gitInfo(cwd: string): Promise<GitInfo> {
   const [behind, ahead] = counts.code === 0 ? counts.out.split(/\s+/).map(Number) : [];
   return {
     branch: branch.out || undefined,
+    head: !branch.out && head.code === 0 ? head.out || undefined : undefined,
     branches: branches.code === 0 ? branches.out.split("\n").filter(Boolean) : [],
     dirty: status.code === 0 ? status.out.split("\n").filter(Boolean).length : 0,
     ahead,
