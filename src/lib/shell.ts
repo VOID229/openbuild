@@ -86,7 +86,7 @@ export function resumeShells(chatId?: string) {
   for (const chat of useStore.getState().chats) {
     if (chatId && chat.id !== chatId) continue;
     for (const m of chat.messages) {
-      if (m.shell?.status === "running" && m.shell.stream && canResume(m.shell.stream.via)) void follow(chat.id, m.id);
+      if (m.shell?.status === "running" && m.shell.stream && canResume(m.shell.stream.via, m.shell.stream.deviceId)) void follow(chat.id, m.id);
     }
   }
 }

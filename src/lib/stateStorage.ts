@@ -8,11 +8,13 @@
 // otherwise replace your saved settings with the defaults.
 import type { StateStorage } from "zustand/middleware";
 import { config } from "./runtime";
+import { fetchWithTimeout } from "./abort";
 
 let ready = false;
 let pending: string | undefined;
 let timer: ReturnType<typeof setTimeout> | undefined;
 let retryDelay = 1000;
+let pushing = false;
 
 const local = {
   get: (name: string) => {
@@ -33,7 +35,7 @@ const local = {
 async function fetchState(): Promise<string | null | undefined> {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const res = await fetch("/api/state");
+      const res = await fetchWithTimeout("/api/state", {}, 3000);
       if (res.ok) return ((await res.json()) as { state: string | null }).state;
     } catch {}
     await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
@@ -44,9 +46,10 @@ async function fetchState(): Promise<string | null | undefined> {
 async function push() {
   timer = undefined;
   const value = pending;
-  if (value === undefined) return;
+  if (value === undefined || pushing) return;
+  pushing = true;
   try {
-    const res = await fetch("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state: value }) });
+    const res = await fetchWithTimeout("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state: value }) });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (pending === value) pending = undefined;
     retryDelay = 1000;
@@ -54,13 +57,19 @@ async function push() {
     console.warn("Couldn't save settings; retrying", err);
     timer ??= setTimeout(push, retryDelay);
     retryDelay = Math.min(retryDelay * 2, 30_000);
+  } finally {
+    pushing = false;
+    // A newer value arrived during this write. Never issue concurrent PUTs: an older response
+    // could otherwise land last on the server and silently undo the user's latest settings.
+    if (pending !== undefined && !timer) timer = setTimeout(push, 0);
   }
 }
 
 function queue(value: string, delay = 250) {
   pending = value;
   if (timer) clearTimeout(timer);
-  timer = setTimeout(push, delay);
+  timer = undefined;
+  if (!pushing) timer = setTimeout(push, delay);
 }
 
 if (typeof window !== "undefined") {

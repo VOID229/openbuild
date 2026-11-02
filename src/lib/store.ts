@@ -6,6 +6,7 @@ import { listDevices, listProjects, piModels, piProblems, piProviders, piResourc
 import { qualifyProject, setDeviceList } from "./devices";
 import { config } from "./runtime";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
+import { clearQueue } from "./queue";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { effortFor, effortKey } from "./effort";
@@ -378,6 +379,7 @@ export const useStore = create<State>()(
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       removeChat: (id) => {
+        clearQueue(id);
         void deleteChat(id);
         set((s) => {
           const { [id]: _, ...selections } = s.selections;
@@ -385,6 +387,7 @@ export const useStore = create<State>()(
         });
       },
       removeAllChats: () => {
+        clearQueue();
         void deleteAllChats();
         set({ chats: [], activeChatId: undefined, selections: {} });
       },

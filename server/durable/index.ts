@@ -9,9 +9,11 @@ import type { Models } from "@earendil-works/pi-ai";
 import { Harness, createRegistry, type Conversation, type EntryRecord, type WatchHandle } from "@earendil-works/pi-durable";
 import { openNodeJsonlStorage } from "@earendil-works/pi-durable/storage/jsonl/node";
 import { durableCodingTools } from "./tools";
+import { cancellationSafeModels } from "./models";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import { Run } from "../runs";
+import { runStopRequested } from "../runStops";
 import { dataDir } from "../paths";
 import { agentDir, packageRoot } from "../pi/install";
 import { addUsage } from "../pi/usage";
@@ -25,7 +27,7 @@ interface Manifest {
   seen: EntryRecord["id"][];
   events: StreamEvent[];
   ended: boolean;
-  /** True once `root.submit()` committed: the input may be in the transcript, so replay stays possible. */
+  /** Persisted before attempting submit: a lost acknowledgement must not discard committed work. */
   submitted?: boolean;
   usage?: Usage;
   stopping?: boolean;
@@ -76,15 +78,21 @@ export class DurableRuntime {
   private persist(m: Manifest) { save(this.file(m.id), m); }
   private tombstone(threadId: string) { return join(this.directory, "deleted", `${key(threadId)}.json`); }
   private deleted(threadId: string) { return existsSync(this.tombstone(threadId)); }
-  private retire(m: Manifest) {
+  private finish(m: Manifest, events: StreamEvent[], stopping = m.stopping) {
+    if (m.ended) return;
+    // Do not mark the live manifest ended until persistence succeeds. Otherwise a failed final
+    // write leaves a non-ended Run whose retries incorrectly take the already-finished fast path.
+    const next = { ...m, stopping, ended: true, events: [...m.events, ...events] };
+    this.persist(next);
+    Object.assign(m, next);
     const run = this.handle(m);
-    m.stopping = true;
-    m.ended = true;
-    m.events.push({ t: "done", finish: "aborted" });
-    this.persist(m);
     for (const event of m.events.slice(run.events.length)) run.push(event);
     run.end();
+    this.driving.delete(m.id);
     this.recoveryErrors.delete(m.id);
+  }
+  private retire(m: Manifest) {
+    this.finish(m, [{ t: "done", finish: "aborted" }], true);
   }
   /**
    * Admission failed before the input could have entered the transcript: nothing was submitted, so
@@ -92,23 +100,16 @@ export class DurableRuntime {
    */
   private fail(m: Manifest, error: unknown) {
     if (m.ended) return;
-    const run = this.handle(m);
     const message = error instanceof Error ? error.message : String(error);
-    m.stopping = true;
-    m.ended = true;
-    m.events.push({ t: "error", message }, { t: "done", finish: "error" });
-    this.persist(m);
-    for (const event of m.events.slice(run.events.length)) run.push(event);
-    run.end();
-    this.recoveryErrors.delete(m.id);
+    this.finish(m, [{ t: "error", message }, { t: "done", finish: "error" }], true);
   }
   /** Drive a newly admitted run, terminalizing it when it failed before submit. */
   private async admit(m: Manifest): Promise<DurableRun> {
     try {
       return await this.drive(m);
     } catch (error) {
-      // Never terminalize after submit: upstream's requestId dedupe makes that replay safe, while a
-      // pre-submit failure has no side effects and would otherwise wedge every later turn.
+      // Never terminalize after attempting submit: a rejection can follow a committed admission.
+      // The persisted requestId makes replay safe even when its acknowledgement was lost.
       if (!m.submitted) this.fail(m, error);
       throw error;
     }
@@ -153,7 +154,7 @@ export class DurableRuntime {
         const registry = createRegistry();
         registry.install(durableCodingTools(this.options.bashTimeoutSeconds));
         const storage = await openNodeJsonlStorage(join(this.directory, "threads", key(id)), context, { fsync: true });
-        const harness = await Harness.open(storage, { models, registry, env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }) }, context);
+        const harness = await Harness.open(storage, { models: cancellationSafeModels(models), registry, env: ({ cwd }) => new NodeExecutionEnv({ cwd: cwd ?? process.cwd() }) }, context);
         return { harness, root: await harness.root(context) };
       })();
       this.threads.set(id, pending);
@@ -185,10 +186,30 @@ export class DurableRuntime {
     // handle() may have just hydrated the full log.
     for (const event of m.events.slice(run.events.length)) run.push(event);
   }
+  /** The active snapshot's newest ID also fences off older, compacted history from prior runs. */
+  private baselineEnd(m: Manifest) { return m.baseline.reduce((max, id) => Math.max(max, id), 0); }
+  private async projectHistory(m: Manifest, root: Conversation) {
+    let cursor: Parameters<Conversation["entries"]>[2];
+    const baseline = this.baselineEnd(m);
+    do {
+      const page = await root.entries({ order: "ascending", ...(baseline ? { minEntryId: baseline as EntryRecord["id"] } : {}) }, 256, cursor, context);
+      if (m.ended) return;
+      // A final/abort scan can overlap the watch's serialized callback. Rebuild seen inside the
+      // synchronous projection AFTER every page await; never cache it across storage reads.
+      this.project(m, page.items);
+      cursor = page.next;
+    } while (cursor !== undefined);
+  }
+  private async abort(m: Manifest, root: Conversation) {
+    await root.abort(context);
+    await this.projectHistory(m, root);
+    this.retire(m);
+  }
   private project(m: Manifest, entries: readonly EntryRecord[]) {
-    const skip = new Set([...m.baseline, ...m.seen]);
+    const skip = new Set(m.seen);
+    const baseline = this.baselineEnd(m);
     for (const entry of entries) {
-      if (skip.has(entry.id)) continue;
+      if (entry.id <= baseline || skip.has(entry.id)) continue;
       const events: StreamEvent[] = [];
       for (const message of entry.model ?? []) {
         if (message.role === "assistant") {
@@ -221,6 +242,9 @@ export class DurableRuntime {
   private async driveImpl(m: Manifest) {
     const run = this.handle(m);
     const { harness, root } = await this.thread(m.request.threadId);
+    // submit() itself resumes SDK scheduling. Persisted cancellation must abort recovered work
+    // before any requestId replay (including an input that never made it into the transcript).
+    if (m.stopping) { await this.abort(m, root); return run; }
     const at = m.request.model.indexOf("/");
     if (at < 1) throw new Error("Expected model provider/model-id");
     const selected = (await this.getModels()).getModel(m.request.model.slice(0, at), m.request.model.slice(at + 1));
@@ -228,44 +252,58 @@ export class DurableRuntime {
     await root.configure({ model: { provider: m.request.model.slice(0, at), modelId: m.request.model.slice(at + 1) }, thinkingLevel: m.request.effort, cwd: m.request.cwd }, context);
     const watch = await root.watch(context);
     this.watches.add(watch as WatchHandle<unknown>);
-    this.project(m, watch.value.entries);
-    watch.start(async value => { if (!m.ended) this.project(m, value.entries); });
-    const content = m.request.images?.length
-      ? [{ type: "text" as const, text: m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
-      : m.request.message;
-    // The manifest exists before submit. Retrying after either side of this await is safe.
-    const submission = await root.submit({ type: "input", content, requestId: m.id, whenBusy: "reject" }, context);
-    // Persist "may have been submitted" before anything else can fail: from here on, recovery must
-    // replay instead of terminalizing, and upstream dedupes the requestId.
-    m.submitted = true;
-    this.persist(m);
-    harness.resume();
-    if (m.stopping) await root.abort(context);
-    void (async () => {
-      try {
-        const result = await submission.wait(context);
-        if (m.ended) return;
-        // Acquire a fresh snapshot after wait: the asynchronous watch may not yet have delivered the answer.
-        const final = await root.watch(context);
-        if (m.ended) { await final.stop(); return; }
-        this.project(m, final.value.entries);
-        await final.stop();
-        if (m.ended) return;
-        if (result.status === "unanswered" && !m.stopping) m.events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
-        m.events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
-        m.ended = true;
-        this.persist(m);
-        for (const event of m.events.slice(run.events.length)) run.push(event);
-        run.end();
-      } catch (error) {
-        // Close/crash is NOT a terminal run. Leave metadata pending for automatic recovery.
-        if (!this.closed) console.error("Durable run paused; reopen to recover", m.id, error);
-      } finally {
+    try {
+      // Watch snapshots contain only active context. Scan immutable storage instead: compaction or
+      // a coalesced watch frame must not erase committed tools/text from the host's replay log.
+      await this.projectHistory(m, root);
+      watch.start(async () => { if (!m.ended) await this.projectHistory(m, root); });
+      // Stop may have arrived while configure/watch/history were awaiting storage.
+      if (m.stopping) {
+        await this.abort(m, root);
         await watch.stop();
         this.watches.delete(watch as WatchHandle<unknown>);
+        return run;
       }
-    })();
-    return run;
+      const content = m.request.images?.length
+        ? [{ type: "text" as const, text: m.request.message }, ...m.request.images.map(i => ({ type: "image" as const, ...i }))]
+        : m.request.message;
+      m.submitted = true;
+      this.persist(m); // commit ambiguity begins BEFORE the SDK call, not after its acknowledgement
+      const submission = await root.submit({ type: "input", content, requestId: m.id, whenBusy: "reject" }, context);
+      harness.resume();
+      if (m.stopping) await root.abort(context);
+      void (async () => {
+        try {
+          const result = await submission.wait(context);
+          if (m.ended) return;
+          // Waiters and watch callbacks are independent; fill any final projection gap before done.
+          const final = await root.watch(context);
+          try { await this.projectHistory(m, root); } finally { await final.stop(); }
+          if (m.ended) return;
+          const events: StreamEvent[] = [];
+          if (result.status === "unanswered" && !m.stopping) events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
+          events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
+          this.finish(m, events);
+        } catch (error) {
+          // A failed host waiter is not a terminal SDK submission. Drop its ownership so retry can
+          // reattach, rather than returning the already-resolved admission promise forever.
+          this.driving.delete(m.id);
+          if (!this.closed) {
+            this.recoveryErrors.set(m.id, error);
+            this.retryAt.set(m.id, Date.now() + 5_000);
+            console.error("Durable run paused; reconnect or reopen to recover", m.id, error);
+          }
+        } finally {
+          await watch.stop();
+          this.watches.delete(watch as WatchHandle<unknown>);
+        }
+      })();
+      return run;
+    } catch (error) {
+      await watch.stop();
+      this.watches.delete(watch as WatchHandle<unknown>);
+      throw error;
+    }
   }
   async recover(): Promise<void> {
     return this.recovering ??= (async () => {
@@ -325,7 +363,7 @@ export class DurableRuntime {
       const watch = await root.watch(context);
       const baseline = watch.value.entries.map(e => e.id);
       await watch.stop();
-      const m: Manifest = { version: 1, id, request: structuredClone(req), baseline, seen: [], events: [], ended: false };
+      const m: Manifest = { version: 1, id, request: structuredClone(req), baseline, seen: [], events: [], ended: false, ...(runStopRequested(id) ? { stopping: true } : {}) };
       this.persist(m);
       this.manifests.set(id, m);
       return this.admit(m);
@@ -351,10 +389,14 @@ export class DurableRuntime {
     if (!m) return false;
     if (!m.ended) {
       m.stopping = true; this.persist(m);
-      // A run with no live drive (for example an admission failure from an earlier process) cannot
-      // be aborted: end it, so Stop actually unsticks the thread.
-      if (!this.driving.has(m.id)) this.retire(m);
-      else await (await this.thread(m.request.threadId)).root.abort(context);
+      // abort() is conversation-scoped, not request-scoped. Fence the entire cancellation with
+      // admission so an old Stop cannot reach the next turn if this one finishes during the await.
+      await this.serial("$admission", async () => {
+        if (m.ended) return;
+        // A failed submit acknowledgement may leave live SDK work without a host drive.
+        if (this.threads.has(m.request.threadId)) await this.abort(m, (await this.thread(m.request.threadId)).root);
+        else this.retire(m);
+      });
     }
     return true;
   }

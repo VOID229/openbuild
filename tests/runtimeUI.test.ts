@@ -29,6 +29,7 @@ g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: str
 const { useStore } = await import("../src/lib/store");
 const { WorkspaceTop, WorkspaceBelow } = await import("../src/components/Workspace");
 const { Sidebar } = await import("../src/components/Sidebar");
+const { Composer } = await import("../src/components/Composer");
 const { sendMessage, regenerate } = await import("../src/lib/chat");
 const initialSettings = useStore.getState().settings;
 const thread = (runtime?: Chat["runtime"]): Chat => ({ id: "runtime-test", title: "Test", createdAt: 0, updatedAt: 0, messages: [], runtime });
@@ -45,6 +46,17 @@ function markup(element: Parameters<typeof renderToStaticMarkup>[0]) {
 function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
   useStore.setState({ settings: { ...initialSettings, workspace: { mode: "local" }, ...settings }, chats, activeChatId: undefined, projects: [], selections: {} });
 }
+
+test("external Pi observation never advertises a working Stop or steering control", () => {
+  const external = { ...thread("pi"), messages: [{ id: "external-reply", role: "assistant" as const, content: "", status: "streaming" as const, createdAt: 0, stream: { id: "", via: "external" } }] };
+  reset({}, [external]);
+  const html = markup(createElement(Composer, { chatId: external.id, variant: "dock", streaming: true }));
+  expect(html).toContain("External Pi · control it in its terminal");
+  expect(html).toContain('aria-label="External Pi session (read-only)" disabled=""');
+  expect(html).not.toContain('aria-label="Stop generating"');
+  reset({}, [{ ...external, messages: [{ ...external.messages[0]!, stream: { id: "local-reply", via: "server" } }] }]);
+  expect(markup(createElement(Composer, { chatId: external.id, variant: "dock", streaming: true }))).toContain('aria-label="Stop generating"');
+});
 
 test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", () => {
   reset({ threadRuntime: undefined });

@@ -3,12 +3,15 @@ import { createAssistantMessageEventStream, type AssistantMessage, type ToolCall
 import { writeFileSync } from "node:fs";
 
 /** Zero network/key access: only use the static catalog, replace the dispatch method. */
-export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; marker?: string; tool?: boolean; command?: string } = {}) {
+export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; ignoreAbort?: boolean; marker?: string; tool?: boolean; command?: string } = {}) {
   const models = builtinModels();
   const model = models.getModels().find(m => m.type === "chat")!;
   let calls = 0;
+  const requests: { input: Parameters<typeof models.streamSimple>[1]; signal?: AbortSignal }[] = [];
+  const releases: (() => void)[] = [];
   models.streamSimple = (_model, input, request) => {
     calls++;
+    requests.push({ input: structuredClone(input), signal: request?.signal });
     const stream = createAssistantMessageEventStream();
     const hasTool = input.messages.some(m => m.role === "toolResult");
     const content: AssistantMessage["content"] = options.tool && !hasTool
@@ -22,8 +25,9 @@ export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; m
     queueMicrotask(() => {
       stream.push({ type: "start", partial: message });
       if (options.hold || (options.holdAfterTool && hasTool)) {
+        releases.push(() => stream.push({ type: "done", reason: message.stopReason as "stop" | "toolUse", message }));
         if (options.marker) writeFileSync(options.marker, "model-entered");
-        request?.signal?.addEventListener("abort", () => {
+        if (!options.ignoreAbort) request?.signal?.addEventListener("abort", () => {
           const aborted = { ...message, stopReason: "aborted" as const };
           stream.push({ type: "error", reason: "aborted", error: aborted });
         }, { once: true });
@@ -31,5 +35,5 @@ export function fakeModels(options: { hold?: boolean; holdAfterTool?: boolean; m
     });
     return stream;
   };
-  return { models, model: `${model.provider}/${model.id}`, calls: () => calls };
+  return { models, model: `${model.provider}/${model.id}`, calls: () => calls, requests, release: () => releases.shift()?.() };
 }

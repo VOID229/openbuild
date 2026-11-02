@@ -1,4 +1,6 @@
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { createStore, del, get, set } from "./kv";
 import type { Attachment } from "../../shared/types";
 
 /** A message written while a reply was still coming in; it's sent once the chat is free. */
@@ -9,13 +11,46 @@ export interface Queued {
 }
 
 interface QueueState {
-  /** Per chat, oldest first. Kept in memory only, like the replies they wait on. */
+  /** Per chat, oldest first. Saved locally so a reload doesn't forget unsent actions. */
   queues: Record<string, Queued[]>;
+  /** Handed to Pi but not yet acknowledged by the reply's steer event (also replayed on resume). */
+  steering: Record<string, Queued[]>;
   /** Per chat, the queued message open in the composer. It keeps its slot, and nothing is sent meanwhile. */
   editing: Record<string, string>;
 }
 
-export const useQueue = create<QueueState>(() => ({ queues: {}, editing: {} }));
+const saved = createStore("openchat-queue", "queue");
+let hydrated = false;
+let resolveReady!: () => void;
+export const queuesReady = new Promise<void>((resolve) => { resolveReady = resolve; });
+export const queueIsReady = () => hydrated;
+export const useQueue = create<QueueState>()(persist(() => ({ queues: {}, steering: {}, editing: {} }), {
+  name: "queue",
+  storage: createJSONStorage(() => ({
+    getItem: async (key) => (await get<string>(key, saved)) ?? null,
+    setItem: (key, value) => set(key, value, saved).catch((err) => console.error("Couldn't save queued actions", err)),
+    removeItem: (key) => del(key, saved),
+  })),
+  partialize: ({ queues, steering }) => ({ queues, steering }),
+  onRehydrateStorage: () => (_state, error) => {
+    hydrated = true;
+    resolveReady();
+    if (error) console.error("Couldn't load queued actions", error);
+  },
+  merge: (persisted, current) => {
+    const previous = persisted as Partial<QueueState> | undefined;
+    const merge = (a: Record<string, Queued[]> = {}, b: Record<string, Queued[]>) => Object.fromEntries(
+      [...new Set([...Object.keys(a), ...Object.keys(b)])].map((id) => [id, [...new Map([...(a[id] ?? []), ...(b[id] ?? [])].map((q) => [q.id, q])).values()]]),
+    );
+    const steering = merge(previous?.steering, current.steering);
+    const queues = merge(previous?.queues, current.queues);
+    for (const id of Object.keys(queues)) {
+      const pending = new Set(steering[id]?.map((q) => q.id));
+      queues[id] = queues[id]!.filter((q) => !pending.has(q.id));
+    }
+    return { ...current, queues, steering };
+  },
+}));
 
 const EMPTY: Queued[] = [];
 
@@ -26,6 +61,16 @@ function setQueue(chatId: string, list: Queued[]) {
   useQueue.setState((s) => {
     const { [chatId]: _, ...rest } = s.queues;
     return { queues: list.length ? { ...rest, [chatId]: list } : rest };
+  });
+}
+
+export function clearQueue(chatId?: string) {
+  useQueue.setState((s) => {
+    if (!chatId) return { queues: {}, steering: {}, editing: {} };
+    const { [chatId]: _queue, ...queues } = s.queues;
+    const { [chatId]: _steers, ...steering } = s.steering;
+    const { [chatId]: _editing, ...editing } = s.editing;
+    return { queues, steering, editing };
   });
 }
 
@@ -62,7 +107,26 @@ export function moveQueued(chatId: string, id: string, to: number) {
 
 /** Put messages back at the front, e.g. ones steered into a reply that ended before Pi read them. */
 export function requeue(chatId: string, items: Queued[]) {
-  if (items.length) setQueue(chatId, [...items, ...queueOf(chatId).filter((q) => !items.includes(q))]);
+  if (!items.length) return;
+  const ids = new Set(items.map((q) => q.id));
+  useQueue.setState((s) => ({
+    queues: { ...s.queues, [chatId]: [...new Map(items.map((q) => [q.id, q])).values(), ...queueOf(chatId).filter((q) => !ids.has(q.id))] },
+    steering: { ...s.steering, [chatId]: (s.steering[chatId] ?? []).filter((q) => !ids.has(q.id)) },
+  }));
+}
+
+export const steeringOf = (chatId: string): Queued[] => useQueue.getState().steering[chatId] ?? EMPTY;
+
+/** Keep an unsent action durable until the stream confirms Pi read it. */
+export function stageSteer(chatId: string, item: Queued) {
+  useQueue.setState((s) => ({
+    queues: { ...s.queues, [chatId]: queueOf(chatId).filter((q) => q.id !== item.id) },
+    steering: { ...s.steering, [chatId]: [...steeringOf(chatId), item] },
+  }));
+}
+
+export function consumeSteer(chatId: string, id: string) {
+  useQueue.setState((s) => ({ steering: { ...s.steering, [chatId]: steeringOf(chatId).filter((q) => q.id !== id) } }));
 }
 
 export function shiftQueue(chatId: string): Queued | undefined {

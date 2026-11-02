@@ -105,6 +105,20 @@ export const set = (key: string, value: unknown, store: Store) => run(store, (f)
 
 export const del = (key: string, store: Store) => run(store, (f) => f.del(key), (s) => idb.del(key, s));
 
+/** Compare and delete in one transaction, so an outbox acknowledgement can't erase a newer edit. */
+export const delIf = <T>(key: string, predicate: (value: T | undefined) => boolean, store: Store): Promise<void> =>
+  run(store, (f) => { if (predicate(f.get(key) as T | undefined)) f.del(key); }, (s) => s("readwrite", (objectStore) => {
+    const request = objectStore.get(key);
+    request.onsuccess = () => {
+      try {
+        if (predicate(request.result as T | undefined)) objectStore.delete(key);
+      } catch {
+        objectStore.transaction.abort();
+      }
+    };
+    return idb.promisifyRequest(objectStore.transaction);
+  }));
+
 export const clear = (store: Store) => run(store, (f) => f.clear(), (s) => idb.clear(s));
 
 export const entries = <K extends string = string, V = unknown>(store: Store) =>
