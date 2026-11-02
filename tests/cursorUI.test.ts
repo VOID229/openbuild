@@ -128,6 +128,10 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(saved.get(first.id)?.permission).toBe("force");
     expect(useStore.getState().settings.runtimePermissions?.cursor).toBe("force");
     // Reload from the serialized chat; a new thread inherits the last selection.
+    // Stream completion updates the UI before its asynchronous outbox PUT finishes.
+    // Wait for disk acknowledgement before simulating a reload of that saved reply.
+    const { saveChatBeforeRun } = await import("../src/lib/db");
+    await saveChatBeforeRun(first);
     useStore.getState().setChats([JSON.parse(JSON.stringify(saved.get(first.id)))]);
     useStore.getState().newChat();
     expect(sendMessage("independent", [])).toBe(true);
