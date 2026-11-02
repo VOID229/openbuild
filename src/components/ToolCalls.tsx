@@ -202,6 +202,8 @@ type Work = ToolPart | ThoughtPart;
 
 /** How long a call or thought has to be going before it shows as what Pi is doing. */
 const SETTLE_MS = 500;
+/** Once it shows, how long it stays (even if it's over sooner), so the live line never just blinks. */
+const HOLD_MS = 900;
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
@@ -289,25 +291,42 @@ export function WorkRun({
   const last = parts.at(-1);
   const thought = live && last?.type === "thought" && last.ms === undefined ? last : undefined;
   const current = live ? parts.filter((p) => p === thought || (p.type === "tool" && p.status === "running")) : [];
-  const done = current.length ? parts.filter((p) => !current.includes(p)) : parts;
-  const summary = done.length ? summarize(done) : undefined;
-  // Most calls are over in a few milliseconds: only one still going after a moment takes the live
-  // line, so quick ones don't flash past "Working" on their way into the summary.
+  // The live line shows one thing at a time. Most calls are over in a few milliseconds, so only one
+  // still going after a moment takes it, and then keeps it for a moment even if it ends sooner:
+  // nothing blinks past "Working" on its way into the summary.
   const keyOf = (p: Work) => (p.type === "tool" ? p.id : `th${parts.indexOf(p)}`);
   const since = useRef(new Map<string, number>());
+  const showing = useRef<{ key: string; at: number }>(undefined);
   const now = Date.now();
   for (const p of current) if (!since.current.has(keyOf(p))) since.current.set(keyOf(p), now);
-  const shown = current.filter((p) => now - since.current.get(keyOf(p))! >= SETTLE_MS);
+  const settled = current.filter((p) => now - since.current.get(keyOf(p))! >= SETTLE_MS);
+  let held = live ? parts.find((p) => keyOf(p) === showing.current?.key) : undefined;
+  if (!held || now - showing.current!.at >= HOLD_MS) {
+    const next = settled.includes(held!) ? held : settled.at(-1);
+    if (next !== held) showing.current = next && { key: keyOf(next), at: now };
+    held = next;
+  }
+  const shown = held;
+  const done = parts.filter((p) => p !== shown && !current.includes(p));
+  const summary = done.length ? summarize(done) : undefined;
+  // Wake up when something waiting would show, or what's showing may give way.
   const [, tick] = useState(0);
-  const waiting = current.length > shown.length;
+  const wake = [
+    ...current.filter((p) => !settled.includes(p)).map((p) => since.current.get(keyOf(p))! + SETTLE_MS),
+    ...(shown && showing.current ? [showing.current.at + HOLD_MS] : []),
+  ].filter((t) => t > now);
   useEffect(() => {
-    if (!waiting) return;
-    const next = Math.min(...current.filter((p) => !shown.includes(p)).map((p) => since.current.get(keyOf(p))! + SETTLE_MS));
-    const t = setTimeout(() => tick((n) => n + 1), Math.max(0, next - Date.now()));
+    if (!wake.length) return;
+    const t = setTimeout(() => tick((n) => n + 1), Math.max(0, Math.min(...wake) - Date.now()));
     return () => clearTimeout(t);
   });
   const row = (p: Work) =>
-    p.type === "thought" ? <ThoughtRow key={`th${parts.indexOf(p)}`} part={p} live={p === thought} /> : <ToolRow key={p.id} part={p} cwd={cwd} />;
+    p.type === "thought" ? (
+      // A thought held past its end keeps reading as it did, rather than jumping to its first paragraph.
+      <ThoughtRow key={`th${parts.indexOf(p)}`} part={p} live={p === thought || p === shown} />
+    ) : (
+      <ToolRow key={p.id} part={p} cwd={cwd} />
+    );
   return (
     <div className={cx("reasoning work", open && "reasoning-open")} data-block={block}>
       {summary && (
@@ -326,7 +345,7 @@ export function WorkRun({
         {done.map(row)}
       </Fold>
       <Fold open={live} settle className="work-live">
-        {shown.length ? shown.map(row) : <div className="work-working shimmer">Working</div>}
+        {shown ? row(shown) : <div className="work-working shimmer">Working</div>}
       </Fold>
     </div>
   );
