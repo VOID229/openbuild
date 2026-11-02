@@ -198,8 +198,33 @@ function rowDevice(devices: Device[], deviceId: string | undefined): string | un
   return devices.find((d) => d.local)?.name;
 }
 
+const GENERATING_TITLE = "Generating title";
+
+/** A thread's title; the one a model just wrote wipes in over the placeholder it replaces. */
+function RowTitle({ title, titling }: { title: string; titling: boolean }) {
+  const [wasTitling, setWasTitling] = useState(titling);
+  const [revealing, setRevealing] = useState(false);
+  if (titling !== wasTitling) {
+    setWasTitling(titling);
+    setRevealing(!titling);
+  }
+  if (titling) return <span className="history-title-text history-title-generating">{GENERATING_TITLE}</span>;
+  if (!revealing) return <span className="history-title-text">{title}</span>;
+  return (
+    <span className="history-title-text history-title-reveal">
+      <span className="history-title-new" onAnimationEnd={() => setRevealing(false)}>
+        {title}
+      </span>
+      <span className="history-title-old" aria-hidden>
+        {GENERATING_TITLE}
+      </span>
+    </span>
+  );
+}
+
 const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regenerating, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
+  const titling = useStore((s) => s.titling.has(chat.id)) && !chat.titleSource;
   const streaming = chat.messages.at(-1)?.status === "streaming";
   const waiting = isWaiting(chat);
   const limit = limitOf(chat);
@@ -261,12 +286,18 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         } else onMenu(chat.id, e.clientX, e.clientY);
       }}
     >
-      <button type="button" className="history-title" onClick={() => onSelect(chat, hit)} aria-current={active ? "page" : undefined} title={chat.title}>
+      <button type="button" className="history-title" onClick={() => onSelect(chat, hit)} aria-current={active ? "page" : undefined} title={titling ? undefined : chat.title}>
         <span className="history-title-line">
           <span className="history-icon" title={model?.name}>
             {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
           </span>
-          <span className="history-title-text">{hit ? <Highlight text={chat.title} ranges={hit.titleRanges} /> : chat.title}</span>
+          {hit ? (
+            <span className="history-title-text">
+              <Highlight text={chat.title} ranges={hit.titleRanges} />
+            </span>
+          ) : (
+            <RowTitle title={chat.title} titling={titling} />
+          )}
           {chat.subagent && (
             <span className="history-subagent" title="Subagent" aria-label="Subagent">
               <Bot size={13} />

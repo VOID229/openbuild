@@ -146,6 +146,15 @@ export async function regenerateTitle(chatId: string) {
   return true;
 }
 
+function setTitling(chatId: string, on: boolean) {
+  useStore.setState((s) => {
+    const titling = new Set(s.titling);
+    if (on) titling.add(chatId);
+    else titling.delete(chatId);
+    return { titling };
+  });
+}
+
 export async function autoName(chatId: string) {
   const { settings, chats } = useStore.getState();
   if (!settings.naming.enabled) return;
@@ -156,9 +165,15 @@ export async function autoName(chatId: string) {
   const asked = question.content.trim() || (question.attachments ?? []).map((a) => a.name).join(", ");
   if (!asked) return;
   const content = `User prompt to title:\n\n${clip(asked, 1500)}`;
-  const title = await generateText({ system: NAMING_SYSTEM, content, images: promptImages(question), sessionId: `${chatId}-title`, chat, clean: cleanTitle });
-  if (!title) return;
-  // The user may have renamed it while we were waiting.
-  const latest = useStore.getState().chats.find((c) => c.id === chatId);
-  if (latest && latest.titleSource !== "user") useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
+  // The prompt stays the title underneath, for when no model answers; it just isn't shown until then.
+  setTitling(chatId, true);
+  try {
+    const title = await generateText({ system: NAMING_SYSTEM, content, images: promptImages(question), sessionId: `${chatId}-title`, chat, clean: cleanTitle });
+    if (!title) return;
+    // The user may have renamed it while we were waiting.
+    const latest = useStore.getState().chats.find((c) => c.id === chatId);
+    if (latest && latest.titleSource !== "user") useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
+  } finally {
+    setTitling(chatId, false);
+  }
 }

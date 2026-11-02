@@ -1,23 +1,30 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { GITHUB_SCOPE } from "../shared/types";
 import { dataDir } from "./paths";
 import { prepareUserPlugins } from "./pluginFiles";
+import { secrets } from "./vault";
 
 export type Track = "stable" | "nightly";
 export interface Release { tag_name: string; prerelease: boolean; draft: boolean; published_at: string; html_url: string }
 const ROOT = resolve(import.meta.dir, "..");
 const REPO = "https://github.com/VOID229/openbuild.git";
 const statePath = () => join(dataDir(), "release-track.json");
+const cachePath = () => join(dataDir(), "release-cache.json");
+const FRESH_FOR = 60 * 60_000, RETRY_AFTER = 5 * 60_000, PER_PAGE = 100;
+function writeState(path: string, value: unknown) {
+  mkdirSync(dataDir(), { recursive: true });
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, JSON.stringify(value) + "\n", { mode: 0o600 });
+  renameSync(temp, path);
+}
 export function releaseTrack(): Track {
   try { return JSON.parse(readFileSync(statePath(), "utf8")).track === "nightly" ? "nightly" : "stable"; }
   catch { return "stable"; }
 }
 export function setReleaseTrack(track: string) {
   if (track !== "stable" && track !== "nightly") throw new Error("Track must be stable or nightly.");
-  mkdirSync(dataDir(), { recursive: true });
-  const temp = `${statePath()}.${process.pid}.tmp`;
-  writeFileSync(temp, JSON.stringify({ track }) + "\n", { mode: 0o600 });
-  renameSync(temp, statePath());
+  writeState(statePath(), { track });
   cache = undefined;
 }
 export function selectRelease(releases: Release[], track: Track) {
@@ -29,24 +36,104 @@ function git(args: string[], root = ROOT) {
   if (p.exitCode !== 0) throw new Error(p.stderr.toString().trim() || "Git command failed.");
   return p.stdout.toString().trim();
 }
+/** A token raises GitHub's limit from 60 to 5,000 requests an hour. The repository is public, so none is required. */
+async function githubToken() {
+  const env = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (env) return env;
+  const saved = await secrets(GITHUB_SCOPE).catch(() => [] as string[]);
+  if (saved[0]) return saved[0];
+  const gh = Bun.which("gh", { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` });
+  if (!gh) return undefined;
+  try {
+    const p = Bun.spawn([gh, "auth", "token", "--hostname", "github.com"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", timeout: 5_000 });
+    const out = await new Response(p.stdout).text();
+    return (await p.exited) === 0 ? out.trim() || undefined : undefined;
+  } catch { return undefined; }
+}
+/** Shared by the server and every CLI run, which otherwise each spend their own requests. Holds no token. */
+interface ReleaseCache { releases: Release[]; checkedAt: number; etag?: string; retryAt?: number; error?: string }
+function readCache(): ReleaseCache | undefined {
+  try {
+    const saved = JSON.parse(readFileSync(cachePath(), "utf8"));
+    return Array.isArray(saved.releases) ? saved : undefined;
+  } catch { return undefined; }
+}
+function writeCache(value: ReleaseCache) {
+  try { writeState(cachePath(), value); } catch { /* The cache only saves requests. */ }
+}
+class ReleaseCheckFailure extends Error { constructor(message: string, readonly retryAt: number) { super(message); } }
+function failure(res: Response, authenticated: boolean) {
+  const retryAfter = Number(res.headers.get("retry-after")) * 1000;
+  const reset = res.headers.get("x-ratelimit-remaining") === "0" ? Number(res.headers.get("x-ratelimit-reset")) * 1000 : 0;
+  const message = `Release check failed (GitHub HTTP ${res.status}).`;
+  if (!retryAfter && !reset && res.status !== 429) return new ReleaseCheckFailure(message, Date.now() + RETRY_AFTER);
+  const retryAt = retryAfter ? Date.now() + retryAfter : reset || Date.now() + RETRY_AFTER;
+  const hint = authenticated ? "" : " The limit is shared by everyone on your network or VPN; run gh auth login or set GITHUB_TOKEN to raise it.";
+  return new ReleaseCheckFailure(`${message} GitHub's rate limit lifts at ${new Date(retryAt).toLocaleTimeString()}.${hint}`, retryAt);
+}
+async function downloadReleases(saved?: ReleaseCache): Promise<ReleaseCache> {
+  const token = await githubToken();
+  const signal = AbortSignal.timeout(10_000);
+  const known = new Set(saved?.releases.map(r => r.tag_name));
+  const releases: Release[] = [];
+  let etag: string | undefined;
+  // Paginate so a busy prerelease channel cannot hide the latest stable release.
+  for (let page = 1; page <= 20; page++) {
+    const get = (auth?: string) => fetch(`https://api.github.com/repos/VOID229/openbuild/releases?per_page=${PER_PAGE}&page=${page}`, {
+      headers: {
+        Accept: "application/vnd.github+json", "User-Agent": "OpenBuild",
+        ...(page === 1 && saved?.etag ? { "If-None-Match": saved.etag } : {}),
+        ...(auth ? { Authorization: `Bearer ${auth}` } : {}),
+      }, signal,
+    });
+    let res = await get(token);
+    // A token GitHub refuses or has exhausted must not lock anyone out of a public repository.
+    const refused = !!token && !res.ok && res.status !== 304 && res.status < 500;
+    if (refused) res = await get();
+    // Unchanged. With a token GitHub doesn't count this against the limit.
+    if (res.status === 304 && saved) return { releases: saved.releases, etag: saved.etag, checkedAt: Date.now() };
+    if (!res.ok) throw failure(res, !!token && !refused);
+    if (page === 1) etag = res.headers.get("etag") ?? undefined;
+    const batch = await res.json() as Release[];
+    // Drafts are only visible with a token, and are never installed.
+    releases.push(...batch.filter(r => !r.draft).map(({ tag_name, prerelease, draft, published_at, html_url }) => ({ tag_name, prerelease, draft, published_at, html_url })));
+    if (batch.length < PER_PAGE) break;
+    // The rest of the list is already saved: only what changed since then needs fetching.
+    if (batch.some(r => known.has(r.tag_name))) {
+      const fetched = new Set(releases.map(r => r.tag_name));
+      const oldest = Math.min(...releases.map(r => Date.parse(r.published_at)));
+      releases.push(...saved!.releases.filter(r => !fetched.has(r.tag_name) && Date.parse(r.published_at) < oldest));
+      break;
+    }
+  }
+  return { releases, etag, checkedAt: Date.now() };
+}
+/** `force` always asks GitHub and reports failure. Otherwise a recent or last-known list is enough, and a failure holds off further requests. */
+async function listReleases(force: boolean) {
+  const saved = readCache();
+  if (!force && saved) {
+    if (saved.retryAt ? saved.retryAt > Date.now() : Date.now() - saved.checkedAt < FRESH_FOR) {
+      if (saved.checkedAt) return saved.releases;
+      throw new Error(saved.error ?? "Release check failed.");
+    }
+  }
+  try {
+    const fetched = await downloadReleases(saved);
+    writeCache(fetched);
+    return fetched.releases;
+  } catch (error) {
+    writeCache({ releases: saved?.releases ?? [], etag: saved?.etag, checkedAt: saved?.checkedAt ?? 0, retryAt: error instanceof ReleaseCheckFailure ? error.retryAt : Date.now() + RETRY_AFTER, error: (error as Error).message });
+    if (!force && saved?.checkedAt) return saved.releases;
+    throw error;
+  }
+}
 export interface ReleaseStatus { track: Track; current: string; latest?: string; available: boolean; url?: string }
 let cache: { track: Track; root: string; until: number; value: Promise<ReleaseStatus> } | undefined;
 export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus> {
   const track = releaseTrack();
   if (!force && cache?.track === track && cache.root === root && cache.until > Date.now()) return cache.value;
   const value = (async () => {
-    const releases: Release[] = [];
-    const signal = AbortSignal.timeout(10_000);
-    // Paginate so a busy prerelease channel cannot hide the latest stable release.
-    for (let page = 1; page <= 20; page++) {
-      const res = await fetch(`https://api.github.com/repos/VOID229/openbuild/releases?per_page=100&page=${page}`, {
-        headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild" }, signal,
-      });
-      if (!res.ok) throw new Error(`Release check failed (GitHub HTTP ${res.status}).`);
-      const batch = await res.json() as Release[];
-      releases.push(...batch);
-      if (batch.length < 100) break;
-    }
+    const releases = await listReleases(force);
     const latest = selectRelease(releases, track);
     const head = git(["rev-parse", "HEAD"], root);
     // A stable release can share its commit with a nightly: name HEAD by its track's tag, and
@@ -61,7 +148,8 @@ export function checkRelease(force = false, root = ROOT): Promise<ReleaseStatus>
     }
     return { track, current, latest: latest?.tag_name, available, url: latest?.html_url };
   })();
-  cache = { track, root, until: Date.now() + 60 * 60_000, value };
+  // Only spares git calls in a burst: the file above decides when GitHub is asked again.
+  cache = { track, root, until: Date.now() + 60_000, value };
   value.catch(() => { if (cache?.value === value) cache = undefined; });
   return value;
 }

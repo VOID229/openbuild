@@ -39,7 +39,7 @@ function install(pages: unknown[][], nightly = false, wrapper = false, curlFails
   `);
   try {
     const result = Bun.spawnSync(["sh", join(root, wrapper ? "nightly/install.sh" : "install.sh"), ...(nightly ? ["--nightly"] : [])], {
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CI: "1", OPENBUILD_INSTALL_DIR: join(temp, "app"),
+      env: { ...process.env, GH_TOKEN: "test-token", PATH: `${bin}:${process.env.PATH}`, CI: "1", OPENBUILD_INSTALL_DIR: join(temp, "app"),
         TEST_PAGES: JSON.stringify(pages), TEST_TAG: join(temp, "tag"), TEST_TRACK: join(temp, "track"),
         TEST_INSTALLER: join(root, "install.sh"), TEST_CURL_FAIL: curlFails ? "1" : "0" },
       stdin: "ignore", stdout: "pipe", stderr: "pipe",

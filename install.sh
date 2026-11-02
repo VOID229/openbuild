@@ -262,11 +262,17 @@ install() {
     const nightly = track === "nightly";
     const base = "https://api.github.com/repos/VOID229/openbuild/releases";
     const signal = AbortSignal.timeout(10000);
+    // A token raises GitHub'"'"'s limit, which a shared network or VPN can exhaust. None is required.
+    const gh = process.env.GH_TOKEN || process.env.GITHUB_TOKEN ? undefined : Bun.which("gh");
+    const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || (gh ? Bun.spawnSync([gh, "auth", "token", "--hostname", "github.com"], { stderr: "ignore", timeout: 5000 }).stdout.toString().trim() : "");
+    const get = (url, auth) => fetch(url, {
+      headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild", ...(auth ? { Authorization: `Bearer ${auth}` } : {}) }, signal,
+    });
     const releases = [];
     for (let page = 1; page <= (nightly ? 20 : 1); page++) {
-      const response = await fetch(nightly ? `${base}?per_page=100&page=${page}` : `${base}/latest`, {
-        headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild" }, signal,
-      });
+      const url = nightly ? `${base}?per_page=100&page=${page}` : `${base}/latest`;
+      let response = await get(url, token);
+      if (token && !response.ok && response.status < 500) response = await get(url);
       if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
       const result = await response.json();
       const batch = nightly ? result : [result];

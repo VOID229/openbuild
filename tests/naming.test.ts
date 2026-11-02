@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { generateText, promptImages, threadTranscript } from "../src/lib/naming";
+import { autoName, generateText, promptImages, threadTranscript } from "../src/lib/naming";
 import { useStore } from "../src/lib/store";
 import type { Attachment } from "../shared/types";
-import type { Detection, Message } from "../src/lib/types";
+import type { Chat, Detection, Message } from "../src/lib/types";
 
 const message = (id: number, role: Message["role"], content: string): Message => ({ id: String(id), role, content, createdAt: id });
 
@@ -102,5 +102,58 @@ describe("generateText on other runtimes", () => {
       globalThis.fetch = realFetch;
       useStore.setState({ codexModels: before.codexModels, settings: before.settings });
     }
+  });
+});
+
+describe("autoName", () => {
+  const chat = { id: "titled", title: "fix the build", createdAt: 1, updatedAt: 1, messages: [message(1, "user", "fix the build")] } as unknown as Chat;
+
+  const withModel = async (answer: () => Response, run: () => Promise<void>) => {
+    const before = useStore.getState();
+    const codex = { plan: "codex", status: "valid", checkedAt: 1, models: [{ id: "codex/gpt", input: ["text"], reasoning: { efforts: ["low"] } }] } as unknown as Detection;
+    useStore.setState({ chats: [chat], codexModels: { "": codex }, settings: { ...before.settings, naming: { enabled: true, models: [{ plan: "codex", id: "codex/gpt", effort: "off" }] } } });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => answer()) as unknown as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = realFetch;
+      useStore.setState({ chats: before.chats, codexModels: before.codexModels, settings: before.settings });
+    }
+  };
+
+  test("marks the thread as titling until the model's title lands", () =>
+    withModel(
+      () => Response.json({ text: "Fix Build" }),
+      async () => {
+        const naming = autoName(chat.id);
+        expect(useStore.getState().titling.has(chat.id)).toBe(true);
+        await naming;
+        const state = useStore.getState();
+        expect(state.titling.has(chat.id)).toBe(false);
+        expect(state.chats[0]).toMatchObject({ title: "Fix Build", titleSource: "auto" });
+      },
+    ));
+
+  test("falls back to the prompt's title when no model answers", () =>
+    withModel(
+      () => new Response("nope", { status: 500 }),
+      async () => {
+        const naming = autoName(chat.id);
+        expect(useStore.getState().titling.has(chat.id)).toBe(true);
+        await naming;
+        const state = useStore.getState();
+        expect(state.titling.has(chat.id)).toBe(false);
+        expect(state.chats[0]?.title).toBe("fix the build");
+      },
+    ));
+
+  test("doesn't mark a thread when naming is off", async () => {
+    const before = useStore.getState();
+    useStore.setState({ chats: [chat], settings: { ...before.settings, naming: { enabled: false, models: [] } } });
+    const naming = autoName(chat.id);
+    expect(useStore.getState().titling.has(chat.id)).toBe(false);
+    await naming;
+    useStore.setState({ chats: before.chats, settings: before.settings });
   });
 });

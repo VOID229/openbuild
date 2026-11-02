@@ -1,10 +1,15 @@
-import { expect, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkRelease, installRelease, releaseTrack, selectRelease, setReleaseTrack, type Release } from "../server/releases";
 
 const release = (tag: string, prerelease = false, date = "2026-10-30"): Release => ({ tag_name: tag, prerelease, draft: false, published_at: date, html_url: `https://github.com/VOID229/openbuild/releases/tag/${tag}` });
+// An explicit token, so these tests never read the real keychain or gh sign-in.
+const previousToken = process.env.GH_TOKEN;
+beforeAll(() => { process.env.GH_TOKEN = "test-token"; });
+afterAll(() => { if (previousToken === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = previousToken; });
+
 test("release tracks select published releases, ignoring drafts and unsafe tags", () => {
   const releases = [release("v1.0.0"), release("v1.1.0-nightly.1", true), { ...release("v9.0.0"), draft: true }, release("--evil"), release("v0.9.0", false, "2026-01-01")];
   expect(selectRelease(releases, "stable")?.tag_name).toBe("v1.0.0");
@@ -35,7 +40,8 @@ test("track persistence, cached release checks, switching tracks, offline recove
     expect(releaseTrack()).toBe("nightly");
     expect((await checkRelease(false, temp)).latest).toBe("v1.1.0-nightly.1");
     expect((await checkRelease(false, temp)).available).toBe(true);
-    expect(calls).toBe(2);
+    // The saved list covers both tracks.
+    expect(calls).toBe(1);
     // A stable release and a nightly on the same commit are both current on their tracks.
     git("tag", "v1.1.0-nightly.1");
     expect(await checkRelease(true, temp)).toMatchObject({ current: "v1.1.0-nightly.1", available: false });
@@ -48,7 +54,8 @@ test("track persistence, cached release checks, switching tracks, offline recove
     globalThis.fetch = (async () => new Response("limited", { status: 403 })) as unknown as typeof fetch;
     await expect(checkRelease(true, temp)).rejects.toThrow("HTTP 403");
     globalThis.fetch = (async () => Response.json([])) as unknown as typeof fetch;
-    expect((await checkRelease(false, temp)).latest).toBeUndefined();
+    // The failure doesn't lose the last known release.
+    expect((await checkRelease(false, temp)).latest).toBe("v1.1.0-nightly.1");
     setReleaseTrack("stable");
     expect(releaseTrack()).toBe("stable");
   } finally {
@@ -57,6 +64,93 @@ test("track persistence, cached release checks, switching tracks, offline recove
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+/** Runs `body` in a tagged checkout with its own data directory, restoring fetch afterwards. */
+async function withCheckout(body: (temp: string, cachePath: string) => Promise<void>) {
+  const temp = mkdtempSync(join(tmpdir(), "ob-release-cache-"));
+  const previous = process.env.OPENCHAT_DATA_DIR, originalFetch = globalThis.fetch;
+  try {
+    process.env.OPENCHAT_DATA_DIR = join(temp, "data");
+    for (const args of [["init"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "initial"], ["tag", "v1.0.0"]]) Bun.spawnSync(["git", "-C", temp, ...args]);
+    setReleaseTrack("stable");
+    await body(temp, join(temp, "data", "release-cache.json"));
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
+    rmSync(temp, { recursive: true, force: true });
+  }
+}
+type Sent = { url: string; headers: Record<string, string> };
+const stubFetch = (respond: (sent: Sent) => Response) => {
+  const sent: Sent[] = [];
+  globalThis.fetch = (async (url: string, init: { headers: Record<string, string> }) => {
+    const request = { url: String(url), headers: init.headers };
+    sent.push(request);
+    return respond(request);
+  }) as unknown as typeof fetch;
+  return sent;
+};
+const age = (path: string, by: number) => {
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  writeFileSync(path, JSON.stringify({ ...saved, checkedAt: saved.checkedAt - by }));
+};
+
+test("release checks are saved between processes, sent with a token, and revalidated by ETag", () => withCheckout(async (temp, path) => {
+  const sent = stubFetch(({ headers }) => headers["If-None-Match"] === '"one"' ? new Response(null, { status: 304 }) : Response.json([release("v1.1.0")], { headers: { etag: '"one"' } }));
+  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
+  expect(sent[0]!.headers.Authorization).toBe("Bearer test-token");
+  expect(readFileSync(path, "utf8")).not.toContain("test-token");
+  setReleaseTrack("stable"); // Clears the in-memory copy, as a new process would have none.
+  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
+  expect(sent.length).toBe(1);
+  age(path, 2 * 60 * 60_000);
+  setReleaseTrack("stable");
+  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
+  expect(sent.length).toBe(2);
+  expect(sent[1]!.headers["If-None-Match"]).toBe('"one"');
+}));
+
+test("a refused token falls back to an anonymous request", () => withCheckout(async (temp) => {
+  const sent = stubFetch(({ headers }) => headers.Authorization ? new Response("bad credentials", { status: 401 }) : Response.json([release("v1.1.0")]));
+  expect((await checkRelease(true, temp)).latest).toBe("v1.1.0");
+  expect(sent.map(s => !!s.headers.Authorization)).toEqual([true, false]);
+}));
+
+test("a rate limit holds off background checks until it lifts, but not an explicit one", () => withCheckout(async (temp, path) => {
+  const reset = Math.floor(Date.now() / 1000) + 600;
+  const limited = () => new Response("limited", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) } });
+  let sent = stubFetch(limited);
+  await expect(checkRelease(false, temp)).rejects.toThrow("HTTP 403");
+  const attempts = sent.length;
+  // Nothing known yet, so background checks repeat the error without asking GitHub.
+  await expect(checkRelease(false, temp)).rejects.toThrow("rate limit");
+  expect(sent.length).toBe(attempts);
+  expect(JSON.parse(readFileSync(path, "utf8")).retryAt).toBe(reset * 1000);
+  sent = stubFetch(() => Response.json([release("v1.1.0")]));
+  expect(await checkRelease(false, temp).catch(() => "held")).toBe("held");
+  expect(sent.length).toBe(0);
+  expect((await checkRelease(true, temp)).latest).toBe("v1.1.0");
+  // Limited again: background checks keep the last known list.
+  sent = stubFetch(limited);
+  await expect(checkRelease(true, temp)).rejects.toThrow("HTTP 403");
+  sent = stubFetch(() => Response.json([]));
+  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
+  expect(sent.length).toBe(0);
+}));
+
+test("only releases newer than the saved list are paged through", () => withCheckout(async (temp, path) => {
+  const dated = (n: number) => release(`v1.0.${n}`, false, new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString());
+  const all = Array.from({ length: 250 }, (_, n) => dated(n)).reverse();
+  const page = ({ url }: Sent, list: Release[]) => { const n = Number(new URL(url).searchParams.get("page")); return Response.json(list.slice((n - 1) * 100, n * 100)); };
+  let sent = stubFetch((s) => page(s, all));
+  expect((await checkRelease(true, temp)).latest).toBe("v1.0.249");
+  expect(sent.length).toBe(3);
+  const newer = [dated(300), ...all];
+  sent = stubFetch((s) => page(s, newer));
+  expect((await checkRelease(true, temp)).latest).toBe("v1.0.300");
+  expect(sent.length).toBe(1);
+  expect(JSON.parse(readFileSync(path, "utf8")).releases.length).toBe(251);
+}));
 
 test("updates fetch a release, keep branches, and roll back after failed dependencies", async () => {
   const temp = mkdtempSync(join(tmpdir(), "ob-release-install-"));

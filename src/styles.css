@@ -1234,6 +1234,80 @@ svg {
   white-space: nowrap;
 }
 
+/* Waiting on a model for the first title: a slow, soft band of light across the placeholder. */
+.history-title-generating {
+  background: linear-gradient(100deg, var(--text-3) 35%, var(--text) 50%, var(--text-3) 65%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: history-title-wait 2.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite, fade 0.3s ease-out;
+}
+
+/* The title arrives: it comes into focus left to right while the placeholder dissolves under it. */
+.history-title-reveal {
+  position: relative;
+}
+
+.history-title-new {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  mask-image: linear-gradient(90deg, #000 40%, transparent 60%);
+  mask-size: 250% 100%;
+  animation: history-title-in 0.85s cubic-bezier(0.35, 0, 0.25, 1) both;
+}
+
+.history-title-old {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  pointer-events: none;
+  animation: history-title-out 0.4s ease-out both;
+}
+
+@keyframes history-title-wait {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+@keyframes history-title-in {
+  from {
+    mask-position: 100% 0;
+    filter: blur(2px);
+  }
+  to {
+    mask-position: 0% 0;
+    filter: blur(0);
+  }
+}
+
+@keyframes history-title-out {
+  to {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .history-title-generating {
+    animation: none;
+    background: none;
+    color: var(--text-3);
+  }
+  .history-title-new {
+    animation: none;
+  }
+  .history-title-old {
+    display: none;
+  }
+}
+
 /* Started by another agent, not the user. */
 .history-subagent {
   display: inline-grid;

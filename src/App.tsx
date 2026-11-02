@@ -155,6 +155,7 @@ function Main() {
   const lightboxOpen = useLightbox((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
+  const titling = useStore((s) => !!s.activeChatId && s.titling.has(s.activeChatId)) && !chat?.titleSource;
   const { setSidebarOpen, newChat } = useStore.getState();
   const folder = usePanel((s) => s.folder);
   const panelOpen = usePanel((s) => s.panel);
@@ -341,8 +342,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = usageOpen ? "Usage · OpenBuild" : chat ? `${chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, usageOpen]);
+    document.title = usageOpen ? "Usage · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, usageOpen]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {

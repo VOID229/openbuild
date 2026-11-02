@@ -240,6 +240,8 @@ interface State {
   selections: Record<string, Selection>;
   /** Set when a chat is opened from a search result, so the matching message can be highlighted. */
   searchFocus?: { chatId: string; messageId: string; words: string[] };
+  /** Threads whose first title a model is writing right now. Lost on reload, so none can stay stuck. */
+  titling: ReadonlySet<string>;
   sidebarOpen: boolean;
   /** Expanded state of the collapsible sidebar sections. */
   sections: SidebarSections;
@@ -363,6 +365,7 @@ export const useStore = create<State>()(
       chats: [],
       chatsLoaded: false,
       selections: {},
+      titling: new Set(),
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
       sections: { pinned: true, attention: true, limits: true, subagents: true, woke: true, done: true, working: true, today: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
