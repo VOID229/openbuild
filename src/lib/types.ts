@@ -104,7 +104,7 @@ export interface Settings {
   /** Native Cursor preference, independent of Pi and other native runtimes. */
   cursorSelection?: ModelRef;
   /** Native model preferences by runtime and device (empty key = this server). */
-  nativeSelections?: Partial<Record<"fx" | "codex" | "cursor" | "claude" | "opencode", Record<string, ModelRef>>>;
+  nativeSelections?: Partial<Record<"fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes", Record<string, ModelRef>>>;
   /** Starred Pi models ("<provider>/<id>"), in order. */
   favorites: string[];
   /**

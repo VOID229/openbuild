@@ -14,7 +14,7 @@ export const HTML_RENDER_TOOL = "html_render";
 export const HTML_PREVIEW_TOOL = "html_preview";
 
 export const HTML_RENDER_MIN_HEIGHT = 60;
-/** Taller pages scroll inside their frame. */
+/** Taller pages scroll inside their frame; shorter ones leave the wheel to the thread. */
 export const HTML_RENDER_MAX_HEIGHT = 4000;
 /** Until the page says how tall it is (the agent's guess, or this). */
 export const HTML_RENDER_DEFAULT_HEIGHT = 240;
@@ -153,13 +153,15 @@ const baseCss = (opaque: boolean) =>
 
 // In the page: take theme updates from the app, report the page's height as it changes, and open
 // web links in a new tab (the frame itself must never navigate away from the page).
+// Once the frame fits, the document's scrollHeight can't see content hanging past the end of the
+// page, and it can't tell when the page shrinks: the body's can, whatever the frame's height.
 const script = (base: string) =>
   `(function(){var s=document.getElementById("openbuild-theme"),h=0,P=window.parent;if(P===window)P=null;` +
   `window.addEventListener("message",function(e){var d=e.data,t=d&&d.theme;if(e.source!==P||!d||d.type!==${JSON.stringify(MSG_THEME)}||!t||typeof t.variables!=="object")return;` +
   `var c=(typeof t.fonts==="string"?t.fonts.replace(/</g,""):"")+":root{color-scheme:"+(t.appearance==="light"?"light":"dark")+";";for(var k in t.variables)if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(t.variables[k]).replace(/[;{}<>]/g,"")+";";s.textContent=c+"}"+${JSON.stringify(base)};});` +
   `document.addEventListener("click",function(e){var a=e.target&&e.target.closest&&e.target.closest("a[href]"),u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI)}catch(x){return}` +
   `if(/^https?:$/.test(u.protocol)){a.setAttribute("target","_blank");a.setAttribute("rel","noopener noreferrer")}},true);` +
-  `if(!P)return;var z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);` +
+  `if(!P)return;var z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:Math.max(r.getBoundingClientRect().height,document.body?document.body.scrollHeight:0));` +
   `if(v===h)return;h=v;P.postMessage({type:${JSON.stringify(MSG_HEIGHT)},height:v},"*")};` +
   `var o=window.ResizeObserver?new ResizeObserver(z):null;if(o)o.observe(document.documentElement);` +
   `document.addEventListener("DOMContentLoaded",function(){if(o&&document.body)o.observe(document.body);z()});window.addEventListener("load",z);setTimeout(z,0);})();`;

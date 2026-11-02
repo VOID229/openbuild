@@ -27,6 +27,8 @@ import * as codexInstall from "../codex/install";
 import * as cursorInstall from "../cursor/install";
 import * as claudeInstall from "../claude/install";
 import * as opencodeInstall from "../opencode-agent/install";
+import * as hermesInstall from "../hermes/install";
+import * as grokInstall from "../grok/install";
 import { assertRuntimeUpdated, forgetRuntimeStatus, runtimeStatus, runtimes, runtimeUpdateCommand } from "../runtimes";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
@@ -103,7 +105,7 @@ export function piRoutes(api: Api) {
           forgetModels();
           if (finished.code === 0) void restartIdle().catch(err => console.warn("[pi] restart after update:", err));
         } else {
-          ({ claude: claudeInstall, codex: codexInstall, cursor: cursorInstall, fx: fxInstall, opencode: opencodeInstall }[runtime as "claude" | "codex" | "cursor" | "fx" | "opencode"]).forgetModels();
+          ({ claude: claudeInstall, codex: codexInstall, cursor: cursorInstall, fx: fxInstall, opencode: opencodeInstall, grok: grokInstall, hermes: hermesInstall }[runtime as "claude" | "codex" | "cursor" | "fx" | "opencode" | "grok" | "hermes"]).forgetModels();
         }
         if (finished.code === 0) {
           finished.lines.push("Verifying the installed runtime version…");
@@ -310,6 +312,30 @@ export function piRoutes(api: Api) {
       }),
     },
     // OpenCode 2's native server protocol, independent of the OpenCode API-key plans.
+    "/api/hermes/status": {
+      GET: api(async () => Response.json(await hermesInstall.status())),
+    },
+    "/api/hermes/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await hermesInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
+    "/api/grok/status": {
+      GET: api(async () => Response.json(await grokInstall.status())),
+    },
+    "/api/grok/models": {
+      GET: api(async (req) => {
+        try {
+          return Response.json(await grokInstall.listModels(new URL(req.url).searchParams.has("fresh")));
+        } catch (err) {
+          return fail(err, 502);
+        }
+      }),
+    },
     "/api/opencode/status": {
       GET: api(async () => Response.json(await opencodeInstall.status())),
     },
@@ -402,6 +428,8 @@ export function piRoutes(api: Api) {
         if (threadRuntime(threadId) === "cursor") return bad("Shell commands aren't available in Cursor threads yet.");
         if (threadRuntime(threadId) === "claude") return bad("Shell commands aren't available in Claude Code threads yet.");
         if (threadRuntime(threadId) === "opencode") return bad("Shell commands aren't available in OpenCode threads yet.");
+        if (threadRuntime(threadId) === "hermes") return bad("Shell commands are not available in Hermes threads.");
+        if (threadRuntime(threadId) === "grok") return bad("Shell commands aren't available in Grok threads yet.");
         try {
           claimRuntime(threadId, "pi");
         } catch (err) {
@@ -435,6 +463,8 @@ export function piRoutes(api: Api) {
           if (threadRuntime(req.params.id) === "cursor") return bad("Manual compaction isn't available in Cursor threads yet.");
           if (threadRuntime(req.params.id) === "claude") return bad("Manual compaction isn't available in Claude Code threads yet.");
           if (threadRuntime(req.params.id) === "opencode") return bad("Manual compaction isn't available in OpenCode threads yet.");
+          if (threadRuntime(req.params.id) === "hermes") return bad("Use Hermes /compress for compaction.");
+          if (threadRuntime(req.params.id) === "grok") return bad("Manual compaction isn't available in Grok threads yet.");
           return Response.json(await compact(req.params.id, typeof body?.instructions === "string" ? body.instructions : undefined));
         } catch (err) {
           return fail(err);

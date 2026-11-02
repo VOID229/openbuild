@@ -10,6 +10,7 @@ All adapters emit the existing `ask` / `asked` stream events. The UI, replay, an
 | OpenCode | Native form events and form-reply API for the installed v2 protocol. Older `question.asked` endpoints must not be mixed into this adapter. |
 | fx | Native ACP form elicitation, advertised with `clientCapabilities.elicitation.form`. Replies preserve schema field IDs and primitive types. Unsupported schemas and URL elicitation are declined. |
 | Cursor | A per-turn, loopback MCP `question_ask` tool loaded through a temporary local plugin. No workspace/global configuration is modified, and no global MCP approval or force flag is added. Native tool policy can still deny it; a native scoped allow rule or the user's explicit unrestricted mode may be needed. |
+| Grok | Native `ask_user_question`, received as the `_x.ai/ask_user_question` ACP extension request. Answers are keyed by question text; dismissing declines. |
 | Durable | A registered tool with persisted question/answer state, rather than a Pi RPC extension. |
 
 Adapters remind models to use their question tool and wait instead of writing a question as ordinary assistant text. This is tool guidance, not a guarantee that every model will comply. Choices and free text use the existing question UI; strict native form enum/type constraints remain binding.
@@ -20,7 +21,7 @@ Reviewed the local t3code source at `/tmp/t3code`. Its generic ACP adapter (`pac
 
 ## Worker feature lanes
 
-Native worker runtimes advertise `runtime-questions`. New Cursor/Claude/Codex/fx threads prefer a compatible `pi-worker`; new OpenCode threads prefer a compatible `opencode-worker`. If that worker lacks the runtime or question feature, admission uses `agent-worker-<feature-hash>` instead. The hash versions the sorted worker feature set. No retirement or signal is sent to the older worker, even when it is busy with other agents. Ordinary Pi and Durable routing are unchanged.
+Native worker runtimes advertise `runtime-questions`. New Cursor/Claude/Codex/fx/Grok threads prefer a compatible `pi-worker`; new OpenCode threads prefer a compatible `opencode-worker`. If that worker lacks the runtime or question feature, admission uses `agent-worker-<feature-hash>` instead. The hash versions the sorted worker feature set. No retirement or signal is sent to the older worker, even when it is busy with other agents. Ordinary Pi and Durable routing are unchanged.
 
 A thread belongs to the lane holding its latest run. Selection and admission are serialized per thread within the web server (the sole admission authority). A stable run-ID replay validates the original request and reattaches before checking features; a different turn while one is pending returns `busy`. A pending turn never moves. When an idle thread's owner lacks a required feature (an older worker that is still running after an update), the next turn is handed off: the owner releases the thread's idle native process (`/release`), then a compatible lane resumes the native session from its mapping in the shared database (`codex-session:…`, `claude-session:…`, etc.). The old lane keeps the thread's earlier runs for history. If that owner still has a `!` shell command running for the thread, the turn is refused as `busy` rather than cutting the shell off. No prompt is sent on refusal.
 

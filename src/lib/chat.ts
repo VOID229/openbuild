@@ -125,7 +125,7 @@ export function interruptWith(chatId: string, id: string) {
 }
 
 /** Runtimes with native streaming input, steering APIs, or tool-boundary hook delivery. */
-export const canSteer = (runtime: string | undefined) => runtime === "pi" || runtime === "codex" || runtime === "claude" || runtime === "opencode" || runtime === "cursor" || runtime === "fx" || runtime === "durable";
+export const canSteer = (runtime: string | undefined) => runtime === "pi" || runtime === "codex" || runtime === "claude" || runtime === "opencode" || runtime === "cursor" || runtime === "fx" || (runtime === "grok" || runtime === "hermes") || runtime === "durable";
 
 /**
  * Hand a queued message to the agent's running reply; Pi reads it once its current step is done. If the
@@ -206,7 +206,7 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
   if (!resolved || !model) {
     // fx models come from fx's own sign-in on the device; the model picker says what's missing.
-    if (!["fx", "codex", "cursor", "claude", "opencode"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
+    if (!["fx", "codex", "cursor", "claude", "opencode", "grok", "hermes"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
     return false;
   }
   const now = Date.now();
@@ -253,13 +253,13 @@ export function regenerate(chatId: string, messageId: string) {
   // no turn could have been admitted before its workspace existed.
   if (chat?.runtime === "durable" && chat.workspace) return;
   // fx can't rewind either: retrying a failed reply sends its message again, on top of what fx has.
-  if ((chat?.runtime === "fx" || chat?.runtime === "codex" || chat?.runtime === "cursor" || chat?.runtime === "opencode") && chat.workspace && msg?.status !== "error") return;
+  if ((chat?.runtime === "fx" || chat?.runtime === "codex" || chat?.runtime === "cursor" || chat?.runtime === "opencode" || chat?.runtime === "grok" || chat?.runtime === "hermes") && chat.workspace && msg?.status !== "error") return;
   if (!chat || !msg) return;
   const prompt = chat.messages.slice(0, chat.messages.indexOf(msg)).findLast((m) => m.role === "user");
   const resolved = resolveModel(prompt?.content ?? "", prompt?.attachments ?? [], chatId);
   const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
   if (!resolved || !model) {
-    if (!["fx", "codex", "cursor", "claude", "opencode"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
+    if (!["fx", "codex", "cursor", "claude", "opencode", "grok", "hermes"].includes(runtimeOf(st, chatId))) st.openSettings("keys");
     return;
   }
   const prev = running.get(chatId);
@@ -415,11 +415,11 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const model = findModel(deviceDetection(st, plannedDevice, chat.runtime), msg.model);
   const plan = msg.model.plan;
   // Native agent turns use the same workspace and normalized stream parts as Pi.
-  const pi = plan === "pi" || plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode";
+  const pi = plan === "pi" || plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode" || (plan === "grok" || plan === "hermes");
   const keys = st.settings.keys[plan];
   if (!resume && (!model || (!pi && !keys?.length))) {
     const on = plannedDevice ? ` on ${deviceName(plannedDevice) ?? "that device"}` : "";
-    const error = plan === "opencode" ? `OpenCode${on} can't use this model anymore. Pick another one, or check OpenCode's providers (run \`opencode\` there).` : plan === "claude" ? `Claude Code${on} can't use this model anymore. Pick another one, or check Claude Code's sign-in (run \`claude\` there).` : plan === "cursor" ? `Cursor${on} can't use this model anymore. Pick another one, or check Cursor's sign-in (\`agent login\`).` : plan === "codex" ? `Codex${on} can't use this model anymore. Pick another one, or check Codex's sign-in (\`codex login\`).` : plan === "fx" ? `fx${on} can't use this model anymore. Pick another one, or check fx's sign-in (\`fx login\`).` : pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
+    const error = plan === "hermes" ? `Hermes${on} cannot use this model. Run hermes setup on that device or pick another model.` : plan === "grok" ? `Grok${on} can't use this model anymore. Pick another one, or check its sign-in (run \`grok login\` there).` : plan === "opencode" ? `OpenCode${on} can't use this model anymore. Pick another one, or check OpenCode's providers (run \`opencode\` there).` : plan === "claude" ? `Claude Code${on} can't use this model anymore. Pick another one, or check Claude Code's sign-in (run \`claude\` there).` : plan === "cursor" ? `Cursor${on} can't use this model anymore. Pick another one, or check Cursor's sign-in (\`agent login\`).` : plan === "codex" ? `Codex${on} can't use this model anymore. Pick another one, or check Codex's sign-in (\`codex login\`).` : plan === "fx" ? `fx${on} can't use this model anymore. Pick another one, or check fx's sign-in (\`fx login\`).` : pi ? `This model isn't available in Pi${on} anymore. Pick another one, or check Settings → Providers.` : "This model isn't available. Check your API keys in Settings.";
     startedWorkspace.delete(chatId);
     st.patchMessage(chatId, messageId, { status: "error", error }, true);
     return;

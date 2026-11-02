@@ -6,6 +6,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStor
 import { createPortal } from "react-dom";
 import {
   HTML_RENDER_DEFAULT_HEIGHT,
+  HTML_RENDER_MAX_HEIGHT,
   clampHeight,
   htmlFileName,
   htmlTheme,
@@ -145,7 +146,7 @@ const useHtmlTheme = () => useSyncExternalStore(subscribe, () => current ?? read
  * The page in a frame. Its document is built once, with the theme of the moment: a later theme
  * is posted to the page instead, so it never reloads (and loses what the reader did in it).
  */
-function PageFrame({ html, title, onHeight, className }: { html: string; title: string; onHeight?: (h: number) => void; className?: string }) {
+function PageFrame({ html, title, onHeight, className, fits }: { html: string; title: string; onHeight?: (h: number) => void; className?: string; fits?: boolean }) {
   const theme = useHtmlTheme();
   const frame = useRef<HTMLIFrameElement>(null);
   const [srcDoc] = useState(() => withBootstrap(html, theme));
@@ -171,6 +172,8 @@ function PageFrame({ html, title, onHeight, className }: { html: string; title: 
       title={title}
       sandbox={SANDBOX}
       referrerPolicy="no-referrer"
+      // A page that fits has nothing to scroll, so the wheel goes straight to the thread.
+      scrolling={fits ? "no" : undefined}
       className={cx("html-render-frame", className)}
       // The page is see-through on the thread only when its color scheme matches the frame's.
       style={{ colorScheme: theme.appearance, visibility: loaded ? undefined : "hidden" }}
@@ -262,7 +265,7 @@ export const HtmlRender = memo(function HtmlRender({ part, block }: { part: Tool
         </IconButton>
       </figcaption>
       <div className="html-render-page" style={{ height }}>
-        <PageFrame html={html} title={title} onHeight={setMeasured} />
+        <PageFrame html={html} title={title} onHeight={setMeasured} fits={!measured || measured <= HTML_RENDER_MAX_HEIGHT} />
       </div>
       <FullScreen html={html} title={title} open={full} onClose={() => setFull(false)} />
     </figure>

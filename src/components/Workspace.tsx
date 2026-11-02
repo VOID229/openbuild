@@ -1,3 +1,4 @@
+import { Bot as HermesMark } from "lucide-react";
 import { ThreadAccountSelect } from "./RuntimeAccounts";
 // Where a thread works. On the new-thread screen the heading picks the project ("What should we
 // build in <project>?"), and above the composer you choose the project's checkout or a new
@@ -15,7 +16,7 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { GrokMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 // The last git state read for each project, kept across reloads so the branch shows at once while
@@ -358,9 +359,10 @@ const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and
 const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Steering uses tool hooks (or a follow-up at completion). Runtime is fixed once a thread starts.";
 const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
 const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
-export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
+const GROK_LIMITATIONS = "Native Grok Build (the CLI installed on this device) with its own models, sign-in, permission mode, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
+export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode", hermes: "Hermes", grok: "Grok" };
 export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
-  return runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+  return runtime === "hermes" ? <HermesMark size={size} /> : runtime === "grok" ? <GrokMark size={size} /> : runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
 }
 
 /**
@@ -396,7 +398,7 @@ function RuntimeMenu() {
   useEffect(() => {
     if (runtime !== selected) updateSettings({ threadRuntime: runtime });
   }, [runtime, selected, updateSettings]);
-  const tip = runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
+  const tip = runtime === "grok" ? GROK_LIMITATIONS : runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
   return (
     <>
       <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${RUNTIME_LABEL[runtime]}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={tip} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>

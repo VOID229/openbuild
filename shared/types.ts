@@ -3,7 +3,7 @@
 /** "pi": a model configured in the installed Pi (its provider/model id). "fx": a model fx (Vercel's
  * coding agent) can use, as "fx/<id>". Native Codex and Cursor models use "codex/<id>"
  * and "cursor/<id>" respectively; native Claude Code models use "claude/<id>". The rest are Opencode plans. */
-export type PlanId = "go" | "plus" | "black" | "zen" | "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode";
+export type PlanId = "go" | "plus" | "black" | "zen" | "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes";
 
 export type Protocol = "chat" | "responses" | "messages" | "gemini";
 
@@ -48,6 +48,8 @@ export const PLANS: Record<PlanId, PlanConfig> = {
   cursor: { id: "cursor", label: "Cursor", chip: "Cursor", baseURL: "", prefix: "cursor" },
   claude: { id: "claude", label: "Claude Code", chip: "Claude", baseURL: "", prefix: "claude" },
   opencode: { id: "opencode", label: "OpenCode", chip: "OpenCode", baseURL: "", prefix: "opencode" },
+  hermes: { id: "hermes", label: "Hermes", chip: "Hermes", baseURL: "", prefix: "hermes" },
+  grok: { id: "grok", label: "Grok", chip: "Grok", baseURL: "", prefix: "grok" },
 };
 
 /** Order of rows in Settings → API Keys (as drawn). */
@@ -426,11 +428,11 @@ export interface GitChanges {
 }
 
 /** Runtime chosen when a thread starts; absent on legacy threads means Pi. "fx" runs Vercel's fx agent. */
-export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor" | "claude" | "opencode";
+export type ThreadRuntime = "pi" | "durable" | "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes";
 
 /** Runtimes that can write short texts. Durable runs Pi's models, so Pi stands in for it. */
-export type TextRuntime = Exclude<ThreadRuntime, "durable">;
-export const TEXT_RUNTIMES: TextRuntime[] = ["pi", "claude", "opencode", "codex", "cursor", "fx"];
+export type TextRuntime = Exclude<ThreadRuntime, "durable" | "hermes">;
+export const TEXT_RUNTIMES: TextRuntime[] = ["pi", "claude", "opencode", "codex", "cursor", "fx", "grok"];
 
 /** Whether a device has a runtime's program installed (GET /api/runtimes), and how to install it. */
 export interface RuntimeAvailability {

@@ -80,7 +80,7 @@ export class PiClient {
   async supportsNative(runtime: string, accounts = false) {
     await this.connect();
     const health = await this.health();
-    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery", ...(["claude", "opencode", "cursor"].includes(runtime) ? ["native-steering"] : []), ...(runtime === "fx" ? ["fx-steering"] : []), ...(accounts ? ["runtime-accounts", "account-config"] : [])].every(f => health.features?.includes(f));
+    return !!health && health.protocol === 1 && [runtime, "runtime-questions", "html-delivery", ...(["claude", "opencode", "cursor", "grok", "hermes"].includes(runtime) ? ["native-steering"] : []), ...(runtime === "fx" ? ["fx-steering"] : []), ...(accounts ? ["runtime-accounts", "account-config"] : [])].every(f => health.features?.includes(f));
   }
   private connect() {
     return this.connected ??= this.connectNow().catch((error) => { this.connected = undefined; throw error; });
@@ -172,7 +172,7 @@ export class PiClient {
     }
   }
   async startRun(req: PiChatRequest): Promise<PiRun> {
-    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode") {
+    if (req.runtime === "fx" || req.runtime === "codex" || req.runtime === "cursor" || req.runtime === "claude" || req.runtime === "opencode" || (req.runtime === "grok" || req.runtime === "hermes")) {
       await this.ensureFeature(req.runtime);
       await this.ensureFeature("runtime-questions");
       await this.ensureFeature("html-delivery");
@@ -286,7 +286,7 @@ async function handOff(owner: PiClient, threadId: string) {
  * The web server is the sole admission authority; serialize its selection + journal admission.
  */
 export async function startRun(req: PiChatRequest) {
-  if (!["cursor", "claude", "codex", "fx", "opencode"].includes(req.runtime ?? "")) return client.startRun(req);
+  if (!["cursor", "claude", "codex", "fx", "opencode", "grok", "hermes"].includes(req.runtime ?? "")) return client.startRun(req);
   const previous = admissions.get(req.threadId) ?? Promise.resolve();
   const admission = previous.catch(() => {}).then(async () => {
     const clients = existingClients();

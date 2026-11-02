@@ -1,3 +1,4 @@
+import { Bot as HermesMark } from "lucide-react";
 import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -17,7 +18,7 @@ import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
 import { RUNTIME_LABEL, RuntimeIcon, useRuntimeOptions } from "./Workspace";
 import { runtimeName } from "../lib/runtimes";
-import { OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
+import { GrokMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
   off: "off",
@@ -43,8 +44,10 @@ const PENDING_CODEX: Detection = { plan: "codex", status: "checking", models: []
 const PENDING_CURSOR: Detection = { plan: "cursor", status: "checking", models: [] };
 const PENDING_CLAUDE: Detection = { plan: "claude", status: "checking", models: [] };
 const PENDING_OPENCODE: Detection = { plan: "opencode", status: "checking", models: [] };
+const PENDING_HERMES: Detection = { plan: "hermes", status: "checking", models: [] };
+const PENDING_GROK: Detection = { plan: "grok", status: "checking", models: [] };
 /** The agent whose models a detection lists. */
-const planOf = (detection: Partial<Record<PlanId, Detection>>): "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode" => (detection.opencode ? "opencode" : detection.claude ? "claude" : detection.cursor ? "cursor" : detection.codex ? "codex" : detection.fx ? "fx" : "pi");
+const planOf = (detection: Partial<Record<PlanId, Detection>>): "pi" | "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes" => (detection.hermes ? "hermes" : detection.grok ? "grok" : detection.opencode ? "opencode" : detection.claude ? "claude" : detection.cursor ? "cursor" : detection.codex ? "codex" : detection.fx ? "fx" : "pi");
 
 /**
  * The models the composer can use: this server's, or those of the paired device the thread works
@@ -56,12 +59,12 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
   const load = useStore((s) => s.loadDeviceModels);
   // Native runtimes list their own models, not Pi provider models.
   const runtime = useStore((s) => runtimeOf(s, s.activeChatId));
-  const native = runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode";
-  const list = useStore((s) => runtime === "opencode" ? s.opencodeModels[deviceId ?? ""] : runtime === "claude" ? s.claudeModels[deviceId ?? ""] : runtime === "cursor" ? s.cursorModels[deviceId ?? ""] : runtime === "codex" ? s.codexModels[deviceId ?? ""] : runtime === "fx" ? s.fxModels[deviceId ?? ""] : undefined);
-  const loadNative = useStore((s) => runtime === "opencode" ? s.loadOpencodeModels : runtime === "claude" ? s.loadClaudeModels : runtime === "cursor" ? s.loadCursorModels : runtime === "codex" ? s.loadCodexModels : s.loadFxModels);
+  const native = runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode" || runtime === "grok" || runtime === "hermes";
+  const list = useStore((s) => runtime === "hermes" ? s.hermesModels[deviceId ?? ""] : runtime === "grok" ? s.grokModels[deviceId ?? ""] : runtime === "opencode" ? s.opencodeModels[deviceId ?? ""] : runtime === "claude" ? s.claudeModels[deviceId ?? ""] : runtime === "cursor" ? s.cursorModels[deviceId ?? ""] : runtime === "codex" ? s.codexModels[deviceId ?? ""] : runtime === "fx" ? s.fxModels[deviceId ?? ""] : undefined);
+  const loadNative = useStore((s) => runtime === "hermes" ? s.loadHermesModels : runtime === "grok" ? s.loadGrokModels : runtime === "opencode" ? s.loadOpencodeModels : runtime === "claude" ? s.loadClaudeModels : runtime === "cursor" ? s.loadCursorModels : runtime === "codex" ? s.loadCodexModels : s.loadFxModels);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const detection = useMemo(
-    () => (native ? { [runtime]: (runtime === "claude" && list ? claudeDetection(list, chat) : runtime === "codex" && list ? codexDetection(list, chat) : list) ?? (runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
+    () => (native ? { [runtime]: (runtime === "claude" && list ? claudeDetection(list, chat) : runtime === "codex" && list ? codexDetection(list, chat) : list) ?? (runtime === "hermes" ? PENDING_HERMES : runtime === "grok" ? PENDING_GROK : runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
     [native, runtime, list, chat, deviceId, remote, local],
   );
   // Fetch when the list is missing or stale; a failed one is retried shortly while it's on screen.
@@ -246,7 +249,7 @@ export function SpeedPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
 }
 
 const PERMISSION_STALE = 10 * 60 * 1000;
-const RUNTIME_NAME: Partial<Record<ThreadRuntime, string>> = { codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode" };
+const RUNTIME_NAME: Partial<Record<ThreadRuntime, string>> = { codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode", grok: "Grok", hermes: "Hermes" };
 
 /**
  * The permission mode for a Codex or Cursor thread, as that runtime lists its modes on the device
@@ -345,9 +348,9 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
 /** Why there are no models to pick: Pi missing, not signed in anywhere, or not answering. */
 function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>> }) {
   const openSettings = useStore((s) => s.openSettings);
-  if (detection.fx || detection.codex || detection.cursor || detection.claude || detection.opencode) {
-    const f = (detection.opencode ?? detection.claude ?? detection.cursor ?? detection.codex ?? detection.fx)!;
-    const name = detection.opencode ? "OpenCode" : detection.claude ? "Claude Code" : detection.cursor ? "Cursor" : detection.codex ? "Codex" : "fx";
+  if (detection.fx || detection.codex || detection.cursor || detection.claude || detection.opencode || detection.grok || detection.hermes) {
+    const f = (detection.hermes ?? detection.grok ?? detection.opencode ?? detection.claude ?? detection.cursor ?? detection.codex ?? detection.fx)!;
+    const name = detection.hermes ? "Hermes" : detection.grok ? "Grok" : detection.opencode ? "OpenCode" : detection.claude ? "Claude Code" : detection.cursor ? "Cursor" : detection.codex ? "Codex" : "fx";
     if (f.status === "checking" && !f.models.length)
       return (
         <div className="model-empty">
@@ -356,8 +359,8 @@ function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>>
       );
     return (
       <div className="model-empty">
-        {detection.opencode ? <OpencodeMark size={18} /> : detection.claude ? <ClaudeMark size={18} /> : detection.cursor ? <CursorMark size={18} /> : detection.codex ? <CodexMark size={18} /> : <FxMark size={18} />}
-        <p>{f.error ?? (detection.opencode ? "OpenCode has no models yet. Install it and configure providers with `opencode` on this device." : detection.claude ? "Claude Code has no models yet. Install it and run `claude` once on this device to sign in." : `${name} has no models yet. Sign in with \`${detection.cursor ? "agent" : detection.codex ? "codex" : "fx"} login\` on this device.`)}</p>
+        {detection.hermes ? <HermesMark size={18} /> : detection.grok ? <GrokMark size={18} /> : detection.opencode ? <OpencodeMark size={18} /> : detection.claude ? <ClaudeMark size={18} /> : detection.cursor ? <CursorMark size={18} /> : detection.codex ? <CodexMark size={18} /> : <FxMark size={18} />}
+        <p>{f.error ?? (detection.hermes ? "Run `hermes setup` on this device to configure models." : detection.grok ? "Grok has no models yet. Install it and run `grok login` on this device." : detection.opencode ? "OpenCode has no models yet. Install it and configure providers with `opencode` on this device." : detection.claude ? "Claude Code has no models yet. Install it and run `claude` once on this device to sign in." : `${name} has no models yet. Sign in with \`${detection.cursor ? "agent" : detection.codex ? "codex" : "fx"} login\` on this device.`)}</p>
       </div>
     );
   }
@@ -599,8 +602,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
           !isAuto(selection) && selection?.plan === plan
           ? selection.id.split("/").pop()!
           : "Select model"
-        : plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode"
-          ? `Set up ${plan === "opencode" ? "OpenCode" : plan === "claude" ? "Claude Code" : plan === "cursor" ? "Cursor" : plan === "codex" ? "Codex" : "fx"}`
+        : plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode" || (plan === "grok" || plan === "hermes")
+          ? `Set up ${plan === "hermes" ? "Hermes" : plan === "grok" ? "Grok" : plan === "opencode" ? "OpenCode" : plan === "claude" ? "Claude Code" : plan === "cursor" ? "Cursor" : plan === "codex" ? "Codex" : "fx"}`
           : "Set up Pi";
 
   const choose = (id: string) => {
@@ -617,7 +620,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() =>
-          all.length || checking || plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode" ? setOpen((o) => !o) : openSettings("keys")
+          all.length || checking || plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode" || (plan === "grok" || plan === "hermes") ? setOpen((o) => !o) : openSettings("keys")
         }
       >
         {current ? (

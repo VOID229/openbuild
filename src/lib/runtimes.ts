@@ -10,6 +10,8 @@ export const RUNTIMES: { runtime: ThreadRuntime; label: string; desc: string }[]
   { runtime: "opencode", label: "OpenCode", desc: "OpenCode's native coding agent" },
   { runtime: "codex", label: "Codex", desc: "OpenAI's native coding agent" },
   { runtime: "cursor", label: "Cursor", desc: "Cursor's native coding agent" },
+  { runtime: "hermes", label: "Hermes", desc: "Nous Research’s agent" },
+  { runtime: "grok", label: "Grok", desc: "SpaceXAI's native coding agent" },
   { runtime: "fx", label: "fx", desc: "Vercel's coding agent" },
 ];
 

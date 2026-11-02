@@ -54,7 +54,7 @@ test("runtime settings immediately render cached versions and update buttons, no
   const originalFetch = globalThis.fetch;
   const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
   const { RuntimesSection } = await import("../src/components/RuntimeSettings");
-  globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, {
+  globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok"].map((id) => [id, {
     installed: true, version: "1.0.0", latest: "2.0.0", updateAvailable: true, install: "secret-update-command",
   }])) })) as unknown as typeof fetch;
   try {
@@ -72,7 +72,7 @@ test("runtime settings immediately render cached versions and update buttons, no
     expect(html).not.toContain("secret-update-command");
     expect(html).not.toContain("Update with:");
     expect(html).not.toContain('class="spinner');
-    globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, {
+    globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok"].map((id) => [id, {
       installed: true, version: "2.0.0", latest: "2.0.0", updateAvailable: false, install: "secret-update-command",
     }])) })) as unknown as typeof fetch;
     await loadRuntimeStatuses(true);
@@ -175,7 +175,7 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
 });
 
 test("existing threads omit the redundant runtime chip and never offer a runtime picker", () => {
-  for (const runtime of [undefined, "pi", "durable", "fx", "codex", "cursor", "claude", "opencode"] as const) {
+  for (const runtime of [undefined, "pi", "durable", "fx", "codex", "cursor", "claude", "opencode", "grok"] as const) {
     reset({ threadRuntime: "durable" }, [thread(runtime)]);
     const html = markup(createElement(WorkspaceBelow, { chatId: "runtime-test", streaming: false }));
     expect(html).not.toContain("Runtime cannot be changed");
@@ -312,7 +312,7 @@ test("native approvals reach their runtime and sensitive answers are not stored 
     return Response.json({ ok: true });
   }) as typeof fetch;
   try {
-    for (const runtime of ["codex", "fx", "cursor", "opencode"] as const) {
+    for (const runtime of ["codex", "fx", "cursor", "opencode", "grok"] as const) {
       const chat = thread(runtime);
       const part = { type: "ask" as const, id: "native-question", method: "input" as const, title: "Credential", secret: true };
       chat.messages = [{ id: "assistant", role: "assistant", content: "", createdAt: 0, parts: [part] }];
@@ -326,7 +326,7 @@ test("native approvals reach their runtime and sensitive answers are not stored 
       expect(calls.at(-1)?.url).toContain(`/api/pi/threads/${chat.id}/answer`);
       expect(calls.at(-1)?.body.value).toBe("test-secret-value");
     }
-    expect(calls.length).toBe(4);
+    expect(calls.length).toBe(5);
   } finally { globalThis.fetch = originalFetch; reset(); }
 });
 

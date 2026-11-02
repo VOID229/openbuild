@@ -11,6 +11,8 @@ import { codexBin, codexEnv } from "./codex/install";
 import { cursorBin, cursorEnv, modelSlug } from "./cursor/install";
 import { sessionPath as cursorSession } from "./cursor/sessions";
 import { fxBin, fxEnv } from "./fx/install";
+import { grokBin, grokEnv } from "./grok/install";
+import { sessionDir as grokSessions } from "./grok/sessions";
 import { complete as opencodeComplete } from "./opencode-agent/sessions";
 import { complete as piComplete } from "./pi/sessions";
 
@@ -57,6 +59,15 @@ export const fxArgs = (r: CompleteRequest, files: string[]) => [
   ...(r.effort && r.effort !== "off" ? ["--effort", r.effort] : []), ...files.flatMap((f) => ["--image", f]), "--", r.prompt,
 ];
 
+/** Plan mode is Grok's read-only one; images only go in as JSON content blocks. */
+export const grokArgs = (r: CompleteRequest) => [
+  "--output-format", "plain", "--model", r.model.replace(/^grok\//, ""), "--rules", r.system, "--permission-mode", "plan", "--no-subagents", "--disable-web-search",
+  ...(r.effort && r.effort !== "off" ? ["--effort", r.effort] : []),
+  ...(r.images?.length
+    ? ["--prompt-json", JSON.stringify([...r.images.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data })), { type: "text", text: r.prompt }])]
+    : ["-p", r.prompt]),
+];
+
 /** Cursor has no system prompt flag, and ask mode is its read-only one. */
 export const cursorArgs = (r: CompleteRequest, slug: string, cwd: string) =>
   ["--print", "--output-format", "text", "--trust", "--workspace", cwd, "--mode", "ask", "--model", slug, "--", `${r.system}\n\n${r.prompt}`];
@@ -83,6 +94,7 @@ export async function complete(r: CompleteRequest, signal: AbortSignal): Promise
     if (r.runtime === "opencode") return await opencodeComplete({ ...r, cwd }, signal);
     if (r.runtime === "claude") return claudeResult(await run([installed(claudeBin(), "Claude Code"), ...claudeArgs(r)], cwd, claudeEnv(), signal, claudeInput(r)));
     if (r.runtime === "cursor") return await run([installed(cursorBin(), "Cursor"), ...cursorArgs(r, await modelSlug(r.model, r.effort), cwd)], cwd, cursorEnv(), signal);
+    if (r.runtime === "grok") return await run([installed(grokBin(), "Grok"), ...grokArgs(r)], cwd, grokEnv(), signal);
     const images = r.images ?? [];
     const files = images.map((image, i) => join(cwd, `image-${i}.${EXTENSIONS[image.mimeType] ?? "png"}`));
     await Promise.all(images.map((image, i) => Bun.write(files[i]!, Buffer.from(image.data, "base64"))));
@@ -92,5 +104,7 @@ export async function complete(r: CompleteRequest, signal: AbortSignal): Promise
     await rm(cwd, { recursive: true, force: true });
     // Cursor can't run without saving a chat, and the sidebar imports its chats.
     if (r.runtime === "cursor") await rm(dirname(dirname(cursorSession(cwd, "x"))), { recursive: true, force: true });
+    // Grok saves every run too, under its folder.
+    if (r.runtime === "grok") await rm(join(grokSessions(), encodeURIComponent(cwd)), { recursive: true, force: true });
   }
 }

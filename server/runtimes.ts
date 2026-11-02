@@ -7,12 +7,15 @@ import * as codex from "./codex/install";
 import * as cursor from "./cursor/install";
 import * as claude from "./claude/install";
 import * as opencode from "./opencode-agent/install";
+import * as hermes from "./hermes/install";
+import * as grok from "./grok/install";
 import { packageRoot, piBin } from "./pi/install";
 import { FX_INSTALL, fxBin } from "./fx/install";
 import { CODEX_INSTALL, codexBin } from "./codex/install";
 import { CURSOR_INSTALL, cursorBin } from "./cursor/install";
 import { CLAUDE_INSTALL, claudeBin } from "./claude/install";
 import { OPENCODE_INSTALL, opencodeBin } from "./opencode-agent/install";
+import { GROK_INSTALL, grokBin } from "./grok/install";
 
 const PI_INSTALL = "curl -fsSL https://pi.dev/install.sh | sh";
 
@@ -27,6 +30,8 @@ export function runtimes(): Record<ThreadRuntime, RuntimeAvailability> {
     cursor: { installed: !!cursorBin(), install: CURSOR_INSTALL },
     fx: { installed: !!fxBin(), install: FX_INSTALL },
     opencode: { installed: !!opencodeBin() || !!process.env.OPENCODE_SERVER_URL, install: OPENCODE_INSTALL },
+    hermes: { installed: !!hermes.hermesBin(), install: hermes.HERMES_INSTALL },
+    grok: { installed: !!grokBin(), install: GROK_INSTALL },
   };
 }
 
@@ -34,7 +39,7 @@ export function runtimes(): Record<ThreadRuntime, RuntimeAvailability> {
 export function runtimeUpdateCommand(runtime: ThreadRuntime, all = false): string[] {
   const bin = {
     pi: piBin, durable: piBin, claude: claudeBin, codex: codexBin,
-    cursor: cursorBin, fx: fxBin, opencode: opencodeBin,
+    cursor: cursorBin, fx: fxBin, opencode: opencodeBin, grok: grokBin, hermes: hermes.hermesBin,
   }[runtime]();
   if (!bin || (runtime === "durable" && !packageRoot())) throw new Error(`${runtime} isn't installed locally`);
   switch (runtime) {
@@ -45,6 +50,8 @@ export function runtimeUpdateCommand(runtime: ThreadRuntime, all = false): strin
     case "cursor": return [bin, "update"];
     case "fx": return [bin, "upgrade"];
     case "opencode": return [bin, "upgrade"];
+    case "hermes": return [bin, "update"];
+    case "grok": return [bin, "update"];
   }
 }
 
@@ -124,6 +131,8 @@ async function probeRuntimeStatus(fresh: boolean): Promise<StatusResults> {
     cursor: () => cursor.status(),
     claude: () => claude.status(),
     opencode: () => opencode.status(),
+    hermes: () => hermes.status(),
+    grok: () => grok.status(),
   };
   const entries = await Promise.all(
     (Object.keys(probes) as ThreadRuntime[]).map(async (id): Promise<[ThreadRuntime, RuntimeStatus]> => {

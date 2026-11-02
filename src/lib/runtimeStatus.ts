@@ -21,7 +21,7 @@ function entry(deviceId?: string): Entry | undefined {
   if (!cache.has(key)) {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey(deviceId)) ?? "null");
-      if (saved && typeof saved.at === "number" && saved.statuses && ["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].every((id) => typeof saved.statuses[id]?.installed === "boolean")) cache.set(key, saved);
+      if (saved && typeof saved.at === "number" && saved.statuses && ["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].every((id) => typeof saved.statuses[id]?.installed === "boolean")) cache.set(key, saved);
     } catch { /* Storage may be unavailable; memory caching still works. */ }
   }
   return cache.get(key);

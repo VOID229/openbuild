@@ -9,10 +9,10 @@
 // fx's events are translated into the same StreamEvents Pi turns produce, with its tools renamed to
 // the ones the thread UI knows (shell → bash, read_file → read, edit_file → edit, …), so a fx
 // thread looks and behaves like a Pi thread.
-import { structuredPatch } from "diff";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { clip, contentOf, unified } from "../acpContent";
 import { AcpProcess, FxError, type AcpMessage } from "./acp";
 import { elicit, elicitationMethods, QUESTION_NOTE, type QuestionReply } from "./questions";
 
@@ -256,12 +256,6 @@ export function restartIdle() {
 
 // ------------------------------------------------------------------ fx tools as OpenBuild tools
 
-function clip(text: string, max: number) {
-  if (text.length <= max) return text;
-  const half = Math.floor(max / 2);
-  return `${text.slice(0, half)}\n\n… ${text.length - max} characters not shown …\n\n${text.slice(-half)}`;
-}
-
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
 
 /** fx's tool, as the tool name and arguments the thread UI renders (Pi's names). */
@@ -322,15 +316,6 @@ function describeCall(call: { name?: string; kind?: string; title?: string; rawI
   return call.title ? call.title.toLowerCase() : `use ${name.replace(/_/g, " ")}`;
 }
 
-/** A unified diff of a change, as the thread UI shows edits. */
-function unified(path: string, oldText: string, newText: string): string | undefined {
-  if (oldText === newText) return undefined;
-  const p = structuredPatch(path, path, oldText, newText, "", "", { context: 3 });
-  const lines = [`--- ${path}`, `+++ ${path}`];
-  for (const h of p.hunks) lines.push(`@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`, ...h.lines.filter((l) => !l.startsWith("\\")));
-  return lines.join("\n");
-}
-
 function editPatch(args: Record<string, unknown>): string | undefined {
   const path = str(args.path) ?? "file";
   const oldText = str(args.old_string) ?? str(args.oldText) ?? str(args.old_text);
@@ -343,22 +328,6 @@ function editPatch(args: Record<string, unknown>): string | undefined {
   }
   if (typeof args.patch === "string") return args.patch;
   return undefined;
-}
-
-/** Text of ACP tool call content blocks (and any diffs they carry). */
-function contentOf(content: unknown, cwd: string): { text: string; patch?: string } {
-  if (!Array.isArray(content)) return { text: "" };
-  let text = "";
-  const patches: string[] = [];
-  for (const c of content as any[]) {
-    if (c?.type === "content" && c.content?.type === "text") text += c.content.text ?? "";
-    else if (c?.type === "diff" && typeof c.newText === "string") {
-      const path = typeof c.path === "string" ? (isAbsolute(c.path) && c.path.startsWith(cwd + "/") ? c.path.slice(cwd.length + 1) : c.path) : "file";
-      const p = unified(path, c.oldText ?? "", c.newText);
-      if (p) patches.push(p);
-    }
-  }
-  return { text, patch: patches.length ? patches.join("\n") : undefined };
 }
 
 /** fx's shell result is a JSON summary; the streamed output is what the user wants to see. */

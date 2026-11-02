@@ -1,5 +1,6 @@
-// One `fx acp` child process: the Agent Client Protocol (JSON-RPC 2.0, one message per line) over
-// stdio. fx is Vercel Labs' coding agent; it's installed on the device (never bundled), like Pi.
+// One agent child process speaking the Agent Client Protocol (JSON-RPC 2.0, one message per line)
+// over stdio: `fx acp` by default, or another ACP agent's command. Agents are installed on the
+// device (never bundled), like Pi.
 import type { Subprocess } from "bun";
 import { fxBin, fxEnv } from "./install";
 
@@ -8,8 +9,17 @@ type Listener = (message: AcpMessage) => void;
 
 export class FxError extends Error {}
 
+/** The program to run; errors name it, since they reach the thread as they are. */
+export interface AcpProgram { name: string; command: string[]; env: Record<string, string> }
+function fxProgram(): AcpProgram {
+  const bin = fxBin();
+  if (!bin) throw new FxError("Fx isn't installed on this device. Install it with: curl -fsSL https://fx.sh/setup.sh | bash");
+  return { name: "Fx", command: [bin, "acp"], env: fxEnv() };
+}
+
 export class AcpProcess {
   readonly cwd: string;
+  private name: string;
   private proc: Subprocess<"pipe", "pipe", "pipe">;
   private nextId = 1;
   private pending = new Map<number, { resolve: (r: any) => void; reject: (e: Error) => void }>();
@@ -19,18 +29,17 @@ export class AcpProcess {
   exitCode?: number;
   lastUsed = Date.now();
 
-  constructor(cwd: string) {
-    const bin = fxBin();
-    if (!bin) throw new FxError("Fx isn't installed on this device. Install it with: curl -fsSL https://fx.sh/setup.sh | bash");
+  constructor(cwd: string, program: AcpProgram = fxProgram()) {
     this.cwd = cwd;
-    this.proc = Bun.spawn([bin, "acp"], { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: fxEnv() });
+    this.name = program.name;
+    this.proc = Bun.spawn(program.command, { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: program.env });
     void this.readStdout();
     void this.readStderr();
     void this.proc.exited.then((code) => {
       this.exited = true;
       this.exitCode = code;
       const tail = this.stderrTail.slice(-6).join("\n");
-      const err = new FxError(`Fx exited (code ${code})${tail ? `: ${tail}` : ""}`);
+      const err = new FxError(`${this.name} exited (code ${code})${tail ? `: ${tail}` : ""}`);
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
       for (const l of this.listeners) l({ jsonrpc: "2.0", method: "$/exit", params: { code, message: err.message } });
@@ -79,7 +88,7 @@ export class AcpProcess {
     if (message.method === undefined && typeof message.id === "number" && this.pending.has(message.id)) {
       const p = this.pending.get(message.id)!;
       this.pending.delete(message.id);
-      if (message.error) p.reject(new FxError(message.error.message || `Fx error ${message.error.code}`));
+      if (message.error) p.reject(new FxError([message.error.message || `${this.name} error ${message.error.code}`, typeof message.error.data === "string" ? message.error.data : ""].filter(Boolean).join(": ")));
       else p.resolve(message.result);
       return;
     }
@@ -112,13 +121,13 @@ export class AcpProcess {
   }
 
   async request<T = any>(method: string, params: unknown, timeoutMs = 60_000, onSent?: (id: number) => void): Promise<T> {
-    if (this.exited) throw new FxError(`Fx isn't running (exited with code ${this.exitCode})`);
+    if (this.exited) throw new FxError(`${this.name} isn't running (exited with code ${this.exitCode})`);
     this.lastUsed = Date.now();
     const id = this.nextId++;
     return await new Promise<T>((resolve, reject) => {
       const timer = timeoutMs > 0 ? setTimeout(() => {
         this.pending.delete(id);
-        reject(new FxError(`Fx didn't answer "${method}" in time`));
+        reject(new FxError(`${this.name} didn't answer "${method}" in time`));
       }, timeoutMs) : undefined;
       this.pending.set(id, {
         resolve: (r) => (clearTimeout(timer), resolve(r)),

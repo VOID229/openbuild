@@ -2,7 +2,7 @@
 import type { ThreadRuntime } from "../shared/types";
 import * as storage from "./storage";
 
-export const validRuntime = (value: unknown): value is ThreadRuntime => value === "pi" || value === "durable" || value === "fx" || value === "codex" || value === "cursor" || value === "claude" || value === "opencode";
+export const validRuntime = (value: unknown): value is ThreadRuntime => value === "pi" || value === "durable" || value === "fx" || value === "codex" || value === "cursor" || value === "claude" || value === "opencode" || (value === "grok" || value === "hermes");
 const key = (id: string) => `thread-runtime:${id}`;
 
 export function threadRuntime(id: string): ThreadRuntime | undefined {
@@ -14,6 +14,8 @@ export function threadRuntime(id: string): ThreadRuntime | undefined {
   if (storage.getValue(`cursor-session:${id}`)) return "cursor";
   if (storage.getValue(`claude-session:${id}`)) return "claude";
   if (storage.getValue(`opencode-session:${id}`)) return "opencode";
+  if (storage.getValue(`grok-session:${id}`)) return "grok";
+  if (storage.getValue(`hermes-session:${id}`)) return "hermes";
   const chat = storage.getChat(id);
   if (chat && Array.isArray(chat.messages) && chat.messages.length) return validRuntime(chat.runtime) ? chat.runtime : "pi";
   return undefined;

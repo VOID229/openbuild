@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { claudeArgs, claudeInput, claudeResult, codexArgs, cursorArgs, fxArgs, type CompleteRequest } from "../server/textGeneration";
+import { claudeArgs, claudeInput, claudeResult, codexArgs, cursorArgs, fxArgs, grokArgs, type CompleteRequest } from "../server/textGeneration";
 
 const request: CompleteRequest = { runtime: "claude", model: "claude/haiku", effort: "low", system: "name it", prompt: "the prompt" };
 
@@ -10,6 +10,17 @@ describe("runtime commands", () => {
     expect(args.slice(args.indexOf("--tools"), args.indexOf("--tools") + 2)).toEqual(["--tools", ""]);
     expect(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)).toEqual(["--model", "haiku"]);
     expect(claudeArgs({ ...request, effort: "off" })).not.toContain("--effort");
+  });
+
+  test("Grok runs read-only without web or subagents, and takes images as JSON content", () => {
+    const args = grokArgs({ ...request, runtime: "grok", model: "grok/grok-4.7" });
+    expect(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2)).toEqual(["--model", "grok-4.7"]);
+    expect(args.slice(args.indexOf("--permission-mode"), args.indexOf("--permission-mode") + 2)).toEqual(["--permission-mode", "plan"]);
+    expect(args.slice(args.indexOf("-p"), args.indexOf("-p") + 2)).toEqual(["-p", "the prompt"]);
+    expect(grokArgs({ ...request, runtime: "grok", effort: "off" })).not.toContain("--effort");
+    const images = grokArgs({ ...request, runtime: "grok", images: [{ data: "QUJD", mimeType: "image/png" }] });
+    expect(images).not.toContain("-p");
+    expect(JSON.parse(images[images.indexOf("--prompt-json") + 1]!)).toEqual([{ type: "image", mimeType: "image/png", data: "QUJD" }, { type: "text", text: "the prompt" }]);
   });
 
   test("Claude gets images as stream-json content", () => {

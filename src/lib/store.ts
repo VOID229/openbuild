@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { GITHUB_SCOPE, PLANS, SEARCH_PROVIDERS, type Device, type KeyEdit, type KeyInventory, type PlanId, type Project, type SearchProviderId, type ThreadRuntime } from "../../shared/types";
 import { verifySearch } from "./api";
-import { opencodeModels, claudeModels, cursorModels, codexModels, fxModels, permissionModes, listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
+import { hermesModels, grokModels, opencodeModels, claudeModels, cursorModels, codexModels, fxModels, permissionModes, listDevices, listProjects, piModels, piProblems, piProviders, piResources, piStatus, type PiProblem, type PiProvider, type PiResource, type PiStatus } from "./pi";
 import { qualifyProject, setDeviceList } from "./devices";
 import { config } from "./runtime";
 import { deleteAllChats, deleteChat, saveChat } from "./db";
@@ -96,6 +96,8 @@ const PENDING_CODEX: Detection = { plan: "codex", status: "checking", models: []
 const PENDING_CURSOR: Detection = { plan: "cursor", status: "checking", models: [] };
 const PENDING_CLAUDE: Detection = { plan: "claude", status: "checking", models: [] };
 const PENDING_OPENCODE: Detection = { plan: "opencode", status: "checking", models: [] };
+const PENDING_HERMES: Detection = { plan: "hermes", status: "checking", models: [] };
+const PENDING_GROK: Detection = { plan: "grok", status: "checking", models: [] };
 
 /** Runtimes that list their own permission modes. */
 export type PermissionRuntime = "codex" | "cursor" | "claude";
@@ -143,7 +145,7 @@ export const composerDevice = (s: Pick<State, "activeChatId" | "chats" | "settin
  * in yet reads as "checking" rather than borrowing this server's models, which it may not share.
  */
 export function deviceDetection(
-  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">>,
+  s: Pick<State, "detection"> & Partial<Pick<State, "remoteModels" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels" | "grokModels" | "hermesModels">>,
   deviceId?: string,
   runtime?: ThreadRuntime,
 ): Partial<Record<PlanId, Detection>> {
@@ -153,6 +155,8 @@ export function deviceDetection(
   if (runtime === "cursor") return { cursor: s.cursorModels?.[deviceId ?? ""] ?? PENDING_CURSOR };
   if (runtime === "claude") return { claude: claudeDetection(s.claudeModels?.[deviceId ?? ""] ?? PENDING_CLAUDE) };
   if (runtime === "opencode") return { opencode: s.opencodeModels?.[deviceId ?? ""] ?? PENDING_OPENCODE };
+  if (runtime === "hermes") return { hermes: s.hermesModels?.[deviceId ?? ""] ?? PENDING_HERMES };
+  if (runtime === "grok") return { grok: s.grokModels?.[deviceId ?? ""] ?? PENDING_GROK };
   if (!deviceId) return s.detection;
   return { pi: s.remoteModels?.[deviceId] ?? PENDING_PI };
 }
@@ -202,12 +206,14 @@ export function claudeModelAccount(s: Pick<State, "claudeModels">, deviceId: str
 }
 
 /** This server's models for a plan, which for a runtime other than Pi is its own list. */
-export function planDetection(s: Pick<State, "detection" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">, plan: PlanId): Detection | undefined {
+export function planDetection(s: Pick<State, "detection" | "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels" | "grokModels" | "hermesModels">, plan: PlanId): Detection | undefined {
   if (plan === "fx") return s.fxModels[""];
   if (plan === "codex") return s.codexModels[""] && codexDetection(s.codexModels[""]!);
   if (plan === "cursor") return s.cursorModels[""];
   if (plan === "claude") return s.claudeModels[""];
   if (plan === "opencode") return s.opencodeModels[""];
+  if (plan === "hermes") return s.hermesModels[""];
+  if (plan === "grok") return s.grokModels[""];
   return s.detection[plan];
 }
 
@@ -220,6 +226,8 @@ export function loadPlanModels(plan: PlanId): Promise<void> {
   if (plan === "cursor") return s.loadCursorModels();
   if (plan === "claude") return s.loadClaudeModels();
   if (plan === "opencode") return s.loadOpencodeModels();
+  if (plan === "hermes") return s.loadHermesModels();
+  if (plan === "grok") return s.loadGrokModels();
   return Promise.resolve();
 }
 
@@ -279,6 +287,10 @@ interface State {
   loadCursorModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   claudeModels: Record<string, ClaudeList>;
   loadClaudeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  hermesModels: Record<string, Detection & { defaultModel?: string }>;
+  grokModels: Record<string, Detection & { defaultModel?: string }>;
+  loadHermesModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
+  loadGrokModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   opencodeModels: Record<string, Detection & { defaultModel?: string }>;
   loadOpencodeModels: (deviceId?: string, fresh?: boolean) => Promise<void>;
   loadDeviceModels: (deviceId: string, fresh?: boolean) => Promise<void>;
@@ -436,6 +448,34 @@ export const useStore = create<State>()(
           set((s) => ({ codexModels: { ...s.codexModels, [key]: { plan: "codex", status: "error", error: (err as Error).message, models: s.codexModels[key]?.models ?? [], accounts: prev?.accounts, checkedAt: Date.now() } } }));
         }
       },
+      hermesModels: {},
+      loadHermesModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().hermesModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ hermesModels: { ...s.hermesModels, [key]: { plan: "hermes", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await hermesModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Hermes didn't list any models");
+          set((s) => ({ hermesModels: { ...s.hermesModels, [key]: { plan: "hermes", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ hermesModels: { ...s.hermesModels, [key]: { plan: "hermes", status: "error", error: (err as Error).message, models: s.hermesModels[key]?.models ?? [], checkedAt: Date.now() } } }));
+        }
+      },
+      grokModels: {},
+      loadGrokModels: async (deviceId, fresh = false) => {
+        const key = deviceId ?? "";
+        const prev = get().grokModels[key];
+        if (prev?.status === "checking" && prev.checkedAt && Date.now() - prev.checkedAt < 30_000) return;
+        set((s) => ({ grokModels: { ...s.grokModels, [key]: { plan: "grok", status: "checking", models: prev?.models ?? [], defaultModel: prev?.defaultModel, checkedAt: Date.now() } } }));
+        try {
+          const r = await grokModels(fresh, deviceId);
+          if (!Array.isArray(r?.models)) throw new Error("Grok didn't list any models");
+          set((s) => ({ grokModels: { ...s.grokModels, [key]: { plan: "grok", status: "valid", models: r.models, defaultModel: r.defaultModel, checkedAt: r.checkedAt ?? Date.now() } } }));
+        } catch (err) {
+          set((s) => ({ grokModels: { ...s.grokModels, [key]: { plan: "grok", status: "error", error: (err as Error).message, models: s.grokModels[key]?.models ?? [], checkedAt: Date.now() } } }));
+        }
+      },
       fxModels: {},
       loadFxModels: async (deviceId, fresh = false) => {
         const key = deviceId ?? "";
@@ -523,6 +563,8 @@ export const useStore = create<State>()(
           if (due(s.cursorModels[key])) void s.loadCursorModels(id, !!s.cursorModels[key]);
           if (due(s.claudeModels[key])) void s.loadClaudeModels(id, !!s.claudeModels[key]);
           if (due(s.opencodeModels[key])) void s.loadOpencodeModels(id, !!s.opencodeModels[key]);
+          if (due(s.hermesModels[key])) void s.loadHermesModels(id, !!s.hermesModels[key]);
+          if (due(s.grokModels[key])) void s.loadGrokModels(id, !!s.grokModels[key]);
           if (due(s.fxModels[key])) void s.loadFxModels(id, !!s.fxModels[key]);
         }
       },
@@ -697,8 +739,8 @@ export const useStore = create<State>()(
       setSelection: (selection) => {
         const id = get().activeChatId;
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
-        else if (["fx", "codex", "cursor", "claude", "opencode"].includes(runtimeOf(get()))) {
-          const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor" | "claude" | "opencode";
+        else if (["fx", "codex", "cursor", "claude", "opencode", "grok", "hermes"].includes(runtimeOf(get()))) {
+          const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes";
           const key = composerDevice(get()) ?? "";
           const nativeSelections = get().settings.nativeSelections;
           get().updateSettings({ nativeSelections: { ...nativeSelections, [runtime]: { ...nativeSelections?.[runtime], [key]: isAuto(selection) ? undefined : selection } } });
@@ -855,6 +897,8 @@ export const useStore = create<State>()(
         cursorModels: s.cursorModels,
         claudeModels: s.claudeModels,
         opencodeModels: s.opencodeModels,
+        hermesModels: s.hermesModels,
+        grokModels: s.grokModels,
       }),
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<State>;
@@ -888,6 +932,8 @@ export const useStore = create<State>()(
           cursorModels: settle(p.cursorModels),
           claudeModels: settle(p.claudeModels),
           opencodeModels: settle(p.opencodeModels),
+          hermesModels: settle(p.hermesModels),
+          grokModels: settle(p.grokModels),
           searchStatus,
           piCache: { ...current.piCache, ...p.piCache },
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
@@ -966,7 +1012,7 @@ export function selectionFor(
   // A thread working on a paired device can only use that device's models.
   const deviceId = composerDevice(s);
   const runtime = runtimeOf(s, id);
-  if (runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode") return nativeSelectionFor(s, id, deviceId, runtime);
+  if (runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode" || (runtime === "grok" || runtime === "hermes")) return nativeSelectionFor(s, id, deviceId, runtime);
   const detection = deviceDetection(s, deviceId);
   // Don't drop a chat's model while the device's list is still on its way.
   const pending = deviceId ? !s.remoteModels?.[deviceId] : false;
@@ -985,12 +1031,12 @@ export function selectionFor(
 const fxDefaults = new WeakMap<Detection, ModelRef | undefined>();
 /** Native threads: picked model, last reply, new-thread preference, then runtime default. */
 function nativeSelectionFor(
-  s: Pick<State, "chats" | "selections" | "settings"> & Partial<Pick<State, "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels">>,
+  s: Pick<State, "chats" | "selections" | "settings"> & Partial<Pick<State, "fxModels" | "codexModels" | "cursorModels" | "claudeModels" | "opencodeModels" | "grokModels" | "hermesModels">>,
   id: string | undefined,
   deviceId: string | undefined,
-  plan: "fx" | "codex" | "cursor" | "claude" | "opencode",
+  plan: "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes",
 ): Selection | undefined {
-  const listed = (plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
+  const listed = (plan === "hermes" ? s.hermesModels : plan === "grok" ? s.grokModels : plan === "opencode" ? s.opencodeModels : plan === "claude" ? s.claudeModels : plan === "cursor" ? s.cursorModels : plan === "fx" ? s.fxModels : s.codexModels)?.[deviceId ?? ""];
   const chat = s.chats.find((c) => c.id === id);
   const d = listed ? plan === "claude" ? claudeDetection(listed, chat) : plan === "codex" ? codexDetection(listed, chat) : listed : undefined;
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));

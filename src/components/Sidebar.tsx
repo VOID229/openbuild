@@ -1,3 +1,4 @@
+import { Bot as HermesMark } from "lucide-react";
 import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
@@ -11,7 +12,7 @@ import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
-import { Avatar, BrandIcon, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { Avatar, BrandIcon, GrokMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 
@@ -222,6 +223,85 @@ function RowTitle({ title, titling }: { title: string; titling: boolean }) {
   );
 }
 
+type RowMotion = "close" | "snooze" | "open";
+
+/** How long a row takes to play out, and to settle in; both match the row-* animations in styles.css. */
+const ROW_OUT_MS = 300;
+const ROW_IN_MS = 460;
+
+/** Threads on their way out of the list, so a quick second action doesn't pick or move them again. */
+const moving = new Set<string>();
+/** Threads about to land in a new section, and how they left the old one. Their rows play it as they mount. */
+const landing = new Map<string, RowMotion>();
+
+const calm = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** What closes up behind a row: its whole section, if the row is all that keeps the section on screen. */
+function foldTarget(row: HTMLElement) {
+  const section = row.closest<HTMLElement>(".history-group");
+  return section && row.closest(".collapse") && section.querySelectorAll(".history-row").length === 1 ? section : row;
+}
+
+function fold(target: HTMLElement, direction: "in" | "out") {
+  target.style.overflow = "hidden";
+  target.style.setProperty("--fold-height", `${target.getBoundingClientRect().height}px`);
+  target.dataset.fold = direction;
+}
+
+function unfold(target: HTMLElement) {
+  target.style.removeProperty("overflow");
+  target.style.removeProperty("--fold-height");
+  delete target.dataset.fold;
+}
+
+function expectLanding(id: string, motion: RowMotion) {
+  if (calm()) return;
+  landing.set(id, motion);
+  // The store update renders before the next frame; a row that doesn't mount by then isn't on screen.
+  requestAnimationFrame(() => landing.delete(id));
+}
+
+/** Plays a thread's row out, then runs `commit` to file it elsewhere, where its row plays back in. */
+function moveThread(id: string, motion: RowMotion, commit: () => void) {
+  if (moving.has(id)) return;
+  const row = document.querySelector<HTMLElement>(`.history-row[data-thread="${CSS.escape(id)}"]`);
+  // Search results keep listing a thread wherever it's filed, so there it doesn't go anywhere.
+  if (row?.closest(".history-results")) return commit();
+  if (!row || calm()) {
+    expectLanding(id, motion);
+    return commit();
+  }
+  const target = foldTarget(row);
+  moving.add(id);
+  row.dataset.leave = motion;
+  fold(target, "out");
+  setTimeout(() => {
+    moving.delete(id);
+    expectLanding(id, motion);
+    commit();
+    // Only still on screen if the thread stayed put, or the list kept the section.
+    requestAnimationFrame(() => {
+      delete row.dataset.leave;
+      unfold(target);
+    });
+  }, ROW_OUT_MS);
+}
+
+function playLanding(row: HTMLElement, motion: RowMotion) {
+  const section = row.closest<HTMLElement>(".history-group");
+  const heading = row.closest(".collapse:not(.collapse-open)") ? section?.querySelector<HTMLElement>(".history-heading") : undefined;
+  const target = foldTarget(row);
+  row.dataset.enter = motion;
+  // In a collapsed section the row can't be seen arriving, so its heading marks the spot.
+  if (heading) heading.dataset.landed = "";
+  if (!heading || target !== row) fold(target, "in");
+  setTimeout(() => {
+    delete row.dataset.enter;
+    if (heading) delete heading.dataset.landed;
+    unfold(target);
+  }, ROW_IN_MS);
+}
+
 const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regenerating, onSelect, onMenu, onRenameDone }: RowProps) {
   const updateChat = useStore((s) => s.updateChat);
   const titling = useStore((s) => s.titling.has(chat.id)) && !chat.titleSource;
@@ -234,7 +314,16 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
   const device = useStore((s) => rowDevice(s.devices, chat.workspace?.deviceId));
   const [draft, setDraft] = useState(chat.title);
   const input = useRef<HTMLInputElement>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
   const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
+
+  useLayoutEffect(() => {
+    const motion = landing.get(chat.id);
+    if (!motion || !rowRef.current) return;
+    landing.delete(chat.id);
+    playLanding(rowRef.current, motion);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useLayoutEffect(() => {
     if (!renaming) return;
@@ -274,6 +363,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
 
   return (
     <div
+      ref={rowRef}
+      data-thread={chat.id}
       className={cx("history-row", active && "history-row-active")}
       {...longPress.handlers}
       onContextMenu={(e) => {
@@ -344,8 +435,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               @ {device}
             </span>
           )}
-          <span className="history-runtime" title={runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
-            {runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
+          <span className="history-runtime" title={runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+            {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
       </button>
@@ -359,7 +450,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
           {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
         </IconButton>
         {chat.snoozedUntil ? (
-          <IconButton label="Wake" tooltipSide="top" className="history-action" onClick={() => updateChat(chat.id, wakePatch)}>
+          <IconButton label="Wake" tooltipSide="top" className="history-action" onClick={() => wakeThread(chat.id)}>
             <ClockArrowUp size={14} />
           </IconButton>
         ) : (
@@ -501,20 +592,31 @@ let threadOrder: string[] = [];
 function leaveThread(id: string) {
   const s = useStore.getState();
   if (s.activeChatId !== id) return;
-  const at = threadOrder.indexOf(id);
-  const next = at < 0 ? threadOrder[0] : (threadOrder[at + 1] ?? threadOrder[at - 1]);
+  const order = threadOrder.filter((t) => t === id || !moving.has(t));
+  const at = order.indexOf(id);
+  const next = at < 0 ? order[0] : (order[at + 1] ?? order[at - 1]);
   if (next) s.selectChat(next);
   else s.newChat();
 }
 
 function toggleClosed(chat: Chat) {
-  if (!isClosed(chat)) leaveThread(chat.id);
-  useStore.getState().updateChat(chat.id, closePatch(chat));
+  const closed = isClosed(chat);
+  if (moving.has(chat.id)) return;
+  if (!closed) leaveThread(chat.id);
+  const commit = () => useStore.getState().updateChat(chat.id, closePatch(chat));
+  // A thread pinned from "Closed" stays in "Pinned" when it reopens.
+  if (closed && chat.pinned) commit();
+  else moveThread(chat.id, closed ? "open" : "close", commit);
 }
 
 function snoozeThread(id: string, until: number) {
+  if (moving.has(id)) return;
   leaveThread(id);
-  useStore.getState().updateChat(id, snoozePatch(until));
+  moveThread(id, "snooze", () => useStore.getState().updateChat(id, snoozePatch(until)));
+}
+
+function wakeThread(id: string) {
+  moveThread(id, "open", () => useStore.getState().updateChat(id, wakePatch));
 }
 
 function deleteThread(id: string) {
@@ -839,7 +941,7 @@ function ChatContextMenu({
         {isClosed(chat) ? <SquareArrowUp size={15} /> : <Check size={15} />} {isClosed(chat) ? "Reopen" : "Close"}
       </button>
       {chat.snoozedUntil ? (
-        <button type="button" role="menuitem" className="menu-item" onClick={act(() => updateChat(chat.id, wakePatch))}>
+        <button type="button" role="menuitem" className="menu-item" onClick={act(() => wakeThread(chat.id))}>
           <ClockArrowUp size={15} /> Wake
         </button>
       ) : (
@@ -946,6 +1048,8 @@ const RUNTIME_FILTERS = [
   ["cursor", "Cursor"],
   ["claude", "Claude Code"],
   ["opencode", "OpenCode"],
+  ["hermes", "Hermes"],
+  ["grok", "Grok"],
 ] as const;
 
 function FilterMenu() {
@@ -1089,12 +1193,12 @@ function FilterMenu() {
           {row(
             "runtime",
             "Runtime",
-            view.runtime === "all" ? "All" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
+            view.runtime === "all" ? "All" : view.runtime === "hermes" ? "Hermes" : view.runtime === "grok" ? "Grok" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
             <>
               <div className="menu-label">Runtime</div>
               {RUNTIME_FILTERS.map(([value, label]) => (
                 <button key={value} type="button" role="menuitemradio" aria-checked={view.runtime === value} className="menu-item" onClick={() => setView({ runtime: value })}>
-                  {value === "opencode" ? <OpencodeMark size={15} /> : value === "claude" ? <ClaudeMark size={15} /> : value === "cursor" ? <CursorMark size={15} /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
+                  {value === "hermes" ? <HermesMark size={15} /> : value === "grok" ? <GrokMark size={15} /> : value === "opencode" ? <OpencodeMark size={15} /> : value === "claude" ? <ClaudeMark size={15} /> : value === "cursor" ? <CursorMark size={15} /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
                   <span className="menu-item-label">{label}</span>
                   {view.runtime === value && <Check size={15} className="menu-check" />}
                 </button>
@@ -1232,7 +1336,11 @@ export function Sidebar() {
     const next = Math.min(...chats.map((c) => c.snoozedUntil ?? Infinity));
     if (next === Infinity) return;
     const wake = () => {
-      for (const c of useStore.getState().chats) if (c.snoozedUntil && c.snoozedUntil <= Date.now()) updateChat(c.id, wokePatch);
+      for (const c of useStore.getState().chats) {
+        if (!c.snoozedUntil || c.snoozedUntil > Date.now()) continue;
+        expectLanding(c.id, "open");
+        updateChat(c.id, wokePatch);
+      }
     };
     // Timers can't wait longer than about 24 days; the effect re-arms after each wake anyway.
     const timer = setTimeout(wake, Math.min(Math.max(0, next - Date.now()), 2 ** 31 - 1));
@@ -1351,7 +1459,7 @@ export function Sidebar() {
           <ScrollThumb target={historyRef} />
           <nav ref={historyRef} className="history" aria-label="Thread history">
             {deferredQuery ? (
-              <section className="history-group">
+              <section className="history-group history-results">
                 <h3 className="history-heading">{hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"}` : "Results"}</h3>
                 {hits.map((h) => row(h.chat, h))}
                 {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
@@ -1413,7 +1521,7 @@ export function Sidebar() {
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."
-                      : `No ${view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "pi" ? "Pi" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
+                      : `No ${view.runtime === "hermes" ? "Hermes" : view.runtime === "grok" ? "Grok" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "pi" ? "Pi" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Durable"} threads${view.models.length ? " with the selected models" : ""}.`}
                   </p>
                 )}
                 {closed.length > 0 && (

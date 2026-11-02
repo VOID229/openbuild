@@ -80,6 +80,8 @@ export const cursorModels = (fresh = false, deviceId?: DeviceId) => get<{ models
 
 /** Native Claude Code models from the device's installed CLI and its own sign-in. */
 export const claudeModels = (fresh = false, deviceId?: DeviceId, accounts: RuntimeAccount[] = []) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number; accounts?: ClaudeAccountModels[] }>(apiUrl(deviceId, `/api/claude/models?${new URLSearchParams({ ...(fresh ? { fresh: "1" } : {}), ...(accounts.length ? { accounts: JSON.stringify(accounts.map(({ id: _, runtime: __, deviceId: ___, ...account }) => account)) } : {}) })}`));
+export const hermesModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/hermes/models${fresh ? "?fresh=1" : ""}`));
+export const grokModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/grok/models${fresh ? "?fresh=1" : ""}`));
 export const opencodeModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/opencode/models${fresh ? "?fresh=1" : ""}`));
 
 /** The permission modes a native runtime reports on a device (Codex and Claude Code resolve the folder's project config). */

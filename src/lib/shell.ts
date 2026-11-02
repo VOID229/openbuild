@@ -38,6 +38,8 @@ export async function runShell(text: string, chatId = useStore.getState().active
   if (runtime === "cursor") throw new Error("Shell commands aren't available in Cursor threads yet.");
   if (runtime === "claude") throw new Error("Shell commands aren't available in Claude Code threads yet.");
   if (runtime === "opencode") throw new Error("Shell commands aren't available in OpenCode threads yet.");
+  if (runtime === "hermes") throw new Error("Shell commands are not available in Hermes threads yet.");
+  if (runtime === "grok") throw new Error("Shell commands aren't available in Grok threads yet.");
   const now = Date.now();
   const plannedDevice = existing?.workspace?.deviceId ?? (existing ? undefined : threadDevice(st));
   const via = plannedDevice ? (deviceServerId(plannedDevice) ?? replyHost()) : replyHost();

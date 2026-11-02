@@ -71,16 +71,16 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
 
   // Only a real answer from the server can lock the screen; an unreachable server never does.
   const locked = !!status && !status.authenticated;
-  // Brief blips (a restart takes a second or two) show nothing at all.
+  // Brief blips (one failed probe, a restart that takes a second or two) show nothing and leave the app usable.
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     if (!offline) { setSlow(false); return; }
     const t = setTimeout(() => setSlow(true), 1500);
     return () => clearTimeout(t);
   }, [offline]);
-  // While the server is unreachable the app is blocked: a modal <dialog> sits in the top layer and makes
+  // While the server stays unreachable the app is blocked: a modal <dialog> sits in the top layer and makes
   // everything else (including other dialogs and portals) inert, so nothing can be clicked or typed into.
-  const blocked = offline && !!status;
+  const blocked = slow && !!status;
   useEffect(() => {
     const d = outage.current;
     if (!d) return;
@@ -107,9 +107,8 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
     finally { setBusy(false); }
   };
 
-  // Blocks input immediately; the card fades in only if the outage outlasts a quick restart.
   const reconnecting = (
-    <dialog ref={outage} className={`local-access-outage${slow ? " local-access-outage-shown" : ""}`} aria-labelledby="local-access-outage-title" onCancel={(e) => e.preventDefault()}>
+    <dialog ref={outage} className="local-access-outage" aria-labelledby="local-access-outage-title" onCancel={(e) => e.preventDefault()}>
       <div className="local-access-outage-card" role="status" aria-live="polite">
         <span className="local-access-spinner" aria-hidden="true" />
         <div>

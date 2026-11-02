@@ -636,7 +636,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       return true;
     }
     if (runtime !== "pi") {
-      setNotice(`${runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Durable"} does not support Pi's /compact command.`);
+      setNotice(`${runtime === "hermes" ? "Hermes" : runtime === "grok" ? "Grok" : runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : "Durable"} does not support Pi's /compact command.`);
       return true;
     }
     if (!chatId) return false;
@@ -865,13 +865,37 @@ export function Composer({ variant, chatId, streaming }: Props) {
     submit(undefined, e.metaKey || e.ctrlKey);
   };
 
-  const onPaste = (e: React.ClipboardEvent) => {
-    const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
-    if (images.length) {
-      e.preventDefault();
-      void addFiles(images);
-    }
+  /** Attach any pictures on the clipboard. True when there were some, so the text isn't pasted too. */
+  const pasteImages = (data: DataTransfer) => {
+    const images = Array.from(data.files).filter((f) => f.type.startsWith("image/"));
+    if (images.length) void addFiles(images);
+    return images.length > 0;
   };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (pasteImages(e.clipboardData)) e.preventDefault();
+  };
+
+  // A paste with no field to land on (after clicking a Copy button, a message or the toolbar) would
+  // vanish without a sign, so it comes here. Fields keep theirs, and so does an open dialog.
+  const strayImages = useRef(pasteImages);
+  strayImages.current = pasteImages;
+  useEffect(() => {
+    const onStrayPaste = (e: ClipboardEvent) => {
+      const el = textarea.current;
+      const inField = (node: EventTarget | null) => node instanceof Element && !!node.closest("input, textarea, select, [contenteditable]");
+      if (!el || !e.clipboardData || e.defaultPrevented || inField(e.target) || inField(document.activeElement)) return;
+      if (document.querySelector("dialog[open], [aria-modal='true']")) return;
+      el.focus();
+      // A hidden or inert box can't take focus.
+      if (document.activeElement !== el) return;
+      e.preventDefault();
+      // Goes through the field's own editing, so the caret, undo and onChange all behave like a real paste.
+      if (!strayImages.current(e.clipboardData)) document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+    };
+    document.addEventListener("paste", onStrayPaste);
+    return () => document.removeEventListener("paste", onStrayPaste);
+  }, []);
 
   const modLabel = isMac ? "⌘" : "Ctrl";
   const hint = chatId

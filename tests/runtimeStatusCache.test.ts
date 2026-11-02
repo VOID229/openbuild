@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../src/lib/runtimeStatus";
 
-const statuses = (version: string) => Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode"].map((id) => [id, { installed: true, version, install: "test", updateAvailable: false }]));
+const statuses = (version: string) => Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].map((id) => [id, { installed: true, version, install: "test", updateAvailable: false }]));
 
 test("runtime status shares startup requests and caches per device; manual checks bypass cache", async () => {
   const original = globalThis.fetch;

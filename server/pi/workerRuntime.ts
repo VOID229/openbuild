@@ -16,11 +16,13 @@ import * as codex from "../codex/sessions";
 import * as cursor from "../cursor/sessions";
 import * as claude from "../claude/sessions";
 import * as opencode from "../opencode-agent/sessions";
+import * as hermes from "../hermes/sessions";
+import * as grok from "../grok/sessions";
 import * as shells from "./shell";
 
 /** Who runs a turn, as messages name it. */
 function agentName(runtime: PiChatRequest["runtime"], possessive = false) {
-  const name = runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : undefined;
+  const name = runtime === "hermes" ? "Hermes" : runtime === "grok" ? "Grok" : runtime === "opencode" ? "OpenCode" : runtime === "claude" ? "Claude Code" : runtime === "cursor" ? "Cursor" : runtime === "codex" ? "Codex" : runtime === "fx" ? "fx" : undefined;
   return name ? (possessive ? `${name}'s agent` : name) : "Pi";
 }
 
@@ -195,7 +197,7 @@ export class PiWorkerRuntime {
     if (fresh) {
       const display = req.runtime && req.runtime !== "pi";
       const input = { ...req, message: (display ? HTML_DELIVERY_NOTE : "") + PLUGIN_GUIDANCE_NOTE + req.message };
-      void this.consume(run, req.runtime === "opencode" ? opencode.runTurn(input, run.signal) : req.runtime === "claude" ? claude.runTurn(input, run.signal) : req.runtime === "cursor" ? cursor.runTurn(input, run.signal) : req.runtime === "codex" ? codex.runTurn(input, run.signal) : req.runtime === "fx" ? fx.runTurn(input, run.signal) : sessions.runTurn(input, run.signal), !!display);
+      void this.consume(run, req.runtime === "hermes" ? hermes.runTurn(input, run.signal) : req.runtime === "grok" ? grok.runTurn(input, run.signal) : req.runtime === "opencode" ? opencode.runTurn(input, run.signal) : req.runtime === "claude" ? claude.runTurn(input, run.signal) : req.runtime === "cursor" ? cursor.runTurn(input, run.signal) : req.runtime === "codex" ? codex.runTurn(input, run.signal) : req.runtime === "fx" ? fx.runTurn(input, run.signal) : sessions.runTurn(input, run.signal), !!display);
     }
     return run;
   }
@@ -247,9 +249,9 @@ export class PiWorkerRuntime {
     this.db.query("INSERT OR IGNORE INTO deleted_threads VALUES (?)").run(threadId);
     this.stopThread(threadId);
   }
-  ownership() { return [...this.threads].filter((id) => sessions.isSessionLive(id) || fx.isSessionLive(id) || codex.isSessionLive(id) || cursor.isSessionLive(id) || claude.isSessionLive(id) || opencode.isSessionLive(id)); }
+  ownership() { return [...this.threads].filter((id) => sessions.isSessionLive(id) || fx.isSessionLive(id) || codex.isSessionLive(id) || cursor.isSessionLive(id) || claude.isSessionLive(id) || opencode.isSessionLive(id) || hermes.isSessionLive(id) || grok.isSessionLive(id)); }
   answer(threadId: string, askId: string, reply: Parameters<typeof sessions.answer>[2]) {
-    return cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
+    return hermes.hasAsk(threadId, askId) ? hermes.answer(threadId, askId, reply) : grok.hasAsk(threadId, askId) ? grok.answer(threadId, askId, reply) : cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
   async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) {
     if (display !== undefined) this.steerDisplays.set(steerId, display);
@@ -263,9 +265,9 @@ export class PiWorkerRuntime {
     }
   }
   private deliverSteer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
-    return fx.canSteer(threadId) ? fx.steer(threadId, steerId, message, images) : cursor.canSteer(threadId) ? cursor.steer(threadId, steerId, message, images) : claude.canSteer(threadId) ? claude.steer(threadId, steerId, message, images) : opencode.canSteer(threadId) ? opencode.steer(threadId, steerId, message, images) : codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
+    return hermes.canSteer(threadId) ? hermes.steer(threadId, steerId, message, images) : grok.canSteer(threadId) ? grok.steer(threadId, steerId, message, images) : fx.canSteer(threadId) ? fx.steer(threadId, steerId, message, images) : cursor.canSteer(threadId) ? cursor.steer(threadId, steerId, message, images) : claude.canSteer(threadId) ? claude.steer(threadId, steerId, message, images) : opencode.canSteer(threadId) ? opencode.steer(threadId, steerId, message, images) : codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
   }
   compact = sessions.compact;
-  release(threadId: string) { this.stopThread(threadId); sessions.release(threadId); fx.release(threadId); codex.release(threadId); cursor.release(threadId); claude.release(threadId); opencode.release(threadId); }
-  restartIdle() { sessions.restartIdle(); fx.restartIdle(); codex.restartIdle(); cursor.restartIdle(); claude.restartIdle(); opencode.restartIdle(); }
+  release(threadId: string) { this.stopThread(threadId); sessions.release(threadId); fx.release(threadId); codex.release(threadId); cursor.release(threadId); claude.release(threadId); opencode.release(threadId); grok.release(threadId); hermes.release(threadId); }
+  restartIdle() { sessions.restartIdle(); fx.restartIdle(); codex.restartIdle(); cursor.restartIdle(); claude.restartIdle(); opencode.restartIdle(); grok.restartIdle(); hermes.restartIdle(); }
 }

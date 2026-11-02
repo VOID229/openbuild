@@ -27,7 +27,7 @@ ob pair --client # pair a remote host to use in the openbuild server
 It will ask for device name, LAN or Tailscale, then show a code.
 Put that code in the client pair after choosing the same connection type.
 
-OpenBuild works with your existing coding agents like [Pi](https://pi.dev), [Codex](https://developers.openai.com/codex), [Claude Code](https://code.claude.com), [Cursor](https://cursor.com), [OpenCode](https://opencode.ai), and [Fx](https://fx.sh) with your paid Subs or connected API keys.
+OpenBuild works with your existing coding agents like [Pi](https://pi.dev), [Codex](https://developers.openai.com/codex), [Claude Code](https://code.claude.com), [Cursor](https://cursor.com), [OpenCode](https://opencode.ai), [Grok Build](https://x.ai/cli), and [Fx](https://fx.sh) with your paid Subs or connected API keys.
 
 OpenBuild isn't selling anything, collecting any data or offering any compute.
 
