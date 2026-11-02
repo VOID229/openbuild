@@ -100,6 +100,7 @@ export async function previewPage(browser: string, html: string, opts: { width?:
     await writeFile(page, withBootstrap(html, htmlTheme(appearance), { opaque: true }) + MEASURE);
     const common = [
       "--headless", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
+      "--enable-logging=stderr",
       "--force-device-scale-factor=1", `--user-data-dir=${join(dir, "profile")}`, "--virtual-time-budget=5000",
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),
     ];
