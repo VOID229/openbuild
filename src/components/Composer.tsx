@@ -2,6 +2,7 @@ import { ArrowUp, Bookmark, BookOpen, Check, ChevronDown, CornerUpLeft, FileText
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { canSteer, drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
+import { EXTERNAL_VIA } from "../../shared/replies";
 import { BUILTIN_COMMANDS, matchCommands, usePiCommands } from "../lib/commands";
 import { compactThread } from "../lib/pi";
 import { useFieldDictation } from "../lib/useFieldDictation";
@@ -415,6 +416,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const stashed = useStash((s) => s.items);
   const [stashOpen, setStashOpen] = useState(false);
   const [stashIndex, setStashIndex] = useState(0);
+  const external = useStore((s) => s.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant")?.stream?.via === EXTERNAL_VIA);
   const [editing, setEditing] = useState<Editing>();
   const editingRef = useRef(editing);
   editingRef.current = editing;
@@ -908,7 +910,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
       {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} />}
-      {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
+      {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
       <PluginSlot name="composer:above" context={{ variant, chatId }} />
@@ -1008,6 +1010,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>
+          ) : external && streaming ? (
+            <span className="composer-mode" role="status">External Pi · control it in its terminal</span>
           ) : (
             shellMode && (
               <span className="composer-mode">
@@ -1019,8 +1023,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <div className="composer-controls">
             <DictationButton dictation={dictation} className="round-btn round-btn-mic" size={17} tooltipSide={variant === "dock" ? "top" : "bottom"} />
             {queueing && !hasContent && !editing ? (
-              <button type="button" className="round-btn" aria-label="Stop generating" data-tooltip="Stop" data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
-                <Square size={13} fill="currentColor" />
+              <button type="button" className="round-btn" aria-label={external ? "External Pi session (read-only)" : "Stop generating"} disabled={external} data-tooltip={external ? "Stop or steer this Pi session in its terminal" : "Stop"} data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
+                {external ? <SquareTerminal size={17} /> : <Square size={13} fill="currentColor" />}
               </button>
             ) : (
               <button

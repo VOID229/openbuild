@@ -12,7 +12,7 @@ import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
-import { Avatar, BrandIcon, HermesMark, GrokMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { Avatar, BrandIcon, GrokMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 

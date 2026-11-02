@@ -16,8 +16,7 @@ import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
 import { UsagePage } from "./components/UsagePage";
-import { canSyncChat, readChatProjection } from "./lib/chatSync";
-import { resumeReplies } from "./lib/chat";
+import { adoptDiscoveredChats, resumeReplies } from "./lib/chat";
 import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
@@ -230,27 +229,7 @@ function Main() {
       try {
         const incoming = await loadChats();
         if (disposed) return;
-        const current = useStore.getState().chats;
-        const byId = new Map(current.map((c) => [c.id, c]));
-        let readActive: string | undefined;
-        for (const chat of incoming) {
-          const original = before.get(chat.id);
-          const now = byId.get(chat.id);
-          // A local edit, delete or streamed delta happened during the request: leave it alone.
-          // Pi running outside OpenBuild only changes here, so keep taking it.
-          if (now !== original || !canSyncChat(now, chat)) continue;
-          // Unchanged chats come back as the same object from the chat cache.
-          if (now === chat) continue;
-          if (!now || JSON.stringify(now) !== JSON.stringify(chat)) {
-            const next = readChatProjection(chat, document.visibilityState === "visible" ? useStore.getState().activeChatId : undefined);
-            if (next !== chat) readActive = chat.id;
-            byId.set(chat.id, next);
-          }
-        }
-        useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
-        if (readActive) useStore.getState().updateChat(readActive, { unread: false });
-        // Replies and commands another device started here, including runs admitted before a restart.
-        resumeReplies();
+        adoptDiscoveredChats(incoming, before);
       } catch { /* Keep the current view offline; the next poll retries. */ }
       finally { pending = false; }
     };

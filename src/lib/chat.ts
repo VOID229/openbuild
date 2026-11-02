@@ -1,10 +1,11 @@
-import { newStreamKey, type ReplyStream } from "../../shared/replies";
+import { EXTERNAL_VIA, newStreamKey, type ReplyStream } from "../../shared/replies";
 import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
+import { abortable } from "./abort";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
-import { editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, removeQueued, requeue, setSteering, shiftQueue, type Queued } from "./queue";
+import { clearQueue, consumeSteer, stageSteer, steeringOf, editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
 import { canResume, replyHost } from "./runtime";
@@ -23,7 +24,7 @@ export { uid };
  * `steers`: queued messages handed to Pi during the reply that it hasn't read yet.
  */
 const running = new Map<string, Run>();
-type Run = { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[] };
+type Run = { ctrl: AbortController; messageId: string; stream: ReplyStream; steers: Queued[]; steerRequests: Set<Promise<unknown>>; drainOnStop: boolean };
 
 /** Update a run's unread steers, and what the queue tray shows as steering while it's the chat's reply. */
 function setSteers(chatId: string, run: Run, list: Queued[]) {
@@ -110,9 +111,20 @@ function stopRun(run: { ctrl: AbortController; stream: ReplyStream }) {
   void stopReply(run.stream);
 }
 
-export function stopGeneration(chatId: string) {
+export function stopGeneration(chatId: string, drainOnStop = false) {
   const run = running.get(chatId);
-  if (run) stopRun(run);
+  if (run) {
+    run.drainOnStop = drainOnStop;
+    stopRun(run);
+    return;
+  }
+  // A synced/persisted streaming message can render before resume attaches its local watcher.
+  const st = useStore.getState();
+  const msg = st.chats.find((c) => c.id === chatId)?.messages.findLast((m) => m.role === "assistant" && m.status === "streaming" && m.stream && canResume(m.stream.via, m.stream.deviceId));
+  if (msg?.stream) {
+    st.patchMessage(chatId, msg.id, { status: "stopped" }, true);
+    void stopReply(msg.stream);
+  }
 }
 
 /** Stop the running reply and send this queued message right after. */
@@ -121,7 +133,8 @@ export function interruptWith(chatId: string, id: string) {
   const run = running.get(chatId);
   if (run) requeueSteers(chatId, run);
   moveQueued(chatId, id, 0);
-  stopGeneration(chatId);
+  stopGeneration(chatId, true);
+  if (!run) drainQueue(chatId);
 }
 
 /** Runtimes with native streaming input, steering APIs, or tool-boundary hook delivery. */
@@ -140,24 +153,31 @@ export async function steerQueued(chatId: string, id: string) {
   const runtime = chat?.runtime ?? "pi";
   if (!run || !item || !canSteer(runtime) || msg?.model?.plan !== runtime) return;
   const { message, images } = piMessage({ content: item.text, attachments: item.files } as Message, findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), msg.model)?.input ?? ["text"]);
-  removeQueued(chatId, id);
+  stageSteer(chatId, item);
   setSteers(chatId, run, [...run.steers, item]);
   // The worker's log only has the steer's text: saved here, its files survive a reload or restart.
   if (item.files.length) st.patchMessage(chatId, run.messageId, (m) => ({ steerFiles: { ...m.steerFiles, [id]: item.files } }), true);
+  const request = steerThread(chatId, id, message, images, chat?.workspace?.deviceId, item.text);
+  run.steerRequests.add(request);
   try {
     // An extension took it as input; there's nothing more to show for it.
-    if ((await steerThread(chatId, id, message, images, chat?.workspace?.deviceId, item.text)).handled) setSteers(chatId, run, run.steers.filter((q) => q !== item));
+    if ((await request).handled) setSteers(chatId, run, run.steers.filter((q) => q !== item));
   } catch (err) {
     if (run.steers.includes(item)) {
       setSteers(chatId, run, run.steers.filter((q) => q !== item));
       requeue(chatId, [item]);
     }
     throw err;
+  } finally {
+    run.steerRequests.delete(request);
   }
 }
 
 export function stopAllGenerations() {
-  for (const run of running.values()) stopRun(run);
+  for (const run of running.values()) {
+    run.drainOnStop = false;
+    stopRun(run);
+  }
 }
 
 /**
@@ -165,6 +185,10 @@ export function stopAllGenerations() {
  * in every chat or just `chatId`.
  */
 export function resumeReplies(chatId?: string) {
+  if (!queuesLoaded()) {
+    void queuesReady.then(() => resumeReplies(chatId));
+    return;
+  }
   for (const chat of useStore.getState().chats) {
     if (chatId && chat.id !== chatId) continue;
     const run = running.get(chat.id);
@@ -175,11 +199,34 @@ export function resumeReplies(chatId?: string) {
       if (message && message.status !== "streaming") run.ctrl.abort();
       continue;
     }
-    const msg = chat.messages.findLast((m) => m.status === "streaming" && m.stream && canResume(m.stream.via));
+    const msg = chat.messages.findLast((m) => m.status === "streaming" && m.stream && canResume(m.stream.via, m.stream.deviceId));
     if (msg) void generate(chat.id, msg.id, true);
+    else requeue(chat.id, steeringOf(chat.id));
   }
   // And commands the user ran ("!"), which run apart from replies.
   resumeShells(chatId);
+}
+
+/** Adopt a background chat-index refresh without overwriting local edits or active stream deltas. */
+export function adoptDiscoveredChats(incoming: Chat[], before: Map<string, Chat>) {
+  const current = useStore.getState().chats;
+  const byId = new Map(current.map((c) => [c.id, c]));
+  const completedExternal: string[] = [];
+  for (const chat of incoming) {
+    const original = before.get(chat.id);
+    const now = byId.get(chat.id);
+    if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
+    if (now === chat) continue;
+    if (!now || JSON.stringify(now) !== JSON.stringify(chat)) {
+      byId.set(chat.id, chat);
+      if (now?.messages.some((m) => m.status === "streaming" && m.stream?.via === EXTERNAL_VIA) && chat.messages.findLast((m) => m.role === "assistant")?.status === "done") completedExternal.push(chat.id);
+    }
+  }
+  useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
+  // The poll can discover a turn another tab started, not only terminal transcripts and shells.
+  // Install its running owner before exposing functional Stop/steer/interrupt controls.
+  resumeReplies();
+  for (const id of completedExternal) drainQueue(id);
 }
 
 /** Resolve the chat's composer selection to a concrete model for this prompt. */
@@ -202,6 +249,9 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
  */
 export function sendMessage(text: string, attachments: Attachment[], chatId = useStore.getState().activeChatId, background = false): boolean {
   const st = useStore.getState();
+  // The composer normally queues these, but plugins and stale composer renders can send directly.
+  // Never replace the run map entry and leave its assistant message streaming forever.
+  if (chatId && (running.has(chatId) || st.chats.find((c) => c.id === chatId)?.messages.some((m) => m.status === "streaming" && m.role === "assistant"))) return false;
   const resolved = resolveModel(text, attachments, chatId);
   const model = resolved && findModel(deviceDetection(st, threadDevice(st, chatId), runtimeOf(st, chatId)), resolved.ref);
   if (!resolved || !model) {
@@ -267,6 +317,7 @@ export function regenerate(chatId: string, messageId: string) {
     running.delete(chatId);
     stopRun(prev);
     requeueSteers(chatId, prev);
+    if (prev.messageId !== messageId) st.patchMessage(chatId, prev.messageId, { status: "stopped" }, true);
   }
   const now = Date.now();
   st.patchMessage(chatId, messageId, {
@@ -330,14 +381,14 @@ export function pinWorkspace(chatId: string) {
 }
 
 /** Set up where a new thread works, from the new-thread settings (project, checkout or worktree, branch). */
-export async function newWorkspace(chat: Chat): Promise<Workspace> {
+export async function newWorkspace(chat: Chat, signal?: AbortSignal): Promise<Workspace> {
   const { projects } = useStore.getState();
   const pref = startedWorkspace.get(chat.id) ?? useStore.getState().settings.workspace;
   startedWorkspace.delete(chat.id);
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
   try {
-    if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId });
-    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, name: chat.title });
+    if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId }, signal);
+    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, name: chat.title }, signal);
   } catch (err) {
     throw new WorkspaceError((err as Error).message);
   }
@@ -431,9 +482,12 @@ async function generate(chatId: string, messageId: string, resume = false) {
     ? msg.stream!
     : { id: uid(), via: via ?? "", deviceId: plannedDevice, key: host === "hosted" ? newStreamKey() : undefined };
   const ctrl = new AbortController();
-  const run: Run = { ctrl, messageId, stream, steers: [] };
+  const run: Run = { ctrl, messageId, stream, steers: [...steeringOf(chatId)], steerRequests: new Set<Promise<unknown>>(), drainOnStop: false };
   running.set(chatId, run);
-  const isCurrent = () => running.get(chatId)?.ctrl === ctrl;
+  const isCurrent = () => {
+    const current = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
+    return running.get(chatId)?.ctrl === ctrl && current?.status === "streaming" && (!current.stream || current.stream.id === stream.id);
+  };
   if (!resume) st.patchMessage(chatId, messageId, { stream: host ? stream : undefined }, true);
 
   let text = "";
@@ -477,8 +531,9 @@ async function generate(chatId: string, messageId: string, resume = false) {
     // A thread's first turn sets up where it works (a project checkout, a new worktree, or a scratch folder).
     let workspace = chat.workspace;
     if (pi && !resume && !workspace) {
-      workspace = await newWorkspace(chat);
-      if (!isCurrent()) return;
+      workspace = await abortable(newWorkspace(chat, ctrl.signal), ctrl.signal);
+      ctrl.signal.throwIfAborted();
+      if (!isCurrent()) throw new Error("This reply is no longer active.");
       useStore.getState().updateChat(chatId, { workspace });
       // The remote device is only known once the workspace was made; keep the stream findable there.
       if (workspace.deviceId) {
@@ -486,6 +541,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         useStore.getState().patchMessage(chatId, messageId, { stream }, true);
       }
     } else startedWorkspace.delete(chatId);
+    ctrl.signal.throwIfAborted();
     // Durable admission is keyed by the reply's stream id, so posting the same request again picks up
     // its turn (or starts it, if the server restarted before admitting it). Pi replies are reattached.
     const repost = resume && chat.runtime === "durable" && !!workspace && !!model;
@@ -514,6 +570,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
       if (isCurrent()) useStore.getState().patchMessage(chatId, messageId, { parts: [...parts] });
     };
     for await (const ev of streamChat(request, stream, startedAt, ctrl.signal, (resume && pi) || chat.runtime === "durable")) {
+      if (!isCurrent() || ctrl.signal.aborted) break;
       // A poll/cloud sync may already have supplied the worker's final projection. Never replace
       // it with a partial replay (or mark it failed when a stale connection eventually dies).
       if (useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.status !== "streaming") break;
@@ -555,6 +612,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
         if (item) {
           steered.set(item.id, item);
           setSteers(chatId, run, run.steers.filter((q) => q !== item));
+          consumeSteer(chatId, item.id);
         }
         endThought();
         const saved = ev.id ? useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.steerFiles?.[ev.id] : undefined;
@@ -598,14 +656,26 @@ async function generate(chatId: string, messageId: string, resume = false) {
     if (!ctrl.signal.aborted) error = err instanceof WorkspaceError ? err.message : `Connection lost: ${(err as Error).message}`;
   }
 
+  // The stream can finish before a steering POST's receipt arrives. Don't send the same action
+  // as a fresh turn while an extension may still be confirming that it handled it.
+  if (!ctrl.signal.aborted && run.steerRequests.size) {
+    await abortable(Promise.allSettled([...run.steerRequests]), ctrl.signal).catch(() => {});
+  }
   // Superseded by a retry: the new run owns this message now.
-  if (!isCurrent()) return;
+  if (running.get(chatId)?.ctrl !== ctrl) return;
   running.delete(chatId);
+  if (!useStore.getState().chats.some((c) => c.id === chatId)) {
+    clearQueue(chatId);
+    return;
+  }
   // Steers Pi didn't get to are sent next, as ordinary messages.
   requeueSteers(chatId, run);
   // A reply picked back up may have been finished meanwhile by the device that started it.
   const now = useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId);
-  if (now?.status !== "streaming") return drainQueue(chatId);
+  if (now?.status !== "streaming" || (now.stream && now.stream.id !== stream.id)) {
+    if (!ctrl.signal.aborted) drainQueue(chatId);
+    return;
+  }
   if (reasoning && reasoningMs === undefined) reasoningMs = Date.now() - startedAt;
   endThought();
   const status: Message["status"] = error ? "error" : ctrl.signal.aborted ? "stopped" : "done";
@@ -644,5 +714,5 @@ async function generate(chatId: string, messageId: string, resume = false) {
   // Finished, the thread moves to the sidebar's "Done" (reopening it if it was closed), open or not.
   st2.upsertChat({ ...latest, updatedAt: Date.now(), unread: latest.unread || (!error && st2.activeChatId !== chatId), done: true, woke: false, archived: false });
   // Done, stopped or failed, the chat is free again: send what was queued meanwhile.
-  drainQueue(chatId);
+  if ((!ctrl.signal.aborted && !error) || run.drainOnStop) drainQueue(chatId);
 }

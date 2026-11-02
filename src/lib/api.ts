@@ -6,6 +6,7 @@ import { cloudClient } from "./cloud";
 import { apiUrl } from "./devices";
 import { browserSecretById, browserSecrets } from "./keyStore";
 import { config } from "./runtime";
+import { abortable, fetchWithTimeout } from "./abort";
 
 /**
  * Check a saved key (by id) and list its models. Local app: the secret stays on the server, which
@@ -93,6 +94,8 @@ const RESUME_PATIENCE = 10 * 60 * 1000;
 const SILENT = 30_000;
 /** A hosted reply isn't saved until the relay has claimed it; wait this long before calling it lost. */
 const CLAIM_GRACE = 90_000;
+/** Local run streams send blank heartbeats every 15s, including while the model is thinking. */
+const TRANSPORT_SILENCE = 45_000;
 
 /**
  * Stream a reply: POST /api/chat (unless `req` is omitted, to pick up a reply already running) and
@@ -113,16 +116,24 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
   let delay = 500;
   /** Only say we're waiting on the thread's turn once, not on every retry. */
   let waiting = false;
+  // Replaying the same prefix is connectivity, not forward progress. Otherwise a reply that
+  // always drops after "I'll investigate" can renew its ten-minute deadline forever.
+  let highWater = 0;
   while (!signal.aborted) {
+    let seen = 0;
     let outcome: Outcome;
     const source = posted || probing ? attach(stream, signal) : post(req!, stream, signal, () => (posted = true), recoverable);
     try {
-      let next = await source.next();
+      let next = await abortable(source.next(), signal);
       while (!next.done) {
-        failingSince = undefined;
-        delay = 500;
+        if (next.value.t === "reset") seen = 0;
+        else if (++seen > highWater) {
+          highWater = seen;
+          failingSince = undefined;
+          delay = 500;
+        }
         yield next.value;
-        next = await source.next();
+        next = await abortable(source.next(), signal);
       }
       outcome = next.value;
     } catch (err) {
@@ -130,7 +141,8 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
       console.warn("[chat] lost the connection to a reply", err);
       outcome = "lost";
     } finally {
-      await source.return("lost").catch(() => {});
+      // Cancellation must not wait for a transport that is itself stuck in next().
+      void source.return("lost").catch(() => {});
     }
     if (outcome === "end") return;
     if (probing && outcome === "gone") {
@@ -184,13 +196,48 @@ function pause(ms: number, signal: AbortSignal) {
     const timer = setTimeout(done, ms);
     addEventListener("online", done);
     document.addEventListener("visibilitychange", onVisible);
-    signal.addEventListener("abort", done);
+    signal.addEventListener("abort", done, { once: true });
+    if (signal.aborted) done();
   });
 }
 
+/** Read NDJSON with cancellation and a raw-byte idle bound (blank heartbeats count as activity). */
+async function* replyEvents(res: Response, signal: AbortSignal): AsyncGenerator<StreamEvent> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  try {
+    while (!signal.aborted) {
+      const idle = new AbortController();
+      const timer = setTimeout(() => idle.abort(new DOMException("The reply connection went quiet", "TimeoutError")), TRANSPORT_SILENCE);
+      let chunk: Awaited<ReturnType<typeof reader.read>>;
+      try {
+        chunk = await abortable(reader.read(), AbortSignal.any([signal, idle.signal]));
+      } finally {
+        clearTimeout(timer);
+      }
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) yield JSON.parse(line) as StreamEvent;
+      }
+    }
+    signal.throwIfAborted();
+    buffer += decoder.decode();
+    if (buffer.trim()) yield JSON.parse(buffer) as StreamEvent;
+  } finally {
+    // Unlike releaseLock alone, cancel also closes the abandoned HTTP watcher.
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
+
 /** Read a reply's NDJSON stream until its end marker; "lost" if it's cut off before that. */
-async function* readReply(res: Response): AsyncGenerator<ReplyEvent, Outcome> {
-  for await (const ev of readEvents(res.body!)) {
+async function* readReply(res: Response, signal: AbortSignal): AsyncGenerator<ReplyEvent, Outcome> {
+  for await (const ev of replyEvents(res, signal)) {
     if (ev.t === "end") return "end";
     yield ev;
   }
@@ -202,7 +249,8 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
   const pi = "threadId" in req;
   const hosted = !pi && (await config).mode === "hosted";
   const body = { ...req, stream: { id: stream.id, key: pi ? undefined : stream.key }, ...(hosted ? { secrets: await secretsFor(req as ChatRequest) } : {}) };
-  const res = await fetch(pi ? apiUrl(stream.deviceId, "/api/pi/chat") : "/api/chat", {
+  signal.throwIfAborted();
+  const res = await fetchWithTimeout(pi ? apiUrl(stream.deviceId, "/api/pi/chat") : "/api/chat", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
@@ -229,10 +277,10 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
     return "end";
   }
   onPosted();
-  if (res.headers.get("x-openchat-run") === "1") return yield* readReply(res);
+  if (res.headers.get("x-openchat-run") === "1") return yield* readReply(res, signal);
   // A server that doesn't keep replies running (an older one): a dropped connection ends the reply.
   try {
-    for await (const ev of readEvents(res.body)) yield ev;
+    for await (const ev of replyEvents(res, signal)) yield ev;
   } catch (err) {
     if (signal.aborted) throw err;
     yield { t: "error", message: `Connection lost: ${(err as Error).message}` };
@@ -242,11 +290,11 @@ async function* post(req: ChatRequest | PiChatRequest, stream: ReplyStream, sign
 
 async function* attach(stream: ReplyStream, signal: AbortSignal): AsyncGenerator<ReplyEvent, Outcome> {
   if (stream.via === "hosted") return yield* attachSaved(stream, signal);
-  const res = await fetch(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}`), { signal });
+  const res = await fetchWithTimeout(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}`), { signal });
   if (res.status === 404) return "gone";
   if (!res.ok || !res.body) return "lost";
   yield { t: "reset" };
-  return yield* readReply(res);
+  return yield* readReply(res, signal);
 }
 
 /** Hosted: follow the copy of the reply the relay saves to the sync service, live. */
@@ -319,7 +367,10 @@ async function* attachSaved(stream: ReplyStream, signal: AbortSignal): AsyncGene
 export async function stopReply(stream: ReplyStream) {
   try {
     if (stream.via === "hosted") await cloudClient()?.mutation(convexApi.streams.stop, { id: stream.id });
-    else await fetch(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}/stop`), { method: "POST" });
+    else {
+      const res = await fetchWithTimeout(apiUrl(stream.deviceId, `/api/chat/runs/${encodeURIComponent(stream.id)}/stop`), { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    }
   } catch (err) {
     console.warn("[chat] couldn't stop a reply on the server", err);
   }

@@ -2,6 +2,7 @@
 import { readEvents } from "../../shared/replies";
 import type { ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
+import { fetchWithTimeout } from "./abort";
 
 async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
@@ -11,6 +12,8 @@ async function json<T>(res: Response): Promise<T> {
 const get = <T>(url: string) => fetch(url).then((r) => json<T>(r));
 const send = <T>(url: string, method: string, body?: unknown) =>
   fetch(url, { method, headers: { "content-type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) }).then((r) => json<T>(r));
+const sendBounded = <T>(url: string, body: unknown, signal?: AbortSignal) =>
+  fetchWithTimeout(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }).then((r) => json<T>(r));
 
 /** A paired device's id; undefined means this server. */
 type DeviceId = string | undefined;
@@ -107,7 +110,7 @@ export const answerAsk = (threadId: string, askId: string, reply: { value?: stri
   send(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/answer`), "POST", { askId, ...reply });
 
 export const steerThread = (threadId: string, steerId: string, message: string, images?: { data: string; mimeType: string }[], deviceId?: string, display?: string) =>
-  send<{ handled: boolean }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/steer`), "POST", { steerId, message, images, display });
+  sendBounded<{ handled: boolean }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/steer`), { steerId, message, images, display });
 
 export const compactThread = (threadId: string, instructions?: string, deviceId?: string) =>
   send<{ tokensBefore: number; estimatedTokensAfter?: number }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/compact`), "POST", { instructions });
@@ -219,10 +222,10 @@ export const folderPickerAvailable = () => get<{ available: boolean }>("/api/nat
 export const pickFolder = (dir?: string) => send<{ path: string | null }>("/api/native/folder", "POST", { dir }).then((r) => r.path);
 export const workspaceGit = (cwd: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/workspaces/git?cwd=${encodeURIComponent(cwd)}`));
 /** `deviceId` is only for a scratch folder: a project's own id says which device it's on. */
-export const prepareWorkspace = ({ deviceId: scratchDevice, ...req }: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string; deviceId?: DeviceId }) => {
+export const prepareWorkspace = ({ deviceId: scratchDevice, ...req }: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string; deviceId?: DeviceId }, signal?: AbortSignal) => {
   const ref = req.projectId ? splitProjectId(req.projectId) : undefined;
   const deviceId = ref ? ref.deviceId : scratchDevice;
-  return send<{ workspace: Workspace }>(apiUrl(deviceId, "/api/workspaces"), "POST", { ...req, projectId: ref?.id })
+  return sendBounded<{ workspace: Workspace }>(apiUrl(deviceId, "/api/workspaces"), { ...req, projectId: ref?.id }, signal)
     .then((r) => (deviceId ? { ...r.workspace, deviceId } : r.workspace));
 };
 export const removeWorktree = (cwd: string, force = false, deviceId?: DeviceId) => send(apiUrl(deviceId, "/api/workspaces/remove"), "POST", { cwd, force });

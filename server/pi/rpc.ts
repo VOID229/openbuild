@@ -32,6 +32,9 @@ export class PiProcess {
   private pending = new Map<string, { resolve: (r: PiRecord) => void; reject: (e: Error) => void }>();
   private listeners = new Set<Listener>();
   private stderrTail: string[] = [];
+  private closing = false;
+  private terminateTimer?: ReturnType<typeof setTimeout>;
+  private killTimer?: ReturnType<typeof setTimeout>;
   exited = false;
   exitCode?: number;
   lastUsed = Date.now();
@@ -46,11 +49,13 @@ export class PiProcess {
     void this.proc.exited.then((code) => {
       this.exited = true;
       this.exitCode = code;
+      clearTimeout(this.terminateTimer);
+      clearTimeout(this.killTimer);
       const tail = this.stderrTail.slice(-6).join("\n");
       const err = new PiError(`Pi exited (code ${code})${tail ? `: ${tail}` : ""}`);
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
-      for (const l of this.listeners) l({ type: "process_exit", code, message: err.message });
+      this.dispatch({ type: "process_exit", code, message: err.message });
     });
   }
 
@@ -102,7 +107,15 @@ export class PiProcess {
       return;
     }
     if (record.type === "extension_error") reportProblem(record.extensionPath ?? "extension", `${record.event ? `${record.event}: ` : ""}${record.error}`);
-    for (const l of this.listeners) l(record);
+    for (const l of this.listeners) {
+      try {
+        l(record);
+      } catch (err) {
+        // A cancelled UI stream or another observer must not kill the only stdout reader.
+        // Losing that reader blocks *every* RPC response, including steering and abort.
+        reportProblem("rpc", `Pi event listener failed (${record.type}): ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   }
 
   on(listener: Listener): () => void {
@@ -138,12 +151,21 @@ export class PiProcess {
     return response.data as T;
   }
 
-  /** Ask Pi to shut down (closing stdin), and kill it if it doesn't. */
-  close() {
-    if (this.exited) return;
+  /** Ask Pi to shut down, then signal it; even a stuck SIGTERM handler has a hard deadline. */
+  close(graceMs = 5000) {
+    if (this.exited || this.closing) return;
+    this.closing = true;
     try {
       this.proc.stdin.end();
     } catch {}
-    setTimeout(() => !this.exited && this.proc.kill(), 5000).unref?.();
+    this.terminateTimer = setTimeout(() => {
+      if (this.exited) return;
+      // Give Pi's signal handler a chance to kill its tracked shell children before hard-killing
+      // the host. Its orderly shutdown can itself hang on an extension that ignores abort.
+      this.proc.kill("SIGTERM");
+      this.killTimer = setTimeout(() => !this.exited && this.proc.kill("SIGKILL"), 1000);
+      this.killTimer.unref?.();
+    }, graceMs);
+    this.terminateTimer.unref?.();
   }
 }

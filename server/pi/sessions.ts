@@ -22,6 +22,8 @@ import { addUsage, emptyUsage } from "./usage";
 
 /** Close a thread's Pi process after this long without use. */
 const IDLE = 20 * 60 * 1000;
+/** A tool or extension may ignore abort; don't leave the thread busy forever. */
+const ABORT_GRACE = 5000;
 /** Tool output kept per call (head and tail), and the diff of a file change. */
 const OUTPUT_MAX = 12_000;
 const PATCH_MAX = 60_000;
@@ -36,7 +38,7 @@ interface Live {
   /** Settles once the running turn is over. */
   idle: Promise<void>;
   /** The running turn: whether Pi has taken its prompt (only then can it be steered), and the steers it hasn't read yet. */
-  turn?: { taking: boolean; steers: string[] };
+  turn?: { taking: boolean; stopping: boolean; steers: string[]; pendingSteers: Set<Promise<void>> };
   /** Questions from extensions still waiting for an answer, replayed to whoever watches the run. */
   asks: Map<string, Extract<StreamEvent, { t: "ask" }>>;
   /** Running question_ask calls and their questions, to tell their dialogs from other extensions'. */
@@ -110,6 +112,22 @@ function saveSpeed(threadId: string, model: string, speed: string | undefined) {
   mkdirSync(join(file, ".."), { recursive: true });
   writeFileSync(file, JSON.stringify({ model, speed: speed ?? null }));
 }
+/**
+ * Pi's fork selector includes abandoned branches and omits users without text. Rewinds instead
+ * count every user on the raw active branch, including image-only prompts and compacted history.
+ */
+function rewindTarget(entries: { id: string; parentId: string | null; type: string; message?: { role: string } }[], leafId: string | null, prior: number) {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const users: typeof entries = [];
+  const seen = new Set<string>();
+  let entry = leafId ? byId.get(leafId) : undefined;
+  while (entry && !seen.has(entry.id)) {
+    seen.add(entry.id);
+    if (entry.type === "message" && entry.message?.role === "user") users.push(entry);
+    entry = entry.parentId ? byId.get(entry.parentId) : undefined;
+  }
+  return users.reverse()[prior];
+}
 
 /** The thread's Pi process, started (or restarted in another directory) as needed. */
 function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
@@ -152,7 +170,8 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
         other: r.method === "select" && [...l.questions.values()].includes(r.title) ? true : undefined,
       };
       l.asks.set(r.id, ask);
-      l.emit?.(ask);
+      if (l.turn?.stopping) answer(threadId, r.id, { cancelled: true });
+      else l.emit?.(ask);
       if (r.timeout) setTimeout(() => l.asks.delete(r.id) && l.emit?.({ t: "asked", id: r.id }), r.timeout).unref?.();
     } else if (r.method === "notify" && r.message) {
       l.emit?.({ t: "notice", message: String(r.message) });
@@ -186,17 +205,32 @@ export async function steer(threadId: string, steerId: string, message: string, 
   const l: Live | undefined = live.get(threadId);
   const turn = l?.turn;
   if (!l || !turn) throw new PiError("Pi isn't working on this thread anymore.");
+  if (turn.stopping) throw new PiError("This reply is stopping.");
   if (!turn.taking) throw new PiError("Pi hasn't started on this reply yet. Try again in a moment.");
   turn.steers.push(steerId);
   const drop = () => (turn.steers = turn.steers.filter((id) => id !== steerId));
+  // An extension's async input handler can accept this after the turn settles or Stop clears
+  // its queues. Keep ownership until that RPC finishes, so it cannot leak into the next turn.
+  let finish!: () => void;
+  const pending = new Promise<void>((r) => (finish = r));
+  const pendingSteers = (turn.pendingSteers ??= new Set());
+  pendingSteers.add(pending);
   try {
     const r = await l.proc.send<{ disposition?: string }>({ type: "steer", message, images: images?.length ? images.map((i) => ({ type: "image", ...i })) : undefined });
     // An extension's input handler took it; Pi won't read it as a message.
     if (r.disposition === "handled") drop();
+    else if (turn.stopping || (!turn.taking && turn.steers.includes(steerId))) {
+      await l.proc.send({ type: "clear_queue" }).catch(() => {});
+      if (turn.stopping) await l.proc.send({ type: "abort" }).catch(() => {});
+      throw new PiError("Pi stopped before it could read that message.");
+    }
     return { handled: r.disposition === "handled" };
   } catch (err) {
     drop();
     throw err;
+  } finally {
+    pendingSteers.delete(pending);
+    finish();
   }
 }
 
@@ -245,23 +279,33 @@ export async function bash(threadId: string, cwd: string, id: string, command: s
 /** Run one turn and stream it as NDJSON StreamEvents. `signal` stops Pi (abort). */
 export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream<Uint8Array> {
   const enc = new TextEncoder();
+  let cancelled = false;
   return new ReadableStream({
     async start(controller) {
       let closed = false;
+      let terminal = false;
       const send = (e: StreamEvent) => {
-        if (!closed) controller.enqueue(enc.encode(JSON.stringify(e) + "\n"));
+        if (e.t === "done" || e.t === "error") terminal = true;
+        if (!closed && !cancelled) controller.enqueue(enc.encode(JSON.stringify(e) + "\n"));
       };
       const heartbeat = setInterval(() => {
-        if (!closed) controller.enqueue(enc.encode("\n"));
+        if (!closed && !cancelled) controller.enqueue(enc.encode("\n"));
       }, 15_000);
       let l: Live | undefined;
       let off: (() => void) | undefined;
       let free: (() => void) | undefined;
+      let removeAbort: (() => void) | undefined;
+      let abortTimer: ReturnType<typeof setTimeout> | undefined;
+      let stopping: Promise<void> | undefined;
       const finish = () => {
         if (closed) return;
         clearInterval(heartbeat);
+        clearTimeout(abortTimer);
+        removeAbort?.();
         off?.();
+        if (signal.aborted && !terminal) send({ t: "done", finish: "aborted" });
         if (l && free) {
+          for (const id of l.asks.keys()) answer(l.threadId, id, { cancelled: true });
           l.busy = false;
           l.turn = undefined;
           // Pi drops pending extension requests on abort without sending a UI dismissal. Retire
@@ -274,16 +318,34 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           free();
         }
         closed = true;
-        controller.close();
+        if (!cancelled) controller.close();
       };
       try {
+        if (signal.aborted) return;
         l = ensure(req.threadId, req.cwd, req.forkFrom);
-        // A reply that was just interrupted may still be winding down.
-        if (l.busy) await Promise.race([l.idle, new Promise((r) => setTimeout(r, 15_000))]);
+        // A reply that was just interrupted may still be winding down. A cancelled waiter must
+        // neither wait the full deadline nor acquire/abort the previous turn's process.
+        if (l.busy) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          let wake!: () => void;
+          try {
+            await new Promise<void>((r) => {
+              wake = r;
+              timer = setTimeout(r, 15_000);
+              signal.addEventListener("abort", wake, { once: true });
+              l!.idle.then(r);
+              if (signal.aborted) r();
+            });
+          } finally {
+            clearTimeout(timer);
+            signal.removeEventListener("abort", wake);
+          }
+        }
+        if (signal.aborted) return;
         if (l.busy) throw new PiError("Pi is still working on this thread's previous message.");
         l.busy = true;
         l.idle = new Promise<void>((r) => (free = r));
-        const turn: NonNullable<Live["turn"]> = { taking: false, steers: [] };
+        const turn: NonNullable<Live["turn"]> = { taking: false, stopping: false, steers: [], pendingSteers: new Set() };
         l.turn = turn;
         const proc = l.proc;
         await l.ready;
@@ -311,11 +373,18 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         const progress = new Map<string, number>();
         /** html_render calls still being written, by their place in the message. */
         const drawing = new Map<number, { id: string; json: string; at: number }>();
+        const abortRun = async () => {
+          await proc.send({ type: "clear_queue" }).catch(() => {});
+          await proc.send({ type: "abort" }).catch(() => {});
+        };
         off = proc.on((r) => {
           switch (r.type) {
             case "agent_start":
               started = true;
               generation++;
+              // Async input/command preflight can start a run after an earlier abort returned
+              // idle. Abort that late start too, rather than let it work until the hard deadline.
+              if (turn.stopping) stopping = abortRun();
               break;
             case "message_start":
               drawing.clear();
@@ -407,6 +476,7 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
               if (r.errorMessage) send({ t: "notice", message: `Compacting failed: ${r.errorMessage}` });
               break;
             case "agent_settled":
+              turn.taking = false;
               // This event ends one Pi run, but an extension may immediately start
               // another (e.g. a subagent result). Keep its output and questions attached.
               const endedGeneration = generation;
@@ -424,19 +494,28 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           }
         });
         const onAbort = () => {
-          // Extensions are not required to pass an AbortSignal to their dialogs. Dismiss them
-          // explicitly, otherwise abort may wait forever for a question with no UI attached.
+          if (stopping) return;
+          turn.stopping = true;
+          turn.taking = false;
+          // RPC dialogs without a signal (including editor and extension preflight dialogs) do
+          // not respond to session.abort(). Dismiss them explicitly, including stale question UI.
           for (const id of l!.asks.keys()) answer(req.threadId, id, { cancelled: true });
-          void proc.send({ type: "abort" }).catch(() => {});
+          abortTimer = setTimeout(() => proc.close(0), ABORT_GRACE);
+          // Pi deliberately resumes queued messages after abort. Clear *before* abort, not after
+          // agent_settled: by then queued instructions may already have run more tools.
+          stopping = abortRun();
         };
         signal.addEventListener("abort", onAbort, { once: true });
+        removeAbort = () => signal.removeEventListener("abort", onAbort);
+        if (signal.aborted) onAbort();
 
         await l.ready;
+        if (signal.aborted) return;
         // Cut Pi's history back to where this message goes, if the thread changed since.
-        const forkable = await proc.send<{ messages: { entryId: string }[] }>({ type: "get_fork_messages" });
-        const target = forkable.messages[req.prior];
+        const history = await proc.send<{ entries: Parameters<typeof rewindTarget>[0]; leafId: string | null }>({ type: "get_entries" });
+        const target = rewindTarget(history.entries, history.leafId, req.prior);
         if (target) {
-          const r = await proc.send<{ cancelled?: boolean }>({ type: "fork", entryId: target.entryId });
+          const r = await proc.send<{ cancelled?: boolean }>({ type: "fork", entryId: target.id });
           if (r.cancelled) throw new PiError("An extension stopped Pi from going back to that point of the thread.");
           const st = await proc.send<{ sessionFile?: string }>({ type: "get_state" });
           if (st.sessionFile) save(req.threadId, { file: st.sessionFile, cwd: req.cwd });
@@ -453,18 +532,19 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         if (level) await proc.send({ type: "set_thinking_level", level });
         saveSpeed(req.threadId, req.model, req.speed);
 
-        if (signal.aborted) return finish();
+        if (signal.aborted) return;
         const res = await proc.send<{ disposition?: string }>({ type: "prompt", message: req.message, images: req.images?.length ? req.images.map((i) => ({ type: "image", ...i })) : undefined }, 5 * 60_000);
         if (res.disposition === "handled") {
           // An extension command handled it. It may still start a run of its own; give it a moment.
           await Promise.race([done, new Promise((r) => setTimeout(r, 2500))]);
           if (!started) {
             send({ t: "done", finish: "handled" });
-            return finish();
+            return;
           }
         }
         await done;
-        signal.removeEventListener("abort", onAbort);
+        await Promise.all(turn.pendingSteers);
+        await stopping;
         // Steers Pi never got to (it was stopped, or finished first) mustn't turn up in a later turn.
         if (turn.steers.length) await proc.send({ type: "clear_queue" }).catch(() => {});
         if (lastError && !signal.aborted) send({ t: "error", message: lastError });
@@ -480,8 +560,16 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
         }
       } catch (err) {
         if (!signal.aborted) send({ t: "error", message: (err as Error).message });
+      } finally {
+        if (l && free) await Promise.all(l.turn?.pendingSteers ?? []);
+        await stopping;
+        finish();
       }
-      finish();
+    },
+    // Reader cancellation is a disconnect, not Stop. Keep consuming Pi's events and retain
+    // ownership until it settles, but never enqueue into a cancelled stream controller.
+    cancel() {
+      cancelled = true;
     },
   });
 }

@@ -1,3 +1,4 @@
+import { get } from "./kv";
 import { userVisiblePrompt } from "../../shared/promptDisplay";
 // Chat persistence. Chats are stored by the local OpenChat server in a database on disk
 // (server/storage.ts), not in the browser: browser storage belongs to one origin, so the app on
@@ -11,7 +12,8 @@ import { userVisiblePrompt } from "../../shared/promptDisplay";
 //
 // On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
 // (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
-import { clear, createStore, del, entries, get, set, usingFallbackStorage } from "./kv";
+import { clear, createStore, del, delIf, entries, set, usingFallbackStorage } from "./kv";
+import { fetchWithTimeout } from "./abort";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { canResume, config, isHosted } from "./runtime";
 import type { Chat } from "./types";
@@ -60,13 +62,13 @@ async function send(id: string, op: Op) {
   let res: Response;
   try {
     if (op.op === "put") {
-      res = await fetch(`/api/chats/${encodeURIComponent(id)}`, {
+      res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(op.chat),
       });
     } else {
-      res = await fetch(op.op === "clear" ? "/api/chats" : `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
+      res = await fetchWithTimeout(op.op === "clear" ? "/api/chats" : `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     }
   } catch {
     throw new Retry("Server unreachable");
@@ -109,7 +111,7 @@ function flush(): Promise<boolean> {
           continue;
         }
         // Only drop the entry if no newer change to the same chat arrived meanwhile.
-        if ((await get<Op>(id, outbox))?.seq === op.seq) await del(id, outbox);
+        await delIf<Op>(id, (current) => current?.seq === op.seq, outbox);
       }
       retryDelay = 1000;
       return empty;
@@ -165,7 +167,7 @@ async function importLegacy() {
     chats = [];
   }
   if (chats.length) {
-    const res = await fetch("/api/chats/import", {
+    const res = await fetchWithTimeout("/api/chats/import", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ chats }),
@@ -185,7 +187,7 @@ const settle = (chat: Chat): Chat => ({
   // Pi running elsewhere is the server's to judge (it re-reads the transcript).
   messages: chat.messages.map((original) => {
     const m = original.role === "user" ? { ...original, content: userVisiblePrompt(original.content) } : original;
-    return (m.status === "streaming" && !canResume(m.stream?.via) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m);
+    return (m.status === "streaming" && !canResume(m.stream?.via, m.stream?.deviceId) && m.stream?.via !== EXTERNAL_VIA ? { ...m, status: "stopped" as const } : m);
   }),
 });
 
@@ -209,7 +211,7 @@ async function readChats(): Promise<Chat[]> {
   }
   await flush();
   await importLegacy();
-  const [res] = await Promise.all([fetch(initialLoad ? "/api/chats?index&startup" : "/api/chats?index"), readCache()]);
+  const [res] = await Promise.all([fetchWithTimeout(initialLoad ? "/api/chats?index&startup" : "/api/chats?index"), readCache()]);
   if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
   const body = (await res.json()) as { index?: { id: string; v: string }[]; chats?: Chat[] };
   let chats: Map<string, Chat>;
@@ -219,7 +221,7 @@ async function readChats(): Promise<Chat[]> {
   } else {
     const stale = body.index.filter((e) => cached.get(e.id)?.v !== e.v).map((e) => e.id);
     if (stale.length) {
-      const res = await fetch("/api/chats/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: stale }) });
+      const res = await fetchWithTimeout("/api/chats/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: stale }) });
       if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
       for (const { v, chat } of (await res.json()).chats as Cached[]) remember(chat.id, v, chat);
     }
