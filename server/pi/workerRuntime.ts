@@ -1,3 +1,4 @@
+import { requestRunStop, runStopRequested } from "../runStops";
 import { withRuntimeAccount } from "../runtimeAccounts";
 /** Ordinary Pi is not checkpointable. Persist output, never replay an unfinished prompt. */
 import { userVisiblePrompt } from "../../shared/promptDisplay";
@@ -194,6 +195,10 @@ export class PiWorkerRuntime {
       if (identity(old) !== identity(req)) throw Object.assign(new Error("A thread’s account is fixed after its first turn. Start a new thread to switch accounts."), { status: 409 });
     }
     const { run, fresh } = this.admit(req.stream?.id ?? "", req.threadId, "run", req);
+    if (fresh && runStopRequested(run.record.id)) {
+      run.stop(); run.push({ t: "done", finish: "aborted" }); this.finish(run, "aborted");
+      return run;
+    }
     if (fresh) {
       const display = req.runtime && req.runtime !== "pi";
       const input = { ...req, message: (display ? HTML_DELIVERY_NOTE : "") + PLUGIN_GUIDANCE_NOTE + req.message };
@@ -236,6 +241,7 @@ export class PiWorkerRuntime {
     this.finish(run, run.signal.aborted ? "aborted" : status);
   }
   stopRun(id: string): boolean {
+    requestRunStop(id);
     const run = this.findRun(id);
     if (!run) return false;
     if (run.record.kind === "shell") shells.stopShell(id);

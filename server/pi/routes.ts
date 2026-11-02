@@ -1,3 +1,5 @@
+import { runStopRequested } from "../runStops";
+import { localRun, Run } from "../runs";
 // HTTP routes for Pi (threads, models, commands, sign-in, install/update, extensions and skills)
 // and for projects and workspaces. Mounted by server/index.ts behind its request checks.
 import { existsSync } from "node:fs";
@@ -240,6 +242,7 @@ export function piRoutes(api: Api) {
           return fail(err);
         }
         try {
+          if (runStopRequested(body.stream.id)) return new Response(localRun(body.stream.id, () => new Run()).stream(), { headers: runHeaders });
           const run = body.runtime === "durable"
             ? await durable.startRun(body)
             : await startRun(body);

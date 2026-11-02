@@ -26,6 +26,7 @@ test("Stop does not silently start the next queued action", () => scenario(`
     throw new Error(url);
   };
   chat.sendMessage('first', []);
+  await until(() => posts === 1);
   queue.enqueue('c', { id: 'q', text: 'next action', files: [] });
   chat.stopGeneration('c');
   reply.resolve(response({ t: 'end' }));

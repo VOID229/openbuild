@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import { createStore, del, get, set } from "./kv";
+import { createStore, del, entries, get, set } from "./kv";
 import type { Attachment } from "../../shared/types";
 
 /** A message written while a reply was still coming in; it's sent once the chat is free. */
@@ -21,13 +21,20 @@ interface QueueState {
 
 const saved = createStore("openchat-queue", "queue");
 let hydrated = false;
+const changedBeforeHydration = new Set<string>();
+const legacy = createStore("openchat-queues", "queues");
 let resolveReady!: () => void;
 export const queuesReady = new Promise<void>((resolve) => { resolveReady = resolve; });
 export const queueIsReady = () => hydrated;
 export const useQueue = create<QueueState>()(persist(() => ({ queues: {}, steering: {}, editing: {} }), {
   name: "queue",
   storage: createJSONStorage(() => ({
-    getItem: async (key) => (await get<string>(key, saved)) ?? null,
+    getItem: async (key) => {
+      const current = await get<string>(key, saved);
+      if (current != null) return current;
+      const queues = Object.fromEntries(await entries<string, Queued[]>(legacy));
+      return JSON.stringify({ state: { queues, steering: {} }, version: 0 });
+    },
     setItem: (key, value) => set(key, value, saved).catch((err) => console.error("Couldn't save queued actions", err)),
     removeItem: (key) => del(key, saved),
   })),
@@ -44,6 +51,7 @@ export const useQueue = create<QueueState>()(persist(() => ({ queues: {}, steeri
     );
     const steering = merge(previous?.steering, current.steering);
     const queues = merge(previous?.queues, current.queues);
+    for (const id of changedBeforeHydration) queues[id] = (current.queues as Record<string, Queued[]>)[id] ?? [];
     for (const id of Object.keys(queues)) {
       const pending = new Set(steering[id]?.map((q) => q.id));
       queues[id] = queues[id]!.filter((q) => !pending.has(q.id));
@@ -58,6 +66,7 @@ export const queueOf = (chatId: string | undefined) => (chatId && useQueue.getSt
 export const useQueueOf = (chatId: string | undefined) => useQueue((s) => (chatId && s.queues[chatId]) || EMPTY);
 
 function setQueue(chatId: string, list: Queued[]) {
+  if (!hydrated) changedBeforeHydration.add(chatId);
   useQueue.setState((s) => {
     const { [chatId]: _, ...rest } = s.queues;
     return { queues: list.length ? { ...rest, [chatId]: list } : rest };

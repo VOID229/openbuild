@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { afterEach, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -33,7 +34,7 @@ for await (const line of console) {
  if (typeof r.message === 'string') r.message = r.message.replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
  const reply=(data={})=>out({type:'response',id:r.id,success:true,data});
  if(r.type==='get_state') reply({isStreaming:busy,sessionFile:process.env.FAKE_SESSION,model:{provider:'test',id:'fake'}});
- else if(r.type==='get_fork_messages') reply({messages:[]});
+ else if(r.type==='get_entries') reply({entries:[],leafId:null});
  else if(r.type==='get_available_thinking_levels') reply({levels:['off']});
  else if(r.type==='get_session_stats') reply({});
  else if(r.type==='prompt') {
@@ -179,4 +180,16 @@ test("a new message stops an unowned busy Pi run before submitting its prompt", 
   expect(readFileSync(f.env.FAKE_EFFECTS, "utf8")).toBe("normal\n");
   expect(run.events.some((e) => e.t === "done")).toBe(true);
   expect(run.events.some((e) => e.t === "error")).toBe(false);
+});
+
+
+test("worker remembers Stop received before the run is admitted", async () => {
+  const f = setup();
+  await f.launch();
+  const c = f.client();
+  expect(await c.stopRun("stopped-before-admission")).toBe(false);
+  const run = await c.startRun(f.req("stopped-before-admission"));
+  await until(() => run.ended);
+  expect(run.events).toContainEqual({ t: "done", finish: "aborted" });
+  expect(existsSync(f.env.FAKE_EFFECTS)).toBe(false);
 });

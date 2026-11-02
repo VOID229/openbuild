@@ -52,6 +52,7 @@ test("an error preserves queued actions instead of burning through them", () => 
     throw new Error(url);
   };
   chat.sendMessage('first', []);
+  await until(() => posts === 1);
   queue.enqueue('c', { id: 'q', text: 'important follow-up', files: [] });
   reply.resolve(response({ t: 'error', message: 'Provider unavailable' }, { t: 'end' }));
   await until(() => current().messages[1].status === 'error');
@@ -70,6 +71,7 @@ test("interrupt explicitly sends a queued message after stopping", () => scenari
     throw new Error(url);
   };
   chat.sendMessage('first', []);
+  await until(() => posts === 1);
   queue.enqueue('c', { id: 'q', text: 'interrupt', files: [] });
   chat.interruptWith('c', 'q');
   await until(() => current().messages.length === 4 && current().messages[3].status === 'done');

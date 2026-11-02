@@ -178,6 +178,7 @@ export class PiClient {
       await this.ensureFeature("html-delivery");
       if (req.runtimeAccount) { await this.ensureFeature("runtime-accounts"); await this.ensureFeature("account-config"); }
     }
+    await this.ensureFeature("lifecycle-v2");
     return this.adopt(await this.json<PiRunRecord>("/start", req, true));
   }
   /**

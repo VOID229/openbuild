@@ -388,17 +388,19 @@ export class DurableRuntime {
           while (!m.ended) {
             const count = m.steers?.length ?? 0;
             if (!m.stopping) await Promise.all((m.steers ?? []).map(async item => (await this.submitSteer(root, m, item)).wait(context)));
-            const ended = await this.serial("$admission", async () => {
+            const finalize = async () => {
               if (m.ended) return true;
               if ((m.steers?.length ?? 0) !== count) return false;
-              await this.projectHistory(m, root);
+              const final = await root.watch(context);
+              try { await this.projectHistory(m, root); } finally { await final.stop(); }
               if (m.ended) return true;
               const events: StreamEvent[] = [];
               if (result.status === "unanswered" && !m.stopping) events.push({ t: "error", message: `Durable submission unanswered: ${result.reason}` });
               events.push({ t: "done", finish: m.stopping ? "aborted" : result.status, usage: m.usage });
               this.finish(m, events);
               return true;
-            });
+            };
+            const ended = m.stopping ? await finalize() : await this.serial("$admission", finalize);
             if (ended) break;
           }
         } catch (error) {

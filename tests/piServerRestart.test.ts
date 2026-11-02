@@ -30,7 +30,7 @@ for await (const line of console) {
   if (typeof r.message === 'string') r.message = r.message.replace(/^\[OpenBuild plugin instructions:[\s\S]*?\]\n\n/, '');
   const reply = (data={}) => out({ type:'response', id:r.id, success:true, data });
   if (r.type === 'get_state') reply({ sessionFile:process.env.FAKE_SESSION, model:{provider:'test',id:'fake'} });
-  else if (r.type === 'get_fork_messages') reply({messages:[]});
+  else if (r.type === 'get_entries') reply({entries:[],leafId:null});
   else if (r.type === 'get_available_thinking_levels') reply({levels:['off']});
   else if (r.type === 'get_session_stats') reply({});
   else if (r.type === 'prompt') {
