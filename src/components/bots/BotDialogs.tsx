@@ -1,9 +1,11 @@
-// OpenBots' dialogs: making a bot or a group, naming things, and confirming a delete. The shape and
+// OpenBots' dialogs: making a bot, a group or a poll, naming things, and confirming a delete. The shape and
 // colour picker here is also the details panel's avatar editor.
-import { Check, Trash, X } from "lucide-react";
+import { Check, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { COLORS, SHAPES, randomLook, type BotLook } from "../../lib/bots/looks";
 import { useBots } from "../../lib/bots/store";
+import { uid } from "../../lib/id";
+import { makePoll, POLL_OPTIONS } from "../../../shared/bots";
 import { cx } from "../../lib/ui";
 import { IconButton } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
@@ -195,6 +197,128 @@ export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose
           </button>
           <button type="submit" className="btn bots-btn bots-btn-primary" disabled={!ok}>
             Create
+          </button>
+        </div>
+      </form>
+    </dialog>
+  );
+}
+
+/** Put a poll to a group: a question, options lettered A, B, C…, and one answer or several. */
+export function PollDialog({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
+  const modal = useModal(onClose);
+  const [question, setQuestion] = useState("");
+  const [options, setOptions] = useState(() => [{ id: uid(), text: "" }, { id: uid(), text: "" }]);
+  const [multiple, setMultiple] = useState(false);
+  const [blind, setBlind] = useState(true);
+  const [posting, setPosting] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const list = useRef<HTMLDivElement>(null);
+  /** The row to put the cursor in once it's drawn. */
+  const focusRow = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (focusRow.current === undefined) return;
+    list.current?.querySelectorAll("input")[focusRow.current]?.focus();
+    focusRow.current = undefined;
+  }, [options.length]);
+  const poll = makePoll(question, options.map((o) => o.text), { multiple, blind });
+  const ok = !!poll.question && poll.options.length >= 2;
+  const addOption = () => {
+    focusRow.current = options.length;
+    setOptions((cur) => [...cur, { id: uid(), text: "" }]);
+  };
+  const removeOption = (i: number) => {
+    focusRow.current = Math.max(0, i - 1);
+    setOptions((cur) => cur.filter((_, j) => j !== i));
+  };
+  const submit = async () => {
+    if (!ok || posting) return;
+    setPosting(true);
+    setFailed(false);
+    const posted = await useBots.getState().post(conversationId, { author: "me", text: poll.question, poll });
+    if (posted) return onClose();
+    setPosting(false);
+    setFailed(true);
+  };
+  return (
+    <dialog {...modal} className="bots-dialog" aria-label="New poll">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
+        <DialogHead title="New poll" onClose={onClose} />
+        <div className="bots-dialog-body">
+          <label className="bots-field">
+            <span className="bots-field-label">Question</span>
+            <input className="input" value={question} maxLength={300} placeholder="What should the group weigh in on?" autoFocus onChange={(e) => setQuestion(e.target.value)} />
+          </label>
+          <div className="bots-field">
+            <span className="bots-field-label">Options</span>
+            <div ref={list} className="bots-poll-options">
+              {options.map((o, i) => (
+                <div key={o.id} className="bots-poll-option">
+                  <span className="bm-option-key" aria-hidden>{String.fromCharCode(65 + i)}</span>
+                  <input
+                    className="input"
+                    value={o.text}
+                    maxLength={200}
+                    placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                    aria-label={`Option ${String.fromCharCode(65 + i)}`}
+                    onChange={(e) => setOptions((cur) => cur.map((x) => (x.id === o.id ? { ...x, text: e.target.value } : x)))}
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
+                      if (e.key === "Backspace" && !o.text && options.length > 2) {
+                        e.preventDefault();
+                        removeOption(i);
+                      }
+                      // Enter moves down the list, then adds a row, and posts from an empty last one.
+                      if (e.key !== "Enter") return;
+                      e.preventDefault();
+                      const inputs = list.current?.querySelectorAll("input");
+                      if (i < options.length - 1) inputs?.[i + 1]?.focus();
+                      else if (o.text.trim() && options.length < POLL_OPTIONS) addOption();
+                      else void submit();
+                    }}
+                  />
+                  {options.length > 2 && (
+                    <IconButton label={`Remove option ${String.fromCharCode(65 + i)}`} tooltip={false} onClick={() => removeOption(i)}>
+                      <X size={16} />
+                    </IconButton>
+                  )}
+                </div>
+              ))}
+            </div>
+            {options.length < POLL_OPTIONS && (
+              <button type="button" className="bots-poll-add" onClick={addOption}>
+                <Plus size={15} /> Add option
+              </button>
+            )}
+          </div>
+          <div className="bots-field">
+            <span className="bots-field-label">Answers</span>
+            <div className="segmented" role="radiogroup" aria-label="Answers">
+              <button type="button" role="radio" aria-checked={!multiple} className="segment" onClick={() => setMultiple(false)}>
+                Single answer
+              </button>
+              <button type="button" role="radio" aria-checked={multiple} className="segment" onClick={() => setMultiple(true)}>
+                Multiple answers
+              </button>
+            </div>
+          </div>
+          <label className="bots-poll-check">
+            <input type="checkbox" checked={blind} onChange={(e) => setBlind(e.target.checked)} />
+            Hide answers until each voter has answered
+          </label>
+          {failed && <div className="bots-poll-failed">The poll didn't post. Try again.</div>}
+        </div>
+        <div className="bots-dialog-foot">
+          <button type="button" className="btn bots-btn" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="btn bots-btn bots-btn-primary" disabled={!ok || posting}>
+            {posting ? "Posting…" : "Post poll"}
           </button>
         </div>
       </form>

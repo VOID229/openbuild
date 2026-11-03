@@ -32,6 +32,7 @@ export const fullTime = (t: number) => new Date(t).toLocaleString([], { weekday:
 /** A message as one line of text: for previews, reply quotes and copying. */
 export function messageText(m: BotMessage): string {
   if (m.question) return `❓ ${m.question.title}`;
+  if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
   if (m.event) return [m.event.text, m.event.detail].filter(Boolean).join(" ");
   const text = m.text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();

@@ -3,8 +3,8 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Routine } from "../../shared/bots";
-import { DEFAULT_SETTINGS, firstName, isBotId, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, firstName, isBotId, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import * as db from "./db";
 
@@ -303,6 +303,7 @@ export async function deleteBot(id: string) {
       emitConversation(c.id);
       const last = db.messages(c.id, 1).at(-1);
       if (last) emit({ t: "message", conversationId: c.id, message: last.message });
+      settlePolls(c.id);
     }
   }
   db.deleteBot(id);
@@ -358,6 +359,7 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   }
   db.putConversation(c);
   emitConversation(id);
+  if (patch.botIds && c.kind === "group") settlePolls(id);
   return conversationView(id)!;
 }
 
@@ -385,10 +387,20 @@ function checkMessage(m: BotMessage) {
   for (const img of m.images ?? []) if (img.length > 2_500_000) throw new BotsError("An image is too large.");
 }
 
-/** Who a message should pull in. Events wake nobody. */
+/** A poll as a new message: whatever it came with, it starts with no votes. */
+function cleanPoll(raw: Poll): Poll {
+  const labels = Array.isArray(raw.options) ? raw.options.map((o) => String(o?.label ?? "")) : [];
+  const poll = makePoll(String(raw.question ?? ""), labels, { multiple: !!raw.multiple, blind: !!raw.blind });
+  if (!poll.question) throw new BotsError("Write the poll's question.");
+  if (poll.options.length < 2) throw new BotsError("A poll needs at least two different options.");
+  return poll;
+}
+
+/** Who a message should pull in. Events wake nobody. A poll asks everyone. */
 function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   if (message.event) return [];
   const members = c.botIds.filter((id) => db.getBot(id));
+  if (message.poll) return members.filter((id) => id !== message.author);
   if (message.author === "me") {
     if (c.kind !== "group") return members;
     const mentioned = mentionedBots(message.text, members);
@@ -424,6 +436,11 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     return existing.message;
   }
   if (message.author !== "me" && !c.botIds.includes(message.author)) throw new BotsError("That bot isn't in this conversation.");
+  if (message.poll) {
+    if (c.kind !== "group") throw new BotsError("Polls are for group chats.");
+    const poll = cleanPoll(message.poll);
+    message = { ...message, text: poll.question, poll };
+  }
   const seq = db.addMessage(conversationId, message);
   const unread = message.author !== "me" ? true : c.unread;
   const hidden = message.author !== "me" ? undefined : c.hidden;
@@ -530,6 +547,91 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   return patchMessage(conversationId, messageId, { question: { ...row.message.question, answer: key.slice(0, 2000) } });
 }
 
+/** A changed answer on a closed poll has to stay this long before the poll's author hears of it, so a slip stays quiet. */
+export const POLL_CHANGE_SETTLE = 30_000;
+const POLL_CHANGES = "poll-changes";
+interface PollChange {
+  conversationId: string;
+  messageId: string;
+  by: string;
+  /** The answer before this run of changes. */
+  from: string[];
+  at: number;
+}
+
+const pollPerson = (id: string) => (id === "me" ? getSettings().user?.name || "The user" : firstName(db.getBot(id)?.name ?? "A deleted bot"));
+const pollTally = (poll: Poll) => poll.options.map((o) => `${o.key}) ${o.label}: ${poll.votes.filter((v) => v.keys.includes(o.key)).map((v) => pollPerson(v.by)).join(", ") || "nobody"}`).join("; ");
+const pollAnswer = (poll: Poll, keys: string[]) => poll.options.filter((o) => keys.includes(o.key)).map((o) => o.label).join(", ");
+
+/** Vote in a poll, replacing any earlier vote. No keys takes it back, until the poll closes. */
+export function votePoll(conversationId: string, messageId: string, by: string, keys: string[]): BotMessage {
+  const row = db.getMessage(messageId);
+  const poll = row?.conversationId === conversationId ? row.message.poll : undefined;
+  if (!row || !poll) throw new BotsError("That message isn't a poll.", 404);
+  const stray = keys.find((key) => !poll.options.some((o) => o.key === key));
+  if (stray !== undefined) throw new BotsError(`That poll has no option ${stray.slice(0, 20)}.`);
+  if (!poll.multiple && new Set(keys).size > 1) throw new BotsError("That poll takes one answer.");
+  if (poll.closedAt && !keys.length) throw new BotsError("That poll has closed. You can change your answer, but not take it back.");
+  const before = poll.votes.find((v) => v.by === by)?.keys;
+  const next = castVote(poll, by, keys);
+  const patched = patchMessage(conversationId, messageId, { poll: next });
+  if (poll.closedAt) {
+    if (before && row.message.author !== by) trackPollChange({ conversationId, messageId, by, from: before, at: Date.now() }, next.votes.find((v) => v.by === by)!.keys);
+    return patched;
+  }
+  if (!pollWaitingOn(next, row.message.author, db.getConversation(conversationId)?.botIds ?? []).length) return closePoll(conversationId, patched, by);
+  return patched;
+}
+
+/** Everyone asked has answered: mark it, say so in the chat, and tell the bot that asked. */
+function closePoll(conversationId: string, message: BotMessage, by: string): BotMessage {
+  const poll: Poll = { ...message.poll!, closedAt: Date.now() };
+  const closed = patchMessage(conversationId, message.id, { poll });
+  postMessage(conversationId, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "poll", text: "Poll closed", detail: poll.question } });
+  if (db.getConversation(conversationId)?.botIds.includes(message.author)) {
+    hooks.wake(message.author, { kind: "note", conversationId, text: `Everyone has answered your poll [${message.id.slice(0, 8)}] “${poll.question}”, so it's closed. Results: ${pollTally(poll)}. Share the outcome or act on it if that helps; otherwise reply [silent].` });
+  }
+  return closed;
+}
+
+/** Someone left the group: a poll that was only waiting on them is finished. */
+function settlePolls(conversationId: string) {
+  const botIds = db.getConversation(conversationId)?.botIds ?? [];
+  for (const { message } of db.messages(conversationId)) {
+    if (message.poll && !message.poll.closedAt && message.poll.votes.length && !pollWaitingOn(message.poll, message.author, botIds).length) closePoll(conversationId, message, "me");
+  }
+}
+
+/** Starts or restarts the wait on a changed answer. Going back to where it started drops it. */
+function trackPollChange(change: PollChange, to: string[]) {
+  const list = db.getValue<PollChange[]>(POLL_CHANGES) ?? [];
+  const same = (c: PollChange) => c.messageId === change.messageId && c.by === change.by;
+  const from = list.find(same)?.from ?? change.from;
+  const rest = list.filter((c) => !same(c));
+  db.setValue(POLL_CHANGES, from.join() === to.join() ? rest : [...rest, { ...change, from }]);
+}
+
+/** Changed answers that have stayed changed: a bot that asked is told, and a user who asked sees it in the chat. */
+function reportPollChanges(now: number) {
+  const list = db.getValue<PollChange[]>(POLL_CHANGES) ?? [];
+  const due = list.filter((c) => now - c.at >= POLL_CHANGE_SETTLE);
+  if (!due.length) return;
+  db.setValue(POLL_CHANGES, list.filter((c) => !due.includes(c)));
+  for (const { conversationId, messageId, by, from } of due) {
+    const message = db.getMessage(messageId)?.message;
+    const poll = message?.poll;
+    const to = poll?.votes.find((v) => v.by === by)?.keys;
+    const members = db.getConversation(conversationId)?.botIds ?? [];
+    if (!message || !poll || !to || to.join() === from.join()) continue;
+    const change = `${pollAnswer(poll, from)} → ${pollAnswer(poll, to)}`;
+    if (message.author === "me") {
+      if (members.includes(by)) postMessage(conversationId, { id: crypto.randomUUID(), author: by, at: now, text: "", event: { kind: "poll", text: `${db.getBot(by)?.name ?? "A bot"} changed their answer`, detail: `${poll.question} ${change}` } });
+    } else if (members.includes(message.author)) {
+      hooks.wake(message.author, { kind: "note", conversationId, text: `${pollPerson(by)} changed their answer in your closed poll [${messageId.slice(0, 8)}] “${poll.question}”: ${change}. Results now: ${pollTally(poll)}. Say something or act on it if it matters; otherwise reply [silent].` });
+    }
+  }
+}
+
 // ------------------------------------------------------------------ memory and routines
 
 export function addMemory(botId: string, text: string, by?: string, id?: string): MemoryItem {
@@ -605,6 +707,7 @@ function quietNow(at: Date): boolean {
 /** Routines that are due, and heartbeats for bots with nothing else going on. */
 export function tick(busy: (botId: string) => boolean) {
   const now = Date.now();
+  reportPollChanges(now);
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;

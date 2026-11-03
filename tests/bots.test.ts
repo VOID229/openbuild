@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isSilent, replyBubbles } from "../shared/bots";
+import { castVote, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -10,6 +10,180 @@ test("[silent] never becomes a bubble", () => {
   expect(replyBubbles("[silent]")).toEqual([]);
   expect(replyBubbles("Sure!\n\n[silent]")).toEqual(["Sure!"]);
   expect(replyBubbles("One\n\nTwo")).toEqual(["One", "Two"]);
+});
+
+test("polls letter their options and keep one vote per voter", () => {
+  const poll = makePoll(" Lunch? ", ["Pizza", " pizza ", "", "Tacos", "Soup"]);
+  expect(poll.question).toBe("Lunch?");
+  expect(poll.options).toEqual([{ key: "A", label: "Pizza" }, { key: "B", label: "Tacos" }, { key: "C", label: "Soup" }]);
+  const once = castVote(poll, "me", ["A", "B"]);
+  expect(once.votes[0]!.keys).toEqual(["A"]);
+  expect(castVote(once, "me", ["C"]).votes.map((v) => v.keys)).toEqual([["C"]]);
+  expect(castVote(once, "me", []).votes).toEqual([]);
+  expect(castVote(makePoll("Lunch?", ["Pizza", "Tacos"], { multiple: true }), "me", ["B", "A", "Z"]).votes[0]!.keys).toEqual(["A", "B"]);
+});
+
+test("a poll waits on the other bots, and on the user if a bot asked", () => {
+  const poll = castVote(makePoll("Lunch?", ["Pizza", "Tacos"]), "b", ["A"]);
+  expect(pollWaitingOn(poll, "me", ["a", "b"])).toEqual(["a"]);
+  expect(pollWaitingOn(poll, "a", ["a", "b"])).toEqual(["me"]);
+  expect(pollWaitingOn(castVote(poll, "a", ["B"]), "me", ["a", "b"])).toEqual([]);
+  const blind = castVote(makePoll("Lunch?", ["Pizza", "Tacos"], { blind: true }), "a", ["A"]);
+  expect(pollVotesVisible(blind, "b")).toBe(false);
+  expect(pollVotesVisible(blind, "a")).toBe(true);
+  expect(pollVotesVisible({ ...blind, closedAt: 1 }, "b")).toBe(true);
+  expect(pollVotesVisible(poll, "c")).toBe(true);
+});
+
+test("polls ask the whole group, from the user or a bot, and only in groups", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-poll-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      import * as svc from './server/bots/service.ts';
+      import { startPoll, votePoll, setFocus } from './server/bots/agent.ts';
+      import { transcript, successfulMessageTool, activityFor } from './server/bots/runner.ts';
+
+      const woken = [];
+      svc.setHooks({ wake: (id, w) => woken.push({ id, ...w }), stop: () => {} });
+      const pip = svc.createBot({ name: 'Pip' });
+      const sal = svc.createBot({ name: 'Sal' });
+      const kit = svc.createBot({ name: 'Kit' });
+      const group = svc.createConversation({ kind: 'group', name: 'Crew', botIds: [pip.bot.id, sal.bot.id, kit.bot.id] });
+      const bots = db.listBots();
+      const poll = (extra = {}) => ({ question: 'Lunch?', options: [{ key: 'A', label: 'Pizza' }, { key: 'B', label: 'Tacos' }], votes: [], ...extra });
+
+      // The user's poll wakes every bot, and whatever votes it arrived with are dropped.
+      woken.length = 0;
+      const mine = { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: '', poll: poll({ votes: [{ by: 'me', keys: ['A'], at: 1 }] }) };
+      const posted = svc.postMessage(group.id, mine);
+      a.equal(posted.text, 'Lunch?');
+      a.deepEqual(posted.poll.votes, []);
+      a.deepEqual(woken.map((w) => w.id).sort(), [pip.bot.id, sal.bot.id, kit.bot.id].sort());
+
+      // Each bot sees it owed a vote until it has voted, by letter, in any case.
+      const short = mine.id.slice(0, 8);
+      a.match(transcript(group.id, bots, 'Sam', pip.bot.id), /Poll, pick one: “Lunch\\?”[\\s\\S]*A\\) Pizza[\\s\\S]*You haven't voted/);
+      setFocus(pip.bot.id, group.id);
+      votePoll(pip.bot.id, { message: short, choices: ['b'] });
+      const seen = transcript(group.id, bots, 'Sam', pip.bot.id);
+      a.match(seen, /B\\) Tacos \\(you\\)/);
+      a.doesNotMatch(seen, /You haven't voted/);
+      a.throws(() => votePoll(pip.bot.id, { message: short, choices: ['A', 'B'] }), /takes one answer/);
+      a.throws(() => votePoll(pip.bot.id, { message: short, choices: ['Z'] }), /no option Z/);
+      a.throws(() => votePoll(pip.bot.id, { message: short, choices: [] }), /at least one/);
+      votePoll(pip.bot.id, { message: short, choices: ['A'] });
+      a.deepEqual(db.getMessage(mine.id).message.poll.votes.map((v) => [v.by, v.keys]), [[pip.bot.id, ['A']]]);
+
+      // The user's poll closes when every bot has answered, whether or not the user has.
+      setFocus(sal.bot.id, group.id);
+      setFocus(kit.bot.id, group.id);
+      votePoll(sal.bot.id, { message: short, choices: ['A'] });
+      a.equal(db.getMessage(mine.id).message.poll.closedAt, undefined);
+      woken.length = 0;
+      votePoll(kit.bot.id, { message: short, choices: ['B'] });
+      a.ok(db.getMessage(mine.id).message.poll.closedAt);
+      a.equal(woken.length, 0);
+      const events = () => db.messages(group.id, 50).filter((r) => r.message.event?.kind === 'poll').map((r) => r.message.event);
+      a.equal(events().at(-1).text, 'Poll closed');
+      a.match(transcript(group.id, bots, 'Sam', sal.bot.id), /Poll \\(closed\\), pick one/);
+
+      // A changed answer stays quiet until it has lasted; going back drops it.
+      const realNow = Date.now;
+      let clock = realNow();
+      Date.now = () => clock;
+      const later = (ms) => { clock += ms; svc.tick(() => true); };
+      votePoll(kit.bot.id, { message: short, choices: ['A'] });
+      votePoll(kit.bot.id, { message: short, choices: ['B'] });
+      later(svc.POLL_CHANGE_SETTLE + 1);
+      a.equal(events().length, 1);
+      votePoll(kit.bot.id, { message: short, choices: ['A'] });
+      later(svc.POLL_CHANGE_SETTLE - 1);
+      a.equal(events().length, 1);
+      later(1);
+      a.equal(events().length, 2);
+      a.equal(events().at(-1).text, 'Kit changed their answer');
+      a.match(events().at(-1).detail, /Tacos → Pizza/);
+      later(svc.POLL_CHANGE_SETTLE + 1);
+      a.equal(events().length, 2);
+      // The user changing their own poll's answer tells nobody; a closed poll can't lose an answer.
+      svc.votePoll(group.id, mine.id, 'me', ['A']);
+      svc.votePoll(group.id, mine.id, 'me', ['B']);
+      later(svc.POLL_CHANGE_SETTLE + 1);
+      a.equal(events().length, 2);
+      a.throws(() => svc.votePoll(group.id, mine.id, 'me', []), /closed/);
+      a.throws(() => votePoll(kit.bot.id, { message: short, choices: ['Z'] }), /no option/);
+
+      // A bot's poll is blind by default, and waits on the other bots and the user.
+      woken.length = 0;
+      const started = startPoll(pip.bot.id, { question: 'Tea or coffee?', options: ['Tea', 'Coffee', 'Tea'], multiple: true });
+      const startedShort = started.id.slice(0, 8);
+      const stored = () => db.getMessage(started.id).message.poll;
+      a.equal(stored().options.length, 2);
+      a.equal(stored().blind, true);
+      a.deepEqual(woken.map((w) => w.id).sort(), [sal.bot.id, kit.bot.id].sort());
+      woken.length = 0;
+      votePoll(sal.bot.id, { message: startedShort, choices: ['A', 'B'] });
+      // Kit can't see Sal's answer before voting; Sal can see their own.
+      const blindFor = (id) => transcript(group.id, bots, 'Sam', id).split('Tea or coffee?')[1];
+      a.doesNotMatch(blindFor(kit.bot.id), /Sal/);
+      a.match(blindFor(kit.bot.id), /Answers stay hidden[\\s\\S]*You haven't voted/);
+      a.match(blindFor(sal.bot.id), /Tea \\(you\\)/);
+      a.doesNotMatch(blindFor(pip.bot.id), /Sal/);
+      votePoll(kit.bot.id, { message: startedShort, choices: ['B'] });
+      a.equal(stored().closedAt, undefined);
+      a.equal(woken.length, 0);
+      svc.votePoll(group.id, started.id, 'me', ['A']);
+      a.ok(stored().closedAt);
+      a.equal(woken.length, 1);
+      a.equal(woken[0].id, pip.bot.id);
+      a.match(woken[0].text, /Everyone has answered[\\s\\S]*B\\) Coffee: Sal, Kit/);
+      a.match(blindFor(pip.bot.id), /Tea \\(Sal, Sam\\)/);
+
+      // A changed answer that lasts reaches the bot that asked, not the chat.
+      woken.length = 0;
+      const eventCount = events().length;
+      votePoll(sal.bot.id, { message: startedShort, choices: ['B'] });
+      a.equal(woken.length, 0);
+      later(svc.POLL_CHANGE_SETTLE + 1);
+      a.equal(woken.length, 1);
+      a.equal(woken[0].id, pip.bot.id);
+      a.equal(woken[0].kind, 'note');
+      a.match(woken[0].text, /Sal changed their answer[\\s\\S]*Tea, Coffee → Coffee/);
+      a.equal(events().length, eventCount);
+      Date.now = realNow;
+
+      // Answers can be shown from the start, and someone leaving can finish a poll.
+      const open = startPoll(pip.bot.id, { question: 'Open?', options: ['Yes', 'No'], hide_votes: false });
+      a.equal(db.getMessage(open.id).message.poll.blind, undefined);
+      svc.votePoll(group.id, open.id, 'me', ['A']);
+      votePoll(sal.bot.id, { message: open.id.slice(0, 8), choices: ['A'] });
+      a.equal(db.getMessage(open.id).message.poll.closedAt, undefined);
+      woken.length = 0;
+      svc.updateConversation(group.id, { botIds: [pip.bot.id, sal.bot.id] });
+      a.ok(db.getMessage(open.id).message.poll.closedAt);
+      a.equal(woken[0].id, pip.bot.id);
+
+      // Bad polls and other kinds of chat are turned away.
+      setFocus(pip.bot.id, group.id);
+      a.throws(() => startPoll(pip.bot.id, { question: 'Hm?', options: ['Only', 'only'] }), /two different options/);
+      a.throws(() => startPoll(pip.bot.id, { question: '', options: ['A', 'B'] }), /question/);
+      a.throws(() => svc.postMessage(pip.conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: '', poll: poll() }), /group chats/);
+      a.throws(() => svc.votePoll(group.id, group.messages[0].id, 'me', ['A']), /isn't a poll/);
+
+      const event = { type: 'tool_execution_end', toolName: 'poll', result: { details: { id: 'posted' } } };
+      a.equal(successfulMessageTool(event), true);
+      a.equal(successfulMessageTool({ ...event, toolName: 'vote_poll', result: { details: { ok: true } } }), false);
+      a.equal(activityFor('vote_poll', {}), 'Voting in the poll');
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("computer tools never silently fall back to unrestricted host access", async () => {

@@ -14,6 +14,8 @@ export type {
   EventKind,
   MemoryItem,
   PlanStep,
+  Poll,
+  PollVote,
   Proactivity,
   Question,
   Reaction,

@@ -4,7 +4,7 @@
 // the unix socket in agent.ts.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { conversationTitle, firstName, reactionId, replyBubbles } from "../../shared/bots";
+import { conversationTitle, firstName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -175,7 +175,7 @@ export async function applyEffort(proc: Pick<PiProcess, "send">, botId: string) 
 }
 
 /** Tools that put words in the chat: while they're being written, the bot is typing. */
-const WRITING = new Set(["send_message", "question"]);
+const WRITING = new Set(["send_message", "question", "poll"]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
@@ -248,6 +248,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "read") return base(a.path) ? `Reading ${base(a.path)}` : "Reading a file";
   if (tool === "write") return base(a.path) ? `Writing ${base(a.path)}` : "Writing a file";
   if (tool === "edit") return base(a.path) ? `Editing ${base(a.path)}` : "Editing a file";
+  if (tool === "vote_poll") return "Voting in the poll";
   if (tool === "remember") return "Making a note";
   if (tool === "forget") return "Forgetting something";
   if (tool === "search") return "Looking back through chats";
@@ -363,7 +364,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   const lines = rows.map((r) => {
     const m = r.message;
     const who = m.author === "me" ? user : firstName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
-    const body = m.event ? `(${m.event.text}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.text.slice(0, 2000);
+    const body = m.event ? `(${m.event.text}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
     const mark = r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
     const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${quoted.message.text.slice(0, 200)}”)` : "";
@@ -373,6 +374,19 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
   });
   return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${conversationTitle(c, bots)}”):\n${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
+}
+
+/** A poll in the transcript: its options, who picked what if this bot may know yet, and whether it still has to vote. */
+function pollBody(m: BotMessage, botId: string, name: (author: string) => string): string {
+  const poll = m.poll!;
+  const visible = pollVotesVisible(poll, botId);
+  const options = poll.options.map((o) => {
+    const by = visible ? poll.votes.filter((v) => v.keys.includes(o.key)).map((v) => name(v.by)) : [];
+    return `\n  ${o.key}) ${o.label}${by.length ? ` (${by.join(", ")})` : ""}`;
+  });
+  const hidden = visible ? "" : "\n  Answers stay hidden until you've voted or it closes.";
+  const owed = !poll.closedAt && m.author !== botId && !poll.votes.some((v) => v.by === botId);
+  return `Poll${poll.closedAt ? " (closed)" : ""}, ${poll.multiple ? "pick any" : "pick one"}: “${poll.question}”${options.join("")}${hidden}${owed ? "\n  You haven't voted. Use vote_poll." : ""}`;
 }
 
 function imagesFor(jobs: Wake[], botId: string): { type: "image"; data: string; mimeType: string }[] {

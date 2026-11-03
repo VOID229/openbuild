@@ -1,13 +1,13 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, PanelLeft, PanelRight, SmilePlus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, PanelLeft, PanelRight, SmilePlus, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { reactionId } from "../../../shared/bots";
+import { pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
@@ -20,6 +20,7 @@ import { StashTray } from "../StashTray";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { BotAvatar } from "./BotAvatar";
+import { PollDialog } from "./BotDialogs";
 import { authorName, ConversationAvatar, dividerTime, fullTime, messageText } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -220,6 +221,61 @@ function QuestionCard({ conversation, message }: { conversation: Conversation; m
   );
 }
 
+function PollCard({ conversation, message, bots }: { conversation: Conversation; message: BotMessage; bots: Bot[] }) {
+  const poll = message.poll!;
+  const mine = poll.votes.find((v) => v.by === "me")?.keys ?? EMPTY;
+  const visible = pollVotesVisible(poll, "me");
+  const waiting = pollWaitingOn(poll, message.author, conversation.botIds).map((id) => (id === "me" ? "you" : firstName(bots.find((b) => b.id === id) ?? { name: "A bot" } as Bot)));
+  const vote = (key: string) => {
+    const others = mine.filter((k) => k !== key);
+    const next = mine.includes(key) ? others : poll.multiple ? [...mine, key] : [key];
+    // A closed poll keeps everyone's answer: it can change, but not go.
+    if (poll.closedAt && !next.length) return;
+    useBots.getState().votePoll(conversation.id, message.id, next);
+  };
+  const count = poll.votes.length === 1 ? "1 vote" : poll.votes.length ? `${poll.votes.length} votes` : "No votes yet";
+  const foot = poll.closedAt
+    ? ["Closed", count, mine.length ? "You can still change your answer" : ""]
+    : [count, waiting.length ? `Waiting on ${waiting.join(", ")}` : "", visible ? "" : "Answers show once you've voted"];
+  return (
+    <div className="bm-poll">
+      <div className="bm-question-title">{poll.question}</div>
+      <div className="bm-question-hint">{poll.multiple ? "Pick any" : "Pick one"}</div>
+      <div className="bm-options" role={poll.multiple ? "group" : "radiogroup"} aria-label={poll.question}>
+        {poll.options.map((o) => {
+          const by = visible ? poll.votes.filter((v) => v.keys.includes(o.key)).map((v) => v.by) : EMPTY;
+          const on = mine.includes(o.key);
+          const voters = by.flatMap((id) => bots.find((b) => b.id === id) ?? []);
+          return (
+            <button
+              key={o.key}
+              type="button"
+              role={poll.multiple ? "checkbox" : "radio"}
+              aria-checked={on}
+              className={cx("bm-option", "bm-poll-option", on && "bm-option-on")}
+              style={{ "--share": `${poll.votes.length ? (by.length / poll.votes.length) * 100 : 0}%` } as React.CSSProperties}
+              data-tooltip={by.length ? by.map((id) => authorName(id, bots).split(" ·")[0]).join(", ") : undefined}
+              onClick={() => vote(o.key)}
+            >
+              <span className={cx("bm-option-key", poll.multiple && "bm-poll-key-multi")}>{on ? <Check size={13} strokeWidth={3} /> : o.key}</span>
+              <span className="bm-option-label">{o.label}</span>
+              {by.length > 0 && (
+                <span className="bm-poll-tally">
+                  {voters.slice(0, 3).map((b) => (
+                    <BotAvatar key={b.id} look={b.look} size={18} alive={false} mood="happy" />
+                  ))}
+                  <span className="bm-poll-count">{by.length}</span>
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="bm-poll-foot">{foot.filter(Boolean).join(" · ")}</div>
+    </div>
+  );
+}
+
 function PlanCard({ message, bots }: { message: BotMessage; bots: Bot[] }) {
   const plan = message.plan!;
   const done = plan.steps.filter((s) => s.status === "done").length;
@@ -356,8 +412,8 @@ interface RowProps {
 const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, seen }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
-  const emojiOnly = !m.images?.length && !m.question && !m.plan && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
-  const card = !!(m.question || m.plan);
+  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
+  const card = !!(m.question || m.plan || m.poll);
   const react = (emoji: string) => {
     const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
     useBots.getState().toggleReaction(conversation.id, m.id, emoji, "me");
@@ -392,12 +448,13 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               ))}
             </div>
           )}
-          {m.text && !m.question && (
+          {m.text && !m.question && !m.poll && (
             <div className="bm-text">
               <RichText text={m.text} bots={bots} botId={m.author === "me" ? undefined : m.author} />
             </div>
           )}
           {m.question && <QuestionCard conversation={conversation} message={m} />}
+          {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
           {m.plan && <PlanCard message={m} bots={bots} />}
         </div>
         {!readonly && (
@@ -408,7 +465,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
             <IconButton label="Reply" tooltip={false} className="bm-action" onClick={() => onReply(m.id)}>
               <CornerUpLeft size={16} />
             </IconButton>
-            {mine && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
+            {mine && !m.poll && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
             <CopyAction text={m.text || messageText(m)} />
           </div>
         )}
@@ -768,6 +825,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const stashed = stash.use((s) => s.items);
   const [stashOpen, setStashOpen] = useState(false);
   const [stashIndex, setStashIndex] = useState(0);
+  const [polling, setPolling] = useState(false);
   const stashList = stashOpen ? stashed : [];
 
   useLayoutEffect(() => {
@@ -876,6 +934,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
 
   return (
     <div className="bots-dock">
+      {polling && <PollDialog conversationId={conversation.id} onClose={() => setPolling(false)} />}
       {stashed.length > 0 && (
         <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={stash.remove} />
       )}
@@ -939,6 +998,11 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => file.current?.click()}>
             <ImagePlus size={18} />
           </IconButton>
+          {conversation.kind === "group" && (
+            <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => setPolling(true)}>
+              <ListChecks size={18} />
+            </IconButton>
+          )}
           <input
             ref={file}
             type="file"

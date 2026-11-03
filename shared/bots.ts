@@ -135,6 +135,54 @@ export interface Question {
   answer?: string;
 }
 
+/** Up to A–J. */
+export const POLL_OPTIONS = 10;
+
+export interface PollVote {
+  by: Author;
+  /** The options picked: one, or any number if the poll takes several. */
+  keys: string[];
+  at: number;
+}
+
+/** A question for a whole group, from the user or a bot, that everyone answers. */
+export interface Poll {
+  question: string;
+  /** Voters can pick several options rather than one. */
+  multiple?: boolean;
+  options: { key: string; label: string }[];
+  votes: PollVote[];
+  /** Nobody sees others' answers until they've answered themselves, or the poll closes. */
+  blind?: boolean;
+  /** When everyone it asks had answered. Answers can still change, but not be taken back. */
+  closedAt?: number;
+}
+
+/** A new poll: blank and repeated options dropped, the rest lettered A, B, C… */
+export function makePoll(question: string, labels: string[], { multiple, blind }: { multiple?: boolean; blind?: boolean } = {}): Poll {
+  const seen = new Set<string>();
+  const unique = labels
+    .map((label) => label.trim().slice(0, 200))
+    .filter((label) => label && !seen.has(label.toLowerCase()) && seen.add(label.toLowerCase()))
+    .slice(0, POLL_OPTIONS);
+  return { question: question.trim().slice(0, 300), ...(multiple ? { multiple: true } : {}), ...(blind ? { blind: true } : {}), options: unique.map((label, i) => ({ key: String.fromCharCode(65 + i), label })), votes: [] };
+}
+
+/** `by`'s vote replaced with `keys`. No keys takes the vote back. */
+export function castVote(poll: Poll, by: Author, keys: string[]): Poll {
+  const picked = poll.options.map((o) => o.key).filter((key) => keys.includes(key));
+  const rest = poll.votes.filter((v) => v.by !== by);
+  return { ...poll, votes: picked.length ? [...rest, { by, keys: poll.multiple ? picked : picked.slice(0, 1), at: Date.now() }] : rest };
+}
+
+/** Who a poll is still waiting on: the other bots in the group, and the user if a bot asked. */
+export function pollWaitingOn(poll: Poll, author: Author, botIds: string[]): Author[] {
+  const asked = [...botIds.filter((id) => id !== author), ...(author === "me" ? [] : ["me"])];
+  return asked.filter((id) => !poll.votes.some((v) => v.by === id));
+}
+
+export const pollVotesVisible = (poll: Poll, viewer: Author) => !poll.blind || !!poll.closedAt || poll.votes.some((v) => v.by === viewer);
+
 export interface PlanStep {
   text: string;
   /** The bot doing it. */
@@ -142,7 +190,7 @@ export interface PlanStep {
   status: "todo" | "doing" | "done";
 }
 
-export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer";
+export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll";
 
 export interface BotMessage {
   id: string;
@@ -159,6 +207,8 @@ export interface BotMessage {
   question?: Question;
   /** A bot laying out who does what. */
   plan?: { title: string; steps: PlanStep[] };
+  /** A poll for the group. */
+  poll?: Poll;
   /** For the user's messages: the bots that have read it. */
   seenBy?: string[];
 }

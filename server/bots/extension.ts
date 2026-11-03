@@ -118,6 +118,10 @@ export default function openbots(pi: any) {
 
   pi.registerTool(tool("question", "Ask", "Ask the user to pick. They can also type their own answer. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices. Don't add Other." }, conversation: str("Short conversation id.") }, required: ["title"] }, (p) => call("question", p)));
 
+  pi.registerTool(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p) => call("poll", p)));
+
+  pi.registerTool(tool("vote_poll", "Vote", "Vote in a poll, by the letters of your choices. Voting again replaces your vote, even once the poll has closed.", { type: "object", properties: { message: str("The poll's short message id."), choices: { type: "array", items: { type: "string" }, description: "Option letters, e.g. [\"B\"]. Only one unless the poll takes several." }, conversation: str("Short conversation id.") }, required: ["message", "choices"] }, (p) => call("vote_poll", p)));
+
   pi.registerTool(tool("remember", "Remember", "Save something you'll need later, across every conversation.", { type: "object", properties: { text: str("One fact, in a sentence.") }, required: ["text"] }, (p) => call("remember", p)));
 
   pi.registerTool(tool("forget", "Forget", "Delete one memory by its id.", { type: "object", properties: { id: str("The memory id.") }, required: ["id"] }, (p) => call("forget", p)));

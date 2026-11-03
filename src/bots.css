@@ -1613,6 +1613,59 @@
   min-width: 0;
 }
 
+/* A poll for the group: each option fills with its share of the votes. */
+.bm-poll {
+  min-width: min(320px, 62vw);
+}
+
+.bm-poll-option {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  width: 100%;
+}
+
+.bm-poll-option::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  width: var(--share, 0%);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  transition: width 320ms var(--ease);
+}
+
+.bm-poll-key-multi {
+  border-radius: 50%;
+}
+
+.bm-poll-option .bm-option-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.bm-poll-tally {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.bm-poll-count {
+  min-width: 18px;
+  text-align: right;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.bm-poll-foot {
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
 /* A bot laying out who does what. */
 .bm-plan-head {
   display: flex;
@@ -2538,6 +2591,65 @@ button.bots-details-name:hover {
 
 .bots-small-dialog .input {
   margin-top: 4px;
+}
+
+.bots-poll-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bots-poll-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bots-poll-option .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.bots-poll-add {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  margin-top: 4px;
+  padding: 0 10px 0 6px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-poll-add:hover {
+    background: var(--hover);
+  }
+}
+
+.bots-poll-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.bots-poll-check input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+.bots-poll-failed {
+  font-size: 13px;
+  color: var(--danger);
 }
 
 /* ==========================================================================

@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, firstName, isSilent, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { conversationTitle, firstName, isSilent, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { capabilities } from "../computers/index";
 import { botsDir } from "./db";
@@ -81,6 +81,10 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return react(botId, p);
     case "question":
       return askUser(botId, p);
+    case "poll":
+      return startPoll(botId, p);
+    case "vote_poll":
+      return votePoll(botId, p);
     case "remember":
       return remember(botId, p);
     case "forget":
@@ -131,6 +135,7 @@ export function contextFor(botId: string): string {
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
     "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
+    "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll in the chat says you haven't voted, vote with vote_poll, going by what you honestly think. Voting shows on the poll, so you needn't announce it; add a message only if you have something more to say. A poll closes once everyone has answered. You can still change your answer after that if you truly change your mind, and whoever asked will hear about it.",
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
@@ -252,6 +257,26 @@ function askUser(botId: string, p: Record<string, unknown>) {
   };
   svc.postMessage(conversationId, message);
   return { id: message.id, note: "The user answers in the chat. Don't invent their answer; stop here and wait." };
+}
+
+export function startPoll(botId: string, p: Record<string, unknown>) {
+  const conversationId = conversationFor(botId, p.conversation);
+  const poll = makePoll(String(p.question ?? ""), asStrings(p.options), { multiple: p.multiple === true, blind: p.hide_votes !== false });
+  const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: poll.question, poll };
+  svc.postMessage(conversationId, message);
+  svc.touchHeartbeat(botId);
+  return { id: message.id, note: "Everyone in the group is asked. You'll hear when it closes, once they've all answered; don't guess the result." };
+}
+
+export function votePoll(botId: string, p: Record<string, unknown>) {
+  const conversationId = conversationFor(botId, p.conversation);
+  const found = db.findMessages(String(p.message ?? ""), [conversationId]);
+  if (found.length !== 1 || !found[0]!.message.poll) throw new svc.BotsError("Name the poll by its message id.");
+  const keys = asStrings(p.choices).map((key) => key.trim().toUpperCase());
+  if (!keys.length) throw new svc.BotsError("Pick at least one option, by its letter.");
+  svc.votePoll(conversationId, found[0]!.message.id, botId, keys);
+  svc.pulse(botId, "happy");
+  return { ok: true };
 }
 
 export function remember(botId: string, p: Record<string, unknown>) {

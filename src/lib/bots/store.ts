@@ -8,7 +8,7 @@ import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
-import { toggleReactionIn } from "../../../shared/bots";
+import { castVote, toggleReactionIn } from "../../../shared/bots";
 
 export interface Draft {
   text: string;
@@ -82,6 +82,8 @@ interface BotsState {
   /** Add or take back a reaction. */
   /** `to` answers that reaction (by id) instead of the message. */
   toggleReaction: (conversationId: string, messageId: string, emoji: string, by: Author, to?: string) => void;
+  /** Replace the user's vote in a poll. No keys takes it back. */
+  votePoll: (conversationId: string, messageId: string, keys: string[]) => void;
   setTyping: (conversationId: string, botId: string, typing: boolean) => void;
   pulse: (botId: string, mood?: Mood) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
@@ -257,6 +259,10 @@ export const useBots = create<BotsState>()(
       toggleReaction: (conversationId, messageId, emoji, by, to) => {
         get().patchMessage(conversationId, messageId, (m) => ({ reactions: toggleReactionIn(m.reactions ?? [], emoji, by, to).next }));
         if (by === "me") void send("PATCH", `/api/bots/conversations/${conversationId}/messages/${messageId}`, { emoji, to });
+      },
+      votePoll: (conversationId, messageId, keys) => {
+        get().patchMessage(conversationId, messageId, (m) => (m.poll ? { poll: castVote(m.poll, "me", keys) } : {}));
+        void send("PATCH", `/api/bots/conversations/${conversationId}/messages/${messageId}`, { vote: keys });
       },
       setTyping: (conversationId, botId, typing) =>
         set((s) => {
