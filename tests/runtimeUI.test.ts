@@ -336,6 +336,25 @@ test("Durable regeneration cannot clear an existing turn", () => {
   expect(JSON.stringify(useStore.getState().chats[0])).toBe(before);
 });
 
+test("an answered question stays on its first line until it is opened", () => {
+  const part = {
+    type: "ask" as const,
+    id: "q",
+    method: "select" as const,
+    title: "Which database should we use\nfor the new billing service?",
+    message: "This decides the migration.",
+    options: ["Postgres", "SQLite"],
+    other: true,
+    answer: "Postgres",
+  };
+  const html = markup(createElement(AskCard, { part, chatId: "runtime-test", messageId: "assistant" }));
+  expect(html).toContain("ask-title-clamp");
+  expect(html).toContain("Which database should we use");
+  expect(html).not.toContain("This decides the migration.");
+  expect(html).not.toContain("SQLite");
+  expect(html).toContain("Show the question");
+});
+
 test("native approvals reach their runtime and sensitive answers are not stored in chat", async () => {
   const originalFetch = globalThis.fetch;
   const calls: { url: string; body: any }[] = [];

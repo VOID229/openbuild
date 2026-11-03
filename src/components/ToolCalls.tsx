@@ -377,14 +377,16 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
   const answered = part.answer !== undefined;
   const [review, setReview] = useState(false);
   const reviewable = answered && !!part.options?.length;
+  // Answered cards stay on one line. Opening them brings the whole question back, then the choices.
+  const compact = reviewable && !review;
   const reply = (r: { value?: string; confirmed?: boolean; cancelled?: boolean }) => void answerQuestion(chatId, messageId, part, r);
   return (
     <div className={cx("ask", answered && "ask-answered", reviewable && "ask-reviewable", review && "ask-review-open")} role="group" aria-label={part.title} data-block={block}>
       <div className="ask-head">
         <MessageCircleQuestion size={15} />
-        <span className="ask-title">{part.title}</span>
+        <span className={cx("ask-title", compact && "ask-title-clamp")}>{part.title}</span>
       </div>
-      {part.message && <p className="ask-message">{part.message}</p>}
+      {part.message && !compact && <p className="ask-message">{part.message}</p>}
       {answered ? (
         <>
           <p className="ask-answer">{part.answer ? <><Check size={13} /> {part.answer}</> : <><X size={13} /> No answer</>}</p>
@@ -404,7 +406,7 @@ export function AskCard({ part, chatId, messageId, block }: { part: AskPart; cha
                   })}
                 </div>
               </Fold>
-              <button type="button" className="ask-review-toggle" aria-expanded={review} aria-label={review ? "Hide options" : "Show options"} title={review ? "Hide options" : "Show options"} onClick={() => setReview((v) => !v)}>
+              <button type="button" className="ask-review-toggle" aria-expanded={review} aria-label={review ? "Hide the question" : "Show the question"} title={review ? "Hide the question" : "Show the question"} onClick={() => setReview((v) => !v)}>
                 <ChevronDown size={14} />
               </button>
             </>

@@ -5678,7 +5678,7 @@ p.key-status svg {
   box-shadow: none;
 }
 
-/* Answered question_ask: a chevron in the bottom-right re-shows the options, read-only. */
+/* Answered question_ask: a chevron in the bottom-right re-shows the whole question, then the options, read-only. */
 .ask-reviewable {
   position: relative;
   padding-right: 40px;
@@ -5734,10 +5734,30 @@ p.key-status svg {
 
 .ask-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
+}
+
+.ask-head > svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+.ask-title {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Closed answered cards keep the first line. Opening drops the clamp. */
+.ask-title-clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .ask-message {
