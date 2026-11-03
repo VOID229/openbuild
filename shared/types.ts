@@ -447,7 +447,7 @@ export interface RuntimeStatus extends RuntimeAvailability {
   /** The program, or package directory, that was found. */
   bin?: string;
   version?: string;
-  /** Newest published version, for runtimes with a package registry to ask. */
+  /** Newest published version, when it could be found out. */
   latest?: string;
   updateAvailable: boolean;
   checkError?: string;

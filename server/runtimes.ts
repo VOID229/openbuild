@@ -65,16 +65,37 @@ export function assertRuntimeUpdated(status: RuntimeStatus): void {
 // ------------------------------------------------------------------ detailed status (Settings → Runtimes)
 
 
-/** npm packages whose `latest` tells whether a runtime has an update (runtimes without one aren't checked). */
-const NPM_PACKAGE: Partial<Record<ThreadRuntime, string>> = { codex: "@openai/codex", claude: "@anthropic-ai/claude-code" };
-const latestCache = new Map<string, { at: number; value: Promise<{ version?: string; error?: string }> }>();
-function npmLatest(pkg: string, fresh: boolean): Promise<{ version?: string; error?: string }> {
-  const hit = latestCache.get(pkg);
+async function download(url: string): Promise<Response> {
+  const r = await fetch(url, { signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) throw new Error(`${new URL(url).host} answered HTTP ${r.status}`);
+  return r;
+}
+const npmLatest = (pkg: string) => async () => ((await (await download(`https://registry.npmjs.org/${pkg}/latest`)).json()) as { version?: string }).version;
+
+/** Where each runtime publishes its newest release; asking never installs anything. Pi checks its own. */
+const LATEST_RELEASE: Partial<Record<ThreadRuntime, (probe: Probe) => Promise<string | undefined>>> = {
+  codex: npmLatest("@openai/codex"),
+  claude: npmLatest("@anthropic-ai/claude-code"),
+  opencode: npmLatest("@opencode/cli"),
+  grok: () => grok.latestRelease(),
+  // Cursor publishes no version file; its installer names the build it downloads.
+  cursor: async () => {
+    const build = /downloads\.cursor\.com\/lab\/([^/]+)\//.exec(await (await download("https://cursor.com/install")).text())?.[1];
+    if (!build) throw new Error("Cursor's installer didn't name a version");
+    return build;
+  },
+  // latest.txt is the stable channel; other channels publish nothing to compare with.
+  fx: async (probe) => (!probe.channel || probe.channel === "stable" ? (await (await download("https://releases.fx.sh/latest.txt")).text()).trim() : undefined),
+  hermes: async () => ((await (await download("https://api.github.com/repos/NousResearch/hermes-agent/releases/latest")).json()) as { tag_name?: string }).tag_name,
+};
+const latestCache = new Map<ThreadRuntime, { at: number; value: Promise<{ version?: string; error?: string }> }>();
+function latestRelease(id: ThreadRuntime, probe: Probe, fresh: boolean): Promise<{ version?: string; error?: string }> {
+  const hit = latestCache.get(id);
   if (!fresh && hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.value;
-  const value: Promise<{ version?: string; error?: string }> = fetch(`https://registry.npmjs.org/${pkg}/latest`, { signal: AbortSignal.timeout(10_000) })
-    .then(async (r) => (r.ok ? { version: ((await r.json()) as { version?: string }).version } : { error: `npm answered HTTP ${r.status}` }))
+  const value: Promise<{ version?: string; error?: string }> = LATEST_RELEASE[id]!(probe)
+    .then((version) => ({ version: semver(version) }))
     .catch((e: Error) => ({ error: `Couldn't check for updates: ${e.message}` }));
-  latestCache.set(pkg, { at: Date.now(), value });
+  latestCache.set(id, { at: Date.now(), value });
   return value;
 }
 
@@ -90,7 +111,7 @@ async function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<
   }
 }
 
-type Probe = { installed: boolean; bin?: string; version?: string; connected?: string[]; error?: string };
+type Probe = { installed: boolean; bin?: string; version?: string; connected?: string[]; channel?: string; error?: string };
 
 type StatusResults = Record<ThreadRuntime, RuntimeStatus>;
 let statusCache: { at: number; value: Promise<StatusResults> } | undefined;
@@ -150,8 +171,9 @@ async function probeRuntimeStatus(fresh: boolean): Promise<StatusResults> {
         const s = (await piStatus)!;
         latest = s.latest;
         checkError = s.checkError;
-      } else if (NPM_PACKAGE[id]) {
-        const l = await npmLatest(NPM_PACKAGE[id]!, fresh);
+      } else if (probe.bin) {
+        // No local program (a remote OpenCode server) means nothing here can be updated.
+        const l = await latestRelease(id, probe, fresh);
         latest = l.version;
         checkError = l.error;
       }

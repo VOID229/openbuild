@@ -50,6 +50,8 @@ export interface FxStatus {
   effort?: string;
   provider?: string;
   connected?: string[];
+  /** The release channel `fx upgrade` follows. */
+  channel?: string;
   install: string;
 }
 
@@ -66,6 +68,7 @@ export async function status(): Promise<FxStatus> {
     effort: st?.effort,
     provider: st?.auth ?? st?.model_source,
     connected: Array.isArray(st?.connected_providers) ? st.connected_providers : undefined,
+    channel: st?.update_channel,
     install: FX_INSTALL,
   };
 }

@@ -30,23 +30,25 @@ function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate 
   return (
     <>
       {status.version && <span className="badge">v{status.version}</span>}
-      {status.installed ? (
+      {status.updateAvailable || updating ? (
         <button
           type="button"
-          className={status.updateAvailable && !quiet ? "badge badge-accent rt-update" : "badge rt-update"}
+          className={quiet ? "badge rt-update" : "badge badge-accent rt-update"}
           disabled={updateDisabled}
           data-updating={updating || undefined}
           aria-label={updating ? `Updating ${name}` : `Update ${name}`}
-          aria-description={status.updateAvailable ? `${status.latest} available` : "Run the native updater"}
+          aria-description={`${status.latest} available`}
           aria-busy={updating}
           onClick={onUpdate}
         >
-          <span className="rt-update-version" aria-hidden="true">{status.updateAvailable ? `${status.latest} available` : status.latest ? "up to date" : "Check for update"}</span>
+          <span className="rt-update-version" aria-hidden="true">{status.latest} available</span>
           <span className="rt-update-action" aria-hidden="true">
             {updating && <Spinner size={10} />}
             {updating ? "Updating…" : "Update"}
           </span>
         </button>
+      ) : status.checkError ? (
+        <span className="badge" title={status.checkError}>couldn't check for updates</span>
       ) : (
         status.latest && <span className="badge">up to date</span>
       )}

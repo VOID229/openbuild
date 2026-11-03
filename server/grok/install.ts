@@ -51,6 +51,19 @@ export function parseModels(out: string): { ids: string[]; defaultId?: string; a
   return { ids, defaultId, account: /logged in with (.+?)\.?\s*$/m.exec(out)?.[1] };
 }
 
+/** The newest release on this install's channel, asked of Grok itself; it installs nothing. */
+export async function latestRelease(): Promise<string | undefined> {
+  const r = await run(["update", "--check", "--json"]);
+  let check: { latestVersion?: string; error?: string | null };
+  try {
+    check = JSON.parse(r.out);
+  } catch {
+    throw new Error(r.err || `grok update --check exited with ${r.code}`);
+  }
+  if (check.error) throw new Error(check.error);
+  return check.latestVersion;
+}
+
 export interface GrokStatus {
   installed: boolean;
   bin?: string;

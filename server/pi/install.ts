@@ -99,8 +99,10 @@ export async function latestVersion(fresh = false): Promise<{ version?: string; 
 
 /** -1, 0 or 1 for dotted versions ("1.10.0" > "1.9.2"). */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
-  const pb = b.split(/[.+-]/).map((n) => parseInt(n, 10) || 0);
+  // Build hashes ("2026.10.22-27dcf5f") aren't numbers: parsing their leading digits would order them at random.
+  const parts = (v: string) => v.split(/[.+-]/).map((n) => (/^\d+$/.test(n) ? Number(n) : 0));
+  const pa = parts(a);
+  const pb = parts(b);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
     const d = (pa[i] ?? 0) - (pb[i] ?? 0);
     if (d) return Math.sign(d);

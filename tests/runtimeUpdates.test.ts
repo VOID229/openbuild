@@ -46,6 +46,48 @@ test("runtime maintenance commands, HTTP validation, jobs and status caching (is
       a.equal((await runtimeStatus()).pi.version, '1.0.0');
       a.equal((await runtimeStatus(true)).pi.version, '2.0.0');
       process.env.PI_BIN = missing;
+      // Runtimes without an npm package ask where their own installers look.
+      const realFetch = globalThis.fetch;
+      const script = (name, body) => { const path = dir + '/' + name; writeFileSync(path, '#!/bin/sh\\n' + body + '\\n'); chmodSync(path, 0o755); return path; };
+      const check = async (env, value, pages) => {
+        process.env[env] = value;
+        globalThis.fetch = async url => { const page = pages[url]; return page === undefined ? new Response('', { status: 404 }) : new Response(page); };
+        forgetRuntimeStatus();
+        const all = await runtimeStatus(true);
+        process.env[env] = missing;
+        return all;
+      };
+      process.env.HERMES_BIN = missing;
+      process.env.GROK_BIN = missing;
+      const grokCheck = json => script('grok', 'if [ "$1" = update ]; then echo \\'' + JSON.stringify(json) + '\\'; else echo "grok 1.0.70 (f50904eaee6c) [stable]"; fi');
+      let got = (await check('GROK_BIN', grokCheck({ latestVersion: '1.0.70', error: null }), {})).grok;
+      a.deepEqual([got.version, got.latest, got.updateAvailable], ['1.0.70', '1.0.70', false]);
+      got = (await check('GROK_BIN', grokCheck({ latestVersion: '1.0.71', error: null }), {})).grok;
+      a.deepEqual([got.latest, got.updateAvailable], ['1.0.71', true]);
+      got = (await check('GROK_BIN', grokCheck({ error: 'offline' }), {})).grok;
+      a.equal(got.updateAvailable, false);
+      a.ok(got.checkError.includes('offline'));
+      const fxBin = channel => script('fx', 'if [ "$1" = status ]; then echo \\'{"update_channel":"' + channel + '"}\\'; else echo 0.0.15; fi');
+      got = (await check('FX_BIN', fxBin('stable'), { 'https://releases.fx.sh/latest.txt': 'v0.0.16\\n' })).fx;
+      a.deepEqual([got.latest, got.updateAvailable], ['0.0.16', true]);
+      got = (await check('FX_BIN', fxBin('dev'), { 'https://releases.fx.sh/latest.txt': 'v0.0.16\\n' })).fx;
+      a.deepEqual([got.latest, got.updateAvailable, got.checkError], [undefined, false, undefined]);
+      const hermes = script('hermes', 'echo "Hermes Agent v0.22.6 (2026.10.30)"');
+      got = (await check('HERMES_BIN', hermes, { 'https://api.github.com/repos/NousResearch/hermes-agent/releases/latest': JSON.stringify({ tag_name: 'v0.22.6' }) })).hermes;
+      a.deepEqual([got.version, got.latest, got.updateAvailable], ['0.22.6', '0.22.6', false]);
+      got = (await check('HERMES_BIN', hermes, {})).hermes;
+      a.equal(got.updateAvailable, false);
+      a.ok(got.checkError.includes('HTTP 404'));
+      // Cursor's builds end in a hash: the same build is current, and a hash never makes one newer.
+      const cursorBin = script('cursor', 'if [ "$1" = --version ]; then echo 2026.10.22-27dcf5f; else exit 1; fi');
+      const installer = build => ({ 'https://cursor.com/install': 'DOWNLOAD_URL="https://downloads.cursor.com/lab/' + build + '/x"' });
+      got = (await check('CURSOR_BIN', cursorBin, installer('2026.10.22-27dcf5f'))).cursor;
+      a.deepEqual([got.latest, got.updateAvailable], ['2026.10.22-27dcf5f', false]);
+      got = (await check('CURSOR_BIN', cursorBin, installer('2026.10.22-99abcde'))).cursor;
+      a.equal(got.updateAvailable, false);
+      got = (await check('CURSOR_BIN', cursorBin, installer('2026.10.29-1234abc'))).cursor;
+      a.equal(got.updateAvailable, true);
+      globalThis.fetch = realFetch;
       forgetRuntimeStatus();
       const beforeUpdate = runtimeStatus();
       await beforeUpdate;

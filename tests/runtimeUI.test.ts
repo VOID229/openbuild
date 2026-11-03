@@ -81,6 +81,17 @@ test("runtime settings immediately render cached versions and update buttons, no
     expect(updated).toContain("v2.0.0");
     expect(updated).not.toContain('class="badge badge-accent rt-update"');
     expect(updated).not.toContain("2.0.0 available");
+    // Nothing to install, or no way to know: the row states that and offers no updater to run.
+    expect(updated).toContain('<span class="badge">up to date</span>');
+    expect(updated).not.toContain("rt-update");
+    globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok"].map((id) => [id, {
+      installed: true, version: "2.0.0", updateAvailable: false, install: "secret-update-command", checkError: "Couldn't check for updates: offline",
+    }])) })) as unknown as typeof fetch;
+    await loadRuntimeStatuses(true);
+    const unknown = markup(createElement(RuntimesSection));
+    expect(unknown).toContain("couldn&#x27;t check for updates");
+    expect(unknown).not.toContain("up to date");
+    expect(unknown).not.toContain("rt-update");
   } finally { globalThis.fetch = originalFetch; reset(); }
 });
 
