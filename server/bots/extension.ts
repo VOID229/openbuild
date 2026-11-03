@@ -128,6 +128,31 @@ export default function openbots(pi: any) {
 
   pi.registerTool(tool("search", "Search", "Search your memory, or everything ever said in your conversations. what is memory (default) or messages.", { type: "object", properties: { query: str("Words to look for."), what: str("memory or messages.") }, required: ["query"] }, (p) => call("search", p)));
 
+  pi.registerTool(
+    tool(
+      "bot_web_search",
+      "Web search",
+      "Search the web through a search provider the user set up. Your context lists which ones you have, what each is good at and which options each takes. Anything else about the web, use your browser.",
+      {
+        type: "object",
+        properties: {
+          query: str("What to search for."),
+          provider: str("exa, brave, kagi, firecrawl, tavily, searxng, x or youtube. The cheapest you have, if omitted."),
+          count: { type: "number", description: "How many results." },
+          recency: str("day, week, month or year."),
+          category: str("Exa or SearXNG: the kind of content."),
+          depth: str("Tavily: basic or advanced."),
+          topic: str("Tavily: general, news or finance."),
+          sort: str("X: relevancy or recency."),
+          order: str("YouTube: relevance, date, viewCount or rating."),
+          duration: str("YouTube: short, medium or long."),
+        },
+        required: ["query"],
+      },
+      (p) => call("bot_web_search", p),
+    ),
+  );
+
   pi.registerTool(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p) => call("routine", p)));
 
   pi.registerTool(tool("ask_bot", "Ask bot", "Ask another bot and wait for their reply. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p) => call("ask_bot", p)));

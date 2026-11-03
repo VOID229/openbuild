@@ -253,6 +253,8 @@ export interface BotsSettings {
   reactions: boolean;
   /** The primary bot is still welcoming the user (naming itself, setting up bots). */
   onboarding?: "active" | "done";
+  /** SearXNG instances for bot_web_search, in priority order. Other providers' keys live in the vault. */
+  searxng?: string[];
 }
 
 /** What a bot replies when it has nothing to say. Never shown in a chat. */

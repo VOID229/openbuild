@@ -48,6 +48,8 @@ interface BotsState {
   /** The starter bots were added (once per browser). */
   seeded: boolean;
   prefs: BotPrefs;
+  /** SearXNG instances for web search. The other providers' keys are in the vault. */
+  searxng: string[];
 
   /** Bots typing right now, by conversation. */
   typing: Record<string, string[]>;
@@ -62,6 +64,7 @@ interface BotsState {
   /** Throw everything away and start again from the starter bots. */
   reset: () => void;
   setPrefs: (patch: Partial<BotPrefs>) => void;
+  setSearxng: (urls: string[]) => void;
   select: (id: string) => void;
   setDetailsOpen: (open: boolean) => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
@@ -128,6 +131,7 @@ export const useBots = create<BotsState>()(
       detailsOpen: false,
       seeded: false,
       prefs: DEFAULT_PREFS,
+      searxng: [],
       typing: {},
       drafts: [],
       pulses: {},
@@ -140,6 +144,10 @@ export const useBots = create<BotsState>()(
       setPrefs: (patch) => {
         set((s) => ({ prefs: { ...s.prefs, ...patch } }));
         if ("reactions" in patch) void send("PATCH", "/api/bots/settings", { reactions: patch.reactions });
+      },
+      setSearxng: (searxng) => {
+        set({ searxng });
+        void send("PATCH", "/api/bots/settings", { searxng });
       },
       select: (id) => {
         set((s) => ({
@@ -469,6 +477,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       drafts: e.drafts,
       status: e.status,
       prefs: { ...s.prefs, reactions: e.settings.reactions },
+      searxng: e.settings.searxng ?? [],
       activeId: openable(e.conversations, s.activeId),
     }));
     return;
@@ -544,6 +553,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set((s) => ({ sections: e.settings.sections, prefs: { ...s.prefs, reactions: e.settings.reactions } }));
+    set((s) => ({ sections: e.settings.sections, prefs: { ...s.prefs, reactions: e.settings.reactions }, searxng: e.settings.searxng ?? [] }));
   }
 }

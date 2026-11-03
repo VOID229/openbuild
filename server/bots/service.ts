@@ -92,6 +92,7 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   if (patch.quietHours) next.quietHours = { from: num(patch.quietHours.from, 0, 23), to: num(patch.quietHours.to, 0, 23) };
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
+  if ("searxng" in patch) next.searxng = [...new Set((Array.isArray(patch.searxng) ? patch.searxng : []).filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim().slice(0, 500)))].slice(0, 8);
   db.setValue("settings", next);
   emit({ t: "settings", settings: next });
   return next;
@@ -216,7 +217,10 @@ export async function resetAll() {
     const device = bot.computer?.device ?? "local";
     await computerApi(device).call(bot.id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
   }
+  // Reset is about bots and chats. How the user searches the web isn't that, and the keys stay too.
+  const { searxng } = settings();
   db.wipe();
+  if (searxng?.length) db.setValue("settings", { ...settings(), searxng });
   status.clear();
   chains.clear();
   chainWarned = mem.openbotsChainWarned = new Set();

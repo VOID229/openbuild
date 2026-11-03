@@ -227,13 +227,13 @@ export interface SearchCheckResult {
   error?: string;
 }
 
-/** Order of rows in Settings → Web Search. */
 /** The key scope for a GitHub token: it isn't a search provider, but it's stored like one. */
 export const GITHUB_SCOPE = "github";
 
 /** Which tool ran: a search provider, a web page read ("fetch"), or a GitHub read ("github"). */
 export type ToolId = SearchProviderId | "fetch" | "github";
 
+/** Order of rows in Settings → Bots → Web search. */
 export const SEARCH_ORDER: SearchProviderId[] = ["exa", "brave", "kagi", "firecrawl", "tavily", "searxng", "x", "youtube"];
 
 /**

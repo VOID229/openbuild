@@ -252,6 +252,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "remember") return "Making a note";
   if (tool === "forget") return "Forgetting something";
   if (tool === "search") return "Looking back through chats";
+  if (tool === "bot_web_search") return "Searching the web";
   if (tool === "routine") return "Sorting out a routine";
   if (tool === "ask_bot") return "Asking another bot";
   if (tool === "manage_bot") return "Tending to the other bots";

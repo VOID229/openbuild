@@ -1,6 +1,6 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
 // routines, model, how often it checks in; a group's members and goal), making and deleting
-// them, and how lively bots are.
+// them, the web search providers they share, and how lively bots are.
 import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { piModels, type PiModels } from "../../lib/pi";
@@ -14,6 +14,7 @@ import { BrandIcon, Popover, SettingsHeading, Toggle } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
+import { BotWebSearch } from "./BotWebSearch";
 
 type Editing = { kind: "bot"; id: string } | { kind: "group"; id: string };
 type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "reset" };
@@ -437,6 +438,10 @@ export function BotsSettingsSection() {
           ))}
           {!groups.length && <li className="pi-empty">No groups yet. A group puts a few bots in one chat to work on something together.</li>}
         </ul>
+      </section>
+
+      <section className="pi-block">
+        <BotWebSearch />
       </section>
 
       <section className="pi-block">

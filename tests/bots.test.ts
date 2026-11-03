@@ -231,6 +231,82 @@ test("computer tools never silently fall back to unrestricted host access", asyn
   }
 });
 
+test("web search uses the user's providers and keeps their keys from the bot", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-search-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import { mock } from 'bun:test';
+      mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), procListeners: new Set() }));
+      mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }) }));
+      const svc = await import('./server/bots/service.ts');
+      const vault = await import('./server/vault.ts');
+      const { webSearch, webSearchNote } = await import('./server/bots/agent.ts');
+      const { activityFor } = await import('./server/bots/runner.ts');
+      const { bot } = svc.createBot({ name: 'Scout' });
+      a.equal(activityFor('bot_web_search', { query: 'x' }), 'Searching the web');
+
+      // Nothing set up: the bot is told where the user adds a provider.
+      a.match(await webSearchNote(), /Settings → Bots → Web search/);
+      await a.rejects(webSearch(bot.id, { query: 'tea' }), /isn't set up/);
+      await a.rejects(webSearch(bot.id, { query: ' ' }), /what to search for/);
+
+      await vault.setKeys('brave', [{ secret: 'BRAVE-SECRET' }]);
+      await vault.setKeys('youtube', [{ secret: 'YT-SECRET' }]);
+      svc.updateSettings({ searxng: [' http://searx.test:8080 ', 'http://searx.test:8080', 5] });
+      a.deepEqual(svc.getSettings().searxng, ['http://searx.test:8080']);
+
+      const note = await webSearchNote();
+      a.match(note, /- brave:/);
+      a.match(note, /- searxng:/);
+      a.doesNotMatch(note, /- exa:/);
+      a.doesNotMatch(note, /SECRET/);
+
+      const seen = [];
+      globalThis.fetch = async (url, init) => {
+        seen.push({ url: String(url), token: new Headers(init.headers).get('x-subscription-token') });
+        if (String(url).includes('googleapis')) throw new Error('failed: ' + url);
+        const results = [{ title: 'Green tea', url: 'https://tea.test/green', description: 'About tea', content: 'About tea' }];
+        return Response.json(String(url).includes('brave') ? { web: { results } } : { results });
+      };
+
+      const brave = await webSearch(bot.id, { query: 'tea', provider: 'brave', count: 2 });
+      a.equal(seen.at(-1).token, 'BRAVE-SECRET');
+      a.match(seen.at(-1).url, /count=2/);
+      a.match(brave, /https:\\/\\/tea.test\\/green/);
+      a.doesNotMatch(brave, /SECRET/);
+
+      // No provider named: the cheapest one.
+      await webSearch(bot.id, { query: 'tea' });
+      a.match(seen.at(-1).url, /^http:\\/\\/searx.test:8080\\/search/);
+
+      // Only providers the user set up, and never the server-side page reader.
+      const before = seen.length;
+      await a.rejects(webSearch(bot.id, { query: 'tea', provider: 'exa' }), /exa isn't set up/);
+      await a.rejects(webSearch(bot.id, { query: 'tea', provider: 'fetch_url', url: 'http://localhost/' }), /isn't set up/);
+      a.equal(seen.length, before);
+
+      // A key in a failure doesn't reach the bot.
+      await a.rejects(webSearch(bot.id, { query: 'tea', provider: 'youtube' }), (err) => {
+        a.doesNotMatch(err.message, /YT-SECRET/);
+        a.match(err.message, /YouTube/);
+        return true;
+      });
+
+      // Resetting OpenBots keeps how the user searches.
+      await svc.resetAll();
+      a.deepEqual(svc.getSettings().searxng, ['http://searx.test:8080']);
+      a.deepEqual(await vault.secrets('brave'), ['BRAVE-SECRET']);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("the first bot writes its own welcome, only when OpenBots is first opened", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {

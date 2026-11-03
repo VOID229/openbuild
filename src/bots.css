@@ -2915,3 +2915,24 @@ button.bots-details-name:hover {
     animation: none;
   }
 }
+
+/* Where to get a provider's key, under its name in Settings → Bots → Web search. */
+.key-label:has(.key-site) {
+  flex-wrap: wrap;
+}
+
+.key-site {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-basis: 100%;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+  .key-site:hover {
+    color: var(--text);
+  }
+}

@@ -452,7 +452,7 @@ export async function checkSearch(id: SearchProviderId, credential: string, sign
   }
 }
 
-const toolName = (id: SearchProviderId) => `search_${id}`;
+export const toolName = (id: SearchProviderId) => `search_${id}`;
 const urlArg = (rawArgs: string) => {
   try {
     const url = JSON.parse(rawArgs || "{}").url;
@@ -496,6 +496,25 @@ const ROUTING: { task: string; order: SearchProviderId[] }[] = [
   { task: "What people are saying on X: reactions, opinions, breaking news, posts by an account", order: ["x", "exa", "brave", "tavily"] },
   { task: "Finding videos: tutorials, talks, reviews, music, a channel's uploads", order: ["youtube"] },
 ];
+
+/** The providers for a caller with one search tool and a provider argument, rather than a tool each. */
+export function providerGuide(ids: SearchProviderId[]) {
+  const sorted = [...ids].sort((a, b) => PROVIDERS[a].cost - PROVIDERS[b].cost);
+  const lines = sorted.map((id) => {
+    const options = Object.entries(PROVIDERS[id].properties as Record<string, { enum?: string[] }>)
+      .filter(([name]) => name !== "query")
+      .map(([name, spec]) => (spec.enum ? `${name} (${spec.enum.join(", ")})` : name));
+    return `- ${id}: ${PROVIDERS[id].description}${options.length ? ` Options: ${options.join("; ")}.` : ""}`;
+  });
+  if (sorted.length > 1) {
+    lines.push("Which fits (best first):");
+    for (const r of ROUTING) {
+      const order = r.order.filter((id) => sorted.includes(id));
+      if (order.length) lines.push(`- ${r.task}: ${order.join(" > ")}`);
+    }
+  }
+  return lines.join("\n");
+}
 
 export interface SearchToolkit {
   specs: ToolSpec[];
