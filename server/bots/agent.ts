@@ -130,7 +130,7 @@ export function contextFor(botId: string): string {
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
-    "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. Reply to a specific message with send_message's reply_to, and react with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
+    "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
@@ -204,7 +204,9 @@ function deliver(botId: string, conversationId: string, text: string, images: st
   let reply: string | undefined;
   if (typeof replyTo === "string" && replyTo) {
     const found = db.findMessages(replyTo, [conversationId]);
-    if (found.length === 1) reply = found[0]!.message.id;
+    // Quoting the newest message is noise: it's right above. Only keep quotes that point further back.
+    const hit = found.length === 1 ? found[0]! : undefined;
+    if (hit && db.messagesAfter(conversationId, hit.seq, 50).some((r) => r.message.author !== botId)) reply = hit.message.id;
   }
   const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: text.trim(), images: images.length ? images : undefined, replyTo: reply };
   svc.postMessage(conversationId, message);

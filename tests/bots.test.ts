@@ -218,6 +218,13 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.match(seen, /reactions: #1 😢 from User/);
       a.ok(seen.includes('(replying to [' + quoted.id.slice(0, 8) + '] you: “what are you working on?”): say that again'), seen);
 
+      // A bot's reply_to only shows when it points past the newest message.
+      const latest = db.messages(conversationId, 1)[0]!.message;
+      const plain = await sendMessage(bot.id, { text: 'sure', conversation: conversationId.slice(0, 8), reply_to: latest.id.slice(0, 8) });
+      a.equal(db.getMessage(plain.id)!.message.replyTo, undefined);
+      const back = await sendMessage(bot.id, { text: 'about that', conversation: conversationId.slice(0, 8), reply_to: quoted.id.slice(0, 8) });
+      a.equal(db.getMessage(back.id)!.message.replyTo, quoted.id);
+
       // Changing the pace restarts the clock, and off stays off.
       db.setValue('hb:' + bot.id, 1);
       svc.updateBot(bot.id, { proactivity: 'low' });
