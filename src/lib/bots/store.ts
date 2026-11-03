@@ -7,7 +7,7 @@ import { uid } from "../id";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
-import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, MemoryItem, Routine } from "./types";
+import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
 
 export interface Draft {
   text: string;
@@ -84,9 +84,6 @@ interface BotsState {
   pulse: (botId: string, mood?: Mood) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
 
-  addMemory: (botId: string, text: string) => void;
-  removeMemory: (botId: string, memoryId: string) => void;
-  addRoutine: (botId: string, routine: Omit<Routine, "id" | "enabled">) => void;
   updateRoutine: (botId: string, routineId: string, patch: Partial<Routine>) => void;
   removeRoutine: (botId: string, routineId: string) => void;
 }
@@ -272,20 +269,6 @@ export const useBots = create<BotsState>()(
       pulse: (botId, mood) => set((s) => ({ pulses: { ...s.pulses, [botId]: { key: (s.pulses[botId]?.key ?? 0) + 1, mood } } })),
       focusMessage: (conversationId, messageId) => set((s) => ({ focus: { conversationId, messageId, key: (s.focus?.key ?? 0) + 1 } })),
 
-      addMemory: (botId, text) => {
-        const item: MemoryItem = { id: uid(), text, at: Date.now(), by: "me" };
-        set((s) => ({ bots: mapBot(s.bots, botId, (b) => ({ ...b, memory: [item, ...b.memory] })) }));
-        void send("POST", `/api/bots/${botId}/memory`, { id: item.id, text });
-      },
-      removeMemory: (botId, memoryId) => {
-        set((s) => ({ bots: mapBot(s.bots, botId, (b) => ({ ...b, memory: b.memory.filter((m) => m.id !== memoryId) })) }));
-        void send("DELETE", `/api/bots/${botId}/memory/${memoryId}`);
-      },
-      addRoutine: (botId, routine) => {
-        const full: Routine = { ...routine, id: uid(), enabled: true, by: "me" };
-        set((s) => ({ bots: mapBot(s.bots, botId, (b) => ({ ...b, routines: [...b.routines, full] })) }));
-        void send("POST", `/api/bots/${botId}/routines`, full);
-      },
       updateRoutine: (botId, routineId, patch) => {
         set((s) => ({ bots: mapBot(s.bots, botId, (b) => ({ ...b, routines: b.routines.map((r) => (r.id === routineId ? { ...r, ...patch } : r)) })) }));
         void send("PATCH", `/api/bots/${botId}/routines/${routineId}`, patch);

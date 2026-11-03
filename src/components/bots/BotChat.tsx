@@ -57,7 +57,9 @@ const RichText = memo(function RichText({ text, bots }: { text: string; bots: Bo
 
 type Block = { kind: "divider"; at: number; key: string } | { kind: "event"; message: BotMessage } | { kind: "group"; author: string; messages: BotMessage[] };
 
-function blocksOf(messages: BotMessage[]): Block[] {
+function blocksOf(all: BotMessage[]): Block[] {
+  // Memory happens in the background; older chats can still hold these.
+  const messages = all.filter((m) => m.event?.kind !== "memory");
   const blocks: Block[] = [];
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
@@ -429,7 +431,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 <span className="bm-event-text">{m.event!.text}</span>
                 {m.event!.detail && (
                   <span className="bm-event-detail">
-                    {m.event!.kind === "routine" ? <ClockGlyph /> : m.event!.kind === "memory" ? <Brain size={13} /> : null}
+                    {m.event!.kind === "routine" && <ClockGlyph />}
                     {m.event!.detail}
                   </span>
                 )}

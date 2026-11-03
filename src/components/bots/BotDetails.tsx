@@ -1,6 +1,5 @@
-// OpenBots' details panel, beside the chat: a bot's look, name, instructions, memory and
-// routines; a group's members and goal; who's in a side chat.
-import { Brain, Minus, Pencil, Plus, Trash, X } from "lucide-react";
+// OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines; a group's members and goal; who's in a side chat.
+import { Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -75,58 +74,20 @@ export function Instructions({ value, placeholder, hint, onChange }: { value: st
   );
 }
 
-export function Memory({ bot }: { bot: Bot }) {
-  const [draft, setDraft] = useState("");
-  const st = useBots.getState();
-  return (
-    <div className="bots-pane">
-      <form
-        className="bots-add-row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!draft.trim()) return;
-          st.addMemory(bot.id, draft.trim());
-          st.pulse(bot.id, "happy");
-          setDraft("");
-        }}
-      >
-        <input className="input input-sm" value={draft} placeholder="Add something to remember…" aria-label="New memory" onChange={(e) => setDraft(e.target.value)} />
-        <IconButton label="Add" tooltip={false} type="submit" disabled={!draft.trim()}>
-          <Plus size={16} />
-        </IconButton>
-      </form>
-      {bot.memory.length ? (
-        <ul className="bots-cards">
-          {bot.memory.map((m) => (
-            <li key={m.id} className="bots-card-row">
-              <Brain size={14} className="bots-card-icon" />
-              <span className="bots-card-text">{m.text}</span>
-              <IconButton label="Forget" tooltipSide="left" className="bots-card-x" onClick={() => st.removeMemory(bot.id, m.id)}>
-                <X size={14} />
-              </IconButton>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="bots-hint">Nothing remembered yet. {bot.name.split(" ·")[0]} adds things here as it learns them, and so can you.</p>
-      )}
-    </div>
-  );
-}
-
 export function Routines({ bot }: { bot: Bot }) {
-  const [title, setTitle] = useState("");
-  const [schedule, setSchedule] = useState("");
   const st = useBots.getState();
   return (
     <div className="bots-pane">
-      {bot.routines.length > 0 && (
+      {bot.routines.length ? (
         <ul className="bots-cards">
           {bot.routines.map((r) => (
             <li key={r.id} className={cx("bots-card-row bots-routine", !r.enabled && "bots-routine-off")}>
               <span className="bots-card-text">
                 <span className="bots-routine-title">{r.title}</span>
-                <span className="bots-routine-when">{r.enabled ? r.schedule : "Paused"}</span>
+                <span className="bots-routine-when">
+                  {r.schedule} · {r.enabled ? "Working" : "Paused"}
+                </span>
+                {r.task && <span className="bots-routine-task">{r.task}</span>}
               </span>
               <IconButton label="Delete routine" tooltipSide="left" className="bots-card-x" onClick={() => st.removeRoutine(bot.id, r.id)}>
                 <Trash size={14} />
@@ -268,7 +229,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "memory" | "routines" | "members" | "goal">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<"instructions" | "routines" | "members" | "goal">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
   const st = useBots.getState();
   useEffect(() => setTab(conversation.kind === "direct" ? "instructions" : "members"), [conversation.id, conversation.kind]);
@@ -318,7 +279,6 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               <Tabs
                 tabs={[
                   ["instructions", "Instructions"],
-                  ["memory", `Memory${bot.memory.length ? ` ${bot.memory.length}` : ""}`],
                   ["routines", `Routines${bot.routines.length ? ` ${bot.routines.length}` : ""}`],
                 ]}
                 value={tab}
@@ -328,11 +288,10 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 <Instructions
                   value={bot.instructions}
                   placeholder="What is this bot for, and how should it act?"
-                  hint="The bot reads these before every reply, in every conversation it's in."
+                  hint="The bots write these as they learn what this one is for, and you can change them any time. It reads them before every reply."
                   onChange={(v) => st.updateBot(bot.id, { instructions: v })}
                 />
               )}
-              {tab === "memory" && <Memory bot={bot} />}
               {tab === "routines" && <Routines bot={bot} />}
               <div className="bots-details-foot">
                 <button

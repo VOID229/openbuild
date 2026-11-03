@@ -131,36 +131,6 @@ export function botRoutes(api: Api) {
         }
       }),
     },
-    "/api/bots/:id/memory": {
-      POST: api(async (req: Bun.BunRequest<"/api/bots/:id/memory">) => {
-        try {
-          const body = await readJson(req);
-          return json(svc.addMemory(req.params.id, String(body?.text ?? ""), "me", typeof body?.id === "string" ? body.id : undefined));
-        } catch (err) {
-          return fail(err);
-        }
-      }),
-    },
-    "/api/bots/:id/memory/:memoryId": {
-      DELETE: api((req: Bun.BunRequest<"/api/bots/:id/memory/:memoryId">) => {
-        try {
-          svc.removeMemory(req.params.id, req.params.memoryId);
-          return json({ ok: true });
-        } catch (err) {
-          return fail(err);
-        }
-      }),
-    },
-    "/api/bots/:id/routines": {
-      POST: api(async (req: Bun.BunRequest<"/api/bots/:id/routines">) => {
-        try {
-          const body = await readJson(req);
-          return json(svc.saveRoutine(req.params.id, { ...(body as object), enabled: true, by: "me" } as Parameters<typeof svc.saveRoutine>[1]));
-        } catch (err) {
-          return fail(err);
-        }
-      }),
-    },
     "/api/bots/:id/routines/:routineId": {
       PATCH: api(async (req: Bun.BunRequest<"/api/bots/:id/routines/:routineId">) => {
         try {

@@ -1969,18 +1969,6 @@ button.bots-details-name:hover {
   color: var(--text-3);
 }
 
-.bots-add-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.bots-routine-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 .bots-cards {
   display: flex;
   flex-direction: column;
@@ -2004,11 +1992,6 @@ button.bots-details-name:hover {
 .bots-card-row + .bots-card-row {
   border-top: 1px solid var(--border);
   border-radius: 0 0 12px 12px;
-}
-
-.bots-card-icon {
-  flex: none;
-  color: var(--text-3);
 }
 
 .bots-card-text {

@@ -1,5 +1,5 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
-// memory, routines, model, how often it checks in; a group's members and goal), making and deleting
+// routines, model, how often it checks in; a group's members and goal), making and deleting
 // them, and how lively bots are.
 import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -13,7 +13,7 @@ import { ModelMenu, OptionSelect } from "../ModelSelect";
 import { BrandIcon, Popover, SettingsHeading, Toggle } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
-import { Instructions, Members, Memory, Routines } from "./BotDetails";
+import { Instructions, Members, Routines } from "./BotDetails";
 
 type Editing = { kind: "bot"; id: string } | { kind: "group"; id: string };
 type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "reset" };
@@ -153,13 +153,9 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
         <Instructions
           value={bot.instructions}
           placeholder="What is this bot for, and how should it act?"
-          hint="The bot reads these before every reply, in every conversation it's in."
+          hint="The bots write these as they learn what this one is for, and you can change them any time. It reads them before every reply."
           onChange={(v) => st.updateBot(bot.id, { instructions: v })}
         />
-      </section>
-      <section className="bots-set-block">
-        <Label>Memory</Label>
-        <Memory bot={bot} />
       </section>
       <section className="bots-set-block">
         <Label>Routines</Label>
@@ -276,7 +272,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
 
 function BotRow({ bot, onEdit }: { bot: Bot; onEdit: () => void }) {
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
-  const details = [bot.memory.length && plural(bot.memory.length, "memory").replace("memorys", "memories"), bot.routines.length && plural(bot.routines.length, "routine")].filter(Boolean).join(" · ");
+  const details = bot.routines.length ? plural(bot.routines.length, "routine") : "";
   return (
     <li className="pi-row bots-set-row">
       <button type="button" className="bots-set-row-main" onClick={onEdit}>
