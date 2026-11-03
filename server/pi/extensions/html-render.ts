@@ -130,7 +130,8 @@ export async function previewPage(browser: string, html: string, opts: { width?:
     const page = join(dir, "page.html");
     await writeFile(page, withBootstrap(html, htmlTheme(appearance), { opaque: true }) + MEASURE);
     const common = [
-      "--headless", "--disable-gpu", "--in-process-gpu", "--disable-dev-shm-usage",
+      // Ozone headless only accepts a stub GL. A real one hits NOTREACHED and aborts before the screenshot.
+      "--headless", "--disable-gpu", "--use-gl=stub", "--disable-dev-shm-usage",
       "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-breakpad",
       "--enable-logging=stderr",
