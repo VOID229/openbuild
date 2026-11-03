@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
+import { useServerOutage } from "../lib/serverOutage";
 
 /** Nothing behind this gate is mounted until the server accepts this browser's session. */
 export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
@@ -8,7 +9,6 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
-  const outage = useRef<HTMLDialogElement>(null);
 
   // Server unreachable (restart, tunnel blip). Never shown as "locked": we don't know that it is.
   const [offline, setOffline] = useState(false);
@@ -71,22 +71,15 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
 
   // Only a real answer from the server can lock the screen; an unreachable server never does.
   const locked = !!status && !status.authenticated;
-  // Brief blips (one failed probe, a restart that takes a second or two) show nothing and leave the app usable.
+  // Brief blips (one failed probe, a restart that takes a second or two) show nothing.
   const [slow, setSlow] = useState(false);
   useEffect(() => {
     if (!offline) { setSlow(false); return; }
     const t = setTimeout(() => setSlow(true), 1500);
     return () => clearTimeout(t);
   }, [offline]);
-  // While the server stays unreachable the app is blocked: a modal <dialog> sits in the top layer and makes
-  // everything else (including other dialogs and portals) inert, so nothing can be clicked or typed into.
-  const blocked = slow && !!status;
-  useEffect(() => {
-    const d = outage.current;
-    if (!d) return;
-    if (blocked && !d.open) d.showModal();
-    if (!blocked && d.open) d.close();
-  }, [blocked]);
+  // The app stays usable while the server is away: Notices says so, and sends and saves retry on their own.
+  useEffect(() => useServerOutage.setState({ outage: slow && !!status }), [slow, !!status]);
   useEffect(() => {
     if (locked && dialog.current && !dialog.current.open) dialog.current.showModal();
   }, [locked]);
@@ -107,19 +100,7 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
     finally { setBusy(false); }
   };
 
-  const reconnecting = (
-    <dialog ref={outage} className="local-access-outage" aria-labelledby="local-access-outage-title" onCancel={(e) => e.preventDefault()}>
-      <div className="local-access-outage-card" role="status" aria-live="polite">
-        <span className="local-access-spinner" aria-hidden="true" />
-        <div>
-          <h2 id="local-access-outage-title">Reconnecting to OpenBuild</h2>
-          <p>The server is restarting or can't be reached. This closes on its own once it's back.</p>
-        </div>
-      </div>
-    </dialog>
-  );
-
-  if (status?.authenticated) return <>{content || <div className="local-access-loading" role="status">{error}</div>}{reconnecting}</>;
+  if (status?.authenticated) return content || <div className="local-access-loading" role="status">{error || (slow && "Connecting to OpenBuild…")}</div>;
   if (!locked) return (
     <div className="local-access-screen local-access-waiting">
       {slow && <div role="status" aria-live="polite"><span className="local-access-dot" aria-hidden="true" />Connecting to OpenBuild…</div>}
@@ -139,7 +120,6 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
         ) : <p>Set a password in a terminal on the host computer:<br /><code>openbuild set pass &lt;password&gt;</code></p>}
         {error && <p id="local-access-error" className="local-access-error" role="alert">{error}</p>}
       </dialog>
-      {reconnecting}
     </div>
   );
 }

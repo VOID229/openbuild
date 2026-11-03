@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { followJob, updateRuntime } from "../lib/pi";
 import { loadRuntimeStatuses } from "../lib/runtimeStatus";
 import { runtimeName } from "../lib/runtimes";
+import { useServerOutage } from "../lib/serverOutage";
 import { useStore } from "../lib/store";
 import { useRuntimeUpdates, useUpdateAvailable, useReleaseUpdate } from "../lib/update";
 import { IconButton, Spinner } from "./primitives";
@@ -92,6 +93,9 @@ export function Notices() {
   const build = useUpdateAvailable(prefs.builds);
   const updates = useRuntimeUpdates(prefs.runtimeUpdates, prefs.updateRuntimes);
   const [buildClosed, setBuildClosed] = useState(false);
+  const outage = useServerOutage((s) => s.outage);
+  const [outageClosed, setOutageClosed] = useState(false);
+  useEffect(() => { if (!outage) setOutageClosed(false); }, [outage]);
   const [updating, setUpdating] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
@@ -106,7 +110,9 @@ export function Notices() {
   const shownKey = shown.map((u) => `${u.runtime}:${u.version}`).join();
   const showUpdates = (shown.length > 0 && expiredUpdates !== shownKey) || updating || !!feedback || !!error;
   const showBuild = prefs.builds && build && !buildClosed;
-  if (!showRelease && !showBuild && !showUpdates) return null;
+  // The restart notice already says what's happening.
+  const showOutage = outage && !outageClosed && !restarting;
+  if (!showOutage && !showRelease && !showBuild && !showUpdates) return null;
   const { updateSettings } = useStore.getState();
   const dismiss = () =>
     updateSettings({
@@ -191,6 +197,16 @@ export function Notices() {
   };
   return (
     <div className="notices">
+      {showOutage && (
+        <Notice
+          text="Reconnecting to OpenBuild…"
+          action={<Spinner size={12} />}
+          persistent
+          dismissLabel="Dismiss reconnecting notice"
+          onDismiss={() => setOutageClosed(true)}
+          onExpire={() => {}}
+        />
+      )}
       {showRelease && (
         <Notice
           text={restartPending
