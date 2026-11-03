@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS: Settings = {
   font: "fun",
   autoScroll: true,
   confirmDelete: true,
+  autoDeleteWorktrees: false,
   notifications: { builds: true, runtimeUpdates: true },
   autoRouter: false,
   avoid: [],

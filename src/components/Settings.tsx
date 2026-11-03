@@ -202,6 +202,13 @@ function GeneralSection() {
       </div>
       <div className="setting-row">
         <div className="setting-text">
+          <div className="setting-label">Auto-delete worktrees</div>
+          <p className="setting-desc">Delete a thread’s worktree when you close it. Worktrees with uncommitted changes are kept.</p>
+        </div>
+        <Toggle checked={s.autoDeleteWorktrees ?? false} onChange={(autoDeleteWorktrees) => update({ autoDeleteWorktrees })} label="Auto-delete worktrees" />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
           <div className="setting-label">Enable Auto Scroll</div>
         </div>
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Enable Auto Scroll" />

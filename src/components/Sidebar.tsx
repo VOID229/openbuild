@@ -603,7 +603,286 @@ function toggleClosed(chat: Chat) {
   const closed = isClosed(chat);
   if (moving.has(chat.id)) return;
   if (!closed) leaveThread(chat.id);
-  const commit = () => useStore.getState().updateChat(chat.id, closePatch(chat));
+  const commit = () => {
+    const title = draft.trim();
+    if (title && title !== chat.title) updateChat(chat.id, { title, titleSource: "user" });
+    onRenameDone();
+  };
+
+  if (renaming)
+    return (
+      <div className="history-row history-row-renaming">
+        <input
+          ref={input}
+          className="history-rename"
+          value={draft}
+          aria-label="Thread title"
+          maxLength={120}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              onRenameDone();
+            }
+          }}
+        />
+      </div>
+    );
+
+  return (
+    <div
+      ref={rowRef}
+      data-thread={chat.id}
+      className={cx("history-row", active && "history-row-active")}
+      {...longPress.handlers}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (longPress.pressing()) return longPress.fire(e.clientX, e.clientY);
+        // Keyboard-invoked context menus report (0, 0); anchor to the row instead.
+        if (e.clientX === 0 && e.clientY === 0) {
+          const r = e.currentTarget.getBoundingClientRect();
+          onMenu(chat.id, r.left + 24, r.bottom);
+        } else onMenu(chat.id, e.clientX, e.clientY);
+      }}
+    >
+      <button type="button" className="history-title" onClick={() => onSelect(chat, hit)} aria-current={active ? "page" : undefined} title={titling ? undefined : chat.title}>
+        <span className="history-title-line">
+          <span className="history-icon" title={model?.name}>
+            {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
+          </span>
+          {hit ? (
+            <span className="history-title-text">
+              <Highlight text={chat.title} ranges={hit.titleRanges} />
+            </span>
+          ) : (
+            <RowTitle title={chat.title} titling={titling} />
+          )}
+          {chat.subagent && (
+            <span className="history-subagent" title="Subagent" aria-label="Subagent">
+              <Bot size={13} />
+            </span>
+          )}
+          {hit && isClosed(chat) && <span className="badge">closed</span>}
+          <span className="history-status">
+            {waiting ? (
+              <Spinner size={13} waiting />
+            ) : streaming || regenerating ? (
+              <Spinner size={13} />
+            ) : chat.snoozedUntil ? (
+              <span className="history-snooze" title={`Snoozed until ${new Date(chat.snoozedUntil).toLocaleString()}`}>
+                <AlarmClock size={12} />
+                {snoozeLabel(chat.snoozedUntil)}
+              </span>
+            ) : limit ? (
+              <span className="history-limit" title={limit === "credits" ? "Out of credits" : "Usage limit reached"} aria-label={limit === "credits" ? "Out of credits" : "Usage limit reached"}>
+                <BatteryWarning size={13} />
+              </span>
+            ) : chat.unread ? (
+              <span className="unread-dot" aria-label="New reply" />
+            ) : chat.woke ? (
+              <span className="history-woke" title="Snooze ended" aria-label="Snooze ended">
+                <AlarmClockCheck size={13} />
+              </span>
+            ) : null}
+          </span>
+        </span>
+        {/* Only search results show a body line: the text that matched. */}
+        {hit?.snippet && (
+          <span className="history-snippet">
+            <Highlight text={hit.snippet.text} ranges={hit.snippet.ranges} />
+          </span>
+        )}
+        <span className="history-meta">
+          {chat.workspace?.projectName && (
+            <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
+              {chat.workspace.projectName}
+            </span>
+          )}
+          {device && (
+            <span className="history-device" title={`Runs on ${device}`}>
+              @ {device}
+            </span>
+          )}
+          <span className="history-runtime" title={runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+            {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
+          </span>
+        </span>
+      </button>
+      <span className="history-actions">
+        <IconButton
+          label={chat.pinned ? "Unpin" : "Pin"}
+          tooltipSide="top"
+          className="history-action"
+          onClick={() => updateChat(chat.id, { pinned: !chat.pinned })}
+        >
+          {chat.pinned ? <PinOff size={14} /> : <Pin size={14} />}
+        </IconButton>
+        {chat.snoozedUntil ? (
+          <IconButton label="Wake" tooltipSide="top" className="history-action" onClick={() => wakeThread(chat.id)}>
+            <ClockArrowUp size={14} />
+          </IconButton>
+        ) : (
+          <IconButton
+            label="Snooze"
+            tooltipSide="top"
+            aria-haspopup="menu"
+            className="history-action"
+            // As with the ⋯ button: a second click toggles the menu closed rather than reopening it.
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              onMenu(chat.id, r.right, r.bottom + 4, true, true);
+            }}
+          >
+            <AlarmClock size={14} />
+          </IconButton>
+        )}
+        {!chat.snoozedUntil && (
+          <IconButton
+            label={closed ? "Reopen" : "Close"}
+            tooltipSide="top"
+            className="history-action"
+            onClick={() => toggleClosed(chat)}
+          >
+            {closed ? <SquareArrowUp size={14} /> : <Check size={14} />}
+          </IconButton>
+        )}
+        {/* Touch screens only: opens the same menu as right-click / long-press. */}
+        <IconButton
+          label="More actions"
+          tooltip={false}
+          aria-haspopup="menu"
+          className="history-action history-more"
+          // Keep the menu's outside-tap dismiss (and the row's long-press) from seeing this tap,
+          // so tapping again toggles the menu closed instead of closing and reopening it.
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            onMenu(chat.id, r.right, r.bottom + 4, true);
+          }}
+        >
+          <Ellipsis size={16} />
+        </IconButton>
+      </span>
+    </div>
+  );
+});
+
+/** Thin overlay scrollbar for `target`: fades in as it scrolls, and out a second after the last scroll.
+ * The native one can stay stuck on screen when a trackpad scroll is stopped dead, with no momentum phase. */
+export function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | null> }) {
+  const thumb = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = target.current;
+    const bar = thumb.current;
+    if (!el || !bar) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let drag: { y: number; top: number; scale: number } | undefined;
+    const size = () => {
+      const height = Math.max(24, (el.clientHeight * el.clientHeight) / el.scrollHeight);
+      return { height, travel: el.clientHeight - height, range: el.scrollHeight - el.clientHeight };
+    };
+    const hide = () => {
+      if (!drag && !bar.matches(":hover")) bar.classList.remove("scroll-thumb-on");
+    };
+    const onScroll = () => {
+      const { height, travel, range } = size();
+      if (range <= 0) return bar.classList.remove("scroll-thumb-on");
+      bar.style.height = `${height}px`;
+      bar.style.transform = `translateY(${(el.scrollTop / range) * travel}px)`;
+      bar.classList.add("scroll-thumb-on");
+      clearTimeout(timer);
+      timer = setTimeout(hide, 1000);
+    };
+    const onDown = (e: PointerEvent) => {
+      const { travel, range } = size();
+      drag = { y: e.clientY, top: el.scrollTop, scale: range / travel };
+      bar.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    };
+    const onMove = (e: PointerEvent) => {
+      if (drag) el.scrollTop = drag.top + (e.clientY - drag.y) * drag.scale;
+    };
+    const onUp = () => {
+      drag = undefined;
+      clearTimeout(timer);
+      timer = setTimeout(hide, 1000);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    bar.addEventListener("pointerdown", onDown);
+    bar.addEventListener("pointermove", onMove);
+    bar.addEventListener("pointerup", onUp);
+    bar.addEventListener("pointercancel", onUp);
+    bar.addEventListener("pointerleave", onUp);
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener("scroll", onScroll);
+      bar.removeEventListener("pointerdown", onDown);
+      bar.removeEventListener("pointermove", onMove);
+      bar.removeEventListener("pointerup", onUp);
+      bar.removeEventListener("pointercancel", onUp);
+      bar.removeEventListener("pointerleave", onUp);
+    };
+  }, [target]);
+  return <div ref={thumb} className="scroll-thumb" aria-hidden />;
+}
+
+/** Section whose header toggles its rows with a height animation. */
+function Collapsible({ label, open, onToggle, children }: { label: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <section className="history-group">
+      <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
+        {label}
+        <ChevronDown size={14} className="history-heading-chevron" />
+      </button>
+      <div className={cx("collapse", open && "collapse-open")} inert={!open}>
+        <div className="collapse-inner">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+interface MenuState {
+  chatId: string;
+  x: number;
+  y: number;
+  /** Opened from the row's ⋯ button: right-align the menu under it. */
+  end?: boolean;
+  /** Opened from the row's snooze button: just the snooze options. */
+  snooze?: boolean;
+}
+
+/** Delete a thread for good, stopping any reply still running. */
+/** Rows the sidebar lists, top to bottom; kept current by Sidebar. */
+let threadOrder: string[] = [];
+
+/** Before the open thread leaves the list: move to the row that takes its place, or the one above if it was last. */
+function leaveThread(id: string) {
+  const s = useStore.getState();
+  if (s.activeChatId !== id) return;
+  const order = threadOrder.filter((t) => t === id || !moving.has(t));
+  const at = order.indexOf(id);
+  const next = at < 0 ? order[0] : (order[at + 1] ?? order[at - 1]);
+  if (next) s.selectChat(next);
+  else s.newChat();
+}
+
+function toggleClosed(chat: Chat) {
+  const closed = isClosed(chat);
+  if (moving.has(chat.id)) return;
+  if (!closed) leaveThread(chat.id);
+  const commit = () => {
+    const st = useStore.getState();
+    st.updateChat(chat.id, closePatch(chat));
+    const ws = chat.workspace;
+    if (!closed && st.settings.autoDeleteWorktrees && ws?.worktree) {
+      void removeWorktree(ws.cwd, false, ws.deviceId).catch((err: Error) => {
+        window.dispatchEvent(new CustomEvent("worktree-cleanup-error", { detail: `Worktree kept: ${err.message}` }));
+      });
+    }
+  };
   // A thread pinned from "Closed" stays in "Pinned" when it reopens.
   if (closed && chat.pinned) commit();
   else moveThread(chat.id, closed ? "open" : "close", commit);
@@ -1292,6 +1571,12 @@ export function Sidebar() {
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
   const [closedView, setClosedView] = useState(false);
+  const [cleanupError, setCleanupError] = useState<string>();
+  useEffect(() => {
+    const onError = (event: Event) => setCleanupError((event as CustomEvent<string>).detail);
+    window.addEventListener("worktree-cleanup-error", onError);
+    return () => window.removeEventListener("worktree-cleanup-error", onError);
+  }, []);
   const historyRef = useRef<HTMLElement>(null);
   const updateChat = useStore((s) => s.updateChat);
   const today = useToday();
@@ -1593,6 +1878,16 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
+      {cleanupError && (
+        <div className="notices">
+          <div className="notice" role="alert">
+            <div className="notice-row">
+              <span className="notice-text">{cleanupError}</span>
+              <IconButton label="Dismiss" onClick={() => setCleanupError(undefined)}><X size={14} /></IconButton>
+            </div>
+          </div>
+        </div>
+      )}
       <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onRegenerate={onRegenerate} onDelete={setDeletingId} onSnooze={setSnoozingId} />
       {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
       {snoozing && <SnoozeDialog chat={snoozing} onClose={() => setSnoozingId(undefined)} />}

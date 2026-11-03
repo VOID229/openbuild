@@ -45,6 +45,8 @@ export interface Settings {
   autoScroll: boolean;
   /** Ask before deleting a thread (off once "Don't ask again" is ticked). */
   confirmDelete: boolean;
+  /** Remove clean worktrees when their thread is explicitly closed. */
+  autoDeleteWorktrees?: boolean;
   /**
    * Notices at the top of the window. `updateRuntimes` lists the runtimes whose releases are
    * announced (undefined = every runtime that can be checked), and `dismissedUpdates` is, per
