@@ -514,10 +514,19 @@ export function Composer({ variant, chatId, streaming }: Props) {
     return () => clearTimeout(t);
   }, [notice]);
 
+  // What's attached right now, including images added earlier in the same paste that haven't rendered yet.
+  const attached = useRef(files);
+  attached.current = files;
   const addFiles = async (list: FileList | File[]) => {
     for (const file of Array.from(list)) {
       try {
         const a = await readAttachment(file);
+        // The same image twice is checked only against what's attached now, so a removed image can come back.
+        if (a.mime.startsWith("image/") && attached.current.some((f) => f.dataUrl === a.dataUrl)) {
+          setNotice(`${a.name} is already attached.`);
+          continue;
+        }
+        attached.current = [...attached.current, a];
         setFiles((f) => [...f, a]);
       } catch (err) {
         setNotice(err instanceof AttachmentError ? err.message : `Couldn't read ${file.name}.`);
