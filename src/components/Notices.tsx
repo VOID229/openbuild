@@ -15,17 +15,20 @@ function listPhrase(items: string[]): string {
 
 const NOTICE_MS = 4000;
 const NOTICE_LEAVE_MS = 180; // .notice-leaving's animation
+const RESTART_WAIT_MS = 60_000;
 
 /**
- * One notice. It leaves on its own after NOTICE_MS unless `sticky` (work in progress), hovered, or
- * showing its details; `onExpire` hides it for now, the close button's `onDismiss` for good.
+ * One notice. It leaves on its own after NOTICE_MS unless `sticky` (work in progress), `persistent`
+ * (waiting on the user), hovered, or showing its details; `onExpire` hides it for now, the close
+ * button's `onDismiss` for good.
  */
-function Notice({ text, role = "status", action, details, sticky = false, dismissLabel = "Dismiss", onDismiss, onExpire }: {
+function Notice({ text, role = "status", action, details, sticky = false, persistent = false, dismissLabel = "Dismiss", onDismiss, onExpire }: {
   text: ReactNode;
   role?: "status" | "alert";
   action?: ReactNode;
   details?: string;
   sticky?: boolean;
+  persistent?: boolean;
   dismissLabel?: string;
   onDismiss: () => void;
   onExpire: () => void;
@@ -35,10 +38,10 @@ function Notice({ text, role = "status", action, details, sticky = false, dismis
   const [open, setOpen] = useState(false);
   useEffect(() => { if (!details) setOpen(false); }, [details]);
   useEffect(() => {
-    if (sticky || hovered || open || leaving) return;
+    if (sticky || persistent || hovered || open || leaving) return;
     const timer = setTimeout(() => setLeaving("expire"), NOTICE_MS);
     return () => clearTimeout(timer);
-  }, [sticky, hovered, open, leaving, text]);
+  }, [sticky, persistent, hovered, open, leaving, text]);
   useEffect(() => {
     if (!leaving) return;
     const timer = setTimeout(() => {
@@ -74,13 +77,17 @@ function Notice({ text, role = "status", action, details, sticky = false, dismis
 /** Notices at the top of the window; Settings → Notifications turns each kind off. */
 export function Notices() {
   const prefs = useStore((s) => s.settings.notifications);
-  const release = useReleaseUpdate(prefs.builds);
+  const { release, refresh: refreshRelease } = useReleaseUpdate(prefs.builds);
   const [dismissedRelease, setDismissedRelease] = useState(() => { try { return localStorage.getItem("openbuild:dismissed-release") ?? ""; } catch { return ""; } });
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [releaseResult, setReleaseResult] = useState("");
   const [releaseDetails, setReleaseDetails] = useState("");
   const [expiredRelease, setExpiredRelease] = useState("");
-  const releaseKey = release ? `${release.track}:${release.latest}` : "";
+  const [restarting, setRestarting] = useState(false);
+  const restartPending = !!release?.restart?.pending;
+  const restartFailure = restartPending ? releaseDetails || release?.restart?.error || "" : "";
+  // Its own key: having closed the offer to update doesn't hide the restart it led to.
+  const releaseKey = !release ? "" : restartPending ? `restart:${release.restart?.head}` : `${release.track}:${release.latest}`;
   const showRelease = !!release && dismissedRelease !== releaseKey && expiredRelease !== releaseKey;
   const build = useUpdateAvailable(prefs.builds);
   const updates = useRuntimeUpdates(prefs.runtimeUpdates, prefs.updateRuntimes);
@@ -153,20 +160,53 @@ export function Notices() {
       let output = "";
       const result = await followJob(line => { output = (output + "\n" + line).slice(-12000); }, undefined, undefined, undefined, body.job);
       if (result?.code !== 0) throw new Error(output || "Connection lost. Check server status before retrying.");
-      setReleaseResult("OpenBuild updated. Run ob restart on this server to load it.");
+      await refreshRelease().catch(() => {});
     } catch (err) {
       setReleaseResult("OpenBuild update failed. Check details before retrying.");
       setReleaseDetails(err instanceof Error ? err.message : String(err));
     } finally { busy.current = false; setReleaseBusy(false); }
   };
+  const restartServer = async () => {
+    if (busy.current || releaseBusy) return;
+    busy.current = true;
+    setRestarting(true);
+    setReleaseDetails("");
+    try {
+      const response = await fetch("/api/releases/restart", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Could not start the restart.");
+      // The old server reports a restart that failed; the new one has nothing pending.
+      for (const deadline = Date.now() + RESTART_WAIT_MS; Date.now() < deadline;) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const status = await fetch("/api/releases/restart", { cache: "no-store" }).then((res) => res.ok ? res.json() : undefined).catch(() => undefined);
+        if (status?.error) throw new Error(status.error);
+        if (status && !status.pending) return location.reload();
+      }
+      throw new Error("The server didn't come back. Run ob restart on this server.");
+    } catch (err) {
+      setReleaseDetails(err instanceof Error ? err.message : String(err));
+      busy.current = false;
+      setRestarting(false);
+    }
+  };
   return (
     <div className="notices">
       {showRelease && (
         <Notice
-          text={releaseBusy ? "Updating OpenBuild…" : releaseResult || `OpenBuild ${release.latest} is available (${release.track}).`}
-          action={<button type="button" className="btn btn-sm" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={() => void updateRelease()}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
-          details={releaseDetails}
-          sticky={releaseBusy}
+          text={restartPending
+            ? restarting ? "Restarting OpenBuild…" : restartFailure ? "OpenBuild couldn't restart. Check details before retrying." : "OpenBuild updated. Restart to load it."
+            : releaseBusy ? "Updating OpenBuild…" : releaseResult || `OpenBuild ${release.latest} is available (${release.track}).`}
+          action={restartPending
+            ? (
+              <button type="button" className="btn btn-sm" disabled={restarting || updating} aria-busy={restarting} onClick={() => void restartServer()}>
+                {restarting && <Spinner size={12} />}
+                {restarting ? "Restarting…" : restartFailure ? "Retry" : "Restart"}
+              </button>
+            )
+            : <button type="button" className="btn btn-sm" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={() => void updateRelease()}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
+          details={restartPending ? restartFailure : releaseDetails}
+          sticky={releaseBusy || restarting}
+          persistent={restartPending}
           dismissLabel="Dismiss release update"
           onDismiss={() => { setDismissedRelease(releaseKey); try { localStorage.setItem("openbuild:dismissed-release", releaseKey); } catch {} }}
           onExpire={() => { setExpiredRelease(releaseKey); setReleaseResult(""); setReleaseDetails(""); }}

@@ -1,5 +1,5 @@
 import { createPreview, localPreviewTarget, forwardPreview, previewWebsocket, stopPreviews } from "./preview";
-import { checkRelease } from "./releases";
+import { checkRelease, restartStatus } from "./releases";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
@@ -204,7 +204,14 @@ function serve(port: number, hostname: string) {
 
       // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
-      "/api/releases": { GET: api(async () => Response.json(await checkRelease())) },
+      "/api/releases": {
+        GET: api(async () => {
+          const restart = restartStatus();
+          // A failed check must not hide that an installed release is waiting for a restart.
+          const status = await checkRelease().catch((error) => { if (restart.pending) return undefined; throw error; });
+          return Response.json({ ...status, restart });
+        }),
+      },
       "/api/config": {
         GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine() })),
       },

@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { GITHUB_SCOPE } from "../shared/types";
 import { dataDir } from "./paths";
@@ -184,4 +185,43 @@ export async function installRelease(root = ROOT, progress?: (step: "download" |
   }
   cache = undefined;
   return { ...status, current: status.latest, available: false, installed: true };
+}
+
+// Held in memory: the server that starts next is already running what was installed.
+let installedHead: string | undefined;
+let restarting = false;
+let restartError: string | undefined;
+export const restartStatus = () => ({ pending: !!installedHead, head: installedHead, error: restartError });
+/** Call before an install; the result, given the finished job, notes whether this server now runs old code. */
+export function watchInstall(root = ROOT) {
+  const before = git(["rev-parse", "HEAD"], root);
+  return ({ code }: { code?: number }) => {
+    // The install ran in another process, so this one's check still describes the old checkout.
+    cache = undefined;
+    const head = git(["rev-parse", "HEAD"], root);
+    if (code === 0 && head !== before) installedHead = head;
+  };
+}
+/** Runs `openbuild restart` outside this server, which it stops. Its output goes to a file, since a pipe would break with us. */
+export function restartServer(command = [process.execPath, join(ROOT, "bin", "openbuild.ts"), "restart"]) {
+  if (restarting) return;
+  restarting = true;
+  restartError = undefined;
+  const failed = (message: string) => { restarting = false; restartError = message; };
+  // The response has to reach the client first.
+  setTimeout(() => {
+    try {
+      mkdirSync(dataDir(), { recursive: true });
+      const path = join(dataDir(), "restart.log");
+      const log = openSync(path, "w");
+      const child = spawn(command[0]!, command.slice(1), { env: { ...process.env, NO_COLOR: "1" }, detached: true, stdio: ["ignore", log, log] });
+      closeSync(log);
+      child.unref();
+      child.on("error", (error) => failed(error.message));
+      child.on("close", (code) => {
+        if (code === 0) restarting = false;
+        else failed(readFileSync(path, "utf8").trim().slice(-12000) || `openbuild restart exited with code ${code}.`);
+      });
+    } catch (error) { failed((error as Error).message); }
+  }, 300);
 }

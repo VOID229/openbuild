@@ -2,7 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkRelease, installRelease, releaseTrack, selectRelease, setReleaseTrack, type Release } from "../server/releases";
+import { checkRelease, installRelease, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall, type Release } from "../server/releases";
 
 const release = (tag: string, prerelease = false, date = "2026-10-30"): Release => ({ tag_name: tag, prerelease, draft: false, published_at: date, html_url: `https://github.com/VOID229/openbuild/releases/tag/${tag}` });
 // An explicit token, so these tests never read the real keychain or gh sign-in.
@@ -194,6 +194,40 @@ test("updates fetch a release, keep branches, and roll back after failed depende
     expect(command(["git", "rev-parse", "HEAD"], checkout)).toBe(installed);
   } finally {
     globalThis.fetch = originalFetch;
+    if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("only an install that moved the checkout waits for a restart, and a failed restart reports its output", async () => {
+  const temp = mkdtempSync(join(tmpdir(), "ob-restart-"));
+  const previous = process.env.OPENCHAT_DATA_DIR;
+  const commit = () => expect(Bun.spawnSync(["git", "-C", temp, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "next"]).exitCode).toBe(0);
+  try {
+    process.env.OPENCHAT_DATA_DIR = join(temp, "data");
+    expect(Bun.spawnSync(["git", "-C", temp, "init"]).exitCode).toBe(0);
+    commit();
+    watchInstall(temp)({ code: 0 });
+    expect(restartStatus().pending).toBe(false);
+    let done = watchInstall(temp);
+    commit();
+    done({ code: 1 });
+    expect(restartStatus().pending).toBe(false);
+    done = watchInstall(temp);
+    commit();
+    done({ code: 0 });
+    expect(restartStatus().pending).toBe(true);
+
+    restartServer(["sh", "-c", "echo not this way; exit 3"]);
+    expect(restartStatus().error).toBeUndefined();
+    for (let i = 0; i < 100 && !restartStatus().error; i++) await Bun.sleep(50);
+    expect(restartStatus()).toMatchObject({ pending: true, error: "not this way" });
+    // A retry clears the failure and can run again.
+    restartServer(["sh", "-c", "exit 0"]);
+    expect(restartStatus().error).toBeUndefined();
+    await Bun.sleep(600);
+    expect(restartStatus().error).toBeUndefined();
+  } finally {
     if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
     rmSync(temp, { recursive: true, force: true });
   }
