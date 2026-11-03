@@ -1,9 +1,10 @@
 import { userVisiblePrompt } from "../../shared/promptDisplay";
-import { Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
+import { Bookmark, Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
 import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
 import { formatBytes } from "../lib/files";
+import { addStash } from "../lib/stash";
 import { useStore } from "../lib/store";
 import type { Message, Part, SearchCall, SteerPart, ThoughtPart, ToolPart } from "../lib/types";
 import { copyText, cx, duration } from "../lib/ui";
@@ -32,6 +33,25 @@ function CopyButton({ text }: { text: string }) {
       }}
     >
       {copied ? <Check size={15} /> : <Copy size={15} />}
+    </IconButton>
+  );
+}
+
+/** Saves a copy of a sent message to the composer's stash. The message itself stays as it is. */
+function StashButton({ text, files }: { text: string; files: Attachment[] }) {
+  const [stashed, setStashed] = useState(false);
+  return (
+    <IconButton
+      label={stashed ? "Stashed" : "Stash"}
+      tooltipSide="top"
+      className="msg-action"
+      onClick={() => {
+        addStash(text, files);
+        setStashed(true);
+        setTimeout(() => setStashed(false), 1400);
+      }}
+    >
+      {stashed ? <Check size={15} /> : <Bookmark size={15} />}
     </IconButton>
   );
 }
@@ -195,6 +215,7 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
         </div>
       )}
       <div className="msg-actions msg-actions-end">
+        {message.content.trim() || message.attachments?.length ? <StashButton text={message.content} files={message.attachments ?? []} /> : null}
         <CopyButton text={message.content} />
         <PluginSlot name="message:user-actions" context={{ message, chatId }} />
       </div>

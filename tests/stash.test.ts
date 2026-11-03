@@ -1,5 +1,8 @@
 import "fake-indexeddb/auto";
 import { describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MessageItem } from "../src/components/MessageItem";
 import { pasteStash, stashAction, type Stashed } from "../src/lib/stash";
 import type { Attachment } from "../shared/types";
 
@@ -37,6 +40,21 @@ describe("pasting a stash", () => {
     const mine = file("a", { name: "src/x.ts", mention: true });
     const theirs = file("b", { name: "src/x.ts", mention: true });
     expect(pasteStash({ text: "@src/x.ts", files: [mine] }, stashed("@src/x.ts", [theirs])).files).toEqual([mine]);
+  });
+});
+
+describe("stashing a sent message", () => {
+  const sent = (content: string, attachments?: Attachment[]) => renderToStaticMarkup(createElement(MessageItem, { message: { id: "m", role: "user", content, attachments, createdAt: 0 }, chatId: "c", isLast: false }));
+  test("puts the button to the left of copy", () => {
+    const html = sent("hello");
+    expect(html).toContain('aria-label="Stash"');
+    expect(html.indexOf('aria-label="Stash"')).toBeLessThan(html.indexOf('aria-label="Copy"'));
+  });
+  test("offers it for a message that's only attachments, not for an empty one", () => {
+    expect(sent("", [file("a")])).toContain('aria-label="Stash"');
+    const empty = sent("  ", []);
+    expect(empty).not.toContain('aria-label="Stash"');
+    expect(empty).not.toContain(">0<");
   });
 });
 
