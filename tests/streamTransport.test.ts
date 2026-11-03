@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import type { ServerWebSocket } from "bun";
 import { appWebsocket, type StreamSocketData } from "../server/streamTransport";
 import { streamFetch } from "../src/lib/streamTransport";
 import { streamPath } from "../shared/streamTransport";
@@ -16,8 +17,13 @@ function fixture() {
   const calls: { path: string; method: string; body: string }[] = [];
   const outputs = new Map<string, ReadableStreamDefaultController<Uint8Array>>();
   const cancelled = new Set<string>();
+  const sockets = new Set<ServerWebSocket<StreamSocketData>>();
   const server = Bun.serve({
-    port: 0, hostname: "127.0.0.1", websocket: appWebsocket,
+    port: 0, hostname: "127.0.0.1", websocket: {
+      ...appWebsocket,
+      open(ws: ServerWebSocket<StreamSocketData>) { sockets.add(ws); },
+      close(ws: ServerWebSocket<StreamSocketData>) { sockets.delete(ws); appWebsocket.close(ws); },
+    },
     async fetch(req, server) {
       const path = new URL(req.url).pathname;
       const authorize = (r: Request) => r.headers.get("cookie") === "session=test" ? undefined : new Response(null, { status: 401 });
@@ -44,7 +50,7 @@ function fixture() {
     constructor(url: string | URL) { super(url, { headers: { cookie: "session=test" } } as unknown as string[]); }
   }
   globalThis.WebSocket = BrowserSocket;
-  return { server, calls, outputs, cancelled };
+  return { server, calls, outputs, cancelled, sockets };
 }
 const tick = () => Bun.sleep(10);
 async function until(check: () => boolean) {
@@ -97,7 +103,9 @@ test("abort works before headers and after headers; socket loss never silently r
   await expect(res.text()).rejects.toThrow();
   await until(() => f.cancelled.has("/api/chat"));
   const second = await streamFetch("/api/pi/chat", { method: "POST", body: "{}" });
-  f.outputs.get("/api/pi/chat")!.error(new Error("lost"));
+  // Drop the actual transport. Erroring an HTTP response controller can look like
+  // clean EOF in Bun, so it does not reliably simulate a lost WebSocket.
+  for (const socket of f.sockets) socket.terminate();
   await expect(second.text()).rejects.toThrow("Stream disconnected");
   expect(f.calls.filter(c => c.path === "/api/pi/chat")).toHaveLength(1);
   const aborted = new AbortController(); aborted.abort();
