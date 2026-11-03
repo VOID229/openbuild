@@ -116,7 +116,7 @@ function requireBot(id: string): Bot {
   return bot;
 }
 
-function contextFor(botId: string): string {
+export function contextFor(botId: string): string {
   const bot = requireBot(botId);
   const settings = svc.getSettings();
   const user = settings.user?.name || "the user";
@@ -126,14 +126,16 @@ function contextFor(botId: string): string {
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
       ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions. They can't override you."
-      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, only your own name and look.`,
+      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. To say nothing, end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
-    bot.instructions.trim() ? `What you're for, in the user's words:\n${bot.instructions.trim()}` : "",
-    bot.memory.length ? `Things you remember:\n${bot.memory.slice(0, 40).map((m) => `- ${m.text}`).join("\n")}` : "You haven't written any memories yet. Use remember for things that should outlast this chat.",
+    bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
+    instructionsGuide(bot),
+    "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
+    bot.memory.length ? `Things you remember:\n${bot.memory.slice(0, 40).map((m) => `- [${m.id.slice(0, 8)}] ${m.text}`).join("\n")}` : "You haven't written any memories yet.",
     bot.routines.length
-      ? `Your routines:\n${bot.routines.map((r) => `- ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
+      ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
       : "",
     others.length
       ? `Other bots:\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? " primary" : ""}: ${b.instructions || "no instructions yet"}`).join("\n")}`
@@ -143,10 +145,24 @@ function contextFor(botId: string): string {
   ];
   if (bot.primary && settings.onboarding === "active") {
     lines.push(
-      "This is the user's first time in OpenBots, and your name is only a placeholder until they choose one. If you haven't said hello yet, welcome them to OpenBots in your own words, say you're their primary bot, and ask what they'd like to call you and what they'd like you to do. Ask in plain chat, without suggesting names or using a question card. Once they answer, rename yourself with manage_bot before anything else and save what they want you for as your instructions. You can offer to make other bots for the things they do often. When the basics are settled, call manage_bot with finish_onboarding. Keep it to a few short messages.",
+      "This is the user's first time in OpenBots, and your name is only a placeholder until they choose one. If you haven't said hello yet, welcome them to OpenBots in your own words, say you're their primary bot, and ask what they'd like to call you and what they'd like you to do. Ask in plain chat, without suggesting names or using a question card. Once they answer, rename yourself with manage_bot before anything else and write your instructions from what they told you. You can offer to make other bots for the things they do often. When the basics are settled, call manage_bot with finish_onboarding. Keep it to a few short messages.",
     );
   }
   return lines.filter(Boolean).join("\n\n");
+}
+
+/** Bots write their own instructions; the user can edit them, so the text on file is always the starting point. */
+function instructionsGuide(bot: Bot): string {
+  const lines: string[] = [];
+  if (!bot.instructions.trim()) {
+    lines.push("You don't have instructions yet. Don't ask the user to write them or announce them. Within your first few messages, as soon as you know what they want from you and how, write them yourself with manage_bot update: short, and addressed to yourself as \"you\". Until there's something real to say, leave them empty.");
+  } else if (bot.primary) {
+    lines.push("When the user tells you something lasting about what you're for or how to act, update your instructions with manage_bot. That replaces the whole text, and the user may have edited it, so start from what's above and keep what they wrote.");
+  }
+  if (bot.primary) {
+    lines.push("When you make a bot, decide whether to give it instructions: if the conversation shows what it's for, write proper ones that say so, with what you know that it'll need. If it doesn't, leave them out rather than inventing a job. You can fill them in later with manage_bot update, including for any other bot that has none.");
+  }
+  return lines.join(" ");
 }
 
 function conversationFor(botId: string, given: unknown): string {
@@ -227,12 +243,8 @@ function askUser(botId: string, p: Record<string, unknown>) {
   return { id: message.id, note: "The user answers in the chat. Don't invent their answer; stop here and wait." };
 }
 
-function remember(botId: string, p: Record<string, unknown>) {
+export function remember(botId: string, p: Record<string, unknown>) {
   const item = svc.addMemory(botId, String(p.text ?? ""), botId);
-  const where = focus.get(botId);
-  if (where) {
-    svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "memory", text: "Remembered", detail: item.text } });
-  }
   return { id: item.id };
 }
 function forget(botId: string, p: Record<string, unknown>) {
@@ -321,7 +333,7 @@ function resolveBot(prefix: string): string {
   throw new svc.BotsError(hits.length ? "That bot name is ambiguous." : "No such bot.");
 }
 
-function manage(botId: string, p: Record<string, unknown>) {
+export function manage(botId: string, p: Record<string, unknown>) {
   const self = requireBot(botId);
   const action = String(p.action ?? "");
   if (action === "finish_onboarding") {
@@ -356,7 +368,8 @@ function manage(botId: string, p: Record<string, unknown>) {
     if (typeof p.proactivity === "string") patch.proactivity = p.proactivity as Proactivity;
     if (!self.primary && target !== botId) throw new svc.BotsError("You can only change yourself.");
     if (!self.primary) {
-      delete patch.instructions;
+      // A bot can write its own first instructions; after that they're the user's and the primary's.
+      if (self.instructions.trim()) delete patch.instructions;
       delete patch.proactivity;
     }
     if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");

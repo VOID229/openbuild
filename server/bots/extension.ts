@@ -124,7 +124,7 @@ export default function openbots(pi: any) {
 
   pi.registerTool(tool("search", "Search", "Search your memory, or everything ever said in your conversations. what is memory (default) or messages.", { type: "object", properties: { query: str("Words to look for."), what: str("memory or messages.") }, required: ["query"] }, (p) => call("search", p)));
 
-  pi.registerTool(tool("routine", "Routine", "Your schedule. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, id: str("For remove, pause, resume.") }, required: ["action"] }, (p) => call("routine", p)));
+  pi.registerTool(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p) => call("routine", p)));
 
   pi.registerTool(tool("ask_bot", "Ask bot", "Ask another bot and wait for their reply. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p) => call("ask_bot", p)));
 
@@ -132,8 +132,8 @@ export default function openbots(pi: any) {
     tool(
       "manage_bot",
       "Manage bots",
-      "Primary bot only, except renaming yourself or changing your own look. action is create (name, instructions, look {shape, color}), update (bot, name, instructions, look, proactivity off|low|normal|high), delete (bot), or finish_onboarding.",
-      { type: "object", properties: { action: str("create, update, delete or finish_onboarding."), bot: str("Name or short id. You, if omitted."), name: str("New name."), instructions: str("What the bot is for."), look: { type: "object", properties: { shape: { type: "string" }, color: { type: "string" } } }, proactivity: str("off, low, normal or high.") }, required: ["action"] },
+      "Primary bot only, except renaming yourself, changing your own look, or writing your own instructions while you have none. action is create (name, instructions, look {shape, color}), update (bot, name, instructions, look, proactivity off|low|normal|high), delete (bot), or finish_onboarding.",
+      { type: "object", properties: { action: str("create, update, delete or finish_onboarding."), bot: str("Name or short id. You, if omitted."), name: str("New name."), instructions: str("What the bot is for and how it should act. Replaces the whole text. Optional when creating: leave it out if the conversation doesn't say."), look: { type: "object", properties: { shape: { type: "string" }, color: { type: "string" } } }, proactivity: str("off, low, normal or high.") }, required: ["action"] },
       (p) => call("manage_bot", p),
     ),
   );
