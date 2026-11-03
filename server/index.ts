@@ -508,7 +508,7 @@ function serve(port: number, hostname: string) {
       // The one-time offer to import native runtimes' sessions (sessionImport.ts). POST is the
       // answer: the runtimes to import, [] to skip. Either way it's never offered again.
       "/api/session-import": {
-        GET: api(async () => Response.json(await sessionImport.offer())),
+        GET: api(async (req) => Response.json(new URL(req.url).searchParams.has("progress") ? sessionImport.progressiveOffer() : await sessionImport.offer())),
         POST: api(async (req, server: Bun.Server<unknown>) => {
           server.timeout(req, 0);
           const body = await readJson(req);

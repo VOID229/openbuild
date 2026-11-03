@@ -36,7 +36,7 @@ const DONE_KEY = "session-import:offered";
 export const BINDING = "imported-session:";
 
 /** A native session as it would be imported: its thread and the adapter mapping that resumes it. */
-interface Found { nativeId: string; load: () => Promise<{ chat: Chat; mapping: object } | undefined> }
+interface Found { checked?: boolean; nativeId: string; load: () => Promise<{ chat: Chat; mapping: object } | undefined> }
 
 /** Bounded I/O: large histories must not spawn a process or promise per thread. */
 async function concurrent<T>(items: T[], use: (item: T) => Promise<void>) {
@@ -177,7 +177,7 @@ async function claudeSessions(): Promise<Found[]> {
         const source = await readFile(file, "utf8");
         if (claudeEntrypoint(source)?.startsWith("sdk-")) continue;
         const loaded = projectClaude(id, file, source);
-        if (loaded) found.push({ nativeId: id, load: async () => loaded });
+        if (loaded) found.push({ checked: true, nativeId: id, load: async () => projectClaude(id, file, await readFile(file, "utf8")) });
       } catch { continue; }
     }
   }
@@ -299,7 +299,13 @@ async function codexSessions(): Promise<Found[]> {
     await concurrent([...threads.values()].filter((th) => th.cwd && !own.has(th.id) && th.originator !== "openbuild" && !th.ephemeral && !th.parentThreadId && !(th.source && typeof th.source === "object" && "subagent" in th.source)), async (th) => {
       const detail = (await p.request("thread/read", { threadId: th.id, includeTurns: true }, 30_000)).thread;
       const loaded = projectCodex({ ...th, ...detail, name: detail?.name || th.name });
-      if (loaded) found.push({ nativeId: th.id, load: async () => loaded });
+      if (loaded) found.push({ checked: true, nativeId: th.id, load: async () => {
+        const read = async (client: CodexProcess) => {
+          const detail = (await client.request("thread/read", { threadId: th.id, includeTurns: true }, 30_000)).thread;
+          return projectCodex({ ...th, ...detail, name: detail?.name || th.name });
+        };
+        return importingCodex ? read(importingCodex) : withCodex(read);
+      } });
     });
     return found;
   });
@@ -479,7 +485,10 @@ async function opencodeSessions(): Promise<Found[]> {
     const found: Found[] = [];
     await concurrent(sessions.filter((s) => s?.id && s.location?.directory && !own.has(s.id) && !s.parentID && !s.revert && !s.fork), async (s) => {
       const loaded = projectOpencode(s, await pages(c, `/api/session/${encodeURIComponent(s.id)}/message`));
-      if (loaded) found.push({ nativeId: s.id, load: async () => loaded });
+      if (loaded) found.push({ checked: true, nativeId: s.id, load: async () => {
+        const read = async (client: Awaited<ReturnType<typeof opencodeConnect>>) => projectOpencode(s, await pages(client, `/api/session/${encodeURIComponent(s.id)}/message`));
+        return importingOpencode ? read(importingOpencode) : withOpencode(read);
+      } });
     });
     return found;
   });
@@ -536,22 +545,36 @@ async function importable(runtime: ImportRuntime): Promise<Found[]> {
     .filter((f) => !storage.chatExists(threadId(runtime, f.nativeId)));
   const valid: Found[] = [];
   await concurrent(unique, async (f) => {
+    if (f.checked) { valid.push(f); return; }
     const loaded = await timeout(f.load(), 30_000, `Reading a ${runtime} session`);
-    if (loaded) valid.push({ nativeId: f.nativeId, load: async () => loaded });
+    if (loaded) valid.push(f);
   });
   return valid;
 }
 
 export const offered = () => storage.getValue(DONE_KEY) !== undefined;
 
-let scan: { at: number; value: Promise<Partial<Record<ImportRuntime, Found[]>>> } | undefined;
+let scan: { done: boolean; partial: Partial<Record<ImportRuntime, number>>; at: number; value: Promise<Partial<Record<ImportRuntime, Found[]>>> } | undefined;
 /** How many sessions each runtime has to import; shared briefly so several windows don't each spawn Codex/OpenCode. */
 function counts(): Promise<Partial<Record<ImportRuntime, Found[]>>> {
   if (scan && Date.now() - scan.at < 10 * 60_000) return scan.value;
-  const value = Promise.all(IMPORT_RUNTIMES.map(async (r) => [r, await importable(r).catch(() => [])] as const))
+  const partial: Partial<Record<ImportRuntime, number>> = {};
+  const value = Promise.all(IMPORT_RUNTIMES.map(async (r) => {
+    const sessions = await importable(r).catch(() => []);
+    if (sessions.length) partial[r] = sessions.length;
+    return [r, sessions] as const;
+  }))
     .then((pairs) => Object.fromEntries(pairs.filter(([, sessions]) => sessions.length > 0)));
-  scan = { at: Date.now(), value };
+  const current = scan = { at: Date.now(), value, partial, done: false as boolean };
+  void value.finally(() => { current.done = true; });
   return value;
+}
+
+/** First-run UI can open immediately while native session discovery continues. */
+export function progressiveOffer() {
+  if (offered()) return { pending: false, scanning: false, runtimes: {} };
+  void counts();
+  return { pending: !scan!.done || Object.keys(scan!.partial).length > 0, scanning: !scan!.done, runtimes: { ...scan!.partial } };
 }
 
 /** Whether to offer the import, and what there is: nothing once it was answered. */
@@ -568,6 +591,8 @@ export async function offer(): Promise<{ pending: boolean; runtimes: Partial<Rec
  * The user's answer: import these runtimes' sessions ([] = skip). Successful answers are
  * persisted; failures remain retryable. Concurrent windows share the same import.
  */
+let importingCodex: CodexProcess | undefined;
+let importingOpencode: Awaited<ReturnType<typeof opencodeConnect>> | undefined;
 let answering: ReturnType<typeof importAnswer> | undefined;
 export function answer(runtimes: ImportRuntime[]): ReturnType<typeof importAnswer> {
   if (answering) return answering;
@@ -582,6 +607,8 @@ async function importAnswer(runtimes: ImportRuntime[]): Promise<{ imported: Part
   scan = undefined;
   for (const runtime of runtimes) {
     try {
+      if (runtime === "codex") { importingCodex = new CodexProcess(homedir()); await importingCodex.initialize(); }
+      if (runtime === "opencode") importingOpencode = await opencodeConnect();
       let n = 0;
       for (const f of cached?.[runtime] ?? await importable(runtime)) {
         try {
@@ -594,6 +621,9 @@ async function importAnswer(runtimes: ImportRuntime[]): Promise<{ imported: Part
       imported[runtime] = n;
     } catch (err) {
       errors[runtime] = (err as Error).message;
+    } finally {
+      importingCodex?.close(); importingCodex = undefined;
+      await importingOpencode?.close().catch(() => {}); importingOpencode = undefined;
     }
   }
   if (!Object.keys(errors).length) storage.setValue(DONE_KEY, JSON.stringify({ at: Date.now(), runtimes }));

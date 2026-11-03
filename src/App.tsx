@@ -396,7 +396,7 @@ function Main() {
       </div>
       <SettingsModal />
       <Notices />
-      {chatsLoaded && <SessionImport />}
+      <SessionImport />
       <Lightbox />
       <TooltipLayer />
       <PluginSlot name="app:overlay" />

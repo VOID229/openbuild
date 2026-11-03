@@ -24,23 +24,35 @@ const threads = (n: number) => `${n} thread${n === 1 ? "" : "s"}`;
 export function SessionImport() {
   const [counts, setCounts] = useState<Partial<Record<ImportRuntime, number>>>();
   const [picked, setPicked] = useState<Set<ImportRuntime>>(new Set());
+  const [scanning, setScanning] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const stopped = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
     let live = true;
-    fetch(apiUrl(undefined, "/api/session-import"))
-      .then((r) => (r.ok ? r.json() : undefined))
-      .then((offer: { pending: boolean; runtimes: Partial<Record<ImportRuntime, number>> } | undefined) => {
-        if (!live || !offer?.pending) return;
-        setCounts(offer.runtimes);
-        setPicked(new Set(ORDER.filter((r) => offer.runtimes[r])));
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const seen = new Set<ImportRuntime>();
+    const check = async () => {
+      try {
+        const res = await fetch(apiUrl(undefined, "/api/session-import?progress"));
+        if (!res.ok) throw new Error("Import discovery unavailable");
+        const offer = await res.json() as { pending: boolean; scanning?: boolean; runtimes: Partial<Record<ImportRuntime, number>> };
+        if (!live || stopped.current) return;
+        setScanning(!!offer.scanning);
+        setCounts(offer.pending ? offer.runtimes : undefined);
+        setPicked(previous => {
+          const next = new Set(previous);
+          for (const r of ORDER) if (offer.runtimes[r] && !seen.has(r)) { next.add(r); seen.add(r); }
+          return next;
+        });
+        if (offer.scanning) timer = setTimeout(check, 750);
+      } catch { if (live && !stopped.current) timer = setTimeout(check, 2000); }
     };
+    void check();
+    return () => { live = false; clearTimeout(timer); };
   }, []);
 
   useEffect(() => {
@@ -53,6 +65,7 @@ export function SessionImport() {
     setCounts(undefined);
   };
   const submit = async (runtimes: ImportRuntime[]) => {
+    stopped.current = true;
     setBusy(true);
     setError(undefined);
     try {
@@ -61,6 +74,7 @@ export function SessionImport() {
       if (failed.length) {
         setError(`Some threads couldn't be imported. ${failed.join(" · ")}`);
         setCounts({});
+        setAnswered(true);
       } else close();
     } catch (e) {
       setError((e as Error).message);
@@ -71,7 +85,7 @@ export function SessionImport() {
   const runtimes = ORDER.filter((r) => counts[r]);
   const total = runtimes.filter((r) => picked.has(r)).reduce((n, r) => n + counts[r]!, 0);
   // After a partial failure the offer is already answered: only closing is left.
-  const answered = !runtimes.length;
+
 
   return (
     <dialog
@@ -87,8 +101,9 @@ export function SessionImport() {
       ) : (
         <>
           <p id="session-import-description">
-            OpenBuild found threads you had in other coding agents on this computer. Imported threads show up in the sidebar, and you can keep going in them here. This is only asked once.
+            Bring in threads from other coding agents on this computer. Imported threads show up in the sidebar, and you can keep going in them here. This is only asked once.
           </p>
+          {scanning && <p role="status"><Spinner size={13} /> Looking for threads…</p>}
           <ul className="pi-list session-import-list">
             {runtimes.map((r) => (
               <li key={r} className="rt-row">
@@ -123,7 +138,7 @@ export function SessionImport() {
             <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void submit([])}>
               Skip
             </button>
-            <button type="button" className="btn btn-sm btn-primary" disabled={busy || !total} onClick={() => void submit(runtimes.filter((r) => picked.has(r)))} autoFocus>
+            <button type="button" className="btn btn-sm btn-primary" disabled={busy || scanning || !total} onClick={() => void submit(runtimes.filter((r) => picked.has(r)))} autoFocus>
               {busy ? <><Spinner size={13} /> Importing…</> : total ? `Import ${threads(total)}` : "Import"}
             </button>
           </>

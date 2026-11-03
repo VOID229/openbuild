@@ -62,7 +62,11 @@ test("imports Claude Code sessions once, ready to continue, and never offers aga
     const mod = await import("./server/sessionImport.ts");
     const { allowedCwd } = await import("./server/projects.ts");
     const { threadRuntime } = await import("./server/threadRuntime.ts");
+    const early = mod.progressiveOffer();
+    assert.equal(early.pending, true);
+    assert.equal(early.scanning, true);
     assert.deepEqual(await mod.offer(), { pending: true, runtimes: { claude: 1 } });
+    assert.equal(mod.progressiveOffer().scanning, false);
     assert.deepEqual(await mod.answer(["claude"]), { imported: { claude: 1 }, errors: {} });
     const chats = storage.listChats().filter((c) => c.runtime === "claude");
     assert.equal(chats.length, 1);
