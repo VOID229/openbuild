@@ -751,13 +751,20 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [mention, setMention] = useState<{ query: string; index: number }>();
+  const [notice, setNotice] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
+  const dictation = useFieldDictation({ value: text, setValue: setText, field: input, onError: setNotice, fallback: true });
   const file = useRef<HTMLInputElement>(null);
   const touch = useMediaQuery("(pointer: coarse)");
   const name = conversationName(conversation, bots);
   const quoted = replyTo ? conversation.messages.find((m) => m.id === replyTo) : undefined;
   const members = bots.filter((b) => conversation.botIds.includes(b.id));
   const matches = mention && conversation.kind === "group" ? members.filter((b) => firstName(b).toLowerCase().startsWith(mention.query.toLowerCase())) : [];
+  const stash = botStashOf(useStore((s) => s.settings.crossStash));
+  const stashed = stash.use((s) => s.items);
+  const [stashOpen, setStashOpen] = useState(false);
+  const [stashIndex, setStashIndex] = useState(0);
+  const stashList = stashOpen ? stashed : [];
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -771,10 +778,19 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   useEffect(() => {
     if (window.matchMedia("(pointer: fine)").matches) input.current?.focus();
   }, []);
+  // A transcript belongs to the conversation it was started in.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => dictation.cancel(), [conversation.id]);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(undefined), 4000);
+    return () => clearTimeout(t);
+  }, [notice]);
 
   const send = async () => {
     const body = text.trim();
     if (sendingRef.current || (!body && !images.length)) return;
+    dictation.cancel();
     sendingRef.current = true;
     setSending(true);
     try {
@@ -790,6 +806,53 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
       setSending(false);
     }
   };
+  const pasteStashed = (item: Stashed) => {
+    dictation.cancel();
+    const next = pasteBotStash({ text, images }, item);
+    setText(next.text);
+    setImages(next.images);
+    if (next.left > 0) setNotice(next.left === 1 ? "Left out 1 file OpenBots can't take." : `Left out ${next.left} files OpenBots can't take.`);
+    stash.remove(item.id);
+    setStashOpen(false);
+    setMention(undefined);
+    requestAnimationFrame(() => {
+      const el = input.current;
+      el?.focus();
+      el?.setSelectionRange(next.text.length, next.text.length);
+    });
+  };
+  const toggleStash = () => {
+    setStashIndex(0);
+    setStashOpen((open) => !open);
+  };
+  /** The stash shortcut, while OpenBots is showing. */
+  const onStashShortcut = () => {
+    if (sendingRef.current) return;
+    const action = stashAction(!!text.trim() || images.length > 0, stashed.length);
+    if (action === "stash") {
+      dictation.cancel();
+      stash.add(text, imageFiles(images));
+      setText("");
+      setImages([]);
+      setMention(undefined);
+      setStashOpen(false);
+      input.current?.focus();
+    } else if (action === "use") {
+      pasteStashed(stashed[0]!);
+    } else if (action === "open") {
+      toggleStash();
+      input.current?.focus();
+    }
+  };
+  const stashShortcut = useRef(onStashShortcut);
+  stashShortcut.current = onStashShortcut;
+  useEffect(() => {
+    const onShortcut = (e: Event) => {
+      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft" && useStore.getState().botsOpen) stashShortcut.current();
+    };
+    window.addEventListener(SHORTCUT_EVENT, onShortcut);
+    return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);
+  }, []);
   const findMention = (value: string, caret: number) => {
     const m = /(?:^|\s)@([\p{L}\d_-]*)$/u.exec(value.slice(0, caret));
     setMention(m ? { query: m[1]!, index: 0 } : undefined);
@@ -809,6 +872,9 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
 
   return (
     <div className="bots-dock">
+      {stashed.length > 0 && (
+        <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={stash.remove} />
+      )}
       <form
         className="bots-composer"
         onSubmit={(e) => {
@@ -852,6 +918,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             </IconButton>
           </div>
         )}
+        {notice && <div className="bots-composer-notice">{notice}</div>}
         {images.length > 0 && (
           <div className="bots-composer-images">
             {images.map((src, i) => (
@@ -888,8 +955,10 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             value={text}
             placeholder={`Message ${name}`}
             aria-label={`Message ${name}`}
+            {...dictation.fieldProps}
             onChange={(e) => {
               setText(e.target.value);
+              setStashOpen(false);
               findMention(e.target.value, e.target.selectionStart);
             }}
             onPaste={(e) => {
@@ -901,6 +970,19 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;
+              if (stashList.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const n = stashList.length;
+                  setStashIndex((i) => (Math.min(i, n - 1) + (e.key === "ArrowDown" ? 1 : n - 1)) % n);
+                  return;
+                }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  pasteStashed(stashList[Math.min(stashIndex, stashList.length - 1)]!);
+                  return;
+                }
+              }
               if (matches.length && mention) {
                 if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                   e.preventDefault();
@@ -929,6 +1011,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               }
             }}
           />
+          <DictationButton dictation={dictation} className="icon-btn bots-composer-btn bots-mic" size={18} />
           <button type="submit" className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")} aria-label={sending ? "Sending…" : "Send"} disabled={sending || (!text.trim() && !images.length)}>
             <ArrowUp size={18} strokeWidth={2.4} />
           </button>
