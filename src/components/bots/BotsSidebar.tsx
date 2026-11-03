@@ -3,12 +3,14 @@
 // a rail of avatars instead of going away.
 import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
+import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime } from "./common";
@@ -28,6 +30,87 @@ interface MenuState {
 
 /** Open the new-bot and new-group dialogs from anywhere in OpenBots (the empty chat, the details panel). */
 export const openBotsDialog = (d: Dialog) => window.dispatchEvent(new CustomEvent<Dialog>("openbots:dialog", { detail: d }));
+
+interface PeekState {
+  id: string;
+  side: Side;
+  rect: DOMRect;
+}
+
+type Peek = (id: string, side: Side) => {
+  onPointerEnter: (e: React.PointerEvent<HTMLElement>) => void;
+  onPointerLeave: () => void;
+  onPointerDown: () => void;
+  onFocus: (e: React.FocusEvent<HTMLElement>) => void;
+  onBlur: () => void;
+};
+
+const PEEK_DELAY = 450;
+
+/** A hover card for tiles and rail avatars, whose names get cut short: the full name and the latest message. */
+function usePeek() {
+  const [peek, setPeek] = useState<PeekState>();
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const hide = useCallback(() => {
+    clearTimeout(timer.current);
+    setPeek(undefined);
+  }, []);
+  useEffect(() => {
+    if (!peek) return;
+    window.addEventListener("scroll", hide, true);
+    window.addEventListener("resize", hide);
+    return () => {
+      window.removeEventListener("scroll", hide, true);
+      window.removeEventListener("resize", hide);
+    };
+  }, [peek, hide]);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const bind = useCallback<Peek>(
+    (id, side) => ({
+      onPointerEnter: (e) => {
+        if (e.pointerType === "touch") return;
+        const el = e.currentTarget;
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: el.getBoundingClientRect() }), PEEK_DELAY);
+      },
+      onPointerLeave: hide,
+      onPointerDown: hide,
+      onFocus: (e) => {
+        if (e.currentTarget.matches(":focus-visible")) setPeek({ id, side, rect: e.currentTarget.getBoundingClientRect() });
+      },
+      onBlur: hide,
+    }),
+    [hide],
+  );
+  return { peek, bind, hide };
+}
+
+function PeekCard({ peek }: { peek?: PeekState }) {
+  const conversation = useBots((s) => s.conversations.find((c) => c.id === peek?.id));
+  const bots = useBots((s) => s.bots);
+  const typing = useBots((s) => (peek ? (s.typing[peek.id]?.length ?? 0) : 0)) > 0;
+  const ref = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
+  useLayoutEffect(() => {
+    if (!peek || !ref.current) return setPos(undefined);
+    setPos(place(peek, ref.current.offsetWidth, ref.current.offsetHeight));
+  }, [peek]);
+  if (!peek || !conversation) return null;
+  const [title, tag] = conversationName(conversation, bots).split(" · ");
+  return createPortal(
+    <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
+      <span className="bots-peek-head">
+        <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />
+        <span className="bots-peek-name">
+          {title}
+          {tag && <span className="bots-peek-tag"> · {tag}</span>}
+        </span>
+      </span>
+      <span className="bots-peek-preview">{typing ? "typing…" : previewOf(conversation, bots)}</span>
+    </div>,
+    document.body,
+  );
+}
 
 /**
  * A sidebar avatar that keeps still unless one of its bots is at work (then it fidgets). Hovering its
@@ -101,9 +184,8 @@ const Row = memo(function Row({ conversation, active, onMenu }: { conversation: 
   );
 });
 
-const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void }) {
+const Tile = memo(function Tile({ conversation, active, onMenu, peek }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
-  const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const select = useSelect();
   const name = conversationName(conversation, bots);
   return (
@@ -111,7 +193,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       type="button"
       className={cx("bots-tile", active && "bots-tile-active")}
       aria-current={active ? "page" : undefined}
-      title={name}
+      {...peek(conversation.id, "bottom")}
       onClick={() => select(conversation.id)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -327,7 +409,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   );
 }
 
-function Rail({ pinned, rest, activeId, onMenu, onDialog }: { pinned: Conversation[]; rest: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void }) {
+function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const avatar = useStore((s) => s.settings.profile.avatar);
   const name = useStore((s) => s.settings.profile.name);
@@ -339,15 +421,14 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog }: { pinned: Conversati
       className={cx("bots-rail-item", c.id === activeId && "bots-rail-item-active")}
       aria-label={conversationName(c, bots)}
       aria-current={c.id === activeId ? "page" : undefined}
-      data-tooltip={conversationName(c, bots)}
-      data-tooltip-side="right"
+      {...peek(c.id, "right")}
       onClick={() => useBots.getState().select(c.id)}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu({ id: c.id, x: e.clientX, y: e.clientY });
       }}
     >
-      <ConversationAvatar conversation={c} size={40} />
+      <SidebarAvatar conversation={c} size={40} />
       {c.unread && <span className="unread-dot bots-rail-dot" aria-label="Unread" />}
     </button>
   );
@@ -391,6 +472,9 @@ export function BotsSidebar() {
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLElement>(null);
   const closeMenu = useCallback(() => setMenu(undefined), []);
+  const { peek, bind: bindPeek, hide: hidePeek } = usePeek();
+  // The hovered tile or avatar goes away with the layout, without a pointerleave.
+  useEffect(() => hidePeek(), [rail, hidePeek]);
 
   useEffect(() => useBots.getState().ensureSeeded(), []);
   useEffect(() => {
@@ -425,7 +509,7 @@ export function BotsSidebar() {
       <div className={cx("sidebar-scrim", open && mobile && "sidebar-scrim-visible")} onClick={() => useStore.getState().setBotsSidebarOpen(false)} aria-hidden />
       <aside className={cx("sidebar bots-sidebar", rail ? "bots-sidebar-rail" : open ? "sidebar-open" : "sidebar-closed")} aria-label="OpenBots" aria-hidden={!open && !rail} inert={!open && !rail}>
         {rail ? (
-          <Rail pinned={pinned} rest={[...rest, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} />
+          <Rail pinned={pinned} rest={[...rest, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         ) : (
           <div className="sidebar-inner bots-sidebar-inner">
             <div className="brand-row">
@@ -471,7 +555,7 @@ export function BotsSidebar() {
                     {pinned.length > 0 && (
                       <div className="bots-tiles">
                         {pinned.map((c) => (
-                          <Tile key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} />
+                          <Tile key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} peek={bindPeek} />
                         ))}
                       </div>
                     )}
@@ -514,6 +598,7 @@ export function BotsSidebar() {
           </div>
         )}
       </aside>
+      <PeekCard peek={peek} />
       <ConversationMenu state={menu} onClose={closeMenu} onDialog={setDialog} />
       <Dialogs dialog={dialog} onClose={() => setDialog(undefined)} />
     </>

@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-type Side = "top" | "bottom" | "left" | "right";
+export type Side = "top" | "bottom" | "left" | "right";
 interface Tip {
   text: string;
   side: Side;
@@ -14,7 +14,8 @@ const GAP = 8;
 const MARGIN = 8;
 const DELAY = 450;
 
-function place(tip: Tip, w: number, h: number) {
+/** Where a floating box of `w`×`h` goes beside `rect`, flipped and clamped to stay on screen. */
+export function place(tip: Pick<Tip, "side" | "rect">, w: number, h: number) {
   const { rect } = tip;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
