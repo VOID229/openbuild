@@ -5982,11 +5982,54 @@ p.key-status svg {
   overflow-y: auto;
 }
 
+.ws-menu .ws-options {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .ws-option {
   height: auto;
   min-height: 40px;
   padding-top: 6px;
   padding-bottom: 6px;
+}
+
+.ws-options-tight .ws-option {
+  min-height: 0;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.ws-options-tight .ws-option-text {
+  line-height: 1.25;
+}
+
+.ws-options-dense .ws-option {
+  min-height: 32px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.ws-options-dense .ws-option-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.ws-options-dense .menu-item-label {
+  flex: none;
+}
+
+@media (pointer: coarse) {
+  .ws-options-tight .ws-option {
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .ws-options-dense .ws-option {
+    min-height: 42px;
+  }
 }
 
 .ws-option-missing .ws-option-icon,

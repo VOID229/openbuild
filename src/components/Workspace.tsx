@@ -10,7 +10,7 @@ import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { chooseDevice, chooseProject, deviceName, splitProjectId, workspaceDevice } from "../lib/devices";
 import { threadDevice, useStore } from "../lib/store";
-import { RUNTIMES, runtimeName } from "../lib/runtimes";
+import { RUNTIMES, runtimeMenuDensity, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
@@ -410,7 +410,7 @@ function RuntimeMenu() {
         <ChevronDown size={13} className="pill-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
-        <div onKeyDown={(e) => arrowNav(e)}>
+        <div className={cx("ws-options", `ws-options-${runtimeMenuDensity(options.length)}`)} onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => {
             const absent = missing(o.runtime);
             return (

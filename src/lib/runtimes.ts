@@ -21,6 +21,13 @@ export const RUNTIMES: { runtime: ThreadRuntime; label: string; desc: string }[]
  */
 export const UPDATABLE_RUNTIMES: ThreadRuntime[] = RUNTIMES.map((r) => r.runtime).filter((r) => r !== "durable");
 
+/**
+ * How tightly the runtime picker sets its rows, so a longer list still fits beside the composer:
+ * full two-line rows, then tighter ones, then a single line each. Past that the list scrolls.
+ */
+export const runtimeMenuDensity = (count: number): "roomy" | "tight" | "dense" =>
+  count <= 6 ? "roomy" : count <= 8 ? "tight" : "dense";
+
 /** How a runtime is named in prose (Pi isn't "Default" there). */
 export const runtimeName = (runtime: ThreadRuntime): string =>
   runtime === "pi" ? "Pi" : RUNTIMES.find((r) => r.runtime === runtime)?.label ?? runtime;
