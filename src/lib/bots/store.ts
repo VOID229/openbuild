@@ -488,8 +488,15 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     set((s) => {
       const i = s.conversations.findIndex((c) => c.id === e.conversation.id);
       if (i < 0) return { conversations: [{ ...e.conversation, messages: [] }, ...s.conversations] };
-      return { conversations: s.conversations.map((c) => (c.id === e.conversation.id ? { ...c, ...e.conversation, messages: c.messages } : c)) };
+      // The server sends the whole record, and JSON drops cleared fields (unread, pinnedAt, hidden),
+      // so replace rather than merge. The open conversation stays read.
+      return {
+        conversations: s.conversations.map((c) =>
+          c.id === e.conversation.id ? { ...e.conversation, unread: s.activeId === c.id ? undefined : e.conversation.unread, messages: c.messages, more: c.more } : c,
+        ),
+      };
     });
+    if (!authoritativeOnly && e.conversation.unread && get().activeId === e.conversation.id) void send("POST", `/api/bots/conversations/${e.conversation.id}/read`);
     return;
   }
   if (e.t === "conversation-deleted") {
@@ -514,7 +521,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       }),
       drafts: e.message.author === "me" ? s.drafts : s.drafts.filter((d) => !(d.conversationId === e.conversationId && d.botId === e.message.author)),
     }));
-    if (!authoritativeOnly && e.message.author !== "me" && get().activeId === e.conversationId) void send("POST", `/api/bots/conversations/${e.conversationId}/read`);
     return;
   }
   if (e.t === "message-deleted") {

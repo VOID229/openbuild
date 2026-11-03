@@ -3,6 +3,7 @@ import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type Mod
 import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
 import { abortable } from "./abort";
+import { readChatProjection } from "./chatSync";
 import { autoName } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { clearQueue, consumeSteer, stageSteer, steeringOf, editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, requeue, setSteering, shiftQueue, type Queued } from "./queue";
@@ -212,17 +213,24 @@ export function adoptDiscoveredChats(incoming: Chat[], before: Map<string, Chat>
   const current = useStore.getState().chats;
   const byId = new Map(current.map((c) => [c.id, c]));
   const completedExternal: string[] = [];
+  const visible = document.visibilityState === "visible" ? useStore.getState().activeChatId : undefined;
+  let readActive: string | undefined;
   for (const chat of incoming) {
     const original = before.get(chat.id);
     const now = byId.get(chat.id);
     if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
     if (now === chat) continue;
     if (!now || JSON.stringify(now) !== JSON.stringify(chat)) {
-      byId.set(chat.id, chat);
+      // The open thread has already shown this reply; only background threads get the dot.
+      const next = readChatProjection(chat, visible);
+      if (next !== chat) readActive = chat.id;
+      byId.set(chat.id, next);
       if (now?.messages.some((m) => m.status === "streaming" && m.stream?.via === EXTERNAL_VIA) && chat.messages.findLast((m) => m.role === "assistant")?.status === "done") completedExternal.push(chat.id);
     }
   }
   useStore.getState().setChats([...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt));
+  // Save the read state so the next poll doesn't bring the dot back.
+  if (readActive) useStore.getState().updateChat(readActive, { unread: false });
   // The poll can discover a turn another tab started, not only terminal transcripts and shells.
   // Install its running owner before exposing functional Stop/steer/interrupt controls.
   resumeReplies();
