@@ -8,7 +8,11 @@ for (const file of files.filter(file => !filters.length || filters.some(filter =
     env: { ...process.env, NODE_ENV: "test" },
     stdin: "inherit", stdout: "inherit", stderr: "inherit",
   });
-  if (await child.exited !== 0) failed++;
+  // A file that never exits (a browser left alive) would hold the nightly until the job's own limit.
+  const timer = setTimeout(() => child.kill("SIGKILL"), 180_000);
+  const code = await child.exited;
+  clearTimeout(timer);
+  if (code !== 0) failed++;
 }
 console.log(`\n${failed} test files failed.`);
 process.exit(failed ? 1 : 0);

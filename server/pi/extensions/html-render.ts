@@ -10,7 +10,7 @@
 //
 // Only Node's own modules and OpenBuild's shared file: Pi loads this file on its own.
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -67,11 +67,37 @@ export function findBrowser(env: Record<string, string | undefined> = process.en
   return undefined;
 }
 
+// Read both pipes as they come. Waiting to drain them until Chrome exits deadlocks once a noisy
+// stderr fills the buffer, and SIGTERM does not reap Chrome's zygote, so the test process never ends.
 const run = (file: string, args: string[], signal?: AbortSignal) =>
   new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(file, args, { timeout: 30_000, maxBuffer: 32 * 1024 * 1024, signal }, (error, stdout, stderr) =>
-      error && !stdout ? reject(Object.assign(error, { stderr })) : resolve({ stdout: String(stdout), stderr: String(stderr) }),
-    );
+    const child = spawn(file, args, { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout!.on("data", (chunk) => stdout.push(chunk));
+    child.stderr!.on("data", (chunk) => stderr.push(chunk));
+    let settled = false;
+    const stop = () => {
+      try { process.kill(-child.pid!, "SIGKILL"); } catch { /* already gone */ }
+    };
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      const out = Buffer.concat(stdout).toString();
+      const errText = Buffer.concat(stderr).toString();
+      if (error && !out) reject(Object.assign(error, { stderr: errText }));
+      else resolve({ stdout: out, stderr: errText });
+    };
+    const onAbort = () => { stop(); finish(new Error("aborted")); };
+    const timer = setTimeout(() => { stop(); finish(new Error("browser timed out")); }, 25_000);
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.once("error", (error) => finish(error));
+    child.once("exit", (code, killed) => {
+      if (killed || code) finish(new Error(killed ? "browser killed" : `browser exited ${code}`));
+      else finish();
+    });
   });
 
 // After the page has loaded and drawn, it writes its height where --dump-dom shows it.
@@ -99,7 +125,9 @@ export async function previewPage(browser: string, html: string, opts: { width?:
     const page = join(dir, "page.html");
     await writeFile(page, withBootstrap(html, htmlTheme(appearance), { opaque: true }) + MEASURE);
     const common = [
-      "--headless", "--disable-gpu", "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
+      "--headless", "--disable-gpu", "--disable-dev-shm-usage", "--no-zygote",
+      "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
+      "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-breakpad",
       "--enable-logging=stderr",
       "--force-device-scale-factor=1", `--user-data-dir=${join(dir, "profile")}`, "--virtual-time-budget=5000",
       ...(process.platform === "linux" ? ["--no-sandbox"] : []),

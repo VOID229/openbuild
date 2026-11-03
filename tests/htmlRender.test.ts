@@ -81,7 +81,7 @@ test.skipIf(!browser)("html_preview measures the page and reports what it logged
   expect(p.console.some((l) => l.startsWith("drawn"))).toBe(true);
   expect(p.console.some((l) => l.includes("missing is not defined"))).toBe(true);
   expect(Buffer.from(p.png, "base64").subarray(1, 4).toString()).toBe("PNG");
-}, 30_000);
+}, 60_000);
 
 test("a page's title is read from its arguments while they're still being written", () => {
   expect(partialTitle('{"html":"<p>{\\"title\\": \\"no\\"}</p>","title":"Q3 \\"revenue\\"","hei')).toBe('Q3 "revenue"');
