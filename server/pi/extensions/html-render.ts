@@ -69,9 +69,14 @@ export function findBrowser(env: Record<string, string | undefined> = process.en
 
 // Read both pipes as they come. Waiting to drain them until Chrome exits deadlocks once a noisy
 // stderr fills the buffer, and SIGTERM does not reap Chrome's zygote, so the test process never ends.
+// The runner's DBUS_SESSION_BUS_ADDRESS is `disabled:`, which current Chrome cannot parse; it then
+// retries the bus and never gets as far as drawing the page.
+const browserEnv = { ...process.env };
+delete browserEnv.DBUS_SESSION_BUS_ADDRESS;
+delete browserEnv.DBUS_SYSTEM_BUS_ADDRESS;
 const run = (file: string, args: string[], signal?: AbortSignal) =>
   new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    const child = spawn(file, args, { detached: true, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(file, args, { detached: true, stdio: ["ignore", "pipe", "pipe"], env: browserEnv });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
     child.stdout!.on("data", (chunk) => stdout.push(chunk));
@@ -91,7 +96,7 @@ const run = (file: string, args: string[], signal?: AbortSignal) =>
       else resolve({ stdout: out, stderr: errText });
     };
     const onAbort = () => { stop(); finish(new Error("aborted")); };
-    const timer = setTimeout(() => { stop(); finish(new Error("browser timed out")); }, 25_000);
+    const timer = setTimeout(() => { stop(); finish(new Error("browser timed out")); }, 40_000);
     signal?.addEventListener("abort", onAbort, { once: true });
     child.once("error", (error) => finish(error));
     child.once("exit", (code, killed) => {
@@ -125,7 +130,7 @@ export async function previewPage(browser: string, html: string, opts: { width?:
     const page = join(dir, "page.html");
     await writeFile(page, withBootstrap(html, htmlTheme(appearance), { opaque: true }) + MEASURE);
     const common = [
-      "--headless", "--disable-gpu", "--disable-dev-shm-usage", "--no-zygote",
+      "--headless", "--disable-gpu", "--in-process-gpu", "--disable-dev-shm-usage",
       "--hide-scrollbars", "--mute-audio", "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--disable-breakpad",
       "--enable-logging=stderr",
