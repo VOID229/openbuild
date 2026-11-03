@@ -34,7 +34,7 @@ export const runtimeName = (runtime: ThreadRuntime): string =>
 
 /** The runtimes turned off on a device (undefined = this server). */
 export const disabledRuntimes = (settings: Pick<Settings, "disabledRuntimes">, deviceId?: string): ThreadRuntime[] =>
-  settings.disabledRuntimes?.[deviceId ?? ""] ?? [];
+  settings.disabledRuntimes?.[deviceId ?? ""] ?? ["hermes", "durable", "fx"];
 
 export const runtimeEnabled = (settings: Pick<Settings, "disabledRuntimes">, runtime: ThreadRuntime, deviceId?: string): boolean =>
   !disabledRuntimes(settings, deviceId).includes(runtime);
@@ -45,7 +45,6 @@ export function setRuntimeEnabled(settings: Pick<Settings, "disabledRuntimes">, 
   const rest = disabledRuntimes(settings, deviceId).filter((r) => r !== runtime);
   const next = enabled ? rest : [...rest, runtime];
   const map = { ...settings.disabledRuntimes };
-  if (next.length) map[key] = next;
-  else delete map[key];
+  map[key] = next;
   return { disabledRuntimes: map };
 }
