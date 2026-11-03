@@ -522,10 +522,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
       try {
         const a = await readAttachment(file);
         // The same image twice is checked only against what's attached now, so a removed image can come back.
-        if (a.mime.startsWith("image/") && attached.current.some((f) => f.dataUrl === a.dataUrl)) {
-          setNotice(`${a.name} is already attached.`);
-          continue;
-        }
+        // A duplicate is dropped silently: it's already in the box, so there's nothing to tell you.
+        if (a.mime.startsWith("image/") && attached.current.some((f) => f.dataUrl === a.dataUrl)) continue;
         attached.current = [...attached.current, a];
         setFiles((f) => [...f, a]);
       } catch (err) {
