@@ -1,4 +1,5 @@
 import { runStopRequested } from "../runStops";
+import { harnessSession } from "../harnessSession";
 import { localRun, Run } from "../runs";
 // HTTP routes for Pi (threads, models, commands, sign-in, install/update, extensions and skills)
 // and for projects and workspaces. Mounted by server/index.ts behind its request checks.
@@ -464,6 +465,12 @@ export function piRoutes(api: Api) {
       POST: api(async (req: Bun.BunRequest<"/api/pi/shells/:id/stop">) => {
         if (isStreamId(req.params.id)) await stopShell(req.params.id);
         return Response.json({ ok: true });
+      }),
+    },
+    "/api/pi/threads/:id/session": {
+      GET: api(async (req: Bun.BunRequest<"/api/pi/threads/:id/session">) => {
+        if (!isThreadId(req.params.id)) return bad("Bad thread id");
+        return Response.json(await harnessSession(req.params.id), { headers: { "cache-control": "no-store" } });
       }),
     },
     "/api/pi/threads/:id/compact": {

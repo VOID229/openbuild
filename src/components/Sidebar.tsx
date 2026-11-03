@@ -2,7 +2,8 @@ import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNo
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
-import { removeWorktree } from "../lib/pi";
+import { harnessSession, removeWorktree } from "../lib/pi";
+import { runtimeName } from "../lib/runtimes";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
@@ -812,6 +813,19 @@ function ChatContextMenu({
   const { mounted, visible } = usePresence(open, 180);
   const [pos, setPos] = useState<{ left: number; top: number; origin: string }>();
   const [sub, setSub] = useState<"rename" | "copy" | "snooze">();
+  const [nativeSession, setNativeSession] = useState<{ threadId: string; id: string | null }>();
+  const HarnessMark = { pi: PiMark, durable: DurableMark, fx: FxMark, codex: CodexMark, cursor: CursorMark, claude: ClaudeMark, opencode: OpencodeMark, grok: GrokMark, hermes: HermesMark }[chat?.runtime ?? "pi"];
+  useEffect(() => {
+    setNativeSession(undefined);
+    if (!open || !chat || sub !== "copy") return;
+    let cancelled = false;
+    const threadId = chat.id;
+    void harnessSession(threadId, chat.workspace?.deviceId).then(
+      (session) => { if (!cancelled) setNativeSession({ threadId, id: session.id }); },
+      () => { if (!cancelled) setNativeSession({ threadId, id: null }); },
+    );
+    return () => { cancelled = true; };
+  }, [open, sub, chat?.id, chat?.workspace?.deviceId]);
   useDismiss(open, onClose, [ref]);
 
   useLayoutEffect(() => {
@@ -977,7 +991,16 @@ function ChatContextMenu({
         "Copy",
         <>
           <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chat.id))}>
-            <Fingerprint size={15} /> Session ID
+            <Fingerprint size={15} /> Thread ID
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="menu-item"
+            disabled={nativeSession?.threadId !== chat.id || !nativeSession.id}
+            onClick={act(() => { if (nativeSession?.threadId === chat.id && nativeSession.id) void copyText(nativeSession.id); })}
+          >
+            <HarnessMark size={15} /> {runtimeName(chat.runtime ?? "pi")} {chat.runtime === "codex" ? "thread" : "session"} ID
           </button>
           <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chatMarkdown(chat)))}>
             <FileText size={15} /> As Markdown

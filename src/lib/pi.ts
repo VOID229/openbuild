@@ -18,6 +18,9 @@ const sendBounded = <T>(url: string, body: unknown, signal?: AbortSignal) =>
 /** A paired device's id; undefined means this server. */
 type DeviceId = string | undefined;
 
+export const harnessSession = (id: string, deviceId?: DeviceId) =>
+  get<{ runtime?: ThreadRuntime; id: string | null }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(id)}/session`));
+
 // ------------------------------------------------------------------ install and status
 
 export interface PiStatus {
