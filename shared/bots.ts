@@ -59,6 +59,8 @@ export interface BotStatus {
   activity?: string;
   /** The conversation it's working in. */
   conversationId?: string;
+  /** Working, but nothing to show in the chat yet (a reaction it may let be, or tidying up after a reply). */
+  quiet?: boolean;
   error?: string;
   since?: number;
 }

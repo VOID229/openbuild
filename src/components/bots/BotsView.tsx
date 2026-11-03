@@ -30,7 +30,8 @@ export function BotsView() {
   const connected = useBots((s) => s.connected);
   const loaded = useBots((s) => s.loaded);
   const statuses = useBots((s) => s.status);
-  const botStatus = Object.values(statuses).find((s) => s.conversationId === conversation?.id && s.state !== "idle");
+  // What a bot is up to shows in the chat itself; up here is only for when it goes wrong.
+  const botStatus = Object.values(statuses).find((s) => s.conversationId === conversation?.id && s.state === "error");
   const mobile = useMediaQuery("(max-width: 768px)");
   useEffect(() => useBots.getState().ensureSeeded(), []);
   // On a phone the details cover the chat, so they start closed.
@@ -52,7 +53,7 @@ export function BotsView() {
   return (
     <div className="bots-view">
       {(error || pending > 0 || !connected || botStatus) && <div className="bots-sync-status" role={error || botStatus?.state === "error" ? "alert" : "status"}>
-        <span>{error || (pending > 0 ? "Saving changes…" : !connected ? "Reconnecting to OpenBots…" : botStatus?.error || botStatus?.activity || (botStatus?.state === "error" ? "Bot could not complete the request." : "Working…"))}</span>
+        <span>{error || (pending > 0 ? "Saving changes…" : !connected ? "Reconnecting to OpenBots…" : botStatus?.error || "Bot could not complete the request.")}</span>
         {error && <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>}
       </div>}
       <div className="bots-view-content">

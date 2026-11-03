@@ -24,6 +24,11 @@ interface Mind {
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
   draft: string;
+  /** Writing a message right now: the chat shows it typing. */
+  typing: boolean;
+  /** Keep the chat clear unless it starts typing (see BotStatus.quiet). */
+  quiet: boolean;
+  activity: string;
   onSettled?: () => void;
   onExit?: (e: Error) => void;
 }
@@ -119,7 +124,7 @@ async function ensureMind(botId: string): Promise<Mind> {
     workDir(botId),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId },
   );
-  const mind: Mind = { proc, token, busy: true, sent: false, draft: "" };
+  const mind: Mind = { proc, token, busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(botId, mind);
   return mind;
@@ -165,38 +170,96 @@ export async function applyEffort(proc: Pick<PiProcess, "send">, botId: string) 
   if (level) await proc.send({ type: "set_thinking_level", level });
 }
 
-function onRecord(botId: string, mind: Mind, record: PiRecord) {
+/** Tools that put words in the chat: while they're being written, the bot is typing. */
+const WRITING = new Set(["send_message", "question"]);
+
+function show(botId: string, mind: Mind, activity?: string) {
+  if (activity) mind.activity = activity;
+  svc.setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: mind.quiet || undefined, since: Date.now() });
+}
+
+function setTyping(botId: string, mind: Mind, on: boolean) {
+  if (mind.typing === on) return;
+  mind.typing = on;
+  const conversationId = getFocus(botId);
+  if (conversationId) svc.setTyping(conversationId, botId, on);
+}
+
+export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "agent_settled") mind.onSettled?.();
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
   mind.sent ||= successfulMessageTool(record);
+  const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
-    const activity = activityFor(String(record.toolName ?? ""), record.args);
-    svc.setStatus(botId, { state: "working", activity, conversationId: getFocus(botId), since: Date.now() });
     mind.draft = "";
     const conversationId = getFocus(botId);
     if (conversationId) svc.setDraft(undefined, { conversationId, botId });
+    if (WRITING.has(tool)) setTyping(botId, mind, true);
+    else if (tool !== "react") {
+      setTyping(botId, mind, false);
+      show(botId, mind, activityFor(tool, record.args));
+    }
   }
-  const delta = record.type === "message_update" && record.assistantMessageEvent?.type === "text_delta" ? String(record.assistantMessageEvent.delta ?? "") : "";
+  if (record.type === "tool_execution_end" && WRITING.has(tool)) {
+    // Sent. Whatever it does next stays out of the chat until it types again or picks up real work.
+    setTyping(botId, mind, false);
+    mind.quiet = true;
+    show(botId, mind, "Thinking");
+  }
+  const ev = record.type === "message_update" ? record.assistantMessageEvent : undefined;
+  if (ev?.type === "toolcall_start" && WRITING.has(String(ev.toolName ?? ""))) setTyping(botId, mind, true);
+  const delta = ev?.type === "text_delta" ? String(ev.delta ?? "") : "";
   if (delta) {
     mind.draft += delta;
     const conversationId = getFocus(botId);
-    if (conversationId && !mind.sent && !"[silent]".startsWith(mind.draft.trim().toLowerCase())) svc.setDraft({ conversationId, botId, text: mind.draft.slice(-4000) }, { conversationId, botId });
+    if (conversationId && !mind.sent && !"[silent]".startsWith(mind.draft.trim().toLowerCase())) {
+      setTyping(botId, mind, true);
+      svc.setDraft({ conversationId, botId, text: mind.draft.slice(-4000) }, { conversationId, botId });
+    }
   }
 }
 
-function activityFor(tool: string, args: unknown): string {
+const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
+
+export function activityFor(tool: string, args: unknown): string {
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  if (tool === "bash" || tool === "process") return "running a command";
-  if (tool === "browser") return a.action === "open" ? `opening ${String(a.url ?? "").slice(0, 60)}` : "browsing";
-  if (tool === "read" || tool === "write" || tool === "edit") return "working with files";
-  if (tool === "ask_bot") return "asking another bot";
-  return "thinking";
+  if (tool === "bash") return "Running a command";
+  if (tool === "process") return a.action === "start" ? "Starting a program" : "Checking on a program";
+  if (tool === "browser") {
+    if (a.action === "open") {
+      const host = (() => {
+        try {
+          return new URL(String(a.url)).hostname.replace(/^www\./, "");
+        } catch {
+          return "";
+        }
+      })();
+      return host ? `Opening ${host}` : "Opening a page";
+    }
+    if (a.action === "screenshot") return "Taking a screenshot";
+    if (a.action === "type") return "Filling something in";
+    if (a.action === "click") return "Clicking around";
+    return "Browsing";
+  }
+  if (tool === "read") return base(a.path) ? `Reading ${base(a.path)}` : "Reading a file";
+  if (tool === "write") return base(a.path) ? `Writing ${base(a.path)}` : "Writing a file";
+  if (tool === "edit") return base(a.path) ? `Editing ${base(a.path)}` : "Editing a file";
+  if (tool === "remember") return "Making a note";
+  if (tool === "forget") return "Forgetting something";
+  if (tool === "search") return "Looking back through chats";
+  if (tool === "routine") return "Sorting out a routine";
+  if (tool === "ask_bot") return "Asking another bot";
+  if (tool === "manage_bot") return "Tending to the other bots";
+  return "Thinking";
 }
 
-async function run(botId: string, jobs: Wake[]) {
+async function run(botId: string, all: Wake[]) {
+  const jobs = all.filter((j) => !j.reaction || stillReacted(j.reaction));
+  if (!jobs.length) return;
   const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
-  svc.setStatus(botId, { state: "working", conversationId, activity: "thinking", since: Date.now() });
-  if (conversationId) svc.setTyping(conversationId, botId, true);
+  // A reaction may well get no answer, so the chat shows nothing unless the bot starts typing.
+  const quiet = jobs.every((j) => j.kind === "reaction");
+  svc.setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || undefined, since: Date.now() });
   setFocus(botId, conversationId);
   let mind: Mind | undefined;
   try {
@@ -204,6 +267,9 @@ async function run(botId: string, jobs: Wake[]) {
     mind.busy = true;
     mind.sent = false;
     mind.draft = "";
+    mind.typing = false;
+    mind.quiet = quiet;
+    mind.activity = "Thinking";
     const message = render(jobs, botId);
     if (!message.trim()) return;
     await applyModel(mind.proc, botId);
@@ -243,6 +309,7 @@ async function run(botId: string, jobs: Wake[]) {
       minds.delete(botId);
     }
   } finally {
+    if (mind) mind.typing = false;
     if (conversationId) {
       svc.setTyping(conversationId, botId, false);
       svc.setDraft(undefined, { conversationId, botId });

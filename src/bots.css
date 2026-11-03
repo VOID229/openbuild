@@ -1226,40 +1226,64 @@
   }
 }
 
+/* A bot at work: its mascot fidgeting beside what it's doing. */
+.bm-working {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-left: 2px;
+  animation: bm-working-in 260ms var(--ease-out, ease-out) both;
+}
+
+.bm-working-text {
+  font-size: 14px;
+  animation: shimmer 1.6s linear infinite, bm-working-in 240ms ease-out both;
+}
+
+@keyframes bm-working-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+/* Writing a message: three soft dots rolling through a wave. */
 .bm-typing {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 40px;
-  padding: 0 16px;
+  gap: 5px;
+  height: 38px;
+  padding: 0 15px;
 }
 
 .bm-typing i {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: var(--text-3);
-  animation: bm-dot 1.2s ease-in-out infinite;
+  background: var(--text-2);
+  opacity: 0.35;
+  animation: bm-dot 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
 .bm-typing i:nth-child(2) {
-  animation-delay: 0.15s;
+  animation-delay: 0.16s;
 }
 
 .bm-typing i:nth-child(3) {
-  animation-delay: 0.3s;
+  animation-delay: 0.32s;
 }
 
 @keyframes bm-dot {
   0%,
-  60%,
+  55%,
   100% {
     transform: none;
-    opacity: 0.5;
+    opacity: 0.35;
   }
-  30% {
-    transform: translateY(-4px);
-    opacity: 1;
+  25% {
+    transform: translateY(-3px) scale(1.15);
+    opacity: 0.95;
   }
 }
 
@@ -2523,7 +2547,10 @@ button.bots-details-name:hover {
   .bm-send,
   .bm-recv,
   .bm-reaction,
+  .bm-reaction-arrow,
   .bm-typing i,
+  .bm-working,
+  .bm-working-text,
   .bots-row-typing,
   .bots-sidebar-inner,
   .bots-rail-inner,

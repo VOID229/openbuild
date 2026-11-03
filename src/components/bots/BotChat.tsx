@@ -1,17 +1,24 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, Ellipsis, ImagePlus, Brain, PanelLeft, PanelRight, SmilePlus, Trash, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, PanelLeft, PanelRight, SmilePlus, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
-import { conversationName, useBots } from "../../lib/bots/store";
-import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
+import { conversationName, directOf, useBots } from "../../lib/bots/store";
+import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
+import { reactionId } from "../../../shared/bots";
 import { useStore } from "../../lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
 import { Linkify } from "../Linkify";
 import { openLightbox } from "../Lightbox";
+import { DictationButton } from "../DictationButton";
+import { useFieldDictation } from "../../lib/useFieldDictation";
 import { IconButton, Popover } from "../primitives";
+import { StashTray } from "../StashTray";
+import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
+import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { BotAvatar } from "./BotAvatar";
 import { authorName, ConversationAvatar, dividerTime, fullTime, messageText } from "./common";
 
@@ -280,6 +287,28 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
   );
 });
 
+/** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
+function Working({ botIds, bots }: { botIds: string[]; bots: Bot[] }) {
+  const statuses = useBots((s) => s.status);
+  return (
+    <>
+      {botIds.map((id) => {
+        const bot = bots.find((b) => b.id === id);
+        const activity = statuses[id]?.activity || "Thinking";
+        if (!bot) return null;
+        return (
+          <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
+            <BotAvatar look={bot.look} size={30} busy pulse={{ key: activity, mood: "idle", action: "squish" }} />
+            <span key={activity} className="bm-working-text shimmer">
+              {activity}
+            </span>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function Typing({ conversation, botIds, bots }: { conversation: Conversation; botIds: string[]; bots: Bot[] }) {
   const drafts = useBots((s) => s.drafts);
   return (
@@ -332,6 +361,9 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
+  const working = useBots(
+    useShallow((s) => Object.entries(s.status).filter(([id, st]) => st.state === "working" && st.conversationId === conversation.id && !st.quiet && !typing.includes(id)).map(([id]) => id)),
+  );
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -351,7 +383,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
 
   // Follow new messages while at the bottom, and always after the user's own. New bubbles animate
   // in, so the jump itself can be instant.
-  const count = conversation.messages.length + typing.length + draftCount;
+  const count = conversation.messages.length + typing.length + draftCount + working.length;
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
@@ -493,6 +525,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             </div>
           );
         })}
+        <Working botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
       </div>
       {away && (

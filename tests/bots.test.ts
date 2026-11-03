@@ -108,7 +108,7 @@ test("send_message, models and check-ins against a real bots database", async ()
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
       import { sendMessage, setFocus, routine } from './server/bots/agent.ts';
-      import { applyModel, applyEffort, successfulMessageTool, transcript } from './server/bots/runner.ts';
+      import { applyModel, applyEffort, successfulMessageTool, transcript, onRecord, activityFor } from './server/bots/runner.ts';
 
       const { bot, conversationId } = svc.createBot({ name: 'Egg' });
       setFocus(bot.id, conversationId);
@@ -187,6 +187,24 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.throws(() => routine(other.bot.id, { action: 'remove', id: second.id }), /No such routine/);
       a.throws(() => svc.saveRoutine(other.bot.id, { ...second, title: 'stolen' }), /routine/i);
       a.equal(db.routineOwner(second.id), bot.id);
+
+      // The chat shows typing only while a message is being written; other work shows as an activity.
+      const mind = { proc: { send: async () => ({}) }, token: '', busy: true, sent: false, draft: '', typing: false, quiet: false, activity: 'Thinking' };
+      const typingNow = () => (svc.snapshot().typing[conversationId] ?? []).includes(bot.id);
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'hmm' } });
+      a.equal(typingNow(), false);
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'browser', args: { action: 'open', url: 'https://www.example.com/x' } });
+      a.equal(svc.snapshot().status[bot.id].activity, 'Opening example.com');
+      a.equal(typingNow(), false);
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', toolName: 'send_message', contentIndex: 0 } });
+      a.equal(typingNow(), true);
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
+      a.equal(typingNow(), false);
+      a.equal(svc.snapshot().status[bot.id].quiet, true);
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '[sil' } });
+      a.equal(typingNow(), false);
+      a.equal(activityFor('read', { path: '/home/x/notes.md' }), 'Reading notes.md');
+      svc.setStatus(bot.id, { state: 'idle' });
 
       // Group instructions are included in the actual bot transcript.
       const group = svc.createConversation({ kind: 'group', name: 'Garden', botIds: [bot.id, other.bot.id], instructions: 'Only discuss the garden.' });
