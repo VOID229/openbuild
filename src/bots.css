@@ -983,6 +983,17 @@
   font-weight: 600;
 }
 
+.bm-mention-link {
+  border: 0;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bm-mention-link:hover {
+  text-decoration: underline;
+}
+
 .bm-images {
   display: flex;
   flex-wrap: wrap;
@@ -1203,6 +1214,29 @@
   align-items: center;
   gap: 5px;
   color: var(--text-2);
+}
+
+.bm-bot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: middle;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--file-link);
+  cursor: pointer;
+}
+
+.bm-bot-link > span {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+
+.bm-bot-link:hover > span {
+  text-decoration-color: currentColor;
 }
 
 /* Sending: the user's bubble rises in from the composer; a bot's settles in from its side. */

@@ -552,13 +552,17 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             );
           if (b.kind === "event") {
             const m = b.message;
+            // The bot the detail names, by id, so it still links after a rename.
+            const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
             return (
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id}>
-                <span className="bm-event-text">{m.event!.text}</span>
+                <span className="bm-event-text">
+                  <WithBotLinks text={m.event!.text} bots={bots} />
+                </span>
                 {m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
-                    {m.event!.detail}
+                    {eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
                   </span>
                 )}
               </div>

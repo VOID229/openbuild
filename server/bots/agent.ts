@@ -358,7 +358,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
       author: botId,
       at: Date.now(),
       text: "",
-      event: { kind: "created", text: "New bot", detail: created.bot.name },
+      event: { kind: "created", text: "New bot", detail: created.bot.name, bot: created.bot.id },
     });
     // The new bot introduces itself. Imported lazily: runner imports this file.
     void import("./runner").then((r) => r.wake(created.bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));

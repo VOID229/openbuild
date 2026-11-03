@@ -128,7 +128,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
                 className="bots-card-x"
                 onClick={() => {
                   st.updateConversation(conversation.id, { botIds: conversation.botIds.filter((id) => id !== b.id) });
-                  st.post(conversation.id, { author: "me", text: "", event: { kind: "left", text: "Removed", detail: b.name } });
+                  st.post(conversation.id, { author: "me", text: "", event: { kind: "left", text: "Removed", detail: b.name, bot: b.id } });
                 }}
               >
                 <Minus size={14} />
@@ -153,7 +153,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
                   className="bots-card-x bots-card-add"
                   onClick={() => {
                     st.updateConversation(conversation.id, { botIds: [...conversation.botIds, b.id] });
-                    st.post(conversation.id, { author: "me", text: "", event: { kind: "joined", text: "Added", detail: b.name } });
+                    st.post(conversation.id, { author: "me", text: "", event: { kind: "joined", text: "Added", detail: b.name, bot: b.id } });
                     st.pulse(b.id, "happy");
                   }}
                 >
