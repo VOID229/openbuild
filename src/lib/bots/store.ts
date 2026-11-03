@@ -25,6 +25,7 @@ export interface BotPrefs {
   reactions: boolean;
 }
 
+const NO_EXTENSIONS = { enabled: false, ids: [] as string[] };
 export const DEFAULT_PREFS: BotPrefs = { lively: true, track: true, reactions: true };
 
 interface BotsState {
@@ -50,6 +51,8 @@ interface BotsState {
   prefs: BotPrefs;
   /** SearXNG instances for web search. The other providers' keys are in the vault. */
   searxng: string[];
+  /** The user's own Pi extensions to load into bots as well. */
+  customExtensions: { enabled: boolean; ids: string[] };
 
   /** Bots typing right now, by conversation. */
   typing: Record<string, string[]>;
@@ -65,6 +68,7 @@ interface BotsState {
   reset: () => void;
   setPrefs: (patch: Partial<BotPrefs>) => void;
   setSearxng: (urls: string[]) => void;
+  setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   select: (id: string) => void;
   setDetailsOpen: (open: boolean) => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
@@ -132,6 +136,7 @@ export const useBots = create<BotsState>()(
       seeded: false,
       prefs: DEFAULT_PREFS,
       searxng: [],
+      customExtensions: NO_EXTENSIONS,
       typing: {},
       drafts: [],
       pulses: {},
@@ -148,6 +153,10 @@ export const useBots = create<BotsState>()(
       setSearxng: (searxng) => {
         set({ searxng });
         void send("PATCH", "/api/bots/settings", { searxng });
+      },
+      setCustomExtensions: (customExtensions) => {
+        set({ customExtensions });
+        return send("PATCH", "/api/bots/settings", { customExtensions });
       },
       select: (id) => {
         set((s) => ({
@@ -478,6 +487,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       status: e.status,
       prefs: { ...s.prefs, reactions: e.settings.reactions },
       searxng: e.settings.searxng ?? [],
+      customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       activeId: openable(e.conversations, s.activeId),
     }));
     return;
@@ -553,6 +563,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set((s) => ({ sections: e.settings.sections, prefs: { ...s.prefs, reactions: e.settings.reactions }, searxng: e.settings.searxng ?? [] }));
+    set((s) => ({ sections: e.settings.sections, prefs: { ...s.prefs, reactions: e.settings.reactions }, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS }));
   }
 }

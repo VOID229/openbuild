@@ -103,6 +103,9 @@ export const permissionModes = (runtime: "codex" | "cursor" | "claude", deviceId
 export const fxModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/fx/models${fresh ? "?fresh=1" : ""}`));
 export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));
 
+/** What bots can run on: only what the extensions they load provide. Rejects if Pi can't start with those. */
+export const botModels = (fresh = false) => get<PiModels>(`/api/bots/models${fresh ? "?fresh=1" : ""}`);
+
 /** Prices for models Pi no longer lists, by "<provider>/<model id>". */
 export const piModelPrices = (ids: string[]) =>
   get<{ models: Record<string, Pick<ModelInfo, "billing" | "price" | "priceFrom" | "contextLimit">> }>(`/api/pi/prices?ids=${encodeURIComponent(ids.join(","))}`).then((r) => r.models);

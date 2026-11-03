@@ -21,7 +21,7 @@ import { forgetPrices, lookup, priceBook, pricing, type PriceBook } from "./pric
 import { problems } from "./rpc";
 import { TEXT_RUNTIMES } from "../../shared/types";
 import { complete } from "../textGeneration";
-import { forgetModels, isThreadId, listCommands, listModels, modelEfforts } from "./sessions";
+import { forgetModels, isThreadId, listCommands, listModels, modelEfforts, type PiModels } from "./sessions";
 import { answer, compact, findShell, startShell, stopShell, restartIdle, steer, startRun } from "./remote";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
@@ -51,6 +51,20 @@ const fail = (err: unknown, status?: number) => {
 const str = (v: unknown, max = 4096): v is string => typeof v === "string" && v.length > 0 && v.length <= max;
 
 /** A Pi model as the app's ModelInfo; its id is "<provider>/<model id>". */
+/** A listing as the app wants it: each model with its group, price and speed. */
+export async function modelListing(r: PiModels, fresh = false) {
+  // Without the built-in list, every provider keeps its own group; without prices, spend
+  // shows only what Pi priced itself.
+  const [builtins, book, speeds] = await Promise.all([
+    auth.builtinProviders().catch(() => undefined),
+    priceBook().catch((err) => void console.warn("[pi] model prices unavailable:", (err as Error).message)),
+    auth.speedsFromPi(fresh).catch((err) => void console.warn("[pi] model speeds unavailable:", (err as Error).message)),
+  ]);
+  // `models` stays the full list (routing, priorities and digests use it); `scope` says which
+  // of them this device's Pi settings put in the picker.
+  return { models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined, speeds ?? undefined)), defaultModel: r.defaultModel, scope: r.scope, checkedAt: r.checkedAt };
+}
+
 function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook, speeds?: Record<string, Speed[]>): ModelInfo {
   const own = speeds?.[`${m.provider}/${m.id}`];
   return {
@@ -193,17 +207,7 @@ export function piRoutes(api: Api) {
         try {
           const fresh = new URL(req.url).searchParams.has("fresh");
           if (fresh) forgetPrices();
-          // Without the built-in list, every provider keeps its own group; without prices, spend
-          // shows only what Pi priced itself.
-          const [r, builtins, book, speeds] = await Promise.all([
-            listModels(fresh),
-            auth.builtinProviders().catch(() => undefined),
-            priceBook().catch((err) => void console.warn("[pi] model prices unavailable:", (err as Error).message)),
-            auth.speedsFromPi(fresh).catch((err) => void console.warn("[pi] model speeds unavailable:", (err as Error).message)),
-          ]);
-          // `models` stays the full list (routing, priorities and digests use it); `scope` says which
-          // of them this device's Pi settings put in the picker.
-          return Response.json({ models: r.models.map((m) => toModelInfo(m, builtins, book ?? undefined, speeds ?? undefined)), defaultModel: r.defaultModel, scope: r.scope, checkedAt: r.checkedAt });
+          return Response.json(await modelListing(await listModels(fresh), fresh));
         } catch (err) {
           return fail(err, 502);
         }

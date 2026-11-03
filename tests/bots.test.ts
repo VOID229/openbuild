@@ -566,6 +566,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
       const svc = await import('./server/bots/service.ts');
       const { getFocus } = await import('./server/bots/agent.ts');
       const { wake, stop } = await import('./server/bots/runner.ts');
+      const { piFlags } = await import('./server/bots/extensions.ts');
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
 
@@ -579,6 +580,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
           }
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
+        mind.loaded = JSON.stringify(piFlags());
         minds.set(botId, mind);
       };
       const first = svc.createBot({ name: 'First' });

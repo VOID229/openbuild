@@ -1,7 +1,9 @@
 // The app's view of OpenBots: a snapshot, then a stream of changes, plus the actions the UI takes.
 // Bots themselves don't use these routes; their tools go through the socket in agent.ts.
 import { computerApi } from "../computers/api";
+import { modelListing } from "../pi/routes";
 import { getBot } from "./db";
+import { available, botModels } from "./extensions";
 import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
@@ -121,6 +123,26 @@ export function botRoutes(api: Api) {
           return json(svc.updateSettings(body));
         } catch (err) {
           return fail(err);
+        }
+      }),
+    },
+    // The user's Pi extensions, and what bots can run on with the ones they've switched on.
+    "/api/bots/extensions": {
+      GET: api(() => {
+        try {
+          return json({ extensions: available() });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/models": {
+      GET: api(async (req) => {
+        try {
+          const fresh = new URL(req.url).searchParams.has("fresh");
+          return json(await modelListing(await botModels(fresh), fresh));
+        } catch (err) {
+          return bad(err instanceof Error ? err.message : "Pi couldn't start", 502);
         }
       }),
     },

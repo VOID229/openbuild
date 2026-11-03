@@ -604,7 +604,7 @@ export interface PiModels {
 }
 let modelsCache: { at: number; value: Promise<PiModels> } | undefined;
 /** Providers seen in the last good listing, so a half-finished one can be recognised. */
-let knownProviders = new Set<string>();
+const listing = { known: new Set<string>() };
 
 /**
  * Pi answers `get_available_models` from a snapshot that fills in as each provider's auth check
@@ -613,7 +613,7 @@ let knownProviders = new Set<string>();
  * app then switched a chat away from a Claude model. Ask again until the snapshot settles: every
  * provider from the last listing is back, or two answers in a row agree.
  */
-async function settledModels(p: PiProcess): Promise<any[]> {
+export async function settledModels(p: PiProcess, memory = listing): Promise<any[]> {
   const ask = async () => (await p.send<{ models: any[] }>({ type: "get_available_models" })).models;
   const providers = (models: any[]) => new Set<string>(models.map((m) => m.provider));
   const deadline = Date.now() + 8_000;
@@ -621,19 +621,19 @@ async function settledModels(p: PiProcess): Promise<any[]> {
   let previous: string | undefined;
   for (let wait = 150; Date.now() < deadline; wait = Math.min(wait * 2, 1_000)) {
     const have = providers(models);
-    const missing = [...knownProviders].some((id) => !have.has(id));
+    const missing = [...memory.known].some((id) => !have.has(id));
     const key = [...have].sort().join(",") + "#" + models.length;
-    if (!missing && (knownProviders.size > 0 || key === previous)) break;
+    if (!missing && (memory.known.size > 0 || key === previous)) break;
     previous = key;
     await new Promise((r) => setTimeout(r, wait));
     models = await ask();
   }
-  knownProviders = providers(models);
+  memory.known = providers(models);
   return models;
 }
 
 /** Pi's model scope, or undefined. A scope that can't be resolved must never stop models being listed. */
-async function modelScope(): Promise<ModelScope | undefined> {
+export async function modelScope(): Promise<ModelScope | undefined> {
   try {
     // Loaded here so this module doesn't import auth.ts (which imports this one) at load time.
     const { modelScope: resolve } = await import("./auth");

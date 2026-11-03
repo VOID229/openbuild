@@ -255,6 +255,16 @@ export interface BotsSettings {
   onboarding?: "active" | "done";
   /** SearXNG instances for bot_web_search, in priority order. Other providers' keys live in the vault. */
   searxng?: string[];
+  /** The user's own Pi extensions and packages to load into bots as well. All off until picked. */
+  customExtensions?: { enabled: boolean; ids: string[] };
+}
+
+/** One of the user's Pi extensions or packages, as Settings → Bots lists them. */
+export interface BotExtension {
+  id: string;
+  name: string;
+  description?: string;
+  kind: "extension" | "package";
 }
 
 /** What a bot replies when it has nothing to say. Never shown in a chat. */

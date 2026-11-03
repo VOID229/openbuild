@@ -8,6 +8,7 @@ import { conversationTitle, firstName, reactionId, pollVotesVisible, replyBubble
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
+import { piFlags } from "./extensions";
 import { botsDir } from "./db";
 import * as db from "./db";
 import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus } from "./agent";
@@ -15,11 +16,12 @@ import * as svc from "./service";
 import type { Wake } from "./service";
 
 const IDLE = 20 * 60 * 1000;
-const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "remember", "forget", "search", "routine", "ask_bot", "manage_bot"].join(",");
 
 interface Mind {
   proc: PiProcess;
   token: string;
+  /** The extensions it started with. */
+  loaded: string;
   busy: boolean;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
@@ -120,15 +122,21 @@ function workDir(botId: string) {
 
 async function ensureMind(botId: string): Promise<Mind> {
   const existing = minds.get(botId);
-  if (existing && !existing.proc.exited) return existing;
+  // The user changed which extensions bots load. Only ever reached between turns, and the session carries on.
+  if (existing && !existing.proc.exited && existing.loaded !== JSON.stringify(piFlags())) {
+    revokeToken(existing.token);
+    existing.proc.close();
+    minds.delete(botId);
+  } else if (existing && !existing.proc.exited) return existing;
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
   const token = mintToken(botId);
+  const flags = piFlags();
   const proc = new PiProcess(
-    ["--session-dir", sessionDir(), "--session-id", botId, "--no-skills", "--no-context-files", "--no-mcp", "--no-builtin-tools", "--tools", TOOLS, "-e", join(import.meta.dir, "extension.ts")],
+    ["--session-dir", sessionDir(), "--session-id", botId, ...flags],
     workDir(botId),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId },
   );
-  const mind: Mind = { proc, token, busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
+  const mind: Mind = { proc, token, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(botId, mind);
   return mind;
@@ -146,19 +154,24 @@ function piDefaultModel(): string | undefined {
 
 /** Put a bot's Pi on its model before a run. A model that can't be used fails the reply instead of quietly running on another. */
 export async function applyModel(proc: Pick<PiProcess, "send">, botId: string) {
-  const model = db.getBot(botId)?.model || svc.getSettings().defaultModel || piDefaultModel();
+  const chosen = db.getBot(botId)?.model || svc.getSettings().defaultModel;
+  const model = chosen || piDefaultModel();
   if (!model?.includes("/")) return;
   const slash = model.indexOf("/");
   const provider = model.slice(0, slash);
   const modelId = model.slice(slash + 1);
   const state = await proc.send<{ model?: { provider: string; id: string } }>({ type: "get_state" });
-  if (state.model?.provider !== provider || state.model?.id !== modelId) await proc.send({ type: "set_model", provider, modelId }, 20_000);
+  if (state.model?.provider === provider && state.model?.id === modelId) return;
+  // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so Pi's next best will do.
+  await proc.send({ type: "set_model", provider, modelId }, 20_000).catch((err) => {
+    if (chosen) throw err;
+  });
 }
 
 /** Our extension returns a posted message id only after the service actually accepted it. */
 export function successfulMessageTool(record: PiRecord): boolean {
   return record.type === "tool_execution_end"
-    && (record.toolName === "send_message" || record.toolName === "question")
+    && (record.toolName === "send_message" || record.toolName === "question" || record.toolName === "poll")
     && !record.isError && !record.result?.isError
     && typeof record.result?.details?.id === "string" && !!record.result.details.id;
 }

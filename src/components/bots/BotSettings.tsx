@@ -3,7 +3,7 @@
 // them, the web search providers they share, and how lively bots are.
 import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { piModels, type PiModels } from "../../lib/pi";
+import { botModels, type PiModels } from "../../lib/pi";
 import { providerName, providerOf } from "../../lib/models";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
@@ -14,6 +14,7 @@ import { BrandIcon, Popover, SettingsHeading, Toggle } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
+import { BotExtensions } from "./BotExtensions";
 import { BotWebSearch } from "./BotWebSearch";
 
 type Editing = { kind: "bot"; id: string } | { kind: "group"; id: string };
@@ -44,19 +45,19 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
   { value: "high", label: "Every hour" },
 ];
 
-/** A bot's model: Pi's models, with "Default" on top for bots that follow whatever the default is. */
+/** A bot's model: the models bots can run on, with "Default" on top for bots that follow whatever the default is. */
 function BotModelSelect({ bot }: { bot: Bot }) {
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState<PiModels>();
+  const [failed, setFailed] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const detection = useStore((s) => s.detection.pi);
-  const models = listing?.models ?? detection?.models;
+  const models = listing?.models;
   const fallback = listing?.defaultModel;
   useEffect(() => {
     let live = true;
-    void piModels()
+    void botModels()
       .then((r) => live && setListing(r))
-      .catch(() => {});
+      .catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
@@ -71,7 +72,7 @@ function BotModelSelect({ bot }: { bot: Bot }) {
     <span className="select-wrap select-grow bots-set-model">
       <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label="Model" onClick={() => setOpen((o) => !o)}>
         {bot.model && <BrandIcon id={bot.model} />}
-        <span className="select-value">{bot.model ? (current?.name ?? `${bot.model} (unavailable)`) : `Default${fallback ? ` · ${nameOf(fallback)}` : ""}`}</span>
+        <span className="select-value">{bot.model ? (current?.name ?? (listing ? `${bot.model} (unavailable)` : bot.model)) : `Default${fallback ? ` · ${nameOf(fallback)}` : ""}`}</span>
         {current && <span className="select-hint">{providerName(providerOf(current))}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
@@ -82,7 +83,7 @@ function BotModelSelect({ bot }: { bot: Bot }) {
         </button>
         <ModelMenu
           selected={{ plan: "pi", id: bot.model ?? "" }}
-          piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : detection}
+          piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : { plan: "pi", status: failed ? "error" : "checking", models: [] }}
           scopedOnly
           onPick={(ref) => pick(ref.id)}
         />
@@ -442,6 +443,13 @@ export function BotsSettingsSection() {
 
       <section className="pi-block">
         <BotWebSearch />
+      </section>
+
+      <section className="pi-block">
+        <div className="pi-subhead">
+          <h3>Custom extensions</h3>
+        </div>
+        <BotExtensions />
       </section>
 
       <section className="pi-block">
