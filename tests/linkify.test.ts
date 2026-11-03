@@ -28,3 +28,27 @@ describe("Linkify", () => {
     expect(render("no links here")).toBe("no links here");
   });
 });
+
+describe("file links", () => {
+  test("routes file URLs through the sending bot and keeps punctuation outside", () => {
+    const html = renderToStaticMarkup(createElement(Linkify, {
+      text: "Story: file:///tmp/story.md.",
+      fileHref: (url) => `/api/bots/helper/file?url=${encodeURIComponent(url)}`,
+    }));
+    expect(html).toContain('class="link file-link"');
+    expect(html).toContain('href="/api/bots/helper/file?url=file%3A%2F%2F%2Ftmp%2Fstory.md"');
+    expect(html).toContain('file:///tmp/story.md</a>.');
+  });
+
+  test("leaves file URLs alone without a computer context", () => {
+    expect(render("file:///tmp/story.md")).toBe("file:///tmp/story.md");
+  });
+
+  test("preserves encoded spaces in file URLs", () => {
+    const html = renderToStaticMarkup(createElement(Linkify, {
+      text: "file:///tmp/my%20story.md",
+      fileHref: (url) => `/files?url=${encodeURIComponent(url)}`,
+    }));
+    expect(html).toContain('href="/files?url=file%3A%2F%2F%2Ftmp%2Fmy%2520story.md"');
+  });
+});

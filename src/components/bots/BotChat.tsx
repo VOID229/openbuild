@@ -35,22 +35,64 @@ const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Dat
 const firstName = (b: Bot) => b.name.split(/\s+/)[0]!;
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|‍|️){1,12}$/u;
 
+/** A bot named in the chat, with its mascot, linking to its thread. */
+function BotLink({ bot }: { bot: Bot }) {
+  const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
+  if (!thread) return <>{bot.name}</>;
+  return (
+    <button type="button" className="bm-bot-link" onClick={() => useBots.getState().select(thread)}>
+      <BotAvatar look={bot.look} size={16} alive={false} />
+      <span>{bot.name}</span>
+    </button>
+  );
+}
+
+const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Text with every bot it names linked. Longer names first, so "Sage Two" wins over "Sage". */
+function WithBotLinks({ text, bots }: { text: string; bots: Bot[] }) {
+  const named = bots.filter((b) => b.name.trim()).sort((a, b) => b.name.length - a.name.length);
+  if (!named.length) return <>{text}</>;
+  const pattern = new RegExp(`(?<![\\p{L}\\d])(?:${named.map((b) => escapeRegExp(b.name)).join("|")})(?![\\p{L}\\d])`, "gu");
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(pattern)) {
+    const start = m.index ?? 0;
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(<BotLink key={start} bot={named.find((b) => b.name === m[0])!} />);
+    last = start + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return <>{parts}</>;
+}
+
+/** An @mention in the bot's colour, opening its thread. */
+function Mention({ bot }: { bot: Bot }) {
+  const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
+  const style = { "--mention": colorOf(bot.look).hex } as React.CSSProperties;
+  if (!thread) return <span className="bm-mention" style={style}>@{firstName(bot)}</span>;
+  return (
+    <button type="button" className="bm-mention bm-mention-link" style={style} onClick={() => useBots.getState().select(thread)}>
+      @{firstName(bot)}
+    </button>
+  );
+}
+
 /** Bold, inline code, links and @mentions (in the mentioned bot's colour). */
-const RichText = memo(function RichText({ text, bots }: { text: string; bots: Bot[] }) {
+const RichText = memo(function RichText({ text, bots, botId }: { text: string; bots: Bot[]; botId?: string }) {
+  const fileHref = botId ? (url: string) => `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}` : undefined;
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|@([\p{L}\d][\p{L}\d_-]*)/gu)) {
     const start = m.index ?? 0;
-    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} />);
+    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} />);
     if (m[1]) parts.push(<code key={start}>{m[1]}</code>);
     else if (m[2]) parts.push(<strong key={start}>{m[2]}</strong>);
     else {
       const bot = bots.find((b) => firstName(b).toLowerCase() === m[3]!.toLowerCase());
       parts.push(
         bot ? (
-          <span key={start} className="bm-mention" style={{ "--mention": colorOf(bot.look).hex } as React.CSSProperties}>
-            @{firstName(bot)}
-          </span>
+          <Mention key={start} bot={bot} />
         ) : (
           m[0]
         ),
@@ -58,7 +100,7 @@ const RichText = memo(function RichText({ text, bots }: { text: string; bots: Bo
     }
     last = start + m[0].length;
   }
-  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} />);
+  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} />);
   return <>{parts}</>;
 });
 
@@ -313,7 +355,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           )}
           {m.text && !m.question && (
             <div className="bm-text">
-              <RichText text={m.text} bots={bots} />
+              <RichText text={m.text} bots={bots} botId={m.author === "me" ? undefined : m.author} />
             </div>
           )}
           {m.question && <QuestionCard conversation={conversation} message={m} />}
@@ -387,11 +429,11 @@ function Typing({ conversation, botIds, bots }: { conversation: Conversation; bo
                   {draft ? (
                     <div className="bm-bubble">
                       <div className="bm-text">
-                        <RichText text={draft} bots={bots} />
+                        <RichText text={draft} bots={bots} botId={id} />
                       </div>
                     </div>
                   ) : (
-                    <div className="bm-bubble bm-typing" aria-label={`${bot.name} is typing`}>
+                    <div className="bm-bubble bm-typing" role="status" aria-label={`${bot.name} is typing`}>
                       <i />
                       <i />
                       <i />

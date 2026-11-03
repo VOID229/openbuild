@@ -1,5 +1,7 @@
 // The app's view of OpenBots: a snapshot, then a stream of changes, plus the actions the UI takes.
 // Bots themselves don't use these routes; their tools go through the socket in agent.ts.
+import { computerApi } from "../computers/api";
+import { getBot } from "./db";
 import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
@@ -19,6 +21,28 @@ const fail = (err: unknown) => {
 export function botRoutes(api: Api) {
   svc.ensureStarted();
   return {
+    "/api/bots/:id/file": {
+      GET: api(async (req: Bun.BunRequest<"/api/bots/:id/file">) => {
+        try {
+          const bot = getBot(req.params.id);
+          if (!bot?.computer) return bad("Bot computer not found", 404);
+          const url = new URL(new URL(req.url).searchParams.get("url") ?? "");
+          if (url.protocol !== "file:" || (url.hostname && url.hostname !== "localhost")) return bad("Invalid file URL", 400);
+          const path = decodeURIComponent(url.pathname);
+          if (path.includes("\0")) return bad("Invalid file path", 400);
+          const result = await computerApi(bot.computer.device).call(bot.id, "fs", { op: "read", path }) as { data: string };
+          const name = path.split("/").pop() || "download";
+          return new Response(Buffer.from(result.data, "base64"), { headers: {
+            "content-type": "application/octet-stream",
+            "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+            "x-content-type-options": "nosniff",
+            "cache-control": "no-store",
+          } });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/stream": {
       GET: api((req: Request, server: Bun.Server<unknown>) => {
         server.timeout(req, 0);

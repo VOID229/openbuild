@@ -48,6 +48,7 @@
   --danger: #c93a3a;
   --danger-bg: rgba(201, 58, 58, 0.08);
   --ok: #2f8a4d;
+  --file-link: #2563eb;
   --bubble: #f0f0ee;
   --code-bg: #f6f6f4;
   --scrim: rgba(20, 20, 20, 0.18);
@@ -101,6 +102,7 @@
   --danger: #ef6b6b;
   --danger-bg: rgba(239, 107, 107, 0.1);
   --ok: #5cc27e;
+  --file-link: #70a7ff;
   --bubble: #262626;
   --code-bg: #151515;
   --scrim: rgba(0, 0, 0, 0.45);
@@ -9309,3 +9311,5 @@ a.btn-primary {
 @media (max-width: 520px) { .ar-field { grid-template-columns: 1fr; gap: 8px; } }
 
 .row-actions { display: flex; gap: 8px; flex: none; }
+
+.link.file-link { color: var(--file-link); text-decoration-color: currentColor; }
