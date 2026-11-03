@@ -6,10 +6,10 @@ import { userVisiblePrompt } from "../shared/promptDisplay";
 // on in the native session instead of starting over.
 //
 // The dialog is offered at most once per data directory: the first answer (import or skip) is
-// recorded on disk before any work starts, so restarts, other browsers and failed imports never
-// bring it back.
+// recorded after successful imports. Failed imports can be retried without duplicating threads.
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import type { AskPart, Chat, Message, Part, ToolPart } from "../src/lib/types";
@@ -37,6 +37,14 @@ export const BINDING = "imported-session:";
 
 /** A native session as it would be imported: its thread and the adapter mapping that resumes it. */
 interface Found { nativeId: string; load: () => Promise<{ chat: Chat; mapping: object } | undefined> }
+
+/** Bounded I/O: large histories must not spawn a process or promise per thread. */
+async function concurrent<T>(items: T[], use: (item: T) => Promise<void>) {
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, items.length) }, async () => {
+    while (next < items.length) await use(items[next++]!);
+  }));
+}
 
 const OUTPUT_LIMIT = 12000;
 const threadId = (runtime: ImportRuntime, nativeId: string) => `${runtime}-${createHash("sha256").update(nativeId).digest("hex").slice(0, 32)}`;
@@ -123,6 +131,7 @@ class Thread {
 const chatOf = (runtime: ImportRuntime, nativeId: string, t: Thread, o: { title?: string; named?: boolean; createdAt: number; updatedAt: number; cwd: string }): Chat => ({
   id: threadId(runtime, nativeId),
   runtime,
+  archived: true,
   title: (o.title || t.messages.find((m) => m.role === "user")?.content || "Imported thread").trim().slice(0, 100),
   ...(o.title && o.named ? { titleSource: "auto" as const } : {}),
   createdAt: o.createdAt || o.updatedAt,
@@ -142,8 +151,8 @@ const CLAUDE_NOISE = /^\s*(<command-|<local-command|Caveat: )/;
 const INTERRUPTED = /^\[Request interrupted by user/;
 
 /** The session's first prompt says where it came from: only people's own sessions, not SDK-driven or `claude -p` ones (OpenBuild's included). */
-function claudeEntrypoint(file: string): string | undefined {
-  const head = readFileSync(file, "utf8").slice(0, 1 << 20);
+function claudeEntrypoint(source: string): string | undefined {
+  const head = source.slice(0, 1 << 20);
   for (const line of head.split("\n")) {
     try {
       const r = JSON.parse(line);
@@ -164,16 +173,20 @@ async function claudeSessions(): Promise<Found[]> {
       const id = f.slice(0, -6), file = join(claudeRoot(), dir, f);
       if (own.has(id)) continue;
       // Sessions nobody prompted in (opened and quit, only slash commands) never become threads: don't count them.
-      try { if (claudeEntrypoint(file)?.startsWith("sdk-") || !projectClaude(id, file)) continue; } catch { continue; }
-      found.push({ nativeId: id, load: async () => projectClaude(id, file) });
+      try {
+        const source = await readFile(file, "utf8");
+        if (claudeEntrypoint(source)?.startsWith("sdk-")) continue;
+        const loaded = projectClaude(id, file, source);
+        if (loaded) found.push({ nativeId: id, load: async () => loaded });
+      } catch { continue; }
     }
   }
   return found;
 }
 
-export function projectClaude(sessionId: string, file: string): { chat: Chat; mapping: object } | undefined {
+export function projectClaude(sessionId: string, file: string, source = readFileSync(file, "utf8")): { chat: Chat; mapping: object } | undefined {
   const records: any[] = [];
-  for (const line of readFileSync(file, "utf8").split("\n")) {
+  for (const line of source.split("\n")) {
     if (!line.trim()) continue;
     try { records.push(JSON.parse(line)); } catch { /* A writer may not have finished its last line. */ }
   }
@@ -236,9 +249,11 @@ export function projectClaude(sessionId: string, file: string): { chat: Chat; ma
   if (!t.turns) return;
   anchors.push(anchor);
   t.close();
-  const title = records.findLast((r) => r.type === "ai-title" && typeof r.aiTitle === "string")?.aiTitle
+  const customTitle = records.findLast((r) => r.type === "custom-title" && typeof r.customTitle === "string")?.customTitle;
+  const title = customTitle ?? records.findLast((r) => r.type === "ai-title" && typeof r.aiTitle === "string")?.aiTitle
     ?? records.findLast((r) => r.type === "summary" && typeof r.summary === "string")?.summary;
   const chat = chatOf("claude", sessionId, t, { title, named: !!title, createdAt: ms(branch[0].timestamp), updatedAt: statSync(file).mtimeMs, cwd });
+  if (customTitle) chat.titleSource = "user";
   return { chat, mapping: { id: sessionId, cwd: resolve(cwd), turns: t.turns, anchors } };
 }
 
@@ -265,19 +280,29 @@ async function withCodex<T>(use: (p: CodexProcess) => Promise<T>): Promise<T> {
 async function codexSessions(): Promise<Found[]> {
   if (!codexBin()) return [];
   const own = ownSessions("codex");
-  const threads: any[] = [];
-  await withCodex(async (p) => {
-    let cursor: string | undefined;
-    for (let page = 0; page < 100; page++) {
-      const r = await p.request("thread/list", { limit: 100, ...(cursor ? { cursor } : {}) }, 30_000);
-      threads.push(...(r.data ?? []));
-      if (!r.nextCursor || r.nextCursor === cursor) break;
-      cursor = r.nextCursor;
+  return withCodex(async (p) => {
+    const threads = new Map<string, any>();
+    // Archived native threads still belong in the import.
+    for (const archived of [false, true]) {
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const r = await p.request("thread/list", { limit: 100, archived, ...(cursor ? { cursor } : {}) }, 30_000);
+        if (!Array.isArray(r.data)) throw new Error("Invalid Codex thread listing");
+        for (const th of r.data) if (th?.id) threads.set(th.id, th);
+        cursor = r.nextCursor || undefined;
+        if (cursor && seen.has(cursor)) throw new Error("Codex repeated a listing cursor");
+        if (cursor) seen.add(cursor);
+      } while (cursor);
     }
+    const found: Found[] = [];
+    await concurrent([...threads.values()].filter((th) => th.cwd && !own.has(th.id) && th.originator !== "openbuild" && !th.ephemeral && !th.parentThreadId && !(th.source && typeof th.source === "object" && "subagent" in th.source)), async (th) => {
+      const detail = (await p.request("thread/read", { threadId: th.id, includeTurns: true }, 30_000)).thread;
+      const loaded = projectCodex({ ...th, ...detail, name: detail?.name || th.name });
+      if (loaded) found.push({ nativeId: th.id, load: async () => loaded });
+    });
+    return found;
   });
-  return threads
-    .filter((th) => th?.id && th.cwd && !own.has(th.id) && th.originator !== "openbuild" && !th.ephemeral && !th.parentThreadId && !(th.source && typeof th.source === "object" && "subagent" in th.source))
-    .map((th) => ({ nativeId: th.id, load: () => withCodex(async (p) => projectCodex((await p.request("thread/read", { threadId: th.id, includeTurns: true }, 60_000)).thread)) }));
 }
 
 export function projectCodex(th: any): { chat: Chat; mapping: object } | undefined {
@@ -435,7 +460,7 @@ async function pages(c: Awaited<ReturnType<typeof opencodeConnect>>, path: strin
     if (!Array.isArray(r?.data)) throw new Error("Invalid OpenCode listing");
     out.push(...r.data);
     cursor = r.cursor?.next ?? undefined;
-    if (cursor && seen.has(cursor)) break;
+    if (cursor && seen.has(cursor)) throw new Error("OpenCode repeated a listing cursor");
     if (cursor) seen.add(cursor);
   } while (cursor);
   return out;
@@ -449,10 +474,15 @@ async function withOpencode<T>(use: (c: Awaited<ReturnType<typeof opencodeConnec
 async function opencodeSessions(): Promise<Found[]> {
   if (!opencodeBin() && !process.env.OPENCODE_SERVER_URL) return [];
   const own = ownSessions("opencode");
-  const sessions = await withOpencode((c) => pages(c, "/api/session"));
-  return sessions
-    .filter((s) => s?.id && s.location?.directory && !own.has(s.id) && !s.parentID && !s.revert && !s.fork)
-    .map((s) => ({ nativeId: s.id, load: () => withOpencode(async (c) => projectOpencode(s, await pages(c, `/api/session/${encodeURIComponent(s.id)}/message`))) }));
+  return withOpencode(async (c) => {
+    const sessions = await pages(c, "/api/session");
+    const found: Found[] = [];
+    await concurrent(sessions.filter((s) => s?.id && s.location?.directory && !own.has(s.id) && !s.parentID && !s.revert && !s.fork), async (s) => {
+      const loaded = projectOpencode(s, await pages(c, `/api/session/${encodeURIComponent(s.id)}/message`));
+      if (loaded) found.push({ nativeId: s.id, load: async () => loaded });
+    });
+    return found;
+  });
 }
 
 export function projectOpencode(s: any, messages: any[]): { chat: Chat; mapping: object } | undefined {
@@ -489,23 +519,37 @@ export function projectOpencode(s: any, messages: any[]): { chat: Chat; mapping:
 // ------------------------------------------------------------------ the one-time offer
 
 const SCANNERS: Record<ImportRuntime, () => Promise<Found[]>> = { claude: claudeSessions, codex: codexSessions, cursor: cursorSessions, opencode: opencodeSessions };
-const timeout = <T>(p: Promise<T>, ms: number, what: string) =>
-  Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`${what} didn't answer in time`)), ms).unref?.())]);
+async function timeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([p, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${what} didn't answer in time`)), ms);
+      timer.unref?.();
+    })]);
+  } finally { clearTimeout(timer); }
+}
 
 /** Sessions not in OpenBuild yet (an earlier import, or a deleted import, counts as in). */
 async function importable(runtime: ImportRuntime): Promise<Found[]> {
   const found = await timeout(SCANNERS[runtime](), 60_000, `Listing ${runtime} sessions`);
-  return found.filter((f) => !storage.chatExists(threadId(runtime, f.nativeId)));
+  const unique = [...new Map(found.map((f) => [f.nativeId, f])).values()]
+    .filter((f) => !storage.chatExists(threadId(runtime, f.nativeId)));
+  const valid: Found[] = [];
+  await concurrent(unique, async (f) => {
+    const loaded = await timeout(f.load(), 30_000, `Reading a ${runtime} session`);
+    if (loaded) valid.push({ nativeId: f.nativeId, load: async () => loaded });
+  });
+  return valid;
 }
 
 export const offered = () => storage.getValue(DONE_KEY) !== undefined;
 
-let scan: { at: number; value: Promise<Partial<Record<ImportRuntime, number>>> } | undefined;
+let scan: { at: number; value: Promise<Partial<Record<ImportRuntime, Found[]>>> } | undefined;
 /** How many sessions each runtime has to import; shared briefly so several windows don't each spawn Codex/OpenCode. */
-function counts(): Promise<Partial<Record<ImportRuntime, number>>> {
+function counts(): Promise<Partial<Record<ImportRuntime, Found[]>>> {
   if (scan && Date.now() - scan.at < 10 * 60_000) return scan.value;
-  const value = Promise.all(IMPORT_RUNTIMES.map(async (r) => [r, await importable(r).then((f) => f.length, () => 0)] as const))
-    .then((pairs) => Object.fromEntries(pairs.filter(([, n]) => n > 0)));
+  const value = Promise.all(IMPORT_RUNTIMES.map(async (r) => [r, await importable(r).catch(() => [])] as const))
+    .then((pairs) => Object.fromEntries(pairs.filter(([, sessions]) => sessions.length > 0)));
   scan = { at: Date.now(), value };
   return value;
 }
@@ -513,30 +557,38 @@ function counts(): Promise<Partial<Record<ImportRuntime, number>>> {
 /** Whether to offer the import, and what there is: nothing once it was answered. */
 export async function offer(): Promise<{ pending: boolean; runtimes: Partial<Record<ImportRuntime, number>> }> {
   if (offered()) return { pending: false, runtimes: {} };
-  const runtimes = await counts();
+  const found = await counts();
+  const runtimes = Object.fromEntries(Object.entries(found).map(([r, sessions]) => [r, sessions.length]));
   // Answered in another window while this one counted.
   if (offered()) return { pending: false, runtimes: {} };
   return { pending: Object.keys(runtimes).length > 0, runtimes };
 }
 
 /**
- * The user's answer: import these runtimes' sessions ([] = skip). Recorded before anything is read,
- * so the offer is never made again, whatever happens next. A second answer imports nothing.
+ * The user's answer: import these runtimes' sessions ([] = skip). Successful answers are
+ * persisted; failures remain retryable. Concurrent windows share the same import.
  */
-export async function answer(runtimes: ImportRuntime[]): Promise<{ imported: Partial<Record<ImportRuntime, number>>; errors: Partial<Record<ImportRuntime, string>> }> {
+let answering: ReturnType<typeof importAnswer> | undefined;
+export function answer(runtimes: ImportRuntime[]): ReturnType<typeof importAnswer> {
+  if (answering) return answering;
+  answering = importAnswer(runtimes).finally(() => { answering = undefined; });
+  return answering;
+}
+
+async function importAnswer(runtimes: ImportRuntime[]): Promise<{ imported: Partial<Record<ImportRuntime, number>>; errors: Partial<Record<ImportRuntime, string>> }> {
   const imported: Partial<Record<ImportRuntime, number>> = {}, errors: Partial<Record<ImportRuntime, string>> = {};
   if (offered()) return { imported, errors };
-  storage.setValue(DONE_KEY, JSON.stringify({ at: Date.now(), runtimes }));
+  const cached = runtimes.length && scan ? await scan.value : undefined;
   scan = undefined;
   for (const runtime of runtimes) {
     try {
       let n = 0;
-      for (const f of await importable(runtime)) {
+      for (const f of cached?.[runtime] ?? await importable(runtime)) {
         try {
           const loaded = await timeout(f.load(), 120_000, `Reading a ${runtime} session`);
           if (loaded && save(runtime, f.nativeId, loaded.chat, loaded.mapping)) n++;
         } catch (err) {
-          console.warn(`[import] ${runtime} session ${f.nativeId}:`, (err as Error).message);
+          errors[runtime] = `Some sessions failed to import: ${(err as Error).message}`;
         }
       }
       imported[runtime] = n;
@@ -544,6 +596,7 @@ export async function answer(runtimes: ImportRuntime[]): Promise<{ imported: Par
       errors[runtime] = (err as Error).message;
     }
   }
+  if (!Object.keys(errors).length) storage.setValue(DONE_KEY, JSON.stringify({ at: Date.now(), runtimes }));
   return { imported, errors };
 }
 

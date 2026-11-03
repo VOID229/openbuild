@@ -211,3 +211,20 @@ test("projects a Codex thread's turns, counting native turns separately from pro
     assert.equal(projected.chat.createdAt, 1700000000000);
   `);
 });
+
+test("preserves Claude custom names and closes even freshly updated imports", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-name-"));
+  await run(dir, `${claudeFixture}
+    import { strict as assert } from "node:assert";
+    import { appendFile } from "node:fs/promises";
+    await appendFile(join(dir, native + ".jsonl"), JSON.stringify({ type: "custom-title", customTitle: "My named session" }) + "\\n");
+    const mod = await import("./server/sessionImport.ts");
+    const [first, second] = await Promise.all([mod.answer(["claude"]), mod.answer(["claude"])]);
+    assert.deepEqual(first, second);
+    assert.equal(first.imported.claude, 1);
+    const [chat] = storage.listChats();
+    assert.equal(chat.title, "My named session");
+    assert.equal(chat.titleSource, "user");
+    assert.equal(chat.archived, true);
+  `);
+});
