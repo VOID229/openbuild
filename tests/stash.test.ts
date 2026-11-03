@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageItem } from "../src/components/MessageItem";
-import { pasteStash, stashAction, type Stashed } from "../src/lib/stash";
+import { botStash, botStashOf, imageFiles, pasteBotStash, pasteStash, stashAction, threadStash, type Stashed } from "../src/lib/stash";
 import type { Attachment } from "../shared/types";
 
 const file = (id: string, patch: Partial<Attachment> = {}) => ({ id, name: `${id}.txt`, mime: "text/plain", size: 1, dataUrl: "data:,", ...patch }) as Attachment;
@@ -40,6 +40,29 @@ describe("pasting a stash", () => {
     const mine = file("a", { name: "src/x.ts", mention: true });
     const theirs = file("b", { name: "src/x.ts", mention: true });
     expect(pasteStash({ text: "@src/x.ts", files: [mine] }, stashed("@src/x.ts", [theirs])).files).toEqual([mine]);
+  });
+});
+
+describe("the OpenBots stash", () => {
+  const image = (n: number) => `data:image/jpeg;base64,${n}`;
+  test("is its own unless cross-stashing shares OpenBuild's", () => {
+    expect(botStashOf(false)).toBe(botStash);
+    expect(botStashOf(undefined)).toBe(botStash);
+    expect(botStashOf(true)).toBe(threadStash);
+    expect(botStash).not.toBe(threadStash);
+  });
+  test("keeps a message's images as image attachments", () => {
+    const [f] = imageFiles(["data:image/png;base64,AAAA"]);
+    expect(f).toMatchObject({ mime: "image/png", dataUrl: "data:image/png;base64,AAAA", name: "Image" });
+  });
+  test("pastes text and images after what's there, up to four images", () => {
+    const item = stashed("second", imageFiles([image(2), image(3), image(4)]));
+    expect(pasteBotStash({ text: "first", images: [image(1)] }, item)).toEqual({ text: "first\nsecond", images: [image(1), image(2), image(3), image(4)], left: 0 });
+    expect(pasteBotStash({ text: "", images: [image(0), image(1)] }, item)).toMatchObject({ images: [image(0), image(1), image(2), image(3)], left: 1 });
+  });
+  test("counts the files a shared OpenBuild stash carries that a bot can't take", () => {
+    const item = stashed("look @src/x.ts", [file("doc", { mime: "application/pdf" }), file("m", { mention: true }), ...imageFiles([image(1)])]);
+    expect(pasteBotStash({ text: "", images: [] }, item)).toEqual({ text: "look @src/x.ts", images: [image(1)], left: 1 });
   });
 });
 

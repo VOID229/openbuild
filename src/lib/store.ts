@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS: Settings = {
   autoScroll: true,
   confirmDelete: true,
   autoDeleteWorktrees: false,
+  crossStash: false,
   notifications: { builds: true, runtimeUpdates: true },
   autoRouter: false,
   avoid: [],

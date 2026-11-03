@@ -215,6 +215,13 @@ function GeneralSection() {
       </div>
       <div className="setting-row">
         <div className="setting-text">
+          <div className="setting-label">Cross-stashing</div>
+          <p className="setting-desc">Share one stash between OpenBuild and OpenBots. When off, each keeps its own.</p>
+        </div>
+        <Toggle checked={s.crossStash ?? false} onChange={(crossStash) => update({ crossStash })} label="Cross-stashing" />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
           <div className="setting-label">Enable Auto Scroll</div>
         </div>
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Enable Auto Scroll" />

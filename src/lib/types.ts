@@ -47,6 +47,8 @@ export interface Settings {
   confirmDelete: boolean;
   /** Remove clean worktrees when their thread is explicitly closed. */
   autoDeleteWorktrees?: boolean;
+  /** OpenBots uses OpenBuild's stash instead of its own. */
+  crossStash?: boolean;
   /**
    * Notices at the top of the window. `updateRuntimes` lists the runtimes whose releases are
    * announced (undefined = every runtime that can be checked), and `dismissedUpdates` is, per

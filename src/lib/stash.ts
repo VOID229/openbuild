@@ -1,6 +1,6 @@
-// Composer drafts set aside to reuse in any thread. Unlike drafts they don't belong to a chat and
-// never expire: one stays, in this browser's IndexedDB, until it's used or removed.
-import { create } from "zustand";
+// Composer drafts set aside to reuse in any thread (or, in OpenBots' own stash, any conversation). Unlike
+// drafts they don't belong to a chat and never expire: one stays, in this browser's IndexedDB, until it's used or removed.
+import { create, type StoreApi, type UseBoundStore } from "zustand";
 import type { Attachment } from "../../shared/types";
 import { uid } from "./id";
 import { createStore, del, entries, set } from "./kv";
@@ -12,43 +12,63 @@ export interface Stashed {
   createdAt: number;
 }
 
-/** Newest first. */
-export const useStash = create<{ items: Stashed[] }>(() => ({ items: [] }));
-
-const storage = createStore("openchat-stash", "stash");
-/** Changed since the last read began, so a read in progress can't undo them. */
-const touched = new Set<string>();
+export interface StashStore {
+  /** Newest first. */
+  use: UseBoundStore<StoreApi<{ items: Stashed[] }>>;
+  ready: Promise<void>;
+  add: (text: string, files: Attachment[]) => Stashed;
+  remove: (id: string) => void;
+}
 
 const report = (err: unknown) => console.error("Couldn't save the stash", err);
 
-async function read() {
-  touched.clear();
-  try {
-    const saved = (await entries<string, Stashed>(storage)).map(([, item]) => item).filter((item) => !touched.has(item.id));
-    useStash.setState((s) => ({ items: [...s.items.filter((item) => touched.has(item.id)), ...saved].sort((a, b) => b.createdAt - a.createdAt) }));
-  } catch (err) {
-    console.error("Couldn't restore the stash", err);
+function createStash(name: string): StashStore {
+  const use = create<{ items: Stashed[] }>(() => ({ items: [] }));
+  const storage = createStore(name, "stash");
+  /** Changed since the last read began, so a read in progress can't undo them. */
+  const touched = new Set<string>();
+
+  async function read() {
+    touched.clear();
+    try {
+      const saved = (await entries<string, Stashed>(storage)).map(([, item]) => item).filter((item) => !touched.has(item.id));
+      use.setState((s) => ({ items: [...s.items.filter((item) => touched.has(item.id)), ...saved].sort((a, b) => b.createdAt - a.createdAt) }));
+    } catch (err) {
+      console.error("Couldn't restore the stash", err);
+    }
   }
+
+  // Another window may have stashed or used something meanwhile.
+  if (typeof window !== "undefined") window.addEventListener?.("focus", () => void read());
+
+  return {
+    use,
+    ready: read(),
+    add(text, files) {
+      const item = { id: uid(), text, files, createdAt: Date.now() };
+      touched.add(item.id);
+      use.setState((s) => ({ items: [item, ...s.items] }));
+      void set(item.id, item, storage).catch(report);
+      return item;
+    },
+    remove(id) {
+      touched.add(id);
+      use.setState((s) => ({ items: s.items.filter((item) => item.id !== id) }));
+      void del(id, storage).catch(report);
+    },
+  };
 }
 
-export const stashReady: Promise<void> = read();
+/** OpenBuild's stash. */
+export const threadStash = createStash("openchat-stash");
+/** OpenBots' own stash, used unless cross-stashing (Settings → General) shares OpenBuild's. */
+export const botStash = createStash("openbots-stash");
+export const botStashOf = (crossStash: boolean | undefined) => (crossStash ? threadStash : botStash);
 
-// Another window may have stashed or used something meanwhile.
-if (typeof window !== "undefined") window.addEventListener?.("focus", () => void read());
-
-export function addStash(text: string, files: Attachment[]): Stashed {
-  const item = { id: uid(), text, files, createdAt: Date.now() };
-  touched.add(item.id);
-  useStash.setState((s) => ({ items: [item, ...s.items] }));
-  void set(item.id, item, storage).catch(report);
-  return item;
-}
-
-export function removeStash(id: string) {
-  touched.add(id);
-  useStash.setState((s) => ({ items: s.items.filter((item) => item.id !== id) }));
-  void del(id, storage).catch(report);
-}
+export const useStash = threadStash.use;
+export const stashReady = threadStash.ready;
+export const addStash = threadStash.add;
+export const removeStash = threadStash.remove;
 
 /** What the stash shortcut does for a composer in this state. */
 export function stashAction(hasContent: boolean, count: number): "stash" | "use" | "open" | undefined {
@@ -62,4 +82,21 @@ export function pasteStash(current: { text: string; files: Attachment[] }, item:
   const before = current.text.trim() ? `${current.text}${current.text.endsWith("\n") ? "" : "\n"}` : "";
   const added = item.files.filter((f) => !current.files.some((c) => c.id === f.id || (f.mention && c.mention && c.name === f.name)));
   return { text: before + item.text, files: [...current.files, ...added] };
+}
+
+/** A bot message's images (data URLs) as stash attachments. */
+export function imageFiles(images: string[]): Attachment[] {
+  return images.map((dataUrl) => ({ id: uid(), name: "Image", mime: /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? "image/jpeg", dataUrl, size: Math.round((dataUrl.length * 3) / 4) }));
+}
+
+/**
+ * A bot composer after pasting a stash into it. OpenBots takes text and up to `max` images; anything else
+ * a shared OpenBuild stash carries (documents, mentioned files) is counted in `left`.
+ */
+export function pasteBotStash(current: { text: string; images: string[] }, item: Stashed, max = 4) {
+  const { text } = pasteStash({ text: current.text, files: [] }, item);
+  const fresh = item.files.filter((f) => !f.mention && f.mime.startsWith("image/") && f.dataUrl && !current.images.includes(f.dataUrl)).map((f) => f.dataUrl);
+  const images = [...current.images, ...fresh].slice(0, max);
+  const left = item.files.filter((f) => !f.mention).length - (images.length - current.images.length);
+  return { text, images, left };
 }

@@ -1,4 +1,4 @@
-import { ArrowUp, Bookmark, BookOpen, Check, ChevronDown, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { canSteer, drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
@@ -14,9 +14,10 @@ import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../lib/shortcuts";
 import { addStash, pasteStash, removeStash, stashAction, useStash, type Stashed } from "../lib/stash";
+import { StashTray } from "./StashTray";
 import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
-import { ago, cx, useDismiss } from "../lib/ui";
+import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker, PermissionPicker, SpeedPicker } from "./Pickers";
 import { IconButton } from "./primitives";
@@ -202,82 +203,6 @@ function QueueTray({ chatId, queue, steering, onEdit, onFinish, live, onError }:
           onSteer={live === "steer" ? () => steerQueued(chatId, q.id).catch((err: Error) => onError(err.message)) : undefined}
         />
       ))}
-    </div>
-  );
-}
-
-interface StashTrayProps {
-  items: Stashed[];
-  open: boolean;
-  /** The row Up/Down and Enter act on while the list is open. */
-  active: number;
-  onToggle: () => void;
-  onClose: () => void;
-  onHover: (i: number) => void;
-  onUse: (item: Stashed) => void;
-}
-
-/** A tab on top of the composer; with several, opening into a list over what's above it, without moving anything. */
-function StashTray({ items, open, active, onToggle, onClose, onHover, onUse }: StashTrayProps) {
-  const tray = useRef<HTMLDivElement>(null);
-  useDismiss(open, onClose, [tray]);
-  // One stash has no list to choose from: the tab pastes it, and carries its remove button.
-  const only = items.length === 1 ? items[0] : undefined;
-  // Keep focus (and the keyboard) in the textarea.
-  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
-  const header = (
-    <>
-      <Bookmark size={15} />
-      <span className="stash-label">Stash</span>
-      <span className="stash-count">{items.length}</span>
-    </>
-  );
-  return (
-    <div ref={tray} className="stash">
-      {open ? (
-        <div className="stash-panel">
-          <button type="button" className="stash-head" aria-expanded aria-label="Close stash" onMouseDown={keepFocus} onClick={onToggle}>
-            {header}
-            <ChevronDown size={16} />
-          </button>
-          <div className="stash-list">
-            {items.map((item, i) => {
-              const chips = item.files.filter((f) => !f.mention);
-              const image = chips.find((f) => f.mime.startsWith("image/"));
-              return (
-                <div key={item.id} className={cx("stash-row", i === active && "stash-row-active")} onMouseEnter={() => onHover(i)}>
-                  <button type="button" className="stash-use" onMouseDown={keepFocus} onClick={() => onUse(item)}>
-                    <FileText className="queued-file" size={15} />
-                    <span className="queued-text">{item.text.trim() || chips[0]?.name}</span>
-                    {image && <img className="queued-thumb" src={image.dataUrl} alt="" />}
-                    <span className="stash-time">{ago(item.createdAt)}</span>
-                  </button>
-                  <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => removeStash(item.id)}>
-                    <X size={15} />
-                  </IconButton>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      ) : (
-        <div className="stash-tab">
-          {only ? (
-            <button type="button" className="stash-tab-btn" aria-label="Paste stash" onMouseDown={keepFocus} onClick={() => onUse(only)}>
-              {header}
-            </button>
-          ) : (
-            <button type="button" className="stash-tab-btn" aria-expanded={false} aria-label={`Open stash, ${items.length} saved`} onMouseDown={keepFocus} onClick={onToggle}>
-              {header}
-            </button>
-          )}
-          {only && (
-            <IconButton label="Remove from stash" tooltipSide="top" className="queued-btn" onMouseDown={keepFocus} onClick={() => removeStash(only.id)}>
-              <X size={15} />
-            </IconButton>
-          )}
-        </div>
-      )}
     </div>
   );
 }
@@ -753,7 +678,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
   stashShortcut.current = onStashShortcut;
   useEffect(() => {
     const onShortcut = (e: Event) => {
-      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft") stashShortcut.current();
+      // OpenBots, when it's showing, has the shortcut for its own composer.
+      if ((e as CustomEvent<ShortcutEventDetail>).detail?.action === "stashDraft" && !useStore.getState().botsOpen) stashShortcut.current();
     };
     window.addEventListener(SHORTCUT_EVENT, onShortcut);
     return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);
@@ -916,7 +842,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
       {!chatId && <WorkspaceTop />}
-      {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} />}
+      {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={removeStash} />}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}
