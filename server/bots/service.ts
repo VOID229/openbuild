@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
-import { castVote, DEFAULT_SETTINGS, firstName, isBotId, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, findMentions, firstName, isBotId, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import * as db from "./db";
 
@@ -418,12 +418,8 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
 
 function mentionedBots(text: string, ids: string[]): string[] {
   if (/@(all|everyone)\b/i.test(text)) return ids;
-  return ids.filter((id) => {
-    const bot = db.getBot(id);
-    if (!bot) return false;
-    const name = firstName(bot.name).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`@${name}\\b`, "i").test(text);
-  });
+  const bots = ids.flatMap((id) => db.getBot(id) ?? []);
+  return [...new Set(findMentions(text, bots).map((m) => m.bot.id))];
 }
 
 export function postMessage(conversationId: string, message: BotMessage): BotMessage {

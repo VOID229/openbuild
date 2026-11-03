@@ -349,6 +349,30 @@ export const isBotId = (id: unknown): id is string => typeof id === "string" && 
 /** A bot's first name: "Juniper · notes" → "Juniper". */
 export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0]!;
 
+/** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
+export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
+
+/**
+ * Where each @mention of a bot sits in some text. The full name wins ("@Dr Eggbot"),
+ * and the first name alone ("@Dr") still counts, as bots and older messages write it.
+ */
+export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[]): { start: number; end: number; bot: B }[] {
+  const names = bots
+    .flatMap((bot) => [mentionName(bot.name), firstName(bot.name)].filter(Boolean).map((name, i) => ({ name: name.toLowerCase(), bot, full: i === 0 })))
+    // Longest first; on a tie, a bot's whole name beats another's first name.
+    .sort((a, b) => b.name.length - a.name.length || Number(b.full) - Number(a.full));
+  const lower = text.toLowerCase();
+  const out: { start: number; end: number; bot: B }[] = [];
+  for (let i = lower.indexOf("@"); i !== -1; i = lower.indexOf("@", i + 1)) {
+    if (i > 0 && /[\p{L}\d_]/u.test(text[i - 1]!)) continue; // an email address
+    const hit = names.find(({ name }) => lower.startsWith(name, i + 1) && !/[\p{L}\d_-]/u.test(text[i + 1 + name.length] ?? ""));
+    if (!hit) continue;
+    out.push({ start: i, end: i + 1 + hit.name.length, bot: hit.bot });
+    i += hit.name.length;
+  }
+  return out;
+}
+
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";

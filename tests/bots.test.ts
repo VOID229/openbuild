@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { castVote, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { castVote, findMentions, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -10,6 +10,14 @@ test("[silent] never becomes a bubble", () => {
   expect(replyBubbles("[silent]")).toEqual([]);
   expect(replyBubbles("Sure!\n\n[silent]")).toEqual(["Sure!"]);
   expect(replyBubbles("One\n\nTwo")).toEqual(["One", "Two"]);
+});
+
+test("@mentions match a bot's whole name, or its first name alone", () => {
+  const bots = [{ name: "Dr Eggbot" }, { name: "Dr" }, { name: "helper · notes" }];
+  const found = (text: string) => findMentions(text, bots).map((m) => [text.slice(m.start, m.end), m.bot.name]);
+  expect(found("hey @dr eggbot, and @helper")).toEqual([["@dr eggbot", "Dr Eggbot"], ["@helper", "helper · notes"]]);
+  expect(found("@Dr hi")).toEqual([["@Dr", "Dr"]]);
+  expect(found("me@helper.com @helpers")).toEqual([]);
 });
 
 test("polls letter their options and keep one vote per voter", () => {

@@ -1110,6 +1110,19 @@
   font-weight: 600;
 }
 
+/* The mascot sits over the @, which stays (invisibly) in the text so widths and copying are unchanged. */
+.bm-mention-at {
+  position: relative;
+  color: transparent;
+}
+
+.bm-mention-at > * {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
+}
+
 .bm-mention-link {
   border: 0;
   font: inherit;
@@ -1813,6 +1826,46 @@
 
 .bots-composer-input::placeholder {
   color: var(--text-3);
+}
+
+/* The textarea's own text is invisible; the backdrop under it draws the draft, with @mentions as tags. */
+.bots-composer-field {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.bots-composer-field .bots-composer-input {
+  margin: 0;
+  scrollbar-width: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.bots-composer-textarea {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text);
+}
+
+.bots-composer-textarea::selection {
+  color: transparent;
+}
+
+.bots-draft {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bots-draft-mention {
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--mention) 16%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mention) 16%, transparent);
+  color: color-mix(in srgb, var(--mention) 80%, var(--text));
 }
 
 .bots-send {

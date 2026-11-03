@@ -7,7 +7,7 @@ import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { findMentions, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
@@ -67,16 +67,45 @@ function WithBotLinks({ text, bots }: { text: string; bots: Bot[] }) {
   return <>{parts}</>;
 }
 
+/** The @ of a mention, drawn as the bot's mascot. The @ stays in the text, so copying keeps it. */
+function MentionAt({ bot }: { bot: Bot }) {
+  return (
+    <span className="bm-mention-at">
+      @
+      <BotAvatar look={bot.look} size={16} alive={false} />
+    </span>
+  );
+}
+
 /** An @mention in the bot's colour, opening its thread. */
-function Mention({ bot }: { bot: Bot }) {
+function Mention({ bot, text }: { bot: Bot; text: string }) {
   const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
   const style = { "--mention": colorOf(bot.look).hex } as React.CSSProperties;
-  if (!thread) return <span className="bm-mention" style={style}>@{firstName(bot)}</span>;
+  const body = (
+    <>
+      <MentionAt bot={bot} />
+      {text.slice(1)}
+    </>
+  );
+  if (!thread) return <span className="bm-mention" style={style}>{body}</span>;
   return (
     <button type="button" className="bm-mention bm-mention-link" style={style} onClick={() => useBots.getState().select(thread)}>
-      @{firstName(bot)}
+      {body}
     </button>
   );
+}
+
+/** Plain text with @mentions and links. */
+function WithMentions({ text, bots, fileHref }: { text: string; bots: Bot[]; fileHref?: (url: string) => string }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const { start, end, bot } of findMentions(text, bots)) {
+    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} />);
+    parts.push(<Mention key={start} bot={bot} text={text.slice(start, end)} />);
+    last = end;
+  }
+  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} />);
+  return <>{parts}</>;
 }
 
 /** Bold, inline code, links and @mentions (in the mentioned bot's colour). */
@@ -84,24 +113,14 @@ const RichText = memo(function RichText({ text, bots, botId }: { text: string; b
   const fileHref = botId ? (url: string) => `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}` : undefined;
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|@([\p{L}\d][\p{L}\d_-]*)/gu)) {
+  for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*/g)) {
     const start = m.index ?? 0;
-    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} />);
+    if (start > last) parts.push(<WithMentions key={last} text={text.slice(last, start)} bots={bots} fileHref={fileHref} />);
     if (m[1]) parts.push(<code key={start}>{m[1]}</code>);
-    else if (m[2]) parts.push(<strong key={start}>{m[2]}</strong>);
-    else {
-      const bot = bots.find((b) => firstName(b).toLowerCase() === m[3]!.toLowerCase());
-      parts.push(
-        bot ? (
-          <Mention key={start} bot={bot} />
-        ) : (
-          m[0]
-        ),
-      );
-    }
+    else parts.push(<strong key={start}>{m[2]}</strong>);
     last = start + m[0].length;
   }
-  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} />);
+  if (last < text.length) parts.push(<WithMentions key={last} text={text.slice(last)} bots={bots} fileHref={fileHref} />);
   return <>{parts}</>;
 });
 
@@ -805,6 +824,29 @@ function shrink(file: File, max = 720): Promise<string> {
   });
 }
 
+/** The draft drawn behind the (transparent) textarea, so @mentions show as tags while you type. */
+function DraftBackdrop({ text, bots, scroll }: { text: string; bots: Bot[]; scroll: React.RefObject<HTMLDivElement | null> }) {
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const { start, end, bot } of findMentions(text, bots)) {
+    if (start > last) parts.push(text.slice(last, start));
+    parts.push(
+      <span key={start} className="bots-draft-mention" style={{ "--mention": colorOf(bot.look).hex } as React.CSSProperties}>
+        <MentionAt bot={bot} />
+        {text.slice(start + 1, end)}
+      </span>,
+    );
+    last = end;
+  }
+  // A trailing newline needs something after it to take up its line.
+  parts.push(text.slice(last) + "\u200b");
+  return (
+    <div ref={scroll} className="bots-composer-input bots-draft" aria-hidden>
+      {parts}
+    </div>
+  );
+}
+
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
   const [text, setText] = useState("");
@@ -814,13 +856,14 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const [mention, setMention] = useState<{ query: string; index: number }>();
   const [notice, setNotice] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
+  const backdrop = useRef<HTMLDivElement>(null);
   const dictation = useFieldDictation({ value: text, setValue: setText, field: input, onError: setNotice, fallback: true });
   const file = useRef<HTMLInputElement>(null);
   const touch = useMediaQuery("(pointer: coarse)");
   const name = conversationName(conversation, bots);
   const quoted = replyTo ? conversation.messages.find((m) => m.id === replyTo) : undefined;
   const members = bots.filter((b) => conversation.botIds.includes(b.id));
-  const matches = mention && conversation.kind === "group" ? members.filter((b) => firstName(b).toLowerCase().startsWith(mention.query.toLowerCase())) : [];
+  const matches = mention && conversation.kind === "group" ? members.filter((b) => mentionName(b.name).toLowerCase().startsWith(mention.query.toLowerCase())) : [];
   const stash = botStashOf(useStore((s) => s.settings.crossStash));
   const stashed = stash.use((s) => s.items);
   const [stashOpen, setStashOpen] = useState(false);
@@ -916,14 +959,20 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     return () => window.removeEventListener(SHORTCUT_EVENT, onShortcut);
   }, []);
   const findMention = (value: string, caret: number) => {
-    const m = /(?:^|\s)@([\p{L}\d_-]*)$/u.exec(value.slice(0, caret));
-    setMention(m ? { query: m[1]!, index: 0 } : undefined);
+    // The query can run over spaces ("@Dr Eg") for as long as it still starts someone's name.
+    const m = /(?:^|\s)@([^@\n]*)$/u.exec(value.slice(0, caret));
+    const query = m?.[1];
+    const open = query !== undefined && (/^[\p{L}\d_-]*$/u.test(query) || members.some((b) => mentionName(b.name).toLowerCase().startsWith(query.toLowerCase())));
+    setMention(open ? { query, index: 0 } : undefined);
   };
   const insertMention = (bot: Bot) => {
     const el = input.current!;
     const caret = el.selectionStart;
-    const before = text.slice(0, caret).replace(/@([\p{L}\d_-]*)$/u, `@${firstName(bot)} `);
-    const next = before + text.slice(caret);
+    const after = text.slice(caret);
+    // Step over a space that's already there rather than doubling it.
+    const spaced = /^\s/.test(after);
+    const before = text.slice(0, caret).replace(/@([^@\n]*)$/u, `@${mentionName(bot.name)}${spaced ? after[0] : " "}`);
+    const next = before + (spaced ? after.slice(1) : after);
     setText(next);
     setMention(undefined);
     requestAnimationFrame(() => {
@@ -1015,10 +1064,12 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               void Promise.all(files.map((f) => shrink(f))).then((urls) => setImages((cur) => [...cur, ...urls].slice(0, 4)));
             }}
           />
+          <div className="bots-composer-field">
+          <DraftBackdrop text={text} bots={bots} scroll={backdrop} />
           <textarea
             ref={input}
             disabled={sending}
-            className="bots-composer-input"
+            className="bots-composer-input bots-composer-textarea"
             rows={1}
             value={text}
             placeholder={`Message ${name}`}
@@ -1028,6 +1079,9 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               setText(e.target.value);
               setStashOpen(false);
               findMention(e.target.value, e.target.selectionStart);
+            }}
+            onScroll={(e) => {
+              if (backdrop.current) backdrop.current.scrollTop = e.currentTarget.scrollTop;
             }}
             onPaste={(e) => {
               if (sending) return;
@@ -1068,6 +1122,13 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
                   return;
                 }
               }
+              // A mention goes as one piece: backspacing into it selects the whole tag, and the native delete removes it.
+              if (e.key === "Backspace" && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                const el = e.currentTarget;
+                const caret = el.selectionStart;
+                const hit = caret === el.selectionEnd ? findMentions(text, bots).find((m) => m.end === caret) : undefined;
+                if (hit) el.setSelectionRange(hit.start, caret);
+              }
               if (e.key === "Escape" && replyTo) {
                 e.stopPropagation();
                 onReply(undefined);
@@ -1079,6 +1140,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               }
             }}
           />
+          </div>
           <DictationButton dictation={dictation} className="icon-btn bots-composer-btn bots-mic" size={18} />
           <button type="submit" className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")} aria-label={sending ? "Sending…" : "Send"} disabled={sending || (!text.trim() && !images.length)}>
             <ArrowUp size={18} strokeWidth={2.4} />
