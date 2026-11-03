@@ -1505,11 +1505,22 @@ svg {
   right: 4px;
   display: flex;
   gap: 1px;
-  padding-left: 18px;
-  background: linear-gradient(to right, transparent, var(--row-bg) 16px);
+  background: var(--row-bg);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--fast) var(--ease);
+}
+
+/* The fade over the title. It sits outside the actions' box so clicks there still open the thread. */
+.history-actions::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 18px;
+  background: linear-gradient(to right, transparent, var(--row-bg) 16px);
+  pointer-events: none;
 }
 
 :where([data-keyboard-nav]) .history-row:has(:focus-visible) .history-actions {
@@ -1573,10 +1584,13 @@ svg {
     position: static;
     align-self: stretch;
     flex-shrink: 0;
-    padding: 0;
     background: none;
     opacity: 1;
     pointer-events: auto;
+  }
+
+  .history-actions::before {
+    display: none;
   }
 
   .history-actions .history-action {
