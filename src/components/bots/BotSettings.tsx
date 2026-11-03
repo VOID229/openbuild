@@ -70,8 +70,8 @@ function BotModelSelect({ bot }: { bot: Bot }) {
     <span className="select-wrap select-grow bots-set-model">
       <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label="Model" onClick={() => setOpen((o) => !o)}>
         {bot.model && <BrandIcon id={bot.model} />}
-        <span className="select-value">{bot.model ? (current?.name ?? `${bot.model} (unavailable)`) : "Default"}</span>
-        <span className="select-hint">{bot.model ? current && providerName(providerOf(current)) : nameOf(fallback)}</span>
+        <span className="select-value">{bot.model ? (current?.name ?? `${bot.model} (unavailable)`) : `Default${fallback ? ` · ${nameOf(fallback)}` : ""}`}</span>
+        {current && <span className="select-hint">{providerName(providerOf(current))}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Model" fixed="auto">

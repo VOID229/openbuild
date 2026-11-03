@@ -96,26 +96,9 @@ export function Routines({ bot }: { bot: Bot }) {
             </li>
           ))}
         </ul>
+      ) : (
+        <p className="bots-hint">No routines yet. {bot.name.split(" ·")[0]} sets these up itself: tell it what you'd like done and when.</p>
       )}
-      <form
-        className="bots-routine-form"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (!title.trim() || !schedule.trim()) return;
-          st.addRoutine(bot.id, { title: title.trim(), schedule: schedule.trim() });
-          setTitle("");
-          setSchedule("");
-        }}
-      >
-        <input className="input input-sm" value={title} placeholder="New routine, e.g. Morning briefing" aria-label="Routine" onChange={(e) => setTitle(e.target.value)} />
-        <div className="bots-add-row">
-          <input className="input input-sm" value={schedule} placeholder="When, e.g. Weekdays at 8:00" aria-label="Schedule" onChange={(e) => setSchedule(e.target.value)} />
-          <IconButton label="Add routine" tooltip={false} type="submit" disabled={!title.trim() || !schedule.trim()}>
-            <Plus size={16} />
-          </IconButton>
-        </div>
-      </form>
-      {!bot.routines.length && <p className="bots-hint">Routines are things the bot does on a schedule, like a morning briefing. It posts them here.</p>}
     </div>
   );
 }
