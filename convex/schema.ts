@@ -45,7 +45,7 @@ export default defineSchema({
   // like records. Kept out of `records` so writing one doesn't wake every device's live "changes"
   // feed: devices fetch drafts when the app opens or comes back into view (sync.draftsSince).
   // `at` is when the draft was edited or cleared on its device (the newer one wins); `changedAt`
-  // is when it reached the server; `session` is the device that wrote it. Deleted after `expiresAt`.
+  // is when it reached the server; `session` is the device that wrote it. Live drafts use `expiresAt: 0`; only deletion markers expire.
   drafts: defineTable({
     userId: v.id("users"),
     key: v.string(),

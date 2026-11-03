@@ -342,7 +342,7 @@ describe("sync", () => {
     expect((await draftOf("draft:a")).text).toBe("a new draft");
   });
 
-  test("the server deletes expired drafts; writing a draft keeps its images alive", async () => {
+  test("the server preserves old live drafts and images without expiry", async () => {
     const image = { id: "img2", name: "b.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,BBB" } as any;
     drafts.saveDraft("b", "with picture", [image]);
     await (engine as any).pushDrafts();
@@ -353,15 +353,20 @@ describe("sync", () => {
     await setExpiry("draftfile:img2", Date.now() + 1000);
     drafts.saveDraft("b", "with picture, edited", [image]);
     await (engine as any).pushDrafts();
-    expect((await draftRow("draftfile:img2")).expiresAt).toBeGreaterThan(Date.now() + 60_000);
+    expect((await draftRow("draftfile:img2")).expiresAt).toBe(0);
 
     await setExpiry("draft:b", 1);
     await setExpiry("draftfile:img2", 1);
     await t.mutation(internal.sync.expireDrafts, {});
-    expect(await draftRow("draft:b")).toBeNull();
-    expect(await draftRow("draftfile:img2")).toBeNull();
+    expect((await draftRow("draft:b")).expiresAt).toBe(0);
+    expect((await draftRow("draftfile:img2")).expiresAt).toBe(0);
     expect(await draftRow("draft:a")).not.toBeNull();
     expect((await records()).map((r) => r.key)).toContain("chat:a");
+    const phone = await otherDevice();
+    await phone.mutation(api.sync.putDraft, { key: "draft:cleared", at: Date.now(), deleted: true });
+    await setExpiry("draft:cleared", 1);
+    await t.mutation(internal.sync.expireDrafts, {});
+    expect(await draftRow("draft:cleared")).toBeNull();
   });
 
   test("writes don't touch the vault every device watches, and carry on an existing account's count", async () => {

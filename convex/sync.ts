@@ -2,7 +2,7 @@
 // and is stored as-is; nothing here logs, inspects or keeps anything else.
 import { ConvexError, v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { DRAFT_TTL, isDraftRecord } from "../shared/drafts";
+import { isDraftRecord } from "../shared/drafts";
 import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { currentSession, deleteSession, requireSession } from "./devices";
@@ -13,8 +13,8 @@ const MAX_INLINE = 800 * 1024;
 const PAGE = 25;
 /** Records deleted per call when deleting an account or expired drafts. */
 const DELETE_BATCH = 200;
-/** Drafts are kept a little past their expiry on devices, so a device never finds one gone early. */
-const DRAFT_KEEP = DRAFT_TTL + 60_000;
+/** Only deletion markers expire. Live drafts and images use zero (no expiry). */
+const DRAFT_KEEP = 6 * 60_000;
 /** Most draft attachments a draft write can keep alive. */
 const MAX_TOUCH = 50;
 /** Drafts returned per draftsSince page. */
@@ -97,7 +97,7 @@ export const uploadUrl = mutation({
  * Write one record. `base` is the seq this device last saw for it: if someone else wrote it since,
  * nothing is written and the caller gets `conflict` (it will receive that write, merge, and retry).
  * A deleted record stays deleted, except drafts, which come and go. `touch` lists draft
- * attachments whose expiry a draft write pushes back.
+ * attachments kept alongside a draft.
  */
 export const put = mutation({
   args: {
@@ -141,7 +141,7 @@ export const put = mutation({
     if (counter) await ctx.db.patch(counter._id, { seq });
     else await ctx.db.insert("seqs", { userId: user, seq });
     const content = args.deleted ? { iv: undefined, data: undefined, file: undefined } : { iv: args.iv, data: args.file ? undefined : args.data, file: args.file };
-    const expiresAt = draft ? Date.now() + DRAFT_KEEP : undefined;
+    const expiresAt = draft ? (args.deleted ? Date.now() + DRAFT_KEEP : 0) : undefined;
     if (current) {
       if (current.file && current.file !== content.file) await ctx.storage.delete(current.file);
       await ctx.db.replace(current._id, { userId: user, key: args.key, seq, deleted: args.deleted, ...content, expiresAt });
@@ -162,7 +162,7 @@ export const put = mutation({
 
 /**
  * Save a draft (or, with `deleted`, clear it). A draft already there that was edited later (`at`)
- * on another device is kept. `touch` lists attachments whose expiry this pushes back, so a
+ * on another device is kept. `touch` lists attachments to retain without expiry, so a
  * picture stays as long as the draft it's in is still being edited.
  */
 export const putDraft = mutation({
@@ -194,7 +194,7 @@ export const putDraft = mutation({
       return;
     }
     const now = Date.now();
-    const expiresAt = now + DRAFT_KEEP;
+    const expiresAt = args.deleted ? now + DRAFT_KEEP : 0;
     const content = args.deleted ? {} : { iv: args.iv, data: args.file ? undefined : args.data, file: args.file };
     const doc = { userId: user, key: args.key, session: sessionId, at: args.at, changedAt: now, deleted: args.deleted, expiresAt, ...content };
     if (current) {
@@ -218,7 +218,7 @@ const LIVE_DRAFTS = 100;
  * Other devices' drafts, for a live subscription: one document read per draft, and nothing else,
  * so a draft write wakes each device once. Draft texts come with their (small) content;
  * attachments as keys only, since they never change: fetch one with draftFile when it's missing.
- * Includes expired drafts not yet deleted; devices ignore those.
+ * Unsent drafts and attachments have no expiry.
  */
 export const liveDrafts = query({
   args: {},
@@ -338,7 +338,7 @@ export const deleteAccount = mutation({
   },
 });
 
-/** Delete drafts past their expiry (run by crons.ts). Devices drop them on their own as well. */
+/** Expire deletion markers and preserve live drafts saved by older versions. */
 export const expireDrafts = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -348,9 +348,13 @@ export const expireDrafts = internalMutation({
       .take(DELETE_BATCH);
     const expiredDrafts = await ctx.db
       .query("drafts")
-      .withIndex("by_expiresAt", (q) => q.lt("expiresAt", Date.now()))
+      .withIndex("by_expiresAt", (q) => q.gt("expiresAt", 0).lt("expiresAt", Date.now()))
       .take(DELETE_BATCH);
     for (const r of [...expired, ...expiredDrafts]) {
+      if (!r.deleted) {
+        await ctx.db.patch(r._id, { expiresAt: 0 });
+        continue;
+      }
       if (r.file) await ctx.storage.delete(r.file);
       await ctx.db.delete(r._id);
     }

@@ -11,11 +11,11 @@ const ls = new Map<string, string>();
 g.localStorage ??= { getItem: (k: string) => ls.get(k) ?? null, setItem: (k: string, v: string) => void ls.set(k, v), removeItem: (k: string) => void ls.delete(k) };
 g.addEventListener ??= () => {};
 
-// Drafts saved by "the previous page load": one fresh, one past the timeout.
+// Drafts saved by "the previous page load": one recent, one saved long before a restart.
 const saved = idb.createStore("openchat-drafts", "drafts");
 await idb.set("draft:fresh", { text: "still here", fileIds: ["kept"], updatedAt: Date.now() - 60_000 }, saved);
 await idb.set("draftfile:kept", { id: "kept", name: "k.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
-await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 6 * 60_000 }, saved);
+await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 90 * 24 * 60 * 60_000 }, saved);
 await idb.set("draftfile:orphan", { id: "orphan", name: "o.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
 
 const { selectionFor, deviceDetection, useStore } = await import("../src/lib/store");
@@ -143,12 +143,21 @@ describe("native Codex model selection", () => {
 });
 
 describe("drafts", () => {
-  test("recent drafts survive a reload; old ones are dropped", async () => {
+  test("drafts and their images survive reloads even months later", async () => {
     await draftsReady;
     expect(getDraft("fresh")).toMatchObject({ text: "still here", files: [{ id: "kept" }] });
-    expect(getDraft("stale")).toBeUndefined();
-    expect(await idb.get("draft:stale", saved)).toBeUndefined();
-    expect(await idb.get("draftfile:orphan", saved)).toBeUndefined();
+    expect(getDraft("stale")).toMatchObject({ text: "too old", files: [{ id: "orphan", dataUrl: "data:," }] });
+    expect(await idb.get("draft:stale", saved)).toBeDefined();
+    expect(await idb.get("draftfile:orphan", saved)).toBeDefined();
+  });
+  test("a restart restores text and image bytes without waiting for a save timer", async () => {
+    const image = { id: "restart-img", name: "draft.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" };
+    saveDraft("restart-thread", "keep this", [image]);
+    // A read queued after save must already see the write, with no debounce delay.
+    expect(await idb.get("draft:restart-thread", saved)).toMatchObject({ text: "keep this" });
+    const restarted = await import("../src/lib/drafts?restart-test" as string);
+    await restarted.draftsReady;
+    expect(restarted.getDraft("restart-thread")).toEqual({ text: "keep this", files: [image] });
   });
   test("drafts, images included, are written to IndexedDB; emptying one removes it", async () => {
     const image = { id: "i", name: "a.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" } as any;

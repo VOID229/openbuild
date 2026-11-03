@@ -1,13 +1,11 @@
 // Unsent composer text and attachments, one per chat (NEW_CHAT for the new-chat screen). Saved in
 // this browser's IndexedDB as you type, so they survive switching chats, reloads and quitting, and
 // (when signed in) synced to your other devices: uploaded once typing pauses, fetched by the others
-// when the app opens or comes back into view (cloud/sync.ts). Drafts last edited more than
-// DRAFT_TTL ago are dropped on load; the sync server deletes its copies on the same schedule.
+// when the app opens or comes back into view (cloud/sync.ts). Drafts stay until sent or cleared.
 //
 // Attachments are stored apart from the draft ("draftfile:<id>"), so editing the text never
 // writes or uploads an image again.
 import type { Attachment } from "../../shared/types";
-import { DRAFT_TTL } from "../../shared/drafts";
 import { createStore, del, entries, set } from "./kv";
 
 /** A draft as stored and synced. */
@@ -23,17 +21,14 @@ export interface Draft {
 }
 
 export const NEW_CHAT = "new";
-const SAVE_DELAY = 400;
 
 const store = createStore("openchat-drafts", "drafts");
 /** By record key: "draft:<chat id>" and "draftfile:<attachment id>". */
 const drafts = new Map<string, StoredDraft>();
 const files = new Map<string, Attachment>();
-const timers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const draftKey = (key: string) => `draft:${key}`;
 const fileKey = (id: string) => `draftfile:${id}`;
-const fresh = (d: StoredDraft) => Date.now() - d.updatedAt < DRAFT_TTL;
 
 /** Told about every local change, by record key (cloud sync uses it). */
 export const draftListeners = new Set<(record: string) => void>();
@@ -50,9 +45,9 @@ export const draftsReady: Promise<void> = (async () => {
     const saved = await entries<string, unknown>(store);
     for (const [k, v] of saved) {
       if (k.startsWith("draftfile:")) files.set(k.slice(10), v as Attachment);
-      else if (k.startsWith("draft:") && fresh(v as StoredDraft)) drafts.set(k.slice(6), v as StoredDraft);
+      else if (k.startsWith("draft:")) drafts.set(k.slice(6), v as StoredDraft);
     }
-    // Drop expired drafts, attachments no draft uses anymore, and anything else left in the store.
+    // Drop attachments no draft uses anymore, and anything else left in the store.
     const used = new Set([...drafts.values()].flatMap((d) => d.fileIds));
     for (const id of files.keys()) if (!used.has(id)) files.delete(id);
     for (const [k] of saved) {
@@ -62,15 +57,8 @@ export const draftsReady: Promise<void> = (async () => {
   } catch {}
 })();
 
-/** Write a record to IndexedDB shortly (debounced while typing). */
+/** Start each storage write immediately; a restart must not race a debounce timer. */
 function persist(record: string) {
-  clearTimeout(timers.get(record));
-  timers.set(record, setTimeout(() => write(record), SAVE_DELAY));
-}
-
-function write(record: string) {
-  clearTimeout(timers.get(record));
-  timers.delete(record);
   const value = record.startsWith("draftfile:") ? files.get(record.slice(10)) : drafts.get(record.slice(6));
   void (value ? set(record, value, store) : del(record, store)).catch(() => {});
 }
@@ -113,7 +101,7 @@ export function saveDraft(key: string, text: string, list: Attachment[]) {
 export function draftRecord(record: string): StoredDraft | Attachment | undefined {
   if (record.startsWith("draftfile:")) return files.get(record.slice(10));
   const d = drafts.get(record.slice(6));
-  return d && fresh(d) ? d : undefined;
+  return d;
 }
 
 /**
@@ -135,7 +123,7 @@ export async function applyDraftRecord(record: string, value: StoredDraft | Atta
   const local = drafts.get(key);
   const remote = value as StoredDraft | undefined;
   if (remote) {
-    if (!fresh(remote) || (local && local.updatedAt >= remote.updatedAt)) return false;
+    if (local && local.updatedAt >= remote.updatedAt) return false;
     drafts.set(key, remote);
   } else {
     if (!local || local.updatedAt > clearedAt) return false;
@@ -144,9 +132,4 @@ export async function applyDraftRecord(record: string, value: StoredDraft | Atta
   persist(record);
   remoteListeners.forEach((fn) => fn(key));
   return true;
-}
-
-if (typeof window !== "undefined") {
-  // Don't lose the last keystrokes when the tab closes or reloads.
-  window.addEventListener("pagehide", () => [...timers.keys()].forEach(write));
 }
