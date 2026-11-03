@@ -143,7 +143,7 @@ function contextFor(botId: string): string {
   ];
   if (bot.primary && settings.onboarding === "active") {
     lines.push(
-      "You're still getting set up. The user was asked what to call you. If they picked or typed a name, rename yourself with manage_bot before anything else. Then ask what they want you for, in a sentence or two, and offer to make other bots for the things they do often. When the basics are settled, call manage_bot with finish_onboarding. Keep it to a few short messages.",
+      "This is the user's first time in OpenBots, and your name is only a placeholder until they choose one. If you haven't said hello yet, welcome them to OpenBots in your own words, say you're their primary bot, and ask what they'd like to call you and what they'd like you to do. Ask in plain chat, without suggesting names or using a question card. Once they answer, rename yourself with manage_bot before anything else and save what they want you for as your instructions. You can offer to make other bots for the things they do often. When the basics are settled, call manage_bot with finish_onboarding. Keep it to a few short messages.",
     );
   }
   return lines.filter(Boolean).join("\n\n");

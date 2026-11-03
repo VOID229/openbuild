@@ -166,3 +166,60 @@ test("computer settings require explicit host selection and explain isolation", 
   expect(settings).toContain('kind: value === "local:host" ? "host" : "container"');
   expect(settings).not.toContain("<select");
 });
+
+test("the OpenBots switch lands entrance motion, keeps looping motion and outlasts a skipped switch", async () => {
+  const script = `
+    import { resolve } from "node:path";
+    import assert from "node:assert/strict";
+    const inApp = { closest: () => ({}) };
+    const outside = { closest: () => null };
+    class CSSAnimation {
+      finished = false;
+      constructor(target, iterations) { this.effect = { target, getComputedTiming: () => ({ iterations }) }; }
+      finish() { this.finished = true; }
+    }
+    class CSSTransition extends CSSAnimation {}
+    const entrance = new CSSAnimation(inApp, 1);
+    const edge = new CSSTransition(inApp, 1);
+    const loop = new CSSAnimation(inApp, Infinity);
+    const toast = new CSSAnimation(outside, 1);
+    const classes = new Set();
+    const finishes = [];
+    let reduced = false;
+    Object.assign(globalThis, {
+      CSSAnimation,
+      CSSTransition,
+      window: { matchMedia: () => ({ matches: reduced }) },
+      document: {
+        documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
+        getAnimations: () => [entrance, edge, loop, toast],
+        startViewTransition(update) {
+          update();
+          return { ready: Promise.resolve(), finished: new Promise((r) => finishes.push(r)) };
+        },
+      },
+    });
+    const { crossfade } = await import(resolve("src/lib/ui.ts"));
+    let updates = 0;
+    crossfade(() => updates++);
+    assert.equal(updates, 1);
+    assert.deepEqual([entrance.finished, edge.finished, loop.finished, toast.finished], [true, true, false, false]);
+    assert.ok(classes.has("world-switch"));
+    crossfade(() => updates++);
+    finishes[0]();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(classes.has("world-switch"), "a skipped switch must not end the one that replaced it");
+    finishes[1]();
+    await new Promise((r) => setTimeout(r, 0));
+    assert.ok(!classes.has("world-switch"));
+    reduced = true;
+    entrance.finished = false;
+    crossfade(() => updates++);
+    assert.equal(updates, 3);
+    assert.equal(entrance.finished, true);
+    assert.ok(!classes.has("world-switch"));
+  `;
+  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
+  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
+});

@@ -306,7 +306,9 @@ export function ChatView({ chat }: { chat: Chat }) {
   }, [autoScroll]);
 
   const onScroll = () => {
-    const el = scroller.current!;
+    const el = scroller.current;
+    // A scroll already queued when the thread was hidden: OpenBots has taken the window.
+    if (!el) return;
     const g = gap(el);
     // Holding the view still moved it, not the reader: it can land on the bottom without them going there.
     const ours = Math.abs(el.scrollTop - moved.current) < 1;

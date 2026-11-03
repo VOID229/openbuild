@@ -3,7 +3,7 @@
 // them, and how lively bots are.
 import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { piModels } from "../../lib/pi";
+import { piModels, type PiModels } from "../../lib/pi";
 import { providerName, providerOf } from "../../lib/models";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
@@ -46,13 +46,15 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
 /** A bot's model: Pi's models, with "Default" on top for bots that follow whatever the default is. */
 function BotModelSelect({ bot }: { bot: Bot }) {
   const [open, setOpen] = useState(false);
-  const [fallback, setFallback] = useState<string>();
+  const [listing, setListing] = useState<PiModels>();
   const anchor = useRef<HTMLButtonElement>(null);
-  const models = useStore((s) => s.detection.pi?.models);
+  const detection = useStore((s) => s.detection.pi);
+  const models = listing?.models ?? detection?.models;
+  const fallback = listing?.defaultModel;
   useEffect(() => {
     let live = true;
     void piModels()
-      .then((r) => live && setFallback(r.defaultModel))
+      .then((r) => live && setListing(r))
       .catch(() => {});
     return () => {
       live = false;
@@ -77,7 +79,12 @@ function BotModelSelect({ bot }: { bot: Bot }) {
           <span className="menu-item-label">Default{fallback ? ` · ${nameOf(fallback)}` : ""}</span>
           {!bot.model && <Check size={15} className="menu-check" />}
         </button>
-        <ModelMenu selected={{ plan: "pi", id: bot.model ?? "" }} onPick={(ref) => pick(ref.id)} />
+        <ModelMenu
+          selected={{ plan: "pi", id: bot.model ?? "" }}
+          piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : detection}
+          scopedOnly
+          onPick={(ref) => pick(ref.id)}
+        />
       </Popover>
     </span>
   );

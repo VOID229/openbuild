@@ -49,6 +49,56 @@ test("computer tools never silently fall back to unrestricted host access", asyn
   }
 });
 
+test("the first bot writes its own welcome, only when OpenBots is first opened", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      import * as svc from './server/bots/service.ts';
+      const woken = [];
+      svc.setHooks({ wake: (botId, wake) => woken.push({ botId, wake }), stop() {} });
+      svc.ensureStarted();
+      const bot = db.listBots()[0];
+      const conversationId = svc.directId(bot.id);
+      a.equal(bot.primary, true);
+      a.equal(svc.getSettings().onboarding, 'active');
+      a.equal(db.messages(conversationId, 10).length, 0);
+      a.equal(woken.length, 0);
+
+      svc.greetOnFirstOpen();
+      a.deepEqual(woken.map(w => [w.botId, w.wake.kind, w.wake.conversationId]), [[bot.id, 'note', conversationId]]);
+
+      // Still working on it: a second tab doesn't ask twice.
+      svc.setStatus(bot.id, { state: 'working' });
+      svc.greetOnFirstOpen();
+      a.equal(woken.length, 1);
+
+      // A failed try stays visible for a moment, then the next open clears it and tries again.
+      svc.setStatus(bot.id, { state: 'idle' });
+      const failure = { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text: '', event: { kind: 'error', text: "Couldn't reply" } };
+      db.addMessage(conversationId, failure);
+      svc.greetOnFirstOpen();
+      a.equal(woken.length, 1);
+      db.updateMessage({ ...failure, at: Date.now() - 61_000 });
+      svc.greetOnFirstOpen();
+      a.equal(woken.length, 2);
+      a.equal(db.messages(conversationId, 10).length, 0);
+
+      // Once anything has been said, opening it again is just opening it.
+      svc.postMessage(conversationId, { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text: 'Welcome!' });
+      svc.greetOnFirstOpen();
+      a.equal(woken.length, 2);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("send_message, models and check-ins against a real bots database", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-"));
   try {

@@ -1058,7 +1058,21 @@ function ChatContextMenu({
   );
 }
 
-/** The footer button that switches the sidebar and main pane over to OpenBots, and back. */
+/** Switch the sidebar and main pane over to OpenBots, and back. */
+export function toggleBots() {
+  crossfade(() => {
+    const st = useStore.getState();
+    const open = st.botsOpen;
+    st.setBotsOpen(!open);
+    // On a phone the sidebar is a drawer and the toggle sits in it, so the other drawer takes its place.
+    if (window.innerWidth <= 768) {
+      st.setSidebarOpen(open);
+      st.setBotsSidebarOpen(!open);
+    }
+  });
+}
+
+/** The footer button for that switch. */
 export function BotsToggle() {
   const open = useStore((s) => s.botsOpen);
   return (
@@ -1069,17 +1083,7 @@ export function BotsToggle() {
       aria-pressed={open}
       data-tooltip={open ? "Back to threads" : "OpenBots"}
       data-tooltip-side="top"
-      onClick={() =>
-        crossfade(() => {
-          const st = useStore.getState();
-          st.setBotsOpen(!open);
-          // On a phone the sidebar is a drawer and this button sits in it, so the other drawer takes its place.
-          if (window.innerWidth <= 768) {
-            st.setSidebarOpen(open);
-            st.setBotsSidebarOpen(!open);
-          }
-        })
-      }
+      onClick={toggleBots}
     >
       <BotsGlyph size={19} />
     </button>

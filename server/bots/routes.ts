@@ -50,6 +50,7 @@ export function botRoutes(api: Api) {
             ping = setInterval(() => send({ t: "ping" }), 20_000);
             ping.unref?.();
             req.signal.addEventListener("abort", stop, { once: true });
+            svc.greetOnFirstOpen();
           },
           cancel() {
             stop();

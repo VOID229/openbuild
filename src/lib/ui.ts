@@ -3,10 +3,38 @@ import { flushSync } from "react-dom";
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
-/** Crossfade the window across a state change, where the browser can and motion is welcome. */
+/**
+ * Land whatever a change just set moving in the app, so the panes come in at rest. Showing a kept
+ * subtree again restarts every entrance animation in it, and the crossfade is the only motion wanted.
+ */
+function settleMotion() {
+  for (const animation of document.getAnimations()) {
+    if (!(animation instanceof CSSAnimation || animation instanceof CSSTransition)) continue;
+    const effect = animation.effect as KeyframeEffect | null;
+    if (effect?.target?.closest(".app") && effect.getComputedTiming().iterations !== Infinity) animation.finish();
+  }
+}
+
+let switching = 0;
+
+/** Switch the sidebar and main pane between OpenBuild and OpenBots, crossfading each where the browser can and motion is welcome. */
 export function crossfade(update: () => void) {
-  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return update();
-  document.startViewTransition(() => flushSync(update));
+  const change = () => {
+    flushSync(update);
+    settleMotion();
+  };
+  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
+  // Only for the switch: a transition name makes its element a stacking context.
+  const root = document.documentElement;
+  const id = ++switching;
+  root.classList.add("world-switch");
+  const done = () => {
+    if (id === switching) root.classList.remove("world-switch");
+  };
+  const transition = document.startViewTransition(change);
+  // A quick second switch skips this one, which is fine.
+  transition.ready.catch(() => {});
+  transition.finished.then(done, done);
 }
 
 /**

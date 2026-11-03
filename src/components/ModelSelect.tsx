@@ -6,12 +6,12 @@ import { findModel, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, scopedModels, searchProviderGroups } from "../lib/modelSearch";
 import { planDetection, useStore } from "../lib/store";
-import type { ModelRef } from "../lib/types";
+import type { Detection, ModelRef } from "../lib/types";
 import { arrowNav, cx, useDevicePref, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
 
 /** Search box + Pi's models grouped by provider. Mounts fresh per open. */
-export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (ref: ModelRef) => void }) {
+export function ModelMenu({ selected, onPick, piDetection, scopedOnly = false }: { selected?: ModelRef; onPick: (ref: ModelRef) => void; piDetection?: Detection; scopedOnly?: boolean }) {
   usePlugins((s) => s.version);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useDevicePref("models.showAll");
@@ -19,7 +19,8 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
   const search = useRef<HTMLInputElement>(null);
   // The runtime is picked apart (Settings); the composer's Pi menu has no selection to go by.
   const plan = selected?.plan ?? "pi";
-  const detection = useStore((s) => planDetection(s, plan));
+  const storedDetection = useStore((s) => planDetection(s, plan));
+  const detection = plan === "pi" && piDetection ? piDetection : storedDetection;
   // This device's Pi settings can scope the picker (`enabledModels`); "Show all" widens it again.
   const scope = plan === "pi" ? detection?.scope : undefined;
   const scoped = hasModelScope(scope);
@@ -28,8 +29,8 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
   useFocusOnShow(search);
 
   const models = useMemo(
-    () => (showAll ? all : scopedModels(all, scope, selected?.id)),
-    [all, scope, showAll, selected],
+    () => (showAll && !scopedOnly ? all : scopedModels(all, scope, scopedOnly ? undefined : selected?.id)),
+    [all, scope, showAll, selected, scopedOnly],
   );
 
   // "xai grok", "fireworks deepseek": provider words narrow to that provider.
@@ -56,7 +57,7 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
         }}
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
-        {scoped && (
+        {scoped && !scopedOnly && (
           <button
             type="button"
             role="switch"
@@ -89,7 +90,7 @@ export function ModelMenu({ selected, onPick }: { selected?: ModelRef; onPick: (
           <p className="menu-empty">
             {query.trim()
               ? `No models match “${query.trim()}”.`
-              : scoped && !showAll
+              : scoped && (!showAll || scopedOnly)
                 ? "No models from this device's Pi scope."
                 : plan === "pi"
                   ? "Sign in to a provider in Settings → Providers to choose a model."

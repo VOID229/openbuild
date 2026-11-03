@@ -1,5 +1,5 @@
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Activity, useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
@@ -14,7 +14,7 @@ import { SidePanel } from "./components/SidePanel";
 import { ThreadTools } from "./components/ThreadTools";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
-import { Sidebar } from "./components/Sidebar";
+import { Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
 import { UsagePage } from "./components/UsagePage";
@@ -28,7 +28,7 @@ import { loadChats } from "./lib/db";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
-import { crossfade, cx } from "./lib/ui";
+import { cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -256,6 +256,8 @@ function Main() {
   // a shortcut is being recorded there.
   useEffect(() => {
     const focusComposer = () => document.querySelector<HTMLTextAreaElement>(".composer-input")?.focus();
+    // Threads and OpenBots both stay in the page, so the first match can be in the hidden one.
+    const shown = <T extends HTMLElement>(selector: string) => [...document.querySelectorAll<T>(selector)].find((el) => el.checkVisibility());
     const run = (id: ShortcutId) => {
       const st = useStore.getState();
       switch (id) {
@@ -280,10 +282,7 @@ function Main() {
           toggleTerminal();
           break;
         case "toggleBots":
-          crossfade(() => {
-            const now = useStore.getState();
-            now.setBotsOpen(!now.botsOpen);
-          });
+          toggleBots();
           break;
         case "openSettings":
           st.openSettings();
@@ -293,7 +292,7 @@ function Main() {
           if (window.innerWidth <= 768) st.setSidebarOpen(false);
           break;
         case "focusSearch":
-          if (st.sidebarOpen) document.querySelector<HTMLInputElement>(".search input")?.focus();
+          if (st.sidebarOpen) shown(".search input")?.focus();
           else focusComposer();
           break;
         case "stashDraft":
@@ -314,7 +313,7 @@ function Main() {
         if (!binding || !eventMatchesBinding(e, binding)) continue;
         if (def.typingSensitive && typing) continue;
         // Without a field that takes dictation there's nothing to dictate into.
-        if (def.id === "toggleDictation" && !document.querySelector("[data-dictation]")) continue;
+        if (def.id === "toggleDictation" && !shown("[data-dictation]")) continue;
         // A file editor keeps its own save, and a terminal its own Ctrl+S.
         if (def.id === "stashDraft" && el?.closest(".cm-editor, .xterm")) continue;
         e.preventDefault();
@@ -351,7 +350,9 @@ function Main() {
     <>
       <PluginSlot name="app:before" />
       <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen || lightboxOpen}>
-        {botsOpen ? <BotsSidebar /> : <Sidebar />}
+        {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
+        <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
+        <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
         <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots")}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", !sidebarOpen && !botsOpen && "floating-tools-visible")} inert={sidebarOpen || botsOpen}>
@@ -374,20 +375,23 @@ function Main() {
                 </div>
               </div>
             )
-          ) : botsOpen ? (
-            <BotsView />
           ) : (
-            <div className="main-row">
-              <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                {usageOpen ? <UsagePage /> : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
-                <TerminalPanel />
-              </div>
-              {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
-              {/* Only a real folder: a thread's, or the project the composer is set to (not every scratch folder at once). */}
-              {folder?.cwd && <FileTree folder={folder} />}
-            </div>
+            <>
+              <Activity mode={botsOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              <Activity mode={botsOpen ? "hidden" : "visible"}>
+                <div className="main-row">
+                  <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
+                    {usageOpen ? <UsagePage /> : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+                    <TerminalPanel />
+                  </div>
+                  {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
+                  {/* Only a real folder: a thread's, or the project the composer is set to (not every scratch folder at once). */}
+                  {folder?.cwd && <FileTree folder={folder} />}
+                </div>
+                <ThreadTools chat={chat} onWidth={onToolsWidth} />
+              </Activity>
+            </>
           )}
-          {chatsLoaded && !botsOpen && <ThreadTools chat={chat} onWidth={onToolsWidth} />}
         </main>
       </div>
       <SettingsModal />

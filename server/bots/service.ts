@@ -6,7 +6,6 @@ import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Routine } from "../../shared/bots";
 import { DEFAULT_SETTINGS, firstName, isBotId } from "../../shared/bots";
 import { computerApi } from "../computers/api";
-import { piBin } from "../pi/install";
 import * as db from "./db";
 
 const MESSAGE_LIMIT = 200;
@@ -183,7 +182,7 @@ export function ensureStarted() {
   const conversationId = crypto.randomUUID();
   const bot: db.StoredBot = {
     id: botId,
-    name: "Pip",
+    name: "Assistant",
     look: { shape: "puff", color: "white" },
     primary: true,
     instructions: "",
@@ -194,41 +193,19 @@ export function ensureStarted() {
   db.putBot(bot);
   const conversation: db.StoredConversation = { id: conversationId, kind: "direct", botIds: [botId], pinnedAt: now, createdAt: now, updatedAt: now };
   db.putConversation(conversation);
-  const pi = piBin();
-  const hello: BotMessage[] = [
-    {
-      id: crypto.randomUUID(),
-      author: botId,
-      at: now,
-      text: "Hey. I'm Pip — I stay on this machine, I remember what you tell me, and I can run other bots for you.",
-    },
-    {
-      id: crypto.randomUUID(),
-      author: botId,
-      at: now + 1,
-      text: pi
-        ? "Each bot gets a computer of its own: files, a terminal and a browser. I can message you when something's worth saying, not only when you write first."
-        : "I can't reply for real until Pi is installed. That's in Settings → Pi. Once it is, just answer here.",
-    },
-    {
-      id: crypto.randomUUID(),
-      author: botId,
-      at: now + 2,
-      text: "What should I be called?",
-      question: {
-        title: "What should I be called?",
-        options: [
-          { key: "A", label: "Pip is fine" },
-          { key: "B", label: "Nova" },
-          { key: "C", label: "Juno" },
-          { key: "D", label: "Atlas" },
-        ],
-      },
-    },
-  ];
-  for (const m of hello) db.addMessage(conversationId, m);
-  db.putConversation({ ...conversation, updatedAt: hello.at(-1)!.at });
   updateSettings({ onboarding: "active" });
+}
+
+/** The first time OpenBots is opened, the primary bot writes its own welcome. A failed try is retried on a later open. */
+export function greetOnFirstOpen() {
+  if (settings().onboarding !== "active") return;
+  const bot = db.listBots().find((b) => b.primary);
+  const conversationId = bot && directId(bot.id);
+  if (!bot || !conversationId || status.get(bot.id)?.state === "working") return;
+  const rows = db.messages(conversationId, MESSAGE_LIMIT);
+  if (rows.some((r) => !r.message.event || Date.now() - r.message.at < 60_000)) return;
+  for (const r of rows) removeMessage(conversationId, r.message.id);
+  hooks.wake(bot.id, { kind: "note", conversationId, text: "The user just opened OpenBots for the first time. Say hello now." });
 }
 
 export async function resetAll() {
@@ -245,6 +222,7 @@ export async function resetAll() {
   drafts.length = 0;
   ensureStarted();
   emit({ t: "snapshot", ...snapshot() });
+  greetOnFirstOpen();
 }
 
 // ------------------------------------------------------------------ bots and conversations

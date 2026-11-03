@@ -673,11 +673,40 @@
   --bm-me: color-mix(in srgb, var(--text) 17%, var(--surface));
 }
 
-/* Switching between OpenBuild and OpenBots crossfades the window. */
+/* Switching between OpenBuild and OpenBots: the window holds still, and each pane crossfades into
+   its counterpart, sliding its edge if the sidebars differ in width. */
+.world-switch .sidebar {
+  view-transition-name: world-sidebar;
+}
+
+.world-switch .main {
+  view-transition-name: world-main;
+}
+
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation-duration: 200ms;
+  animation: none;
+}
+
+::view-transition-group(world-sidebar),
+::view-transition-group(world-main),
+::view-transition-old(world-sidebar),
+::view-transition-new(world-sidebar),
+::view-transition-old(world-main),
+::view-transition-new(world-main) {
+  animation-duration: var(--fast);
   animation-timing-function: var(--ease);
+}
+
+/* Cropped as the edge slides, not stretched. */
+::view-transition-old(world-sidebar),
+::view-transition-new(world-sidebar),
+::view-transition-old(world-main),
+::view-transition-new(world-main) {
+  width: 100%;
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
 }
 
 .main-bots {
