@@ -1,3 +1,4 @@
+import { streamFetch } from "./streamTransport";
 // Commands the user runs from the composer (server/pi/shell.ts): "!cmd" runs in the thread's folder and
 // the agent reads the command and its output with the next message; "!!cmd" runs for the user alone.
 // Neither waits for a reply nor interrupts one. Each is its own message in the thread, following its
@@ -159,8 +160,8 @@ async function* shellEvents(threadId: string, stream: ReplyStream, start: { cwd:
     let res: Response | undefined;
     try {
       res = posted
-        ? await fetch(apiUrl(stream.deviceId, `/api/pi/shells/${encodeURIComponent(stream.id)}`), { signal })
-        : await fetch(apiUrl(stream.deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/shell`), {
+        ? await streamFetch(apiUrl(stream.deviceId, `/api/pi/shells/${encodeURIComponent(stream.id)}`), { signal })
+        : await streamFetch(apiUrl(stream.deviceId, `/api/pi/threads/${encodeURIComponent(threadId)}/shell`), {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ id: stream.id, ...start }),

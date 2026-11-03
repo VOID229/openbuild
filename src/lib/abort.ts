@@ -1,3 +1,4 @@
+import { streamFetch } from "./streamTransport";
 /** Stop waiting even when an operation (workspace setup, a stalled transport) ignores cancellation. */
 export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -20,7 +21,7 @@ export async function fetchWithTimeout(input: RequestInfo | URL, init: RequestIn
   const timer = setTimeout(() => ctrl.abort(new DOMException("The server didn't respond in time", "TimeoutError")), ms);
   try {
     signal.throwIfAborted();
-    return await abortable(fetch(input, { ...init, signal }), signal);
+    return await abortable(streamFetch(input, { ...init, signal }), signal);
   } finally {
     clearTimeout(timer);
   }

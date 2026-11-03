@@ -1,3 +1,4 @@
+import { streamFetch } from "./streamTransport";
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
 import type { ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
@@ -50,7 +51,7 @@ export const updateRuntime = (runtime: ThreadRuntime, deviceId?: DeviceId) =>
 
 /** Follow the current maintenance job's output; resolves with its exit code. */
 export async function followJob(onLine: (line: string) => void, signal?: AbortSignal, onStart?: () => void, deviceId?: DeviceId, jobId?: string): Promise<{ code?: number; title?: string } | undefined> {
-  const res = await fetch(apiUrl(deviceId, "/api/pi/job" + (jobId ? `?id=${encodeURIComponent(jobId)}` : "")), { signal });
+  const res = await streamFetch(apiUrl(deviceId, "/api/pi/job" + (jobId ? `?id=${encodeURIComponent(jobId)}` : "")), { signal });
   if (!res.ok || !res.body || res.status === 204) return undefined;
   // Only a real job stream counts as running: an empty answer must not flash a progress panel.
   onStart?.();
@@ -155,7 +156,7 @@ export type LoginRecord =
 export const startLogin = (provider: string, type: "api_key" | "oauth", deviceId?: DeviceId) =>
   send<{ id: string }>(apiUrl(deviceId, "/api/pi/login"), "POST", { provider, type }).then((r) => r.id);
 export async function* followLogin(id: string, signal: AbortSignal, deviceId?: DeviceId): AsyncGenerator<LoginRecord> {
-  const res = await fetch(apiUrl(deviceId, `/api/pi/login/${encodeURIComponent(id)}`), { signal });
+  const res = await streamFetch(apiUrl(deviceId, `/api/pi/login/${encodeURIComponent(id)}`), { signal });
   if (!res.ok || !res.body) throw new Error((await res.json().catch(() => null))?.error ?? "Sign-in failed");
   yield* readEvents(res.body) as AsyncGenerator<any>;
 }

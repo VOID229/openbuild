@@ -1,3 +1,4 @@
+import { streamFetch } from "./streamTransport";
 // A terminal in the browser: the app side of server/terminals.ts. Cmd/Ctrl+J opens one in the folder
 // the open thread works in, on the device that thread runs on — this one, or a paired one through
 // /api/devices/<id>/… — and the shell there is a real one on a PTY, not a command runner.
@@ -340,7 +341,7 @@ export class TerminalConnection {
     while (!this.ctrl.signal.aborted && !this.ended) {
       let res: Response | undefined;
       try {
-        res = await fetch(url, { signal: this.ctrl.signal });
+        res = await streamFetch(url, { signal: this.ctrl.signal });
       } catch {
         // Unreachable; retried below.
       }

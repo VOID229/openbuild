@@ -29,7 +29,7 @@ test("server gates every device API and only unlocks with a local session", asyn
     expect(await (await call("/api/auth/status")).json()).toEqual({ configured: true, authenticated: false });
     for (const [path, method] of [
       ["/api/preview", "POST"], ["/api/preview/open?url=http://localhost:4321", "GET"], ["/api/preview/relay/4321", "GET"],
-      ["/api/config", "GET"], ["/api/chats", "GET"], ["/api/state", "PUT"],
+      ["/api/stream", "GET"], ["/api/config", "GET"], ["/api/chats", "GET"], ["/api/state", "PUT"],
       ["/api/keys/secrets", "GET"], ["/api/pi/chat", "POST"], ["/api/pi/providers", "GET"],
       ["/api/unknown", "GET"], ["/api/dictation/check", "GET"], ["/api/dictation/transcribe", "POST"],
     ]) expect((await call(path!, { method })).status).toBe(401);
@@ -37,6 +37,21 @@ test("server gates every device API and only unlocks with a local session", asyn
     expect(login.status).toBe(200);
     const cookie = login.headers.get("set-cookie")!.split(";")[0]!;
     expect((await call("/api/config", { headers: { cookie } })).status).toBe(200);
+    expect((await call("/api/stream", { headers: { cookie } })).status).toBe(426);
+    expect((await call("/api/stream", { headers: { cookie, origin: "http://evil.invalid" } })).status).toBe(403);
+    // The new transport traverses the real authenticated routes, without exposing credentials.
+    const Socket = WebSocket as unknown as { new(url: string, options: Bun.WebSocketOptions): WebSocket };
+    await new Promise<void>((resolve, reject) => {
+      const socket = new Socket(new URL("/api/stream", url).href.replace("http:", "ws:"), { headers: { cookie } });
+      const timer = setTimeout(() => { socket.close(); reject(new Error("Stream handshake timed out")); }, 5000);
+      socket.onopen = () => socket.send(JSON.stringify({ path: "/api/pi/job", method: "GET" }));
+      socket.onmessage = event => {
+        const frame = JSON.parse(event.data);
+        if (frame.type === "headers") { expect(frame.status).toBe(204); expect(frame.headers["set-cookie"]).toBeUndefined(); }
+        if (frame.type === "end") { clearTimeout(timer); socket.close(); resolve(); }
+      };
+      socket.onerror = () => { clearTimeout(timer); reject(new Error("Stream failed")); };
+    });
     const preview = await call("/api/preview", { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ url: "http://localhost:4321" }) });
     expect(preview.status).toBe(200);
     expect(new URL((await preview.json()).url).origin).not.toBe(new URL(url!).origin);

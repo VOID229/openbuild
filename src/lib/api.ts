@@ -1,3 +1,4 @@
+import { streamFetch } from "./streamTransport";
 import type { FunctionReturnType } from "convex/server";
 import { api as convexApi } from "../../convex/_generated/api";
 import { openEvents, readEvents, type ReplyStream } from "../../shared/replies";
@@ -68,7 +69,7 @@ export async function* streamOnce(req: ChatRequest, signal: AbortSignal): AsyncG
   const body = (await config).mode === "hosted" ? { ...req, secrets: await secretsFor(req) } : req;
   let res: Response;
   try {
-    res = await fetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
+    res = await streamFetch("/api/chat", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal });
   } catch (err) {
     if (signal.aborted) throw err;
     yield { t: "error", message: "Couldn't reach the OpenBuild server. Check your connection." };

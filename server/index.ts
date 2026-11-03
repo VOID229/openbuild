@@ -1,4 +1,5 @@
-import { createPreview, localPreviewTarget, forwardPreview, previewWebsocket, stopPreviews } from "./preview";
+import { appWebsocket, type StreamSocketData } from "./streamTransport";
+import { createPreview, localPreviewTarget, forwardPreview, stopPreviews } from "./preview";
 import { checkRelease, restartStatus } from "./releases";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
@@ -184,13 +185,25 @@ const proxyRoute = async (req: Bun.BunRequest<"/api/devices/:id/*">, server: Bun
 
 function serve(port: number, hostname: string) {
   return Bun.serve({
-    websocket: previewWebsocket,
+    websocket: appWebsocket,
     port,
     // Loopback by default, even with password protection.
     hostname,
     idleTimeout: 120,
     development: process.env.NODE_ENV !== "production" && { hmr: true, console: true },
     routes: {
+      "/api/stream": (req, server) => {
+        const denied = forbidden(req) ?? localAuth.authorize(req);
+        if (denied) return denied;
+        if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") return bad("Expected WebSocket upgrade", 426);
+        const base = new URL(server.url);
+        // Use the bound listener address. For wildcard listeners, loopback reaches this server.
+        if (base.hostname === "0.0.0.0") base.hostname = "127.0.0.1";
+        if (base.hostname === "[::]") base.hostname = "[::1]";
+        const data: StreamSocketData = { kind: "stream", request: req, base: base.origin, authorize: localAuth.authorize, ctrl: new AbortController(), started: false };
+        if (server.upgrade(req, { data })) return;
+        return bad("WebSocket upgrade failed", 400);
+      },
       "/*": index,
       // The bundle's own files are exact routes and win over this. A script or stylesheet that
       // isn't one of them is from an older build (a tab left open across an update): answer 404
