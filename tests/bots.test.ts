@@ -234,3 +234,171 @@ test("send_message, models and check-ins against a real bots database", async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("any number of routines stay active at once, each bot's separate, each in its own turn", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-routines-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      const minds = globalThis.openbotsMinds = new Map();
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const { getFocus } = await import('./server/bots/agent.ts');
+      const { wake, stop } = await import('./server/bots/runner.ts');
+      svc.setHooks({ wake, stop });
+      svc.updateSettings({ onboarding: 'done' });
+
+      const prompts = [], steers = [];
+      const fakeMind = (botId) => {
+        const mind = { token: 't', busy: false, sent: false, draft: '', proc: { exited: false, lastUsed: Date.now(), close() {}, send: async (cmd) => {
+          if (cmd.type === 'steer') steers.push({ botId, message: cmd.message });
+          if (cmd.type === 'prompt') {
+            prompts.push({ botId, focus: getFocus(botId), message: cmd.message });
+            setTimeout(() => mind.onSettled?.(), 1);
+          }
+          return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
+        } } };
+        minds.set(botId, mind);
+      };
+      const first = svc.createBot({ name: 'First' });
+      const second = svc.createBot({ name: 'Second' });
+      for (const { bot } of [first, second]) {
+        svc.updateBot(bot.id, { proactivity: 'off' });
+        fakeMind(bot.id);
+      }
+      const group = svc.createConversation({ kind: 'group', name: 'Both', botIds: [first.bot.id, second.bot.id] });
+      const add = (botId, task, conversationId, enabled = true) => {
+        const r = svc.saveRoutine(botId, { id: crypto.randomUUID(), title: task, schedule: 'every hour', enabled, task, conversationId });
+        db.putRoutine(botId, { ...r, nextRunAt: Date.now() - 1000 });
+        return r;
+      };
+      const expected = new Map();
+      const addMany = (botId, prefix, count, conversationId, home) => {
+        for (let i = 0; i < count; i++) {
+          const task = prefix + '<' + i + '>';
+          add(botId, task, conversationId);
+          expected.set(task, { botId, conversationId: home });
+        }
+      };
+      addMany(first.bot.id, 'first-dm', 25, undefined, first.conversationId);
+      addMany(first.bot.id, 'first-group', 5, group.id, group.id);
+      addMany(second.bot.id, 'second-dm', 10, undefined, second.conversationId);
+      const paused = add(first.bot.id, 'paused<0>', undefined, false);
+      a.equal(db.routines(first.bot.id).length, 31);
+      a.equal(db.routines(second.bot.id).length, 10);
+
+      svc.tick(() => false);
+      for (let i = 0; i < 500 && prompts.length < expected.size; i++) await new Promise((r) => setTimeout(r, 5));
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Every due routine ran exactly once, alone, as the right bot, reporting to its own conversation.
+      a.equal(steers.length, 0);
+      a.equal(prompts.length, expected.size);
+      const ran = new Set();
+      for (const p of prompts) {
+        const tasks = [...new Set([...p.message.matchAll(/[a-z-]+<[0-9]+>/g)].map((m) => m[0]))];
+        const own = tasks.filter((t) => p.message.includes('Routine “' + t + '”'));
+        a.equal(own.length, 1, p.message);
+        const want = expected.get(own[0]);
+        a.equal(p.botId, want.botId);
+        a.equal(p.focus, want.conversationId);
+        ran.add(own[0]);
+      }
+      a.equal(ran.size, expected.size);
+      a.ok(!prompts.some((p) => p.message.includes('Routine “paused')));
+
+      // They all stay on, scheduled for their next run; pausing one leaves its neighbours alone.
+      for (const r of db.routines(second.bot.id)) a.ok(r.enabled && r.nextRunAt > Date.now());
+      const [one, two] = db.routines(second.bot.id);
+      svc.updateRoutine(second.bot.id, one.id, { enabled: false });
+      a.equal(db.routines(second.bot.id).filter((r) => r.enabled).length, 9);
+      a.equal(db.routines(second.bot.id).find((r) => r.id === two.id).enabled, true);
+      a.equal(db.routines(first.bot.id).filter((r) => r.enabled).length, 30);
+      svc.updateRoutine(first.bot.id, paused.id, { enabled: true });
+      a.ok(db.routines(first.bot.id).find((r) => r.id === paused.id).nextRunAt > Date.now());
+
+      // A message in the chat a bot is working in still joins the turn; one elsewhere waits for its own.
+      prompts.length = 0;
+      let release;
+      minds.get(first.bot.id).proc.send = async (cmd) => {
+        if (cmd.type === 'steer') steers.push({ botId: first.bot.id, message: cmd.message });
+        if (cmd.type === 'prompt') {
+          prompts.push({ botId: first.bot.id, focus: getFocus(first.bot.id), message: cmd.message });
+          if (prompts.length === 1) release = () => minds.get(first.bot.id).onSettled?.();
+          else setTimeout(() => minds.get(first.bot.id).onSettled?.(), 1);
+        }
+        return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
+      };
+      wake(first.bot.id, { kind: 'messages', conversationId: first.conversationId });
+      for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setTimeout(r, 5));
+      wake(first.bot.id, { kind: 'messages', conversationId: first.conversationId });
+      wake(first.bot.id, { kind: 'messages', conversationId: group.id });
+      await new Promise((r) => setTimeout(r, 10));
+      a.equal(steers.length, 1);
+      release();
+      for (let i = 0; i < 200 && prompts.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
+      a.deepEqual(prompts.map((p) => p.focus), [first.conversationId, group.id]);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("bots write their own instructions, and only a blank slate is open to a non-primary bot", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-instructions-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      import * as svc from './server/bots/service.ts';
+      import { manage, contextFor, remember, setFocus } from './server/bots/agent.ts';
+      svc.setHooks({ wake() {}, stop() {} });
+      const primary = svc.createBot({ name: 'Boss' }).bot;
+      const blank = svc.createBot({ name: 'Blank' }).bot;
+      a.equal(primary.primary, true);
+
+      // The primary is told to write its own, and when to give other bots theirs. Done writing, the nudge goes.
+      a.match(contextFor(primary.id), /You don't have instructions yet/);
+      a.match(contextFor(primary.id), /When you make a bot, decide whether/);
+      manage(primary.id, { action: 'update', instructions: 'Help Outis plan.' });
+      a.equal(db.getBot(primary.id).instructions, 'Help Outis plan.');
+      a.doesNotMatch(contextFor(primary.id), /You don't have instructions yet/);
+      a.match(contextFor(primary.id), /Help Outis plan/);
+
+      // Giving a new bot instructions is optional, either way works.
+      const withJob = manage(primary.id, { action: 'create', name: 'Coach', instructions: 'Track runs.' });
+      const without = manage(primary.id, { action: 'create', name: 'Later' });
+      a.equal(db.getBot(withJob.id).instructions, 'Track runs.');
+      a.equal(db.getBot(without.id).instructions, '');
+
+      // Remembering goes to the bot's memory without saying anything in the chat.
+      const blankChat = svc.directId(blank.id);
+      setFocus(blank.id, blankChat);
+      remember(blank.id, { text: 'Likes tea.' });
+      a.equal(db.messages(blankChat, 10).length, 0);
+      a.match(contextFor(blank.id), /Likes tea/);
+      setFocus(blank.id, undefined);
+
+      // Every bot hears that its memory and routines are its own to run, and doesn't get the primary's guidance.
+      a.match(contextFor(blank.id), /any number of routines active at once/);
+      a.doesNotMatch(contextFor(blank.id), /When you make a bot/);
+
+      // A non-primary bot can fill in its own blank, not overwrite what's there or touch anyone else.
+      manage(blank.id, { action: 'update', instructions: 'First draft.' });
+      a.equal(db.getBot(blank.id).instructions, 'First draft.');
+      a.throws(() => manage(blank.id, { action: 'update', instructions: 'Rewritten.' }), /Say what to change/);
+      a.equal(db.getBot(blank.id).instructions, 'First draft.');
+      a.throws(() => manage(blank.id, { action: 'update', bot: without.id, instructions: 'Nope.' }), /only change yourself/);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

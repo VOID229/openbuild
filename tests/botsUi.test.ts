@@ -62,9 +62,6 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     useBots.getState().updateConversation("chat", { section: undefined, pinnedAt: undefined });
     await new Promise((r) => setTimeout(r, 0));
     assert.deepEqual(JSON.parse(requests.at(-1)[1].body), { section: null, pinnedAt: null });
-    useBots.getState().addMemory("bot", "keep");
-    await new Promise((r) => setTimeout(r, 0));
-    assert.ok(JSON.parse(requests.at(-1)[1].body).id);
     globalThis.fetch = async (path) => {
       if (path === "/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
         const events = [
@@ -155,6 +152,26 @@ test("composer clears only after ack and routine/memory actions do not fabricate
   expect(chat).toContain("Please remember this:");
   expect(chat).not.toContain('author: directBot.id, text: "", event:');
   expect(details).not.toContain('author: bot.id, text: "", event:');
+});
+
+test("memory stays out of sight, and routines are the bots' to write: people can only see, pause and delete", async () => {
+  const details = await Bun.file("src/components/bots/BotDetails.tsx").text();
+  const store = await Bun.file("src/lib/bots/store.ts").text();
+  const settings = await Bun.file("src/components/bots/BotSettings.tsx").text();
+  const routes = await Bun.file("server/bots/routes.ts").text();
+  for (const name of ["addMemory", "removeMemory", "addRoutine"]) {
+    expect(details).not.toContain(name);
+    expect(store).not.toContain(name);
+  }
+  expect(details).not.toMatch(/memory/i);
+  expect(settings).not.toContain("<Memory");
+  expect(settings).not.toContain("bot.memory");
+  expect(details).not.toContain("<form");
+  expect(details).toContain('r.enabled ? "Working" : "Paused"');
+  expect(details).toContain("<textarea");
+  expect(routes).not.toContain("/api/bots/:id/memory");
+  expect(routes).not.toContain('"/api/bots/:id/routines":');
+  expect(routes).toContain('"/api/bots/:id/routines/:routineId"');
 });
 
 test("computer settings require explicit host selection and explain isolation", async () => {
