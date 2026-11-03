@@ -1,3 +1,5 @@
+import { isHosted } from "../runtime";
+import { chatSummary } from "../../../shared/chatSummary";
 // Cloud sync engine: keeps this device's chats, settings and profile in step with the account.
 //
 // The local copy (on disk via the OpenChat server) stays the source the app reads from; sync runs
@@ -23,7 +25,7 @@ import { createStore, del, get, set } from "../kv";
 import { create } from "zustand";
 import { api } from "../../../convex/_generated/api";
 import { resumeReplies } from "../chat";
-import { chatListeners } from "../db";
+import { chatListeners, loadChatHistory } from "../db";
 import { applyDraftRecord, draftListeners, draftRecord, type StoredDraft } from "../drafts";
 import { isDraftRecord } from "../../../shared/drafts";
 import { allSecrets, keyListeners, saveKeys } from "../keyStore";
@@ -371,11 +373,19 @@ export class SyncEngine {
 
     if (id) {
       const remote = value as Chat;
-      const local = useStore.getState().chats.find((c) => c.id === id);
+      const saved = useStore.getState().chats.find((c) => c.id === id);
+      const local = saved ? await loadChatHistory(saved) : undefined;
       const streaming = local?.messages.some((m) => m.status === "streaming");
       // Local edits not yet written (or a reply still arriving) are merged in, and the merge is written back.
       const next = local && (isDirty || streaming) ? mergeChats(local, remote) : remote;
-      this.apply(() => useStore.getState().upsertChat(next));
+      this.apply(() => {
+        const state = useStore.getState();
+        state.upsertChat(next);
+        // Cloud downloads must not gradually materialize the whole archive in the UI either.
+        if (!isHosted() && (saved?.historyDeferred || JSON.stringify(next).length > 256_000) && state.activeChatId !== id && !next.messages.some(m => m.status === "streaming" || m.shell?.status === "running")) {
+          useStore.getState().upsertChat(chatSummary(next), false);
+        }
+      });
       // A reply another device started: follow it here too, in case that device has gone away.
       resumeReplies(id);
       if (local && isDirty) this.schedulePush(0);
@@ -580,7 +590,10 @@ export class SyncEngine {
     const s = useStore.getState();
     if (key === "keys") return keySnapshot(!!s.settings.syncApiKeys);
     const id = chatIdOf(key);
-    if (id) return s.chats.find((c) => c.id === id);
+    if (id) {
+      const chat = s.chats.find((c) => c.id === id);
+      return chat ? loadChatHistory(chat) : undefined;
+    }
     if (key === "settings") return syncedSettings(s.settings);
     if (key === "profile") return s.settings.profile;
     return undefined;

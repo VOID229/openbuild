@@ -1,3 +1,4 @@
+import { loadChatHistory } from "./db";
 // Short texts written by a model on the side: thread titles (as soon as the first user prompt is
 // sent, or on request from the thread menu) and commit messages. The text generation models picked in Settings, each on its own runtime, are tried in order;
 // with none picked, the thread's own model is used at the lowest reasoning it supports (no
@@ -133,7 +134,8 @@ export function threadTranscript(chat: Pick<Chat, "messages">, budget = 6000) {
  * Pi gave the session.
  */
 export async function regenerateTitle(chatId: string) {
-  const chat = useStore.getState().chats.find((c) => c.id === chatId);
+  const saved = useStore.getState().chats.find((c) => c.id === chatId);
+  const chat = saved ? await loadChatHistory(saved) : undefined;
   const transcript = chat && threadTranscript(chat);
   if (!transcript) return false;
   const content = `Transcript to title:\n\n${transcript}`;

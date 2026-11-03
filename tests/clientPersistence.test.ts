@@ -5,7 +5,7 @@ test("loading remote-device replies before device discovery does not mark them s
   const remote = { ...base, id: 'remote', messages: [{ id: 'a', role: 'assistant', model: { plan: 'pi', id: model.id, name: 'Test' }, status: 'streaming', content: 'partial', createdAt: 1, stream: { id: 'remote-reply-0123456789', via: 'remote-server', deviceId: 'paired-device' } }] };
   let attached = false;
   transport = async url => {
-    if (url.startsWith('/api/chats?index')) return Response.json({ chats: [remote] });
+    if (url.startsWith('/api/chats?summaries')) return Response.json({ chats: [remote] });
     assert.equal(url, '/api/devices/paired-device/api/chat/runs/remote-reply-0123456789');
     attached = true;
     return response({ t: 'text', v: 'remote completed' }, { t: 'end' });

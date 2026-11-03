@@ -1,3 +1,5 @@
+import { searchChats } from "../src/lib/search";
+import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
 import { createPreview, localPreviewTarget, forwardPreview, stopPreviews } from "./preview";
 import { checkRelease, restartStatus } from "./releases";
@@ -458,6 +460,7 @@ function serve(port: number, hostname: string) {
           // Refreshes show the saved list promptly even if Pi is cold or transcripts are large.
           // Discovery continues in the background; subsequent polls await its fresh result.
           await refreshChats(params.has("startup") ? 100 : undefined);
+          if (params.has("summaries")) return Response.json({ summaryIndex: storage.chatIndex() });
           if (params.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
         }),
@@ -476,6 +479,26 @@ function serve(port: number, hostname: string) {
         }),
       },
       // The given chats as stored, spliced in raw rather than parsed and serialized again.
+      "/api/chats/summaries": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (!Array.isArray(body?.ids) || !body.ids.every((id: unknown) => typeof id === "string")) return bad("Expected { ids: string[] }");
+          return Response.json({ summaries: await storage.chatSummaries(body.ids) });
+        }),
+      },
+      "/api/chats/search": {
+        POST: api(async (req) => {
+          const body = await readJson(req);
+          if (typeof body?.query !== "string" || body.query.length > 500) return bad("Expected a search query");
+          const hits = [];
+          for (const chat of storage.eachChat()) {
+            for (const hit of searchChats([chat], body.query)) hits.push({ ...hit, chat: chatSummary(chat) });
+            await Bun.sleep(0);
+            if (req.signal.aborted) break;
+          }
+          return Response.json({ hits });
+        }),
+      },
       "/api/chats/fetch": {
         POST: api(async (req) => {
           const body = await readJson(req);
@@ -489,7 +512,7 @@ function serve(port: number, hostname: string) {
       "/api/chats/:id": {
         PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           const chat = await readJson(req);
-          if (!isChat(chat) || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
+          if (!isChat(chat) || chat.historyDeferred || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
           if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
           const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
           const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];

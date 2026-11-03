@@ -24,7 +24,7 @@ import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
-import { loadChats } from "./lib/db";
+import { loadChatHistory, loadChats } from "./lib/db";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
@@ -146,6 +146,31 @@ export function App() {
     ) : null;
   }
   return <Main />;
+}
+
+function LoadedChat({ chat }: { chat: import("./lib/types").Chat }) {
+  const [error, setError] = useState<string>();
+  const [attempt, retry] = useState(0);
+  useEffect(() => {
+    if (!chat.historyDeferred) return;
+    let live = true;
+    setError(undefined);
+    void loadChatHistory(chat, true).then(full => {
+      if (!live) return;
+      const current = useStore.getState().chats.find(c => c.id === chat.id);
+      if (current?.historyDeferred) {
+        const { historyDeferred: _, ...metadata } = current;
+        useStore.getState().upsertChat({ ...full, ...metadata, messages: full.messages }, false);
+        resumeReplies(chat.id);
+      }
+    }, err => { if (live) setError((err as Error).message); });
+    return () => { live = false; };
+  }, [chat, attempt]);
+  if (!chat.historyDeferred) return <ChatView chat={chat} />;
+  return <div className="home"><div className="home-center" role="status">
+    <p>{error || "Loading thread…"}</p>
+    {error && <button className="btn" onClick={() => retry(n => n + 1)}>Retry</button>}
+  </div></div>;
 }
 
 function Main() {
@@ -381,7 +406,7 @@ function Main() {
               <Activity mode={botsOpen ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                    {usageOpen ? <UsagePage /> : chat ? <ChatView key={chat.id} chat={chat} /> : <Home />}
+                    {usageOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
                     <TerminalPanel />
                   </div>
                   {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}

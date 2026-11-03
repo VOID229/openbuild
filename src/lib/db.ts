@@ -1,3 +1,4 @@
+import { chatSummary } from "../../shared/chatSummary";
 import { get } from "./kv";
 import { userVisiblePrompt } from "../../shared/promptDisplay";
 // Chat persistence. Chats are stored by the local OpenChat server in a database on disk
@@ -12,7 +13,7 @@ import { userVisiblePrompt } from "../../shared/promptDisplay";
 //
 // On the hosted website there is no server storage: chats are kept in this browser's IndexedDB
 // (marked persistent, so the browser doesn't evict them), and signing in syncs them to the account.
-import { clear, createStore, del, delIf, entries, set, usingFallbackStorage } from "./kv";
+import { clear, createStore, del, delIf, entries, set } from "./kv";
 import { fetchWithTimeout } from "./abort";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { canResume, config, isHosted } from "./runtime";
@@ -32,25 +33,55 @@ let seq = Date.now();
 /** Successful server PUTs, distinct from merely queued writes (or deletion tombstones). */
 const acknowledged = new Map<string, number>();
 
-// The local server's chats, cached in this browser by version (see /api/chats?index). A reload
-// reads them from here and downloads only the chats that changed, not every message of every
-// thread. Without IndexedDB the cache lives in memory only, for this page load.
+// Sidebar summaries cached by version. Full histories stay on the server until opened;
+// never enumerate the legacy IndexedDB cache, which can contain the entire archive.
 type Cached = { v: string; chat: Chat };
-const chatCache = createStore("openchat-chat-cache", "chats");
+
 /** Settled chats by id. Unchanged chats keep the same object across loads. */
 const cached = new Map<string, Cached>();
-let cacheRead: Promise<void> | undefined;
-const readCache = () => (cacheRead ??= usingFallbackStorage ? Promise.resolve() : entries<string, Cached>(chatCache).then(
-  (rows) => { for (const [id, c] of rows) if (c?.chat && !cached.has(id)) cached.set(id, { v: c.v, chat: settle(c.chat) }); },
-  () => {},
-));
+// Full histories are read only when opened, never by enumerating the entire browser cache.
+const requestedHistories = new Set<string>();
+const historyRequests = new Map<string, Promise<Chat>>();
+/** Bound retained visited histories too; streams keep their complete in-flight state. */
+function retainHistory(id: string) {
+  requestedHistories.delete(id);
+  requestedHistories.add(id);
+  for (const old of requestedHistories) {
+    if (requestedHistories.size <= 8) break;
+    const row = cached.get(old);
+    if (old === id || row?.chat.messages.some(m => m.status === "streaming" || m.shell?.status === "running")) continue;
+    requestedHistories.delete(old);
+    if (row) cached.set(old, { ...row, chat: chatSummary(row.chat) });
+  }
+}
+export function loadChatHistory(chat: Chat, retain = false): Promise<Chat> {
+  if (!chat.historyDeferred) return Promise.resolve(chat);
+  if (retain) retainHistory(chat.id);
+  const pending = historyRequests.get(chat.id);
+  if (pending) return pending.then(full => materialize(chat, full));
+  const work = (async () => {
+    const res = await fetchWithTimeout("/api/chats/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: [chat.id] }) });
+    if (!res.ok) throw new Error(`Couldn't load thread (HTTP ${res.status})`);
+    const row = (await res.json()).chats[0] as Cached | undefined;
+    if (!row) throw new Error("This thread is no longer on the server");
+    remember(chat.id, row.v, row.chat);
+    // Sidebar edits can be made while history is deferred; only messages come from the history.
+    return settle(row.chat);
+  })().finally(() => historyRequests.delete(chat.id));
+  historyRequests.set(chat.id, work);
+  return work.then(full => materialize(chat, full));
+}
+function materialize(summary: Chat, full: Chat): Chat {
+  const { historyDeferred: _, ...metadata } = summary;
+  return { ...full, ...metadata, messages: full.messages };
+}
+
 function remember(id: string, v: string, chat: Chat) {
-  cached.set(id, { v, chat: settle(chat) });
-  if (!usingFallbackStorage) void set(id, { v, chat }, chatCache).catch(() => {});
+  cached.set(id, { v, chat: settle(requestedHistories.has(id) ? chat : chatSummary(chat)) });
 }
 function forget(id: string) {
   cached.delete(id);
-  if (!usingFallbackStorage) void del(id, chatCache).catch(() => {});
+  requestedHistories.delete(id);
 }
 
 class Retry extends Error {}
@@ -62,10 +93,11 @@ async function send(id: string, op: Op) {
   let res: Response;
   try {
     if (op.op === "put") {
+      const chat = await loadChatHistory(op.chat);
       res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(op.chat),
+        body: JSON.stringify(chat),
       });
     } else {
       res = await fetchWithTimeout(op.op === "clear" ? "/api/chats" : `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -211,11 +243,29 @@ async function readChats(): Promise<Chat[]> {
   }
   await flush();
   await importLegacy();
-  const [res] = await Promise.all([fetchWithTimeout(initialLoad ? "/api/chats?index&startup" : "/api/chats?index"), readCache()]);
+  const res = await fetchWithTimeout(initialLoad ? "/api/chats?summaries&startup" : "/api/chats?summaries");
   if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
-  const body = (await res.json()) as { index?: { id: string; v: string }[]; chats?: Chat[] };
+  const body = (await res.json()) as { summaryIndex?: { id: string; v: string }[]; summaries?: Cached[]; index?: { id: string; v: string }[]; chats?: Chat[] };
   let chats: Map<string, Chat>;
-  if (!body.index) {
+  if (body.summaryIndex) {
+    const stale = body.summaryIndex.filter(e => cached.get(e.id)?.v !== e.v).map(e => e.id);
+    if (stale.length) {
+      const res = await fetchWithTimeout("/api/chats/summaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: stale }) });
+      if (!res.ok) throw new Error(`Couldn't load thread list (HTTP ${res.status})`);
+      body.summaries = (await res.json()).summaries;
+    } else body.summaries = [];
+    for (const row of body.summaries ?? []) cached.set(row.chat.id, { v: row.v, chat: settle(row.chat) });
+    const live = new Set(body.summaryIndex.map(e => e.id));
+    for (const id of cached.keys()) if (!live.has(id)) forget(id);
+    chats = new Map();
+    for (const entry of body.summaryIndex) {
+      const row = cached.get(entry.id);
+      if (!row) continue;
+      const chat = row.chat;
+      chats.set(chat.id, chat.historyDeferred && (requestedHistories.has(chat.id) || chat.messages.some(m => m.status === "streaming" || m.shell?.status === "running"))
+        ? await loadChatHistory(chat, true) : chat);
+    }
+  } else if (!body.index) {
     // A server from before the index: it sent every chat.
     chats = new Map((body.chats ?? []).map((c) => [c.id, c]));
   } else {
@@ -245,14 +295,17 @@ const notify = (id: string | null) => chatListeners.forEach((fn) => fn(id));
 const logFailure = (what: string) => (err: unknown) => console.error(`Failed to ${what}`, err);
 
 export function saveChat(chat: Chat) {
+  const writeSeq = ++seq;
   notify(chat.id);
   if (isHosted()) return set(chat.id, chat, browserChats).catch(logFailure("save chat"));
-  return enqueue(chat.id, { op: "put", chat, seq: ++seq });
+  return enqueue(chat.id, { op: "put", chat, seq: writeSeq });
 }
 
 /** Admission barrier: the worker must not start until its reply id and workspace are on disk.
  * Unlike saveChat, this waits for the server, not just the browser's durable outbox. */
 export async function saveChatBeforeRun(chat: Chat) {
+  retainHistory(chat.id);
+  if (chat.historyDeferred) throw new Error("Wait for this thread to finish loading before sending");
   if (isHosted()) return saveChat(chat);
   notify(chat.id);
   const op: Op = { op: "put", chat, seq: ++seq };

@@ -1,3 +1,5 @@
+import { loadChatHistory } from "../lib/db";
+import { isHosted } from "../lib/runtime";
 import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
@@ -987,8 +989,8 @@ function ChatContextMenu({
             type="button"
             role="menuitem"
             className="menu-item"
-            disabled={!threadTranscript(chat)}
-            title={threadTranscript(chat) ? undefined : "This thread has no messages yet"}
+            disabled={!chat.historyDeferred && !threadTranscript(chat)}
+            title={chat.historyDeferred || threadTranscript(chat) ? undefined : "This thread has no messages yet"}
             onClick={act(() => onRegenerate(chat.id))}
           >
             <RefreshCw size={15} /> Regenerate
@@ -1012,7 +1014,7 @@ function ChatContextMenu({
           >
             <HarnessMark size={15} /> {runtimeName(chat.runtime ?? "pi")} {chat.runtime === "codex" ? "thread" : "session"} ID
           </button>
-          <button type="button" role="menuitem" className="menu-item" onClick={act(() => copyText(chatMarkdown(chat)))}>
+          <button type="button" role="menuitem" className="menu-item" onClick={act(() => loadChatHistory(chat).then(full => copyText(chatMarkdown(full))))}>
             <FileText size={15} /> As Markdown
           </button>
           <button
@@ -1356,7 +1358,27 @@ export function Sidebar() {
     return view.sort === "created" ? [...byModel].sort((a, b) => b.createdAt - a.createdAt) : byModel;
   }, [chats, view.models, view.sort, view.subagents, view.runtime, activeChatId]);
 
-  const hits = useMemo(() => (deferredQuery ? searchChats(visible, deferredQuery) : []), [visible, deferredQuery]);
+  const [remoteHits, setRemoteHits] = useState<{ query: string; hits: SearchHit[] }>();
+  useEffect(() => {
+    if (!deferredQuery || isHosted()) return;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      void fetch("/api/chats/search", { method: "POST", signal: ctrl.signal, headers: { "content-type": "application/json" }, body: JSON.stringify({ query: deferredQuery }) })
+        .then(r => { if (!r.ok) throw new Error("Search failed"); return r.json(); })
+        .then(body => setRemoteHits({ query: deferredQuery, hits: body.hits }))
+        .catch(() => {});
+    }, 250);
+    return () => { clearTimeout(timer); ctrl.abort(); };
+  }, [deferredQuery, chats]);
+  const hits = useMemo(() => {
+    if (!deferredQuery) return [];
+    const local = searchChats(visible, deferredQuery);
+    if (remoteHits?.query !== deferredQuery) return local;
+    const shown = new Map(visible.map(c => [c.id, c]));
+    const merged = new Map(remoteHits.hits.filter(h => shown.has(h.chat.id)).map(h => [h.chat.id, { ...h, chat: shown.get(h.chat.id)! }]));
+    for (const hit of local) merged.set(hit.chat.id, hit);
+    return [...merged.values()].sort((a, b) => b.score - a.score || b.chat.updatedAt - a.chat.updatedAt);
+  }, [visible, deferredQuery, remoteHits]);
   // Snoozed threads leave every other section until they wake.
   const awake = useMemo(() => visible.filter((c) => !c.snoozedUntil), [visible]);
   const snoozed = useMemo(() => visible.filter((c) => c.snoozedUntil).sort((a, b) => a.snoozedUntil! - b.snoozedUntil!), [visible]);

@@ -192,6 +192,7 @@ export function resumeReplies(chatId?: string) {
   }
   for (const chat of useStore.getState().chats) {
     if (chatId && chat.id !== chatId) continue;
+    if (chat.historyDeferred) continue;
     const run = running.get(chat.id);
     if (run) {
       // A server projection/cloud update finished the reply while this listener was offline.

@@ -270,6 +270,8 @@ export interface Message {
 }
 
 export interface Chat {
+  /** Sidebar projection only; fetch the transcript before reading or writing messages. */
+  historyDeferred?: true;
   runtimeAccount?: import("../../shared/types").RuntimeAccount;
   /** Fixed when the thread starts. Missing on legacy threads means Pi. */
   runtime?: ThreadRuntime;

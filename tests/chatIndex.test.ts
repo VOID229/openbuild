@@ -29,6 +29,15 @@ test("chat versions change with content and match what PUT reports", async () =>
     const [row] = storage.chatsById(["a", "missing"]);
     assert.equal(row.v, v2);
     assert.equal(JSON.parse(row.data).pinned, true);
+    const huge = { id: "large", updatedAt: 3, messages: [{ id: "m", role: "assistant", content: "x".repeat(5000000), createdAt: 1, status: "done" }] };
+    storage.putChat(huge);
+    const summaries = await storage.chatSummaries(["large"]);
+    assert.equal(summaries.length, 1);
+    assert.equal(summaries[0].chat.historyDeferred, true);
+    assert.ok(JSON.stringify(summaries).length < 1000);
+    assert.throws(() => storage.putChat(summaries[0].chat), /deferred/);
+    assert.equal(storage.getChat("large").messages[0].content.length, 5000000);
+    storage.deleteChat("large");
     storage.deleteChat("b");
     assert.equal(storage.putChat({ id: "b", updatedAt: 3, createdAt: 3, messages: [] }), false);
     assert.deepEqual(storage.chatIndex().map((e) => e.id), ["a", "legacy"]);

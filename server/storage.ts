@@ -1,3 +1,5 @@
+import { chatSummary } from "../shared/chatSummary";
+import type { Chat } from "../src/lib/types";
 // Durable storage for chats and app state, in a SQLite database on disk owned by the server.
 //
 // Browser storage (IndexedDB, localStorage) belongs to one origin, so the same app on
@@ -47,8 +49,8 @@ function open(): Database {
   if (!db.query<{ name: string }, []>("PRAGMA table_info(chats)").all().some((column) => column.name === "version")) {
     db.run("ALTER TABLE chats ADD COLUMN version TEXT");
   }
-  const unversioned = db.query<{ id: string; data: string }, []>("SELECT id, data FROM chats WHERE version IS NULL AND data IS NOT NULL").all();
-  if (unversioned.length) {
+  const unversioned = db.query<{ id: string; data: string }, []>("SELECT id, data FROM chats WHERE version IS NULL AND data IS NOT NULL").iterate();
+  {
     const setVersion = db.query("UPDATE chats SET version = ?2 WHERE id = ?1");
     db.transaction(() => { for (const row of unversioned) setVersion.run(row.id, versionOf(row.data)); })();
   }
@@ -57,6 +59,7 @@ function open(): Database {
     value TEXT NOT NULL,
     updated_at INTEGER NOT NULL
   )`);
+  db.run("CREATE TABLE IF NOT EXISTS chat_summaries (id TEXT PRIMARY KEY, version TEXT NOT NULL, data TEXT NOT NULL)");
   return db;
 }
 
@@ -84,6 +87,41 @@ export function listChats(): StoredChat[] {
 export function chatIndex(): { id: string; v: string }[] {
   return db.query<{ id: string; version: string }, []>("SELECT id, version FROM chats WHERE deleted_at IS NULL ORDER BY updated_at DESC").all()
     .map((r) => ({ id: r.id, v: r.version }));
+}
+
+/** Migrate old histories one at a time, yielding between rows rather than holding all JSON in memory. */
+export async function chatSummaries(ids?: string[]): Promise<{ v: string; chat: Chat }[]> {
+  const out: { v: string; chat: Chat }[] = [];
+  const selected = ids ? new Set(ids) : undefined;
+  let migratedBytes = 0;
+  for (const entry of chatIndex()) {
+    if (selected && !selected.has(entry.id)) continue;
+    let row = db.query<{ data: string }, [string, string]>("SELECT data FROM chat_summaries WHERE id = ?1 AND version = ?2").get(entry.id, entry.v);
+    if (!row) {
+      const stored = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL").get(entry.id);
+      if (!stored) continue;
+      migratedBytes += stored.data.length;
+      row = { data: JSON.stringify(chatSummary(JSON.parse(stored.data))) };
+      db.query("INSERT OR REPLACE INTO chat_summaries (id, version, data) VALUES (?1, ?2, ?3)").run(entry.id, entry.v, row.data);
+      await Bun.sleep(0);
+      // Large old archives can outpace JSC's GC heuristic even though each row is discarded.
+      if (migratedBytes >= 32 * 1024 * 1024) { Bun.gc(true); migratedBytes = 0; }
+    }
+    out.push({ v: entry.v, chat: JSON.parse(row.data) });
+  }
+  return out;
+}
+
+/** Read histories one at a time for server-side search, without collecting the archive in RAM. */
+export function* eachChat(): Generator<Chat> {
+  let bytes = 0;
+  for (const { id } of chatIndex()) {
+    const row = db.query<{ data: string }, [string]>("SELECT data FROM chats WHERE id = ? AND deleted_at IS NULL").get(id);
+    if (!row) continue;
+    bytes += row.data.length;
+    yield JSON.parse(row.data) as Chat;
+    if (bytes >= 32 * 1024 * 1024) { Bun.gc(true); bytes = 0; }
+  }
 }
 
 /** Every current Durable thread's id and version (for usage, which reads only those). */
@@ -116,6 +154,7 @@ export function chatExists(id: string): boolean {
 
 /** Save a chat. Returns its new version, or false when it was deleted (it stays deleted). */
 export function putChat(chat: StoredChat): string | false {
+  if (chat.historyDeferred) throw new Error("Cannot save a deferred chat history");
   const row = db.query<{ deleted_at: number | null }, [string]>("SELECT deleted_at FROM chats WHERE id = ?").get(chat.id);
   if (row?.deleted_at) return false;
   const data = JSON.stringify(chat);
@@ -126,6 +165,8 @@ export function putChat(chat: StoredChat): string | false {
     chat.updatedAt,
     version,
   );
+  db.query("INSERT OR REPLACE INTO chat_summaries (id, version, data) VALUES (?1, ?2, ?3)")
+    .run(chat.id, version, JSON.stringify(chatSummary(chat as unknown as Chat)));
   return version;
 }
 
@@ -149,10 +190,12 @@ export function importChats(chats: StoredChat[]): number {
 
 /** Delete a chat's content, keeping a tombstone. */
 export function deleteChat(id: string) {
+  db.query("DELETE FROM chat_summaries WHERE id = ?").run(id);
   db.query("INSERT INTO chats (id, data, updated_at, version, deleted_at) VALUES (?1, NULL, ?2, NULL, ?2) ON CONFLICT(id) DO UPDATE SET data = NULL, version = NULL, deleted_at = ?2").run(id, Date.now());
 }
 
 export function deleteAllChats() {
+  db.run("DELETE FROM chat_summaries");
   db.query("UPDATE chats SET data = NULL, version = NULL, deleted_at = ?1 WHERE deleted_at IS NULL").run(Date.now());
 }
 
