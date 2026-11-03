@@ -942,6 +942,8 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  /* overflow-y alone makes x auto too, so a pixel of overflow nudged sideways mid-scroll. */
+  overflow-x: hidden;
   overflow-y: auto;
   overflow-anchor: none;
   padding: 0 24px;
