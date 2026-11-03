@@ -124,7 +124,46 @@ function blocksOf(all: BotMessage[]): Block[] {
 interface Picker {
   messageId: string;
   mine: boolean;
-  what: "react" | "more";
+  what: "react";
+}
+
+function CopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      label={copied ? "Copied" : "Copy"}
+      tooltip={false}
+      className="bm-action"
+      disabled={!text}
+      onClick={() => {
+        void copyText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1400);
+      }}
+    >
+      {copied ? <Check size={16} /> : <Copy size={16} />}
+    </IconButton>
+  );
+}
+
+/** Saves a copy of a message I sent to the stash. The message itself stays as it is. */
+function StashAction({ text, images }: { text: string; images: string[] }) {
+  const crossStash = useStore((s) => s.settings.crossStash);
+  const [stashed, setStashed] = useState(false);
+  return (
+    <IconButton
+      label={stashed ? "Stashed" : "Stash"}
+      tooltip={false}
+      className="bm-action"
+      onClick={() => {
+        botStashOf(crossStash).add(text, imageFiles(images));
+        setStashed(true);
+        setTimeout(() => setStashed(false), 1400);
+      }}
+    >
+      {stashed ? <Check size={16} /> : <Bookmark size={16} />}
+    </IconButton>
+  );
 }
 
 function QuestionCard({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
@@ -369,9 +408,8 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
             <IconButton label="Reply" tooltip={false} className="bm-action" onClick={() => onReply(m.id)}>
               <CornerUpLeft size={16} />
             </IconButton>
-            <IconButton label="More" tooltip={false} className="bm-action" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => onPicker({ messageId: m.id, mine, what: "more" }, e.currentTarget)}>
-              <Ellipsis size={16} />
-            </IconButton>
+            {mine && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
+            <CopyAction text={m.text || messageText(m)} />
           </div>
         )}
       </div>
@@ -516,7 +554,6 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const picked = picker ? conversation.messages.find((m) => m.id === picker.messageId) : undefined;
   const closePicker = () => setPicker(undefined);
   const st = useBots.getState();
-  const directBot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
 
   return (
     <div
@@ -674,39 +711,6 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
               </button>
             ))}
           </div>
-        )}
-      </Popover>
-      <Popover open={!!picker && picker.what === "more"} onClose={closePicker} anchor={anchor} className="menu bm-more-menu" role="menu" label="Message actions" fixed="auto" align={picker?.mine ? "end" : "start"}>
-        {picked && (
-          <>
-            <button type="button" role="menuitem" className="menu-item" onClick={() => { onReply(picked.id); closePicker(); }}>
-              <CornerUpLeft size={15} /> Reply
-            </button>
-            <button type="button" role="menuitem" className="menu-item" disabled={!messageText(picked)} onClick={() => { void copyText(picked.text || messageText(picked)); closePicker(); }}>
-              <Copy size={15} /> Copy text
-            </button>
-            {picked.author === "me" && directBot && picked.text && (
-              <button
-                type="button"
-                role="menuitem"
-                className="menu-item"
-                onClick={() => {
-                  void st.post(conversation.id, { author: "me", text: `Please remember this: ${picked.text}`, replyTo: picked.id });
-                  closePicker();
-                }}
-              >
-                <Brain size={15} /> Ask {firstName(directBot)} to remember
-              </button>
-            )}
-            {picked.author === "me" && (
-              <>
-                <div className="menu-sep" />
-                <button type="button" role="menuitem" className="menu-item menu-item-danger" onClick={() => { st.deleteMessage(conversation.id, picked.id); closePicker(); }}>
-                  <Trash size={15} /> Delete
-                </button>
-              </>
-            )}
-          </>
         )}
       </Popover>
     </div>

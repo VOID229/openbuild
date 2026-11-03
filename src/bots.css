@@ -1401,12 +1401,6 @@
   background: color-mix(in srgb, #3f87f5 18%, transparent);
 }
 
-.bm-more-menu {
-  right: auto;
-  width: max-content;
-  min-width: 210px;
-}
-
 /* A bot asking the user to pick. */
 .bm-bubble.bm-card {
   width: min(480px, 100%);
