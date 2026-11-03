@@ -293,10 +293,10 @@
 .bots-toggle {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   flex: none;
-  border-radius: 11px;
+  border-radius: 10px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
