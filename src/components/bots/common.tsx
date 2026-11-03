@@ -63,6 +63,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   lively,
   track,
   playful,
+  busy,
   mood,
   badge = true,
 }: {
@@ -72,6 +73,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   lively?: boolean;
   track?: boolean;
   playful?: boolean;
+  busy?: boolean;
   mood?: Mood;
   badge?: boolean;
 }) {
@@ -82,7 +84,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} playful={playful} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} playful={playful} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" title="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
@@ -92,7 +94,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
     );
   }
   const looks = members.map((b) => b?.look ?? MISSING);
-  return <BotHuddle looks={looks} size={size} alive={alive} extra={looks.length > 4 ? looks.length - 4 : undefined} />;
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} track={track} extra={looks.length > 4 ? looks.length - 4 : undefined} />;
 });
 
 export { conversationName };

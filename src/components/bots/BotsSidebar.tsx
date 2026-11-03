@@ -29,6 +29,35 @@ interface MenuState {
 /** Open the new-bot and new-group dialogs from anywhere in OpenBots (the empty chat, the details panel). */
 export const openBotsDialog = (d: Dialog) => window.dispatchEvent(new CustomEvent<Dialog>("openbots:dialog", { detail: d }));
 
+/**
+ * A sidebar avatar that keeps still unless one of its bots is at work (then it fidgets). Hovering its
+ * row, tile or rail button makes the eyes follow the pointer, and nothing more.
+ */
+function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
+  const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
+  const working = useBots((s) => conversation.botIds.some((id) => s.status[id]?.state === "working"));
+  const busy = typing || working;
+  const ref = useRef<HTMLSpanElement>(null);
+  const [hover, setHover] = useState(false);
+  useEffect(() => {
+    const host = ref.current?.closest("button");
+    if (!host) return;
+    const enter = (e: PointerEvent) => e.pointerType !== "touch" && setHover(true);
+    const leave = () => setHover(false);
+    host.addEventListener("pointerenter", enter);
+    host.addEventListener("pointerleave", leave);
+    return () => {
+      host.removeEventListener("pointerenter", enter);
+      host.removeEventListener("pointerleave", leave);
+    };
+  }, []);
+  return (
+    <span ref={ref} className="bots-sidebar-avatar">
+      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} track={hover} playful={playful} mood={typing ? "thinking" : undefined} />
+    </span>
+  );
+}
+
 function useSelect() {
   const mobile = useMediaQuery("(max-width: 768px)");
   return useCallback(
@@ -55,7 +84,7 @@ const Row = memo(function Row({ conversation, active, onMenu }: { conversation: 
       }}
     >
       <button type="button" className="bots-row-main" onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
-        <ConversationAvatar conversation={conversation} size={36} mood={typing ? "thinking" : undefined} />
+        <SidebarAvatar conversation={conversation} size={36} />
         <span className="bots-row-text">
           <span className="bots-row-name">
             <span className="bots-row-title">{title}</span>
@@ -90,7 +119,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       }}
     >
       <span className="bots-tile-avatar">
-        <ConversationAvatar conversation={conversation} size={64} lively playful={conversation.kind === "direct"} mood={typing ? "thinking" : undefined} />
+        <SidebarAvatar conversation={conversation} size={64} playful={conversation.kind === "direct"} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>

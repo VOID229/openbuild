@@ -70,10 +70,68 @@
   }
 }
 
-/* Where the eyes look: a glance or thought (--look-*) wins over following the pointer (--track-*). */
+/* Where the eyes look: a glance or thought (--look-*) wins over following the pointer (--track-*).
+   A busy bot also turns its head (--turn-*): the face slides further than the eyes alone would and
+   narrows, as if seen at an angle. */
 .bot-look {
-  transform: translate(calc(var(--look-x, var(--track-x, 0)) * 1px), calc(var(--look-y, var(--track-y, 0)) * 1px));
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translate(calc((var(--look-x, var(--track-x, 0)) + var(--turn-x, 0) * 6) * 1px), calc((var(--look-y, var(--track-y, 0)) + var(--turn-y, 0) * 4) * 1px))
+    scaleX(calc(1 - var(--turn-a, 0) * 0.16));
   transition: transform 260ms var(--ease);
+}
+
+.bot[data-busy] .bot-look {
+  transition: transform 520ms cubic-bezier(0.3, 1.35, 0.45, 1);
+}
+
+/* The eye on the side it turns toward is further away, so smaller; the other comes closer. */
+.bot-eye-side {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 520ms cubic-bezier(0.3, 1.35, 0.45, 1);
+}
+
+.bot-eye-left {
+  transform: scale(calc(1 + var(--turn-x, 0) * 0.08));
+}
+
+.bot-eye-right {
+  transform: scale(calc(1 - var(--turn-x, 0) * 0.14));
+}
+
+/* The body leans a touch into the turn and the light slides the other way, which sells the roundness. */
+.bot-turn,
+.bot-tilt {
+  transform-box: fill-box;
+  transform-origin: 50% 85%;
+  transition: transform 560ms cubic-bezier(0.3, 1.3, 0.45, 1);
+}
+
+.bot-turn {
+  transform: translate(calc(var(--turn-x, 0) * 1.5px), calc(var(--turn-y, 0) * 1px)) scaleX(calc(1 - var(--turn-a, 0) * 0.04));
+}
+
+.bot-tilt {
+  transform: rotate(var(--tilt, 0deg));
+}
+
+.bot-light {
+  transform: translate(calc(var(--turn-x, 0) * -9px), calc(var(--turn-y, 0) * -6px));
+  transition: transform 600ms cubic-bezier(0.3, 1.2, 0.45, 1);
+}
+
+/* Eyes opened wide or narrowed, eased so it reads as an expression rather than a blink. */
+.bot[data-busy]:not([data-blink]) .bot-eye {
+  transition-duration: 220ms;
+}
+
+.bot[data-eyes="wide"]:not([data-blink]) .bot-eye {
+  transform: scale(1.14, 1.24);
+}
+
+.bot[data-eyes="squint"]:not([data-blink]) .bot-eye {
+  transform: scale(1.08, 0.52);
 }
 
 .bot-bob,
@@ -255,12 +313,21 @@
   .bots-glyph-eyes rect {
     animation: none !important;
   }
-  .bot-look {
+  .bot-look,
+  .bot-eye-side,
+  .bot-turn,
+  .bot-tilt,
+  .bot-light {
     transition: none;
   }
 }
 
 /* Primary bot: a little star on its avatar. */
+/* Only there to find the sidebar item it's hovered through. */
+.bots-sidebar-avatar {
+  display: contents;
+}
+
 .bots-avatar-wrap {
   position: relative;
   display: inline-grid;
