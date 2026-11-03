@@ -93,6 +93,38 @@ export interface Reaction {
   emoji: string;
   by: Author;
   at: number;
+  /** Older reactions have none; see reactionId. */
+  id?: string;
+  /** The reaction this one answers, by id, rather than the message itself. */
+  to?: string;
+}
+
+export const reactionId = (r: Reaction) => r.id ?? String(r.at);
+
+/** How many reactions deep this one is: 0 on the message, 1 answering a reaction, and so on. */
+export function reactionDepth(list: Reaction[], r: Reaction): number {
+  let depth = 0;
+  for (let at = r; at.to && depth < list.length; depth++) {
+    const up = list.find((x) => reactionId(x) === at.to);
+    if (!up) break;
+    at = up;
+  }
+  return depth;
+}
+
+/** Adds or takes back `by`'s emoji (on the message, or answering reaction `to`). Taking one back takes its answers with it. */
+export function toggleReactionIn(list: Reaction[], emoji: string, by: Author, to?: string): { next: Reaction[]; added?: Reaction } {
+  const had = list.find((r) => r.by === by && r.emoji === emoji && r.to === to);
+  if (!had) {
+    const added: Reaction = { id: Math.random().toString(36).slice(2, 10), emoji: emoji.slice(0, 16), by, at: Date.now(), ...(to ? { to } : {}) };
+    return { next: [...list, added], added };
+  }
+  const gone = new Set([reactionId(had)]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const r of list) if (r.to && gone.has(r.to) && !gone.has(reactionId(r))) gone.add(reactionId(r)), (grew = true);
+  }
+  return { next: list.filter((r) => !gone.has(reactionId(r))) };
 }
 
 export interface Question {

@@ -210,6 +210,14 @@ test("send_message, models and check-ins against a real bots database", async ()
       const group = svc.createConversation({ kind: 'group', name: 'Garden', botIds: [bot.id, other.bot.id], instructions: 'Only discuss the garden.' });
       a.match(transcript(group.id, db.listBots(), 'User', bot.id), /Group instructions: Only discuss the garden/);
 
+      // Replies and reactions reach the bot, not just the UI.
+      const quoted = await sendMessage(bot.id, { text: 'what are you working on?', conversation: conversationId.slice(0, 8) });
+      svc.toggleReaction(conversationId, quoted.id, '😢', 'me');
+      svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'say that again', replyTo: quoted.id });
+      const seen = transcript(conversationId, db.listBots(), 'User', bot.id);
+      a.match(seen, /reactions: #1 😢 from User/);
+      a.ok(seen.includes('(replying to [' + quoted.id.slice(0, 8) + '] you: “what are you working on?”): say that again'), seen);
+
       // Changing the pace restarts the clock, and off stays off.
       db.setValue('hb:' + bot.id, 1);
       svc.updateBot(bot.id, { proactivity: 'low' });
@@ -226,6 +234,36 @@ test("send_message, models and check-ins against a real bots database", async ()
       db.setValue('hb:' + bot.id, 1);
       svc.tick(() => false);
       a.equal(woken.filter((w) => w.kind === 'heartbeat').length, 1);
+
+      // A reaction on a bot's message wakes that bot; taking it back or reacting to your own doesn't.
+      const reacted = () => woken.filter((w) => w.kind === 'reaction');
+      svc.toggleReaction(conversationId, quoted.id, '👍', 'me');
+      a.equal(reacted().length, 1);
+      a.equal(reacted()[0].reaction.messageId, quoted.id);
+      a.match(reacted()[0].text, /reacted 👍 to your message/);
+      svc.toggleReaction(conversationId, quoted.id, '👍', 'me');
+      const own = svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'mine' });
+      svc.toggleReaction(conversationId, own.id, '👍', 'me');
+      a.equal(reacted().length, 1);
+
+      // Reactions can answer reactions. Bots hear about answers to theirs, and a chain between bots settles.
+      const chat = svc.createConversation({ kind: 'group', name: 'Chain', botIds: [bot.id, other.bot.id] });
+      const post = svc.postMessage(chat.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'look' });
+      const start = reacted().length;
+      const fire = svc.toggleReaction(chat.id, post.id, '🔥', other.bot.id).reactions[0];
+      a.equal(reacted().length, start);
+      const thanks = svc.toggleReaction(chat.id, post.id, '🙏', bot.id, fire.id).reactions[1];
+      a.equal(thanks.to, fire.id);
+      a.equal(reacted().length, start + 1);
+      a.equal(reacted().at(-1).reaction.to, fire.id);
+      a.match(reacted().at(-1).text, /to your 🔥 reaction/);
+      const laugh = svc.toggleReaction(chat.id, post.id, '😂', other.bot.id, thanks.id).reactions[2];
+      a.equal(reacted().length, start + 1);
+      svc.toggleReaction(chat.id, post.id, '❤️', 'me', laugh.id);
+      a.equal(reacted().length, start + 2);
+      a.match(transcript(chat.id, db.listBots(), 'User', bot.id), /#2 🙏 from you → #1, #3 😂 from Other → #2, #4 ❤️ from User → #3/);
+      // Taking one back takes the answers with it.
+      a.equal(svc.toggleReaction(chat.id, post.id, '🙏', bot.id, fire.id).reactions.length, 1);
 
       // A relative one-shot is consumed instead of being moved forward at each tick.
       const createdAt = Date.now() - 2 * 3600_000;

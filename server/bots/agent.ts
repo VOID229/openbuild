@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, firstName, isSilent, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { conversationTitle, firstName, isSilent, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { capabilities } from "../computers/index";
 import { botsDir } from "./db";
@@ -128,8 +128,9 @@ export function contextFor(botId: string): string {
       ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions. They can't override you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
-    "You can write to any conversation you're in, at any time, with send_message. To say nothing, end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
+    "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
+    "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. Reply to a specific message with send_message's reply_to, and react with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
@@ -218,7 +219,15 @@ function react(botId: string, p: Record<string, unknown>) {
   if (!emoji) throw new svc.BotsError("Name an emoji.");
   const found = db.findMessages(String(p.message ?? ""), [conversationId]);
   if (found.length !== 1) throw new svc.BotsError("Name the message to react to.");
-  svc.toggleReaction(conversationId, found[0]!.message.id, emoji, botId);
+  const message = found[0]!.message;
+  let to: string | undefined;
+  if (p.to_reaction !== undefined && p.to_reaction !== null && p.to_reaction !== "") {
+    const n = Number(String(p.to_reaction).replace(/^#/, ""));
+    const target = message.reactions?.[n - 1];
+    if (!target) throw new svc.BotsError(`That message has no reaction #${p.to_reaction}.`);
+    to = reactionId(target);
+  }
+  svc.toggleReaction(conversationId, message.id, emoji, botId, to);
   svc.pulse(botId, emoji === "❤️" ? "love" : "happy");
   return { ok: true };
 }

@@ -173,37 +173,89 @@ function PlanCard({ message, bots }: { message: BotMessage; bots: Bot[] }) {
   );
 }
 
+interface ReactionGroup {
+  key: string;
+  emoji: string;
+  /** The reaction this group answers, if any. */
+  to?: string;
+  /** Ids of the reactions in it, so answers to them can find it. */
+  ids: string[];
+  by: string[];
+}
+
+/** Reactions on the message come first, each followed by the chain of reactions answering it. */
+function reactionThreads(reactions: Reaction[]): { group: ReactionGroup; parent?: ReactionGroup }[][] {
+  const groups = new Map<string, ReactionGroup>();
+  for (const r of reactions) {
+    const key = `${r.to ?? ""}|${r.emoji}`;
+    const g = groups.get(key) ?? { key, emoji: r.emoji, to: r.to, ids: [], by: [] };
+    g.ids.push(reactionId(r));
+    g.by.push(r.by);
+    groups.set(key, g);
+  }
+  const all = [...groups.values()];
+  const owner = (id: string) => all.find((g) => g.ids.includes(id));
+  const threads: { group: ReactionGroup; parent?: ReactionGroup }[][] = [];
+  const walk = (group: ReactionGroup, into: { group: ReactionGroup; parent?: ReactionGroup }[], parent?: ReactionGroup) => {
+    into.push({ group, parent });
+    for (const child of all) if (child.to && group.ids.includes(child.to) && !into.some((x) => x.group === child)) walk(child, into, group);
+  };
+  for (const g of all) {
+    const parent = g.to ? owner(g.to) : undefined;
+    if (parent && parent !== g) continue;
+    const thread: { group: ReactionGroup; parent?: ReactionGroup }[] = [];
+    walk(g, thread);
+    threads.push(thread);
+  }
+  return threads;
+}
+
+/** A little hooked arrow pointing back at the reaction the next chip answers. */
+function ReactionArrow() {
+  return (
+    <svg className="bm-reaction-arrow" width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+      <path d="M12 2.5c0 5-3 7.5-9 7.5" />
+      <path d="M6 6.8 3 10l3 3.2" />
+    </svg>
+  );
+}
+
 function Reactions({ message, conversation, bots, mine }: { message: BotMessage; conversation: Conversation; bots: Bot[]; mine: boolean }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, string[]>();
-    for (const r of message.reactions ?? []) map.set(r.emoji, [...(map.get(r.emoji) ?? []), r.by]);
-    return [...map];
-  }, [message.reactions]);
-  if (!groups.length) return null;
+  const threads = useMemo(() => reactionThreads(message.reactions ?? []), [message.reactions]);
+  if (!threads.length) return null;
+  const names = (by: string[]) => by.map((b) => authorName(b, bots)).join(", ");
   return (
     <div className={cx("bm-reactions", mine && "bm-reactions-mine")}>
-      {groups.map(([emoji, by]) => {
-        const reactors = by.filter((b) => b !== "me").map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
-        return (
-          <button
-            key={emoji}
-            type="button"
-            className={cx("bm-reaction", by.includes("me") && "bm-reaction-mine")}
-            data-tooltip={by.map((b) => authorName(b, bots)).join(", ")}
-            data-tooltip-side="bottom"
-            onClick={() => {
-              useBots.getState().toggleReaction(conversation.id, message.id, emoji, "me");
-              if (!by.includes("me") && message.author !== "me") noticeReaction(message.author, emoji);
-            }}
-          >
-            <span className="bm-reaction-emoji">{emoji}</span>
-            {reactors.slice(0, 2).map((b) => (
-              <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
-            ))}
-            {by.length > 1 && <span className="bm-reaction-count">{by.length}</span>}
-          </button>
-        );
-      })}
+      {threads.map((thread) => (
+        <span key={thread[0]!.group.key} className="bm-reaction-thread">
+          {thread.map(({ group, parent }) => {
+            const { emoji, by, to } = group;
+            const reactors = by.filter((b) => b !== "me").map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
+            const answered = parent ? parent.by.find((b) => b !== "me") : message.author !== "me" ? message.author : undefined;
+            return (
+              <span key={group.key} className="bm-reaction-link">
+                {parent && <ReactionArrow />}
+                <button
+                  type="button"
+                  className={cx("bm-reaction", parent && "bm-reaction-answer")}
+                  data-tooltip={parent ? `${names(by)} → ${names(parent.by)}'s ${parent.emoji}` : names(by)}
+                  data-tooltip-side="bottom"
+                  onClick={() => {
+                    useBots.getState().toggleReaction(conversation.id, message.id, emoji, "me", to);
+                    if (!by.includes("me") && answered) noticeReaction(answered, emoji);
+                  }}
+                >
+                  <span className="bm-reaction-emoji">{emoji}</span>
+                  {reactors.slice(0, 2).map((b) => (
+                    <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
+                  ))}
+                  {by.length > 1 && <span className="bm-reaction-count">{by.length}</span>}
+                </button>
+              </span>
+            );
+          })}
+        </span>
+      ))}
     </div>
   );
 }
@@ -226,7 +278,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
   const emojiOnly = !m.images?.length && !m.question && !m.plan && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
   const card = !!(m.question || m.plan);
   const react = (emoji: string) => {
-    const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji);
+    const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
     useBots.getState().toggleReaction(conversation.id, m.id, emoji, "me");
     if (!had && !mine) noticeReaction(m.author, emoji);
   };
@@ -542,10 +594,10 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             <button
               key={e}
               type="button"
-              className={cx("bm-react-btn", picked?.reactions?.some((r) => r.by === "me" && r.emoji === e) && "bm-react-btn-on")}
+              className={cx("bm-react-btn", picked?.reactions?.some((r) => r.by === "me" && r.emoji === e && !r.to) && "bm-react-btn-on")}
               onClick={() => {
                 if (!picked) return;
-                const had = picked.reactions?.some((r) => r.by === "me" && r.emoji === e);
+                const had = picked.reactions?.some((r) => r.by === "me" && r.emoji === e && !r.to);
                 st.toggleReaction(conversation.id, picked.id, e, "me");
                 if (!had && picked.author !== "me") noticeReaction(picked.author, e);
                 closePicker();

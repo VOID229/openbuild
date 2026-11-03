@@ -4,7 +4,7 @@
 // the unix socket in agent.ts.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { conversationTitle, firstName, replyBubbles } from "../../shared/bots";
+import { conversationTitle, firstName, reactionId, replyBubbles } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -52,8 +52,12 @@ export function wake(botId: string, item: Wake) {
   const mind = minds.get(botId);
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
-  if (item.kind === "messages" && item.conversationId === getFocus(botId) && pumping.has(botId) && mind && !mind.proc.exited) {
+  if ((item.kind === "messages" || item.kind === "reaction") && item.conversationId === getFocus(botId) && pumping.has(botId) && mind && !mind.proc.exited) {
     const text = render([item], botId);
+    if (item.kind === "messages") {
+      mind.quiet = false;
+      show(botId, mind);
+    }
     void mind.proc
       .send({ type: "steer", message: text }, 15_000)
       .then(() => {
@@ -318,6 +322,10 @@ async function run(botId: string, all: Wake[]) {
   }
 }
 
+function stillReacted({ messageId, emoji, by, to }: NonNullable<Wake["reaction"]>) {
+  return !!db.getMessage(messageId)?.message.reactions?.some((r) => r.by === by && r.emoji === emoji && r.to === to);
+}
+
 function waitSettled(mind: Mind): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -351,12 +359,18 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   if (!c) return "";
   const cursor = db.cursor(botId, conversationId);
   const rows = db.messages(conversationId, 16);
+  const name = (author: string) => (author === "me" ? user : author === botId ? "you" : firstName(bots.find((b) => b.id === author)?.name ?? "Bot"));
   const lines = rows.map((r) => {
     const m = r.message;
     const who = m.author === "me" ? user : firstName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const body = m.event ? `(${m.event.text}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.text.slice(0, 2000);
     const mark = r.seq > cursor ? "" : " [already seen]";
-    return `[${m.id.slice(0, 8)}] ${who}${mark}: ${body}`;
+    const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
+    const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${quoted.message.text.slice(0, 200)}”)` : "";
+    const list = m.reactions ?? [];
+    const number = (id?: string) => list.findIndex((x) => reactionId(x) === id) + 1;
+    const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${x.emoji} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
+    return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
   });
   return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${conversationTitle(c, bots)}”):\n${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
 }

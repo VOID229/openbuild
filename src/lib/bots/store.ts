@@ -8,6 +8,7 @@ import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
+import { toggleReactionIn } from "../../../shared/bots";
 
 export interface Draft {
   text: string;
@@ -79,7 +80,8 @@ interface BotsState {
   patchMessage: (conversationId: string, messageId: string, patch: (m: BotMessage) => Partial<BotMessage>) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
   /** Add or take back a reaction. */
-  toggleReaction: (conversationId: string, messageId: string, emoji: string, by: Author) => void;
+  /** `to` answers that reaction (by id) instead of the message. */
+  toggleReaction: (conversationId: string, messageId: string, emoji: string, by: Author, to?: string) => void;
   setTyping: (conversationId: string, botId: string, typing: boolean) => void;
   pulse: (botId: string, mood?: Mood) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
@@ -252,13 +254,9 @@ export const useBots = create<BotsState>()(
         set((s) => ({ conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== messageId) })) }));
         void send("DELETE", `/api/bots/conversations/${conversationId}/messages/${messageId}`);
       },
-      toggleReaction: (conversationId, messageId, emoji, by) => {
-        get().patchMessage(conversationId, messageId, (m) => {
-          const reactions = m.reactions ?? [];
-          const mine = reactions.find((r) => r.by === by && r.emoji === emoji);
-          return { reactions: mine ? reactions.filter((r) => r !== mine) : [...reactions, { emoji, by, at: Date.now() }] };
-        });
-        if (by === "me") void send("PATCH", `/api/bots/conversations/${conversationId}/messages/${messageId}`, { emoji });
+      toggleReaction: (conversationId, messageId, emoji, by, to) => {
+        get().patchMessage(conversationId, messageId, (m) => ({ reactions: toggleReactionIn(m.reactions ?? [], emoji, by, to).next }));
+        if (by === "me") void send("PATCH", `/api/bots/conversations/${conversationId}/messages/${messageId}`, { emoji, to });
       },
       setTyping: (conversationId, botId, typing) =>
         set((s) => {

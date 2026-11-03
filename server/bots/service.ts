@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Routine } from "../../shared/bots";
-import { DEFAULT_SETTINGS, firstName, isBotId } from "../../shared/bots";
+import { DEFAULT_SETTINGS, firstName, isBotId, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import * as db from "./db";
 
@@ -22,9 +22,11 @@ export class BotsError extends Error {
 
 export interface Wake {
   /** Why the bot is being asked to look. */
-  kind: "messages" | "routine" | "heartbeat" | "note";
+  kind: "messages" | "routine" | "heartbeat" | "note" | "reaction";
   conversationId?: string;
   text?: string;
+  /** For a reaction: dropped if it's taken back before the bot looks. */
+  reaction?: { messageId: string; emoji: string; by: string; to?: string };
 }
 
 type Hooks = {
@@ -495,13 +497,31 @@ export function removeMessage(conversationId: string, messageId: string) {
   emit({ t: "message-deleted", conversationId, id: messageId });
 }
 
-export function toggleReaction(conversationId: string, messageId: string, emoji: string, by: string): BotMessage {
+/** Bots answering bots' reactions wake each other only this deep, so a chain of them settles. */
+const BOT_REACTION_DEPTH = 2;
+
+export function toggleReaction(conversationId: string, messageId: string, emoji: string, by: string, to?: string): BotMessage {
   const row = db.getMessage(messageId);
   if (!row || row.conversationId !== conversationId) throw new BotsError("No such message.", 404);
   const reactions = row.message.reactions ?? [];
-  const mine = reactions.find((r) => r.by === by && r.emoji === emoji);
-  const next = mine ? reactions.filter((r) => r !== mine) : [...reactions, { emoji: emoji.slice(0, 16), by, at: Date.now() }];
-  return patchMessage(conversationId, messageId, { reactions: next });
+  const target = to ? reactions.find((r) => reactionId(r) === to) : undefined;
+  if (to && !target) throw new BotsError("No such reaction.", 404);
+  const { next, added } = toggleReactionIn(reactions, emoji, by, to);
+  const patched = patchMessage(conversationId, messageId, { reactions: next });
+  // Whoever was reacted to hears about it if they're a bot here: the message's author, or the one whose reaction this answers.
+  const owner = target ? target.by : row.message.author;
+  const depth = added ? reactionDepth(next, added) : 0;
+  const bots = db.getConversation(conversationId)?.botIds ?? [];
+  if (added && owner !== by && owner !== "me" && !row.message.event && bots.includes(owner) && (by === "me" || depth < BOT_REACTION_DEPTH)) {
+    const who = by === "me" ? getSettings().user?.name || "The user" : db.getBot(by)?.name || "Another bot";
+    const quote = `“${row.message.text.slice(0, 200)}”`;
+    const short = messageId.slice(0, 8);
+    const text = target
+      ? `${who} reacted ${emoji} to your ${target.emoji} reaction on [${short}] ${quote}. That's reaction #${next.length} there; react to it with react's to_reaction if you like. A reaction doesn't need an answer: react back, say something, or stay [silent], whatever a person would do.`
+      : `${who} reacted ${emoji} to your message [${short}]: ${quote}. That's reaction #${next.length} there; react to it with react's to_reaction if you like. A reaction doesn't need an answer: react back, say something, or stay [silent], whatever a person would do.`;
+    hooks.wake(owner, { kind: "reaction", conversationId, text, reaction: { messageId, emoji, by, to } });
+  }
+  return patched;
 }
 
 export function answerQuestion(conversationId: string, messageId: string, key: string) {

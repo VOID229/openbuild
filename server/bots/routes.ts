@@ -198,7 +198,7 @@ export function botRoutes(api: Api) {
         try {
           const body = await readJson(req);
           if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(req.params.id, req.params.messageId, body.question.answer);
-          if (typeof body?.emoji === "string") return json(svc.toggleReaction(req.params.id, req.params.messageId, body.emoji, "me"));
+          if (typeof body?.emoji === "string") return json(svc.toggleReaction(req.params.id, req.params.messageId, body.emoji, "me", typeof body.to === "string" ? body.to : undefined));
           // Questions may live in a history page, outside the latest snapshot.
           return json(svc.patchMessage(req.params.id, req.params.messageId, {}));
         } catch (err) {

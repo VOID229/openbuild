@@ -1062,6 +1062,29 @@
   margin: -7px 10px 0 0;
 }
 
+/* A reaction and the chain answering it stay together, each answer hooked back to the one before. */
+.bm-reaction-thread,
+.bm-reaction-link {
+  display: inline-flex;
+  align-items: center;
+}
+
+.bm-reaction-thread {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.bm-reaction-arrow {
+  flex: none;
+  margin: 0 1px 0 2px;
+  fill: none;
+  stroke: var(--text-3);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+}
+
 .bm-reaction {
   display: inline-flex;
   align-items: center;
@@ -1086,11 +1109,6 @@
 .bm-reaction-emoji {
   font-size: 14px;
   line-height: 1;
-}
-
-.bm-reaction-mine {
-  border-color: color-mix(in srgb, #3f87f5 60%, transparent);
-  background: color-mix(in srgb, #3f87f5 14%, var(--surface));
 }
 
 .bm-reaction-count {
