@@ -47,6 +47,13 @@ type Peek = (id: string, side: Side) => {
 
 const PEEK_DELAY = 450;
 
+/** Where a peek hangs from: a tile's card sits past the sidebar's edge, so it never covers the rows or tiles beside it. */
+function anchor(el: HTMLElement): DOMRect {
+  const rect = el.getBoundingClientRect();
+  const edge = el.closest(".bots-sidebar")?.getBoundingClientRect().right;
+  return edge === undefined ? rect : new DOMRect(rect.left, rect.top, Math.max(rect.width, edge - rect.left), rect.height);
+}
+
 /** A hover card for tiles and rail avatars, whose names get cut short: the full name and the latest message. */
 function usePeek() {
   const [peek, setPeek] = useState<PeekState>();
@@ -71,12 +78,12 @@ function usePeek() {
         if (e.pointerType === "touch") return;
         const el = e.currentTarget;
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: el.getBoundingClientRect() }), PEEK_DELAY);
+        timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: anchor(el) }), PEEK_DELAY);
       },
       onPointerLeave: hide,
       onPointerDown: hide,
       onFocus: (e) => {
-        if (e.currentTarget.matches(":focus-visible")) setPeek({ id, side, rect: e.currentTarget.getBoundingClientRect() });
+        if (e.currentTarget.matches(":focus-visible")) setPeek({ id, side, rect: anchor(e.currentTarget) });
       },
       onBlur: hide,
     }),
@@ -193,7 +200,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu, peek }: { conver
       type="button"
       className={cx("bots-tile", active && "bots-tile-active")}
       aria-current={active ? "page" : undefined}
-      {...peek(conversation.id, "bottom")}
+      {...peek(conversation.id, "right")}
       onClick={() => select(conversation.id)}
       onContextMenu={(e) => {
         e.preventDefault();
