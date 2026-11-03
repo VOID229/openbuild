@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { flushSync } from "react-dom";
 
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
+
+/** Crossfade the window across a state change, where the browser can and motion is welcome. */
+export function crossfade(update: () => void) {
+  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return update();
+  document.startViewTransition(() => flushSync(update));
+}
 
 /**
  * Follow a resize grip until the drag ends, with `className` on the body meanwhile. The pointer is

@@ -15,7 +15,7 @@ import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
-export type SettingsSection = "security" | "account" | "profile" | "general" | "shortcuts" | "pi" | "keys" | "runtimes" | "projects" | "devices" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
+export type SettingsSection = "security" | "account" | "profile" | "general" | "bots" | "shortcuts" | "pi" | "keys" | "runtimes" | "projects" | "devices" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
@@ -253,6 +253,8 @@ interface State {
   /** Threads whose first title a model is writing right now. Lost on reload, so none can stay stuck. */
   titling: ReadonlySet<string>;
   sidebarOpen: boolean;
+  /** OpenBots keeps its own sidebar state, so closing one leaves the other as it was. */
+  botsSidebarOpen: boolean;
   /** Expanded state of the collapsible sidebar sections. */
   sections: SidebarSections;
   view: SidebarView;
@@ -260,6 +262,8 @@ interface State {
   settingsSection: SettingsSection;
   /** The usage page is showing in place of a thread. */
   usageOpen: boolean;
+  /** OpenBots is showing: its own sidebar and chat in place of threads. */
+  botsOpen: boolean;
   /** Projects threads can work in (from this server, and from paired devices). Remote ids are namespaced. */
   projects: Project[];
   projectsLoaded: boolean;
@@ -325,7 +329,9 @@ interface State {
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
   setUsageOpen: (open: boolean) => void;
+  setBotsOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
+  setBotsSidebarOpen: (open: boolean) => void;
   /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
   setSelection: (selection: Selection) => void;
   setEffort: (effort: Effort, selection?: Selection) => void;
@@ -381,11 +387,13 @@ export const useStore = create<State>()(
       selections: {},
       titling: new Set(),
       sidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
+      botsSidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
       sections: { pinned: true, attention: true, limits: true, subagents: true, woke: true, done: true, working: true, today: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
       usageOpen: false,
+      botsOpen: false,
       projects: [],
       projectsLoaded: false,
       devices: [],
@@ -735,8 +743,10 @@ export const useStore = create<State>()(
 
       openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
       closeSettings: () => set({ settingsOpen: false }),
-      setUsageOpen: (open) => set({ usageOpen: open }),
+      setUsageOpen: (open) => set(open ? { usageOpen: true, botsOpen: false } : { usageOpen: false }),
+      setBotsOpen: (open) => set(open ? { botsOpen: true, usageOpen: false } : { botsOpen: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
+      setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 
       setSelection: (selection) => {
         const id = get().activeChatId;
@@ -777,13 +787,14 @@ export const useStore = create<State>()(
       newChat: () => set((s) => ({
         activeChatId: undefined,
         usageOpen: false,
+        botsOpen: false,
         searchFocus: undefined,
         settings: s.settings.workspace.defaultMode === "last-used"
           ? s.settings
           : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },
       })),
       selectChat: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: false });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       removeChat: (id) => {
@@ -891,6 +902,7 @@ export const useStore = create<State>()(
         searchStatus: s.searchStatus,
         selections: s.selections,
         sidebarOpen: s.sidebarOpen,
+        botsSidebarOpen: s.botsSidebarOpen,
         sections: s.sections,
         view: s.view,
         piCache: s.piCache,
@@ -941,6 +953,7 @@ export const useStore = create<State>()(
           searchStatus,
           piCache: { ...current.piCache, ...p.piCache },
           sidebarOpen: window.innerWidth > 768 ? (p.sidebarOpen ?? true) : false,
+          botsSidebarOpen: window.innerWidth > 768 ? (p.botsSidebarOpen ?? true) : false,
           sections: { ...current.sections, ...p.sections },
           view: { ...DEFAULT_VIEW, ...p.view },
           settings: (() => {

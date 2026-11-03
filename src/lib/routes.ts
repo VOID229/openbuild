@@ -1,10 +1,10 @@
 import type { SettingsSection } from "./store";
 
-const sections: readonly SettingsSection[] = ["security", "account", "profile", "general", "shortcuts", "pi", "keys", "projects", "search", "appearance", "notifications"];
+const sections: readonly SettingsSection[] = ["security", "account", "profile", "general", "bots", "shortcuts", "pi", "keys", "projects", "search", "appearance", "notifications"];
 
 export const threadPath = (id: string) => `/thread-${encodeURIComponent(id)}`;
 
-type Route = { threadId?: string; section?: SettingsSection; usage?: true };
+type Route = { threadId?: string; section?: SettingsSection; usage?: true; bots?: true };
 
 export function readRoute(pathname: string, hash = ""): Route {
   try {
@@ -15,6 +15,7 @@ export function readRoute(pathname: string, hash = ""): Route {
     const thread = /^\/thread-([^/]+)$/.exec(path);
     if (thread) return { threadId: decodeURIComponent(thread[1]!) };
     if (path === "/usage") return { usage: true };
+    if (path === "/bots") return { bots: true };
     const settings = /^\/settings(?:\/([^/]+))?$/.exec(path);
     if (settings) {
       const section = settings[1] ?? "profile";
@@ -31,12 +32,13 @@ interface RouteState {
   settingsOpen: boolean;
   settingsSection: SettingsSection;
   usageOpen?: boolean;
+  botsOpen?: boolean;
   chats: { id: string }[];
 }
 interface RouteStore {
   getState(): RouteState;
   selectChat(id: string): void;
-  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection" | "usageOpen"> & { searchFocus?: undefined }): void;
+  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection" | "usageOpen" | "botsOpen"> & { searchFocus?: undefined }): void;
   subscribe(listener: () => void): () => void;
 }
 type Browser = Pick<Window, "location" | "history" | "addEventListener" | "removeEventListener">;
@@ -47,7 +49,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
   let applying = false;
   const pathFor = (state: RouteState) => state.settingsOpen
     ? `/settings/${state.settingsSection}`
-    : state.usageOpen ? "/usage" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
+    : state.usageOpen ? "/usage" : state.botsOpen ? "/bots" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
   const write = (replace: boolean) => {
     const state = store.getState();
     const url = pathFor(state) + location.search;
@@ -69,6 +71,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
         settingsOpen: !!route.section,
         settingsSection: route.section ?? state.settingsSection,
         usageOpen: !!route.usage,
+        botsOpen: !!route.bots,
         searchFocus: undefined,
       });
     } finally {

@@ -12,6 +12,7 @@ export type ShortcutId =
   | "toggleSidebar"
   | "toggleRightSidebar"
   | "toggleTerminal"
+  | "toggleBots"
   | "openSettings"
   | "openUsage"
   | "focusSearch"
@@ -54,6 +55,12 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     label: "Toggle terminal",
     description: "Open or hide the terminal drawer under the thread (separate from the side panel's terminals).",
     default: "mod+KeyJ",
+  },
+  {
+    id: "toggleBots",
+    label: "Toggle OpenBots",
+    description: "Switch between OpenBuild and OpenBots.",
+    default: "mod+KeyG",
   },
   {
     id: "toggleDictation",

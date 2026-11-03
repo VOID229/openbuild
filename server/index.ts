@@ -30,6 +30,7 @@ import * as devices from "./devices";
 import * as folderPicker from "./folderPicker";
 import * as sessionImport from "./sessionImport";
 import { computerRoutes } from "./computers/api";
+import { botRoutes } from "./bots/routes";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -523,6 +524,8 @@ function serve(port: number, hostname: string) {
       ...usageRoutes(api),
 
       ...computerRoutes(api),
+
+      ...botRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
     },

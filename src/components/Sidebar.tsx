@@ -11,10 +11,11 @@ import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
-import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
+import { arrowNav, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
+import { BotsGlyph } from "./bots/BotAvatar";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
 function fitFlyout(el: HTMLElement | null) {
@@ -502,7 +503,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
 
 /** Thin overlay scrollbar for `target`: fades in as it scrolls, and out a second after the last scroll.
  * The native one can stay stuck on screen when a trackpad scroll is stopped dead, with no momentum phase. */
-function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | null> }) {
+export function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | null> }) {
   const thumb = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = target.current;
@@ -1057,6 +1058,34 @@ function ChatContextMenu({
   );
 }
 
+/** The footer button that switches the sidebar and main pane over to OpenBots, and back. */
+export function BotsToggle() {
+  const open = useStore((s) => s.botsOpen);
+  return (
+    <button
+      type="button"
+      className={cx("bots-toggle", open && "active")}
+      aria-label={open ? "Back to threads" : "OpenBots"}
+      aria-pressed={open}
+      data-tooltip={open ? "Back to threads" : "OpenBots"}
+      data-tooltip-side="top"
+      onClick={() =>
+        crossfade(() => {
+          const st = useStore.getState();
+          st.setBotsOpen(!open);
+          // On a phone the sidebar is a drawer and this button sits in it, so the other drawer takes its place.
+          if (window.innerWidth <= 768) {
+            st.setSidebarOpen(open);
+            st.setBotsSidebarOpen(!open);
+          }
+        })
+      }
+    >
+      <BotsGlyph size={19} />
+    </button>
+  );
+}
+
 /** Models that replied in any chat, for the model filter. */
 function useChatModels() {
   const chats = useStore((s) => s.chats);
@@ -1605,6 +1634,7 @@ export function Sidebar() {
             >
               <SquareCheck size={18} />
             </button>
+            <BotsToggle />
           </div>
         </div>
       </aside>

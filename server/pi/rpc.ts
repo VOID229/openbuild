@@ -39,11 +39,11 @@ export class PiProcess {
   exitCode?: number;
   lastUsed = Date.now();
 
-  constructor(args: string[], cwd: string) {
+  constructor(args: string[], cwd: string, env?: Record<string, string>) {
     const bin = piBin();
     if (!bin) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
     this.cwd = cwd;
-    this.proc = Bun.spawn([bin, "--mode", "rpc", ...args], { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: piEnv() });
+    this.proc = Bun.spawn([bin, "--mode", "rpc", ...args], { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...piEnv(), ...env } });
     void this.readStdout();
     void this.readStderr();
     void this.proc.exited.then((code) => {

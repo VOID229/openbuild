@@ -15,8 +15,11 @@ import { ThreadTools } from "./components/ThreadTools";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
 import { Sidebar } from "./components/Sidebar";
+import { BotsSidebar } from "./components/bots/BotsSidebar";
+import { BotsView } from "./components/bots/BotsView";
 import { UsagePage } from "./components/UsagePage";
 import { adoptDiscoveredChats, resumeReplies } from "./lib/chat";
+import { preloadBots } from "./lib/bots/store";
 import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
@@ -25,7 +28,7 @@ import { loadChats } from "./lib/db";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
-import { cx } from "./lib/ui";
+import { crossfade, cx } from "./lib/ui";
 import { startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -81,11 +84,13 @@ function Home() {
 let preloadingProjects: Promise<void> | undefined;
 
 /**
- * Fetch settings, threads and projects together. Only settings and threads gate the first render:
+ * Fetch settings, threads and projects together. Only settings, threads and the bots' cached copy gate the first render:
  * paired-device project discovery can wait on sleeping machines and must not delay the sidebar.
  * Past the deadline, whatever's missing fills in when it arrives.
  */
 export async function preloadApp() {
+  // First, so it isn't queued behind the slower requests below for one of the browser's connections.
+  const bots = preloadBots();
   const hydrated = new Promise<void>((resolve) => {
     if (useStore.persist.hasHydrated()) return resolve();
     const off = useStore.persist.onFinishHydration(() => { off(); resolve(); });
@@ -109,7 +114,7 @@ export async function preloadApp() {
       if (!device.local && device.online !== false) preloadRuntimeStatuses(device.id);
     }
   }).catch(() => {}).finally(() => { preloadingProjects = undefined; });
-  await Promise.race([Promise.all([hydrated, chats]), new Promise((r) => setTimeout(r, 3000))]);
+  await Promise.race([Promise.all([hydrated, chats, bots]), new Promise((r) => setTimeout(r, 3000))]);
 }
 
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
@@ -151,6 +156,7 @@ function Main() {
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const usageOpen = useStore((s) => s.usageOpen);
+  const botsOpen = useStore((s) => s.botsOpen);
   const lightboxOpen = useLightbox((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
@@ -257,7 +263,8 @@ function Main() {
           st.newChat();
           break;
         case "toggleSidebar":
-          st.setSidebarOpen(!st.sidebarOpen);
+          if (st.botsOpen) st.setBotsSidebarOpen(!st.botsSidebarOpen);
+          else st.setSidebarOpen(!st.sidebarOpen);
           break;
         case "toggleRightSidebar": {
           const { panel, tree, setPanel, setTree } = usePanel.getState();
@@ -271,6 +278,12 @@ function Main() {
           // The browser's own Cmd/Ctrl+J (downloads) doesn't get it: the app is what has focus.
           // Stopped in the handler so a focused terminal doesn't also take it (Ctrl+J is a line feed there).
           toggleTerminal();
+          break;
+        case "toggleBots":
+          crossfade(() => {
+            const now = useStore.getState();
+            now.setBotsOpen(!now.botsOpen);
+          });
           break;
         case "openSettings":
           st.openSettings();
@@ -321,8 +334,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = usageOpen ? "Usage · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, titling, usageOpen]);
+    document.title = botsOpen ? "OpenBots · OpenBuild" : usageOpen ? "Usage · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, usageOpen, botsOpen]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -338,9 +351,10 @@ function Main() {
     <>
       <PluginSlot name="app:before" />
       <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen || lightboxOpen}>
-        <Sidebar />
-        <main className={cx("main", !sidebarOpen && "main-full")}>
-          <div className={cx("floating-tools", !sidebarOpen && "floating-tools-visible")} inert={sidebarOpen}>
+        {botsOpen ? <BotsSidebar /> : <Sidebar />}
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots")}>
+          {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
+          <div className={cx("floating-tools", !sidebarOpen && !botsOpen && "floating-tools-visible")} inert={sidebarOpen || botsOpen}>
             <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
               <PanelLeft size={18} />
             </IconButton>
@@ -360,6 +374,8 @@ function Main() {
                 </div>
               </div>
             )
+          ) : botsOpen ? (
+            <BotsView />
           ) : (
             <div className="main-row">
               <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
@@ -371,7 +387,7 @@ function Main() {
               {folder?.cwd && <FileTree folder={folder} />}
             </div>
           )}
-          {chatsLoaded && <ThreadTools chat={chat} onWidth={onToolsWidth} />}
+          {chatsLoaded && !botsOpen && <ThreadTools chat={chat} onWidth={onToolsWidth} />}
         </main>
       </div>
       <SettingsModal />

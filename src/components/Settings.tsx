@@ -1,5 +1,5 @@
 import { ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type TextRuntime, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget } from "../lib/models";
@@ -19,11 +19,17 @@ import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../li
 import { PluginsSection } from "./PluginSettings";
 import { RuntimesSection } from "./RuntimeSettings";
 import { RuntimeIcon } from "./Workspace";
+import { BotsGlyph } from "./bots/BotAvatar";
+import { BotsSettingsSection } from "./bots/BotSettings";
+
+/** A section's icon: Lucide's, or one drawn to match them (OpenBots' bot). */
+type NavIcon = LucideIcon | ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
 /** Icons stand in for the labels on phones, so every section fits without scrolling. */
-const SECTIONS: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
+const SECTIONS: { id: SettingsSection; label: string; icon: NavIcon }[] = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "general", label: "General", icon: Settings2 },
+  { id: "bots", label: "Bots", icon: BotsGlyph },
   { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
   { id: "pi", label: "Pi agent", icon: SquareTerminal },
   { id: "keys", label: "Providers", icon: Key },
@@ -499,7 +505,7 @@ export function SettingsModal() {
   const requestedSection = useStore((s) => s.settingsSection);
   const hasCloud = cloudConfigured();
   const pluginSections = usePluginSettingsSections();
-  const sections: { id: SettingsSection; label: string; icon: LucideIcon }[] = [
+  const sections: { id: SettingsSection; label: string; icon: NavIcon }[] = [
     ...SECTIONS.filter((s) => s.id !== "account" || hasCloud),
     ...pluginSections.map((p) => ({ id: p.id as SettingsSection, label: p.label, icon: Puzzle })),
   ];
@@ -569,6 +575,7 @@ export function SettingsModal() {
             </>
           )}
           {section === "general" && <GeneralSection />}
+          {section === "bots" && <BotsSettingsSection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "pi" && <PiSection />}
           {section === "keys" && <ProvidersSection />}
