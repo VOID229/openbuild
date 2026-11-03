@@ -45,7 +45,9 @@ export function busy(botId: string): boolean {
 
 export function wake(botId: string, item: Wake) {
   const mind = minds.get(botId);
-  if (pumping.has(botId) && mind && !mind.proc.exited) {
+  // Only a message in the conversation it's working in joins the current turn. Everything else gets a
+  // turn of its own, so a routine actually runs and its replies land in its own conversation.
+  if (item.kind === "messages" && item.conversationId === getFocus(botId) && pumping.has(botId) && mind && !mind.proc.exited) {
     const text = render([item], botId);
     void mind.proc
       .send({ type: "steer", message: text }, 15_000)
@@ -73,8 +75,11 @@ async function pump(botId: string) {
   try {
     while (queue.get(botId)?.length) {
       const jobs = queue.get(botId)!;
-      queue.set(botId, []);
-      await run(botId, jobs);
+      const first = jobs[0]!;
+      // One conversation a turn, and each routine alone.
+      const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId);
+      queue.set(botId, jobs.filter((j: Wake) => !turn.includes(j)));
+      await run(botId, turn);
     }
   } finally {
     pumping.delete(botId);
