@@ -29,6 +29,7 @@ import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as folderPicker from "./folderPicker";
 import * as sessionImport from "./sessionImport";
+import { computerRoutes } from "./computers/api";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -94,6 +95,8 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/pi\/(threads|shells)\/[^/]+/.test(path) ||
   // A terminal in a project's folder. It's a shell on this device, which Pi turns here already are.
   /^\/api\/terminals(\/|$)/.test(path) ||
+  // A bot on the paired server can keep its computer on this machine.
+  /^\/api\/computers(\/|$)/.test(path) ||
   // Managing Pi on this device. It already runs Pi turns here — tools included — so this is not
   // a wider grant: it's the same power through a settings page instead of a prompt.
   /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
@@ -518,6 +521,8 @@ function serve(port: number, hostname: string) {
       ...terminalRoutes(api),
 
       ...usageRoutes(api),
+
+      ...computerRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
     },
