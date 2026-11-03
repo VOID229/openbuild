@@ -217,7 +217,7 @@ export const OpencodeMark = memo(function OpencodeMark({ size = 14, className }:
   );
 });
 
-/** Hermes's official helmet logo. Keep the original SVG, including its brand colors. */
+/** Hermes's official logo. Keep the original SVG, including its brand colors. */
 const hermesLogoUrl = `data:image/svg+xml,${encodeURIComponent(hermesLogo)}`;
 export const HermesMark = memo(function HermesMark({ size = 14, className }: { size?: number; className?: string }) {
   return <img src={hermesLogoUrl} width={size} height={size} className={className} alt="" aria-hidden style={{ flexShrink: 0 }} />;

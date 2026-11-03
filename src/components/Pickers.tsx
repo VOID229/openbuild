@@ -1,4 +1,3 @@
-import { Bot as HermesMark } from "lucide-react";
 import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -18,7 +17,7 @@ import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
 import { RUNTIME_LABEL, RuntimeIcon, useRuntimeOptions } from "./Workspace";
 import { runtimeName } from "../lib/runtimes";
-import { GrokMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
+import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
   off: "off",

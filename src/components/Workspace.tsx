@@ -1,4 +1,3 @@
-import { Bot as HermesMark } from "lucide-react";
 import { ThreadAccountSelect } from "./RuntimeAccounts";
 // Where a thread works. On the new-thread screen the heading picks the project ("What should we
 // build in <project>?"), and above the composer you choose the project's checkout or a new
@@ -16,7 +15,7 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { GrokMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 // The last git state read for each project, kept across reloads so the branch shows at once while
