@@ -149,7 +149,8 @@ test("composer clears only after ack and routine/memory actions do not fabricate
   expect(chat).toContain("const m = await useBots.getState().post");
   expect(chat.indexOf("if (!m) return;")).toBeLessThan(chat.indexOf('setText((current) =>'));
   expect(chat).toContain("sendingRef.current ||");
-  expect(chat).toContain("Please remember this:");
+  // The overflow menu is gone, so the "ask it to remember" shortcut went with it.
+  expect(chat).not.toContain("Please remember this:");
   expect(chat).not.toContain('author: directBot.id, text: "", event:');
   expect(details).not.toContain('author: bot.id, text: "", event:');
 });
