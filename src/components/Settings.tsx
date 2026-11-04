@@ -209,7 +209,7 @@ function GeneralSection() {
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Close threads when their PR merges</div>
-          <p className="setting-desc">Close a worktree thread once the pull request from its branch is merged on GitHub, unless it’s pinned, snoozed, working, or you wrote to it after the merge. Its worktree is removed when nothing in it would be lost.</p>
+          <p className="setting-desc">Close a thread once the pull request from its worktree’s branch, or one its agent opened, is merged on GitHub, unless it’s pinned, snoozed, working, or you wrote to it after the merge. Its worktree is removed when nothing in it would be lost.</p>
         </div>
         <Toggle checked={s.workspace.closeMerged ?? true} onChange={(closeMerged) => update({ workspace: { ...s.workspace, closeMerged } })} label="Close threads when their PR merges" />
       </div>

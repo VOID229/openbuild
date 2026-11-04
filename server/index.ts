@@ -612,7 +612,7 @@ void durable.recover().catch((err) => console.error("[durable] Startup recovery 
 void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
 // Behind the open port: a tab refreshed during a restart waits for the server instead of being refused.
 void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Warm-up failed:", (err as Error).message));
-startPullRequestSweep();
+startPullRequestSweep(() => refreshChats(15_000));
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");

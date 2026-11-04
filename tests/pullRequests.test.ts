@@ -36,6 +36,9 @@ const script = `
   assert.equal(pr.pickPullRequest([old], "openbuild/x", t0), undefined, "an older thread's pull request on a reused branch name");
   assert.equal(pr.pickPullRequest([old, fresh, reopened], "openbuild/x", t0).number, 3, "the open one wins");
   assert.equal(pr.pickPullRequest([old, fresh], "openbuild/x", t0).number, 2);
+  assert.equal(pr.pickPullRequest([old, fresh], undefined, t0), undefined, "no branch of its own, and it opened nothing");
+  assert.equal(pr.pickPullRequest([old, fresh], undefined, t0, ["u1"]).number, 1, "one it opened itself");
+  assert.equal(pr.pickPullRequest([old, reopened], undefined, t0, ["u1", "u3"]).number, 3, "an open one holds the thread open");
 
   const merged = { number: 9, url: "u", state: "merged", mergedAt: t0 + 5000, checkedAt: t0 + 6000 };
   const base = { id: "c", title: "t", createdAt: t0, updatedAt: t0, messages: [
@@ -98,6 +101,32 @@ const script = `
   await pr.sweep();
   assert.equal(storage.getChat("open").archived, true);
   assert.equal(existsSync(ws2.cwd), true);
+
+  // A thread in the project's own checkout follows the pull request its agent opened from elsewhere.
+  const created = (url, command = "cd ~/elsewhere && gh pr create --fill") => ({ id: "a", role: "assistant", content: "", createdAt: now - 59_000, status: "done", parts: [{ type: "tool", id: "t", name: "bash", args: { command }, status: "done", output: url + "\\n" }] });
+  const checkout = { cwd: repo, branch: "main", projectId: project.id };
+  const url = "https://github.com/o/r/pull/50";
+  storage.putChat(chat("checkout", checkout, { messages: [{ id: "u", role: "user", content: "go", createdAt: now - 60_000 }, created(url)] }));
+  storage.putChat(chat("neighbour", checkout));
+  storage.putChat(chat("searched", checkout, { messages: [created(url, "grep 'gh pr create' AGENTS.md")] }));
+  const pullRequests = [{ number: 50, url, state: "OPEN", headRefName: "feat/elsewhere", headRefOid: "x", createdAt: new Date(now - 30_000).toISOString() }];
+  writeFileSync(process.env.FAKE_GH_JSON, JSON.stringify(pullRequests));
+  await pr.sweep();
+  assert.deepEqual([storage.getChat("checkout").pullRequest.number, storage.getChat("checkout").archived], [50, undefined]);
+  writeFileSync(process.env.FAKE_GH_JSON, JSON.stringify([{ ...pullRequests[0], state: "MERGED", mergedAt: new Date().toISOString() }]));
+  await pr.sweep();
+  assert.equal(storage.getChat("checkout").archived, true);
+  assert.equal(existsSync(repo + "/.git"), true, "the project's checkout is never removed");
+  assert.equal(storage.getChat("neighbour").pullRequest, undefined, "a thread sharing the checkout isn't touched");
+  assert.equal(storage.getChat("searched").pullRequest, undefined, "mentioning the command isn't running it");
+
+  // Nobody has the app open: the sweep brings a finished reply up to date, so the thread still closes.
+  const streaming = chat("unattended", checkout, { messages: [{ id: "u", role: "user", content: "go", createdAt: now - 60_000 }, { ...created(url), status: "streaming" }] });
+  storage.putChat(streaming);
+  await pr.sweep();
+  assert.equal(storage.getChat("unattended").archived, undefined, "still working");
+  await pr.sweep(async () => { storage.putChat({ ...streaming, messages: [streaming.messages[0], created(url)] }); });
+  assert.equal(storage.getChat("unattended").archived, true);
   console.log("ok");
 `;
 
