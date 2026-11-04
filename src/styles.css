@@ -66,7 +66,7 @@
   --fast: 150ms;
   --med: 220ms;
 
-  --sidebar-w: clamp(244px, 18.5vw, 300px);
+  --sidebar-w: clamp(272px, 21vw, 340px);
   --content-w: 768px;
   color-scheme: light;
 }
@@ -1453,7 +1453,7 @@ svg {
 .history-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   width: 100%;
   font-size: 13px;
@@ -7696,9 +7696,35 @@ a.btn-primary {
 /* Sidebar: a thread's project, before the runtime mark on its meta line */
 
 .history-proj {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
+}
+
+/* The project keeps up to half the room; the worktree's name gives way first. */
+.history-proj-name {
+  flex-shrink: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-worktree {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.history-worktree svg {
+  flex-shrink: 0;
+}
+
+.history-worktree span {
+  overflow: hidden;
   text-overflow: ellipsis;
 }
 

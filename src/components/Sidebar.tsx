@@ -434,9 +434,14 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         <span className="history-meta">
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
-              {chat.workspace.projectName}
+              <span className="history-proj-name">{chat.workspace.projectName}</span>
               {/* A worktree's folder name tells threads of one project apart. */}
-              {chat.workspace.worktree && <span className="history-worktree"> · {chat.workspace.cwd.split(/[\\/]/).pop()}</span>}
+              {chat.workspace.worktree && (
+                <span className="history-worktree">
+                  <GitBranch size={12} />
+                  <span>{chat.workspace.cwd.split(/[\\/]/).pop()}</span>
+                </span>
+              )}
             </span>
           )}
           {device && (
