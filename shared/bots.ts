@@ -425,6 +425,19 @@ export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[
   return out;
 }
 
+/**
+ * Every @mention in some text, in order: bots as findMentions finds them, and "@all" or "@everyone",
+ * which have no `bot` because they name the whole conversation. They beat a bot called "All", but
+ * "@All Stars" is still that bot.
+ */
+export function findTags<B extends Pick<Bot, "name">>(text: string, bots: B[]): { start: number; end: number; bot?: B }[] {
+  const named = findMentions(text, bots);
+  const all = [...text.matchAll(/(?<![\p{L}\d_])@(?:all|everyone)(?![\p{L}\d_-])/giu)]
+    .map((m) => ({ start: m.index, end: m.index + m[0].length }))
+    .filter((a) => !named.some((m) => m.start === a.start && m.end > a.end));
+  return [...named.filter((m) => !all.some((a) => a.start === m.start)), ...all].sort((a, b) => a.start - b.start);
+}
+
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";
