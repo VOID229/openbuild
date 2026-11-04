@@ -65,17 +65,31 @@ export interface BotStatus {
   since?: number;
 }
 
+export type BotProjectScope = "all" | "choose" | "exclude";
+
 /** What a bot may do with the user's OpenBuild threads. Only the user can change this. */
 export interface BotThreadAccess {
   enabled: boolean;
-  /** The projects it can work in, by id. */
+  /** Which projects it can work in. Grants from before this existed have none, and mean "choose". */
+  scope?: BotProjectScope;
+  /** "choose": the projects it can work in, by id. */
   projects: string[];
+  /** "exclude": the projects it can't work in, by id. */
+  excluded?: string[];
   /** It picks each thread's permission mode. Otherwise threads get the harness's default from BotsSettings. */
   choosePermission?: boolean;
   /** It can answer permission prompts, not just the questions threads ask. */
   approve?: boolean;
   /** It can merge pull requests. */
   merge?: boolean;
+}
+
+/** Whether a grant covers a project. Something that isn't in a project is never covered. */
+export function coversProject(access: Pick<BotThreadAccess, "scope" | "projects" | "excluded">, projectId: string | undefined): boolean {
+  if (!projectId) return false;
+  if (access.scope === "all") return true;
+  if (access.scope === "exclude") return !access.excluded?.includes(projectId);
+  return access.projects.includes(projectId);
 }
 
 /** The harnesses with permission modes OpenBuild can set for a thread. */
