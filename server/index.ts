@@ -531,12 +531,13 @@ function serve(port: number, hostname: string) {
       // The one-time offer to import native runtimes' sessions (sessionImport.ts). POST is the
       // answer: the runtimes to import, [] to skip. Either way it's never offered again.
       "/api/session-import": {
-        GET: api(async (req) => Response.json(new URL(req.url).searchParams.has("progress") ? sessionImport.progressiveOffer() : await sessionImport.offer())),
+        GET: api(async (req) => Response.json(new URL(req.url).searchParams.has("progress") ? sessionImport.progressiveOffer(new URL(req.url).searchParams.has("all")) : await sessionImport.offer(new URL(req.url).searchParams.has("all")))),
         POST: api(async (req, server: Bun.Server<unknown>) => {
           server.timeout(req, 0);
           const body = await readJson(req);
           if (!Array.isArray(body?.runtimes) || !body.runtimes.every(sessionImport.isImportRuntime)) return bad("Expected { runtimes: string[] }");
-          return Response.json(await sessionImport.answer([...new Set<sessionImport.ImportRuntime>(body.runtimes)]));
+          if (body.all !== undefined && typeof body.all !== "boolean") return bad("Expected all to be boolean");
+          return Response.json(await sessionImport.answer([...new Set<sessionImport.ImportRuntime>(body.runtimes)], body.all === true));
         }),
       },
 

@@ -232,3 +232,112 @@ test("preserves Claude custom names and closes even freshly updated imports", as
     assert.equal(chat.archived, true);
   `);
 });
+
+test("discovery probes metadata without reading full Claude transcripts, and import reads once", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-import-probe-"));
+  await run(dir, `${claudeFixture}
+    const { mock } = await import("bun:test");
+    const fs = await import("node:fs/promises");
+    const originalRead = fs.readFile;
+    let reads = 0;
+    mock.module("node:fs/promises", () => ({ ...fs, readFile: async (file, ...args) => {
+      if (String(file).endsWith(".jsonl")) reads++;
+      return originalRead(file, ...args);
+    } }));
+    const mod = await import("./server/sessionImport.ts");
+    const { strict: a } = await import("node:assert");
+    a.deepEqual(await mod.offer(), { pending: true, runtimes: { claude: 1 } });
+    a.equal(reads, 0);
+    a.equal((await mod.answer(["claude"])).imported.claude, 1);
+    a.equal(reads, 1);
+    const before = reads;
+    await mod.offer();
+    a.equal(reads, before);
+  `);
+});
+
+test("failed imports roll back the chat and every resume binding, then retry successfully", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-import-atomic-"));
+  await run(dir, `${claudeFixture}
+    const { Database } = await import("bun:sqlite");
+    const db = new Database(join(process.env.OPENCHAT_DATA_DIR, "openchat.db"));
+    db.run("CREATE TRIGGER fail_binding BEFORE INSERT ON kv WHEN NEW.key LIKE 'imported-session:%' BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
+    const mod = await import("./server/sessionImport.ts");
+    const { strict: a } = await import("node:assert");
+    a.ok((await mod.answer(["claude"])).errors.claude);
+    a.equal(mod.offered(), false);
+    a.equal(storage.chatIndex().length, 0);
+    a.equal(storage.listValues("claude-session:").length, 1); // fixture's pre-existing own session only
+    a.equal(storage.listValues("thread-runtime:").length, 0);
+    db.run("DROP TRIGGER fail_binding");
+    a.equal((await mod.answer(["claude"])).imported.claude, 1);
+    a.equal(storage.chatIndex().length, 1);
+  `);
+});
+
+test("defaults to the newest 100 candidates and preserves an explicit import-all option", async () => {
+  for (const all of [false, true]) {
+    const dir = await mkdtemp(join(tmpdir(), "openbuild-import-recent-"));
+    await run(dir, `${claudeFixture}
+      const { utimes } = await import("node:fs/promises");
+      for (let n = 0; n < 105; n++) {
+        const id = 'aaaaaaaa-aaaa-4aaa-8aaa-' + String(n).padStart(12, '0');
+        const file = join(dir, id + '.jsonl');
+        await writeFile(file, jsonl([rec('u', null, 'user', 'Session ' + n), rec('a', 'u', 'assistant', [{ type: 'text', text: 'Done' }])]));
+        await utimes(file, 2000000000 + n, 2000000000 + n);
+      }
+      const mod = await import("./server/sessionImport.ts");
+      const { strict: a } = await import("node:assert");
+      a.equal((await mod.offer(${all})).runtimes.claude, ${all ? 106 : 100});
+      if (!${all}) {
+        const { Database } = await import("bun:sqlite");
+        const { createHash } = await import("node:crypto");
+        const id = "claude-" + createHash("sha256").update('aaaaaaaa-aaaa-4aaa-8aaa-000000000104').digest("hex").slice(0, 32);
+        const db = new Database(join(process.env.OPENCHAT_DATA_DIR, "openchat.db"));
+        db.run("CREATE TRIGGER fail_recent BEFORE INSERT ON kv WHEN NEW.key = 'imported-session:" + id + "' BEGIN SELECT RAISE(ABORT, 'retry recent batch'); END");
+        const first = await mod.answer(["claude"]);
+        a.equal(first.imported.claude, 99);
+        a.ok(first.errors.claude);
+        db.run("DROP TRIGGER fail_recent");
+        a.equal((await mod.answer(["claude"])).imported.claude, 1);
+      } else a.equal((await mod.answer(["claude"], true)).imported.claude, 106);
+      a.equal(storage.chatIndex().length, ${all ? 106 : 100});
+      a.ok(storage.listChats().some(c => c.title === 'Session 104'));
+      if (!${all}) a.ok(!storage.listChats().some(c => c.title === 'Session 0'));
+    `);
+  }
+});
+
+test("Codex and OpenCode discovery only lists metadata; only selected histories are read", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ob-import-list-only-"));
+  await run(dir, `
+    const { mock } = await import("bun:test");
+    const { strict: a } = await import("node:assert");
+    const calls = [];
+    mock.module("./server/codex/install.ts", () => ({ codexBin: () => "/fake/codex" }));
+    mock.module("./server/codex/rpc.ts", () => ({ CodexProcess: class {
+      async initialize() {} close() {}
+      async request(method, input) {
+        calls.push(method);
+        if (method === "thread/list") return { data: input.archived ? [] : [{ id: "native-codex", cwd: "/tmp", updatedAt: 1 }] };
+        if (method === "thread/read") return { thread: { id: "native-codex", cwd: "/tmp", turns: [{ id: "t", status: "completed", items: [{ id: "u", type: "userMessage", content: [{ type: "text", text: "hello" }] }] }] } };
+        throw new Error(method);
+      }
+    } }));
+    mock.module("./server/opencode-agent/connection.ts", () => ({ opencodeBin: () => "/fake/opencode", connect: async () => ({
+      async close() {},
+      async request(path) {
+        calls.push(path);
+        if (path.startsWith("/api/session?")) return { data: [{ id: "native-opencode", location: { directory: "/tmp" }, time: { updated: 1 } }] };
+        throw new Error("Unselected OpenCode history must not be read: " + path);
+      }
+    }) }));
+    const mod = await import("./server/sessionImport.ts");
+    a.deepEqual((await mod.offer()).runtimes, { codex: 1, opencode: 1 });
+    a.ok(!calls.includes("thread/read"));
+    a.ok(!calls.some(c => c.includes("/message")));
+    a.equal((await mod.answer(["codex"])).imported.codex, 1);
+    a.equal(calls.filter(c => c === "thread/read").length, 1);
+    a.ok(!calls.some(c => c.includes("/message")));
+  `);
+});

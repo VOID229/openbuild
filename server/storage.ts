@@ -234,3 +234,6 @@ backup();
 // Importing storage in a one-off diagnostic must not keep that process alive forever.
 hot.openchatBackupTimer = setInterval(backup, BACKUP_EVERY);
 hot.openchatBackupTimer.unref();
+
+/** Keep imported histories and their resume mappings in one durable commit. */
+export function transaction<T>(work: () => T): T { return db.transaction(work)(); }
