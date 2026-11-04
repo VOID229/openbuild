@@ -590,7 +590,7 @@ export function BotsSidebar() {
             <div className="settings-row">
               <button type="button" className="settings-btn" onClick={() => useStore.getState().openSettings()}>
                 <Avatar src={avatar} name={profileName} size={26} />
-                <span className="bots-me-name">{profileName || "Settings"}</span>
+                <span className="bots-me-name">Settings</span>
               </button>
               <BotsToggle />
             </div>
