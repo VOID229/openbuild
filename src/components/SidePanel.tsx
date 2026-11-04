@@ -10,6 +10,7 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { deviceName } from "../lib/devices";
 import { arrangeTabs, defaultWidth, scopeKey, usePanel, type PanelView } from "../lib/panel";
+import { prefetchPulls } from "../lib/pulls";
 import { machineName } from "../lib/runtime";
 import { restartTerminalTab, showSideTerminal, useSideTerminal, type TerminalFolder } from "../lib/terminal";
 import { cx } from "../lib/ui";
@@ -245,6 +246,15 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
     browser: !!browser,
   };
   const showing: PanelView = view !== "launcher" && has[view] ? view : ((["file", "terminal", "diff", "pulls", "browser"] as const).find((v) => has[v]) ?? "launcher");
+
+  // The thread's pull requests, read while it's open so the tab has them before it's shown (a
+  // moment after, so hopping through threads doesn't ask about each one).
+  useEffect(() => {
+    if (!folder.cwd) return;
+    const at = { deviceId: folder.deviceId, cwd: folder.cwd };
+    const timer = setTimeout(() => void prefetchPulls(at, pulls), 600);
+    return () => clearTimeout(timer);
+  }, [folder.deviceId, folder.cwd, pulls]);
 
   // Back to the terminal you were in, so typing works straight away.
   useEffect(() => {
