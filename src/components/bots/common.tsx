@@ -41,7 +41,6 @@ export function dividerTime(t: number) {
   return `${new Date(t).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${clock(t)}`;
 }
 
-export const fullTime = (t: number) => new Date(t).toLocaleString([], { weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** A message as one line of text: for previews, reply quotes and copying. */
 export function messageText(m: BotMessage): string {

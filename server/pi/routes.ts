@@ -826,6 +826,9 @@ export function piRoutes(api: Api) {
     "/api/workspaces/pulls": {
       GET: gitRead((cwd, q) => pullRequestView.list(cwd, q.get("state"), q.has("fresh"))),
     },
+    "/api/workspaces/pulls/repo": {
+      GET: gitRead((cwd) => pullRequestView.repository(cwd)),
+    },
     "/api/workspaces/pulls/view": {
       GET: gitRead((cwd, q) => pullRequestView.view(cwd, q.get("number"), q.has("fresh"))),
     },

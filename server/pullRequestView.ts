@@ -233,6 +233,12 @@ export async function list(cwd: string, state: unknown, fresh = false): Promise<
   return { gh: true, repo: true, pulls: prs.map(toSummary), ...(current ? { current } : {}) };
 }
 
+/** The GitHub repository this folder's pull requests are in, so links to them can open in the tab. */
+export async function repository(cwd: string): Promise<{ url: string }> {
+  bin();
+  return { url: (await repoOf(cwd)).url };
+}
+
 export async function view(cwd: string, number: unknown, fresh = false): Promise<PullDetail> {
   const n = validNumber(number);
   return shared(`${await repoKey(cwd)}|view|${n}`, fresh, async () => {

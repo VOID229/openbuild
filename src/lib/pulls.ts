@@ -26,6 +26,29 @@ const act = (folder: Folder, path: string, body: Record<string, unknown>) =>
 /** `fresh`: past the server's few seconds of sharing a read, as the Refresh button wants. */
 export const listPulls = (folder: Folder, state: PullListState, fresh = false) => read<PullList>(folder, "", { state, fresh: fresh || undefined });
 export const viewPull = (folder: Folder, number: number, fresh = false) => read<PullDetail>(folder, "/view", { number, fresh: fresh || undefined });
+// A folder's repository doesn't change, so it's asked once (again after a failure).
+const repos = new Map<string, Promise<string | undefined>>();
+const repoUrls = new Map<string, string | undefined>();
+const folderId = (folder: Folder) => `${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
+
+/** The folder's GitHub repository (`https://github.com/o/r`), or undefined when it has none or gh can't say. */
+export function pullRepo(folder: Folder): Promise<string | undefined> {
+  const key = folderId(folder);
+  let known = repos.get(key);
+  if (!known) {
+    known = read<{ url: string }>(folder, "/repo", {}).then(
+      ({ url }) => (repoUrls.set(key, url), url),
+      () => (repos.delete(key), undefined),
+    );
+    repos.set(key, known);
+  }
+  return known;
+}
+
+/** The folder's repository if it's already known: `null` while it hasn't been asked or answered. */
+export const knownPullRepo = (folder: Folder): string | undefined | null => (repoUrls.has(folderId(folder)) ? repoUrls.get(folderId(folder)) : null);
+
+
 export const pullPatch = (folder: Folder, number: number, sha?: string) => read<PullPatch>(folder, "/patch", { number, sha });
 export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) => act(folder, "merge", { number, method, headSha, deleteBranch });
 export const editPull = (folder: Folder, number: number, title: string, body: string) => act(folder, "edit", { number, title, body });
