@@ -368,11 +368,6 @@
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
-.bots-toggle.active {
-  background: var(--hover);
-  color: var(--text);
-}
-
 @media (hover: hover) {
   .bots-toggle:hover {
     background: var(--hover);
