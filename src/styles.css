@@ -2629,6 +2629,9 @@ svg {
 }
 
 .msg-sent-by {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: var(--muted-foreground);
   font-size: 12px;
   margin-bottom: 4px;

@@ -271,6 +271,8 @@ export interface Message {
   usage?: Usage;
   /** A user message a bot wrote: its name. */
   sentBy?: string;
+  /** That bot's id, for its current name and mascot. */
+  sentByBot?: string;
   shell?: ShellRun;
   createdAt: number;
 }

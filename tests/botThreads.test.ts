@@ -90,6 +90,7 @@ test("a thread starts with the harness, model, effort, speed and branch asked fo
   expect(chat.workspace).toMatchObject({ projectId: project.id, worktree: true, branch: "openbuild/fix-it" });
   expect(chat.messages.map((m: any) => m.role)).toEqual(["user", "assistant"]);
   expect(chat.messages[0].sentBy).toBe("Juniper");
+  expect(chat.messages[0].sentByBot).toBe(bot.id);
   expect(chat.messages[1].stream.id).toBe(admitted[0].stream.id);
   // Bad picks are refused before anything is created.
   admitted.length = 0;
