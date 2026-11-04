@@ -85,7 +85,7 @@ function serverRequest(l: Live, m: RpcMessage) {
     const qs = Array.isArray(p.questions) ? p.questions : [];
     if (!qs.length) { respond({ answers }); return; }
     let left = qs.length;
-    for (const q of qs) question(l, { method: q.options?.length ? "select" : "input", title: q.header || q.question, message: q.question, options: q.options?.map((o: any) => o.label), other: true, secret: !!q.isSecret }, (r) => {
+    for (const q of qs) question(l, { question: true, method: q.options?.length ? "select" : "input", title: q.header || q.question, message: q.question, options: q.options?.map((o: any) => o.label), other: true, secret: !!q.isSecret }, (r) => {
       answers[q.id] = { answers: r.cancelled ? [] : [r.value ?? ""] };
       if (--left === 0) respond({ answers });
     });

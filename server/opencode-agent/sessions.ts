@@ -85,7 +85,7 @@ async function handleForm(c: Connection, l: Live, form: any, signal: AbortSignal
   const answer: Record<string, unknown> = {};
   for (const f of form.fields) {
     const options: string[] | undefined = f.type === "boolean" ? ["Yes", "No"] : f.options?.map((o: any) => o.label);
-    const r = await question(l, { method: options?.length ? "select" : "input", title: f.title ?? form.title ?? f.key, message: f.description, options, other: f.custom === true, placeholder: f.placeholder, prefill: f.default === undefined ? undefined : String(f.default) }, signal);
+    const r = await question(l, { question: true, method: options?.length ? "select" : "input", title: f.title ?? form.title ?? f.key, message: f.description, options, other: f.custom === true, placeholder: f.placeholder, prefill: f.default === undefined ? undefined : String(f.default) }, signal);
     if (r.cancelled || signal.aborted) { await c.request(path, "DELETE"); return; }
     let value: unknown = r.value ?? "";
     if (f.type === "boolean") { if (!["Yes", "No"].includes(String(value))) throw new Error("Invalid boolean form answer"); value = value === "Yes"; }

@@ -15,7 +15,7 @@ export async function elicit(params: any, ask: (a: Ask) => Promise<QuestionReply
   for (const [key, f] of fields) {
     const values: unknown[] | undefined = f.enum ?? (f.type === "boolean" ? [true, false] : undefined);
     const labels: string[] | undefined = values?.map((v, i) => f.enumNames?.[i] ?? String(v));
-    const reply = await ask({ method: labels?.length ? "select" : "input", title: f.title || f.description || params.message || key, message: [f.title && f.description, params.message].filter(Boolean).join("\n") || undefined, options: labels, other: !values, prefill: f.default === undefined ? undefined : String(f.default) });
+    const reply = await ask({ question: true, method: labels?.length ? "select" : "input", title: f.title || f.description || params.message || key, message: [f.title && f.description, params.message].filter(Boolean).join("\n") || undefined, options: labels, other: !values, prefill: f.default === undefined ? undefined : String(f.default) });
     if (reply.cancelled) return { action: "cancel" };
     let value: unknown = reply.value ?? "";
     if (values) {

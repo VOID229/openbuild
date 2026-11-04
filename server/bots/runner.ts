@@ -13,6 +13,7 @@ import { botsDir } from "./db";
 import * as db from "./db";
 import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus } from "./agent";
 import * as svc from "./service";
+import { resumeWatches } from "./threads";
 import type { Wake } from "./service";
 
 const IDLE = 20 * 60 * 1000;
@@ -241,6 +242,7 @@ const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).po
 export function activityFor(tool: string, args: unknown): string {
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
   if (tool === "bash") return "Running a command";
+  if (tool === "openbuild") return a.action === "start" ? "Starting a thread" : a.action === "merge" ? "Merging a pull request" : "Checking on threads";
   if (tool === "process") return a.action === "start" ? "Starting a program" : "Checking on a program";
   if (tool === "browser") {
     if (a.action === "open") {
@@ -435,6 +437,7 @@ function markSeen(botId: string, jobs: Wake[]) {
 export function startBots() {
   listen();
   svc.setHooks({ wake, stop });
+  resumeWatches();
   if (!hot.openbotsProc) {
     hot.openbotsProc = true;
     procListeners.add((computerId, proc, tail) => {

@@ -65,6 +65,30 @@ export interface BotStatus {
   since?: number;
 }
 
+/** What a bot may do with the user's OpenBuild threads. Only the user can change this. */
+export interface BotThreadAccess {
+  enabled: boolean;
+  /** The projects it can work in, by id. */
+  projects: string[];
+  /** It picks each thread's permission mode. Otherwise threads get the harness's default from BotsSettings. */
+  choosePermission?: boolean;
+  /** It can answer permission prompts, not just the questions threads ask. */
+  approve?: boolean;
+  /** It can merge pull requests. */
+  merge?: boolean;
+}
+
+/** The harnesses with permission modes OpenBuild can set for a thread. */
+export const PERMISSION_HARNESSES = ["codex", "cursor", "claude"] as const;
+export type PermissionHarness = (typeof PERMISSION_HARNESSES)[number];
+
+export interface BotHarnessSettings {
+  /** Harnesses bots may not start threads with. */
+  blocked?: string[];
+  /** The mode a thread gets when its bot can't choose. Absent: the harness's own configured default. */
+  permissions?: Partial<Record<PermissionHarness, string>>;
+}
+
 export interface Bot {
   id: string;
   name: string;
@@ -82,6 +106,8 @@ export interface Bot {
   effort?: string;
   proactivity?: Proactivity;
   computer?: ComputerConfig;
+  /** Off when unset. */
+  threads?: BotThreadAccess;
   /** Who made it: "me", or the primary bot's id. */
   by?: string;
 }
@@ -190,7 +216,7 @@ export interface PlanStep {
   status: "todo" | "doing" | "done";
 }
 
-export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll";
+export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread";
 
 export interface BotMessage {
   id: string;
@@ -255,6 +281,8 @@ export interface BotsSettings {
   searxng?: string[];
   /** The user's own Pi extensions and packages to load into bots as well. All off until picked. */
   customExtensions?: { enabled: boolean; ids: string[] };
+  /** How bots' OpenBuild threads use each harness. */
+  harnesses?: BotHarnessSettings;
 }
 
 /** One of the user's Pi extensions or packages, as Settings → Bots lists them. */

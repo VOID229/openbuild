@@ -30,3 +30,7 @@ Snapshots, run lookup/replay, questions, stop/delete/release, ownership and reco
 ## Validation
 
 Runtime fixtures exercise native request/reply shapes, free-text answers, cancellation, replay and restart boundaries. The Cursor fixture calls the actual loopback HTTP MCP endpoint. These tests do not spend subscription inference or claim a live model always follows tool instructions. Native runtime policy is never silently relaxed to make a question work.
+
+## Bots
+
+Adapters set `question: true` on an `ask` that comes from the agent's own ask-the-user tool. Anything without it (a permission prompt, Claude's plan approval, another extension's dialog, or a question from a worker that predates the field) counts as a permission prompt. So the bots' `openbuild` tool (`server/bots/threads.ts`) fails closed: a bot answers questions freely, but needs the user's "Answer permission prompts" grant for the rest, and never answers a `secret` one. It reads the kind from the worker's record, not from what the bot says.

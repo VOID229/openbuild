@@ -210,7 +210,7 @@ export class DurableRuntime {
       q = { question, options, answered: false };
       Object.defineProperty(m.questions, callId, { value: q, writable: true, enumerable: true, configurable: true });
       const offset = m.events.length;
-      try { this.emit(m, [{ t: "ask", id: callId, method: "select", title: question, options, other: true }]); }
+      try { this.emit(m, [{ t: "ask", id: callId, question: true, method: "select", title: question, options, other: true }]); }
       catch (error) {
         delete m.questions![callId];
         m.events.length = offset;

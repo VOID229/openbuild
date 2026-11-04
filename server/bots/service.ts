@@ -4,8 +4,10 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
-import { castVote, DEFAULT_SETTINGS, findMentions, firstName, isBotId, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, findMentions, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
+import { isPermissionId } from "../../shared/types";
+import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
 
 const MESSAGE_LIMIT = 200;
@@ -97,12 +99,20 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
   if ("searxng" in patch) next.searxng = [...new Set((Array.isArray(patch.searxng) ? patch.searxng : []).filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim().slice(0, 500)))].slice(0, 8);
   if (patch.customExtensions) next.customExtensions = { enabled: patch.customExtensions.enabled === true, ids: [...new Set((Array.isArray(patch.customExtensions.ids) ? patch.customExtensions.ids : []).filter((id) => typeof id === "string"))].slice(0, 200) };
+  if (patch.harnesses) {
+    const permissions = patch.harnesses.permissions ?? {};
+    next.harnesses = {
+      blocked: strings(patch.harnesses.blocked, 20).filter(validRuntime),
+      permissions: Object.fromEntries(PERMISSION_HARNESSES.flatMap((h) => (isPermissionId(permissions[h]) ? [[h, permissions[h]]] : []))),
+    };
+  }
   db.setValue("settings", next);
   emit({ t: "settings", settings: next });
   return next;
 }
 
 const num = (n: unknown, min: number, max: number) => Math.min(max, Math.max(min, Math.floor(Number(n) || 0)));
+const strings = (list: unknown, max: number) => [...new Set((Array.isArray(list) ? list : []).filter((s): s is string => typeof s === "string" && !!s))].slice(0, max);
 const clip = (s: unknown, max: number) => (typeof s === "string" && s.trim() ? s.trim().slice(0, max) : undefined);
 
 export function fullBot(id: string): Bot | undefined {
@@ -290,6 +300,7 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
     bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
   }
+  if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, projects: strings(patch.threads.projects, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true };
   if (patch.primary) {
     for (const other of db.listBots()) if (other.primary && other.id !== id) db.putBot({ ...other, primary: undefined });
     bot.primary = true;
