@@ -435,11 +435,11 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
               <span className="history-proj-name">{chat.workspace.projectName}</span>
-              {/* A worktree's folder name tells threads of one project apart. */}
+              {/* Branch naming leaves the checkout path stable for running sessions. */}
               {chat.workspace.worktree && (
                 <span className="history-worktree">
                   <GitBranch size={12} />
-                  <span>{chat.workspace.cwd.split(/[\\/]/).pop()}</span>
+                  <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
                 </span>
               )}
             </span>
