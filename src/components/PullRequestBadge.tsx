@@ -13,7 +13,7 @@ export function pullRequestLabel(pr: ThreadPullRequest): string {
  * The icon's colour: orange while checks run, green when it's ready to merge, purple once merged,
  * red when closed or a check failed, grey as a draft.
  */
-export function pullRequestTone(pr: ThreadPullRequest): "pending" | "ready" | "merged" | "failing" | "closed" | "draft" {
+export function pullRequestTone(pr: Pick<ThreadPullRequest, "state" | "checks" | "draft">): "pending" | "ready" | "merged" | "failing" | "closed" | "draft" {
   if (pr.state === "merged") return "merged";
   if (pr.state === "closed") return "closed";
   if (pr.checks === "failing") return "failing";

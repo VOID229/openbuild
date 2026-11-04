@@ -85,7 +85,43 @@ const FOLD_OVER = 400;
 const REFRESH_MS = 4000;
 const WRAP_KEY = "openbuild:diff-wrap";
 
-const FileSection = memo(function FileSection({ file, open, onToggle }: { file: FileDiff; open: boolean; onToggle: (path: string) => void }) {
+/** Whether diff lines wrap, remembered across every diff. */
+export function useDiffWrap() {
+  const [wrap, setWrap] = useState(() => localStorage.getItem(WRAP_KEY) === "1");
+  return [
+    wrap,
+    () => {
+      localStorage.setItem(WRAP_KEY, wrap ? "0" : "1");
+      setWrap(!wrap);
+    },
+  ] as const;
+}
+
+/** A patch's files, and which of them are folded. */
+export function useDiffFiles(patch: string | undefined) {
+  // Which files are folded, by path; files not in it follow FOLD_OVER.
+  const [folded, setFolded] = useState<Record<string, boolean>>({});
+  const files = useMemo(() => (patch ? parsePatch(patch) : []), [patch]);
+  const isOpen = (f: FileDiff) => !(folded[f.path] ?? f.lines.length > FOLD_OVER);
+  const toggle = useCallback((path: string) => setFolded((s) => {
+    const file = files.find((f) => f.path === path);
+    const wasFolded = s[path] ?? (file ? file.lines.length > FOLD_OVER : false);
+    return { ...s, [path]: !wasFolded };
+  }), [files]);
+  const allFolded = files.length > 0 && files.every((f) => !isOpen(f));
+  return {
+    files,
+    isOpen,
+    toggle,
+    allFolded,
+    toggleAll: () => setFolded(Object.fromEntries(files.map((f) => [f.path, !allFolded]))),
+    reset: useCallback(() => setFolded({}), []),
+    adds: files.reduce((n, f) => n + f.adds, 0),
+    dels: files.reduce((n, f) => n + f.dels, 0),
+  };
+}
+
+export const FileSection = memo(function FileSection({ file, open, onToggle }: { file: FileDiff; open: boolean; onToggle: (path: string) => void }) {
   const name = file.path.split("/").pop()!;
   const dir = file.path.slice(0, file.path.length - name.length);
   return (
@@ -138,9 +174,8 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
   const [data, setData] = useState<PatchResponse>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(false);
-  const [wrap, setWrap] = useState(() => localStorage.getItem(WRAP_KEY) === "1");
-  // Which files are folded, by path; files not in it follow FOLD_OVER.
-  const [folded, setFolded] = useState<Record<string, boolean>>({});
+  const [wrap, toggleWrap] = useDiffWrap();
+  const { files, isOpen, toggle, allFolded, toggleAll, reset, adds, dels } = useDiffFiles(data?.patch);
   const last = useRef<string>(undefined);
 
   const load = useCallback(
@@ -170,7 +205,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
   useEffect(() => {
     last.current = undefined;
     setData(undefined);
-    setFolded({});
+    reset();
     void load(true);
     const tick = () => document.visibilityState === "visible" && void load();
     const timer = setInterval(tick, REFRESH_MS);
@@ -179,18 +214,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
     };
-  }, [load]);
-
-  const files = useMemo(() => (data ? parsePatch(data.patch) : []), [data]);
-  const isOpen = (f: FileDiff) => !(folded[f.path] ?? f.lines.length > FOLD_OVER);
-  const toggle = useCallback((path: string) => setFolded((s) => {
-    const file = files.find((f) => f.path === path);
-    const wasFolded = s[path] ?? (file ? file.lines.length > FOLD_OVER : false);
-    return { ...s, [path]: !wasFolded };
-  }), [files]);
-  const allFolded = files.length > 0 && files.every((f) => !isOpen(f));
-  const adds = files.reduce((n, f) => n + f.adds, 0);
-  const dels = files.reduce((n, f) => n + f.dels, 0);
+  }, [load, reset]);
 
   return (
     <div className="diff-view">
@@ -209,7 +233,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
           label={allFolded ? "Expand all files" : "Collapse all files"}
           className="fv-tool"
           disabled={!files.length}
-          onClick={() => setFolded(Object.fromEntries(files.map((f) => [f.path, !allFolded])))}
+          onClick={toggleAll}
         >
           {allFolded ? <ChevronsUpDown size={14} /> : <ChevronsDownUp size={14} />}
         </IconButton>
@@ -217,10 +241,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
           label={wrap ? "Don't wrap lines" : "Wrap lines"}
           className={cx("fv-tool", wrap && "fv-tool-on")}
           aria-pressed={wrap}
-          onClick={() => {
-            localStorage.setItem(WRAP_KEY, wrap ? "0" : "1");
-            setWrap(!wrap);
-          }}
+          onClick={toggleWrap}
         >
           <WrapText size={14} />
         </IconButton>

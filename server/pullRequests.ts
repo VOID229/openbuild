@@ -35,7 +35,7 @@ export interface GhPullRequest {
   statusCheckRollup?: { __typename?: string; status?: string; conclusion?: string | null; state?: string }[] | null;
 }
 
-const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
+export const FAILED = new Set(["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"]);
 
 /** One word for a pull request's checks: any failure fails them, anything unfinished keeps them pending. */
 export function checksOf(rollup: GhPullRequest["statusCheckRollup"]): ThreadPullRequest["checks"] {
@@ -43,7 +43,7 @@ export function checksOf(rollup: GhPullRequest["statusCheckRollup"]): ThreadPull
   let pending = false;
   for (const check of rollup) {
     // Check runs carry status and conclusion; commit statuses carry a single state.
-    const result = check.conclusion ?? check.state;
+    const result = check.conclusion || check.state;
     if (result && FAILED.has(result)) return "failing";
     if ((check.status && check.status !== "COMPLETED") || result === "PENDING" || result === "EXPECTED") pending = true;
   }

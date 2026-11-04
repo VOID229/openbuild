@@ -348,6 +348,91 @@ export interface ThreadPullRequest {
   checkedAt: number;
 }
 
+/** A pull request in the side panel's list (server/pullRequestView.ts). */
+export interface PullSummary {
+  number: number;
+  title: string;
+  url: string;
+  state: ThreadPullRequest["state"];
+  draft?: boolean;
+  checks?: ThreadPullRequest["checks"];
+  author: string;
+  head: string;
+  base: string;
+  additions: number;
+  deletions: number;
+  /** ms */
+  updatedAt: number;
+}
+
+export type PullListState = "open" | "merged" | "closed";
+
+export interface PullList {
+  /** The GitHub CLI is on this machine. */
+  gh: boolean;
+  /** The folder is a git repository. */
+  repo: boolean;
+  pulls: PullSummary[];
+  /** The open pull request from the branch this folder is on. */
+  current?: number;
+}
+
+export type PullMergeMethod = "squash" | "merge" | "rebase";
+
+export interface PullCheck {
+  name: string;
+  state: "passing" | "failing" | "pending" | "skipped";
+  url?: string;
+}
+
+/** A comment on the pull request, or a review that says something. */
+export interface PullComment {
+  id: string;
+  author: string;
+  body: string;
+  /** ms */
+  at: number;
+  /** A review's verdict, for a review. */
+  verdict?: string;
+}
+
+export interface PullCommit {
+  sha: string;
+  title: string;
+  author: string;
+  /** ms */
+  at: number;
+}
+
+export interface PullDetail extends PullSummary {
+  /** owner/name */
+  repo: string;
+  body: string;
+  headSha: string;
+  changedFiles: number;
+  /** GitHub's verdicts on merging, as it reports them; each may be UNKNOWN while it works them out. */
+  mergeable: string;
+  mergeState: string;
+  reviewDecision?: string;
+  mergedAt?: number;
+  closedAt?: number;
+  checkList: PullCheck[];
+  /** Who was asked to review, and how they answered if they have. */
+  reviewers: { login: string; state?: string }[];
+  labels: { name: string; color: string }[];
+  comments: PullComment[];
+  commits: PullCommit[];
+  /** The ways this repository lets a pull request merge. */
+  methods: PullMergeMethod[];
+  /** Whoever `gh` is signed in as may merge here. */
+  canWrite: boolean;
+}
+
+export interface PullPatch {
+  patch: string;
+  truncated?: boolean;
+}
+
 /** A project: a directory (usually a git repository) threads can work in. */
 export interface Project {
   id: string;

@@ -1,11 +1,11 @@
-// The panel beside the thread: open files, terminals, the diff and browser pages as tabs, side by side
+// The panel beside the thread: open files, terminals, the diff, pull requests and browser pages as tabs, side by side
 // with the conversation. Its tabs belong to the open thread (each thread has its own), in that thread's
-// folder on the device it runs on (lib/panel.ts for files, diff and browser tabs, lib/terminal.ts for shells). With nothing open it
-// offers what it can open: a browser, a terminal or the diff.
+// folder on the device it runs on (lib/panel.ts for files, diff, pull request and browser tabs, lib/terminal.ts for shells). With nothing open it
+// offers what it can open: a browser, a terminal, the diff or pull requests.
 //
 // Its terminals are its own (useSideTerminal), not the drawer's under the thread: ⌘J still opens and
 // hides the drawer, and both can be open at once.
-import { FileDiff, Globe, MessageSquare, Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
+import { FileDiff, GitPullRequest, Globe, MessageSquare, Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { deviceName } from "../lib/devices";
@@ -18,10 +18,11 @@ import { DiffView } from "./DiffView";
 import { dropBuffer, FileView } from "./FileView";
 import { FileIcon, useEdgeDrag } from "./FileTree";
 import { IconButton, Popover } from "./primitives";
+import { PullRequestsView } from "./PullRequestsView";
 import { tabLabel, TerminalView, useTabKeys } from "./TerminalView";
 
 interface Surface {
-  id: "browser" | "terminal" | "diff" | "openchat";
+  id: "browser" | "terminal" | "diff" | "pulls" | "openchat";
   label: string;
   icon: ReactNode;
   /** The key that opens it from the launcher. */
@@ -44,7 +45,7 @@ const isOpenChat = (url: string) => {
 };
 
 function useSurfaces(folder: TerminalFolder): Surface[] {
-  const { openBrowser, openDiff, activateBrowser } = usePanel.getState();
+  const { openBrowser, openDiff, openPulls, activateBrowser } = usePanel.getState();
   // Back to the OpenChat tab if one is open, else a new one.
   const openChat = () => {
     const tab = usePanel.getState().browsers.find((b) => isOpenChat(b.url));
@@ -58,6 +59,7 @@ function useSurfaces(folder: TerminalFolder): Surface[] {
     // A new shell each time: the launcher and the + menu both mean "another one".
     { id: "terminal", label: "Terminal", icon: <SquareTerminal size={16} />, key: "T", open: () => (useSideTerminal.getState().tabs.length ? useSideTerminal.getState().addTab() : showSideTerminal()) },
     { id: "diff", label: "Diff", icon: <FileDiff size={16} />, key: "D", open: openDiff, disabled: !folder.cwd },
+    { id: "pulls", label: "Pull requests", icon: <GitPullRequest size={16} />, key: "P", open: () => openPulls(), disabled: !folder.cwd },
     { id: "openchat", label: "OpenChat", icon: <MessageSquare size={16} />, key: "O", open: openChat, disabled: true, note: "Maintenance" },
   ];
 }
@@ -95,7 +97,7 @@ function NewTabMenu({ surfaces }: { surfaces: Surface[] }) {
 
 /** With no tabs: what the panel can open, each with a key. */
 /**
- * ⌥B, ⌥T, ⌥D and ⌥O open a browser, terminal, diff or OpenChat tab whenever the panel is open, whatever tab it's
+ * ⌥B, ⌥T, ⌥D, ⌥P and ⌥O open a browser, terminal, diff, pull requests or OpenChat tab whenever the panel is open, whatever tab it's
  * on and wherever focus is (the composer included). The bare letter works too on the launcher, when
  * nothing that takes typing has focus. In the panel's terminal ⌥B and ⌥D work too, while ⌥T and ⌥W
  * are its own tab keys (useTabKeys); the drawer's terminal keeps all its keys, and a page in a
@@ -112,12 +114,12 @@ function useSurfaceKeys(open: boolean, launcher: boolean, surfaces: Surface[], c
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.repeat || e.isComposing) return;
       const el = document.activeElement as HTMLElement | null;
-      // ⌥O (OpenChat) works with the panel closed too: it opens the panel on it.
+      // ⌥O (OpenChat) and ⌥P (pull requests) work with the panel closed too: they open the panel on it.
       if (!open) {
-        if (!e.altKey || e.code !== "KeyO" || el?.closest(".xterm")) return;
+        if (!e.altKey || (e.code !== "KeyO" && e.code !== "KeyP") || el?.closest(".xterm")) return;
         e.preventDefault();
         e.stopPropagation();
-        latest.current.find((x) => x.id === "openchat" && !x.disabled)?.open();
+        latest.current.find((x) => (x.id === "openchat" || x.id === "pulls") && !x.disabled && e.code === `Key${x.key}`)?.open();
         return;
       }
       // The drawer's terminal keeps its keys. In the panel's own terminal, ⌥T and ⌥W are its tab
@@ -218,10 +220,12 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
   const activeFile = usePanel((s) => s.activeFile);
   const dirty = usePanel((s) => s.dirty);
   const diff = usePanel((s) => s.diff);
+  const pulls = usePanel((s) => s.pulls);
+  const activePull = usePanel((s) => s.activePull);
   const browsers = usePanel((s) => s.browsers);
   const activeBrowser = usePanel((s) => s.activeBrowser);
   const order = usePanel((s) => s.order);
-  const { openFile, closeFile, setView, closeDiff, closeBrowser, activateBrowser, setOrder } = usePanel.getState();
+  const { openFile, closeFile, setView, closeDiff, closePulls, closeBrowser, activateBrowser, setOrder } = usePanel.getState();
   const tabs = useSideTerminal((s) => s.tabs);
   const activeShell = useSideTerminal((s) => s.active);
   const termFolder = useSideTerminal((s) => s.folder);
@@ -237,9 +241,10 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
     file: !!activeFile,
     terminal: !!shell && !!termFolder,
     diff,
+    pulls,
     browser: !!browser,
   };
-  const showing: PanelView = view !== "launcher" && has[view] ? view : ((["file", "terminal", "diff", "browser"] as const).find((v) => has[v]) ?? "launcher");
+  const showing: PanelView = view !== "launcher" && has[view] ? view : ((["file", "terminal", "diff", "pulls", "browser"] as const).find((v) => has[v]) ?? "launcher");
 
   // Back to the terminal you were in, so typing works straight away.
   useEffect(() => {
@@ -254,7 +259,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
     dropBuffer(folder, path);
     closeFile(path);
   };
-  const anyTabs = files.length > 0 || tabs.length > 0 || diff || browsers.length > 0;
+  const anyTabs = files.length > 0 || tabs.length > 0 || diff || pulls || browsers.length > 0;
 
   // Every tab, by key, then laid out in the panel's order: a new tab goes right of the one that was
   // showing when it opened, not at the end of its kind.
@@ -296,6 +301,20 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
         />,
       );
   if (diff) items.set("d", <Tab key="d" active={showing === "diff"} icon={<FileDiff size={13} className="ft-icon" />} label="Diff" onSelect={() => setView("diff")} onClose={closeDiff} closeTip="Close (⌥W)" />);
+  if (pulls)
+    items.set(
+      "p",
+      <Tab
+        key="p"
+        active={showing === "pulls"}
+        title="Pull requests"
+        icon={<GitPullRequest size={13} className="ft-icon" />}
+        label={typeof activePull === "number" ? `#${activePull}` : "Pull requests"}
+        onSelect={() => setView("pulls")}
+        onClose={closePulls}
+        closeTip="Close (⌥W)"
+      />,
+    );
   for (const b of browsers)
     items.set(
       `b:${b.id}`,
@@ -314,7 +333,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
       />,
     );
   const activeKey =
-    showing === "file" ? `f:${activeFile}` : showing === "terminal" ? `t:${shell?.id}` : showing === "diff" ? "d" : showing === "browser" ? `b:${browser?.id}` : undefined;
+    showing === "file" ? `f:${activeFile}` : showing === "terminal" ? `t:${shell?.id}` : showing === "diff" ? "d" : showing === "pulls" ? "p" : showing === "browser" ? `b:${browser?.id}` : undefined;
   // The tab that was showing before this render: where a tab opened just now goes.
   const shown = useRef<string>(undefined);
   const arranged = arrangeTabs(order, [...items.keys()], shown.current);
@@ -324,6 +343,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
     if (showing === "file" && activeFile) close(activeFile);
     else if (showing === "terminal" && shell) closeTab(shell.id);
     else if (showing === "diff") closeDiff();
+    else if (showing === "pulls") closePulls();
     else if (showing === "browser" && browser) {
       dropBrowserHistory(browser.id);
       closeBrowser(browser.id);
@@ -337,6 +357,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
       activateTab(id);
       setView("terminal");
     } else if (key === "d") setView("diff");
+    else if (key === "p") setView("pulls");
     else if (key.startsWith("b:")) activateBrowser(id);
   });
   useLayoutEffect(() => {
@@ -377,6 +398,7 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
             </div>
           )}
           {showing === "diff" && <DiffView folder={folder} />}
+          {showing === "pulls" && <PullRequestsView folder={folder} />}
           {showing === "browser" && browser && <BrowserView key={browser.id} tab={browser} folder={folder} />}
           {showing === "launcher" && <Launcher surfaces={surfaces} files={!!folder.cwd} />}
         </div>
