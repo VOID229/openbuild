@@ -35,11 +35,9 @@ interface PeekState {
   id: string;
   side: Side;
   rect: DOMRect;
-  /** A tile's card fills the other column of the tile grid, at this left edge, so it stays inside the sidebar. */
-  column?: number;
 }
 
-type Peek = (id: string, where: Side | "column") => {
+type Peek = (id: string, side: Side) => {
   onPointerEnter: (e: React.PointerEvent<HTMLElement>) => void;
   onPointerLeave: () => void;
   onPointerDown: () => void;
@@ -48,17 +46,8 @@ type Peek = (id: string, where: Side | "column") => {
 };
 
 const PEEK_DELAY = 450;
-const PEEK_MARGIN = 8;
 
-function peekAt(id: string, where: Side | "column", el: HTMLElement): PeekState {
-  const rect = el.getBoundingClientRect();
-  if (where !== "column") return { id, side: where, rect };
-  const grid = el.parentElement!.getBoundingClientRect();
-  const leftTile = rect.left - grid.left < grid.right - rect.right;
-  return { id, side: leftTile ? "right" : "left", rect, column: leftTile ? grid.right - rect.width : grid.left };
-}
-
-/** A hover card for tiles and rail avatars, whose names get cut short: the full name and the latest message. */
+/** A hover card for rows and rail avatars, whose names and messages get cut short: the full name and the latest message. */
 function usePeek() {
   const [peek, setPeek] = useState<PeekState>();
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -77,17 +66,17 @@ function usePeek() {
   }, [peek, hide]);
   useEffect(() => () => clearTimeout(timer.current), []);
   const bind = useCallback<Peek>(
-    (id, where) => ({
+    (id, side) => ({
       onPointerEnter: (e) => {
         if (e.pointerType === "touch") return;
         const el = e.currentTarget;
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => el.isConnected && setPeek(peekAt(id, where, el)), PEEK_DELAY);
+        timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: el.getBoundingClientRect() }), PEEK_DELAY);
       },
       onPointerLeave: hide,
       onPointerDown: hide,
       onFocus: (e) => {
-        if (e.currentTarget.matches(":focus-visible")) setPeek(peekAt(id, where, e.currentTarget));
+        if (e.currentTarget.matches(":focus-visible")) setPeek({ id, side, rect: e.currentTarget.getBoundingClientRect() });
       },
       onBlur: hide,
     }),
@@ -104,23 +93,14 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
   useLayoutEffect(() => {
     if (!peek || !ref.current) return setPos(undefined);
-    const { offsetWidth: w, offsetHeight: h } = ref.current;
-    setPos(peek.column === undefined ? place(peek, w, h) : { left: peek.column, top: Math.max(PEEK_MARGIN, Math.min(peek.rect.top, window.innerHeight - h - PEEK_MARGIN)), side: peek.side });
+    setPos(place(peek, ref.current.offsetWidth, ref.current.offsetHeight));
   }, [peek]);
   if (!peek || !conversation) return null;
   const [title, tag] = conversationName(conversation, bots).split(" · ");
-  const column = peek.column !== undefined;
   return createPortal(
-    <div
-      ref={ref}
-      role="tooltip"
-      className={cx("bots-peek", column && "bots-peek-column")}
-      data-side={pos?.side ?? peek.side}
-      data-state={pos ? "open" : "measuring"}
-      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, ...(column && { width: peek.rect.width, minHeight: peek.rect.height }) }}
-    >
+    <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
       <span className="bots-peek-head">
-        {!column && <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />}
+        <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />
         <span className="bots-peek-name">
           {title}
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
@@ -172,7 +152,7 @@ function useSelect() {
   );
 }
 
-const Row = memo(function Row({ conversation, active, onMenu }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void }) {
+const Row = memo(function Row({ conversation, active, onMenu, peek }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const select = useSelect();
@@ -186,7 +166,7 @@ const Row = memo(function Row({ conversation, active, onMenu }: { conversation: 
         onMenu({ id: conversation.id, x: e.clientX, y: e.clientY });
       }}
     >
-      <button type="button" className="bots-row-main" onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
+      <button type="button" className="bots-row-main" {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
         <SidebarAvatar conversation={conversation} size={36} />
         <span className="bots-row-text">
           <span className="bots-row-name">
@@ -204,7 +184,7 @@ const Row = memo(function Row({ conversation, active, onMenu }: { conversation: 
   );
 });
 
-const Tile = memo(function Tile({ conversation, active, onMenu, peek }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek }) {
+const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void }) {
   const bots = useBots((s) => s.bots);
   const select = useSelect();
   const name = conversationName(conversation, bots);
@@ -213,7 +193,6 @@ const Tile = memo(function Tile({ conversation, active, onMenu, peek }: { conver
       type="button"
       className={cx("bots-tile", active && "bots-tile-active")}
       aria-current={active ? "page" : undefined}
-      {...peek(conversation.id, "column")}
       onClick={() => select(conversation.id)}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -522,7 +501,7 @@ export function BotsSidebar() {
     [q, conversations, bots],
   );
 
-  const row = (c: Conversation) => <Row key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} />;
+  const row = (c: Conversation) => <Row key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} peek={bindPeek} />;
 
   return (
     <>
@@ -575,7 +554,7 @@ export function BotsSidebar() {
                     {pinned.length > 0 && (
                       <div className="bots-tiles">
                         {pinned.map((c) => (
-                          <Tile key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} peek={bindPeek} />
+                          <Tile key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} />
                         ))}
                       </div>
                     )}

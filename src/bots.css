@@ -732,17 +732,6 @@
   overflow-wrap: anywhere;
 }
 
-/* A tile's card, narrow enough to sit in the tile grid's other column: names wrap instead of cutting short. */
-.bots-peek-column .bots-peek-name {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.bots-peek-column .bots-peek-preview {
-  -webkit-line-clamp: 4;
-  line-height: 1.3;
-}
-
 .bots-rail-dot {
   position: absolute;
   top: 6px;
