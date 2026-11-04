@@ -1900,6 +1900,55 @@ svg {
   min-width: 0;
 }
 
+/* The bar follows the composer's own width, not the window's: the side panel narrows it too. The
+   model's name is what gives way. Attach, the other pickers and send keep their size. */
+.composer-wrap {
+  container: composer / inline-size;
+}
+
+.attach-btn,
+.composer-controls,
+.composer-bar > .picker {
+  flex-shrink: 0;
+}
+
+.composer-bar > .picker-static {
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* Too narrow for one row: attach, model and send stay on top, the other pickers go underneath. */
+@container composer (max-width: 560px) {
+  .composer-bar {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .composer-bar > * {
+    order: 2;
+  }
+
+  .composer-bar > .attach-btn,
+  .composer-bar > .picker-static {
+    order: 0;
+  }
+
+  .composer-bar > .picker-static {
+    flex: 1 1 0;
+  }
+
+  .composer-bar > .composer-controls {
+    order: 1;
+  }
+
+  /* Ends the top row. */
+  .composer-bar::after {
+    content: "";
+    order: 1;
+    flex-basis: 100%;
+  }
+}
+
 /* The stash: a tab on top of the composer, opening into a list over what's above it. */
 
 .stash {
