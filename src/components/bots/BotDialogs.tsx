@@ -355,7 +355,7 @@ export function NameDialog({ title, initial = "", action, placeholder, onSubmit,
   );
 }
 
-export function ConfirmDeleteDialog({ title, body, onConfirm, onClose }: { title: string; body: string; onConfirm: () => void; onClose: () => void }) {
+export function ConfirmDeleteDialog({ title, body, action = <><Trash size={14} /> Delete</>, onConfirm, onClose }: { title: string; body: string; action?: React.ReactNode; onConfirm: () => void; onClose: () => void }) {
   const modal = useModal(onClose);
   return (
     <dialog {...modal} className="confirm-dialog bots-small-dialog" aria-label={title}>
@@ -373,7 +373,7 @@ export function ConfirmDeleteDialog({ title, body, onConfirm, onClose }: { title
             onClose();
           }}
         >
-          <Trash size={14} /> Delete
+          {action}
         </button>
       </div>
     </dialog>

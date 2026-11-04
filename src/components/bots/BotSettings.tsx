@@ -10,7 +10,7 @@ import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { ModelMenu, OptionSelect } from "../ModelSelect";
-import { BrandIcon, Popover, SettingsHeading, Toggle } from "../primitives";
+import { BrandIcon, Popover, SettingsHeading } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
@@ -322,7 +322,6 @@ function GroupRow({ group, bots, onEdit }: { group: Conversation; bots: Bot[]; o
 export function BotsSettingsSection() {
   const bots = useBots((s) => s.bots);
   const conversations = useBots((s) => s.conversations);
-  const prefs = useBots((s) => s.prefs);
   const error = useBots((s) => s.error);
   // Saves show no progress; only a failed one is worth interrupting for.
   const syncStatus = error && <div className="bots-sync-status" role="alert">
@@ -374,6 +373,7 @@ export function BotsSettingsSection() {
         <ConfirmDeleteDialog
           title="Reset OpenBots?"
           body="Every bot, group and conversation is deleted, and the starter bots come back. This can't be undone."
+          action={<><RotateCcw size={14} /> Reset</>}
           onClose={closeDialog}
           onConfirm={() => {
             st.reset();
@@ -453,30 +453,6 @@ export function BotsSettingsSection() {
       </section>
 
       <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Behaviour</h3>
-        </div>
-        <div className="setting-row">
-          <div className="setting-text">
-            <div className="setting-label">Lively bots</div>
-            <p className="setting-desc">Bots hop, spin and pull faces now and then. Blinking and breathing stay on either way.</p>
-          </div>
-          <Toggle checked={prefs.lively} label="Lively bots" onChange={(lively) => st.setPrefs({ lively })} />
-        </div>
-        <div className="setting-row">
-          <div className="setting-text">
-            <div className="setting-label">Eyes follow the pointer</div>
-            <p className="setting-desc">The bigger bots, like the one open in the details panel, watch your cursor.</p>
-          </div>
-          <Toggle checked={prefs.track} label="Eyes follow the pointer" onChange={(track) => st.setPrefs({ track })} />
-        </div>
-        <div className="setting-row">
-          <div className="setting-text">
-            <div className="setting-label">Reactions from bots</div>
-            <p className="setting-desc">Bots react to your messages with an emoji when they read them.</p>
-          </div>
-          <Toggle checked={prefs.reactions} label="Reactions from bots" onChange={(reactions) => st.setPrefs({ reactions })} />
-        </div>
         <div className={cx("setting-row", "bots-set-danger")}>
           <div className="setting-text">
             <div className="setting-label">Reset OpenBots</div>

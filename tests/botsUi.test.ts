@@ -10,7 +10,7 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
     const { useBots } = await import(resolve("src/lib/bots/store.ts"));
     const c = { id: "chat", kind: "direct", botIds: ["bot"], createdAt: 1, updatedAt: 1, messages: [{ id: "latest", author: "me", text: "hello", at: 1 }], more: true };
-    const snapshot = { bots: [], conversations: [c], settings: { sections: [], reactions: true }, typing: {}, drafts: [], status: {} };
+    const snapshot = { bots: [], conversations: [c], settings: { sections: [] }, typing: {}, drafts: [], status: {} };
     useBots.setState({ conversations: [c] });
     const calls = [];
     let ack;
@@ -105,7 +105,7 @@ test("bots paint from the cache, then the server's snapshot replaces it and is c
     globalThis.fetch = async (path) => {
       paths.push(path);
       await new Promise((r) => { answer = r; });
-      return Response.json({ bots: [], conversations: [chat("fresh", 60)], settings: { sections: [], reactions: true }, typing: {}, drafts: [], status: {} });
+      return Response.json({ bots: [], conversations: [chat("fresh", 60)], settings: { sections: [] }, typing: {}, drafts: [], status: {} });
     };
 
     // The cached copy shows without the server, and isn't mistaken for the server's state.
@@ -173,6 +173,16 @@ test("memory stays out of sight, and routines are the bots' to write: people can
   expect(routes).not.toContain("/api/bots/:id/memory");
   expect(routes).not.toContain('"/api/bots/:id/routines":');
   expect(routes).toContain('"/api/bots/:id/routines/:routineId"');
+});
+
+test("resetting says reset, and lively bots, pointer tracking and reactions are always on", async () => {
+  const settings = await Bun.file("src/components/bots/BotSettings.tsx").text();
+  const store = await Bun.file("src/lib/bots/store.ts").text();
+  const agent = await Bun.file("server/bots/agent.ts").text();
+  expect(settings).toContain("action={<><RotateCcw size={14} /> Reset</>}");
+  for (const label of ["Lively bots", "Eyes follow the pointer", "Reactions from bots"]) expect(settings).not.toContain(label);
+  expect(store).not.toContain("setPrefs");
+  expect(agent).not.toContain("Reactions are turned off");
 });
 
 test("computer settings require explicit host selection and explain isolation", async () => {
