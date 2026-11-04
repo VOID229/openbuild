@@ -101,7 +101,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
       <span className="bots-avatar-wrap">
         <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} playful={playful} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
-          <span className="bots-primary-badge" title="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
+          <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
           </span>
         )}
