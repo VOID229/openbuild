@@ -13,7 +13,8 @@ export const CLAUDE_INSTALL = "curl -fsSL https://claude.ai/install.sh | bash";
 export const FAST = "fast";
 
 export function claudeEnv(): Record<string, string> {
-  return accountEnvironment("claude", { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_AGENT_SDK_CLIENT_APP: "openbuild" } as Record<string, string>);
+  // Identify our Claude processes explicitly, even when the host inherited an SDK entrypoint.
+  return accountEnvironment("claude", { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_AGENT_SDK_CLIENT_APP: "openbuild", CLAUDE_CODE_ENTRYPOINT: "openbuild" } as Record<string, string>);
 }
 export function claudeBin(): string | undefined {
   const custom = accountBin("claude", `${claudeEnv().PATH}:/opt/homebrew/bin:/usr/local/bin`);
