@@ -48,6 +48,7 @@ const svc = await import("../server/bots/service");
 const projects = await import("../server/projects");
 const storage = await import("../server/storage");
 const threads = await import("../server/bots/threads");
+const { coversProject } = await import("../shared/bots");
 const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide } = threads;
 
 const project = await projects.addProject(repo);
@@ -228,6 +229,33 @@ test("threads outside its projects are out of reach", async () => {
   await expect(call("close", { thread: other.id })).rejects.toThrow(/isn't in one of your projects/);
   const titles = (await call("list")).threads.map((t: any) => t.title);
   expect(titles).not.toContain("Other");
+});
+
+test("a grant covers all projects, the chosen ones, or all but the excluded ones", async () => {
+  const projectIds = async () => (await call("options")).projects.map((p: any) => p.id);
+  grant({ scope: "all", projects: [] });
+  expect(await projectIds()).toEqual([project.id]);
+  grant({ scope: "exclude", projects: [], excluded: ["elsewhere"] });
+  expect(await projectIds()).toEqual([project.id]);
+  grant({ scope: "exclude", projects: [project.id], excluded: [project.id] });
+  expect(await projectIds()).toEqual([]);
+  await expect(call("start", { project: project.name, prompt: "Go" })).rejects.toThrow(/you haven't been given any/);
+  grant({ scope: "choose", projects: [], excluded: [project.id] });
+  expect(await projectIds()).toEqual([]);
+  // A grant saved before scopes, or with one that's not recognised, only has what it lists.
+  grant({ scope: "everything", projects: [] });
+  expect(svc.fullBot(bot.id)!.threads?.scope).toBe("choose");
+  expect(coversProject({ projects: [project.id] }, project.id)).toBe(true);
+  expect(coversProject({ projects: [] }, project.id)).toBe(false);
+  expect(coversProject({ scope: "all", projects: [] }, undefined)).toBe(false);
+});
+
+test("all projects doesn't reach threads outside OpenBuild's projects", async () => {
+  const removed = { id: crypto.randomUUID(), title: "Removed", workspace: { projectId: "removed", projectName: "Removed", cwd: repo }, createdAt: 1, updatedAt: 1, messages: [] };
+  storage.putChat(removed as never);
+  grant({ scope: "all", projects: [] });
+  await expect(call("read", { thread: removed.id })).rejects.toThrow(/isn't in one of your projects/);
+  expect((await call("list")).threads.map((t: any) => t.title)).not.toContain("Removed");
 });
 
 test("closing refuses a working thread, and leaves uncommitted work alone", async () => {

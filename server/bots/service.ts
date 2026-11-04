@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
-import { castVote, DEFAULT_SETTINGS, findMentions, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
@@ -300,7 +300,7 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
     bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
   }
-  if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, projects: strings(patch.threads.projects, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true };
+  if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true };
   if (patch.primary) {
     for (const other of db.listBots()) if (other.primary && other.id !== id) db.putBot({ ...other, primary: undefined });
     bot.primary = true;
@@ -445,9 +445,10 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
 }
 
 function mentionedBots(text: string, ids: string[]): string[] {
-  if (/@(all|everyone)\b/i.test(text)) return ids;
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
-  return [...new Set(findMentions(text, bots).map((m) => m.bot.id))];
+  const tags = findTags(text, bots);
+  if (tags.some((t) => !t.bot)) return ids;
+  return [...new Set(tags.map((t) => t.bot!.id))];
 }
 
 export function postMessage(conversationId: string, message: BotMessage): BotMessage {

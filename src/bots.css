@@ -1128,6 +1128,37 @@
   translate: -50% -50%;
 }
 
+.bm-mascots {
+  white-space: nowrap;
+}
+
+/* Inline rather than flex: a flex box would put line breaks in the copied text. */
+.bm-mascot {
+  display: inline-block;
+  line-height: 0;
+}
+
+.bm-mention-all .bm-mascot {
+  vertical-align: -3px;
+}
+
+.bm-mascot + .bm-mascot {
+  margin-left: 1px;
+}
+
+.bm-mention-all {
+  --mention: var(--text);
+}
+
+.bm-mention-all > .bm-mascots {
+  margin-right: 2px;
+}
+
+/* Takes no room, but stays in the text for copying. */
+.bm-mention-all-at {
+  font-size: 0;
+}
+
 .bm-mention-link {
   border: 0;
   font: inherit;
@@ -1871,6 +1902,31 @@
   background: color-mix(in srgb, var(--mention) 16%, transparent);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--mention) 16%, transparent);
   color: color-mix(in srgb, var(--mention) 80%, var(--text));
+}
+
+.bots-draft-all {
+  --mention: var(--text);
+  position: relative;
+  color: transparent;
+}
+
+/* Over the invisible "@all": the mascots overlap only as much as they need to stay inside it. */
+.bots-draft-all > .bm-mascots {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bots-draft-all .bm-mascot {
+  flex: 0 1 12px;
+  min-width: 0;
+  margin: 0;
+}
+
+.bots-draft-all .bm-mascot:last-child {
+  flex: none;
 }
 
 .bots-send {
