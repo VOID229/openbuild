@@ -8,6 +8,7 @@ import { BotAvatar } from "./BotAvatar";
 import { BotChat } from "./BotChat";
 import { BotDetails } from "./BotDetails";
 import { openBotsDialog } from "./BotsSidebar";
+import { useSlow } from "./common";
 
 function NoConversation() {
   return (
@@ -26,13 +27,13 @@ export function BotsView() {
   const conversation = useBots((s) => s.conversations.find((c) => c.id === s.activeId));
   const detailsOpen = useBots((s) => s.detailsOpen);
   const error = useBots((s) => s.error);
-  const pending = useBots((s) => s.pending);
   const connected = useBots((s) => s.connected);
   const loaded = useBots((s) => s.loaded);
   const statuses = useBots((s) => s.status);
   // What a bot is up to shows in the chat itself; up here is only for when it goes wrong.
   const botStatus = Object.values(statuses).find((s) => s.conversationId === conversation?.id && s.state === "error");
   const mobile = useMediaQuery("(max-width: 768px)");
+  const slow = useSlow(!connected);
   useEffect(() => useBots.getState().ensureSeeded(), []);
   // On a phone the details cover the chat, so they start closed.
   useEffect(() => {
@@ -52,8 +53,8 @@ export function BotsView() {
   }, [detailsOpen]);
   return (
     <div className="bots-view">
-      {(error || pending > 0 || !connected || botStatus) && <div className="bots-sync-status" role={error || botStatus?.state === "error" ? "alert" : "status"}>
-        <span>{error || (pending > 0 ? "Saving changes…" : !connected ? "Reconnecting to OpenBots…" : botStatus?.error || "Bot could not complete the request.")}</span>
+      {(error || slow || botStatus) && <div className="bots-sync-status" role={error || botStatus?.state === "error" ? "alert" : "status"}>
+        <span>{error || (slow ? "Reconnecting to OpenBots…" : botStatus?.error || "Bot could not complete the request.")}</span>
         {error && <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>}
       </div>}
       <div className="bots-view-content">

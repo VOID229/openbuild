@@ -324,10 +324,10 @@ export function BotsSettingsSection() {
   const conversations = useBots((s) => s.conversations);
   const prefs = useBots((s) => s.prefs);
   const error = useBots((s) => s.error);
-  const pending = useBots((s) => s.pending);
-  const syncStatus = (error || pending > 0) && <div className="bots-sync-status" role={error ? "alert" : "status"}>
-    <span>{error || "Saving changes…"}</span>
-    {error && <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>}
+  // Saves show no progress; only a failed one is worth interrupting for.
+  const syncStatus = error && <div className="bots-sync-status" role="alert">
+    <span>{error}</span>
+    <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>
   </div>;
   const [editing, setEditing] = useState<Editing>();
   const [dialog, setDialog] = useState<Dialog>();

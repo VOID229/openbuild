@@ -1,10 +1,24 @@
 // Pieces the OpenBots sidebar, chat and details panel share.
 import { Star } from "lucide-react";
-import { memo } from "react";
+import { memo, useEffect, useState } from "react";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
+
+/**
+ * True once `busy` has lasted a moment. Saves and reconnects usually finish in a blink, and a status
+ * bar for those just pushes the view down and back up as a flicker.
+ */
+export function useSlow(busy: boolean, delay = 1200) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    if (!busy) return setSlow(false);
+    const t = setTimeout(() => setSlow(true), delay);
+    return () => clearTimeout(t);
+  }, [busy, delay]);
+  return busy && slow;
+}
 
 const DAY = 24 * 60 * 60 * 1000;
 const startOfDay = (t: number) => new Date(t).setHours(0, 0, 0, 0);
