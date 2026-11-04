@@ -1,5 +1,7 @@
 // The app's view of OpenBots: a snapshot, then a stream of changes, plus the actions the UI takes.
 // Bots themselves don't use these routes; their tools go through the socket in agent.ts.
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { computerApi } from "../computers/api";
 import { modelListing } from "../pi/routes";
 import { getBot } from "./db";
@@ -7,6 +9,7 @@ import { available, botModels } from "./extensions";
 import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
+import * as apps from "./apps";
 import { startBots } from "./runner";
 import { BotsError, snapshot, subscribe } from "./service";
 import * as svc from "./service";
@@ -20,9 +23,104 @@ const fail = (err: unknown) => {
   return bad(err instanceof Error ? err.message : "Something went wrong", 500);
 };
 
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/** The page a service's sign-in ends on, in the popup the app opened. It tells the app and closes itself. */
+function signInPage(title: string, body: string, ok: boolean, appId?: string): Response {
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  const note = JSON.stringify({ type: "openbots-app", app: appId ?? null, ok });
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${escapeHtml(title)}</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#111;color:#eee}main{max-width:26rem;padding:2rem;text-align:center}h1{font-size:1.15rem;margin:0 0 .5rem}p{color:#aaa;margin:0}</style></head>
+<body><main><h1>${escapeHtml(title)}</h1><p>${escapeHtml(body)}</p></main>
+<script nonce="${nonce}">try{window.opener&&window.opener.postMessage(${note},location.origin)}catch(e){}${ok ? "setTimeout(function(){window.close()},900)" : ""}</script></body></html>`;
+  return new Response(html, {
+    status: ok ? 200 : 400,
+    headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`, "referrer-policy": "no-referrer" },
+  });
+}
+
+const LOGOS = join(import.meta.dir, "logos");
+
 export function botRoutes(api: Api) {
   svc.ensureStarted();
   return {
+    // ---------------------------------------------------------------- apps
+    "/api/bots/apps": {
+      GET: api(async () => {
+        try {
+          return json(await apps.snapshot());
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // Where a service sends the user back after they sign in. The session cookie is SameSite=Strict, so
+    // it doesn't come along on that redirect: the sign-in's single-use state is what vouches for it.
+    "/api/bots/apps/callback": {
+      GET: async (req: Request) => {
+        try {
+          const { app, error } = await apps.finish(new URL(req.url).searchParams);
+          if (error) return signInPage(app ? `Couldn't connect ${app.name}` : "Couldn't connect", error, false, app?.id);
+          return signInPage(`${app!.name} is connected`, "Your bots can use it now. You can close this window.", true, app!.id);
+        } catch (err) {
+          console.error("[bots] app sign-in failed:", err);
+          return signInPage("Couldn't connect", err instanceof Error ? err.message : "Something went wrong.", false);
+        }
+      },
+    },
+    "/api/bots/apps/clients/:id": {
+      DELETE: api(async (req: Bun.BunRequest<"/api/bots/apps/clients/:id">) => {
+        try {
+          await apps.forgetClient(req.params.id);
+          return json({ ok: true });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/apps/:id/connect": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/apps/:id/connect">) => {
+        try {
+          const body = (await readJson(req)) ?? {};
+          // The page's own address, which forbidden() has already matched to the host: the sign-in comes back there.
+          const origin = req.headers.get("origin") || new URL(req.url).origin;
+          return json(await apps.connect(req.params.id, { origin, fields: body.fields, client: body.client }));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/apps/:id/check": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/apps/:id/check">) => {
+        try {
+          return json(await apps.check(req.params.id));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/apps/:id/logo": {
+      GET: api((req: Bun.BunRequest<"/api/bots/apps/:id/logo">) => {
+        const id = req.params.id;
+        if (!/^[a-z0-9-]+$/.test(id)) return bad("Not found", 404);
+        for (const [ext, type] of [["svg", "image/svg+xml"], ["png", "image/png"]] as const) {
+          const path = join(LOGOS, `${id}.${ext}`);
+          if (existsSync(path))
+            return new Response(readFileSync(path), { headers: { "content-type": type, "cache-control": "public, max-age=86400", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'", "x-content-type-options": "nosniff" } });
+        }
+        return bad("Not found", 404);
+      }),
+    },
+    "/api/bots/apps/:id": {
+      DELETE: api(async (req: Bun.BunRequest<"/api/bots/apps/:id">) => {
+        try {
+          await apps.disconnect(req.params.id);
+          return json({ ok: true });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/:id/file": {
       GET: api(async (req: Bun.BunRequest<"/api/bots/:id/file">) => {
         try {

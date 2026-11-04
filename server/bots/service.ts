@@ -58,6 +58,11 @@ export function subscribe(listener: (e: BotsEvent) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
+/** Something about apps changed; the app asks for the new state. */
+export function emitApps() {
+  emit({ t: "apps" });
+}
+
 function emit(e: BotsEvent) {
   for (const l of listeners) {
     try {
@@ -239,10 +244,12 @@ export async function resetAll() {
     const device = bot.computer?.device ?? "local";
     await computerApi(device).call(bot.id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
   }
-  // Reset is about bots and chats. How the user searches the web and which extensions they load aren't those, and the keys stay too.
+  // Reset is about bots and chats. How the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
   const { searxng, customExtensions } = settings();
+  const apps = db.getValue("apps");
   db.wipe();
   if (searxng?.length || customExtensions) db.setValue("settings", { ...settings(), searxng, customExtensions });
+  if (apps) db.setValue("apps", apps);
   status.clear();
   chains.clear();
   chainWarned = mem.openbotsChainWarned = new Set();

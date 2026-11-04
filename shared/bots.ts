@@ -249,6 +249,8 @@ export interface BotMessage {
   plan?: { title: string; steps: PlanStep[] };
   /** A poll for the group. */
   poll?: Poll;
+  /** A bot offering an app for the user to connect, by its catalog id. */
+  connect?: { app: string };
   /** For the user's messages: the bots that have read it. */
   seenBy?: string[];
 }
@@ -348,7 +350,9 @@ export type BotsEvent =
   | { t: "draft"; draft: Draft; done?: boolean }
   | { t: "status"; botId: string; status: BotStatus }
   | { t: "pulse"; botId: string; mood?: string }
-  | { t: "settings"; settings: BotsSettings };
+  | { t: "settings"; settings: BotsSettings }
+  /** The connected apps changed: ask /api/bots/apps for them. */
+  | { t: "apps" };
 
 // ------------------------------------------------------------------ computers
 

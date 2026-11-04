@@ -20,6 +20,7 @@ import { IconButton, Popover } from "../primitives";
 import { StashTray } from "../StashTray";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
+import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
 import { authorName, ConversationAvatar, dividerTime, messageText } from "./common";
@@ -490,8 +491,8 @@ interface RowProps {
 const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, seen }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
-  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
-  const card = !!(m.question || m.plan || m.poll);
+  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
+  const card = !!(m.question || m.plan || m.poll || m.connect);
   const everyone = useMemo(() => everyoneIn(conversation, bots), [conversation.kind, conversation.botIds, bots]);
   const react = (emoji: string) => {
     const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
@@ -525,7 +526,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               ))}
             </div>
           )}
-          {m.text && !m.question && !m.poll && (
+          {m.text && !m.question && !m.poll && !m.connect && (
             <div className="bm-text">
               <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
             </div>
@@ -533,6 +534,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           {m.question && <QuestionCard conversation={conversation} message={m} />}
           {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
           {m.plan && <PlanCard message={m} bots={bots} />}
+          {m.connect && <ConnectCard appId={m.connect.app} />}
         </div>
         {!readonly && (
           <div className="bm-actions">

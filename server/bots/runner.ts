@@ -4,6 +4,7 @@
 // the unix socket in agent.ts.
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { appById } from "../../shared/apps";
 import { conversationTitle, firstName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
@@ -268,6 +269,8 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "forget") return "Forgetting something";
   if (tool === "search") return "Looking back through chats";
   if (tool === "bot_web_search") return "Searching the web";
+  if (tool === "apps") return a.action === "skill" ? "Reading up on how to do it" : "Looking through apps";
+  if (tool === "use_app") return `Using ${appById(String(a.app ?? ""))?.name ?? "an app"}`;
   if (tool === "routine") return "Sorting out a routine";
   if (tool === "ask_bot") return "Asking another bot";
   if (tool === "manage_bot") return "Tending to the other bots";
