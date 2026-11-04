@@ -4,7 +4,7 @@ import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
 import { abortable } from "./abort";
 import { readChatProjection } from "./chatSync";
-import { autoName } from "./naming";
+import { autoName, autoNameWorktree } from "./naming";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { clearQueue, consumeSteer, stageSteer, steeringOf, editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
@@ -397,7 +397,7 @@ export async function newWorkspace(chat: Chat, signal?: AbortSignal): Promise<Wo
   const project = pref.projectId ? projects.find((p) => p.id === pref.projectId) : undefined;
   try {
     if (!project) return await prepareWorkspace({ mode: "scratch", deviceId: pref.deviceId }, signal);
-    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch, name: chat.title }, signal);
+    return await prepareWorkspace({ projectId: project.id, mode: project.git ? pref.mode : "local", branch: pref.branch }, signal);
   } catch (err) {
     throw new WorkspaceError((err as Error).message);
   }
@@ -544,6 +544,7 @@ async function generate(chatId: string, messageId: string, resume = false) {
       ctrl.signal.throwIfAborted();
       if (!isCurrent()) throw new Error("This reply is no longer active.");
       useStore.getState().updateChat(chatId, { workspace });
+      void autoNameWorktree(chatId);
       // The remote device is only known once the workspace was made; keep the stream findable there.
       if (workspace.deviceId) {
         stream.deviceId = workspace.deviceId;

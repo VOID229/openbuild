@@ -229,10 +229,12 @@ export const folderPickerAvailable = () => get<{ available: boolean }>("/api/nat
 export const pickFolder = (dir?: string) => send<{ path: string | null }>("/api/native/folder", "POST", { dir }).then((r) => r.path);
 export const workspaceGit = (cwd: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/workspaces/git?cwd=${encodeURIComponent(cwd)}`));
 /** `deviceId` is only for a scratch folder: a project's own id says which device it's on. */
-export const prepareWorkspace = ({ deviceId: scratchDevice, ...req }: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; name?: string; deviceId?: DeviceId }, signal?: AbortSignal) => {
+export const prepareWorkspace = ({ deviceId: scratchDevice, ...req }: { projectId?: string; mode: "local" | "worktree" | "scratch"; branch?: string; deviceId?: DeviceId }, signal?: AbortSignal) => {
   const ref = req.projectId ? splitProjectId(req.projectId) : undefined;
   const deviceId = ref ? ref.deviceId : scratchDevice;
   return sendBounded<{ workspace: Workspace }>(apiUrl(deviceId, "/api/workspaces"), { ...req, projectId: ref?.id }, signal)
     .then((r) => (deviceId ? { ...r.workspace, deviceId } : r.workspace));
 };
 export const removeWorktree = (cwd: string, force = false, deviceId?: DeviceId) => send(apiUrl(deviceId, "/api/workspaces/remove"), "POST", { cwd, force });
+
+export const nameWorktree = (cwd: string, expected: string, name: string, deviceId?: DeviceId) => send<{ branch: string | null }>(apiUrl(deviceId, "/api/workspaces/name"), "POST", { cwd, expected, name });
