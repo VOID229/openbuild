@@ -18,6 +18,9 @@ import { AskCard, WorkRun } from "./ToolCalls";
 import { HtmlRender } from "./HtmlRender";
 import { HTML_RENDER_TOOL } from "../../shared/htmlRender";
 import { PluginSlot } from "../lib/plugins";
+import { useBots } from "../lib/bots/store";
+import { firstName, mentionName } from "../../shared/bots";
+import { BotAvatar } from "./bots/BotAvatar";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -204,11 +207,23 @@ function Attachments({ files, chatId }: { files: Attachment[]; chatId: string })
   );
 }
 
+/** Which bot wrote a user message, under its current name. Older messages only kept a first name. */
+function SentBy({ id, name }: { id?: string; name: string }) {
+  const bot = useBots((s) => s.bots.find((b) => (id ? b.id === id : firstName(b.name) === name)));
+  return (
+    <div className="msg-sent-by">
+      Sent by
+      {bot && <BotAvatar look={bot.look} size={16} alive={false} />}
+      <span>{bot ? mentionName(bot.name) : name}</span>
+    </div>
+  );
+}
+
 function UserMessage({ message, chatId }: { message: Message; chatId: string }) {
   message = { ...message, content: userVisiblePrompt(message.content) };
   return (
     <div className="msg msg-user" data-message-id={message.id}>
-      {message.sentBy && <div className="msg-sent-by">Sent by {message.sentBy}</div>}
+      {message.sentBy && <SentBy id={message.sentByBot} name={message.sentBy} />}
       {message.attachments?.length ? <Attachments files={message.attachments} chatId={chatId} /> : null}
       {message.content.trim() && (
         <div className="bubble">

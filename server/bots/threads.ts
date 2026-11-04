@@ -4,7 +4,7 @@
 // Threads are ordinary threads: the app shows them and picks up their replies like another tab's.
 //
 // Only this server's own threads, and not Durable ones: their turns are admitted differently.
-import { firstName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
+import { firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { readEvents } from "../../shared/replies";
 import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime } from "../../shared/types";
@@ -333,7 +333,7 @@ function pickSpeed(model: ModelInfo, asked: unknown): string | undefined {
 async function startTurn(botId: string, base: Chat, text: string, model: { id: string; name: string; effort: Effort; speed?: string }): Promise<void> {
   const now = Date.now();
   const stream = { id: crypto.randomUUID(), via: serverId() };
-  const user: Message = { id: crypto.randomUUID(), role: "user", content: text, createdAt: now, sentBy: firstName(db.getBot(botId)?.name ?? "A bot") };
+  const user: Message = { id: crypto.randomUUID(), role: "user", content: text, createdAt: now, sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId };
   const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", status: "streaming", model: { plan: (base.runtime ?? "pi") as PlanId, id: model.id, name: model.name, effort: model.effort, speed: model.speed }, stream, createdAt: now, startedAt: now };
   const chat: Chat = { ...base, updatedAt: now, archived: false, done: false, messages: [...base.messages, user, assistant] };
   if (!storage.putChat(chat as never)) throw refuse("That thread was deleted.", 410);
