@@ -158,12 +158,16 @@ async function removeMergedWorktree(chat: Chat, pr: GhPullRequest, local: { head
 }
 
 let sweeping: Promise<void> | undefined;
+let queued: Promise<void> | undefined;
 
 /**
  * Look up every open thread's pull request, saving what changed and closing merged threads. `refresh`
  * brings finished replies up to date first: with no browser polling, they'd still look like working.
+ * `fresh` is for just after a pull request changed: a sweep already under way may have asked GitHub
+ * before it did, so another one follows it.
  */
-export function sweep(refresh?: () => Promise<void>): Promise<void> {
+export function sweep(refresh?: () => Promise<void>, fresh = false): Promise<void> {
+  if (fresh && sweeping) return (queued ??= sweeping.then(() => { queued = undefined; return sweep(refresh); }));
   return (sweeping ??= sweepOnce(refresh).catch((err) => console.error("[pull-requests] Sweep failed:", err)).finally(() => { sweeping = undefined; }));
 }
 

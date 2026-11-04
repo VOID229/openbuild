@@ -46,7 +46,15 @@ export const knownPullRepo = (folder: Folder): string | undefined | null => (rep
 
 export const viewPull = (folder: Folder, number: number) => read<PullDetail>(folder, "/view", { number });
 export const pullPatch = (folder: Folder, number: number, sha?: string) => read<PullPatch>(folder, "/patch", { number, sha });
-export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) => act(folder, "merge", { number, method, headSha, deleteBranch });
+/** Asks the app to load its threads again now, rather than at its next poll. */
+export const RELOAD_THREADS = "openbuild:reload-threads";
+
+/** Merge, then pick up the thread the merge closed (the server closes it before answering). */
+export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) =>
+  act(folder, "merge", { number, method, headSha, deleteBranch }).then((r) => {
+    window.dispatchEvent(new Event(RELOAD_THREADS));
+    return r;
+  });
 export const editPull = (folder: Folder, number: number, title: string, body: string) => act(folder, "edit", { number, title, body });
 export const commentOnPull = (folder: Folder, number: number, body: string) => act(folder, "comment", { number, body });
 export const setPullState = (folder: Folder, number: number, action: "close" | "reopen" | "ready") => act(folder, "state", { number, action });

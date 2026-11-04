@@ -614,6 +614,15 @@ function leaveThread(id: string) {
   else s.newChat();
 }
 
+// Closed elsewhere (its pull request merged, or another tab or device closed it) while it's open
+// here: move on as closing it here would. Closing it here leaves it first, so it isn't open by then.
+useStore.subscribe((s, prev) => {
+  const id = s.activeChatId;
+  if (!id || id !== prev.activeChatId || s.chats === prev.chats) return;
+  const was = prev.chats.find((c) => c.id === id);
+  if (was && !was.archived && s.chats.find((c) => c.id === id)?.archived) leaveThread(id);
+});
+
 function toggleClosed(chat: Chat) {
   const closed = isClosed(chat);
   if (moving.has(chat.id)) return;

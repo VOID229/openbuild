@@ -237,12 +237,13 @@ async function act(cwd: string, verb: string, number: unknown, args: string[] = 
 
 /**
  * Merge the pull request, as long as its head is still the commit the user was looking at (GitHub
- * refuses otherwise), then look at the threads' pull requests again so their badges catch up.
+ * refuses otherwise), then look at the threads' pull requests again before answering, so the thread
+ * it merged is already closed when the browser next loads its threads.
  */
 export async function merge(cwd: string, number: unknown, method: unknown, headSha: unknown, deleteBranch: unknown) {
   if (method !== "squash" && method !== "merge" && method !== "rebase") throw new Error("Expected a merge method");
   await act(cwd, "merge", number, [`--${method}`, "--match-head-commit", validSha(headSha), ...(deleteBranch === true ? ["--delete-branch"] : [])]);
-  void sweep();
+  await sweep(undefined, true);
   return { ok: true };
 }
 
@@ -263,6 +264,6 @@ export async function comment(cwd: string, number: unknown, body: unknown) {
 export async function setState(cwd: string, number: unknown, action: unknown) {
   if (action !== "close" && action !== "reopen" && action !== "ready") throw new Error("Expected close, reopen or ready");
   await act(cwd, action, number);
-  void sweep();
+  void sweep(undefined, true);
   return { ok: true };
 }
