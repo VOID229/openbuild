@@ -210,7 +210,16 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   return deliver(botId, conversationId, text, images, p.reply_to);
 }
 
-function deliver(botId: string, conversationId: string, text: string, images: string[], replyTo: unknown) {
+/** About how long a person takes to type a bubble. */
+export function typingTime(text: string): number {
+  return Math.min(2400, 450 + text.length * 18);
+}
+
+async function deliver(botId: string, conversationId: string, text: string, images: string[], replyTo: unknown) {
+  // While the chat shows it typing, a bubble lands no sooner than someone could have typed it, so a
+  // few messages written at once still arrive one after another instead of all in the same instant.
+  const typed = svc.typingFor(conversationId, botId);
+  if (typed !== undefined && typed < typingTime(text)) await Bun.sleep(typingTime(text) - typed);
   let reply: string | undefined;
   if (typeof replyTo === "string" && replyTo) {
     const found = db.findMessages(replyTo, [conversationId]);
