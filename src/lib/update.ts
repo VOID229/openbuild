@@ -13,6 +13,8 @@ import { UPDATABLE_RUNTIMES } from "./runtimes";
 // they're left alone.
 
 const CHECK_EVERY = 60_000;
+/** After a failed check: coming back to a tab during a restart must still find the new build. */
+const RETRY_EVERY = 2_000;
 
 /** A production build's script path, e.g. "/chunk-z4krfn4n.js"; undefined for anything else. */
 export function buildPath(src: string | null | undefined, base: string): string | undefined {
@@ -27,32 +29,45 @@ export function buildOf(html: string, base: string): string | undefined {
   return buildPath(tag && /\bsrc="([^"]+)"/.exec(tag)?.[1], base);
 }
 
+/** Calls `onNewer` when the server serves a different build than `running`. Returns a stop function. */
+export function watchBuild(running: string, onNewer: () => void, retryEvery = RETRY_EVERY): () => void {
+  let pending = false;
+  let stopped = false;
+  let retry: ReturnType<typeof setTimeout> | undefined;
+  const check = async () => {
+    if (pending || document.visibilityState !== "visible") return;
+    pending = true;
+    clearTimeout(retry);
+    let answered = false;
+    try {
+      const res = await fetch("/", { cache: "no-store" });
+      answered = res.ok;
+      const served = res.ok ? buildOf(await res.text(), location.href) : undefined;
+      if (served && served !== running) onNewer();
+    } catch { /* The server is down or restarting; the retry sees it. */ }
+    finally { pending = false; }
+    if (!answered && !stopped) retry = setTimeout(() => void check(), retryEvery);
+  };
+  const timer = setInterval(() => void check(), CHECK_EVERY);
+  const onVisible = () => void check();
+  document.addEventListener("visibilitychange", onVisible);
+  addEventListener("online", onVisible);
+  return () => {
+    stopped = true;
+    clearInterval(timer);
+    clearTimeout(retry);
+    document.removeEventListener("visibilitychange", onVisible);
+    removeEventListener("online", onVisible);
+  };
+}
+
 /** True once the server serves a different build than the one running here. */
 export function useUpdateAvailable(enabled = true): boolean {
   const [available, setAvailable] = useState(false);
   useEffect(() => {
     const running = buildPath(document.querySelector('script[type="module"][src]')?.getAttribute("src"), location.href);
     if (!enabled || !running || available) return;
-    let pending = false;
-    const check = async () => {
-      if (pending || document.visibilityState !== "visible") return;
-      pending = true;
-      try {
-        const res = await fetch("/", { cache: "no-store" });
-        const served = res.ok ? buildOf(await res.text(), location.href) : undefined;
-        if (served && served !== running) setAvailable(true);
-      } catch { /* The server is down or restarting; the next check sees it. */ }
-      finally { pending = false; }
-    };
-    const timer = setInterval(() => void check(), CHECK_EVERY);
-    const onVisible = () => void check();
-    document.addEventListener("visibilitychange", onVisible);
-    addEventListener("online", onVisible);
-    return () => {
-      clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-      removeEventListener("online", onVisible);
-    };
+    return watchBuild(running, () => setAvailable(true));
   }, [enabled, available]);
   return available;
 }

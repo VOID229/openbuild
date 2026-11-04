@@ -30,7 +30,8 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { cx } from "./lib/ui";
-import { startRouting } from "./lib/routes";
+import { readRoute, startRouting } from "./lib/routes";
+import type { Chat } from "./lib/types";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
 
@@ -102,6 +103,7 @@ export async function preloadApp() {
     useStore.getState().setChats(chats);
     // Replies that were still coming in when the app was closed or reloaded.
     resumeReplies();
+    return openRoutedThread();
   }, () => { /* Main keeps retrying and shows the error. */ });
   // Settings → Pi and Settings → Providers open with content, not a spinner.
   void hydrated.then(() => {
@@ -117,6 +119,25 @@ export async function preloadApp() {
     }
   }).catch(() => {}).finally(() => { preloadingProjects = undefined; });
   await Promise.race([Promise.all([hydrated, chats, bots]), new Promise((r) => setTimeout(r, 3000))]);
+}
+
+/** Swap a deferred thread for its loaded history, unless that already happened. */
+function adoptHistory(chat: Chat, full: Chat) {
+  const current = useStore.getState().chats.find(c => c.id === chat.id);
+  if (!current?.historyDeferred) return;
+  const { historyDeferred: _, ...metadata } = current;
+  useStore.getState().upsertChat({ ...full, ...metadata, messages: full.messages }, false);
+  resumeReplies(chat.id);
+}
+
+/** So a reload paints the thread in the URL, rather than Home and then "Loading thread…". */
+async function openRoutedThread() {
+  const { threadId } = readRoute(location.pathname, location.hash);
+  const chat = useStore.getState().chats.find(c => c.id === threadId);
+  if (!chat) return;
+  useStore.setState({ activeChatId: chat.id });
+  // LoadedChat tries again and shows a failure.
+  await loadChatHistory(chat, true).then(full => adoptHistory(chat, full), () => {});
 }
 
 /** Settings are loaded from the server before the app renders, so nothing acts on the defaults. */
@@ -150,7 +171,7 @@ export function App() {
   return <Main />;
 }
 
-function LoadedChat({ chat }: { chat: import("./lib/types").Chat }) {
+function LoadedChat({ chat }: { chat: Chat }) {
   const [error, setError] = useState<string>();
   const [attempt, retry] = useState(0);
   useEffect(() => {
@@ -158,13 +179,7 @@ function LoadedChat({ chat }: { chat: import("./lib/types").Chat }) {
     let live = true;
     setError(undefined);
     void loadChatHistory(chat, true).then(full => {
-      if (!live) return;
-      const current = useStore.getState().chats.find(c => c.id === chat.id);
-      if (current?.historyDeferred) {
-        const { historyDeferred: _, ...metadata } = current;
-        useStore.getState().upsertChat({ ...full, ...metadata, messages: full.messages }, false);
-        resumeReplies(chat.id);
-      }
+      if (live) adoptHistory(chat, full);
     }, err => { if (live) setError((err as Error).message); });
     return () => { live = false; };
   }, [chat, attempt]);

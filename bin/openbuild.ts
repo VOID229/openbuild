@@ -240,7 +240,7 @@ function disableServe(s?: Pick<State, "servePort" | "serveHttpPort">) {
 async function start(mode: Mode, managed?: { active: boolean; restart: boolean }) {
   if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild start [local|lan|tailscale]`);
   if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
-  const STOPPING = "Stopping the server", PREPARING = "Preparing the network", STARTING = "Preparing caches and starting the server", PUBLISHING = "Publishing on Tailscale";
+  const STOPPING = "Stopping the server", PREPARING = "Preparing the network", STARTING = "Starting the server", PUBLISHING = "Publishing on Tailscale";
   const opened = (switching: boolean) => stage.open({
     scene: "lifecycle",
     power: switching ? 1 : 0,
@@ -542,7 +542,7 @@ async function pairHost() {
   if (!localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
   devices.setDeviceName(name);
   const WAITING = "Waiting for the other device";
-  const STARTING = "Preparing caches and starting the server";
+  const STARTING = "Starting the server";
   const animated = stage.open({ scene: "pair", power: 0, sonar: true, steps: [STARTING, WAITING] });
   stage.update({ power: 1 });
   stage.step(STARTING);

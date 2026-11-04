@@ -595,7 +595,6 @@ hot.openbuildStopPreviews = stopPreviews;
 for (const p of previous ?? []) p.stop(true);
 const port = previous?.[0]?.port ?? Number(process.env.PORT ?? 3100);
 const servers: ReturnType<typeof serve>[] = [];
-await warmStartup(() => refreshChats());
 try {
   for (const host of hosts) servers.push(serve(port, host));
 } catch (err) {
@@ -611,6 +610,8 @@ hot.openbuildServers = servers;
 // Recover before any browser reconnects; attach also awaits this same recovery barrier.
 void durable.recover().catch((err) => console.error("[durable] Startup recovery failed:", err));
 void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
+// Behind the open port: a tab refreshed during a restart waits for the server instead of being refused.
+void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Warm-up failed:", (err as Error).message));
 startPullRequestSweep();
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
