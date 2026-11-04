@@ -14,6 +14,7 @@ interface Slot<T> {
   loading: boolean;
   error?: string;
   promise?: Promise<void>;
+  forced?: boolean;
 }
 
 const slots = new Map<string, Slot<unknown>>();
@@ -39,11 +40,16 @@ function persist() {
 }
 
 /** `force`: ask the server to re-read too; `stale`: just skip this browser's copy. */
-function load(key: string, url: string, force = false, stale = force) {
+function load(key: string, url: string, force = false, stale = force): Promise<void> {
   const slot = (slots.get(key) ?? { at: 0, loading: false }) as Slot<unknown>;
   slots.set(key, slot);
-  if (slot.promise) return slot.promise;
+  if (slot.promise) {
+    // A hover prefetch must not swallow the fresh read requested on opening.
+    if (force && !slot.forced) return slot.promise.then(() => load(key, url, true));
+    return slot.promise;
+  }
   if (!stale && slot.data && Date.now() - slot.at < FRESH_MS) return Promise.resolve();
+  slot.forced = force;
   slot.loading = true;
   slot.error = undefined;
   emit();
@@ -114,7 +120,7 @@ export function useUsageReport(range: UsageRange, machine: UsageScope) {
 }
 
 export function useUsageLimits() {
-  useEffect(() => void loadLimits(), []);
+  useEffect(() => void loadLimits(true), []);
   const slot = useSlot<UsageLimitsReport>("limits");
   const pending = !!slot.data?.machines?.some((m) => m.status === "pending");
   useEffect(() => {

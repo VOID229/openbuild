@@ -43,7 +43,7 @@ test("a stale warmed usage report renders immediately; explicit refresh waits fo
   `);
 });
 
-test("warmed plan limits remain available while providers refresh, and refresh returns new limits", async () => {
+test("warmed plan limits wait for fresh provider readings and deduplicate explicit refresh", async () => {
   await isolated(`
     import { mock } from 'bun:test';
     import { strict as a } from 'node:assert';
@@ -70,14 +70,16 @@ test("warmed plan limits remain available while providers refresh, and refresh r
     a.equal(first.find(p => p.provider === 'grok').windows[0].usedPercent, 25);
     now += 61000;
     blocked = new Promise(resolve => { release = resolve; });
-    const cached = await Promise.race([limits(), Bun.sleep(100).then(() => { throw Error('limits cache waited'); })]);
-    a.equal(cached.find(p => p.provider === 'grok').windows[0].usedPercent, 25);
+    let normalFinished = false;
+    const normal = limits().then(value => { normalFinished = true; return value; });
     for (let i = 0; i < 20 && calls < 2; i++) await Bun.sleep(0);
     a.equal(calls, 2);
+    a.equal(normalFinished, false);
     let finished = false;
     const fresh = limits(true).then(value => { finished = true; return value; });
     await Bun.sleep(5); a.equal(finished, false);
     percent = 75; release();
+    a.equal((await normal).find(p => p.provider === 'grok').windows[0].usedPercent, 75);
     a.equal((await fresh).find(p => p.provider === 'grok').windows[0].usedPercent, 75);
     const lastGood = (await limits()).find(p => p.provider === 'grok');
     blocked = undefined; limited = true; now += 61000;
@@ -94,5 +96,32 @@ test("warmed plan limits remain available while providers refresh, and refresh r
     a.equal(recovered.windows[0].usedPercent, 80);
     a.equal(recovered.stale, undefined);
     a.equal(recovered.error, undefined);
+  `);
+});
+
+test("opening limits after an in-flight prefetch still requests fresh readings", async () => {
+  await isolated(`
+    import { mock } from 'bun:test';
+    import { strict as a } from 'node:assert';
+    const effects = [];
+    mock.module('react', () => ({
+      useEffect: fn => effects.push(fn), useState: () => [],
+      useSyncExternalStore: () => '',
+    }));
+    let release;
+    const urls = [];
+    globalThis.fetch = async url => {
+      urls.push(url);
+      if (urls.length === 1) await new Promise(resolve => { release = resolve; });
+      return Response.json({ providers: [], checkedAt: Date.now() });
+    };
+    const { loadLimits, useUsageLimits } = await import('./src/lib/usageStats.ts');
+    const prefetch = loadLimits();
+    useUsageLimits();
+    effects[0]();
+    a.equal(urls.length, 1);
+    release(); await prefetch;
+    for (let i = 0; i < 20 && urls.length < 2; i++) await Bun.sleep(0);
+    a.deepEqual(urls, ['/api/usage/limits', '/api/usage/limits?fresh=1']);
   `);
 });

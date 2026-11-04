@@ -80,8 +80,9 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
       },
     ).finally(() => (c.running = undefined));
   }
-  // The first answer is worth a short wait; after that the cached one is shown straight away.
-  if (c.running && force && key === "limits") await c.running;
+  // Limits return the completed refresh so the browser cannot cache an old reading as fresh.
+  // History reports still show cached numbers immediately.
+  if (c.running && key === "limits") await c.running;
   else if (c.running && c.value === undefined) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
   return { value: c.value, at: c.at, error: c.error, pending: !!c.running };
 }
