@@ -437,7 +437,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               {chat.workspace.projectName}
             </span>
           )}
-          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={12} compact />}
+          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={12} />}
           {device && (
             <span className="history-device" title={`Runs on ${device}`}>
               @ {device}

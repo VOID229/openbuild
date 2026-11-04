@@ -1,4 +1,4 @@
-import { GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft } from "lucide-react";
+import { GitPullRequest } from "lucide-react";
 import type { ThreadPullRequest } from "../../shared/types";
 
 /** What the badge says about a pull request: its state, and its checks while it's open. */
@@ -9,21 +9,32 @@ export function pullRequestLabel(pr: ThreadPullRequest): string {
   return `#${pr.number} ${pr.draft ? "draft" : "open"}${checks}`;
 }
 
-/** A thread's pull request (server/pullRequests.ts): a link to it on GitHub, or just its number when compact. */
-export function PullRequestBadge({ pr, size = 13, compact }: { pr: ThreadPullRequest; size?: number; compact?: boolean }) {
-  const Icon = pr.state === "merged" ? GitMerge : pr.state === "closed" ? GitPullRequestClosed : pr.draft ? GitPullRequestDraft : GitPullRequest;
-  const tone = pr.state === "open" ? (pr.checks ?? "open") : pr.state;
+/**
+ * The icon's colour: orange while checks run, green when it's ready to merge, purple once merged,
+ * red when closed or a check failed, grey as a draft.
+ */
+export function pullRequestTone(pr: ThreadPullRequest): "pending" | "ready" | "merged" | "failing" | "closed" | "draft" {
+  if (pr.state === "merged") return "merged";
+  if (pr.state === "closed") return "closed";
+  if (pr.checks === "failing") return "failing";
+  if (pr.checks === "pending") return "pending";
+  return pr.draft ? "draft" : "ready";
+}
+
+/** A thread's pull request (server/pullRequests.ts): its number, with the icon coloured by its state. */
+export function PullRequestBadge({ pr, size = 13, link }: { pr: ThreadPullRequest; size?: number; link?: boolean }) {
+  const className = `pr-badge pr-${pullRequestTone(pr)}`;
+  const title = `Pull request ${pullRequestLabel(pr)}`;
   const content = (
     <>
-      <Icon size={size} />
-      <span>{compact ? `#${pr.number}` : pullRequestLabel(pr)}</span>
+      <GitPullRequest size={size} className="pr-icon" />
+      <span>#{pr.number}</span>
     </>
   );
-  const title = `Pull request ${pullRequestLabel(pr)}`;
-  // A sidebar row is already a button, so its compact badge can't be a link of its own.
-  if (compact) return <span className={`pr-badge pr-${tone}`} title={title}>{content}</span>;
+  // A sidebar row is already a button, so its badge can't be a link of its own.
+  if (!link) return <span className={className} title={title}>{content}</span>;
   return (
-    <a className={`pr-badge pr-${tone}`} href={pr.url} target="_blank" rel="noreferrer" title={title}>
+    <a className={`${className} thread-pr`} href={pr.url} target="_blank" rel="noreferrer" data-tooltip={`${title} · open on GitHub`}>
       {content}
     </a>
   );
