@@ -52,3 +52,29 @@ describe("file links", () => {
     expect(html).toContain('href="/files?url=file%3A%2F%2F%2Ftmp%2Fmy%2520story.md"');
   });
 });
+
+describe("bare addresses", () => {
+  const bare = (text: string) => renderToStaticMarkup(createElement(Linkify, { text, bare: true }));
+
+  test("links schemeless domains over https, keeping the text as written", () => {
+    const html = bare("Sources: The New Stack (thenewstack.io/claude-ultra-session-limit), Notebookcheck (notebookcheck.net, Oct 31).");
+    expect(html).toContain('href="https://thenewstack.io/claude-ultra-session-limit"');
+    expect(html).toContain(">thenewstack.io/claude-ultra-session-limit</a>),");
+    expect(html).toContain('href="https://notebookcheck.net"');
+    expect(html).toContain(">notebookcheck.net</a>,");
+  });
+
+  test("leaves file names, emails and versions alone", () => {
+    expect(bare("edit agent.ts and notes.md, mail me@x.com, v1.2.3")).not.toContain("<a");
+  });
+
+  test("still links full URLs once", () => {
+    const html = bare("https://x.com/a");
+    expect(html.match(/<a /g)?.length).toBe(1);
+    expect(html).toContain('href="https://x.com/a"');
+  });
+
+  test("is off unless asked for", () => {
+    expect(render("thenewstack.io")).toBe("thenewstack.io");
+  });
+});
