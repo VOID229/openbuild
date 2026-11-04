@@ -127,6 +127,21 @@ const script = `
   assert.equal(storage.getChat("unattended").archived, undefined, "still working");
   await pr.sweep(async () => { storage.putChat({ ...streaming, messages: [streaming.messages[0], created(url)] }); });
   assert.equal(storage.getChat("unattended").archived, true);
+
+  // Just after a merge, a sweep already under way may have asked GitHub before it: another follows it.
+  const asks = () => (existsSync(process.env.FAKE_GH_LOG) ? Bun.file(process.env.FAKE_GH_LOG).text() : Promise.resolve("")).then((t) => t.split("\\n").filter(Boolean).length);
+  storage.putChat(chat("following", checkout, { messages: [{ id: "u", role: "user", content: "go", createdAt: now - 60_000 }, created(url)] }));
+  writeFileSync(process.env.FAKE_GH_JSON, JSON.stringify(pullRequests));
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const before = await asks();
+  const running = pr.sweep(() => gate);
+  assert.equal(pr.sweep(), running, "an ordinary sweep joins the one under way");
+  const after = pr.sweep(undefined, true);
+  assert.equal(pr.sweep(undefined, true), after, "and so do fresh ones, after it");
+  release();
+  await after;
+  assert.equal(await asks(), before + 2);
   console.log("ok");
 `;
 
@@ -135,11 +150,11 @@ test("worktree threads follow their pull request and close when it merges", asyn
   try {
     const bin = join(root, "bin");
     Bun.spawnSync(["mkdir", "-p", bin]);
-    writeFileSync(join(bin, "gh"), `#!/bin/sh\ncat "$FAKE_GH_JSON"\n`);
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "$FAKE_GH_LOG"\ncat "$FAKE_GH_JSON"\n`);
     chmodSync(join(bin, "gh"), 0o755);
     const proc = Bun.spawn([process.execPath, "-e", script], {
       cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_JSON: join(root, "prs.json"), PATH: `${bin}:${process.env.PATH}` },
+      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_JSON: join(root, "prs.json"), FAKE_GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` },
       stdout: "pipe",
       stderr: "pipe",
     });

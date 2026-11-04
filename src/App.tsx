@@ -26,6 +26,7 @@ import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChatHistory, loadChats } from "./lib/db";
+import { RELOAD_THREADS } from "./lib/pulls";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
@@ -270,8 +271,14 @@ function Main() {
     if (!chatsLoaded || isHosted()) return;
     let disposed = false;
     let pending = false;
+    // Asked for while a load was under way, which may have read the threads before the change.
+    let again = false;
     const refresh = async () => {
-      if (pending || document.visibilityState !== "visible") return;
+      if (pending) {
+        again = true;
+        return;
+      }
+      if (document.visibilityState !== "visible") return;
       pending = true;
       const before = new Map(useStore.getState().chats.map((c) => [c.id, c]));
       try {
@@ -280,15 +287,21 @@ function Main() {
         adoptDiscoveredChats(incoming, before);
       } catch { /* Keep the current view offline; the next poll retries. */ }
       finally { pending = false; }
+      if (again && !disposed) {
+        again = false;
+        void refresh();
+      }
     };
     const timer = setInterval(() => void refresh(), 5000);
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("online", refresh);
+    window.addEventListener(RELOAD_THREADS, refresh);
     return () => {
       disposed = true;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("online", refresh);
+      window.removeEventListener(RELOAD_THREADS, refresh);
     };
   }, [chatsLoaded]);
 
