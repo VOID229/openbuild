@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { castVote, findMentions, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { castVote, findMentions, findTags, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -18,6 +18,15 @@ test("@mentions match a bot's whole name, or its first name alone", () => {
   expect(found("hey @dr eggbot, and @helper")).toEqual([["@dr eggbot", "Dr Eggbot"], ["@helper", "helper · notes"]]);
   expect(found("@Dr hi")).toEqual([["@Dr", "Dr"]]);
   expect(found("me@helper.com @helpers")).toEqual([]);
+});
+
+test("@all and @everyone tag the whole conversation, among the bots' own mentions", () => {
+  const bots = [{ name: "Dr Eggbot" }, { name: "All" }, { name: "All Stars" }];
+  const found = (text: string) => findTags(text, bots).map((t) => [text.slice(t.start, t.end), t.bot?.name]);
+  expect(found("@Dr Eggbot and @ALL, @everyone")).toEqual([["@Dr Eggbot", "Dr Eggbot"], ["@ALL", undefined], ["@everyone", undefined]]);
+  expect(found("@all")).toEqual([["@all", undefined]]);
+  expect(found("@all stars")).toEqual([["@all stars", "All Stars"]]);
+  expect(found("me@all.com @allison @all-hands")).toEqual([]);
 });
 
 test("polls letter their options and keep one vote per voter", () => {

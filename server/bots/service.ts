@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
-import { castVote, DEFAULT_SETTINGS, findMentions, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
@@ -445,9 +445,10 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
 }
 
 function mentionedBots(text: string, ids: string[]): string[] {
-  if (/@(all|everyone)\b/i.test(text)) return ids;
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
-  return [...new Set(findMentions(text, bots).map((m) => m.bot.id))];
+  const tags = findTags(text, bots);
+  if (tags.some((t) => !t.bot)) return ids;
+  return [...new Set(tags.map((t) => t.bot!.id))];
 }
 
 export function postMessage(conversationId: string, message: BotMessage): BotMessage {
