@@ -7704,16 +7704,16 @@ a.btn-primary {
   white-space: nowrap;
 }
 
-/* The project keeps up to half the room; the worktree's name gives way first. */
+/* Both names shrink when the line runs out of room, the worktree's three times as fast. No % cap:
+   .history-proj sizes to its content, so 50% halved even a short name with room to spare. */
 .history-proj-name {
-  flex-shrink: 0;
-  max-width: 50%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .history-worktree {
   display: inline-flex;
+  flex-shrink: 3;
   align-items: center;
   gap: 3px;
   min-width: 0;
