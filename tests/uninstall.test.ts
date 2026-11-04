@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { removeInstallation, uninstallPlan } from "../bin/uninstall";
+import { describeUninstall, removeInstallation, uninstallPlan } from "../bin/uninstall";
 
 test("uninstall preserves source and unrelated links, removes marked apps and their data", () => {
   const temp = mkdtempSync(join(tmpdir(), "ob-uninstall-"));
@@ -45,4 +45,19 @@ test("uninstall refuses piped input and --yes without deleting data", () => {
     expect(result.stderr.toString()).toContain("terminal");
     expect(existsSync(join(temp, "keep.txt"))).toBe(true);
   } finally { rmSync(temp, { recursive: true, force: true }); }
+});
+
+test("the uninstall summary says what goes and what stays, in short paths", () => {
+  const plan = { root: "/u/gal/.local/share/openbuild/app", data: "/u/gal/Library/Application Support/OpenBuild", installed: true, links: ["/u/gal/.bun/bin/ob", "/u/gal/.bun/install/global/node_modules/openbuild"] };
+  const text = describeUninstall(plan, { columns: 60, home: "/u/gal" }).join("\n");
+  expect(text).toContain("Data          ~/Library/Application Support/OpenBuild");
+  expect(text).toContain("App           ~/.local/share/openbuild/app");
+  expect(text).toContain("Commands      ob, bun global package");
+  expect(text).not.toContain("\x1b");
+  expect(text).not.toContain("Source");
+  const lines = describeUninstall({ ...plan, installed: false, links: [] }, { columns: 60, home: "/u/gal" });
+  expect(lines.join("\n")).toContain("Source        ~/.local/share/openbuild/app");
+  expect(lines.join("\n")).not.toContain("Commands");
+  expect(Math.max(...lines.map(line => line.length))).toBeLessThanOrEqual(60);
+  expect(describeUninstall(plan, { color: true }).join("\n")).toContain("\x1b[31m");
 });

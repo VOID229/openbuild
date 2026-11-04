@@ -10,10 +10,17 @@ const UNICODE = { cells: " ▘▝▀▖▌▞▛▗▚▐▜▄▙▟█", spinn
 const ASCII = { cells: " '`\",[/P.\\]?_LJ#", spinner: "|/-\\", done: "+", failed: "x", idle: ".", knob: "o", rail: "-" };
 const SCRAMBLE = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const LEVELS = 48, FRAME_MS = 33, SWEEP = 34, PERIOD = 96, OUTRO = 26, SLIDE = 22;
+/** Uninstall: rows left below the wordmark for falling pixels, frames for a full crumble, frames a pixel falls. */
+const DEBRIS = 2, CRUMBLE = 84, FALL = 22;
 
 const clamp = (v: number) => Math.min(1, Math.max(0, v));
 const smooth = (v: number) => { v = clamp(v); return v * v * (3 - 2 * v); };
 const ease = (v: number) => 1 - (1 - clamp(v)) ** 3;
+const hash = (n: number) => {
+  n = Math.imul(n ^ (n >>> 16), 0x45d9f3b);
+  n = Math.imul(n ^ (n >>> 16), 0x45d9f3b);
+  return ((n ^ (n >>> 16)) >>> 0) / 4294967296;
+};
 
 const statePath = process.argv[2]!;
 const parent = process.ppid;
@@ -70,7 +77,7 @@ const shade = (v: number) => {
 const tint = (code: number) => depth === "none" ? "" : `\x1b[${code}m`;
 
 let state: MotionState = JSON.parse(readFileSync(statePath, "utf8"));
-const reserved = () => state.scene === "pair" ? state.steps.length + 11 : state.steps.length + 3;
+const reserved = () => state.scene === "pair" ? state.steps.length + 11 : state.steps.length + (state.scene === "uninstall" ? 2 + DEBRIS : 3);
 
 /** The largest wordmark this window holds; the two-line labels decide what's left. */
 function chooseMark() {
@@ -95,6 +102,11 @@ let shown = 0;
 let settled = 0;
 let outro = -1;
 let height = 0;
+let decay = 0;
+let crumbled = -1;
+interface Pixel { x: number; y: number; at: number; gone: number; falls: boolean; drift: number }
+let pixels: Pixel[] = [];
+let pixelsFor: string[] | undefined | null = null;
 
 /** Rising power washes left to right (or upward for updates); falling power drains right to left. */
 function reach(x: number, r: number, to: number) {
@@ -135,6 +147,58 @@ function wordmark(final: boolean) {
       if (q < 1 || (depth === "none" && value < 0.5)) { line += " "; continue; }
       if (q !== last) { line += shade(value); last = q; }
       line += glyph;
+    }
+    return `${line}${reset}`;
+  });
+}
+
+/**
+ * Every quadrant of every wordmark cell is a pixel with its own moment to go, the right side
+ * first. A pixel crackles just before it goes, and some fall away as dust.
+ */
+function crumble() {
+  if (pixelsFor !== mark) {
+    pixelsFor = mark;
+    pixels = [];
+    for (let r = 0; r < ROWS; r++) for (let x = 0; x < SPAN; x++) {
+      const mask = mark ? parseInt(mark[r]![x]!, 16) || 0 : 15;
+      for (let bit = 0; bit < 4; bit++) {
+        if (!(mask & (1 << bit))) continue;
+        const px = 2 * x + (bit & 1), py = 2 * r + (bit >> 1), seed = py * 4099 + px;
+        const at = 0.04 + 0.5 * (1 - px / (2 * SPAN)) + 0.42 * hash(seed);
+        pixels.push({ x: px, y: py, at, gone: at <= decay ? -1e9 : -1, falls: hash(seed + 77) < 0.55, drift: (hash(seed + 191) - 0.5) * 0.12 });
+      }
+    }
+  }
+  const rows = ROWS + (mark ? DEBRIS : 0);
+  const masks = new Uint8Array(SPAN * rows), light = new Float32Array(SPAN * rows);
+  pixels.forEach((pixel, i) => {
+    let { x, y } = pixel, value: number;
+    if (pixel.at > decay) {
+      value = level(x >> 1, y >> 1);
+      if (pixel.at - decay < 0.05) value = hash(i * 7919 + frame) < 0.5 ? 1 : 0.25;
+    } else {
+      if (pixel.gone === -1) pixel.gone = frame;
+      const age = frame - pixel.gone;
+      if (!pixel.falls || age >= FALL) return;
+      y += Math.round(0.02 * age * age);
+      x += Math.round(pixel.drift * age);
+      value = 0.7 * (1 - age / FALL);
+    }
+    const column = x >> 1, row = y >> 1;
+    if (column < 0 || column >= SPAN || row >= rows) return;
+    const cell = row * SPAN + column;
+    masks[cell]! |= 1 << ((y & 1) * 2 + (x & 1));
+    light[cell] = Math.max(light[cell]!, value);
+  });
+  return Array.from({ length: rows }, (_, r) => {
+    let line = "  ", last = -1;
+    for (let x = 0; x < SPAN; x++) {
+      const cell = r * SPAN + x, value = light[cell]!;
+      const q = Math.round(clamp(value) * (LEVELS - 1));
+      if (!masks[cell] || q < 1 || (depth === "none" && value < 0.5)) { line += " "; continue; }
+      if (q !== last) { line += shade(value); last = q; }
+      line += mark ? glyphs.cells[masks[cell]!]! : "OpenBuild"[x]!;
     }
     return `${line}${reset}`;
   });
@@ -187,6 +251,8 @@ function paint(final = false) {
   const room = Math.max(0, size().rows - 1 - fixed);
   const body = state.scene === "track"
     ? ["", trackLine(), ""]
+    : state.scene === "uninstall"
+    ? ["", ...(final && state.end === "done" ? [] : [...crumble(), ...(mark ? [] : [""])]), ...stepLines(), ""]
     : ["", ...wordmark(final), "", ...(state.code ? [codeLine(state.code), ""] : []), ...stepLines(), ...(state.lines ?? []).slice(0, room).map(line => `  ${shade(0.5)}${line}${reset}`), ""];
   let out = "\x1b[?2026h";
   for (const line of body) out += `\r${line}\x1b[K\n`;
@@ -234,7 +300,8 @@ setInterval(() => {
     settled = frame;
     holdUntil = frame + (power === 0 ? 8 : 0);
   }
-  if (!sweep && frame >= holdUntil && played < state.powers.length) {
+  // The uninstall wordmark only ever crumbles; a nested stop's power change doesn't drain it.
+  if (state.scene !== "uninstall" && !sweep && frame >= holdUntil && played < state.powers.length) {
     const to = state.powers[played++]!;
     if (to !== power) sweep = { from: power, to, start: frame };
   }
@@ -242,6 +309,16 @@ setInterval(() => {
   else if (shown < state.current && frame % 10 === 0) shown++;
 
   if (state.end === "fail") { paint(true); leave(); }
+  if (state.scene === "uninstall") {
+    // Each step taken lets a little more go; the rest goes once everything is removed.
+    const target = state.end === "done" ? 1 : Math.min(0.85, (shown + 0.35) / Math.max(1, state.steps.length));
+    if (frame >= 10) decay = Math.max(decay, Math.min(target, decay + 1 / CRUMBLE));
+    if (decay >= 1 && crumbled < 0) crumbled = frame;
+    if (state.end === "done" && shown >= state.current && crumbled >= 0 && frame - crumbled > FALL) { paint(true); leave(); }
+    paint();
+    frame++;
+    return;
+  }
   const introDone = state.scene === "track" ? frame >= SLIDE + 4 : !sweep && played === state.powers.length && shown >= state.current && frame >= 14;
   if (state.end === "done" && introDone) {
     if (state.scene === "track") { paint(true); leave(); }

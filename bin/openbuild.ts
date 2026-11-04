@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { checkRelease, installRelease, releaseTrack, setReleaseTrack } from "../server/releases";
 import { ask, confirm } from "./prompt";
 import { stage } from "./motion";
-import { uninstallPlan, removeInstallation } from "./uninstall";
+import { describeUninstall, uninstallPlan, removeInstallation } from "./uninstall";
 import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { remoteRequest } from "./remoteRequest";
 import { dataDir } from "../server/paths";
@@ -833,12 +833,13 @@ async function remoteServer(action: "start" | "stop", raw: string[]) {
 async function uninstall() {
   if (!process.stdin.isTTY) fail("run ob uninstall in a terminal to review and confirm removal.");
   const plan = uninstallPlan(ROOT, DATA);
-  console.log(`Remove OpenBuild data: ${plan.data}`);
-  console.log("This deletes all chats, settings, plugins, scratch projects and managed worktrees, including uncommitted work. Running agent turns will stop.");
-  console.log(plan.installed ? `Remove installed app: ${plan.root}` : `Keep source checkout: ${plan.root}`);
-  for (const link of plan.links) console.log(`Remove command link: ${link}`);
-  console.log("OpenBuild credentials and device pairings will be removed. External project folders and native agent sessions are kept.");
-  if (!(await confirm("Uninstall OpenBuild permanently?", false))) { console.log("Uninstall cancelled."); return; }
+  for (const line of describeUninstall(plan, { columns: process.stdout.columns, color: !!process.stdout.isTTY && !process.env.NO_COLOR })) console.log(line);
+  if (!(await confirm(`  ${bold("Uninstall OpenBuild permanently?")}`, false))) { console.log(dim("\n  Uninstall cancelled. Nothing was removed.")); return; }
+  const paired = devices.readDevices();
+  const REVOKING = "Revoking device pairings", CLEARING = "Clearing credentials", REMOVING = "Removing files";
+  const owned = stage.open({ scene: "uninstall", steps: [STOP_STEP, ...(paired.length ? [REVOKING] : []), CLEARING, REMOVING] });
+  if (!owned) console.log();
+  stage.step(STOP_STEP);
   const managed = systemdService(ROOT, run);
   if (managed) {
     const result = run("systemctl", ["--user", "disable", "--now", UNIT]);
@@ -854,15 +855,20 @@ async function uninstall() {
   const workers = stopWorkers();
   for (let i = 0; i < 40 && workers.some(alive); i++) await Bun.sleep(100);
   for (const pid of workers.filter(alive)) { try { process.kill(pid, "SIGKILL"); } catch {} }
-  for (const device of devices.readDevices()) {
-    if (!(await devices.revokeDevice(device))) console.log(`Could not reach ${device.name}; remove this pairing on that device too.`);
+  stage.step(REVOKING);
+  for (const device of paired) {
+    if (!(await devices.revokeDevice(device))) stage.print(`  Could not reach ${device.name}; remove this pairing on that device too.`);
   }
+  stage.step(CLEARING);
   const vault = await import("../server/vault");
   for (const scope of vault.scopes()) await vault.setKeys(scope, []);
   const secretsFile = process.env.OPENCHAT_SECRETS_FILE || join(process.env.XDG_CONFIG_HOME || join(process.env.HOME!, ".config"), "openbuild", "secrets.json");
   rmSync(secretsFile, { force: true });
+  stage.step(REMOVING);
   removeInstallation(plan);
-  console.log("OpenBuild uninstalled.");
+  if (owned) stage.end();
+  console.log(`  ${bold("OpenBuild uninstalled.")} ${dim("Your projects are right where you left them.")}`);
+  console.log();
 }
 
 const args = process.argv.slice(2);
