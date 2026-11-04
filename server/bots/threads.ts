@@ -4,7 +4,7 @@
 // Threads are ordinary threads: the app shows them and picks up their replies like another tab's.
 //
 // Only this server's own threads, and not Durable ones: their turns are admitted differently.
-import { firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
+import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { readEvents } from "../../shared/replies";
 import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime } from "../../shared/types";
@@ -70,9 +70,12 @@ function accessOf(botId: string): BotThreadAccess {
   return access;
 }
 
+/** The projects a bot has. Only ones still in OpenBuild, so "all" doesn't reach threads of removed ones. */
+const grantedProjects = (access: BotThreadAccess) => projects.listProjects().filter((p) => coversProject(access, p.id));
+
 function grantedProject(access: BotThreadAccess, ref: unknown) {
   const wanted = String(ref ?? "").trim().toLowerCase();
-  const mine = projects.listProjects().filter((p) => access.projects.includes(p.id));
+  const mine = grantedProjects(access);
   const hits = mine.filter((p) => p.id === wanted || p.name.toLowerCase() === wanted);
   if (hits.length === 1) return hits[0]!;
   throw refuse(hits.length ? "That project name is ambiguous. Use its id." : `Name one of your projects: ${mine.map((p) => p.name).join(", ") || "you haven't been given any"}.`);
@@ -86,7 +89,7 @@ function grantedThread(access: BotThreadAccess, ref: unknown): Chat {
   if (hits.length !== 1) throw refuse(hits.length ? "That thread id is ambiguous." : "No such thread.", hits.length ? 400 : 404);
   const chat = storage.getChat(hits[0]!.id) as Chat | undefined;
   if (!chat) throw refuse("No such thread.", 404);
-  if (chat.workspace?.deviceId || !access.projects.includes(chat.workspace?.projectId ?? "")) throw refuse("That thread isn't in one of your projects.", 403);
+  if (chat.workspace?.deviceId || !grantedProjects(access).some((p) => p.id === chat.workspace?.projectId)) throw refuse("That thread isn't in one of your projects.", 403);
   if (chat.runtime === "durable") throw refuse("Bots can't use Durable threads yet.");
   return chat;
 }
@@ -285,7 +288,7 @@ async function options(botId: string, p: Record<string, unknown>) {
   const all = runtimes();
   if (!p.harness) {
     return {
-      projects: projects.listProjects().filter((project) => access.projects.includes(project.id)).map((project) => ({ id: project.id, name: project.name, git: project.git })),
+      projects: grantedProjects(access).map((project) => ({ id: project.id, name: project.name, git: project.git })),
       harnesses: Object.keys(MODEL_LISTERS).filter((r) => all[r as ThreadRuntime]?.installed && !settings?.blocked?.includes(r)),
       you_may: { choose_permissions: !!access.choosePermission, answer_permission_prompts: !!access.approve, merge_pull_requests: !!access.merge },
     };
@@ -469,7 +472,8 @@ async function list(botId: string, p: Record<string, unknown>) {
   const access = accessOf(botId);
   const all = await storage.chatSummaries();
   const running = await pendingRuns();
-  const chats = all.map((row) => row.chat).filter((c) => !c.workspace?.deviceId && access.projects.includes(c.workspace?.projectId ?? "") && !!c.archived === (p.closed === true)).sort((a, b) => b.updatedAt - a.updatedAt);
+  const mine = new Set(grantedProjects(access).map((p) => p.id));
+  const chats = all.map((row) => row.chat).filter((c) => !c.workspace?.deviceId && mine.has(c.workspace?.projectId ?? "") && !!c.archived === (p.closed === true)).sort((a, b) => b.updatedAt - a.updatedAt);
   return {
     threads: chats.slice(0, 30).map((c) => {
       const runs = running.filter((run) => run.threadId === c.id);

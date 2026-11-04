@@ -65,17 +65,31 @@ export interface BotStatus {
   since?: number;
 }
 
+export type BotProjectScope = "all" | "choose" | "exclude";
+
 /** What a bot may do with the user's OpenBuild threads. Only the user can change this. */
 export interface BotThreadAccess {
   enabled: boolean;
-  /** The projects it can work in, by id. */
+  /** Which projects it can work in. Grants from before this existed have none, and mean "choose". */
+  scope?: BotProjectScope;
+  /** "choose": the projects it can work in, by id. */
   projects: string[];
+  /** "exclude": the projects it can't work in, by id. */
+  excluded?: string[];
   /** It picks each thread's permission mode. Otherwise threads get the harness's default from BotsSettings. */
   choosePermission?: boolean;
   /** It can answer permission prompts, not just the questions threads ask. */
   approve?: boolean;
   /** It can merge pull requests. */
   merge?: boolean;
+}
+
+/** Whether a grant covers a project. Something that isn't in a project is never covered. */
+export function coversProject(access: Pick<BotThreadAccess, "scope" | "projects" | "excluded">, projectId: string | undefined): boolean {
+  if (!projectId) return false;
+  if (access.scope === "all") return true;
+  if (access.scope === "exclude") return !access.excluded?.includes(projectId);
+  return access.projects.includes(projectId);
 }
 
 /** The harnesses with permission modes OpenBuild can set for a thread. */
@@ -409,6 +423,19 @@ export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[
     i += hit.name.length;
   }
   return out;
+}
+
+/**
+ * Every @mention in some text, in order: bots as findMentions finds them, and "@all" or "@everyone",
+ * which have no `bot` because they name the whole conversation. They beat a bot called "All", but
+ * "@All Stars" is still that bot.
+ */
+export function findTags<B extends Pick<Bot, "name">>(text: string, bots: B[]): { start: number; end: number; bot?: B }[] {
+  const named = findMentions(text, bots);
+  const all = [...text.matchAll(/(?<![\p{L}\d_])@(?:all|everyone)(?![\p{L}\d_-])/giu)]
+    .map((m) => ({ start: m.index, end: m.index + m[0].length }))
+    .filter((a) => !named.some((m) => m.start === a.start && m.end > a.end));
+  return [...named.filter((m) => !all.some((a) => a.start === m.start)), ...all].sort((a, b) => a.start - b.start);
 }
 
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
