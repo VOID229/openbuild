@@ -7652,7 +7652,7 @@ a.btn-primary {
   text-overflow: ellipsis;
 }
 
-/* A thread's pull request (PullRequestBadge.tsx): in its sidebar row and the thread's workspace bar */
+/* A thread's pull request (PullRequestBadge.tsx): in its sidebar row and the thread's top right */
 
 .pr-badge {
   display: inline-flex;
@@ -7670,6 +7670,23 @@ a.btn-primary {
 .pr-merged .pr-icon { color: var(--pr-merged); }
 .pr-failing .pr-icon,
 .pr-closed .pr-icon { color: var(--danger); }
+
+/* In a sidebar row, on the right of the meta line beside the runtime mark. */
+.history-pr {
+  margin-left: auto;
+  cursor: pointer;
+}
+
+.history-pr + .history-runtime {
+  margin-left: 0;
+}
+
+@media (hover: hover) {
+  .history-pr:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+}
 
 /* In the thread's top right, beside the Commit button and sized like it. */
 .thread-pr {

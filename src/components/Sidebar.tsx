@@ -435,14 +435,16 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
               {chat.workspace.projectName}
+              {/* A worktree's folder name tells threads of one project apart. */}
+              {chat.workspace.worktree && <span className="history-worktree"> · {chat.workspace.cwd.split(/[\\/]/).pop()}</span>}
             </span>
           )}
-          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={12} />}
           {device && (
             <span className="history-device" title={`Runs on ${device}`}>
               @ {device}
             </span>
           )}
+          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={12} inRow />}
           <span className="history-runtime" title={runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
