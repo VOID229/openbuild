@@ -11,7 +11,7 @@ import { findMentions, mentionName, pollVotesVisible, pollWaitingOn, reactionId 
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
-import { Linkify } from "../Linkify";
+import { Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
@@ -100,24 +100,25 @@ function WithMentions({ text, bots, fileHref }: { text: string; bots: Bot[]; fil
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const { start, end, bot } of findMentions(text, bots)) {
-    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} />);
+    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} bare />);
     parts.push(<Mention key={start} bot={bot} text={text.slice(start, end)} />);
     last = end;
   }
-  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} />);
+  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} bare />);
   return <>{parts}</>;
 }
 
-/** Bold, inline code, links and @mentions (in the mentioned bot's colour). */
+/** Bold, inline code, [Markdown](https://links), bare links and @mentions (in the mentioned bot's colour). */
 const RichText = memo(function RichText({ text, bots, botId }: { text: string; bots: Bot[]; botId?: string }) {
   const fileHref = botId ? (url: string) => `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}` : undefined;
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*/g)) {
+  for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
     const start = m.index ?? 0;
     if (start > last) parts.push(<WithMentions key={last} text={text.slice(last, start)} bots={bots} fileHref={fileHref} />);
     if (m[1]) parts.push(<code key={start}>{m[1]}</code>);
-    else parts.push(<strong key={start}>{m[2]}</strong>);
+    else if (m[2]) parts.push(<strong key={start}>{m[2]}</strong>);
+    else parts.push(<WebLink key={start} url={m[4]!}>{m[3]}</WebLink>);
     last = start + m[0].length;
   }
   if (last < text.length) parts.push(<WithMentions key={last} text={text.slice(last)} bots={bots} fileHref={fileHref} />);
