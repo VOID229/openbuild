@@ -1,6 +1,6 @@
 import { loadChatHistory } from "../lib/db";
 import { isHosted } from "../lib/runtime";
-import { AlarmClock, AlarmClockCheck, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
@@ -1086,20 +1086,19 @@ export function toggleBots() {
   });
 }
 
-/** The footer button for that switch. */
+/** The footer button for that switch: OpenBots' puff to go in, a back arrow to leave. */
 export function BotsToggle() {
   const open = useStore((s) => s.botsOpen);
   return (
     <button
       type="button"
-      className={cx("bots-toggle", open && "active")}
+      className="bots-toggle"
       aria-label={open ? "Back to threads" : "OpenBots"}
-      aria-pressed={open}
       data-tooltip={open ? "Back to threads" : "OpenBots"}
       data-tooltip-side="top"
       onClick={toggleBots}
     >
-      <BotsGlyph size={19} />
+      {open ? <ArrowLeft size={19} /> : <BotsGlyph size={19} />}
     </button>
   );
 }
