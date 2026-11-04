@@ -824,10 +824,10 @@ export function piRoutes(api: Api) {
     },
     // The side panel's pull requests tab.
     "/api/workspaces/pulls": {
-      GET: gitRead((cwd, q) => pullRequestView.list(cwd, q.get("state"))),
+      GET: gitRead((cwd, q) => pullRequestView.list(cwd, q.get("state"), q.has("fresh"))),
     },
     "/api/workspaces/pulls/view": {
-      GET: gitRead((cwd, q) => pullRequestView.view(cwd, q.get("number"))),
+      GET: gitRead((cwd, q) => pullRequestView.view(cwd, q.get("number"), q.has("fresh"))),
     },
     "/api/workspaces/pulls/patch": {
       GET: gitRead((cwd, q) => pullRequestView.patch(cwd, q.get("number"), q.get("sha"))),

@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../../shared/types";
 import { usePanel, folderKey } from "../lib/panel";
-import { commentOnPull, DELETE_KEY, editPull, listPulls, mergePull, mergeReadiness, METHOD_KEY, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
+import { commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
 import type { TerminalFolder } from "../lib/terminal";
 import { ago, copyText, cx } from "../lib/ui";
 import { FileSection, useDiffFiles, useDiffWrap } from "./DiffView";
@@ -61,7 +61,13 @@ export function PullRequestsView({ folder }: { folder: TerminalFolder }) {
 function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving: boolean }) {
   const [filter, setFilter] = useState<PullListState>("open");
   const { setActivePull } = usePanel.getState();
-  const { data, error, loading, reload } = usePullRead<PullList>(`${folderKey(folder)}|list|${filter}`, () => listPulls(folder, filter), LIST_REFRESH);
+  const { data, error, loading, reload } = usePullRead<PullList>(listKey(folder, filter), (fresh) => listPulls(folder, filter, fresh), LIST_REFRESH);
+  // With the list in, the other lists and the first few pull requests, so clicking is instant.
+  const listed = !!data;
+  useEffect(() => {
+    if (listed) void prefetchPulls(folder, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the folder by what it names, not its object
+  }, [listed, folder.deviceId, folder.cwd]);
 
   // Opened from the launcher or its key: straight to this branch's pull request, when it has one.
   useEffect(() => {
@@ -82,7 +88,7 @@ function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving
           ))}
         </div>
         {loading && <Spinner />}
-        <IconButton label="Refresh" className="fv-tool" onClick={() => void reload()}>
+        <IconButton label="Refresh" className="fv-tool" onClick={() => void reload(false, true)}>
           <RotateCcw size={13} />
         </IconButton>
       </div>
@@ -101,7 +107,7 @@ function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving
           <ul className="pv-list">
             {sorted.map((pr) => (
               <li key={pr.number}>
-                <button type="button" className="pv-row" onClick={() => setActivePull(pr.number)}>
+                <button type="button" className="pv-row" onPointerEnter={() => void prefetchPull(folder, pr.number)} onFocus={() => void prefetchPull(folder, pr.number)} onClick={() => setActivePull(pr.number)}>
                   <PullIcon pr={pr} />
                   <span className="pv-row-main">
                     <span className="pv-row-title">{pr.title}</span>
@@ -127,7 +133,13 @@ type Tab = "overview" | "commits" | "code";
 
 function PullView({ folder, number }: { folder: TerminalFolder; number: number }) {
   const { setActivePull } = usePanel.getState();
-  const { data: pr, error, loading, reload } = usePullRead<PullDetail>(`${folderKey(folder)}|pull|${number}`, () => viewPull(folder, number), PULL_REFRESH);
+  const { data: pr, error, loading, reload } = usePullRead<PullDetail>(pullKey(folder, number), (fresh) => viewPull(folder, number, fresh), PULL_REFRESH);
+  // The Code tab's diff, ready before it's asked for.
+  const head = pr?.headSha;
+  useEffect(() => {
+    if (head) void prefetchPatch(folder, number, head);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the folder by what it names, not its object
+  }, [folder.deviceId, folder.cwd, number, head]);
   const [tab, setTab] = useState<Tab>("overview");
   const [commit, setCommit] = useState<string>();
   const [editing, setEditing] = useState(false);
@@ -141,7 +153,7 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
     setFailure(undefined);
     try {
       await action();
-      await reload(true);
+      await reload(true, true);
       return true;
     } catch (err) {
       setFailure((err as Error).message);
@@ -515,7 +527,7 @@ function CommitList({ commits, onPick }: { commits: PullCommit[]; onPick(sha: st
 
 function CodeTab({ folder, pr, commit, clearCommit }: { folder: TerminalFolder; pr: PullDetail; commit?: PullCommit; clearCommit(): void }) {
   // The whole pull request's diff changes when its head does; a commit's never does.
-  const key = `${folderKey(folder)}|patch|${pr.number}|${commit ? commit.sha : pr.headSha}`;
+  const key = patchKey(folder, pr.number, commit ? commit.sha : pr.headSha);
   const { data, error, loading, reload } = usePullRead<PullPatch>(key, () => pullPatch(folder, pr.number, commit?.sha), 0);
   const { files, isOpen, toggle, allFolded, toggleAll, reset, adds, dels } = useDiffFiles(data?.patch);
   const [wrap, toggleWrap] = useDiffWrap();
@@ -548,7 +560,7 @@ function CodeTab({ folder, pr, commit, clearCommit }: { folder: TerminalFolder; 
         <IconButton label={wrap ? "Don't wrap lines" : "Wrap lines"} className={cx("fv-tool", wrap && "fv-tool-on")} aria-pressed={wrap} onClick={toggleWrap}>
           <WrapText size={14} />
         </IconButton>
-        <IconButton label="Refresh the diff" className="fv-tool" onClick={() => void reload()}>
+        <IconButton label="Refresh the diff" className="fv-tool" onClick={() => void reload(false, true)}>
           <RotateCcw size={13} />
         </IconButton>
       </div>

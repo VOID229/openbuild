@@ -62,6 +62,18 @@ const script = `
   assert.ok(calls()[0].startsWith("pr list --state merged"));
   assert.deepEqual(await view.list(process.env.TEST_ROOT, "open"), { gh: true, repo: false, pulls: [] });
 
+  // Lists are shared for a moment, across the repository's worktrees too, but not past a refresh.
+  assert.equal((await view.list(cwd, "open")).current, 7);
+  assert.deepEqual(calls().filter(Boolean), [], "a list just read is read once");
+  await view.list(cwd, "open", true);
+  assert.ok(calls()[0].startsWith("pr list --state open"), "fresh asks again");
+  const tree = process.env.TEST_ROOT + "/tree";
+  sh("worktree", "add", "-b", "other", tree);
+  const there = await view.list(tree, "open");
+  assert.equal(there.current, undefined, "another branch has no pull request of its own");
+  assert.equal(there.pulls.length, 2);
+  assert.deepEqual(calls().filter(Boolean), [], "a worktree shares its repository's list");
+
   // One pull request.
   const pr = await view.view(cwd, "7");
   assert.equal(pr.repo, "o/r");
@@ -74,6 +86,8 @@ const script = `
   assert.deepEqual(pr.comments.map((c) => [c.id, c.verdict]), [["c1", undefined], ["r2", "COMMENTED"]], "by time, without a review that says nothing");
   assert.equal(pr.commits[0].author, "Me");
   calls();
+  await view.view(cwd, 7);
+  assert.deepEqual(calls().filter(Boolean), [], "a pull request just read is read once");
 
   // Diffs.
   assert.equal((await view.patch(cwd, 7)).patch, "diff --git a/a b/a");
@@ -85,6 +99,8 @@ const script = `
   // Actions name the repository, and a merge pins the commit that was on screen.
   await view.merge(cwd, 7, "squash", "abc1234def", false);
   assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --squash --match-head-commit abc1234def"]);
+  await view.view(cwd, 7);
+  assert.ok(calls()[0].startsWith("pr view 7"), "acting on it forgets what was read");
   await view.merge(cwd, 7, "rebase", "abc1234def", true);
   assert.deepEqual(calls(), ["pr merge 7 --repo github.com/o/r --rebase --match-head-commit abc1234def --delete-branch"]);
   await assert.rejects(view.merge(cwd, 7, "--admin", "abc1234def", false), /merge method/);

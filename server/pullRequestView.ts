@@ -185,26 +185,61 @@ async function repoOf(cwd: string): Promise<GhRepo> {
   return repo;
 }
 
+// Reads are shared for a few seconds by everything looking at the same repository: every worktree
+// of a project asks about the same pull requests, and the panel asks again whenever it's shown.
+const READ_TTL = 15_000;
+const reads = new Map<string, { at: number; value: Promise<unknown> }>();
+
+/** `load`'s answer under `key`, reused for READ_TTL unless `fresh`; one ask at a time, and failures aren't kept. */
+function shared<T>(key: string, fresh: boolean, load: () => Promise<T>): Promise<T> {
+  const known = reads.get(key);
+  if (known && !fresh && Date.now() - known.at < READ_TTL) return known.value as Promise<T>;
+  const value = load();
+  const entry = { at: Date.now(), value };
+  reads.set(key, entry);
+  value.catch(() => reads.get(key) === entry && reads.delete(key));
+  return value;
+}
+
+/** Forget what was read about a repository, after acting on it. */
+const forget = (common: string) => {
+  for (const key of reads.keys()) if (key.startsWith(`${common}|`)) reads.delete(key);
+};
+
+/** The repository a folder belongs to (its worktrees share it), and the branch it's on ("" when detached). */
+async function whereIs(cwd: string): Promise<{ common: string; branch: string } | undefined> {
+  const r = await run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir", "--symbolic-full-name", "HEAD"], cwd, 10_000);
+  if (r.code !== 0) return undefined;
+  const [common = cwd, head = ""] = r.out.split("\n");
+  return { common, branch: head.startsWith("refs/heads/") ? head.slice("refs/heads/".length) : "" };
+}
+
+const repoKey = async (cwd: string) => (await whereIs(cwd))?.common ?? cwd;
+
 /** A repository's pull requests in one state, newest first, and which of them this folder's branch opened. */
-export async function list(cwd: string, state: unknown): Promise<PullList> {
-  const branch = await run(["git", "branch", "--show-current"], cwd, 10_000);
-  if (branch.code !== 0) return { gh: !!gh(), repo: false, pulls: [] };
+export async function list(cwd: string, state: unknown, fresh = false): Promise<PullList> {
+  const where = await whereIs(cwd);
+  if (!where) return { gh: !!gh(), repo: false, pulls: [] };
   const path = gh();
   if (!path) return { gh: false, repo: true, pulls: [] };
   const wanted: PullListState = state === "merged" || state === "closed" ? state : "open";
-  const r = await run([path, "pr", "list", "--state", wanted, "--limit", String(LIST_LIMIT), "--json", `${SUMMARY_FIELDS},isCrossRepository`], cwd, READ_TIMEOUT);
-  if (r.code !== 0) fail(r, "gh pr list failed");
-  const prs = parse<GhSummary[]>(r.out);
+  const prs = await shared(`${where.common}|list|${wanted}`, fresh, async () => {
+    const r = await run([path, "pr", "list", "--state", wanted, "--limit", String(LIST_LIMIT), "--json", `${SUMMARY_FIELDS},isCrossRepository`], cwd, READ_TIMEOUT);
+    if (r.code !== 0) fail(r, "gh pr list failed");
+    return parse<GhSummary[]>(r.out);
+  });
   // Someone's fork can have a branch of the same name.
-  const current = prs.find((pr) => pr.state === "OPEN" && !pr.isCrossRepository && pr.headRefName === branch.out)?.number;
+  const current = where.branch ? prs.find((pr) => pr.state === "OPEN" && !pr.isCrossRepository && pr.headRefName === where.branch)?.number : undefined;
   return { gh: true, repo: true, pulls: prs.map(toSummary), ...(current ? { current } : {}) };
 }
 
-export async function view(cwd: string, number: unknown): Promise<PullDetail> {
+export async function view(cwd: string, number: unknown, fresh = false): Promise<PullDetail> {
   const n = validNumber(number);
-  const [repo, r] = await Promise.all([repoOf(cwd), run([bin(), "pr", "view", String(n), "--json", DETAIL_FIELDS], cwd, READ_TIMEOUT)]);
-  if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
-  return toDetail(parse<GhDetail>(r.out), repo);
+  return shared(`${await repoKey(cwd)}|view|${n}`, fresh, async () => {
+    const [repo, r] = await Promise.all([repoOf(cwd), run([bin(), "pr", "view", String(n), "--json", DETAIL_FIELDS], cwd, READ_TIMEOUT)]);
+    if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
+    return toDetail(parse<GhDetail>(r.out), repo);
+  });
 }
 
 /** A pull request's whole diff, or one of its commits'. */
@@ -226,6 +261,7 @@ async function act(cwd: string, verb: string, number: unknown, args: string[] = 
   const n = validNumber(number);
   const repo = await repoOf(cwd);
   const r = await run([bin(), "pr", verb, String(n), "--repo", repoFlag(repo.url), ...args], cwd, ACTION_TIMEOUT);
+  forget(await repoKey(cwd));
   if (r.code !== 0) fail(r, `gh pr ${verb} failed`);
 }
 
