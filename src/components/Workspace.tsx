@@ -1,4 +1,5 @@
 import { ThreadAccountSelect } from "./RuntimeAccounts";
+import { PullRequestBadge } from "./PullRequestBadge";
 // Where a thread works. On the new-thread screen the heading picks the project ("What should we
 // build in <project>?"), and above the composer you choose the project's checkout or a new
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
@@ -594,6 +595,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
     };
   }, [workspace?.cwd, workspace?.deviceId, workspace?.branch, streaming]);
   const branch = info?.branch ?? workspace?.branch;
+  const pullRequest = useStore((s) => s.chats.find((c) => c.id === chatId)?.pullRequest);
   return (
     <div className="ws-bottom">
       {workspace && (
@@ -608,6 +610,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
               <span className="ws-pill-text">{branch}</span>
             </span>
           )}
+          {pullRequest && <PullRequestBadge pr={pullRequest} />}
           {!!info?.dirty && <span className="ws-dirty">{info.dirty} changed</span>}
           {!!info?.ahead && <span className="ws-dirty">↑{info.ahead}</span>}
         </span>

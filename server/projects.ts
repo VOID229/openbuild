@@ -216,8 +216,11 @@ export async function prepareWorkspace(projectId: string, mode: "local" | "workt
   return { ...base, cwd: dir, branch: newBranch, worktree: true, base: from };
 }
 
-/** Remove a worktree OpenBuild made (and its branch, if it was merged or `force`). */
-export async function removeWorktree(cwd: string, force = false): Promise<void> {
+/**
+ * Remove a worktree OpenBuild made, and its branch if git sees it merged or `forceBranch` (a squash
+ * merge leaves the branch's commits off the base, so only GitHub can say it merged).
+ */
+export async function removeWorktree(cwd: string, force = false, forceBranch = force): Promise<void> {
   const real = realpathSync(cwd);
   if (!real.startsWith(realpathSync(worktreesDir()) + sep)) throw new Error("Only worktrees OpenBuild made can be removed here");
   const top = await git(real, ["rev-parse", "--git-common-dir"]);
@@ -226,5 +229,5 @@ export async function removeWorktree(cwd: string, force = false): Promise<void> 
   if (!repo) throw new Error("This isn't a git worktree anymore");
   const r = await git(repo, ["worktree", "remove", ...(force ? ["--force"] : []), real]);
   if (r.code !== 0) throw new Error(r.err.includes("modified or untracked") ? "The worktree has uncommitted changes" : r.err || "Couldn't remove the worktree");
-  if (branch) await git(repo, ["branch", force ? "-D" : "-d", branch]);
+  if (branch) await git(repo, ["branch", forceBranch ? "-D" : "-d", branch]);
 }

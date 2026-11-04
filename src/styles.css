@@ -7652,6 +7652,35 @@ a.btn-primary {
   text-overflow: ellipsis;
 }
 
+/* A thread's pull request (PullRequestBadge.tsx): in its sidebar row and the thread's workspace bar */
+
+.pr-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+a.pr-badge:hover {
+  color: var(--text);
+}
+
+.pr-passing,
+.pr-merged {
+  color: var(--ok);
+}
+
+.pr-failing {
+  color: var(--danger);
+}
+
+.pr-pending {
+  color: var(--git-mod);
+}
+
 /* The project gives way first; the device keeps its name unless it's very long. */
 .history-device {
   flex-shrink: 0;

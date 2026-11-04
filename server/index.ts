@@ -1,4 +1,5 @@
 import { warmStartup } from "./startupWarmup";
+import { keepPullRequestFields, startPullRequestSweep } from "./pullRequests";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
@@ -517,7 +518,8 @@ function serve(port: number, hostname: string) {
           if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
           const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
           const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
-          const projected = projectChat(chat as unknown as Chat, snapshots, storage.getChat(chat.id) as Chat | undefined);
+          const stored = storage.getChat(chat.id) as Chat | undefined;
+          const projected = keepPullRequestFields(projectChat(chat as unknown as Chat, snapshots, stored), stored);
           const v = storage.putChat({ ...projected });
           return v ? Response.json({ ok: true, v, chat: projected }) : bad("Chat was deleted", 410);
         }),
@@ -609,6 +611,7 @@ hot.openbuildServers = servers;
 // Recover before any browser reconnects; attach also awaits this same recovery barrier.
 void durable.recover().catch((err) => console.error("[durable] Startup recovery failed:", err));
 void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
+startPullRequestSweep();
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");

@@ -19,7 +19,7 @@ async function git(cwd: string, args: string[], timeoutMs = 30_000): Promise<{ c
   return { code, out, err: err.trim() };
 }
 
-async function run(cmd: string[], cwd: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
+export async function run(cmd: string[], cwd: string, timeoutMs: number): Promise<{ code: number; out: string; err: string }> {
   try {
     const proc = Bun.spawn(cmd, { cwd, stdout: "pipe", stderr: "pipe", stdin: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GH_PROMPT_DISABLED: "1" } });
     const timer = setTimeout(() => proc.kill(), timeoutMs);
@@ -60,7 +60,7 @@ function parseStatus(raw: string): GitChange[] {
 
 /** Whether a tool for opening pull requests (GitHub's `gh`) is on this machine. */
 let ghPath: string | null | undefined;
-const gh = () => (ghPath === undefined ? (ghPath = Bun.which("gh")) : ghPath);
+export const gh = () => (ghPath === undefined ? (ghPath = Bun.which("gh")) : ghPath);
 
 /** The checkout's branch, what has changed in it, and where it stands against its upstream. */
 export async function changes(cwd: string): Promise<GitChanges> {

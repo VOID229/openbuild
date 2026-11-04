@@ -335,6 +335,19 @@ export interface Workspace {
   base?: string;
 }
 
+/** The pull request opened from a thread's worktree branch, as GitHub last reported it (server/pullRequests.ts). */
+export interface ThreadPullRequest {
+  number: number;
+  url: string;
+  state: "open" | "merged" | "closed";
+  draft?: boolean;
+  /** Its checks, when it has any. */
+  checks?: "pending" | "passing" | "failing";
+  mergedAt?: number;
+  /** When the server last asked GitHub (ms). */
+  checkedAt: number;
+}
+
 /** A project: a directory (usually a git repository) threads can work in. */
 export interface Project {
   id: string;
