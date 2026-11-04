@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, PanelLeft, PanelRight, SmilePlus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, PanelLeft, SmilePlus, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
@@ -1222,11 +1222,6 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           <ConversationAvatar conversation={conversation} size={26} mood={typing ? "thinking" : undefined} badge={false} />
           <span className="bots-head-name">{name}</span>
         </button>
-        {!detailsOpen && (
-          <IconButton label="Details" tooltipSide="left" className="bots-head-tools" onClick={() => useBots.getState().setDetailsOpen(true)}>
-            <PanelRight size={18} />
-          </IconButton>
-        )}
       </div>
       {empty ? <Hello conversation={conversation} /> : <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />}
       {conversation.kind === "side" ? (
