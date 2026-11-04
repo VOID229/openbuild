@@ -302,7 +302,7 @@ function Overview({ folder, pr, editing, setEditing, act, busy }: { folder: Term
                 </IconButton>
               )}
             </div>
-            {pr.body.trim() ? <Markdown content={pr.body} className="pv-md" /> : <p className="pv-none">No description.</p>}
+            {pr.body.trim() ? <Markdown content={pr.body.replace(/🤖\uFE0F?[ \t]*/gu, "")} className="pv-md" /> : <p className="pv-none">No description.</p>}
           </section>
         )}
         <Checks checks={pr.checkList} />
@@ -328,7 +328,7 @@ function EditForm({ folder, pr, act, busy, onDone }: { folder: TerminalFolder; p
         <button type="button" className={cx("pv-filter", preview && "pv-filter-on")} onClick={() => setPreview(true)}>Preview</button>
       </div>
       {preview ? (
-        <div className="pv-preview">{body.trim() ? <Markdown content={body} className="pv-md" /> : <p className="pv-none">Nothing to preview.</p>}</div>
+        <div className="pv-preview">{body.trim() ? <Markdown content={body.replace(/🤖\uFE0F?[ \t]*/gu, "")} className="pv-md" /> : <p className="pv-none">Nothing to preview.</p>}</div>
       ) : (
         <textarea className="pv-input pv-textarea" aria-label="Description" rows={10} value={body} autoFocus onChange={(e) => setBody(e.target.value)} onKeyDown={submitOnModEnter(save)} />
       )}
