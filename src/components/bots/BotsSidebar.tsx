@@ -35,9 +35,11 @@ interface PeekState {
   id: string;
   side: Side;
   rect: DOMRect;
+  /** A tile's card fills the other column of the tile grid, at this left edge, so it stays inside the sidebar. */
+  column?: number;
 }
 
-type Peek = (id: string, side: Side) => {
+type Peek = (id: string, where: Side | "column") => {
   onPointerEnter: (e: React.PointerEvent<HTMLElement>) => void;
   onPointerLeave: () => void;
   onPointerDown: () => void;
@@ -46,6 +48,15 @@ type Peek = (id: string, side: Side) => {
 };
 
 const PEEK_DELAY = 450;
+const PEEK_MARGIN = 8;
+
+function peekAt(id: string, where: Side | "column", el: HTMLElement): PeekState {
+  const rect = el.getBoundingClientRect();
+  if (where !== "column") return { id, side: where, rect };
+  const grid = el.parentElement!.getBoundingClientRect();
+  const leftTile = rect.left - grid.left < grid.right - rect.right;
+  return { id, side: leftTile ? "right" : "left", rect, column: leftTile ? grid.right - rect.width : grid.left };
+}
 
 /** A hover card for tiles and rail avatars, whose names get cut short: the full name and the latest message. */
 function usePeek() {
@@ -66,17 +77,17 @@ function usePeek() {
   }, [peek, hide]);
   useEffect(() => () => clearTimeout(timer.current), []);
   const bind = useCallback<Peek>(
-    (id, side) => ({
+    (id, where) => ({
       onPointerEnter: (e) => {
         if (e.pointerType === "touch") return;
         const el = e.currentTarget;
         clearTimeout(timer.current);
-        timer.current = setTimeout(() => el.isConnected && setPeek({ id, side, rect: el.getBoundingClientRect() }), PEEK_DELAY);
+        timer.current = setTimeout(() => el.isConnected && setPeek(peekAt(id, where, el)), PEEK_DELAY);
       },
       onPointerLeave: hide,
       onPointerDown: hide,
       onFocus: (e) => {
-        if (e.currentTarget.matches(":focus-visible")) setPeek({ id, side, rect: e.currentTarget.getBoundingClientRect() });
+        if (e.currentTarget.matches(":focus-visible")) setPeek(peekAt(id, where, e.currentTarget));
       },
       onBlur: hide,
     }),
@@ -93,14 +104,23 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
   useLayoutEffect(() => {
     if (!peek || !ref.current) return setPos(undefined);
-    setPos(place(peek, ref.current.offsetWidth, ref.current.offsetHeight));
+    const { offsetWidth: w, offsetHeight: h } = ref.current;
+    setPos(peek.column === undefined ? place(peek, w, h) : { left: peek.column, top: Math.max(PEEK_MARGIN, Math.min(peek.rect.top, window.innerHeight - h - PEEK_MARGIN)), side: peek.side });
   }, [peek]);
   if (!peek || !conversation) return null;
   const [title, tag] = conversationName(conversation, bots).split(" · ");
+  const column = peek.column !== undefined;
   return createPortal(
-    <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
+    <div
+      ref={ref}
+      role="tooltip"
+      className={cx("bots-peek", column && "bots-peek-column")}
+      data-side={pos?.side ?? peek.side}
+      data-state={pos ? "open" : "measuring"}
+      style={{ left: pos?.left ?? 0, top: pos?.top ?? 0, ...(column && { width: peek.rect.width, minHeight: peek.rect.height }) }}
+    >
       <span className="bots-peek-head">
-        <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />
+        {!column && <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />}
         <span className="bots-peek-name">
           {title}
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
@@ -193,7 +213,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu, peek }: { conver
       type="button"
       className={cx("bots-tile", active && "bots-tile-active")}
       aria-current={active ? "page" : undefined}
-      {...peek(conversation.id, "bottom")}
+      {...peek(conversation.id, "column")}
       onClick={() => select(conversation.id)}
       onContextMenu={(e) => {
         e.preventDefault();
