@@ -268,9 +268,9 @@ function startFollowing(botId: string, threadId: string, runId: string) {
 // ------------------------------------------------------------------ actions
 
 /** Shows in the bot's conversation, so the user can see what it did with their threads. */
-function record(botId: string, text: string, detail: string) {
+function record(botId: string, text: string, detail: string, threadId?: string) {
   const conversationId = getFocus(botId) ?? svc.directId(botId);
-  if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200) } });
+  if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}) } });
 }
 
 function usableHarness(value: unknown): ThreadRuntime {
@@ -388,7 +388,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   const title = clip((typeof p.title === "string" && p.title.trim()) || prompt.split("\n")[0]!, 80);
   const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(permission ? { permission } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
   await startTurn(botId, chat, prompt, { id: model.id, name: model.name, effort, speed });
-  record(botId, "Started a thread", `${title} · ${runtime}`);
+  record(botId, "Started a thread", `${title} · ${runtime}`, chat.id);
   return {
     thread: short(chat.id),
     title,
@@ -419,13 +419,13 @@ async function send(botId: string, p: Record<string, unknown>) {
     });
     if (!handled) throw refuse("It's still working and couldn't take that now. You'll be told when it finishes; send it then.", 409);
     if (!watches().some((w) => w.runId === running[0]!.id)) startFollowing(botId, chat.id, running[0]!.id);
-    record(botId, "Wrote to a thread", chat.title);
+    record(botId, "Wrote to a thread", chat.title, chat.id);
     return { sent: true, note: `${bot}'s message went into its current turn.` };
   }
   const last = chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
   if (!last || !chat.workspace) throw refuse("That thread has nothing to continue from.");
   await startTurn(botId, chat, text, { id: last.id, name: last.name ?? last.id, effort: last.effort ?? "medium", speed: last.speed });
-  record(botId, "Wrote to a thread", chat.title);
+  record(botId, "Wrote to a thread", chat.title, chat.id);
   return { sent: true, next: "You'll be told when it asks something or finishes." };
 }
 
@@ -442,7 +442,7 @@ async function answer(botId: string, p: Record<string, unknown>) {
   const reply = replyFor(ask, p.answer);
   if (!(await remote.answer(chat.id, ask.id, reply))) throw refuse("That question isn't waiting anymore. The user may have answered it.", 410);
   const given = reply.value ?? (reply.confirmed ? "Yes" : "No");
-  record(botId, ask.question ? "Answered a thread's question" : "Answered a permission prompt", `${ask.title} → ${given}`);
+  record(botId, ask.question ? "Answered a thread's question" : "Answered a permission prompt", `${ask.title} → ${given}`, chat.id);
   return { ok: true };
 }
 
@@ -490,7 +490,7 @@ async function stop(botId: string, p: Record<string, unknown>) {
     requestRunStop(run.id);
     await remote.stopRun(run.id);
   }
-  if (running.length) record(botId, "Stopped a thread", chat.title);
+  if (running.length) record(botId, "Stopped a thread", chat.title, chat.id);
   return { stopped: running.length > 0 };
 }
 
