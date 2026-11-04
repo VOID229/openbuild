@@ -1699,16 +1699,14 @@ svg {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  margin: 8px 8px 8px 0;
-  border-radius: 16px;
+  /* Edge to edge: the pane meets the window on every side, with a hairline against the sidebar. */
   background: var(--surface);
-  border: 1px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  transition: margin var(--med) var(--ease), background-color var(--med) var(--ease);
+  border-left: 1px solid var(--border);
+  transition: border-color var(--med) var(--ease), background-color var(--med) var(--ease);
 }
 
 .main-full {
-  margin-left: 8px;
+  border-left-color: transparent;
 }
 
 .floating-tools {
@@ -7972,12 +7970,10 @@ a.btn-primary {
   display: flex;
   flex-direction: column;
   min-height: 120px;
-  margin: 0 8px 8px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  /* Flush with the window's edges, like the pane it sits in. */
+  border-top: 1px solid var(--border);
   /* One surface, bar and screen alike: no card inside the card. */
   background: var(--terminal-bg);
-  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
@@ -8022,7 +8018,7 @@ a.btn-primary {
   align-items: center;
   gap: 6px;
   height: 36px;
-  padding: 2px 6px 0 6px;
+  padding: 2px 8px 0 10px;
   font-size: 12.5px;
   user-select: none;
   -webkit-user-select: none;
@@ -8218,6 +8214,14 @@ a.btn-primary {
   backdrop-filter: blur(8px);
 }
 
+/* Over a panel's header the frosted backing has nothing to blur, and it would cover the header's
+   bottom border; the bare buttons sit in the header instead. */
+.thread-tools-over {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 .thread-tool { color: var(--text-3); }
 .thread-tool-on { color: var(--text); background: var(--active); }
 
@@ -8378,10 +8382,6 @@ a.btn-primary {
   opacity: 1;
   pointer-events: auto;
 }
-
-/* The window's own rounded corner, on whichever is at its right edge. */
-.file-tree-open,
-.side-panel-open:not(:has(+ .file-tree-open)) { border-radius: 0 15px 15px 0; }
 
 .side-panel-expanded { flex: 1; border-left-color: transparent; }
 
@@ -9044,7 +9044,6 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: 8px; }
     width: auto !important;
     min-width: 0 !important;
     border-left: 0;
-    border-radius: 16px;
     background: var(--surface);
   }
 

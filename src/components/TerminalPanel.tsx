@@ -22,7 +22,7 @@ import { tabLabel, TerminalView, useTabKeys } from "./TerminalView";
 function useDrag(setHeight: (height: number) => void) {
   return (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
-    trackDrag(e, "terminal-dragging", (ev) => setHeight(window.innerHeight - ev.clientY - 8));
+    trackDrag(e, "terminal-dragging", (ev) => setHeight(window.innerHeight - ev.clientY));
   };
 }
 
@@ -64,7 +64,7 @@ export function TerminalPanel() {
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
   const where = folder.deviceId ? (deviceName(folder.deviceId) ?? "paired device") : (machineName() ?? "this device");
   return (
-    <div className={cx("terminal-drawer", ready && open && "terminal-drawer-open")} style={{ height: ready && open ? height + 8 : 0 }} inert={!open}>
+    <div className={cx("terminal-drawer", ready && open && "terminal-drawer-open")} style={{ height: ready && open ? height : 0 }} inert={!open}>
       <section className="terminal-panel" style={{ height }} aria-label="Terminal" aria-hidden={!open}>
         <div className="terminal-grip" onPointerDown={drag} onDoubleClick={() => setHeight(defaultHeight())} role="separator" aria-orientation="horizontal" aria-label="Resize the terminal" />
         <header className="terminal-bar">
