@@ -128,20 +128,28 @@ export async function writeCommitMessage(ws: Workspace, chat: Chat | undefined, 
   return message;
 }
 
+/** Each checkout's last read changes, so coming back to a thread shows its Commit button at once. */
+const lastChanges = new Map<string, GitChanges>();
+
 /**
  * The checkout's changes, kept fresh: read when the thread opens, after each reply, when the page
  * comes back into view, every few seconds while it's in view, and whenever `tick` changes.
  */
 export function useGitChanges(ws: Workspace | undefined, streaming: boolean, tick: number) {
-  const [changes, setChanges] = useState<GitChanges>();
   const key = ws ? `${ws.deviceId ?? ""}:${ws.cwd}` : "";
-  useEffect(() => setChanges(undefined), [key]);
+  const [state, setState] = useState<{ key: string; changes?: GitChanges }>(() => ({ key, changes: lastChanges.get(key) }));
   useEffect(() => {
     if (!ws) return;
     let live = true;
     const load = () => {
       if (document.visibilityState !== "visible") return;
-      gitChanges(ws).then((c) => live && setChanges(c), () => {});
+      gitChanges(ws).then(
+        (c) => {
+          lastChanges.set(key, c);
+          if (live) setState({ key, changes: c });
+        },
+        () => {},
+      );
     };
     load();
     // While a reply is coming in, files change under it: a slower poll, and one more when it ends.
@@ -153,5 +161,6 @@ export function useGitChanges(ws: Workspace | undefined, streaming: boolean, tic
       document.removeEventListener("visibilitychange", load);
     };
   }, [key, streaming, tick]);
-  return changes;
+  // Switching threads, the checkout's last known changes stand in until the new read lands.
+  return state.key === key ? state.changes : lastChanges.get(key);
 }
