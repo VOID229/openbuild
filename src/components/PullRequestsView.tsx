@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../../shared/types";
 import { usePanel, folderKey } from "../lib/panel";
-import { commentOnPull, editPull, listPulls, mergePull, mergeReadiness, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
+import { commentOnPull, DELETE_KEY, editPull, listPulls, mergePull, mergeReadiness, METHOD_KEY, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
 import type { TerminalFolder } from "../lib/terminal";
 import { ago, copyText, cx } from "../lib/ui";
 import { FileSection, useDiffFiles, useDiffWrap } from "./DiffView";
@@ -16,8 +16,6 @@ import { pullRequestTone } from "./PullRequestBadge";
 
 const LIST_REFRESH = 30_000;
 const PULL_REFRESH = 20_000;
-const METHOD_KEY = "openbuild:pr-merge-method";
-const DELETE_KEY = "openbuild:pr-delete-branch";
 
 const METHODS: Record<PullMergeMethod, { label: string; hint: string }> = {
   squash: { label: "Squash and merge", hint: "One commit on the base branch" },
