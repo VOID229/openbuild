@@ -1,4 +1,4 @@
-// The top right of the window: the thread's pull request and the Commit button (in a thread whose folder is a git repository),
+// The top right of the window: the Commit button (in a thread whose folder is a git repository),
 // and the switches for the side panel (browser, terminals, diff and files, beside the thread) and the file tree.
 import { FolderTree, Maximize2, Minimize2, PanelRight } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
@@ -6,7 +6,6 @@ import { usePanel } from "../lib/panel";
 import type { Chat } from "../lib/types";
 import { cx, useMediaQuery } from "../lib/ui";
 import { GitMenu } from "./GitMenu";
-import { PullRequestBadge } from "./PullRequestBadge";
 import { IconButton } from "./primitives";
 
 export function ThreadTools({ chat, onWidth }: { chat?: Chat; onWidth: (width: number) => void }) {
@@ -35,8 +34,6 @@ export function ThreadTools({ chat, onWidth }: { chat?: Chat; onWidth: (width: n
         </IconButton>
       )}
       {/* Right of the panel's expand button, in with the file tree and panel switches. */}
-      {/* The thread's pull request, linking to it on GitHub. */}
-      {chat?.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={15} link />}
       {chat && <GitMenu chat={chat} streaming={streaming} />}
       {hasFiles && (
         <IconButton

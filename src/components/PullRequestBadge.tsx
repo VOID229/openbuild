@@ -22,41 +22,26 @@ export function pullRequestTone(pr: ThreadPullRequest): "pending" | "ready" | "m
 }
 
 /**
- * A thread's pull request (server/pullRequests.ts): its number, with the icon coloured by its state,
- * opening it on GitHub. `link` makes it a real link; `inRow` sits inside a sidebar row, which is
- * already a button, so it opens the pull request on click instead of being a link of its own.
+ * A thread's pull request (server/pullRequests.ts) in its sidebar row: its number, with the icon
+ * coloured by its state. The row is already a button, so the badge opens the pull request on click
+ * rather than being a link of its own.
  */
-export function PullRequestBadge({ pr, size = 13, link, inRow }: { pr: ThreadPullRequest; size?: number; link?: boolean; inRow?: boolean }) {
-  const className = `pr-badge pr-${pullRequestTone(pr)}`;
-  const title = `Pull request ${pullRequestLabel(pr)} · open on GitHub`;
-  const content = (
-    <>
+export function PullRequestBadge({ pr, size = 12 }: { pr: ThreadPullRequest; size?: number }) {
+  return (
+    <span
+      role="link"
+      className={`pr-badge pr-${pullRequestTone(pr)} history-pr`}
+      title={`Pull request ${pullRequestLabel(pr)} · open on GitHub`}
+      // Opening the pull request mustn't also open (or start dragging) the thread.
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.open(pr.url, "_blank", "noopener,noreferrer");
+      }}
+    >
       <GitPullRequest size={size} className="pr-icon" />
       <span>#{pr.number}</span>
-    </>
-  );
-  if (inRow) {
-    return (
-      <span
-        role="link"
-        className={`${className} history-pr`}
-        title={title}
-        // Opening the pull request mustn't also open (or start dragging) the thread.
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          window.open(pr.url, "_blank", "noopener,noreferrer");
-        }}
-      >
-        {content}
-      </span>
-    );
-  }
-  if (!link) return <span className={className} title={title}>{content}</span>;
-  return (
-    <a className={`${className} thread-pr`} href={pr.url} target="_blank" rel="noreferrer" data-tooltip={title}>
-      {content}
-    </a>
+    </span>
   );
 }
