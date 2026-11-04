@@ -50,7 +50,7 @@ export function LookPicker({ look, onChange }: { look: BotLook; onChange: (look:
 }
 
 /** A native modal dialog that opens as it mounts and asks to close on Escape. */
-function useModal(onClose: () => void) {
+export function useModal(onClose: () => void) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     ref.current?.showModal();
@@ -72,7 +72,7 @@ function useModal(onClose: () => void) {
   };
 }
 
-function DialogHead({ title, onClose }: { title: string; onClose: () => void }) {
+export function DialogHead({ title, onClose }: { title: string; onClose: () => void }) {
   return (
     <div className="bots-dialog-head">
       <h2>{title}</h2>

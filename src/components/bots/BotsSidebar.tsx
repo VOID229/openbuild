@@ -1,7 +1,7 @@
 // OpenBots' sidebar: pinned bots and groups as big tiles, then every other conversation as a row
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
 // a rail of avatars instead of going away.
-import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Trash, UsersRound, X } from "lucide-react";
+import { Bell, BellDot, Blocks, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationName, useBots } from "../../lib/bots/store";
@@ -11,6 +11,7 @@ import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
+import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime } from "./common";
@@ -20,7 +21,8 @@ type Dialog =
   | { kind: "group"; preset?: string[] }
   | { kind: "rename"; id: string }
   | { kind: "section"; id: string }
-  | { kind: "delete"; id: string };
+  | { kind: "delete"; id: string }
+  | { kind: "apps"; app?: string };
 
 interface MenuState {
   id: string;
@@ -368,6 +370,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   if (!dialog) return null;
   if (dialog.kind === "bot") return <CreateBotDialog onClose={onClose} />;
   if (dialog.kind === "group") return <CreateGroupDialog preset={dialog.preset} onClose={onClose} />;
+  if (dialog.kind === "apps") return <AppsDialog initial={dialog.app} onClose={onClose} />;
   if (!conversation) return null;
   const st = useBots.getState();
   const name = conversationName(conversation, bots);
@@ -446,6 +449,9 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       </div>
       <div className="bots-rail-foot">
         <NewMenu onDialog={onDialog} rail />
+        <IconButton label="Apps" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
+          <Blocks size={18} />
+        </IconButton>
         <BotsToggle />
         <button type="button" className="bots-rail-me" aria-label="Settings" data-tooltip="Settings" data-tooltip-side="right" onClick={() => useStore.getState().openSettings()}>
           <Avatar src={avatar} name={name} size={30} />
@@ -526,6 +532,9 @@ export function BotsSidebar() {
                 }}
               >
                 <Search size={18} />
+              </IconButton>
+              <IconButton label="Apps" onClick={() => setDialog({ kind: "apps" })}>
+                <Blocks size={18} />
               </IconButton>
               <NewMenu onDialog={setDialog} />
             </div>

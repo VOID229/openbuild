@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { uid } from "../id";
+import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
@@ -554,6 +555,10 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
   }
   if (e.t === "pulse") {
     if (!authoritativeOnly) get().pulse(e.botId, e.mood as Mood | undefined);
+    return;
+  }
+  if (e.t === "apps") {
+    if (!authoritativeOnly) void useApps.getState().load().catch(() => {});
     return;
   }
   if (e.t === "settings") {

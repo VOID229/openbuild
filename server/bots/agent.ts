@@ -8,6 +8,7 @@ import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../sha
 import { computerApi } from "../computers/api";
 import { capabilities } from "../computers/index";
 import { providerGuide, searchToolkit, toolName } from "../search";
+import * as apps from "./apps";
 import * as vault from "../vault";
 import { botsDir } from "./db";
 import * as db from "./db";
@@ -78,7 +79,7 @@ export function listen() {
 async function handle(botId: string, method: string, p: Record<string, unknown>): Promise<unknown> {
   switch (method) {
     case "context":
-      return `${contextFor(botId)}\n\n${await webSearchNote()}`;
+      return `${contextFor(botId)}\n\n${await webSearchNote()}\n\n${apps.contextNote()}`;
     case "send_message":
       return sendMessage(botId, p);
     case "react":
@@ -97,6 +98,10 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return search(botId, p);
     case "bot_web_search":
       return webSearch(botId, p);
+    case "apps":
+      return p.action === "connect" ? offerApp(botId, p) : apps.appsTool(p);
+    case "use_app":
+      return apps.useApp(p);
     case "routine":
       return routine(botId, p);
     case "ask_bot":
@@ -274,6 +279,18 @@ function askUser(botId: string, p: Record<string, unknown>) {
   };
   svc.postMessage(conversationId, message);
   return { id: message.id, note: "The user answers in the chat. Don't invent their answer; stop here and wait." };
+}
+
+/** A card in the chat for the user to connect an app with. Connecting is theirs to do. */
+function offerApp(botId: string, p: Record<string, unknown>) {
+  const key = String(p.app ?? "").trim().toLowerCase();
+  const app = apps.catalogApp(key);
+  if (!app) throw new svc.BotsError(key ? `There's no app called ${key}. Your context lists them.` : "Say which app.");
+  if (apps.storedApps()[app.id]?.status === "connected") return { note: `${app.name} is already connected. Use it with use_app.` };
+  const conversationId = conversationFor(botId, p.conversation);
+  const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: `Connect ${app.name}`, connect: { app: app.id } };
+  svc.postMessage(conversationId, message);
+  return { id: message.id, note: `The user sees a card to connect ${app.name}. You'll be able to use it once they have; you can tell from your context.` };
 }
 
 export function startPoll(botId: string, p: Record<string, unknown>) {

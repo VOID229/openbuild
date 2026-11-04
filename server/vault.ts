@@ -134,6 +134,29 @@ export function setKeys(scope: KeyScope, edits: KeyEdit[]): Promise<string[]> {
   });
 }
 
+/**
+ * A JSON value under a name of its own rather than a key scope (an OpenBots app's sign-in). It is
+ * never listed, synced or sent to the browser.
+ */
+export async function getJson<T>(name: string): Promise<T | undefined> {
+  const [entry] = await load(name);
+  if (!entry) return undefined;
+  try {
+    return JSON.parse(entry.secret) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Change a named JSON value. Returning undefined deletes it. */
+export function updateJson<T>(name: string, change: (current: T | undefined) => T | undefined): Promise<T | undefined> {
+  return serial(async () => {
+    const next = change(await getJson<T>(name));
+    await store(name, next === undefined ? [] : [{ id: "json", secret: JSON.stringify(next) }]);
+    return next;
+  });
+}
+
 /** Every stored secret, per scope in priority order. Only for account key sync, which the user turns on. */
 export async function allSecrets(): Promise<Record<KeyScope, string[]>> {
   const out: Record<KeyScope, string[]> = {};

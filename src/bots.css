@@ -2995,3 +2995,318 @@ button.bots-details-name:hover {
     color: var(--text);
   }
 }
+
+/* Connect Apps: the catalog, an app's own page, and the card a bot posts to offer one. */
+.apps-dialog {
+  width: min(760px, calc(100vw - 24px));
+}
+
+.apps-body {
+  gap: 16px;
+}
+
+.apps-tools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.apps-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.apps-connected {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.apps-connected:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.apps-connected .app-logo + .app-logo {
+  margin-left: -8px;
+}
+
+.apps-connected span:not(.app-logo) {
+  margin-left: 4px;
+}
+
+.apps-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.apps-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 13px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-size: 13.5px;
+  transition: background-color var(--fast) var(--ease);
+}
+
+.apps-chip-on {
+  border-color: transparent;
+  background: var(--text);
+  color: var(--surface);
+}
+
+@media (hover: hover) {
+  .apps-chip:hover:not(.apps-chip-on) {
+    background: var(--hover);
+  }
+}
+
+.apps-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apps-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.apps-section-head h3 {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 500;
+}
+
+.apps-view-all,
+.apps-link {
+  color: var(--text-2);
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.apps-view-all {
+  text-decoration: none;
+}
+
+.apps-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 24px;
+}
+
+.app-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.app-row-main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px;
+  border-radius: 12px;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .app-row-main:hover {
+    background: var(--hover);
+  }
+}
+
+.app-row-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.app-row-name {
+  overflow: hidden;
+  font-size: 14.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-row-status {
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-row-status-on {
+  color: var(--text);
+}
+
+/* Logos are made for a light background, whichever theme the app is in. */
+.app-logo {
+  display: grid;
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 24%;
+  background: #fff;
+}
+
+.app-logo img {
+  width: 76%;
+  height: 76%;
+  object-fit: contain;
+}
+
+.app-logo-letter {
+  color: #222;
+  font-weight: 600;
+}
+
+.apps-back {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.app-page-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.app-page-title h3 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.app-page-title p,
+.app-page-desc {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+
+.app-page-title a,
+.app-guide a,
+.app-page .field-help a {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.app-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.app-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13.5px;
+}
+
+.app-copy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  border-radius: 10px;
+  background: var(--hover);
+}
+
+.app-copy code {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 12.5px;
+}
+
+.app-page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-details summary {
+  cursor: pointer;
+  font-size: 13.5px;
+}
+
+.app-details ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-details li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12.5px;
+}
+
+.app-details li span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.bm-connect {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.bm-connect-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.bm-connect-done {
+  flex: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .apps-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .apps-tools {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

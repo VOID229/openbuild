@@ -153,6 +153,46 @@ export default function openbots(pi: any) {
     ),
   );
 
+  pi.registerTool(
+    tool(
+      "apps",
+      "Apps",
+      "The user's connected apps (GitHub, Notion, Gmail…) and the skills that came with them. action is tools (app; names or query to narrow it: each tool's description and parameters), skill (app, skill; file for one of its other files: read a skill), connect (app: show the user a card to connect an app that isn't connected), or list.",
+      {
+        type: "object",
+        properties: {
+          action: str("tools, skill, connect or list."),
+          app: str("The app's id, e.g. github."),
+          names: { type: "array", items: { type: "string" }, description: "For tools: just these tools." },
+          query: str("For tools: words to look for in their names and descriptions."),
+          skill: str("For skill: its name."),
+          file: str("For skill: another file in it, as the skill names it."),
+          conversation: str("For connect: short conversation id."),
+        },
+        required: ["action"],
+      },
+      (p) => call("apps", p),
+    ),
+  );
+
+  pi.registerTool({
+    name: "use_app",
+    label: "Use app",
+    description: "Call a tool of one of the user's connected apps. Look up its parameters with apps (action tools) first. It acts as the user in that service.",
+    parameters: { type: "object", properties: { app: str("The app's id, e.g. github."), tool: str("The tool's name."), arguments: { type: "object", description: "The tool's arguments." } }, required: ["app", "tool"] },
+    executionMode: "sequential" as const,
+    exposure: "model-only" as const,
+    async execute(_id: string, params: Params) {
+      try {
+        const out = (await call("use_app", params ?? {})) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
+        const images = (out.images ?? []).map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
+        return { content: [...(out.text || !images.length ? text(out.text || "(no output)") : []), ...images], details: { app: params?.app, tool: params?.tool }, ...(out.isError ? { isError: true } : {}) };
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  });
+
   pi.registerTool(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p) => call("routine", p)));
 
   pi.registerTool(tool("ask_bot", "Ask bot", "Ask another bot and wait for their reply. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p) => call("ask_bot", p)));
