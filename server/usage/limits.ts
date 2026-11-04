@@ -542,7 +542,7 @@ export async function limits(force = false): Promise<UsageLimits[]> {
   const now = Date.now();
   const all = await Promise.all(PROVIDERS.map(([provider, list]) => {
     const hit = cache.get(provider);
-    if (hit && now - hit.at < (force ? MIN_REFRESH_MS : TTL_MS)) return !force && hit.snapshot ? hit.snapshot : hit.value;
+    if (hit && now - hit.at < (force ? MIN_REFRESH_MS : TTL_MS)) return hit.value;
     const slot: { at: number; value: Promise<UsageLimits[]>; snapshot?: UsageLimits[] } = {
       at: now, value: Promise.resolve([]), snapshot: hit?.snapshot,
     };
@@ -559,10 +559,6 @@ export async function limits(force = false): Promise<UsageLimits[]> {
       return slot.snapshot;
     });
     cache.set(provider, slot);
-    if (!force && hit?.snapshot) {
-      void slot.value.catch(err => console.warn("[limits] Background refresh failed:", (err as Error).message));
-      return hit.snapshot;
-    }
     return slot.value;
   }));
   return all.flat();
