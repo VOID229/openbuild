@@ -5,6 +5,8 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Publishes main's newest commit as a nightly. It was checked in its pull request (checks.yml),
+# so nothing is re-run here.
 permissions:
   contents: read
 
@@ -13,23 +15,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  checks:
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.3.8
-      - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun run test
-
   publish:
-    needs: checks
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -39,7 +26,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Publish the checked commit
+      - name: Publish the commit
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

@@ -9,6 +9,7 @@ import { runtimeName } from "../lib/runtimes";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
+import { PullRequestBadge } from "./PullRequestBadge";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
@@ -57,7 +58,10 @@ const isClosed = (chat: Chat, today = startOfToday()) =>
 
 /** Closing a thread files it under "Closed" (and unpins it); reopening one puts it back in "Done". */
 const closePatch = (chat: Chat, today?: number) =>
-  isClosed(chat, today) ? { archived: false, done: true } : { archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false };
+  isClosed(chat, today)
+    // Reopening a thread its merge closed keeps it open: the merge won't close it again.
+    ? { archived: false, done: true, ...(chat.autoClosedAt ? { autoClosedAt: undefined, autoCloseOptOut: true } : {}) }
+    : { archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false };
 
 /** Snoozing hides a thread under "Snoozed"; waking it by hand puts it back where it was. */
 const snoozePatch = (until: number) => ({ snoozedUntil: until, woke: false });
@@ -433,6 +437,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               {chat.workspace.projectName}
             </span>
           )}
+          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} size={12} />}
           {device && (
             <span className="history-device" title={`Runs on ${device}`}>
               @ {device}

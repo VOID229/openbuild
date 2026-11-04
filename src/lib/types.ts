@@ -1,5 +1,5 @@
 import type { ReplyStream } from "../../shared/replies";
-import type { Attachment, Effort, ModelInfo, ModelScope, PlanId, SearchProviderId, SearchResultLink, ShellStatus, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
+import type { Attachment, Effort, ModelInfo, ModelScope, PlanId, SearchProviderId, SearchResultLink, ShellStatus, ThreadPullRequest, ThreadRuntime, ToolId, Usage, Workspace } from "../../shared/types";
 
 export type Theme = "light" | "dark" | "system";
 export type FontStyle = "normal" | "fun" | "serif" | "mono";
@@ -127,6 +127,8 @@ export interface NewWorkspace {
   mode: "local" | "worktree";
   /** Default workspace mode for new threads; last-used preserves the mode picker selection. */
   defaultMode?: "local" | "worktree" | "last-used";
+  /** Close a worktree thread (and remove its clean worktree) once its pull request merges. Absent = on. */
+  closeMerged?: boolean;
   /** Local: the branch to switch to. Worktree: the branch to start from. None = the current one. */
   branch?: string;
 }
@@ -309,6 +311,12 @@ export interface Chat {
   forkDepth?: number;
   /** Where the thread works (set when it starts; a fork works where its original did). */
   workspace?: Workspace;
+  /** Its worktree branch's pull request. Written only by the server. */
+  pullRequest?: ThreadPullRequest;
+  /** When the server closed it because its pull request merged. */
+  autoClosedAt?: number;
+  /** Reopened after being closed for a merge: never closed for it again. */
+  autoCloseOptOut?: boolean;
   /** A Pi session another agent started (a subagent), not the user. Hidden from the sidebar by default. */
   subagent?: boolean;
 }

@@ -7652,6 +7652,43 @@ a.btn-primary {
   text-overflow: ellipsis;
 }
 
+/* A thread's pull request (PullRequestBadge.tsx): in its sidebar row and the thread's workspace bar */
+
+.pr-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* Only the icon takes the state's colour; the number stays quiet. */
+.pr-pending .pr-icon { color: var(--git-mod); }
+.pr-ready .pr-icon { color: var(--ok); }
+.pr-merged .pr-icon { color: var(--pr-merged); }
+.pr-failing .pr-icon,
+.pr-closed .pr-icon { color: var(--danger); }
+
+/* In the thread's top right, beside the Commit button and sized like it. */
+.thread-pr {
+  height: 34px;
+  padding: 0 9px;
+  gap: 5px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .thread-pr:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
 /* The project gives way first; the device keeps its name unless it's very long. */
 .history-device {
   flex-shrink: 0;
@@ -8024,6 +8061,7 @@ a.btn-primary {
    ========================================================================== */
 
 :root {
+  --pr-merged: #8250df;
   --git-mod: #b66b00;
   --git-new: #2f8a4d;
   --git-del: #c93a3a;
@@ -8042,6 +8080,7 @@ a.btn-primary {
 }
 
 :root[data-theme="dark"] {
+  --pr-merged: #a371f7;
   --git-mod: #f0b46b;
   --git-new: #8fd18a;
   --git-del: #ef6b6b;

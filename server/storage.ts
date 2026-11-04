@@ -112,6 +112,14 @@ export async function chatSummaries(ids?: string[]): Promise<{ v: string; chat: 
   return out;
 }
 
+/** Summaries of the threads that work in an OpenBuild worktree (open or closed), read without parsing the rest. */
+export function worktreeChatSummaries(): Chat[] {
+  return db.query<{ data: string }, []>(
+    `SELECT s.data FROM chat_summaries s JOIN chats c ON c.id = s.id AND c.version = s.version
+     WHERE c.deleted_at IS NULL AND json_extract(s.data, '$.workspace.worktree') = 1`,
+  ).all().map((row) => JSON.parse(row.data) as Chat);
+}
+
 /** Read histories one at a time for server-side search, without collecting the archive in RAM. */
 export function* eachChat(): Generator<Chat> {
   let bytes = 0;
