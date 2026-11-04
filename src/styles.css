@@ -6356,7 +6356,7 @@ p.key-status svg {
 /* A section heading that folds its body away, with a one-line summary of what's inside. */
 .pi-subhead-toggle {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
   margin-left: -6px;
   padding: 2px 6px;
@@ -6387,6 +6387,7 @@ p.key-status svg {
 
 .pi-subhead-chevron {
   flex: none;
+  align-self: center;
   color: var(--text-3);
   transition: transform var(--med) var(--ease);
 }
