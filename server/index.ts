@@ -1,3 +1,4 @@
+import { warmStartup } from "./startupWarmup";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
@@ -592,6 +593,7 @@ hot.openbuildStopPreviews = stopPreviews;
 for (const p of previous ?? []) p.stop(true);
 const port = previous?.[0]?.port ?? Number(process.env.PORT ?? 3100);
 const servers: ReturnType<typeof serve>[] = [];
+await warmStartup(() => refreshChats());
 try {
   for (const host of hosts) servers.push(serve(port, host));
 } catch (err) {

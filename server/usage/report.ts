@@ -85,14 +85,18 @@ export function report(range: UsageRange, tz: string, force = false): Promise<Us
   const zone = validZone(tz) ? tz : "UTC";
   const key = `${range}|${zone}`;
   const active = running.get(key);
-  if (active) return active;
   const hit = reports.get(key);
+  if (active) return !force && hit ? Promise.resolve({ ...hit.value, pending: [...pendingSources()] }) : active;
   // Polling and machine switching shouldn't wait for filesystem or model-catalog work.
   // A background source's new records invalidate this shortcut immediately.
   if (!force && hit && hit.version === generation() && Date.now() - hit.at < REPORT_FRESH_MS)
     return Promise.resolve({ ...hit.value, pending: [...pendingSources()] });
   const task = refreshReport(range, zone, force).finally(() => running.delete(key));
   running.set(key, task);
+  if (!force && hit) {
+    void task.catch(err => console.warn("[usage] Background refresh failed:", (err as Error).message));
+    return Promise.resolve({ ...hit.value, pending: [...pendingSources()] });
+  }
   return task;
 }
 

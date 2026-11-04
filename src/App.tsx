@@ -1,3 +1,4 @@
+import { prefetchUsage } from "./lib/usageStats";
 import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
 import { Activity, useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
@@ -91,6 +92,7 @@ let preloadingProjects: Promise<void> | undefined;
 export async function preloadApp() {
   // First, so it isn't queued behind the slower requests below for one of the browser's connections.
   const bots = preloadBots();
+  prefetchUsage();
   const hydrated = new Promise<void>((resolve) => {
     if (useStore.persist.hasHydrated()) return resolve();
     const off = useStore.persist.onFinishHydration(() => { off(); resolve(); });

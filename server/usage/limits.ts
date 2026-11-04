@@ -507,7 +507,7 @@ const PROVIDERS: [UsageProvider, () => Promise<Account[]>][] = [
 /** Fresh enough to reuse; Refresh asks again once this has passed. */
 const TTL_MS = 60_000;
 const MIN_REFRESH_MS = 10_000;
-const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits[]> }>();
+const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits[]>; snapshot?: UsageLimits[] }>();
 
 async function readAccounts(provider: UsageProvider, list: () => Promise<Account[]>): Promise<UsageLimits[]> {
   const groups = new Map<string, Account[]>();
@@ -542,10 +542,17 @@ export async function limits(force = false): Promise<UsageLimits[]> {
   const now = Date.now();
   const all = await Promise.all(PROVIDERS.map(([provider, list]) => {
     const hit = cache.get(provider);
-    if (hit && now - hit.at < (force ? MIN_REFRESH_MS : TTL_MS)) return hit.value;
-    const value = readAccounts(provider, list);
-    cache.set(provider, { at: now, value });
-    return value;
+    if (hit && now - hit.at < (force ? MIN_REFRESH_MS : TTL_MS)) return !force && hit.snapshot ? hit.snapshot : hit.value;
+    const slot: { at: number; value: Promise<UsageLimits[]>; snapshot?: UsageLimits[] } = {
+      at: now, value: Promise.resolve([]), snapshot: hit?.snapshot,
+    };
+    slot.value = readAccounts(provider, list).then(value => { slot.snapshot = value; return value; });
+    cache.set(provider, slot);
+    if (!force && hit?.snapshot) {
+      void slot.value.catch(err => console.warn("[limits] Background refresh failed:", (err as Error).message));
+      return hit.snapshot;
+    }
+    return slot.value;
   }));
   return all.flat();
 }
