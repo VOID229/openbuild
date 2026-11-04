@@ -8,6 +8,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
 import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
@@ -124,16 +125,44 @@ function Mention({ bot, text }: { bot: Bot; text: string }) {
   );
 }
 
+/** Keep normal browser link actions while plain clicks use the app's thread navigation. */
+function ThreadLink({ id, children }: { id: string; children: React.ReactNode }) {
+  return <a className="link" href={threadPath(id)} onClick={(e) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    useStore.getState().selectChat(id);
+  }}>{children}</a>;
+}
+
+/** Only link IDs that resolve uniquely to a known thread; ordinary hex text stays text. */
+function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
+  const chats = useStore((s) => s.chats);
+  const parts: React.ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/\b(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{8})\b/gi)) {
+    const matches = chats.filter((c) => c.id.toLowerCase() === m[0].toLowerCase() || c.id.toLowerCase().startsWith(m[0].toLowerCase() + "-"));
+    if (matches.length !== 1) continue;
+    // Let the URL renderer own IDs inside URLs.
+    const token = text.slice(0, m.index).match(/[^\s]*$/)?.[0] ?? "";
+    if (/[/:]/.test(token)) continue;
+    parts.push(<Linkify key={last} text={text.slice(last, m.index)} fileHref={fileHref} bare />);
+    parts.push(<ThreadLink key={m.index + "-thread"} id={matches[0]!.id}>{m[0]}</ThreadLink>);
+    last = m.index + m[0].length;
+  }
+  parts.push(<Linkify key="end" text={text.slice(last)} fileHref={fileHref} bare />);
+  return <>{parts}</>;
+}
+
 /** Plain text with @mentions and links. */
 function WithMentions({ text, bots, everyone, fileHref }: { text: string; bots: Bot[]; everyone: Bot[]; fileHref?: (url: string) => string }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const { start, end, bot } of tagsIn(text, bots, everyone)) {
-    if (start > last) parts.push(<Linkify key={last} text={text.slice(last, start)} fileHref={fileHref} bare />);
+    if (start > last) parts.push(<ThreadReferences key={last} text={text.slice(last, start)} fileHref={fileHref} />);
     parts.push(bot ? <Mention key={start} bot={bot} text={text.slice(start, end)} /> : <MentionAll key={start} everyone={everyone} text={text.slice(start, end)} />);
     last = end;
   }
-  if (last < text.length) parts.push(<Linkify key={last} text={text.slice(last)} fileHref={fileHref} bare />);
+  if (last < text.length) parts.push(<ThreadReferences key={last} text={text.slice(last)} fileHref={fileHref} />);
   return <>{parts}</>;
 }
 
@@ -145,8 +174,8 @@ const RichText = memo(function RichText({ text, bots, everyone, botId }: { text:
   for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
     const start = m.index ?? 0;
     if (start > last) parts.push(<WithMentions key={last} text={text.slice(last, start)} bots={bots} everyone={everyone} fileHref={fileHref} />);
-    if (m[1]) parts.push(<code key={start}>{m[1]}</code>);
-    else if (m[2]) parts.push(<strong key={start}>{m[2]}</strong>);
+    if (m[1]) parts.push(<code key={start}><ThreadReferences text={m[1]} fileHref={fileHref} /></code>);
+    else if (m[2]) parts.push(<strong key={start}><WithMentions text={m[2]} bots={bots} everyone={everyone} fileHref={fileHref} /></strong>);
     else parts.push(<WebLink key={start} url={m[4]!}>{m[3]}</WebLink>);
     last = start + m[0].length;
   }
@@ -704,7 +733,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 {m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
-                    {eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
+                    {m.event!.threadId ? <ThreadLink id={m.event!.threadId}>{m.event!.detail}</ThreadLink> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
                   </span>
                 )}
               </div>
