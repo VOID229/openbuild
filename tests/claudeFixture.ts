@@ -49,6 +49,32 @@ async function turn(prompt) {
   appendFileSync(file(session), JSON.stringify({ type: 'user', text: t }) + '\n');
   if (process.env.FAKE_EFFECTS) appendFileSync(process.env.FAKE_EFFECTS, raw + '\n');
   out({ type: 'system', subtype: 'init', cwd: process.cwd(), tools: ['Bash','Edit'], mcp_servers: [], model: state.model, permissionMode: state.mode, slash_commands: [], output_style: 'default', skills: [], plugins: [], apiKeySource: 'none', claude_code_version: '2.1.311', ...base, uuid: crypto.randomUUID() });
+  if (t.startsWith('background')) {
+    const modern = !t.includes('legacy');
+    if (modern) frame({ type: 'system', subtype: 'session_state_changed', state: 'running' });
+    frame({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'bg-test', task_type: 'local_bash', description: 'tests' }] });
+    text('I will be notified');
+    result();
+    await Bun.sleep(80);
+    if (t.includes('stop')) {
+      while (!interrupted) await Bun.sleep(10);
+      return result({ subtype: 'error_during_execution', is_error: true, errors: ['interrupted'] });
+    }
+    frame({ type: 'system', subtype: 'task_notification', task_id: 'bg-test', status: 'failed', output_file: '/tmp/test-output', summary: 'Tests failed' });
+    frame({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+    await Bun.sleep(80);
+    text('Tests failed; fixing');
+    const r = await ask({ subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'fix tests' }, tool_use_id: 'bg-fix' });
+    text(r.behavior === 'allow' ? 'fixed and verified' : 'fix denied');
+    result();
+    // The final result must not close the reply either: idle is authoritative.
+    if (modern) {
+      await Bun.sleep(30);
+      frame({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'watcher', task_type: 'monitor', ambient: true }] });
+      frame({ type: 'system', subtype: 'session_state_changed', state: 'idle' });
+    }
+    return;
+  }
   if (t.startsWith('question')) {
     const questions = t === 'question malformed' ? [] : [
       { question: 'Which approach?', header: 'Approach', multiSelect: false, options: [{ label: 'Small', description: 'Minimal change' }, { label: 'Full', description: 'Complete change' }] },

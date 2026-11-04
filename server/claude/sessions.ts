@@ -188,6 +188,8 @@ async function open(req: PiChatRequest, s: Saved, start: { thinkingOff: boolean;
     prompt: inbox,
     options: {
       ...baseOptions(cwd),
+      // Surface authoritative idle events, and keep finite background work active.
+      env: { ...claudeEnv(), CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: "1", CLAUDE_CODE_BG_TASKS_REPORT_RUNNING: "1" },
       ...identity,
       model: start.row.value,
       systemPrompt: { type: "preset", preset: "claude_code", append: QUESTION_INSTRUCTIONS },
@@ -296,6 +298,14 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           let lastText: "text" | "tool" | undefined, hadText = false;
           let currentMessage: string | undefined;
           let aborted = false;
+          let sessionState: string | undefined;
+          let backgroundTasks = false;
+          let pendingResult: any;
+          const settle = () => {
+            if (!pendingResult) return;
+            proc.turn!.settled = true;
+            finish(pendingResult);
+          };
           let finish!: (r: any) => void, fail!: (e: Error) => void;
           const completion = new Promise<any>((res, rej) => { finish = res; fail = rej; });
           completion.catch(() => {});
@@ -320,7 +330,15 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
                 save(req.threadId, { ...state, turns: state.turns + 1, anchors: [...state.anchors, anchor] });
                 send({ t: "steer", id: item.id, text: item.text });
               }
-              if (m.type === "system" && m.subtype === "init" && m.session_id && m.session_id !== s!.id) {
+              if (m.type === "system" && m.subtype === "session_state_changed") {
+                sessionState = m.state;
+                // Idle follows the final result and notification-driven continuation.
+                if (sessionState === "idle" && !proc.turn!.steers.size && !proc.turn!.awaiting.size) settle();
+              } else if (m.type === "system" && m.subtype === "background_tasks_changed") {
+                backgroundTasks = m.tasks.some((task: { ambient?: boolean }) => !task.ambient);
+                // An empty snapshot is not completion: Claude may still be handling
+                // the notification. Wait for its next result (or authoritative idle).
+              } else if (m.type === "system" && m.subtype === "init" && m.session_id && m.session_id !== s!.id) {
                 // A fork gets its own id: from here on the thread follows the new transcript.
                 s = { ...s!, id: m.session_id }; save(req.threadId, s); proc.sessionId = m.session_id;
               } else if (m.type === "stream_event" && !sub) {
@@ -363,7 +381,8 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
                 // reply attached until Claude acknowledges all submitted inputs.
                 const answered: string[] = m.user_message_uuids ?? (m.user_message_uuid ? [m.user_message_uuid] : []);
                 for (const uuid of answered) proc.turn!.awaiting.delete(uuid);
-                if (aborted || m.is_error || (!proc.turn!.steers.size && (!answered.length || !proc.turn!.awaiting.size))) { proc.turn!.settled = true; finish(m); }
+                pendingResult = m;
+                if (aborted || m.is_error || (!proc.turn!.steers.size && (!answered.length || !proc.turn!.awaiting.size) && (sessionState === "idle" || (sessionState === undefined && !backgroundTasks)))) settle();
               }
             },
           };

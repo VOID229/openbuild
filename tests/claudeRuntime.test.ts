@@ -245,3 +245,30 @@ test("editing an earlier message forks Claude's session at that point instead of
   release(req.threadId);
   delete process.env.FAKE_RELEASE; delete process.env.FAKE_TOOL_EFFECTS;
  });
+
+for (const mode of ["modern", "legacy"]) {
+  test(`background failure keeps the reply, permissions and continuation attached (${mode})`, async () => {
+    const req = request(`background ${mode}`);
+    const events = await collect(req, e => {
+      if (e.t === "ask") answer(req.threadId, e.id, { value: "Allow once" });
+    });
+    expect(text(events)).toContain("I will be notified");
+    expect(text(events)).toContain("Tests failed; fixing");
+    expect(text(events)).toContain("fixed and verified");
+    expect(events.filter(e => e.t === "ask")).toHaveLength(1);
+    expect(events.filter(e => e.t === "done")).toHaveLength(1);
+    expect(events.some(e => e.t === "error")).toBe(false);
+    expect(text(await collect({ ...req, prior: 1, message: "after background" }))).toBe("reply 2 to after background");
+    release(req.threadId);
+  });
+}
+
+test("Stop remains available while waiting for a background task", async () => {
+  const req = request("background stop"), stop = new AbortController();
+  const events = await collect(req, e => {
+    if (e.t === "text") setTimeout(() => stop.abort(), 120);
+  }, stop.signal);
+  expect(events.find(e => e.t === "done")).toMatchObject({ finish: "aborted" });
+  expect(events.some(e => e.t === "error")).toBe(false);
+  release(req.threadId);
+});
