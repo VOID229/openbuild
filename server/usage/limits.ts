@@ -546,7 +546,18 @@ export async function limits(force = false): Promise<UsageLimits[]> {
     const slot: { at: number; value: Promise<UsageLimits[]>; snapshot?: UsageLimits[] } = {
       at: now, value: Promise.resolve([]), snapshot: hit?.snapshot,
     };
-    slot.value = readAccounts(provider, list).then(value => { slot.snapshot = value; return value; });
+    slot.value = readAccounts(provider, list).then(value => {
+      const previous = new Map(hit?.snapshot?.map(reading => [reading.id, reading]));
+      slot.snapshot = value.map(reading => {
+        const saved = previous.get(reading.id);
+        // A failed refresh must not erase the last reading or make old values look current.
+        // Only retain accounts still discovered, and never retain redeemable reset grants.
+        return reading.error && !reading.windows.length && saved?.windows.length
+          ? { ...saved, ...reading, windows: saved.windows, asOf: saved.asOf, stale: true, resetCredits: undefined }
+          : reading;
+      });
+      return slot.snapshot;
+    });
     cache.set(provider, slot);
     if (!force && hit?.snapshot) {
       void slot.value.catch(err => console.warn("[limits] Background refresh failed:", (err as Error).message));

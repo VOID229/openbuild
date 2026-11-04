@@ -58,10 +58,11 @@ test("warmed plan limits remain available while providers refresh, and refresh r
     }));
     mock.module('./server/claude/accounts.ts', () => ({ detectAccounts: () => [] }));
     let now = Date.now(); Date.now = () => now;
-    let release, blocked, percent = 25, calls = 0;
+    let release, blocked, percent = 25, calls = 0, limited = false;
     globalThis.fetch = async url => {
       a.ok(String(url).includes('cli-chat-proxy.grok.com'));
       calls++; if (blocked) await blocked;
+      if (limited) return new Response('', { status: 429 });
       return Response.json({ config: { creditUsagePercent: percent, currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY' } } });
     };
     const { limits } = await import('./server/usage/limits.ts');
@@ -78,5 +79,20 @@ test("warmed plan limits remain available while providers refresh, and refresh r
     await Bun.sleep(5); a.equal(finished, false);
     percent = 75; release();
     a.equal((await fresh).find(p => p.provider === 'grok').windows[0].usedPercent, 75);
+    const lastGood = (await limits()).find(p => p.provider === 'grok');
+    blocked = undefined; limited = true; now += 61000;
+    const stale = (await limits(true)).find(p => p.provider === 'grok');
+    a.equal(stale.windows[0].usedPercent, 75);
+    a.equal(stale.asOf, lastGood.asOf);
+    a.equal(stale.stale, true);
+    a.match(stale.error, /429/);
+    a.equal(stale.resetCredits, undefined);
+    now += 61000;
+    a.equal((await limits(true)).find(p => p.provider === 'grok').asOf, lastGood.asOf);
+    limited = false; percent = 80; now += 61000;
+    const recovered = (await limits(true)).find(p => p.provider === 'grok');
+    a.equal(recovered.windows[0].usedPercent, 80);
+    a.equal(recovered.stale, undefined);
+    a.equal(recovered.error, undefined);
   `);
 });
