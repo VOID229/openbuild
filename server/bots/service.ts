@@ -38,6 +38,7 @@ const mem = globalThis as {
   openbotsHooks?: Hooks;
   openbotsListeners?: Set<(e: BotsEvent) => void>;
   openbotsTyping?: Record<string, string[]>;
+  openbotsTypingSince?: Map<string, number>;
   openbotsDrafts?: Draft[];
   openbotsStatus?: Map<string, BotStatus>;
   openbotsChains?: Map<string, number>;
@@ -66,6 +67,8 @@ function emit(e: BotsEvent) {
 }
 
 const typing = (mem.openbotsTyping ??= {});
+/** When each bot started typing in a conversation, keyed `conversation:bot`. */
+const typingSince = (mem.openbotsTypingSince ??= new Map<string, number>());
 const drafts = (mem.openbotsDrafts ??= []);
 const status = (mem.openbotsStatus ??= new Map<string, BotStatus>());
 /** Bot-to-bot replies in a row, per conversation, so two bots can't talk forever. */
@@ -148,10 +151,18 @@ export function setStatus(botId: string, next: BotStatus) {
 }
 export function setTyping(conversationId: string, botId: string, on: boolean) {
   const now = new Set(typing[conversationId] ?? []);
+  const key = `${conversationId}:${botId}`;
+  if (on && !now.has(botId)) typingSince.set(key, Date.now());
+  if (!on) typingSince.delete(key);
   if (on) now.add(botId);
   else now.delete(botId);
   typing[conversationId] = [...now];
   emit({ t: "typing", conversationId, botIds: typing[conversationId]! });
+}
+/** How long a bot has been typing in a conversation, or undefined when it isn't. */
+export function typingFor(conversationId: string, botId: string): number | undefined {
+  const since = typingSince.get(`${conversationId}:${botId}`);
+  return since === undefined ? undefined : Date.now() - since;
 }
 export function setDraft(draft: Draft | undefined, key: { conversationId: string; botId: string }) {
   const i = drafts.findIndex((d) => d.conversationId === key.conversationId && d.botId === key.botId);
@@ -226,6 +237,7 @@ export async function resetAll() {
   chains.clear();
   chainWarned = mem.openbotsChainWarned = new Set();
   for (const id of Object.keys(typing)) delete typing[id];
+  typingSince.clear();
   drafts.length = 0;
   ensureStarted();
   emit({ t: "snapshot", ...snapshot() });

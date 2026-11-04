@@ -1192,7 +1192,23 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const [openedAt] = useState(Date.now);
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
-  const empty = conversation.kind === "direct" && !conversation.messages.length;
+  // The hello is for bots the user made, which wait to be spoken to. The primary bot welcomes the user
+  // and bots it makes introduce themselves, so their chat shows them at work from the start; so does
+  // any bot already writing in it.
+  const active = useBots((s) => {
+    const id = conversation.botIds[0];
+    const bot = s.bots.find((b) => b.id === id);
+    if (!bot) return false;
+    const st = s.status[bot.id];
+    return (
+      (!!bot.by && bot.by !== "me") ||
+      (s.onboarding && !!bot.primary) ||
+      (st?.state === "working" && st.conversationId === conversation.id) ||
+      !!s.typing[conversation.id]?.length ||
+      s.drafts.some((d) => d.conversationId === conversation.id)
+    );
+  });
+  const empty = conversation.kind === "direct" && !conversation.messages.length && !active;
   return (
     <div className="bots-chat">
       <div className="bots-head">

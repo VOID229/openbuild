@@ -381,6 +381,17 @@ test("send_message, models and check-ins against a real bots database", async ()
       await sendMessage(bot.id, { text: 'hello' });
       a.equal(count(), before + 1);
 
+      // While the chat shows it typing, a bubble waits until it could have been typed; otherwise it goes at once.
+      svc.setTyping(conversationId, bot.id, true);
+      let t = Date.now();
+      await sendMessage(bot.id, { text: 'one' });
+      a.ok(Date.now() - t >= 450, 'a typed bubble takes a moment');
+      svc.setTyping(conversationId, bot.id, false);
+      t = Date.now();
+      await sendMessage(bot.id, { text: 'two' });
+      a.ok(Date.now() - t < 200, 'an untyped bubble is immediate');
+      a.equal(count(), before + 3);
+
       // A session resumes on its last model, so "default" has to switch back; matching models don't re-send.
       const fake = (provider, id) => {
         const sent = [];
