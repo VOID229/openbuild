@@ -149,7 +149,7 @@ function permissions(threadId: string): CanUseTool {
       if (!questions.length || questions.some((q: any) => typeof q?.question !== "string" || !Array.isArray(q.options) || q.options.some((o: any) => typeof o?.label !== "string"))) return { behavior: "deny", message: "Invalid AskUserQuestion input; no answer was collected.", toolUseID: options.toolUseID };
       const answers: Record<string, string> = {};
       for (const q of questions) {
-        const r = await ask(l, { method: "select", title: q.header ? `${q.header}: ${q.question}` : q.question, message: q.multiSelect ? "Pick one, or type several separated by commas." : undefined, options: (q.options ?? []).map((o: any) => o.label), other: true }, options.signal);
+        const r = await ask(l, { question: true, method: "select", title: q.header ? `${q.header}: ${q.question}` : q.question, message: q.multiSelect ? "Pick one, or type several separated by commas." : undefined, options: (q.options ?? []).map((o: any) => o.label), other: true }, options.signal);
         if (r.cancelled || options.signal.aborted) return { behavior: "deny", message: "The user dismissed the question. Do not assume an answer.", toolUseID: options.toolUseID };
         answers[q.question] = r.value ?? "";
       }

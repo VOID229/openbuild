@@ -2628,6 +2628,12 @@ svg {
   animation: rise 260ms var(--ease) both;
 }
 
+.msg-sent-by {
+  color: var(--muted-foreground);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
 .msg-user {
   align-items: flex-end;
 }

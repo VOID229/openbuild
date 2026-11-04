@@ -78,7 +78,7 @@ export function createQuestions(send: (event: StreamEvent) => void, onSteer: () 
           pending.set(id, resolve);
           req.signal.addEventListener("abort", abort, { once: true });
           if (req.signal.aborted || closed) abort();
-          else send({ t: "ask", id, method: options.length ? "select" : "input", title: a.question.trim(), options, other: true });
+          else send({ t: "ask", id, question: true, method: options.length ? "select" : "input", title: a.question.trim(), options, other: true });
         });
         return respond({ result: { content: [{ type: "text", text: JSON.stringify(reply.cancelled ? { cancelled: true } : { answer: reply.value ?? "" }) }] } });
       } finally { active.delete(m.id); req.signal.removeEventListener("abort", abort); }

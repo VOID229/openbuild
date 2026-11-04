@@ -192,6 +192,8 @@ export interface AskPart {
   other?: boolean;
   /** Sensitive native input: mask entry and never persist the answer. */
   secret?: boolean;
+  /** The agent's own ask-the-user tool, rather than a permission prompt or an extension's dialog. */
+  question?: boolean;
   /** Answered (the answer, or "" for cancelled / timed out); missing while waiting. */
   answer?: string;
 }
@@ -267,6 +269,8 @@ export interface Message {
   parts?: Part[];
   /** Tokens, cost and context fill after this reply. */
   usage?: Usage;
+  /** A user message a bot wrote: its name. */
+  sentBy?: string;
   shell?: ShellRun;
   createdAt: number;
 }

@@ -208,6 +208,7 @@ function UserMessage({ message, chatId }: { message: Message; chatId: string }) 
   message = { ...message, content: userVisiblePrompt(message.content) };
   return (
     <div className="msg msg-user" data-message-id={message.id}>
+      {message.sentBy && <div className="msg-sent-by">Sent by {message.sentBy}</div>}
       {message.attachments?.length ? <Attachments files={message.attachments} chatId={chatId} /> : null}
       {message.content.trim() && (
         <div className="bubble">

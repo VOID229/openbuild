@@ -15,6 +15,7 @@ import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
 import { BotExtensions } from "./BotExtensions";
+import { BotHarnesses, BotThreads } from "./BotThreads";
 import { BotWebSearch } from "./BotWebSearch";
 
 type Editing = { kind: "bot"; id: string } | { kind: "group"; id: string };
@@ -184,6 +185,10 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
           />
         </div>
         <p className="setting-desc">Choosing an environment applies to the next request. This does not move files from an existing computer.</p>
+      </section>
+      <section className="bots-set-block">
+        <Label>OpenBuild</Label>
+        <BotThreads bot={bot} />
       </section>
       <section className="bots-set-block">
         <Label>Usage</Label>
@@ -443,6 +448,13 @@ export function BotsSettingsSection() {
 
       <section className="pi-block">
         <BotWebSearch />
+      </section>
+
+      <section className="pi-block">
+        <div className="pi-subhead">
+          <h3>Harnesses in OpenBuild</h3>
+        </div>
+        <BotHarnesses />
       </section>
 
       <section className="pi-block">

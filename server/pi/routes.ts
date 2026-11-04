@@ -1,19 +1,17 @@
-import { runStopRequested } from "../runStops";
 import { harnessSession } from "../harnessSession";
-import { localRun, Run } from "../runs";
 // HTTP routes for Pi (threads, models, commands, sign-in, install/update, extensions and skills)
 // and for projects and workspaces. Mounted by server/index.ts behind its request checks.
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { isStreamId, isStreamRef } from "../../shared/replies";
-import { EFFORTS, isPermissionId, isSpeedId, type ModelInfo, type PiChatRequest, type Speed, type ThreadRuntime } from "../../shared/types";
+import { EFFORTS, type ModelInfo, type Speed, type ThreadRuntime } from "../../shared/types";
 import { bad, readJson } from "../handlers";
 import * as projects from "../projects";
 import { restartServer, restartStatus, watchInstall } from "../releases";
 import * as workspaceFiles from "../workspaceFiles";
 import * as workspaceGit from "../workspaceGit";
 import * as pullRequestView from "../pullRequestView";
-import { beforeChat, hasChatHooks } from "../plugins";
+import { admitTurn, isPiChat, validImages } from "./turn";
 import * as auth from "./auth";
 import { status } from "./install";
 import { currentJob, jobStream, startJob } from "./jobs";
@@ -23,7 +21,7 @@ import { problems } from "./rpc";
 import { TEXT_RUNTIMES } from "../../shared/types";
 import { complete } from "../textGeneration";
 import { forgetModels, isThreadId, listCommands, listModels, modelEfforts, type PiModels } from "./sessions";
-import { answer, compact, findShell, startShell, stopShell, restartIdle, steer, startRun } from "./remote";
+import { answer, compact, findShell, startShell, stopShell, restartIdle, steer } from "./remote";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
 import * as durable from "../durable";
@@ -84,30 +82,6 @@ function toModelInfo(m: any, builtins?: Set<string>, book?: PriceBook, speeds?: 
     ...(own?.length ? { speeds: own } : {}),
   };
 }
-
-function isPiChat(b: any): b is PiChatRequest {
-  return (
-    !!b &&
-    isThreadId(b.threadId) &&
-    (b.runtime === undefined || validRuntime(b.runtime)) &&
-    (b.cursorAllowAllTools === undefined || (b.runtime === "cursor" && typeof b.cursorAllowAllTools === "boolean")) &&
-    (b.permission === undefined || ((b.runtime === "codex" || b.runtime === "cursor" || b.runtime === "claude") && isPermissionId(b.permission))) &&
-    str(b.cwd, 1024) &&
-    str(b.model, 512) &&
-    b.model.includes("/") &&
-    EFFORTS.includes(b.effort) &&
-    (b.speed === undefined || isSpeedId(b.speed)) &&
-    typeof b.message === "string" &&
-    b.message.length < 2_000_000 &&
-    Number.isInteger(b.prior) &&
-    b.prior >= 0 &&
-    (b.forkFrom === undefined || isThreadId(b.forkFrom)) &&
-    validImages(b.images)
-  );
-}
-
-const validImages = (images: any) =>
-  images === undefined || (Array.isArray(images) && images.length <= 20 && images.every((i: any) => str(i?.data, 30_000_000) && str(i?.mimeType, 100)));
 
 export function piRoutes(api: Api) {
   // Pi and Durable deliberately use the exact same maintenance path as /api/pi/update.
@@ -254,27 +228,10 @@ export function piRoutes(api: Api) {
     "/api/pi/chat": {
       POST: api(async (req, server: Bun.Server<unknown>) => {
         server.timeout(req, 0);
-        let body = await readJson(req);
+        const body = await readJson(req);
         if (!isPiChat(body) || !isStreamRef(body.stream)) return bad("Malformed request");
-        if (hasChatHooks()) {
-          // A plugin may adjust the model, prompt or effort for this turn; it may not change the
-          // stream or leave an invalid request behind.
-          const next = await beforeChat(body);
-          if (!isPiChat(next) || !isStreamRef(next.stream)) return bad("A plugin produced an invalid chat request");
-          body = next;
-        }
-        if (!existsSync(body.cwd)) return bad("This thread's folder doesn't exist anymore (was its worktree removed?). Start a new thread to keep going.", 410);
-        if (!projects.allowedCwd(body.cwd)) return bad("That folder isn't a project in OpenBuild", 403);
         try {
-          claimRuntime(body.threadId, body.runtime ?? "pi");
-        } catch (err) {
-          return fail(err);
-        }
-        try {
-          if (runStopRequested(body.stream.id)) return new Response(localRun(body.stream.id, () => new Run()).stream(), { headers: runHeaders });
-          const run = body.runtime === "durable"
-            ? await durable.startRun(body)
-            : await startRun(body);
+          const run = await admitTurn(body);
           return new Response(run.stream(), { headers: runHeaders });
         } catch (err) {
           return fail(err);

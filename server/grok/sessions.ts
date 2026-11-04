@@ -140,7 +140,7 @@ async function askQuestions(l: Live, m: AcpMessage) {
   if (!l.emit) return declined();
   for (const q of Array.isArray(m.params?.questions) ? m.params.questions : []) {
     const labels: string[] | undefined = q?.options?.length ? q.options.map((o: any) => String(o?.label)) : undefined;
-    const reply = await new Promise<Reply>((resolve) => question(l, { method: labels ? "select" : "input", title: String(q?.question ?? "Grok has a question"), options: labels, other: true }, (r) => { resolve(r); return r.value; }));
+    const reply = await new Promise<Reply>((resolve) => question(l, { question: true, method: labels ? "select" : "input", title: String(q?.question ?? "Grok has a question"), options: labels, other: true }, (r) => { resolve(r); return r.value; }));
     if (reply.cancelled) return declined();
     answers[String(q?.question)] = reply.value ?? "";
   }

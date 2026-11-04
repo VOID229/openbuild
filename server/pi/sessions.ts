@@ -168,6 +168,7 @@ function ensure(threadId: string, cwd: string, forkFrom?: string): Live {
         prefill: r.prefill,
         // question_ask's dialog takes the user's own words too.
         other: r.method === "select" && [...l.questions.values()].includes(r.title) ? true : undefined,
+        question: r.method === "select" && [...l.questions.values()].includes(r.title) ? true : undefined,
       };
       l.asks.set(r.id, ask);
       if (l.turn?.stopping) answer(threadId, r.id, { cancelled: true });
