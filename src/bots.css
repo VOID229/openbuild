@@ -1094,13 +1094,15 @@
 }
 
 /* Links in bot chat are blue as well as underlined, so they read as clickable at a glance. */
-.bm-text .link {
+.bm-text .link,
+.bm-event-detail .link {
   color: var(--file-link);
   text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 @media (hover: hover) {
-  .bm-text .link:hover {
+  .bm-text .link:hover,
+  .bm-event-detail .link:hover {
     text-decoration-color: currentColor;
   }
 }

@@ -228,7 +228,7 @@ export interface BotMessage {
   replyTo?: string;
   reactions?: Reaction[];
   /** Something that happened rather than something said ("Created routine …"), shown as a centred line. */
-  event?: { kind: EventKind; text: string; detail?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string };
+  event?: { kind: EventKind; text: string; detail?: string; /** The OpenBuild thread this activity concerns. */ threadId?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string };
   /** A bot asking the user to pick. */
   question?: Question;
   /** A bot laying out who does what. */
