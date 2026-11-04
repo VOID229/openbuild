@@ -12,6 +12,7 @@ import * as projects from "../projects";
 import { restartServer, restartStatus, watchInstall } from "../releases";
 import * as workspaceFiles from "../workspaceFiles";
 import * as workspaceGit from "../workspaceGit";
+import * as pullRequestView from "../pullRequestView";
 import { beforeChat, hasChatHooks } from "../plugins";
 import * as auth from "./auth";
 import { status } from "./install";
@@ -145,6 +146,18 @@ export function piRoutes(api: Api) {
       if (!str(body?.cwd, 1024) || !projects.allowedCwd(body.cwd)) return bad("Unknown folder", 403);
       try {
         return Response.json(await action(body));
+      } catch (err) {
+        return fail(err);
+      }
+    });
+  /** A read of a workspace the server knows, from `?cwd=…` and the rest of the query. */
+  const gitRead = (read: (cwd: string, query: URLSearchParams) => Promise<unknown>) =>
+    api(async (req: Request) => {
+      const query = new URL(req.url).searchParams;
+      const cwd = query.get("cwd");
+      if (!cwd || !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
+      try {
+        return Response.json(await read(cwd, query));
       } catch (err) {
         return fail(err);
       }
@@ -808,6 +821,28 @@ export function piRoutes(api: Api) {
     },
     "/api/workspaces/pr": {
       POST: gitAction((body) => workspaceGit.pullRequest(body.cwd)),
+    },
+    // The side panel's pull requests tab.
+    "/api/workspaces/pulls": {
+      GET: gitRead((cwd, q) => pullRequestView.list(cwd, q.get("state"))),
+    },
+    "/api/workspaces/pulls/view": {
+      GET: gitRead((cwd, q) => pullRequestView.view(cwd, q.get("number"))),
+    },
+    "/api/workspaces/pulls/patch": {
+      GET: gitRead((cwd, q) => pullRequestView.patch(cwd, q.get("number"), q.get("sha"))),
+    },
+    "/api/workspaces/pulls/merge": {
+      POST: gitAction((body) => pullRequestView.merge(body.cwd, body.number, body.method, body.headSha, body.deleteBranch)),
+    },
+    "/api/workspaces/pulls/edit": {
+      POST: gitAction((body) => pullRequestView.edit(body.cwd, body.number, body.title, body.body)),
+    },
+    "/api/workspaces/pulls/comment": {
+      POST: gitAction((body) => pullRequestView.comment(body.cwd, body.number, body.body)),
+    },
+    "/api/workspaces/pulls/state": {
+      POST: gitAction((body) => pullRequestView.setState(body.cwd, body.number, body.action)),
     },
     "/api/workspaces": {
       POST: api(async (req) => {

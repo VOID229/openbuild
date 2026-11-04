@@ -1,5 +1,5 @@
 // The thread's side of the window: a file tree, and a panel beside the thread holding open files,
-// terminals, the diff and browser pages as tabs (src/components/SidePanel.tsx). Both follow the open thread's folder, on the
+// terminals, the diff, pull requests and browser pages as tabs (src/components/SidePanel.tsx). Both follow the open thread's folder, on the
 // device it runs on, as the terminal does (terminal.ts): each folder keeps its own open files, in
 // this browser, so coming back to a thread brings its files back.
 //
@@ -9,8 +9,8 @@
 import { create } from "zustand";
 import { adopts, type TerminalFolder } from "./terminal";
 
-/** What the panel is showing: a file, a terminal, the diff, a browser tab, or (no tabs) the list of what it can open. */
-export type PanelView = "file" | "terminal" | "diff" | "browser" | "launcher";
+/** What the panel is showing: a file, a terminal, the diff, pull requests, a browser tab, or (no tabs) the list of what it can open. */
+export type PanelView = "file" | "terminal" | "diff" | "pulls" | "browser" | "launcher";
 
 /** A browser tab in the panel: a page in a frame, with its own address. */
 export interface BrowserTab {
@@ -41,9 +41,13 @@ interface PanelState extends Layout {
   activeFile?: string;
   /** The diff viewer's tab is open. */
   diff: boolean;
+  /** The pull requests tab is open. */
+  pulls: boolean;
+  /** The pull request it's on; "current" until it knows whether this branch has one; unset for the list. */
+  activePull?: number | "current";
   browsers: BrowserTab[];
   activeBrowser?: string;
-  /** The tabs' order, left to right, as keys ("f:<path>", "t:<shell>", "d", "b:<id>"); see arrangeTabs. */
+  /** The tabs' order, left to right, as keys ("f:<path>", "t:<shell>", "d", "p", "b:<id>"); see arrangeTabs. */
   order: string[];
   /** Files with edits not saved yet. */
   dirty: Record<string, boolean>;
@@ -61,6 +65,10 @@ interface PanelState extends Layout {
   setDirty(path: string, dirty: boolean): void;
   openDiff(): void;
   closeDiff(): void;
+  /** Show the pull requests tab: on this one, else where it was, else on this branch's. */
+  openPulls(pull?: number): void;
+  closePulls(): void;
+  setActivePull(pull: number | undefined): void;
   /** A new browser tab, at this address or blank. */
   openBrowser(url?: string): void;
   activateBrowser(id: string): void;
@@ -117,6 +125,8 @@ interface Saved {
   files: string[];
   active?: string;
   diff: boolean;
+  pulls: boolean;
+  activePull?: number | "current";
   browsers: BrowserTab[];
   activeBrowser?: string;
   order: string[];
@@ -133,20 +143,22 @@ function loadFiles(folder: TerminalFolder): Saved {
       files,
       active: typeof saved?.active === "string" && files.includes(saved.active) ? saved.active : files[0],
       diff: saved?.diff === true,
+      pulls: saved?.pulls === true,
+      activePull: typeof saved?.activePull === "number" || saved?.activePull === "current" ? saved.activePull : undefined,
       browsers,
       activeBrowser: browsers.some((b) => b.id === saved?.activeBrowser) ? (saved!.activeBrowser as string) : browsers[0]?.id,
       order: Array.isArray(saved?.order) ? saved.order.filter((k): k is string => typeof k === "string") : [],
     };
   } catch {
-    return { files: [], diff: false, browsers: [], order: [] };
+    return { files: [], diff: false, pulls: false, browsers: [], order: [] };
   }
 }
 
-function save(s: Pick<PanelState, "folder" | "files" | "activeFile" | "diff" | "browsers" | "activeBrowser" | "order">) {
+function save(s: Pick<PanelState, "folder" | "files" | "activeFile" | "diff" | "pulls" | "activePull" | "browsers" | "activeBrowser" | "order">) {
   if (!s.folder) return;
   try {
-    if (s.files.length || s.diff || s.browsers.length)
-      localStorage.setItem(filesKey(s.folder), JSON.stringify({ files: s.files, active: s.activeFile, diff: s.diff, browsers: s.browsers.map(({ id, url }) => ({ id, url })), activeBrowser: s.activeBrowser, order: s.order }));
+    if (s.files.length || s.diff || s.pulls || s.browsers.length)
+      localStorage.setItem(filesKey(s.folder), JSON.stringify({ files: s.files, active: s.activeFile, diff: s.diff, pulls: s.pulls, activePull: s.activePull, browsers: s.browsers.map(({ id, url }) => ({ id, url })), activeBrowser: s.activeBrowser, order: s.order }));
     else localStorage.removeItem(filesKey(s.folder));
   } catch {}
 }
@@ -184,6 +196,7 @@ export const usePanel = create<PanelState>((set, get) => {
     view: "launcher",
     files: [],
     diff: false,
+    pulls: false,
     browsers: [],
     order: [],
     dirty: {},
@@ -215,17 +228,17 @@ export const usePanel = create<PanelState>((set, get) => {
       }
       set({ width: width ?? defaultWidth() });
       // A thread just started from the home screen keeps the tabs that were open there.
-      if (adopts(prev.folder, folder) && !saved.files.length && !saved.diff && !saved.browsers.length && (prev.files.length || prev.diff || prev.browsers.length)) {
-        saved = { files: prev.files, active: prev.activeFile, diff: prev.diff, browsers: prev.browsers, activeBrowser: prev.activeBrowser, order: prev.order };
+      if (adopts(prev.folder, folder) && !saved.files.length && !saved.diff && !saved.pulls && !saved.browsers.length && (prev.files.length || prev.diff || prev.pulls || prev.browsers.length)) {
+        saved = { files: prev.files, active: prev.activeFile, diff: prev.diff, pulls: prev.pulls, activePull: prev.activePull, browsers: prev.browsers, activeBrowser: prev.activeBrowser, order: prev.order };
         try {
           localStorage.removeItem(filesKey(prev.folder!));
         } catch {}
-        set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order });
+        set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, pulls: saved.pulls, activePull: saved.activePull, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order });
         save(get());
         return;
       }
       // The view stays what it was; the panel falls back to another tab when this folder has none of it.
-      set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order, dirty: {} });
+      set({ folder, files: saved.files, activeFile: saved.active, diff: saved.diff, pulls: saved.pulls, activePull: saved.activePull, browsers: saved.browsers, activeBrowser: saved.activeBrowser, order: saved.order, dirty: {} });
     },
 
     openFile: (path) => {
@@ -255,6 +268,23 @@ export const usePanel = create<PanelState>((set, get) => {
 
     closeDiff: () => {
       set({ diff: false });
+      save(get());
+    },
+
+    openPulls: (pull) => {
+      const { pulls, activePull } = get();
+      set({ pulls: true, view: "pulls", activePull: pull ?? (pulls ? activePull : "current") });
+      save(get());
+      layout({ panel: true });
+    },
+
+    closePulls: () => {
+      set({ pulls: false, activePull: undefined });
+      save(get());
+    },
+
+    setActivePull: (activePull) => {
+      set({ activePull });
       save(get());
     },
 

@@ -12,7 +12,7 @@ import { apiUrl } from "./devices";
 import { generateText } from "./naming";
 import type { Chat } from "./types";
 
-async function json<T>(res: Response): Promise<T> {
+export async function json<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
   if (!res.ok) throw new Error(body?.error ?? `Request failed (HTTP ${res.status})`);
   return body as T;

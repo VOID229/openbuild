@@ -35,7 +35,7 @@ export async function run(cmd: string[], cwd: string, timeoutMs: number): Promis
 const reason = (r: { err: string; out: string }, fallback: string) =>
   (r.err || r.out).split("\n").filter((l) => l.trim() && !/^hint:/.test(l)).slice(0, 6).join("\n") || fallback;
 
-const fail = (r: { err: string; out: string }, fallback: string): never => {
+export const fail = (r: { err: string; out: string }, fallback: string): never => {
   throw new Error(reason(r, fallback));
 };
 
@@ -152,7 +152,7 @@ export async function diff(cwd: string, rawPaths?: unknown): Promise<{ diff: str
 }
 
 /** How much of a checkout's changes the side panel's diff viewer takes at once. */
-const MAX_VIEW_DIFF = 4_000_000;
+export const MAX_VIEW_DIFF = 4_000_000;
 const MAX_VIEW_UNTRACKED = 400_000;
 
 /**
