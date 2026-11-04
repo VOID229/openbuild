@@ -3,18 +3,22 @@ name: Nightly release
 on:
   push:
     branches: [main]
+  # Pull requests are how changes land (AGENTS.md): they run the same checks, but never publish.
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: nightly-main
+  # Each pull request supersedes only its own earlier runs, never main's.
+  group: nightly-${{ github.event.pull_request.number || 'main' }}
   cancel-in-progress: true
 
 jobs:
   checks:
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -30,6 +34,7 @@ jobs:
 
   publish:
     needs: checks
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
