@@ -249,8 +249,6 @@ export interface BotsSettings {
   user?: { name?: string; context?: string };
   /** Sections the user made in the sidebar, in order. */
   sections: string[];
-  /** Bots may react to messages with emoji. */
-  reactions: boolean;
   /** The primary bot is still welcoming the user (naming itself, setting up bots). */
   onboarding?: "active" | "done";
   /** SearXNG instances for bot_web_search, in priority order. Other providers' keys live in the vault. */
@@ -278,7 +276,7 @@ export const replyBubbles = (text: string) =>
     .filter((s) => s && !isSilent(s))
     .slice(0, 6);
 
-export const DEFAULT_SETTINGS: BotsSettings = { quietHours: { from: 22, to: 8 }, sections: [], reactions: true };
+export const DEFAULT_SETTINGS: BotsSettings = { quietHours: { from: 22, to: 8 }, sections: [] };
 
 /** A bot that's streaming a message into a conversation: the text so far. */
 export interface Draft {

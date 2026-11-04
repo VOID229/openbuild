@@ -3,7 +3,6 @@
 // held mood (thinking while typing, happy at a reaction) changes their expression.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood, type Shape } from "../../lib/bots/looks";
-import { useBots } from "../../lib/bots/store";
 import { cx } from "../../lib/ui";
 
 export type { Action, Mood };
@@ -140,13 +139,8 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantsLively = false, track: wantsTrack = false, playful = false, busy = false, pulse, className, label }: BotAvatarProps) {
-  // Settings → Bots can calm them all down.
-  const lively = useBots((s) => wantsLively && s.prefs.lively);
-  // Settings' "lively" switch calms busy bots too; then they just idle.
-  const fidget = useBots((s) => busy && s.prefs.lively);
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
-  const track = useBots((s) => wantsTrack && s.prefs.track);
   const shape = shapeOf(look);
   const color = colorOf(look);
   const clip = useId().replace(/:/g, "");
@@ -183,7 +177,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
 
   // Busy: one small routine after another, looking about and pulling faces, with blinks between.
   useEffect(() => {
-    if (!fidget || calm()) return;
+    if (!busy || calm()) return;
     let timer: ReturnType<typeof setTimeout>;
     let steps: ReturnType<typeof nextBeat> = [];
     const step = () => {
@@ -200,11 +194,11 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fidget]);
+  }, [busy]);
 
   // Idle life: mostly blinks and glances, and for lively ones the odd trick or face.
   useEffect(() => {
-    if (!alive || fidget || calm()) return;
+    if (!alive || busy || calm()) return;
     let timer: ReturnType<typeof setTimeout>;
     const next = (first = false) => {
       timer = setTimeout(() => {
@@ -222,7 +216,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     next(true);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, lively, track, fidget]);
+  }, [alive, lively, track, busy]);
 
   // Eyes that follow the pointer, written straight to the element so moving the mouse doesn't render.
   useEffect(() => {
@@ -273,7 +267,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-blink={blink || undefined}
       data-action={action}
       data-looking={look2 ? "" : undefined}
-      data-busy={fidget || undefined}
+      data-busy={busy || undefined}
       data-eyes={flash ? undefined : pose?.eyes}
       role={label ? "img" : undefined}
       aria-label={label}

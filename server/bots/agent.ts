@@ -225,7 +225,6 @@ function deliver(botId: string, conversationId: string, text: string, images: st
 }
 
 function react(botId: string, p: Record<string, unknown>) {
-  if (!svc.getSettings().reactions) throw new svc.BotsError("Reactions are turned off.");
   const conversationId = conversationFor(botId, p.conversation);
   const emoji = String(p.emoji ?? "").trim();
   if (!emoji) throw new svc.BotsError("Name an emoji.");

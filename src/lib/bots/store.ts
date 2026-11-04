@@ -16,17 +16,7 @@ export interface Draft {
   replyTo?: string;
 }
 
-export interface BotPrefs {
-  /** Bots hop, spin and pull faces now and then (blinking and breathing stay on). */
-  lively: boolean;
-  /** Big avatars' eyes follow the pointer. */
-  track: boolean;
-  /** Bots react to the user's messages with emoji. */
-  reactions: boolean;
-}
-
 const NO_EXTENSIONS = { enabled: false, ids: [] as string[] };
-export const DEFAULT_PREFS: BotPrefs = { lively: true, track: true, reactions: true };
 
 interface BotsState {
   bots: Bot[];
@@ -48,7 +38,6 @@ interface BotsState {
   detailsOpen: boolean;
   /** The starter bots were added (once per browser). */
   seeded: boolean;
-  prefs: BotPrefs;
   /** SearXNG instances for web search. The other providers' keys are in the vault. */
   searxng: string[];
   /** The user's own Pi extensions to load into bots as well. */
@@ -66,7 +55,6 @@ interface BotsState {
   ensureSeeded: () => void;
   /** Throw everything away and start again from the starter bots. */
   reset: () => void;
-  setPrefs: (patch: Partial<BotPrefs>) => void;
   setSearxng: (urls: string[]) => void;
   setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   select: (id: string) => void;
@@ -134,7 +122,6 @@ export const useBots = create<BotsState>()(
       folded: ["hidden"],
       detailsOpen: false,
       seeded: false,
-      prefs: DEFAULT_PREFS,
       searxng: [],
       customExtensions: NO_EXTENSIONS,
       typing: {},
@@ -145,10 +132,6 @@ export const useBots = create<BotsState>()(
       reset: () => {
         set({ bots: [], conversations: [], sections: [], folded: ["hidden"], typing: {}, drafts: [], pulses: {}, focus: undefined, seeded: true });
         void send("POST", "/api/bots/reset");
-      },
-      setPrefs: (patch) => {
-        set((s) => ({ prefs: { ...s.prefs, ...patch } }));
-        if ("reactions" in patch) void send("PATCH", "/api/bots/settings", { reactions: patch.reactions });
       },
       setSearxng: (searxng) => {
         set({ searxng });
@@ -302,12 +285,11 @@ export const useBots = create<BotsState>()(
     {
       name: "openbuild.bots",
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 3,
       partialize: (s) => ({
         folded: s.folded,
         activeId: s.activeId,
         detailsOpen: s.detailsOpen,
-        prefs: s.prefs,
       }),
       // Bots used to live in this browser. The server owns them now; keep only the layout.
       migrate: (persisted) => {
@@ -316,11 +298,12 @@ export const useBots = create<BotsState>()(
         delete p.conversations;
         delete p.sections;
         delete p.seeded;
+        delete (p as { prefs?: unknown }).prefs;
         return p as BotsState;
       },
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<BotsState>;
-        return { ...current, ...p, bots: current.bots, conversations: current.conversations, typing: current.typing, drafts: current.drafts, prefs: { ...DEFAULT_PREFS, ...p.prefs } };
+        return { ...current, ...p, bots: current.bots, conversations: current.conversations, typing: current.typing, drafts: current.drafts };
       },
     },
   ),
@@ -485,7 +468,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       typing: e.typing,
       drafts: e.drafts,
       status: e.status,
-      prefs: { ...s.prefs, reactions: e.settings.reactions },
       searxng: e.settings.searxng ?? [],
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       activeId: openable(e.conversations, s.activeId),
@@ -563,6 +545,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set((s) => ({ sections: e.settings.sections, prefs: { ...s.prefs, reactions: e.settings.reactions }, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS }));
+    set({ sections: e.settings.sections, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS });
   }
 }
