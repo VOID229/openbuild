@@ -3706,6 +3706,39 @@ svg {
   margin-top: 12px;
 }
 
+/* Settings → Bots: which projects a bot can work in. */
+.bot-projects-toggle {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  width: 100%;
+  text-align: left;
+}
+.bot-projects-toggle .setting-label,
+.bot-projects-toggle .setting-desc {
+  display: block;
+}
+.bot-projects-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--med) var(--ease);
+}
+.bot-projects-toggle[aria-expanded="false"] .bot-projects-chevron {
+  transform: rotate(-90deg);
+}
+/* The padding keeps focus rings clear of the collapse's clipped edge. */
+.bot-projects-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 -2px;
+  padding: 14px 2px 2px;
+}
+.bot-projects-body .segmented {
+  display: flex;
+  flex-wrap: wrap;
+}
+
 .setting-row-top {
   align-items: flex-start;
   border-bottom: 0;
