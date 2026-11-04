@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 const inside = (parent: string, child: string) => {
   const path = relative(parent, child);
@@ -38,4 +38,49 @@ export function removeInstallation(plan: ReturnType<typeof uninstallPlan>) {
   for (const link of plan.links) rmSync(link, { force: true });
   rmSync(plan.data, { recursive: true, force: true });
   if (plan.installed) rmSync(plan.root, { recursive: true, force: true });
+}
+
+/** What `ob uninstall` shows before asking: what goes, what stays, wrapped to the terminal. */
+export function describeUninstall(plan: ReturnType<typeof uninstallPlan>, { columns = 80, color = false, home = homedir() } = {}) {
+  const sgr = (code: string) => (text: string) => color ? `\x1b[${code}m${text}\x1b[0m` : text;
+  const bold = sgr("1"), dim = sgr("2"), red = sgr("31"), green = sgr("32"), yellow = sgr("33");
+  const short = (path: string) => inside(home, path) && path !== home ? `~/${relative(home, path)}` : path;
+  const indent = 20;
+  const wrap = (text: string) => {
+    const width = Math.max(24, Math.min(60, columns - indent - 2)), lines: string[] = [];
+    let line = "";
+    for (const word of text.split(" ")) {
+      if (line && line.length + word.length + 1 > width) { lines.push(line); line = word; }
+      else line = line ? `${line} ${word}` : word;
+    }
+    return [...lines, line];
+  };
+  // Paths stay whole so they can be copied; prose wraps under its label.
+  const row = (sign: string, label: string, value: string, note?: string) => {
+    const [first, ...rest] = value.startsWith("/") || value.startsWith("~/") ? [value] : wrap(value);
+    return [
+      `    ${sign} ${label.padEnd(indent - 6)}${first}`,
+      ...rest.map(line => `${" ".repeat(indent)}${line}`),
+      ...(note ? wrap(note).map(line => `${" ".repeat(indent)}${dim(line)}`) : []),
+    ];
+  };
+  const gone = red("✕"), kept = green("✓");
+  const commands = plan.links.map(link => basename(dirname(link)) === "node_modules" ? "bun global package" : basename(link));
+  return [
+    "",
+    `  ${bold("Uninstall OpenBuild")}`,
+    "",
+    `  ${dim("Removes")}`,
+    ...row(gone, "Data", short(plan.data), "All chats, settings, plugins, scratch projects and managed worktrees, including uncommitted work."),
+    ...(plan.installed ? row(gone, "App", short(plan.root)) : []),
+    ...(commands.length ? row(gone, "Commands", commands.join(", ")) : []),
+    ...row(gone, "Credentials", "saved keys and device pairings"),
+    "",
+    `  ${dim("Keeps")}`,
+    ...(plan.installed ? [] : row(kept, "Source", short(plan.root))),
+    ...row(kept, "Projects", "your project folders and native agent sessions"),
+    "",
+    `  ${yellow("!")} Running agent turns will stop.`,
+    "",
+  ];
 }

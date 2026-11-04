@@ -1,13 +1,13 @@
-// The animated stage behind `ob start`, `stop`, `restart`, `update`, `--set-track` and `pair`.
+// The animated stage behind `ob start`, `stop`, `restart`, `update`, `--set-track`, `pair` and `uninstall`.
 // Without an animating terminal every call degrades to plain output, so callers never branch.
 // OPENBUILD_NO_MOTION=1 turns it off.
-// Preview without touching anything: bun bin/motion.ts start|stop|restart|update|track|pair
+// Preview without touching anything: bun bin/motion.ts start|stop|restart|update|track|pair|uninstall
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export type Scene = "lifecycle" | "update" | "track" | "pair";
+export type Scene = "lifecycle" | "update" | "track" | "pair" | "uninstall";
 export interface MotionStep { label: string; detail?: string }
 export interface MotionState {
   scene: Scene;
@@ -173,8 +173,14 @@ if (import.meta.main) {
       stage.update({ code: "K7QX-3MPD", lines: ["http://localhost:3100", "On the other computer, run: ob pair --client"] });
       pause(4000);
       break;
+    case "uninstall": {
+      const removing = ["Stopping the server", "Revoking device pairings", "Clearing credentials", "Removing files"];
+      stage.open({ scene: "uninstall", steps: removing });
+      stepped(removing);
+      break;
+    }
     default:
-      console.error("usage: bun bin/motion.ts start|stop|restart|update|track|pair");
+      console.error("usage: bun bin/motion.ts start|stop|restart|update|track|pair|uninstall");
       process.exit(1);
   }
   stage.end();
