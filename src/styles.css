@@ -8437,10 +8437,11 @@ a.btn-primary {
 .panel-dragging .side-panel,
 .panel-dragging .file-tree { transition: none; }
 
-/* The top row, level with the window's tools (which sit over its right end). */
+/* The top row, level with the window's tools (which sit over its right end). Tall enough that
+   its bottom border clears those buttons (they end at 47px) with room to spare. */
 .side-head {
   flex: none;
-  height: 48px;
+  height: 54px;
 }
 
 .side-bar {
