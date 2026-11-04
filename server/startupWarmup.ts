@@ -1,4 +1,4 @@
-/** Run independent, read-only cache jobs before announcing readiness, with a hard startup budget. */
+/** Run independent, read-only cache jobs together, with a hard budget for the wait. */
 export async function warmCaches(jobs: Record<string, () => Promise<unknown>>, budgetMs = 8000): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const work = Promise.allSettled(Object.entries(jobs).map(async ([name, job]) => {
