@@ -1,5 +1,8 @@
 # Working on OpenBuild
 
+These instructions apply to every agent and harness working in this repository, including Codex,
+Claude Code, Pi, and OpenCode. `CLAUDE.md` imports this file so the workflow stays in one place.
+
 ## Every change lands through a pull request
 
 Each OpenBuild thread works in its own worktree, on its own `openbuild/…` branch. Nothing is pushed
@@ -14,8 +17,13 @@ to `main` directly. When you finish an implementation, a fix or any other change
    little). If the branch already has an open PR, push to it instead of opening another.
 4. **Babysit it until green**: `gh pr checks --watch`. When a check fails, read the log
    (`gh run view <id> --log-failed`), fix the cause, commit, push, and watch again. Repeat until
-   every check passes. Don't skip, disable or weaken a test to get there; if a failure is unrelated
-   to the change (flaky, or broken on `main`), say so with the evidence instead.
+   every check passes. This is required after every push, including follow-up changes to an existing
+   PR and documentation-only changes. Do not end the task while checks are pending or failing just
+   because the PR was opened or local tests passed.
+   Don't skip, disable or weaken a test to get there. Investigate unrelated failures too: retry a
+   suspected flaky check and watch the retry to completion. If a persistent failure is broken on
+   `main` or an external blocker prevents progress, report the evidence and the remaining blocker
+   explicitly; never call the PR ready or green while any check is pending or failing.
 5. **Report** the PR link and its check status. Don't merge it: merging is the user's call. Once it
    merges, OpenBuild closes the thread and removes its worktree by itself.
 
