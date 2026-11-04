@@ -52,6 +52,18 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
     return () => clearTimeout(t);
   }, [done, open]);
 
+  // While a thread's first read is out, the button keeps its place if the last thread had one, so
+  // the switches beside it don't slide over and back.
+  const shown = useRef(false);
+  const loading = !!ws && !changes;
+  if (!loading) shown.current = !!changes?.repo;
+  if (loading && shown.current) {
+    return (
+      <IconButton label="Commit and push actions" tooltip="Reading changes…" className="thread-tool" disabled>
+        <GitBranch size={16} />
+      </IconButton>
+    );
+  }
   if (!ws || !changes?.repo || !scope) return null;
 
   const mine = (onlyMine ?? scope.separable) && scope.separable;
@@ -118,7 +130,9 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
       : primary === "commit"
         ? `Commit ${mine ? "this thread's" : "all"} ${plural(files.length, "change")}`
         : primary === "push"
-          ? `Push ${plural(changes.ahead ?? 0, "commit")} to ${changes.upstream ?? changes.remote}`
+          ? changes.upstream
+            ? `Push ${plural(changes.ahead ?? 0, "commit")} to ${changes.upstream}`
+            : `Push ${branch} to ${changes.remote}`
           : conflicted
             ? "Resolve the conflicts first"
             : "Nothing to commit";
