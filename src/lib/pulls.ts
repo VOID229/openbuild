@@ -29,6 +29,16 @@ export const editPull = (folder: Folder, number: number, title: string, body: st
 export const commentOnPull = (folder: Folder, number: number, body: string) => act(folder, "comment", { number, body });
 export const setPullState = (folder: Folder, number: number, action: "close" | "reopen" | "ready") => act(folder, "state", { number, action });
 
+// The merge the user picked last, shared by the pull request tab and the Commit menu.
+export const METHOD_KEY = "openbuild:pr-merge-method";
+export const DELETE_KEY = "openbuild:pr-delete-branch";
+
+/** The merge method to use without asking: the last one picked, if this repository allows it. */
+export function preferredMethod(methods: PullMergeMethod[]): PullMergeMethod {
+  const last = localStorage.getItem(METHOD_KEY) as PullMergeMethod | null;
+  return last && methods.includes(last) ? last : (methods[0] ?? "merge");
+}
+
 export interface Readiness {
   tone: "ok" | "wait" | "warn" | "bad" | "merged" | "closed" | "draft";
   text: string;

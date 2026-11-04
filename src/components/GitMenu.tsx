@@ -1,11 +1,14 @@
 // The thread header's Commit button: one icon button among the panel's switches that opens the menu:
 // a message (left blank, the text generation models write it), which changes go in, and commit,
-// commit and push, push, or open a pull request. The git itself is server/workspaceGit.ts; which
+// commit and push, push, or open a pull request. Once the thread has an open pull request, merging
+// it (the way last picked in the pull request tab) and viewing it take that last one's place. The git itself is server/workspaceGit.ts; which
 // changes are this thread's is src/lib/git.ts.
-import { ArrowUp, ChevronDown, CloudUpload, ExternalLink, GitBranch, GitCommitHorizontal, GitPullRequest } from "lucide-react";
+import { ArrowUp, ChevronDown, CloudUpload, ExternalLink, GitBranch, GitCommitHorizontal, GitMerge, GitPullRequest } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GitChange } from "../../shared/types";
+import type { GitChange, PullDetail } from "../../shared/types";
 import { commitPaths, commitScope, gitCommit, gitPullRequest, gitPush, useGitChanges, writeCommitMessage } from "../lib/git";
+import { usePanel } from "../lib/panel";
+import { DELETE_KEY, mergePull, mergeReadiness, preferredMethod, viewPull } from "../lib/pulls";
 import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { cx } from "../lib/ui";
@@ -13,7 +16,9 @@ import { useFieldDictation } from "../lib/useFieldDictation";
 import { DictationButton } from "./DictationButton";
 import { IconButton, Popover, Spinner } from "./primitives";
 
-type Action = "commit" | "commit-push" | "push" | "pr";
+type Action = "commit" | "commit-push" | "push" | "pr" | "merge";
+
+const METHOD_LABEL = { squash: "Squash and merge", merge: "Merge commit", rebase: "Rebase and merge" } as const;
 
 const STATUS: Record<GitChange["status"], string> = { M: "M", A: "A", D: "D", R: "R", "?": "U", U: "!" };
 const STATUS_LABEL: Record<GitChange["status"], string> = { M: "Changed", A: "Added", D: "Deleted", R: "Renamed", "?": "New", U: "Conflict" };
@@ -35,8 +40,25 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
   const [error, setError] = useState<string>();
   const [done, setDone] = useState<{ text: string; short: string; url?: string }>();
   const [showFiles, setShowFiles] = useState(false);
+  // The thread's open pull request, as GitHub says it stands now: asked each time the menu opens.
+  const threadPr = chat.pullRequest?.state === "open" ? chat.pullRequest : undefined;
+  const [pull, setPull] = useState<PullDetail>();
+  const [pullError, setPullError] = useState<string>();
   const dictation = useFieldDictation({ value: message, setValue: setMessage, field: input, onError: setError });
   useEffect(() => { if (!open) dictation.cancel(); }, [open]);
+
+  useEffect(() => {
+    if (!open || !ws || !threadPr) return;
+    let live = true;
+    setPullError(undefined);
+    viewPull(ws, threadPr.number).then(
+      (p) => live && setPull(p),
+      (err: Error) => live && setPullError(err.message),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open, ws?.cwd, ws?.deviceId, threadPr?.number, tick]);
 
   const scope = useMemo(() => (changes?.repo ? commitScope(chat, changes, chats) : undefined), [chat, changes, chats]);
   useEffect(() => {
@@ -44,6 +66,7 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
     setMessage("");
     setError(undefined);
     setDone(undefined);
+    setPull(undefined);
   }, [chat.id]);
   // A finished action's note fades after a while, once the menu is closed.
   useEffect(() => {
@@ -69,6 +92,19 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         : changes.defaultBranch === branch
           ? `You're on ${branch}, the default branch`
           : undefined;
+  // Merging takes what GitHub has, so commits that only exist here would be left out.
+  const current = threadPr && pull?.number === threadPr.number ? pull : undefined;
+  const readiness = current && mergeReadiness(current);
+  const mergeBlocked = !threadPr
+    ? undefined
+    : !current
+      ? (pullError ?? `Checking #${threadPr.number}…`)
+      : changes.ahead
+        ? `Push ${plural(changes.ahead, "commit")} first: they're not in #${threadPr.number} yet`
+        : !readiness!.canMerge
+          ? readiness!.text
+          : undefined;
+  const method = current && preferredMethod(current.methods);
   const primary: Action | undefined = canCommit ? "commit" : canPush ? "push" : undefined;
 
   const run = async (action: Action) => {
@@ -93,6 +129,12 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         setBusy({ action, step: "Pushing…" });
         const r = await gitPush(ws);
         setDone({ text: sha ? `Committed ${sha} and pushed to ${r.upstream}` : `Pushed to ${r.upstream}`, short: "Pushed" });
+      } else if (action === "merge") {
+        if (!current || !method) return;
+        setBusy({ action, step: `Merging #${current.number}…` });
+        await mergePull(ws, current.number, method, current.headSha, localStorage.getItem(DELETE_KEY) === "1");
+        setDone({ text: `Merged #${current.number} into ${current.base}`, short: "Merged", url: current.url });
+        setOpen(true);
       } else if (action === "pr") {
         setBusy({ action, step: "Opening pull request…" });
         const r = await gitPullRequest(ws);
@@ -226,11 +268,35 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
           <span className="menu-item-label">Push</span>
           {busy?.action === "push" && <Spinner size={12} />}
         </button>
-        <button type="button" className="menu-item" disabled={!!prBlocked || !!busy} data-tooltip={prBlocked} data-tooltip-side="left" onClick={() => void run("pr")}>
-          <GitPullRequest size={15} />
-          <span className="menu-item-label">Create PR</span>
-          {busy?.action === "pr" && <Spinner size={12} />}
-        </button>
+        {threadPr ? (
+          <>
+            <button type="button" className="menu-item git-merge-item" disabled={!!mergeBlocked || !!busy} data-tooltip={mergeBlocked} data-tooltip-side="left" onClick={() => void run("merge")}>
+              <GitMerge size={15} />
+              <span className="menu-item-label">
+                Merge #{threadPr.number}
+                <small>{mergeBlocked ?? `${METHOD_LABEL[method!]} into ${current!.base}`}</small>
+              </span>
+              {(busy?.action === "merge" || (!current && !pullError && open)) && <Spinner size={12} />}
+            </button>
+            <button
+              type="button"
+              className="menu-item"
+              onClick={() => {
+                setOpen(false);
+                usePanel.getState().openPulls(threadPr.number);
+              }}
+            >
+              <GitPullRequest size={15} />
+              <span className="menu-item-label">View #{threadPr.number}</span>
+            </button>
+          </>
+        ) : (
+          <button type="button" className="menu-item" disabled={!!prBlocked || !!busy} data-tooltip={prBlocked} data-tooltip-side="left" onClick={() => void run("pr")}>
+            <GitPullRequest size={15} />
+            <span className="menu-item-label">Create PR</span>
+            {busy?.action === "pr" && <Spinner size={12} />}
+          </button>
+        )}
         {busy && <p className="git-note">{busy.step}</p>}
         {error && <p className="git-note git-note-bad" role="alert">{error}</p>}
         {done && (
