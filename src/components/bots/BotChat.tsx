@@ -21,7 +21,7 @@ import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
-import { authorName, ConversationAvatar, dividerTime, fullTime, messageText } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageText } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -451,8 +451,6 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       <div className="bm-line">
         <div
           className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card")}
-          data-tooltip={fullTime(m.at)}
-          data-tooltip-side={mine ? "left" : "right"}
           onDoubleClick={readonly ? undefined : (e) => {
             if ((e.target as Element).closest("button, a")) return;
             window.getSelection()?.removeAllRanges();
