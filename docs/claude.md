@@ -51,6 +51,16 @@ OpenBuild appends question guidance to Claude's native `claude_code` system prom
 
 Claude Code's tools appear in OpenBuild's usual rows: `Bash` as commands with their output, `Read`, `Edit`/`MultiEdit`/`Write` with the diff Claude actually applied (from its structured patch), `Grep`/`Glob` as searches, `WebSearch`/`WebFetch`, `TodoWrite` as a checklist, `Task`/`Agent` subagents (with their tools nested in the same run), `ExitPlanMode` and MCP tools under their own names. Thinking streams as reasoning, text streams token by token. The native input and structured result stay on each row (`args.claude`). Claude Code runs every tool itself; OpenBuild never runs one again.
 
+## Background tasks
+
+A reply stays active while Claude handles finite background work and its completion notifications,
+including failures. OpenBuild requests Claude's session-state events and waits for authoritative
+`idle`, rather than closing the reply on the first `result`. Follow-up output, tool approvals,
+steering and Stop remain attached to the same reply. Ambient watchers do not keep activity running.
+Older CLIs without session-state events retain result-based completion, guarded by the live
+background-task snapshots when available. This does not create a GitHub webhook or wake a thread
+for checks Claude never started watching.
+
 ## Restarts and interruption
 
 Claude Code runs inside OpenBuild's **detached agent worker** (a compatible `pi-worker/` or feature-versioned lane), not in the HTTP server. `openbuild stop`, `openbuild restart`, a server crash or SIGTERM leave a running turn running. While the server is down the worker keeps saving its output. The restarted server reattaches, replays it, and finishes the reply in the same message. Posting the same stream id again reattaches instead of starting another turn.
