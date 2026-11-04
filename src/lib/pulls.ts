@@ -22,6 +22,28 @@ const act = (folder: Folder, path: string, body: Record<string, unknown>) =>
   fetch(apiUrl(folder.deviceId, `/api/workspaces/pulls/${path}`), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: folder.cwd, ...body }) }).then((r) => answer<{ ok: boolean }>(r));
 
 export const listPulls = (folder: Folder, state: PullListState) => read<PullList>(folder, "", { state });
+// A folder's repository doesn't change, so it's asked once (again after a failure).
+const repos = new Map<string, Promise<string | undefined>>();
+const repoUrls = new Map<string, string | undefined>();
+const folderId = (folder: Folder) => `${folder.deviceId ?? "local"}:${folder.cwd ?? ""}`;
+
+/** The folder's GitHub repository (`https://github.com/o/r`), or undefined when it has none or gh can't say. */
+export function pullRepo(folder: Folder): Promise<string | undefined> {
+  const key = folderId(folder);
+  let known = repos.get(key);
+  if (!known) {
+    known = read<{ url: string }>(folder, "/repo", {}).then(
+      ({ url }) => (repoUrls.set(key, url), url),
+      () => (repos.delete(key), undefined),
+    );
+    repos.set(key, known);
+  }
+  return known;
+}
+
+/** The folder's repository if it's already known: `null` while it hasn't been asked or answered. */
+export const knownPullRepo = (folder: Folder): string | undefined | null => (repoUrls.has(folderId(folder)) ? repoUrls.get(folderId(folder)) : null);
+
 export const viewPull = (folder: Folder, number: number) => read<PullDetail>(folder, "/view", { number });
 export const pullPatch = (folder: Folder, number: number, sha?: string) => read<PullPatch>(folder, "/patch", { number, sha });
 export const mergePull = (folder: Folder, number: number, method: PullMergeMethod, headSha: string, deleteBranch: boolean) => act(folder, "merge", { number, method, headSha, deleteBranch });
