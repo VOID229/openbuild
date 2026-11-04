@@ -4,7 +4,7 @@ import { loadChatHistory } from "./db";
 // with none picked, the thread's own model is used at the lowest reasoning it supports (no
 // thinking when possible).
 import { streamOnce } from "./api";
-import { completeOnce } from "./pi";
+import { nameWorktree, completeOnce } from "./pi";
 import { loadPlanModels, planDetection, useStore } from "./store";
 import { lowestEffort, nearestEffort, TEXT_RUNTIMES } from "../../shared/types";
 import type { Attachment, PlanId, TextRuntime } from "../../shared/types";
@@ -177,5 +177,33 @@ export async function autoName(chatId: string) {
     if (latest && latest.titleSource !== "user") useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
   } finally {
     setTitling(chatId, false);
+  }
+}
+
+/** Runs once after provisioning, alongside the first turn. No later title edit renames Git state. */
+export async function autoNameWorktree(chatId: string) {
+  const chat = useStore.getState().chats.find((c) => c.id === chatId);
+  const ws = chat?.workspace;
+  const question = chat?.messages.find((m) => m.role === "user");
+  if (!useStore.getState().settings.naming.enabled || !ws?.worktree || !ws.branch || !question) return;
+  try {
+    const name = await generateText({
+      system: "Name a Git branch for this coding task. Reply only with a specific lowercase kebab-case slug of 2 to 6 words, at most 48 characters. No prefix, quotes, formatting, or explanation.",
+      content: question.content.slice(0, 6000) || (question.attachments ?? []).map((a) => a.name).join(", "),
+      images: promptImages(question), sessionId: `${chatId}-branch`, chat,
+      clean: (raw) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(raw.trim()) && raw.trim().length <= 48 ? raw.trim() : "",
+    });
+    const latest = useStore.getState().chats.find((c) => c.id === chatId);
+    if (!name || latest?.done || latest?.workspace?.cwd !== ws.cwd || latest.workspace.branch !== ws.branch) return;
+    const { branch } = await nameWorktree(ws.cwd, ws.branch, name, ws.deviceId);
+    if (!branch) return;
+    // Forked threads can share the checkout. Only replace metadata still matching the old identity.
+    for (const current of useStore.getState().chats) {
+      const workspace = current.workspace;
+      if (workspace?.cwd === ws.cwd && workspace.deviceId === ws.deviceId && workspace.branch === ws.branch)
+        useStore.getState().updateChat(current.id, { workspace: { ...workspace, branch } });
+    }
+  } catch {
+    // Naming is optional: a failed model or unavailable device leaves the temporary branch intact.
   }
 }

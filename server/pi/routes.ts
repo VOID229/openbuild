@@ -850,7 +850,7 @@ export function piRoutes(api: Api) {
         if (body?.mode === "scratch") return Response.json({ workspace: projects.scratchWorkspace() });
         if (!str(body?.projectId, 64) || (body.mode !== "local" && body.mode !== "worktree")) return bad("Expected { projectId, mode, branch? }");
         try {
-          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined, typeof body.name === "string" ? body.name : undefined) });
+          return Response.json({ workspace: await projects.prepareWorkspace(body.projectId, body.mode, typeof body.branch === "string" ? body.branch : undefined) });
         } catch (err) {
           return fail(err);
         }
@@ -861,6 +861,17 @@ export function piRoutes(api: Api) {
         const cwd = new URL(req.url).searchParams.get("cwd");
         if (!cwd || !projects.allowedCwd(cwd)) return bad("Unknown folder", 403);
         return Response.json(await projects.gitInfo(cwd));
+      }),
+    },
+    "/api/workspaces/name": {
+      POST: api(async (req) => {
+        const body = await readJson(req);
+        if (!str(body?.cwd, 1024) || !str(body?.expected, 128) || !str(body?.name, 48)) return bad("Expected { cwd, expected, name }");
+        try {
+          return Response.json({ branch: await projects.nameWorktree(body.cwd, body.expected, body.name) });
+        } catch (err) {
+          return fail(err);
+        }
       }),
     },
     "/api/workspaces/remove": {

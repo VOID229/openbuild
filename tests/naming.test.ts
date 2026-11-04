@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { autoName, generateText, promptImages, threadTranscript } from "../src/lib/naming";
+import { autoNameWorktree, autoName, generateText, promptImages, threadTranscript } from "../src/lib/naming";
 import { useStore } from "../src/lib/store";
 import type { Attachment } from "../shared/types";
 import type { Chat, Detection, Message } from "../src/lib/types";
@@ -155,5 +155,35 @@ describe("autoName", () => {
     expect(useStore.getState().titling.has(chat.id)).toBe(false);
     await naming;
     useStore.setState({ chats: before.chats, settings: before.settings });
+  });
+});
+
+
+describe("autoNameWorktree", () => {
+  test("renames in the background and updates threads sharing the same checkout", async () => {
+    const before = useStore.getState();
+    const workspace = { cwd: "/tmp/checkout", branch: "openbuild/tmp-012345abcdef", worktree: true };
+    const chat = { id: "branch-test", title: "Original title", messages: [message(1, "user", "fix branch naming")], workspace } as Chat;
+    const codex = { plan: "codex", status: "valid", checkedAt: 1, models: [{ id: "codex/gpt", input: ["text"], reasoning: { efforts: ["low"] } }] } as unknown as Detection;
+    const realFetch = globalThis.fetch;
+    const requests: any[] = [];
+    useStore.setState({ chats: [chat, { ...chat, id: "fork" }], codexModels: { "": codex }, settings: { ...before.settings, naming: { enabled: true, models: [{ plan: "codex", id: "codex/gpt", effort: "off" }] } } });
+    globalThis.fetch = (async (url: string, init: RequestInit) => {
+      requests.push(JSON.parse(init.body as string));
+      return Response.json(url.includes("/workspaces/name") ? { branch: "openbuild/fix-branch-naming" } : { text: "fix-branch-naming" });
+    }) as unknown as typeof fetch;
+    try {
+      await autoNameWorktree(chat.id);
+      expect(requests[1]).toMatchObject({ cwd: workspace.cwd, expected: workspace.branch, name: "fix-branch-naming" });
+      for (const thread of useStore.getState().chats) {
+        expect(thread.workspace).toMatchObject({ cwd: workspace.cwd, branch: "openbuild/fix-branch-naming" });
+        expect(thread.title).toBe("Original title");
+      }
+      // Later title edits do not start another Git rename.
+      expect(requests).toHaveLength(2);
+    } finally {
+      globalThis.fetch = realFetch;
+      useStore.setState({ chats: before.chats, codexModels: before.codexModels, settings: before.settings });
+    }
   });
 });

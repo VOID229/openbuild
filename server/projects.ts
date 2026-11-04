@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { GitInfo, Project, Workspace } from "../shared/types";
 import * as storage from "./storage";
+import { temporaryWorktreeBranch, renameTemporaryBranch } from "./worktreeNaming";
 
 const KEY = "projects";
 
@@ -185,7 +186,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").repla
  * `branch` first if asked (only when there's nothing uncommitted to carry over). "worktree" makes a
  * worktree on a new branch started from `branch` (or the current one).
  */
-export async function prepareWorkspace(projectId: string, mode: "local" | "worktree", branch?: string, name?: string): Promise<Workspace> {
+export async function prepareWorkspace(projectId: string, mode: "local" | "worktree", branch?: string): Promise<Workspace> {
   const project = findProject(projectId);
   if (!project) throw new Error("That project isn't in OpenBuild anymore");
   if (project.missing) throw new Error(`${tilde(project.path)} doesn't exist anymore`);
@@ -205,15 +206,19 @@ export async function prepareWorkspace(projectId: string, mode: "local" | "workt
     return { ...base, branch: info.branch };
   }
   const from = branch || info.branch || "HEAD";
-  // A few words of the thread's title make a readable branch name.
-  const short = slug((name ?? "").split(/\s+/).slice(0, 4).join(" ")).slice(0, 32).replace(/[-.]+$/, "") || crypto.randomUUID().slice(0, 6);
-  let newBranch = `openbuild/${short}`;
-  for (let i = 2; info.branches.includes(newBranch); i++) newBranch = `openbuild/${short}-${i}`;
+  const newBranch = temporaryWorktreeBranch();
   const dir = join(worktreesDir(), slug(project.name) || project.id, newBranch.slice("openbuild/".length));
   mkdirSync(join(worktreesDir(), slug(project.name) || project.id), { recursive: true });
   const r = await git(project.path, ["worktree", "add", "-b", newBranch, dir, from], 120_000);
   if (r.code !== 0) throw new Error(r.err || "Couldn't create the worktree");
   return { ...base, cwd: dir, branch: newBranch, worktree: true, base: from };
+}
+
+/** Rename only a managed worktree's temporary branch, never its directory. */
+export async function nameWorktree(cwd: string, expected: string, name: string): Promise<string | null> {
+  const real = realpathSync(cwd);
+  if (!real.startsWith(realpathSync(worktreesDir()) + sep)) throw new Error("Only worktrees OpenBuild made can be named here");
+  return renameTemporaryBranch(real, expected, name);
 }
 
 /**
