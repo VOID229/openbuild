@@ -60,6 +60,11 @@ function open(): Database {
     updated_at INTEGER NOT NULL
   )`);
   db.run("CREATE TABLE IF NOT EXISTS chat_summaries (id TEXT PRIMARY KEY, version TEXT NOT NULL, data TEXT NOT NULL)");
+  // Summaries now list the pull requests a thread opened: rebuild the ones that may have some, once.
+  if (!db.query("SELECT 1 FROM kv WHERE key = 'summaries-opened-prs'").get()) {
+    db.run("DELETE FROM chat_summaries WHERE id IN (SELECT id FROM chats WHERE instr(data, 'gh pr create') > 0)");
+    db.query("INSERT INTO kv (key, value, updated_at) VALUES ('summaries-opened-prs', '1', ?1)").run(Date.now());
+  }
   return db;
 }
 
@@ -112,11 +117,11 @@ export async function chatSummaries(ids?: string[]): Promise<{ v: string; chat: 
   return out;
 }
 
-/** Summaries of the threads that work in an OpenBuild worktree (open or closed), read without parsing the rest. */
-export function worktreeChatSummaries(): Chat[] {
+/** Summaries of the threads with a pull request to follow (open or closed), read without parsing the rest. */
+export function pullRequestChatSummaries(): Chat[] {
   return db.query<{ data: string }, []>(
     `SELECT s.data FROM chat_summaries s JOIN chats c ON c.id = s.id AND c.version = s.version
-     WHERE c.deleted_at IS NULL AND json_extract(s.data, '$.workspace.worktree') = 1`,
+     WHERE c.deleted_at IS NULL AND (json_extract(s.data, '$.workspace.worktree') = 1 OR json_extract(s.data, '$.openedPullRequests') IS NOT NULL)`,
   ).all().map((row) => JSON.parse(row.data) as Chat);
 }
 

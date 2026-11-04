@@ -311,8 +311,10 @@ export interface Chat {
   forkDepth?: number;
   /** Where the thread works (set when it starts; a fork works where its original did). */
   workspace?: Workspace;
-  /** Its worktree branch's pull request. Written only by the server. */
+  /** The pull request it's following: its worktree branch's, or one it opened. Written only by the server. */
   pullRequest?: ThreadPullRequest;
+  /** Pull requests its agent opened, by URL. Derived from its tool calls when it's summarized. */
+  openedPullRequests?: string[];
   /** When the server closed it because its pull request merged. */
   autoClosedAt?: number;
   /** Reopened after being closed for a merge: never closed for it again. */

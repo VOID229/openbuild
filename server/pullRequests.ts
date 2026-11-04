@@ -1,13 +1,15 @@
-// Follows the pull requests of threads that work in OpenBuild worktrees, and closes a thread once its
-// pull request merges ("Close threads when their PR merges" in Settings › Workspace, on by default).
-// Once a minute, while some open thread has a worktree, GitHub is asked about each repository's
-// recent pull requests with one `gh pr list`, and each thread is matched to the one opened from its
-// branch. The chat keeps what was found (`pullRequest`), so the sidebar and thread header can show it.
+// Follows threads' pull requests, and closes a thread once its pull request merges ("Close threads
+// when their PR merges" in Settings › Workspace, on by default). Once a minute, while some open thread
+// has one to follow, GitHub is asked about each repository's recent pull requests with one
+// `gh pr list`. A thread is matched to the one from its worktree's branch, or to one its agent opened
+// wherever it worked (a thread in the project's own checkout, say). The chat keeps what was found
+// (`pullRequest`), so the sidebar and thread header can show it.
 //
 // A merge closes the thread only when it came after the thread's last user message (so a thread that
 // kept going after the merge stays open), and never while it's working, pinned, snoozed or was
 // reopened after an earlier auto-close. Its worktree is then removed when nothing would be lost:
 // no uncommitted changes, HEAD is the commit GitHub merged, and no other open thread works there.
+// Only OpenBuild's own worktrees are ever removed.
 import { existsSync } from "node:fs";
 import type { ThreadPullRequest } from "../shared/types";
 import type { Chat } from "../src/lib/types";
@@ -49,11 +51,11 @@ export function checksOf(rollup: GhPullRequest["statusCheckRollup"]): ThreadPull
 }
 
 /**
- * The pull request opened from this branch for this thread: one opened after the thread started (a
- * reused branch name mustn't inherit an old one), preferring an open one, else the newest.
+ * This thread's pull request: one from its branch opened after the thread started (a reused branch
+ * name mustn't inherit an old one), or one it opened itself, preferring an open one, else the newest.
  */
-export function pickPullRequest(prs: GhPullRequest[], branch: string, since: number): GhPullRequest | undefined {
-  const mine = prs.filter((pr) => pr.headRefName === branch && Date.parse(pr.createdAt) >= since);
+export function pickPullRequest(prs: GhPullRequest[], branch: string | undefined, since: number, opened: string[] = []): GhPullRequest | undefined {
+  const mine = prs.filter((pr) => (pr.headRefName === branch && Date.parse(pr.createdAt) >= since) || opened.includes(pr.url));
   return mine.find((pr) => pr.state === "OPEN") ?? mine.sort((a, b) => b.number - a.number)[0];
 }
 
@@ -157,18 +159,24 @@ async function removeMergedWorktree(chat: Chat, pr: GhPullRequest, local: { head
 
 let sweeping: Promise<void> | undefined;
 
-/** Look up every open worktree thread's pull request, saving what changed and closing merged threads. */
-export function sweep(): Promise<void> {
-  return (sweeping ??= sweepOnce().catch((err) => console.error("[pull-requests] Sweep failed:", err)).finally(() => { sweeping = undefined; }));
+/**
+ * Look up every open thread's pull request, saving what changed and closing merged threads. `refresh`
+ * brings finished replies up to date first: with no browser polling, they'd still look like working.
+ */
+export function sweep(refresh?: () => Promise<void>): Promise<void> {
+  return (sweeping ??= sweepOnce(refresh).catch((err) => console.error("[pull-requests] Sweep failed:", err)).finally(() => { sweeping = undefined; }));
 }
 
-async function sweepOnce() {
+async function sweepOnce(refresh?: () => Promise<void>) {
   // Paired devices follow their own threads; this server only knows its own checkouts.
-  const open = storage.worktreeChatSummaries().filter((c) => !c.archived && !c.workspace?.deviceId);
-  if (!open.length || !gh()) return;
+  const following = () => storage.pullRequestChatSummaries().filter((c) => !c.archived && !c.workspace?.deviceId);
+  if (!following().length || !gh()) return;
+  await refresh?.();
+  const open = following();
   const byRepo = new Map<string, Chat[]>();
   for (const chat of open) {
-    const repo = findProject(chat.workspace!.projectId)?.path;
+    const projectId = chat.workspace?.projectId;
+    const repo = projectId && findProject(projectId)?.path;
     if (!repo || !existsSync(repo)) continue;
     byRepo.set(repo, [...(byRepo.get(repo) ?? []), chat]);
   }
@@ -177,11 +185,11 @@ async function sweepOnce() {
     const prs = await listPullRequests(repo);
     if (!prs) continue;
     for (const summary of chats) {
-      const local = await currentBranch(summary.workspace!.cwd);
+      // Only a worktree's branch is the thread's own: threads share a project's checkout and its branch.
+      const local = summary.workspace?.worktree ? await currentBranch(summary.workspace.cwd) : undefined;
       // An agent may have switched the worktree to a branch of its own.
-      const branch = local?.branch ?? summary.workspace!.branch;
-      if (!branch) continue;
-      const found = pickPullRequest(prs, branch, summary.createdAt);
+      const branch = summary.workspace?.worktree ? local?.branch ?? summary.workspace.branch : undefined;
+      const found = pickPullRequest(prs, branch, summary.createdAt, summary.openedPullRequests);
       if (!found) continue;
       const now = Date.now();
       const pr = toThreadPullRequest(found, now);
@@ -207,8 +215,8 @@ async function sweepOnce() {
 const hot = globalThis as { openbuildPullRequestTimer?: ReturnType<typeof setInterval> };
 
 /** Start the once-a-minute sweep (once, even under `bun --hot`). */
-export function startPullRequestSweep() {
+export function startPullRequestSweep(refresh: () => Promise<void>) {
   if (hot.openbuildPullRequestTimer) clearInterval(hot.openbuildPullRequestTimer);
-  hot.openbuildPullRequestTimer = setInterval(() => void sweep(), SWEEP_EVERY);
-  setTimeout(() => void sweep(), 10_000);
+  hot.openbuildPullRequestTimer = setInterval(() => void sweep(refresh), SWEEP_EVERY);
+  setTimeout(() => void sweep(refresh), 10_000);
 }
