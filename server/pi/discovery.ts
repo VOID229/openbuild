@@ -1,6 +1,6 @@
 import { userVisiblePrompt } from "../../shared/promptDisplay";
 // Read Pi's persisted transcripts without opening/migrating them or starting an agent.
-import { realpathSync } from "node:fs";
+import { type Stats, realpathSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { basename, join, resolve, sep } from "node:path";
@@ -171,6 +171,8 @@ async function filesIn(dir: string): Promise<string[]> {
 }
 
 const fingerprints = new Map<string, string>();
+const fingerprintKey = (file: string) => `pi-discovery:v2:${createHash("sha256").update(resolve(file)).digest("hex")}`;
+const fileFingerprint = (info: Stats, id?: string) => `${info.dev}:${info.ino}:${info.ctimeMs}:${info.mtimeMs}:${info.size}:${isLive(info.mtimeMs)}:${id ?? ""}:${id ? managedSessionBoundary(id) ?? "" : ""}:${id ? ownsSession(id) : false}`;
 let running: Promise<void> | undefined;
 
 /** Shared by all browsers; unchanged files cost a stat, not a transcript read. */
@@ -195,15 +197,16 @@ async function discover() {
     try {
       const info = await stat(file);
       // Includes liveness so a run that went quiet is read again once it's taken to be over.
-      const fingerprint = `${info.mtimeMs}:${info.size}:${isLive(info.mtimeMs)}`;
-      if (fingerprints.get(file) === fingerprint) return;
+      if (!info.isFile()) return;
       const knownId = mappings.get(resolve(file));
+      const fingerprint = fileFingerprint(info, knownId);
+      if (fingerprints.get(file) === fingerprint || storage.getValue(fingerprintKey(file)) === fingerprint) return;
       // Worker logs own the original UI messages. After a finished turn, terminal-created
       // messages may still be appended to this Pi session; import only that later suffix.
       const boundary = knownId ? managedSessionBoundary(knownId) : undefined;
       if (knownId && ownsSession(knownId) && (boundary === undefined || info.mtimeMs <= boundary)) { fingerprints.set(file, fingerprint); return; }
       const projected = projectSession(await readFile(file, "utf8"), file, info.mtimeMs);
-      if (!projected) return;
+      if (!projected) { fingerprints.set(file, fingerprint); storage.setValue(fingerprintKey(file), fingerprint); return; }
       const id = knownId || projected.id;
       // Reads above yield to requests; re-check ownership and metadata immediately before writing.
       const managed = ownsSession(id);
@@ -227,8 +230,14 @@ async function discover() {
         ...(keepTitle ? { title: old.title, titleSource: old.titleSource } : {}),
         workspace: old?.workspace || projected.workspace,
       };
-      if (storage.putChat(chat)) storage.setValue(`pi-session:${id}`, JSON.stringify({ file, cwd: projected.workspace!.cwd }));
-      fingerprints.set(file, fingerprint);
+      let savedFingerprint = fingerprint;
+      storage.transaction(() => {
+        const saved = storage.putChat(chat);
+        if (saved) storage.setValue(`pi-session:${id}`, JSON.stringify({ file, cwd: projected.workspace!.cwd }));
+        savedFingerprint = fileFingerprint(info, saved ? id : knownId);
+        storage.setValue(fingerprintKey(file), savedFingerprint);
+      });
+      fingerprints.set(file, savedFingerprint);
     } catch { /* A session can disappear or be replaced while scanning. Retry next time. */ }
   }));
 }
