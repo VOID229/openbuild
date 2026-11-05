@@ -176,7 +176,9 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
       </div>
     );
 
-  const readiness = mergeReadiness(pr);
+  const readiness: Readiness = error
+    ? { tone: "warn", text: `Couldn’t refresh pull request: ${error}`, canMerge: false }
+    : mergeReadiness(pr);
   const tabs: { id: Tab; label: string; count?: number }[] = [
     { id: "overview", label: "Overview" },
     { id: "commits", label: "Commits", count: pr.commits.length },

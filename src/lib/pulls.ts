@@ -238,9 +238,11 @@ export function usePullRead<T>(key: string, load: (fresh: boolean) => Promise<T>
     const tick = () => document.visibilityState === "visible" && void reload(true);
     const timer = setInterval(tick, every);
     document.addEventListener("visibilitychange", tick);
+    window.addEventListener("focus", tick);
     return () => {
       clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);
+      window.removeEventListener("focus", tick);
     };
   }, [key, every, reload]);
   useEffect(() => {

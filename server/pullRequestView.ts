@@ -4,6 +4,7 @@
 //
 // Actions name the repository with `--repo`. Besides being explicit, that keeps `gh pr merge
 // --delete-branch` away from local branches: a worktree's checkout is the thread's, not ours to switch.
+import { existsSync } from "node:fs";
 import { mergeUnsettled } from "../shared/pullReadiness";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../shared/types";
 import { checksOf, FAILED, sweep } from "./pullRequests";
@@ -178,7 +179,7 @@ const repos = new Map<string, { at: number; repo: GhRepo }>();
 
 async function repoOf(cwd: string): Promise<GhRepo> {
   const known = repos.get(cwd);
-  if (known && Date.now() - known.at < REPO_TTL) return known.repo;
+  if (known && (Date.now() - known.at < REPO_TTL || !existsSync(cwd))) return known.repo;
   const r = await run([bin(), "repo", "view", "--json", "nameWithOwner,url,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed,viewerPermission"], cwd, READ_TIMEOUT);
   if (r.code !== 0) fail(r, "gh couldn't find this repository on GitHub");
   const repo = parse<GhRepo>(r.out);
@@ -216,7 +217,24 @@ async function whereIs(cwd: string): Promise<{ common: string; branch: string } 
   return { common, branch: head.startsWith("refs/heads/") ? head.slice("refs/heads/".length) : "" };
 }
 
-const repoKey = async (cwd: string) => (await whereIs(cwd))?.common ?? cwd;
+// Remember the repository while the thread exists: a merge can remove its worktree.
+const locations = new Map<string, string>();
+const repoKey = async (cwd: string) => {
+  if (!existsSync(cwd)) return locations.get(cwd) ?? cwd;
+  const common = (await whereIs(cwd))?.common ?? cwd;
+  locations.set(cwd, common);
+  return common;
+};
+
+async function readPull(cwd: string, number: number, fields: string) {
+  const args = [bin(), "pr", "view", String(number), "--json", fields];
+  if (!existsSync(cwd)) {
+    const repo = await repoOf(cwd);
+    args.push("--repo", repoFlag(repo.url));
+    cwd = await repoKey(cwd);
+  }
+  return run(args, cwd, READ_TIMEOUT);
+}
 
 /** A repository's pull requests in one state, newest first, and which of them this folder's branch opened. */
 export async function list(cwd: string, state: unknown, fresh = false): Promise<PullList> {
@@ -249,7 +267,7 @@ async function settled(cwd: string, detail: PullDetail): Promise<PullDetail> {
   for (const wait of SETTLE_WAITS) {
     if (!mergeUnsettled(detail)) break;
     await Bun.sleep(wait);
-    const r = await run([bin(), "pr", "view", String(detail.number), "--json", "mergeable,mergeStateStatus"], cwd, READ_TIMEOUT);
+    const r = await readPull(cwd, detail.number, "mergeable,mergeStateStatus");
     if (r.code !== 0) break;
     const { mergeable, mergeStateStatus } = parse<Pick<GhDetail, "mergeable" | "mergeStateStatus">>(r.out);
     detail = { ...detail, mergeable: mergeable ?? detail.mergeable, mergeState: mergeStateStatus ?? detail.mergeState };
@@ -263,7 +281,7 @@ export async function view(cwd: string, number: unknown, fresh = false): Promise
     `${await repoKey(cwd)}|view|${n}`,
     fresh,
     async () => {
-      const [repo, r] = await Promise.all([repoOf(cwd), run([bin(), "pr", "view", String(n), "--json", DETAIL_FIELDS], cwd, READ_TIMEOUT)]);
+      const [repo, r] = await Promise.all([repoOf(cwd), readPull(cwd, n, DETAIL_FIELDS)]);
       if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
       return settled(cwd, toDetail(parse<GhDetail>(r.out), repo));
     },
