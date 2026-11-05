@@ -1,6 +1,6 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
 // routines, model, how often it checks in; a group's members and goal), making and deleting
-// them, the web search providers they share, and how lively bots are.
+// them, the default model and web search providers they share, and how lively bots are.
 import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { botModels, type PiModels } from "../../lib/pi";
@@ -46,14 +46,14 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
   { value: "high", label: "Every hour" },
 ];
 
-/** A bot's model: the models bots can run on, with "Default" on top for bots that follow whatever the default is. */
-function BotModelSelect({ bot }: { bot: Bot }) {
+/** A model to run bots on, with an option on top for leaving it unset and following what's `inherited` (Pi's own default without one). */
+function BotModelSelect({ label, value, unset, inherited, onChange }: { label: string; value?: string; unset: string; inherited?: string; onChange: (model: string) => void }) {
   const [open, setOpen] = useState(false);
   const [listing, setListing] = useState<PiModels>();
   const [failed, setFailed] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
   const models = listing?.models;
-  const fallback = listing?.defaultModel;
+  const fallback = inherited || listing?.defaultModel;
   useEffect(() => {
     let live = true;
     void botModels()
@@ -64,26 +64,27 @@ function BotModelSelect({ bot }: { bot: Bot }) {
     };
   }, []);
   const nameOf = (id?: string) => models?.find((m) => m.id === id)?.name ?? id;
-  const current = models?.find((m) => m.id === bot.model);
+  const current = models?.find((m) => m.id === value);
   const pick = (model: string) => {
-    useBots.getState().updateBot(bot.id, { model });
+    onChange(model);
     setOpen(false);
   };
+  const unsetLabel = `${unset}${fallback ? ` · ${nameOf(fallback)}` : ""}`;
   return (
     <span className="select-wrap select-grow bots-set-model">
-      <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label="Model" onClick={() => setOpen((o) => !o)}>
-        {bot.model && <BrandIcon id={bot.model} />}
-        <span className="select-value">{bot.model ? (current?.name ?? (listing ? `${bot.model} (unavailable)` : bot.model)) : `Default${fallback ? ` · ${nameOf(fallback)}` : ""}`}</span>
+      <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
+        {value && <BrandIcon id={value} />}
+        <span className="select-value">{value ? (current?.name ?? (listing ? `${value} (unavailable)` : value)) : unsetLabel}</span>
         {current && <span className="select-hint">{providerName(providerOf(current))}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label="Model" fixed="auto">
-        <button type="button" role="option" aria-selected={!bot.model} className="menu-item" onClick={() => pick("")}>
-          <span className="menu-item-label">Default{fallback ? ` · ${nameOf(fallback)}` : ""}</span>
-          {!bot.model && <Check size={15} className="menu-check" />}
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">
+        <button type="button" role="option" aria-selected={!value} className="menu-item" onClick={() => pick("")}>
+          <span className="menu-item-label">{unsetLabel}</span>
+          {!value && <Check size={15} className="menu-check" />}
         </button>
         <ModelMenu
-          selected={{ plan: "pi", id: bot.model ?? "" }}
+          selected={{ plan: "pi", id: value ?? "" }}
           piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : { plan: "pi", status: failed ? "error" : "checking", models: [] }}
           scopedOnly
           onPick={(ref) => pick(ref.id)}
@@ -96,6 +97,7 @@ function BotModelSelect({ bot }: { bot: Bot }) {
 function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; onDelete: (conversationId: string) => void }) {
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
+  const defaultModel = useBots((s) => s.defaultModel);
   const st = useBots.getState();
   const [name, setName] = useState(bot.name);
   useEffect(() => setName(bot.name), [bot.name]);
@@ -195,9 +197,9 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
         <div className="setting-row">
           <div className="setting-text">
             <div className="setting-label">Model</div>
-            <p className="setting-desc">Changes apply from the bot's next reply.</p>
+            <p className="setting-desc">Default follows the default model in Settings → Bots. Changes apply from the bot's next reply.</p>
           </div>
-          <BotModelSelect bot={bot} />
+          <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => st.updateBot(bot.id, { model })} />
         </div>
         <div className="setting-row">
           <div className="setting-text">
@@ -327,6 +329,7 @@ function GroupRow({ group, bots, onEdit }: { group: Conversation; bots: Bot[]; o
 export function BotsSettingsSection() {
   const bots = useBots((s) => s.bots);
   const conversations = useBots((s) => s.conversations);
+  const defaultModel = useBots((s) => s.defaultModel);
   const error = useBots((s) => s.error);
   // Saves show no progress; only a failed one is worth interrupting for.
   const syncStatus = error && <div className="bots-sync-status" role="alert">
@@ -444,6 +447,16 @@ export function BotsSettingsSection() {
           ))}
           {!groups.length && <li className="pi-empty">No groups yet. A group puts a few bots in one chat to work on something together.</li>}
         </ul>
+      </section>
+
+      <section className="pi-block">
+        <div className="setting-row">
+          <div className="setting-text">
+            <div className="setting-label">Default model</div>
+            <p className="setting-desc">What every bot set to Default runs on. A bot with its own model keeps it. Changes apply from each bot's next reply.</p>
+          </div>
+          <BotModelSelect label="Default model" value={defaultModel} unset="Pi's default" onChange={st.setDefaultModel} />
+        </div>
       </section>
 
       <section className="pi-block">

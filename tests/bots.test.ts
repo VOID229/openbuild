@@ -302,9 +302,11 @@ test("web search uses the user's providers and keeps their keys from the bot", a
         return true;
       });
 
-      // Resetting OpenBots keeps how the user searches.
+      // Resetting OpenBots keeps how the user searches and their default model.
+      svc.updateSettings({ defaultModel: 'anthropic/shared' });
       await svc.resetAll();
       a.deepEqual(svc.getSettings().searxng, ['http://searx.test:8080']);
+      a.equal(svc.getSettings().defaultModel, 'anthropic/shared');
       a.deepEqual(await vault.secrets('brave'), ['BRAVE-SECRET']);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
@@ -419,6 +421,24 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.deepEqual(proc.sent.at(-1), { type: 'set_model', provider: 'anthropic', modelId: 'picked' });
       svc.updateBot(bot.id, { model: '' });
       a.equal(db.getBot(bot.id).model, undefined);
+
+      // A bot on Default follows the default for all bots; one with its own model keeps it.
+      svc.updateSettings({ defaultModel: 'anthropic/shared' });
+      proc = fake('openrouter', 'deepseek/flash');
+      await applyModel(proc, bot.id);
+      a.deepEqual(proc.sent.at(-1), { type: 'set_model', provider: 'anthropic', modelId: 'shared' });
+      svc.updateBot(bot.id, { model: 'anthropic/picked' });
+      proc = fake('anthropic', 'shared');
+      await applyModel(proc, bot.id);
+      a.deepEqual(proc.sent.at(-1), { type: 'set_model', provider: 'anthropic', modelId: 'picked' });
+      svc.updateBot(bot.id, { model: '' });
+
+      // Clearing the default for all bots goes back to Pi's.
+      svc.updateSettings({ defaultModel: '' });
+      a.equal(svc.getSettings().defaultModel, undefined);
+      proc = fake('anthropic', 'shared');
+      await applyModel(proc, bot.id);
+      a.deepEqual(proc.sent.at(-1), { type: 'set_model', provider: 'openrouter', modelId: 'deepseek/flash' });
 
       // A model Pi refuses fails the run rather than falling back quietly.
       svc.updateBot(bot.id, { model: 'anthropic/gone' });
