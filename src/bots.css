@@ -3463,3 +3463,10 @@ button.bots-details-name:hover {
     align-items: stretch;
   }
 }
+
+/* On a phone the model picker drops under its label and spans the row. */
+@media (max-width: 480px) {
+  .setting-row-stack .bots-set-model {
+    width: 100%;
+  }
+}

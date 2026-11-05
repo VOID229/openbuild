@@ -194,7 +194,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
       </section>
       <section className="bots-set-block">
         <Label>Usage</Label>
-        <div className="setting-row">
+        <div className="setting-row setting-row-stack">
           <div className="setting-text">
             <div className="setting-label">Model</div>
             <p className="setting-desc">Default follows the default model in Settings → Bots. Changes apply from the bot's next reply.</p>
@@ -450,7 +450,7 @@ export function BotsSettingsSection() {
       </section>
 
       <section className="pi-block">
-        <div className="setting-row">
+        <div className="setting-row setting-row-stack">
           <div className="setting-text">
             <div className="setting-label">Default model</div>
             <p className="setting-desc">What every bot set to Default runs on. A bot with its own model keeps it. Changes apply from each bot's next reply.</p>
