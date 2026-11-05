@@ -10,6 +10,9 @@ export interface Readiness {
 
 type ReadinessInput = Pick<PullDetail, "state" | "draft" | "base" | "mergeable" | "mergeState" | "reviewDecision" | "checkList" | "canWrite">;
 
+/** GitHub hasn't finished working out whether this pull request can merge: asking again soon will tell. */
+export const mergeUnsettled = (pr: Pick<PullDetail, "state" | "draft" | "mergeable" | "mergeState">) => pr.state === "open" && !pr.draft && (pr.mergeable === "UNKNOWN" || pr.mergeState === "UNKNOWN");
+
 /** One line on where a pull request stands, and whether the Merge button should work. */
 export function mergeReadiness(pr: ReadinessInput): Readiness {
   if (pr.state === "merged") return { tone: "merged", text: "Merged", canMerge: false };

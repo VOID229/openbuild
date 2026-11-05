@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../../shared/types";
 import { usePanel, folderKey } from "../lib/panel";
-import { commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
+import { commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, mergeUnsettled, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, SETTLE_REFRESH, usePullRead, viewPull, type Readiness } from "../lib/pulls";
 import type { TerminalFolder } from "../lib/terminal";
 import { ago, copyText, cx } from "../lib/ui";
 import { FileSection, useDiffFiles, useDiffWrap } from "./DiffView";
@@ -140,6 +140,12 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
     if (head) void prefetchPatch(folder, number, head);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the folder by what it names, not its object
   }, [folder.deviceId, folder.cwd, number, head]);
+  // The regular refresh is too slow for this: the Merge button is waiting on it.
+  useEffect(() => {
+    if (!pr || !mergeUnsettled(pr)) return;
+    const timer = setTimeout(() => document.visibilityState === "visible" && void reload(true), SETTLE_REFRESH);
+    return () => clearTimeout(timer);
+  }, [pr, reload]);
   const [tab, setTab] = useState<Tab>("overview");
   const [commit, setCommit] = useState<string>();
   const [editing, setEditing] = useState(false);
