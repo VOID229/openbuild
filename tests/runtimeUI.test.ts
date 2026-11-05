@@ -177,7 +177,10 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
   const html = markup(createElement(WorkspaceTop));
   expect(html).toContain('aria-label="Thread runtime: Default"');
   expect(html).not.toContain("Local checkout");
+  // Durable is off by default on a device with no saved runtime settings, so the picker falls back.
   reset({ threadRuntime: "durable" });
+  expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+  reset({ threadRuntime: "durable", disabledRuntimes: { "": [] } });
   expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
   reset({ threadRuntime: "codex" });
   const codex = markup(createElement(WorkspaceTop));

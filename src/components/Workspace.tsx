@@ -10,7 +10,7 @@ import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
 import { chooseDevice, chooseProject, deviceName, splitProjectId, workspaceDevice } from "../lib/devices";
 import { threadDevice, useStore } from "../lib/store";
-import { RUNTIMES, runtimeMenuDensity, runtimeName } from "../lib/runtimes";
+import { RUNTIMES, runtimeEnabled, runtimeMenuDensity, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
@@ -375,8 +375,9 @@ export function useRuntimeOptions() {
   const selected = useStore((s) => s.settings.threadRuntime ?? "pi");
   // Runtimes turned off in Settings → Runtimes for the device new threads run on aren't offered.
   const device = useStore((s) => threadDevice(s));
-  const disabled = useStore((s) => s.settings.disabledRuntimes?.[device ?? ""]);
-  const options = useMemo(() => RUNTIMES.filter((o) => !disabled?.includes(o.runtime)), [disabled]);
+  // A device with nothing saved yet gets the same defaults Settings shows for it.
+  const disabledRuntimes = useStore((s) => s.settings.disabledRuntimes);
+  const options = useMemo(() => RUNTIMES.filter((o) => runtimeEnabled({ disabledRuntimes }, o.runtime, device)), [disabledRuntimes, device]);
   // Runtimes not installed on that device are shown grayed out and lead to Settings → Runtimes instead.
   const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses(device));
   useEffect(() => {
