@@ -219,20 +219,20 @@ export function toggleTerminal(): void {
 }
 
 /** What was showing in the thread left for the new-thread screen, to bring back on going back to one. */
-let leftOpen: { panel: boolean; tree: boolean; expanded: boolean; drawer: boolean } | undefined;
+let leftOpen: { tree: boolean; expanded: boolean; drawer: boolean } | undefined;
 
 /**
  * The new-thread screen is a thread of its own, so what's open in a thread doesn't follow you there:
- * the panel, the tree and the drawer close, and come back with the next thread you open. A thread
- * started from this screen keeps what's open here instead.
+ * the tree and the drawer close, and come back with the next thread you open (the panel is each
+ * thread's own: see showFolder in panel.ts). A thread started from this screen keeps what's open
+ * here instead.
  */
 function crossNewThread(from: TerminalFolder | undefined, to: TerminalFolder): void {
   if (!from || !!from.thread === !!to.thread) return;
   const panel = usePanel.getState();
   const drawer = useTerminal.getState();
   if (from.thread) {
-    leftOpen = { panel: panel.panel, tree: panel.tree, expanded: panel.expanded, drawer: drawer.open };
-    if (panel.panel) panel.setPanel(false);
+    leftOpen = { tree: panel.tree, expanded: panel.expanded, drawer: drawer.open };
     if (panel.tree) panel.setTree(false);
     if (drawer.open) drawer.hide();
     return;
@@ -240,7 +240,6 @@ function crossNewThread(from: TerminalFolder | undefined, to: TerminalFolder): v
   const back = leftOpen;
   leftOpen = undefined;
   if (!back || to.fresh) return;
-  panel.setPanel(back.panel);
   panel.setTree(back.tree);
   panel.setExpanded(back.expanded);
   useTerminal.setState({ open: back.drawer });
