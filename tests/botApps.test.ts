@@ -144,6 +144,21 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
         assert.equal((await apps.useApp({ app: "fake-keyed", tool: "whoami" })).text, "keyed");
         assert.ok(!JSON.stringify(await apps.snapshot()).includes("sekrit"));
 
+        // Google signs in through the server's own client, never one pasted in.
+        apps.addAppForTests({ ...base, id: "fake-google", name: "Fake Google", by: "Google", connection: { kind: "client", url: origin + "/mcp", client: "google" } });
+        delete process.env.GOOGLE_OAUTH_CLIENT_ID;
+        delete process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+        await assert.rejects(apps.connect("fake-google", { origin: "http://localhost:9", client: { id: "pasted", secret: "pasted" } }), /isn't set up on this server.*GOOGLE_OAUTH_CLIENT_ID/);
+        assert.equal(await vault.getJson("app-client:google"), undefined);
+        assert.ok(!(await apps.snapshot()).clients.includes("google"));
+        process.env.GOOGLE_OAUTH_CLIENT_ID = "server-client";
+        process.env.GOOGLE_OAUTH_CLIENT_SECRET = "server-secret";
+        const { authorize: google } = await apps.connect("fake-google", { origin: "http://localhost:9" });
+        assert.equal(new URL(google).searchParams.get("client_id"), "server-client");
+        assert.ok((await apps.snapshot()).clients.includes("google"));
+        assert.ok(!JSON.stringify(await apps.snapshot()).includes("server-secret"));
+        await apps.disconnect("fake-google");
+
         // A reset is about bots and chats: the apps stay.
         await svc.resetAll();
         assert.equal(apps.storedApps().fake.status, "connected");

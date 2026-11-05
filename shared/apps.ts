@@ -45,7 +45,7 @@ export interface AppField {
   options?: { value: string; label: string }[];
 }
 
-/** Services without self-registration: the user registers an OAuth app of their own, once per service. */
+/** Services without self-registration: they sign in through an OAuth app registered once per service, by the server or the user. */
 export type OAuthClientId = "google" | "slack" | "asana" | "microsoft";
 
 export interface OAuthClientGuide {
@@ -55,7 +55,10 @@ export interface OAuthClientGuide {
   docs: string;
   /** A public client (PKCE only) can do without a secret. */
   secret: "required" | "optional";
-  steps: string[];
+  /** Set where the server runs instead of pasted in: the environment variables holding the client. */
+  env?: { id: string; secret: string };
+  /** How to register one to paste in, for services without `env`. */
+  steps?: string[];
 }
 
 export const OAUTH_CLIENTS: Record<OAuthClientId, OAuthClientGuide> = {
@@ -64,13 +67,7 @@ export const OAUTH_CLIENTS: Record<OAuthClientId, OAuthClientGuide> = {
     console: "https://console.cloud.google.com/auth/clients",
     docs: "https://developers.google.com/workspace/guides/configure-mcp-servers",
     secret: "required",
-    steps: [
-      "Google's Workspace MCP servers are in developer preview: your Google Cloud project needs to be in the Workspace Developer Preview Program.",
-      "In Google Cloud, set up the OAuth consent screen, then create an OAuth client of type Web application and tick “Use this client for an AI-powered agent”.",
-      "Add the redirect URI below to the client.",
-      "Enable the APIs listed for each Google app you connect.",
-      "Paste the client ID and secret. Every Google app uses the same ones.",
-    ],
+    env: { id: "GOOGLE_OAUTH_CLIENT_ID", secret: "GOOGLE_OAUTH_CLIENT_SECRET" },
   },
   slack: {
     name: "Slack",
