@@ -6,8 +6,6 @@ import { OptionSelect } from "./ModelSelect";
 const variables = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 const quote = (s: string) => "'" + s.replaceAll("'", "'\\''") + "'";
 export function accountCommand(a: RuntimeAccount): string {
-  // Ori keeps one OpenRouter sign-in for every harness it launches.
-  if (a.ori) return "ori login";
   const shell = (p: string) => p.startsWith("~/") ? '"$HOME"/' + quote(p.slice(2)) : quote(p);
   const bin = a.binPath?.trim();
   const program = bin ? (bin.includes("/") ? shell(bin) : quote(bin)) : a.runtime === "cursor" ? "cursor-agent" : a.runtime;
@@ -39,7 +37,7 @@ export function RuntimeAccounts({ runtime, deviceId }: { runtime: ThreadRuntime;
     <h3 className="settings-subheading">Accounts</h3>
     <p className="pi-meta">The default account uses this device’s existing configuration. Add separate configuration directories for other accounts, then select one before starting a thread.</p>
     <ul className="pi-list">{rows.map((a) => <li className="pi-row" key={a.id}>
-      <div className="pi-row-text"><span className="pi-row-name">{a.name}</span><span className="pi-row-desc">{a.ori && "Via Ori (OpenRouter) · "}{variables[runtime]}={a.configDir}</span><code style={{ overflowWrap: "anywhere" }}>{accountCommand(a)}</code></div>
+      <div className="pi-row-text"><span className="pi-row-name">{a.name}</span><span className="pi-row-desc">{variables[runtime]}={a.configDir}</span><code style={{ overflowWrap: "anywhere" }}>{accountCommand(a)}</code></div>
       <button className="btn btn-sm" onClick={() => { update({ runtimeAccounts: accounts.filter((b) => b.id !== a.id) }); if (runtime === "claude") void reload(deviceId, true); }}>Remove</button>
     </li>)}{detected.map((a) => <li className="pi-row" key={a.id}>
       <div className="pi-row-text"><span className="pi-row-name">{a.name}</span><span className="pi-row-desc">Detected · {variables[runtime]}={a.configDir}</span></div>

@@ -1,6 +1,5 @@
 // Settings → Runtimes → Add runtime: another login of a runtime on one device, in three steps.
 // It saves the same account entry Providers & accounts lists; Claude's become model picker providers.
-// "via Ori" choices launch the runtime through Ori Harness, so its requests go to OpenRouter.
 import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -12,7 +11,7 @@ import { accountCommand } from "./RuntimeAccounts";
 import { RuntimeIcon } from "./Workspace";
 
 type AccountRuntime = RuntimeAccount["runtime"];
-const CHOICES: { runtime: AccountRuntime; ori?: boolean }[] = [{ runtime: "claude" }, { runtime: "codex" }, { runtime: "cursor" }, { runtime: "claude", ori: true }, { runtime: "codex", ori: true }];
+const CHOICES: AccountRuntime[] = ["claude", "codex", "cursor"];
 const STEPS = ["Runtime", "Identity", "Config"];
 const VARIABLES = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 
@@ -25,14 +24,12 @@ function Field({ label, hint, value, onChange, placeholder, autoFocus }: { label
   );
 }
 
-/** The first free `claude2`, `claude3`, … on this device; Ori's are `claude-ori`, `claude-ori2`, …. */
-export function nextAccountName(runtime: AccountRuntime, taken: string[], ori = false): string {
+/** The first free `claude2`, `claude3`, … on this device. */
+export function nextAccountName(runtime: AccountRuntime, taken: string[]): string {
   const names = new Set(taken.map((n) => n.toLowerCase()));
-  if (ori && !names.has(`${runtime}-ori`)) return `${runtime}-ori`;
-  const base = ori ? `${runtime}-ori` : runtime;
   let n = 2;
-  while (names.has(`${base}${n}`)) n++;
-  return `${base}${n}`;
+  while (names.has(`${runtime}${n}`)) n++;
+  return `${runtime}${n}`;
 }
 
 export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; deviceId?: string; where: string; onClose: () => void }) {
@@ -44,7 +41,6 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
   const reload = useStore((s) => s.loadClaudeModels);
   const [step, setStep] = useState(0);
   const [runtime, setRuntime] = useState<AccountRuntime>("claude");
-  const [ori, setOri] = useState(false);
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [error, setError] = useState("");
@@ -57,7 +53,6 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
     ...(launchArgs.trim() ? { launchArgs: launchArgs.trim() } : {}),
     ...(runtime === "codex" && shadowHome.trim() ? { shadowHome: shadowHome.trim() } : {}),
     ...(runtime === "claude" && compact.trim() ? { autoCompactWindow: Number(compact.replaceAll(",", "")) } : {}),
-    ...(ori ? { ori: true } : {}),
   };
 
   const taken = (r: AccountRuntime) => [
@@ -72,7 +67,7 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
   // Empty fields use the example shown in them.
-  const suggested = nextAccountName(runtime, taken(runtime), ori);
+  const suggested = nextAccountName(runtime, taken(runtime));
   const label = name.trim() || suggested;
   const directory = path.trim() || `~/.${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(?<=[a-z])(\d+)$/, "-$1")}`;
   const next = () => {
@@ -116,19 +111,15 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
         <div className="ar-body">
           {step === 0 && (
             <div className="ar-grid" role="radiogroup" aria-label="Runtime">
-              {CHOICES.map((c) => {
-                const on = runtime === c.runtime && ori === !!c.ori;
-                return (
-                  <button key={`${c.runtime}${c.ori ? "-ori" : ""}`} type="button" role="radio" aria-checked={on} className="ar-choice" onClick={() => { setRuntime(c.runtime); setOri(!!c.ori); }}>
-                    <RuntimeIcon runtime={c.runtime} size={18} />
-                    <span>{runtimeName(c.runtime)}{c.ori && " via Ori"}</span>
-                    {on && <Check size={15} className="ar-check" />}
-                  </button>
-                );
-              })}
+              {CHOICES.map((r) => (
+                <button key={r} type="button" role="radio" aria-checked={runtime === r} className="ar-choice" onClick={() => setRuntime(r)}>
+                  <RuntimeIcon runtime={r} size={18} />
+                  <span>{runtimeName(r)}</span>
+                  {runtime === r && <Check size={15} className="ar-check" />}
+                </button>
+              ))}
             </div>
           )}
-          {step === 0 && ori && <p className="pi-meta">Launches {runtimeName(runtime)} through Ori Harness, so its requests use your OpenRouter account and models. Needs <code>ori</code> on this device.</p>}
           {step === 1 && (
             <label className="ar-field">
               <span><b>Label</b><small>{runtime === "claude" || runtime === "codex" ? "Shown in the model picker’s provider list." : "Shown in the account picker for new threads."}</small></span>
@@ -137,7 +128,7 @@ export function AddRuntime({ open, deviceId, where, onClose }: { open: boolean; 
           )}
           {step === 2 && (
             <>
-              <Field label="Binary path" hint={`The ${runtimeName(runtime)} program this account runs${ori ? " through Ori" : ""}. Empty uses the device’s.`} placeholder={runtime === "cursor" ? "cursor-agent" : runtime} value={binPath} onChange={setBinPath} />
+              <Field label="Binary path" hint={`The ${runtimeName(runtime)} program this account runs. Empty uses the device’s.`} placeholder={runtime === "cursor" ? "cursor-agent" : runtime} value={binPath} onChange={setBinPath} />
               <Field label={`${VARIABLES[runtime]} path`} hint={runtime === "codex" ? "Codex home and config directory." : "Keeps this account’s sign-in and history separate."} placeholder={directory} value={path} onChange={setPath} autoFocus />
               {runtime === "codex" && <Field label="Shadow home path" hint={`Optional. Keeps auth.json here while sharing everything else from ${VARIABLES.codex}.`} placeholder="~/.codex-shadow/personal" value={shadowHome} onChange={setShadowHome} />}
               {runtime === "claude" && <Field label="Auto-compact after" hint="Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude’s default." placeholder="e.g. 300000" value={compact} onChange={setCompact} />}
