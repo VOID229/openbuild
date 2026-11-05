@@ -90,6 +90,16 @@ export function botRoutes(api: Api) {
         }
       }),
     },
+    "/api/bots/apps/:id/finish": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/apps/:id/finish">) => {
+        try {
+          const body = (await readJson(req)) ?? {};
+          return json(await apps.finishPasted(req.params.id, body.url));
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/apps/:id/check": {
       POST: api(async (req: Bun.BunRequest<"/api/bots/apps/:id/check">) => {
         try {

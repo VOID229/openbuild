@@ -109,7 +109,7 @@ export const OAUTH_CLIENTS: Record<OAuthClientId, OAuthClientGuide> = {
 
 export type AppConnection =
   /** Signs in with OAuth and registers itself with the service. */
-  | { kind: "oauth"; url: string; scopes?: string[] }
+  | { kind: "oauth"; url: string; scopes?: string[]; /** The service only sends sign-ins back to localhost (see appReturnOrigin). */ localhostOnly?: boolean }
   /** Signs in with OAuth through an app the user registered (see OAUTH_CLIENTS). */
   | { kind: "client"; url: string; client: OAuthClientId; scopes?: string[]; /** APIs to turn on in the user's project. */ enable?: string[] }
   /** Keys the user pastes, sent as headers. `{field}` in a header takes that field's value. */
@@ -451,7 +451,8 @@ export const APP_CATALOG: CatalogApp[] = [
     description: "Look into projects, deployments and logs, and search Vercel's docs.",
     category: "code",
     docs: "https://vercel.com/docs/mcp/vercel-mcp",
-    connection: { kind: "oauth", url: "https://mcp.vercel.com" },
+    // Vercel refuses to register any other return address unless it has approved it.
+    connection: { kind: "oauth", url: "https://mcp.vercel.com", localhostOnly: true },
     skills: [{ repo: "vercel/vercel-plugin", ref: "3b472643cbb1a42479d99b0c9a1d27b8bc84aaa7", dir: "skills" }],
     recommended: true,
   },
@@ -788,6 +789,8 @@ export interface AppView {
   fields?: Record<string, string>;
   tools?: AppTool[];
   skills?: AppSkill[];
+  /** A sign-in is under way. */
+  signingIn?: boolean;
 }
 
 export interface AppsSnapshot {
@@ -800,3 +803,14 @@ export interface AppsSnapshot {
 
 /** The path a service sends the user back to after signing in. */
 export const APP_CALLBACK_PATH = "/api/bots/apps/callback";
+
+/**
+ * The address a sign-in comes back to, for OpenBuild open at `origin`. A service that only accepts
+ * localhost gets that even over Tailscale, where the browser can't reach it unless it runs on the
+ * server, so the user pastes the address it ended on back into OpenBuild.
+ */
+export function appReturnOrigin(app: CatalogApp, origin: string): string {
+  if (app.connection.kind !== "oauth" || !app.connection.localhostOnly) return origin;
+  const url = new URL(origin);
+  return url.hostname === "localhost" || url.hostname === "127.0.0.1" ? origin : `http://localhost:${url.port || 3100}`;
+}

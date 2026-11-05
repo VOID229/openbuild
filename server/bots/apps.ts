@@ -2,7 +2,7 @@
 // get: a note in their context saying what's there, `apps` to look up tools and read skills, and
 // `use_app` to call a tool. State is in the bots database under "apps" (it outlasts a reset, like
 // the keys do); sign-ins are in the vault (see mcp.ts); skills are files (see skills.ts).
-import { APP_CALLBACK_PATH, APP_CATALOG, appById, OAUTH_CLIENTS, type AppStatus, type AppsSnapshot, type AppView, type CatalogApp, type OAuthClientId } from "../../shared/apps";
+import { APP_CALLBACK_PATH, APP_CATALOG, appById, appReturnOrigin, OAUTH_CLIENTS, type AppStatus, type AppsSnapshot, type AppView, type CatalogApp, type OAuthClientId } from "../../shared/apps";
 import { GITHUB_SCOPE } from "../../shared/types";
 import * as vault from "../vault";
 import * as db from "./db";
@@ -65,6 +65,7 @@ function view(id: string, s: StoredApp): AppView {
     fields: s.fields,
     tools: s.tools?.map((t) => ({ name: t.name, title: t.title, description: t.description?.slice(0, 300) })),
     skills: s.skills?.map((k) => ({ name: k.name, description: k.description })),
+    signingIn: waiting,
   };
 }
 
@@ -116,7 +117,7 @@ function readFields(app: CatalogApp, given: Record<string, unknown> | undefined,
   return { values, secrets };
 }
 
-function callbackUrl(origin: string): string {
+function callbackUrl(app: CatalogApp, origin: string): string {
   let url: URL;
   try {
     url = new URL(origin);
@@ -124,7 +125,7 @@ function callbackUrl(origin: string): string {
     throw new svc.BotsError("Couldn't tell where OpenBuild is open.");
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new svc.BotsError("Couldn't tell where OpenBuild is open.");
-  return `${url.origin}${APP_CALLBACK_PATH}`;
+  return `${appReturnOrigin(app, url.origin)}${APP_CALLBACK_PATH}`;
 }
 
 export interface ConnectInput {
@@ -161,7 +162,7 @@ export async function connect(id: string, input: ConnectInput): Promise<{ author
       if (!own) throw new svc.BotsError(`Add your ${guide.name} OAuth client first.`);
       if (guide.secret === "required" && !own.secret) throw new svc.BotsError(guide.env ? `Set ${guide.env.secret} too, where OpenBuild runs.` : `${guide.name} needs the client secret too.`);
     }
-    const redirect = callbackUrl(input.origin);
+    const redirect = callbackUrl(app, input.origin);
     const state = crypto.randomUUID();
     let authorize: string;
     try {
@@ -218,6 +219,21 @@ export async function finish(params: URLSearchParams): Promise<{ app?: CatalogAp
   }
   const result = await check(app.id);
   return { app, error: result.status === "connected" ? undefined : result.error };
+}
+
+/** The address a sign-in ended on, pasted by a user whose browser couldn't bring it back here. */
+export async function finishPasted(id: string, pasted: unknown): Promise<AppView> {
+  need(id);
+  let params: URLSearchParams | undefined;
+  try {
+    if (typeof pasted === "string") params = new URL(pasted.trim()).searchParams;
+  } catch {}
+  if (!params?.get("state")) throw new svc.BotsError("Copy the whole address from the sign-in tab, starting with http.");
+  const flow = flows.get(params.get("state")!);
+  if (flow && flow.appId !== id) throw new svc.BotsError("That address is from another app's sign-in.");
+  const { error } = await finish(params);
+  if (error) throw new svc.BotsError(error);
+  return view(id, storedApps()[id]!);
 }
 
 async function target(app: CatalogApp) {
