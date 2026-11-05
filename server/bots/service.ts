@@ -99,6 +99,7 @@ export function getSettings(): BotsSettings {
 }
 export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   const next: BotsSettings = { ...settings(), ...patch };
+  if ("defaultModel" in patch) next.defaultModel = typeof patch.defaultModel === "string" && patch.defaultModel ? patch.defaultModel.slice(0, 200) : undefined;
   if (patch.quietHours) next.quietHours = { from: num(patch.quietHours.from, 0, 23), to: num(patch.quietHours.to, 0, 23) };
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
@@ -244,11 +245,11 @@ export async function resetAll() {
     const device = bot.computer?.device ?? "local";
     await computerApi(device).call(bot.id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
   }
-  // Reset is about bots and chats. How the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
-  const { searxng, customExtensions } = settings();
+  // Reset is about bots and chats. Their default model, how the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
+  const { defaultModel, searxng, customExtensions } = settings();
   const apps = db.getValue("apps");
   db.wipe();
-  if (searxng?.length || customExtensions) db.setValue("settings", { ...settings(), searxng, customExtensions });
+  if (defaultModel || searxng?.length || customExtensions) db.setValue("settings", { ...settings(), defaultModel, searxng, customExtensions });
   if (apps) db.setValue("apps", apps);
   status.clear();
   chains.clear();

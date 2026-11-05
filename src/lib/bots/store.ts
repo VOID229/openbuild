@@ -41,6 +41,8 @@ interface BotsState {
   detailsOpen: boolean;
   /** The starter bots were added (once per browser). */
   seeded: boolean;
+  /** "provider/model" for bots without their own. Pi's default when unset. */
+  defaultModel?: string;
   /** SearXNG instances for web search. The other providers' keys are in the vault. */
   searxng: string[];
   /** The user's own Pi extensions to load into bots as well. */
@@ -59,6 +61,7 @@ interface BotsState {
   ensureSeeded: () => void;
   /** Throw everything away and start again from the starter bots. */
   reset: () => void;
+  setDefaultModel: (model: string) => void;
   setSearxng: (urls: string[]) => void;
   setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   setHarnesses: (harnesses: BotHarnessSettings) => void;
@@ -139,6 +142,10 @@ export const useBots = create<BotsState>()(
       reset: () => {
         set({ bots: [], conversations: [], sections: [], folded: ["hidden"], typing: {}, drafts: [], pulses: {}, focus: undefined, seeded: true });
         void send("POST", "/api/bots/reset");
+      },
+      setDefaultModel: (model) => {
+        set({ defaultModel: model || undefined });
+        void send("PATCH", "/api/bots/settings", { defaultModel: model });
       },
       setSearxng: (searxng) => {
         set({ searxng });
@@ -480,6 +487,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       drafts: e.drafts,
       status: e.status,
       onboarding: e.settings.onboarding === "active",
+      defaultModel: e.settings.defaultModel,
       searxng: e.settings.searxng ?? [],
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       harnesses: e.settings.harnesses ?? {},
@@ -562,6 +570,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set({ sections: e.settings.sections, onboarding: e.settings.onboarding === "active", searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
+    set({ sections: e.settings.sections, onboarding: e.settings.onboarding === "active", defaultModel: e.settings.defaultModel, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
   }
 }
