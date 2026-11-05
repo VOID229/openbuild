@@ -24,6 +24,7 @@ JSON
 JSON
   ;;
   "pr view")
+    if [ -n "$GH_MERGED" ]; then echo '{"number":7,"title":"Mine","url":"u","state":"MERGED","headRefName":"feat","baseRefName":"main","headRefOid":"abc1234def","updatedAt":"2026-11-02T00:00:00Z"}'; exit 0; fi
     # #9 settles on the second ask for only its mergeability, #10 never does.
     case "$3 $5" in
       "9 mergeable,mergeStateStatus")
@@ -83,8 +84,17 @@ const script = `
   assert.equal(there.pulls.length, 2);
   assert.deepEqual(calls().filter(Boolean), [], "a worktree shares its repository's list");
 
+  // Polling a closed thread must survive removal of its worktree.
+  await view.view(tree, 7, true);
+  sh("worktree", "remove", tree);
+  calls();
+  process.env.GH_MERGED = "1";
+  assert.equal((await view.view(tree, 7, true)).state, "merged");
+  delete process.env.GH_MERGED;
+  assert.ok(calls().some((line) => line.startsWith("pr view 7") && line.endsWith("--repo github.com/o/r")), "removed worktrees read from the surviving repository explicitly");
+
   // One pull request.
-  const pr = await view.view(cwd, "7");
+  const pr = await view.view(cwd, "7", true);
   assert.equal(pr.repo, "o/r");
   assert.equal(pr.author, "ghost");
   assert.deepEqual(pr.methods, ["squash", "rebase"]);
