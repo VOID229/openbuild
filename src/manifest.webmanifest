@@ -1,0 +1,7 @@
+{
+  "name": "OpenBuild",
+  "short_name": "OpenBuild",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone"
+}
