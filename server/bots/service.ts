@@ -439,7 +439,10 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   if (message.author === "me") {
     if (c.kind !== "group") return members;
     const mentioned = mentionedBots(message.text, members);
-    if (mentioned.length) return mentioned;
+    const reply = message.replyTo ? db.getMessage(message.replyTo) : undefined;
+    const replied = reply?.conversationId === c.id && members.includes(reply.message.author) ? [reply.message.author] : [];
+    const addressed = [...new Set([...mentioned, ...replied])];
+    if (addressed.length) return addressed;
     const primary = members.find((id) => db.getBot(id)?.primary);
     return primary ? [primary] : members.slice(0, 1);
   }

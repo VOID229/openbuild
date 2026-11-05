@@ -90,3 +90,43 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+
+test("group replies wake the quoted bot instead of falling back to the primary", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-replies-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as svc from './server/bots/service.ts';
+      const primary = svc.createBot({ name: 'Boss' });
+      const second = svc.createBot({ name: 'Helper' });
+      const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [primary.bot.id, second.bot.id] });
+      const woken = [];
+      svc.setHooks({ wake: id => woken.push(id), stop() {} });
+      const post = (conversationId, author, text, replyTo) => svc.postMessage(conversationId, { id: crypto.randomUUID(), author, text, replyTo, at: Date.now() });
+      const quoted = post(group.id, second.bot.id, 'Hello');
+      const mine = post(group.id, 'me', 'Generic');
+      const foreign = post(second.conversationId, second.bot.id, 'Private');
+      const check = (text, replyTo, expected) => {
+        woken.length = 0;
+        post(group.id, 'me', text, replyTo);
+        a.deepEqual(woken, expected);
+      };
+      check('Tell me more', quoted.id, [second.bot.id]);
+      check('Generic', undefined, [primary.bot.id]);
+      check('Follow up', mine.id, [primary.bot.id]);
+      check('Missing quote', crypto.randomUUID(), [primary.bot.id]);
+      check('Foreign quote', foreign.id, [primary.bot.id]);
+      check('@Boss your thoughts?', quoted.id, [primary.bot.id, second.bot.id]);
+      check('@Helper tell me more', quoted.id, [second.bot.id]);
+      svc.updateConversation(group.id, { botIds: [primary.bot.id] });
+      check('Removed bot', quoted.id, [primary.bot.id]);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
