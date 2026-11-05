@@ -99,6 +99,9 @@ export function BotThreads({ bot }: { bot: Bot }) {
       {access.enabled && (
         <>
           <BotProjects access={access} save={save} />
+          <Row label="Control others' threads" desc="Write to, answer, stop, close and merge threads it didn't start: yours and other bots'. Off, it can still see them but only controls its own.">
+            <Toggle checked={!!access.others} onChange={(others) => save({ others })} label="Control others' threads" />
+          </Row>
           <Row label="Choose permissions" desc="Pick each thread's permission mode itself, including the unrestricted ones. Off, its threads use the defaults under Harnesses in OpenBuild.">
             <Toggle checked={!!access.choosePermission} onChange={(choosePermission) => save({ choosePermission })} label="Choose permissions" />
           </Row>
