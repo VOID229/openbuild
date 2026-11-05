@@ -3,6 +3,7 @@
 // fresh while they're showing. Every read is kept (lists and pull requests across reloads too) and
 // asked for ahead of time, so the tab shows what it last knew at once and catches up after.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { create } from "zustand";
 import type { PullDetail, PullList, PullListState, PullMergeMethod, PullPatch } from "../../shared/types";
 import { apiUrl } from "./devices";
 import { json } from "./git";
@@ -173,6 +174,38 @@ export const prefetchPull = (folder: Folder, number: number) => ahead(pullKey(fo
 /** Read a pull request's whole diff ahead, while its overview is showing. */
 export const prefetchPatch = (folder: Folder, number: number, sha: string) => ahead(patchKey(folder, number, sha), () => pullPatch(folder, number));
 
+// What's being done to each pull request (by `pullKey`), and how the last thing done ended if it
+// failed. It lives here because the request outlives the tab: leaving the thread unmounts the tab, and
+// coming back has to find the merge still going, not a Merge button to press again.
+export const usePullActivity = create<Record<string, { running?: string; failure?: string }>>(() => ({}));
+
+// The reads showing right now, told when an action leaves a newer answer in the cache.
+const showing = new Set<(key: string) => void>();
+
+/** Do something to a pull request, one thing at a time, then read it again. Throws if it fails. */
+export async function actOnPull(folder: Folder, number: number, what: string, action: () => Promise<unknown>) {
+  const key = pullKey(folder, number);
+  if (usePullActivity.getState()[key]?.running) throw new Error(`#${number} is still busy`);
+  usePullActivity.setState({ [key]: { running: what } });
+  try {
+    await action();
+    // The action worked either way, and a merge can take the worktree this would read from with it.
+    await viewPull(folder, number, true).then(
+      (value) => {
+        remember(key, value);
+        for (const heard of showing) heard(key);
+      },
+      () => {},
+    );
+    usePullActivity.setState({ [key]: {} });
+  } catch (err) {
+    usePullActivity.setState({ [key]: { failure: (err as Error).message } });
+    throw err;
+  }
+}
+
+export const clearPullFailure = (folder: Folder, number: number) => usePullActivity.setState({ [pullKey(folder, number)]: {} });
+
 /**
  * A read named by `key`, redone every `every` ms while the page is in view (0: once per key). What
  * was read last shows at once, then is read again. `load(true)` should skip the server's sharing.
@@ -210,6 +243,15 @@ export function usePullRead<T>(key: string, load: (fresh: boolean) => Promise<T>
       document.removeEventListener("visibilitychange", tick);
     };
   }, [key, every, reload]);
+  useEffect(() => {
+    const heard = (changed: string) => {
+      if (changed === key) setState({ key, data: held<T>(key) });
+    };
+    showing.add(heard);
+    return () => {
+      showing.delete(heard);
+    };
+  }, [key]);
   // Between a key changing and the effect above, what's held still belongs to the old key.
   const current = state.key === key ? state : { key, data: held<T>(key) };
   return { data: current.data as T | undefined, error: "error" in current ? current.error : undefined, loading, reload };
