@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitChange, PullDetail } from "../../shared/types";
 import { commitPaths, commitScope, gitCommit, gitPullRequest, gitPush, useGitChanges, writeCommitMessage } from "../lib/git";
 import { usePanel } from "../lib/panel";
-import { DELETE_KEY, mergePull, mergeReadiness, preferredMethod, viewPull } from "../lib/pulls";
+import { DELETE_KEY, mergePull, mergeReadiness, mergeUnsettled, preferredMethod, SETTLE_REFRESH, viewPull } from "../lib/pulls";
 import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { cx } from "../lib/ui";
@@ -50,13 +50,21 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
   useEffect(() => {
     if (!open || !ws || !threadPr) return;
     let live = true;
+    let again: ReturnType<typeof setTimeout> | undefined;
     setPullError(undefined);
-    viewPull(ws, threadPr.number).then(
-      (p) => live && setPull(p),
-      (err: Error) => live && setPullError(err.message),
-    );
+    const ask = () =>
+      viewPull(ws, threadPr.number).then(
+        (p) => {
+          if (!live) return;
+          setPull(p);
+          if (mergeUnsettled(p)) again = setTimeout(ask, SETTLE_REFRESH);
+        },
+        (err: Error) => live && setPullError(err.message),
+      );
+    void ask();
     return () => {
       live = false;
+      clearTimeout(again);
     };
   }, [open, ws?.cwd, ws?.deviceId, threadPr?.number, tick]);
 
