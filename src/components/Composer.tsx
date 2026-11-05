@@ -795,6 +795,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
       return finishEdit(false);
     }
     if (e.key !== "Enter" || e.nativeEvent.isComposing || e.shiftKey) return;
+    // On touch screens Enter is a new line and the send button sends.
+    if (window.matchMedia("(pointer: coarse)").matches) return;
     e.preventDefault();
     // Cmd/Ctrl+Enter sends and leaves a new empty thread. Enter sends and opens the thread.
     submit(undefined, e.metaKey || e.ctrlKey);
