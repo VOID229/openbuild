@@ -3,7 +3,7 @@
 import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
-import { isConnected, useApps, type ConnectInput } from "../../lib/bots/apps";
+import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
 import { arrowNav, copyText, cx } from "../../lib/ui";
 import { IconButton, Popover, Spinner } from "../primitives";
 import { DialogHead, useModal } from "./BotDialogs";
@@ -45,6 +45,7 @@ function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
     setProblem(undefined);
     try {
       await useApps.getState().connect(app.id);
+      if (pastesSignIn(app)) onOpen();
     } catch (err) {
       setProblem((err as Error).message);
     } finally {
@@ -114,6 +115,7 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
   const [fields, setFields] = useState<Record<string, string>>(view?.fields ?? {});
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [pasted, setPasted] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const c = app.connection;
@@ -140,6 +142,8 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
     if (guide && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
     void run(() => useApps.getState().connect(app.id, input));
   };
+  const finish = () => void run(() => useApps.getState().finish(app.id, pasted).then(() => setPasted("")));
+  const pastes = pastesSignIn(app);
   const error = problem ?? (view?.status === "error" || view?.status === "needs-auth" ? view.error : undefined);
 
   return (
@@ -246,6 +250,29 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
         </label>
       ))}
 
+      {pastes && !connected && !view?.signingIn && <p className="field-help">{app.by} only sends sign-ins back to localhost, so connecting from this address takes one extra step: you'll copy an address back here after signing in.</p>}
+
+      {pastes && view?.signingIn && (
+        <form
+          className="app-guide"
+          onSubmit={(e) => {
+            e.preventDefault();
+            finish();
+          }}
+        >
+          <label className="bots-field">
+            <span className="bots-field-label">Finish signing in</span>
+            <input className="input" value={pasted} autoComplete="off" spellCheck={false} placeholder="http://localhost…" onChange={(e) => setPasted(e.target.value)} />
+            <span className="field-help">Once you approve {app.name}, its tab ends on a page that won't load. That's expected. Copy the whole address from that tab and paste it here.</span>
+          </label>
+          <div className="app-page-actions">
+            <button type="submit" className="btn bots-btn bots-btn-primary" disabled={busy || !pasted.trim()}>
+              {busy ? <Spinner size={13} /> : "Finish"}
+            </button>
+          </div>
+        </form>
+      )}
+
       {error && (
         <p className="field-help key-status key-status-bad" role="alert">
           <CircleAlert size={13} className="bad" /> {error}
@@ -254,7 +281,7 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
 
       <div className="app-page-actions">
         {!(connected && c.kind === "open") && (
-          <button type="button" className="btn bots-btn bots-btn-primary" disabled={busy} onClick={connect}>
+          <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy} onClick={connect}>
             {busy ? <Spinner size={13} /> : connected || view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
           </button>
         )}

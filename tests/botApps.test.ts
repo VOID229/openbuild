@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { APP_CATALOG, APP_CATEGORIES, appUrl, fillTemplate, OAUTH_CLIENTS } from "../shared/apps";
+import { APP_CATALOG, APP_CATEGORIES, appReturnOrigin, appUrl, fillTemplate, OAUTH_CLIENTS } from "../shared/apps";
 import { frontMatter } from "../server/bots/skills";
 import { renderResult } from "../server/bots/mcp";
 
@@ -35,6 +35,16 @@ test("templates take field values, then a choice's default", () => {
   expect(appUrl(datadog)).toBe("https://mcp.datadoghq.com/v1/mcp");
   expect(appUrl(datadog, { site: "datadoghq.eu" })).toBe("https://mcp.datadoghq.eu/v1/mcp");
   expect(fillTemplate("Bearer {token}", { fields: [{ id: "token", label: "Key" }] }, { token: "abc" })).toBe("Bearer abc");
+});
+
+test("only a localhost-only service changes where a sign-in comes back to", () => {
+  const vercel = APP_CATALOG.find((a) => a.id === "vercel")!;
+  expect(appReturnOrigin(vercel, "http://box.tail0.ts.net:4000")).toBe("http://localhost:4000");
+  expect(appReturnOrigin(vercel, "https://box.tail0.ts.net")).toBe("http://localhost:3100");
+  expect(appReturnOrigin(vercel, "http://localhost:4000")).toBe("http://localhost:4000");
+  expect(appReturnOrigin(vercel, "http://127.0.0.1:4000")).toBe("http://127.0.0.1:4000");
+  const github = APP_CATALOG.find((a) => a.connection.kind === "oauth" && !a.connection.localhostOnly)!;
+  expect(appReturnOrigin(github, "https://box.tail0.ts.net")).toBe("https://box.tail0.ts.net");
 });
 
 test("skill front matter handles quotes and folded blocks", () => {
@@ -158,6 +168,19 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
         assert.ok((await apps.snapshot()).clients.includes("google"));
         assert.ok(!JSON.stringify(await apps.snapshot()).includes("server-secret"));
         await apps.disconnect("fake-google");
+
+        // A service that only accepts localhost: over Tailscale, the user pastes the sign-in back.
+        apps.addAppForTests({ ...base, id: "fake-local", name: "Local", connection: { kind: "oauth", url: origin + "/mcp", localhostOnly: true } });
+        const { authorize } = await apps.connect("fake-local", { origin: "http://box.tail0.ts.net:4000" });
+        const landed = (await fetch(authorize, { redirect: "manual" })).headers.get("location");
+        assert.ok(landed.startsWith("http://localhost:4000/api/bots/apps/callback?"));
+        assert.equal((await apps.snapshot()).apps.find((a) => a.id === "fake-local").signingIn, true);
+        await assert.rejects(apps.finishPasted("fake-local", "not an address"), /whole address/);
+        await assert.rejects(apps.finishPasted("fake-open", landed), /another app/);
+        assert.equal((await apps.finishPasted("fake-local", "  " + landed + " ")).status, "connected");
+        assert.equal((await apps.snapshot()).apps.find((a) => a.id === "fake-local").signingIn, false);
+        await assert.rejects(apps.finishPasted("fake-local", landed), /expired or was already used/);
+        await apps.disconnect("fake-local");
 
         // A reset is about bots and chats: the apps stay.
         await svc.resetAll();
