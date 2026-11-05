@@ -3000,11 +3000,32 @@ button.bots-details-name:hover {
 
 /* Connect Apps: the catalog, an app's own page, and the card a bot posts to offer one. */
 .apps-dialog {
-  width: min(760px, calc(100vw - 24px));
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(680px, calc(100dvh - 48px));
+  overflow: hidden;
 }
 
-.apps-body {
-  gap: 16px;
+/* The head stays put and the catalog or app page scrolls under it, so nothing falls off the bottom. */
+.apps-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.apps-dialog .bots-dialog-head {
+  flex: none;
+  padding: 10px 10px 10px 20px;
+}
+
+.apps-dialog .bots-dialog-head h2 {
+  font-size: 16px;
+}
+
+.apps-dialog .bots-dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  gap: 12px;
+  padding: 14px 20px 18px;
 }
 
 .apps-tools {
@@ -3050,11 +3071,11 @@ button.bots-details-name:hover {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 32px;
-  padding: 0 13px;
+  height: 28px;
+  padding: 0 11px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  font-size: 13.5px;
+  border-radius: 14px;
+  font-size: 13px;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -3073,7 +3094,7 @@ button.bots-details-name:hover {
 .apps-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .apps-section-head {
@@ -3084,7 +3105,7 @@ button.bots-details-name:hover {
 
 .apps-section-head h3 {
   margin: 0;
-  font-size: 14.5px;
+  font-size: 13.5px;
   font-weight: 500;
 }
 
@@ -3103,7 +3124,7 @@ button.bots-details-name:hover {
 .apps-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 24px;
+  gap: 2px 20px;
 }
 
 .app-row {
@@ -3117,10 +3138,10 @@ button.bots-details-name:hover {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
-  padding: 6px;
-  border-radius: 12px;
+  padding: 4px 6px;
+  border-radius: 10px;
   text-align: left;
   transition: background-color var(--fast) var(--ease);
 }
@@ -3139,7 +3160,7 @@ button.bots-details-name:hover {
 
 .app-row-name {
   overflow: hidden;
-  font-size: 14.5px;
+  font-size: 13.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3195,7 +3216,7 @@ button.bots-details-name:hover {
 
 .app-page-title h3 {
   margin: 0;
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
 }
 
@@ -3203,7 +3224,7 @@ button.bots-details-name:hover {
 .app-page-desc {
   margin: 0;
   color: var(--text-2);
-  font-size: 13.5px;
+  font-size: 13px;
 }
 
 .app-page-title a,

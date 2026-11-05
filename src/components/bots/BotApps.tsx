@@ -54,7 +54,7 @@ function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
   return (
     <div className="app-row">
       <button type="button" className="app-row-main" onClick={onOpen}>
-        <AppLogo app={app} />
+        <AppLogo app={app} size={32} />
         <span className="app-row-text">
           <span className="app-row-name">{app.name}</span>
           {problem ? <span className="app-row-status bad">{problem}</span> : status && <span className={cx("app-row-status", view?.status === "connected" ? "app-row-status-on" : view?.status !== "connecting" && "bad")}>{status}</span>}
@@ -146,7 +146,7 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
         <ArrowLeft size={15} /> All apps
       </button>
       <div className="app-page-head">
-        <AppLogo app={app} size={52} />
+        <AppLogo app={app} size={44} />
         <div className="app-page-title">
           <h3>{app.name}</h3>
           <p>
