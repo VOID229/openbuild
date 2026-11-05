@@ -39,6 +39,11 @@ export function BotsView() {
   useEffect(() => {
     if (mobile) useBots.getState().setDetailsOpen(false);
   }, [mobile]);
+  // With nothing to show, the way back to the list would be missing with the chat it's in.
+  const nothingOpen = mobile && loaded && !conversation;
+  useEffect(() => {
+    if (nothingOpen) useStore.getState().setBotsSidebarOpen(true);
+  }, [nothingOpen]);
   // Escape closes the details panel, unless something on top of it (a menu, a dialog) takes it first.
   useEffect(() => {
     if (!detailsOpen) return;

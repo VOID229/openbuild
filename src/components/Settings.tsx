@@ -25,7 +25,7 @@ import { BotsSettingsSection } from "./bots/BotSettings";
 /** A section's icon: Lucide's, or one drawn to match them (OpenBots' bot). */
 type NavIcon = LucideIcon | ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
 
-/** Icons stand in for the labels on phones, so every section fits without scrolling. */
+/** On phones these are a row of named tabs that scrolls sideways: there are too many to fit, even as icons. */
 const SECTIONS: { id: SettingsSection; label: string; icon: NavIcon }[] = [
   { id: "profile", label: "Profile", icon: UserRound },
   { id: "general", label: "General", icon: Settings2 },
@@ -571,6 +571,7 @@ export function SettingsModal() {
               type="button"
               className="settings-nav-item"
               aria-current={section === s.id}
+              ref={section === s.id ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
               aria-label={s.label}
               onClick={() => useStore.setState({ settingsSection: s.id })}
             >

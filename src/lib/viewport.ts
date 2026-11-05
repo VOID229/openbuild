@@ -20,6 +20,8 @@ export function lockViewport() {
     frame = requestAnimationFrame(() => {
       tallest = Math.max(tallest, vv.height);
       root.style.setProperty("--app-h", `${Math.round(vv.height)}px`);
+      // Bottom sheets sit in the top layer, measured from the layout viewport, which the keyboard covers.
+      root.style.setProperty("--kb-h", `${Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop))}px`);
       // A keyboard (not just a collapsing toolbar) is covering the bottom of the screen.
       root.toggleAttribute("data-keyboard", tallest - vv.height > 120);
       if (window.scrollY !== 0 || window.scrollX !== 0) window.scrollTo(0, 0);

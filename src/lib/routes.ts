@@ -54,9 +54,11 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
     const state = store.getState();
     const url = pathFor(state) + location.search;
     const context = { threadId: state.activeChatId };
-    if (replace) history.replaceState(context, "", url);
+    // The same entry keeps whatever else it holds: which of OpenBots' screens it is, on a phone (see gestures.ts).
+    const same = { ...history.state, ...context };
+    if (replace) history.replaceState(same, "", url);
     else if (location.pathname + location.search + location.hash !== url) history.pushState(context, "", url);
-    else if (history.state?.threadId !== state.activeChatId) history.replaceState(context, "", url);
+    else if (history.state?.threadId !== state.activeChatId) history.replaceState(same, "", url);
   };
   const read = () => {
     const route = readRoute(location.pathname, location.hash);
