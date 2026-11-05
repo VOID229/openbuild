@@ -153,11 +153,26 @@ function HarnessRow({ runtime }: { runtime: ThreadRuntime }) {
 }
 
 export function BotHarnesses() {
+  const blocked = useBots((s) => s.harnesses.blocked);
+  // Collapsed by default, like web search: the header already says which harnesses bots can use.
+  const [open, setOpen] = useState(false);
+  const allowed = HARNESSES.filter((r) => !blocked?.includes(r)).map(runtimeName);
   return (
     <>
-      {HARNESSES.map((runtime) => (
-        <HarnessRow key={runtime} runtime={runtime} />
-      ))}
+      <div className="pi-subhead">
+        <button type="button" className="pi-subhead-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+          <span className="pi-subhead-title">Harnesses in OpenBuild</span>
+          <span className="pi-subhead-note">{allowed.length ? allowed.join(", ") : "None allowed"}</span>
+          <ChevronDown size={15} className="pi-subhead-chevron" />
+        </button>
+      </div>
+      <div className={cx("collapse", open && "collapse-open")} inert={!open}>
+        <div className="collapse-inner">
+          {HARNESSES.map((runtime) => (
+            <HarnessRow key={runtime} runtime={runtime} />
+          ))}
+        </div>
+      </div>
     </>
   );
 }
