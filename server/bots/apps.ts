@@ -68,9 +68,23 @@ function view(id: string, s: StoredApp): AppView {
   };
 }
 
+/**
+ * The OAuth app a service signs in through: the server's own when its environment sets one, or else
+ * one saved in the vault (pasted in, or from before the server had its own).
+ */
+async function clientFor(id: OAuthClientId): Promise<OwnClient | undefined> {
+  const env = OAUTH_CLIENTS[id].env;
+  const clientId = env && process.env[env.id]?.trim();
+  if (clientId) {
+    const secret = process.env[env.secret]?.trim();
+    return { id: clientId, ...(secret ? { secret } : {}) };
+  }
+  return getOwnClient(id);
+}
+
 export async function snapshot(): Promise<AppsSnapshot> {
   const clients: OAuthClientId[] = [];
-  for (const id of Object.keys(OAUTH_CLIENTS) as OAuthClientId[]) if (await getOwnClient(id)) clients.push(id);
+  for (const id of Object.keys(OAUTH_CLIENTS) as OAuthClientId[]) if (await clientFor(id)) clients.push(id);
   return {
     apps: Object.entries(storedApps()).map(([id, s]) => view(id, s)),
     clients,
@@ -135,15 +149,17 @@ export async function connect(id: string, input: ConnectInput): Promise<{ author
   if (c.kind === "oauth" || c.kind === "client") {
     let own: OwnClient | undefined;
     if (c.kind === "client") {
+      const guide = OAUTH_CLIENTS[c.client];
       const clientId = typeof input.client?.id === "string" ? input.client.id.trim() : "";
-      if (clientId) {
+      if (clientId && !guide.env) {
         const secret = typeof input.client?.secret === "string" ? input.client.secret.trim() : "";
         if (clientId.length > 500 || secret.length > 500) throw new svc.BotsError("That client doesn't look right.");
         await saveOwnClient(c.client, { id: clientId, ...(secret ? { secret } : {}) });
       }
-      own = await getOwnClient(c.client);
-      if (!own) throw new svc.BotsError(`Add your ${OAUTH_CLIENTS[c.client].name} OAuth client first.`);
-      if (OAUTH_CLIENTS[c.client].secret === "required" && !own.secret) throw new svc.BotsError(`${OAUTH_CLIENTS[c.client].name} needs the client secret too.`);
+      own = await clientFor(c.client);
+      if (!own && guide.env) throw new svc.BotsError(`${app.by} sign-in isn't set up on this server yet. Set ${guide.env.id} and ${guide.env.secret} where OpenBuild runs, then restart it.`);
+      if (!own) throw new svc.BotsError(`Add your ${guide.name} OAuth client first.`);
+      if (guide.secret === "required" && !own.secret) throw new svc.BotsError(guide.env ? `Set ${guide.env.secret} too, where OpenBuild runs.` : `${guide.name} needs the client secret too.`);
     }
     const redirect = callbackUrl(input.origin);
     const state = crypto.randomUUID();
@@ -195,7 +211,7 @@ export async function finish(params: URLSearchParams): Promise<{ app?: CatalogAp
   if (!code) return { app, error: "The sign-in came back without a code." };
   try {
     const c = app.connection;
-    await finishSignIn(app, storedApps()[app.id]?.fields ?? {}, flow.redirect, code, c.kind === "client" ? await getOwnClient(c.client) : undefined);
+    await finishSignIn(app, storedApps()[app.id]?.fields ?? {}, flow.redirect, code, c.kind === "client" ? await clientFor(c.client) : undefined);
   } catch (err) {
     update(app.id, { status: "error", error: message(err) });
     return { app, error: message(err) };
@@ -207,7 +223,7 @@ export async function finish(params: URLSearchParams): Promise<{ app?: CatalogAp
 async function target(app: CatalogApp) {
   const s = storedApps()[app.id];
   const c = app.connection;
-  return { app, values: s?.fields ?? {}, secrets: await getSecrets(app.id), own: c.kind === "client" ? await getOwnClient(c.client) : undefined };
+  return { app, values: s?.fields ?? {}, secrets: await getSecrets(app.id), own: c.kind === "client" ? await clientFor(c.client) : undefined };
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 500);

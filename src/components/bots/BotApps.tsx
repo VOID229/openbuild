@@ -22,7 +22,8 @@ export function AppLogo({ app, size = 40 }: { app: CatalogApp; size?: number }) 
 const connectsStraightAway = (app: CatalogApp, clients: string[]) => {
   const c = app.connection;
   if (app.fields?.length || c.kind === "token" || c.kind === "local" || c.kind === "desktop") return false;
-  return c.kind !== "client" || clients.includes(c.client);
+  // A client the server keeps goes straight to sign-in; if it's missing, Connect says so.
+  return c.kind !== "client" || !!OAUTH_CLIENTS[c.client].env || clients.includes(c.client);
 };
 
 function statusText(view?: AppView) {
@@ -116,7 +117,8 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const c = app.connection;
-  const guide = c.kind === "client" ? OAUTH_CLIENTS[c.client] : undefined;
+  // Services whose client the server keeps just sign in; the rest take one pasted in here.
+  const guide = c.kind === "client" && !OAUTH_CLIENTS[c.client].env ? OAUTH_CLIENTS[c.client] : undefined;
   const hasClient = c.kind === "client" && clients.includes(c.client);
   const connected = isConnected(view);
   const canReuseKey = app.id === "github" && githubKey;
@@ -135,7 +137,7 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
   const connect = () => {
     const input: ConnectInput = {};
     if (app.fields?.length) input.fields = fields;
-    if (c.kind === "client" && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
+    if (guide && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
     void run(() => useApps.getState().connect(app.id, input));
   };
   const error = problem ?? (view?.status === "error" || view?.status === "needs-auth" ? view.error : undefined);
@@ -174,7 +176,7 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
             </p>
           ) : (
             <ol className="app-steps">
-              {guide.steps.map((step) => (
+              {guide.steps?.map((step) => (
                 <li key={step}>{step}</li>
               ))}
             </ol>
