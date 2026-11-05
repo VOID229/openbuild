@@ -1112,8 +1112,10 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <div className="bots-composer-images">
             {images.map((src, i) => (
               <span key={i} className="bots-composer-image">
-                <img src={src} alt="" />
-                <button type="button" aria-label="Remove image" disabled={sending} onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
+                <button type="button" className="bots-composer-image-open" aria-label="Preview image" onClick={() => openLightbox(images.map((src, j) => ({ id: `draft-${j}`, name: "Image", dataUrl: src })), `draft-${i}`)}>
+                  <img src={src} alt="" />
+                </button>
+                <button type="button" className="bots-composer-image-remove" aria-label="Remove image" disabled={sending} onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
                   <X size={12} />
                 </button>
               </span>
