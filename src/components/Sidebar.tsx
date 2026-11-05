@@ -1358,9 +1358,17 @@ export function Sidebar() {
   const [closedView, setClosedView] = useState(false);
   const [cleanupError, setCleanupError] = useState<string>();
   useEffect(() => {
-    const onError = (event: Event) => setCleanupError((event as CustomEvent<string>).detail);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onError = (event: Event) => {
+      clearTimeout(timer);
+      setCleanupError((event as CustomEvent<string>).detail);
+      timer = setTimeout(() => setCleanupError(undefined), 8000);
+    };
     window.addEventListener("worktree-cleanup-error", onError);
-    return () => window.removeEventListener("worktree-cleanup-error", onError);
+    return () => {
+      window.removeEventListener("worktree-cleanup-error", onError);
+      clearTimeout(timer);
+    };
   }, []);
   const historyRef = useRef<HTMLElement>(null);
   const updateChat = useStore((s) => s.updateChat);
