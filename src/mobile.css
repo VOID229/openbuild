@@ -234,6 +234,73 @@
   }
 }
 
+/* Controls press down quickly and let go slowly, rather than snapping between the two. Rows and bubbles
+   that a scroll passes through keep their own timing. */
+@media (hover: none) {
+  .btn,
+  .icon-btn,
+  .round-btn,
+  .new-chat,
+  .settings-btn,
+  .pill,
+  .chip,
+  .segment,
+  .menu-item,
+  .sheet-item,
+  .model-row,
+  .settings-nav-item,
+  .select-trigger,
+  .reasoning-toggle,
+  .history-heading-toggle,
+  .scroll-down,
+  .bots-chip,
+  .bots-pick,
+  .bots-toggle,
+  .bots-composer-btn {
+    transition-property: background-color, border-color, color, opacity, transform;
+    transition-duration: 240ms;
+    transition-timing-function: var(--ease);
+  }
+
+  .btn:active,
+  .icon-btn:active,
+  .round-btn:active,
+  .new-chat:active,
+  .settings-btn:active,
+  .pill:active,
+  .chip:active,
+  .segment:active,
+  .menu-item:active,
+  .sheet-item:active,
+  .model-row:active,
+  .settings-nav-item:active,
+  .select-trigger:active,
+  .reasoning-toggle:active,
+  .history-heading-toggle:active,
+  .scroll-down:active,
+  .bots-chip:active,
+  .bots-pick:active,
+  .bots-toggle:active,
+  .bots-composer-btn:active {
+    transition-duration: 70ms;
+  }
+
+  /* Only a mouse can aim at a sliver this thin. A thumb that lands on it should scroll the list. */
+  .scroll-thumb-on {
+    pointer-events: none;
+  }
+
+  /* Pulling a list past its end stays in the list, so the page can't take over the next swipe. */
+  .history {
+    overscroll-behavior: contain;
+  }
+
+  /* A thread opening rises only where it can be seen, not once for every message it has. */
+  .msg:not(:nth-last-child(-n + 4)):not(.msg-flash) {
+    animation: none;
+  }
+}
+
 /* iOS zooms into any field under 16px when it's focused, and leaves the page zoomed. */
 @media (pointer: coarse) {
   .bots-composer-input,
@@ -1174,8 +1241,21 @@
     height: 42px;
   }
 
+  /* The same soft landing as OpenBots' panes. */
   .sidebar:not(.bots-sidebar) {
-    touch-action: pan-y;
+    transition: transform 340ms var(--ease-panel), opacity 200ms var(--ease), visibility 0s;
+  }
+
+  .sidebar-closed:not(.bots-sidebar) {
+    transition: transform 340ms var(--ease-panel), opacity 200ms var(--ease), visibility 0s 340ms;
+  }
+
+  .sidebar-scrim {
+    transition: opacity 340ms var(--ease-panel), visibility 0s 340ms;
+  }
+
+  .sidebar-scrim-visible {
+    transition: opacity 340ms var(--ease-panel), visibility 0s;
   }
 
   .new-chat {

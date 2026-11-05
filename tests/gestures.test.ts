@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dragCommits, REPLY_AT, replyDrag } from "../src/lib/gestures";
+import { dragClaims, dragCommits, REPLY_AT, replyDrag } from "../src/lib/gestures";
 
 describe("dragging a pane", () => {
   const width = 400;
@@ -52,5 +52,23 @@ describe("the phone stylesheet", () => {
     const queries = topLevel.filter((s) => s.startsWith("@media"));
     expect(queries.length).toBeGreaterThan(0);
     for (const q of queries) expect(q).toMatch(/max-width: (768|960)px|pointer: coarse|hover: none|prefers-reduced-motion/);
+  });
+});
+
+describe("dragClaims", () => {
+  test("a swipe that's clearly sideways, the right way, pulls the pane", () => {
+    expect(dragClaims(-20, 3, -1)).toBe(true);
+    expect(dragClaims(20, -3, 1)).toBe(true);
+  });
+
+  test("a thumb arcing up a list is a scroll, even when it starts more sideways than up", () => {
+    expect(dragClaims(-14, -8, -1)).toBe(false);
+    expect(dragClaims(-10, -10, -1)).toBe(false);
+    expect(dragClaims(0, -12, -1)).toBe(false);
+  });
+
+  test("a swipe the other way leaves the pane alone", () => {
+    expect(dragClaims(20, 0, -1)).toBe(false);
+    expect(dragClaims(-20, 0, 1)).toBe(false);
   });
 });

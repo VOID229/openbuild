@@ -2,6 +2,7 @@ import { loadChatHistory } from "../lib/db";
 import { isHosted } from "../lib/runtime";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
 import { harnessSession, removeWorktree } from "../lib/pi";
@@ -1445,9 +1446,15 @@ export function Sidebar() {
 
   const onSelect = useCallback(
     (c: Chat, hit?: SearchHit) => {
-      selectChat(c.id);
-      if (hit?.snippet) setSearchFocus({ chatId: c.id, messageId: hit.snippet.messageId, words: hit.words });
-      if (mobile) setSidebarOpen(false);
+      const open = () => {
+        selectChat(c.id);
+        if (hit?.snippet) setSearchFocus({ chatId: c.id, messageId: hit.snippet.messageId, words: hit.words });
+      };
+      if (!mobile) return open();
+      // The drawer answers the tap first: it slides on the compositor while the thread renders behind
+      // it, instead of sitting still until a long thread has finished.
+      flushSync(() => setSidebarOpen(false));
+      requestAnimationFrame(() => setTimeout(open));
     },
     [mobile, selectChat, setSearchFocus, setSidebarOpen],
   );

@@ -220,6 +220,14 @@ export function dragCommits(distance: number, velocity: number, width: number) {
   return distance > width * 0.35 || (distance > 24 && velocity > 0.4);
 }
 
+/**
+ * Whether a finger's first move is pulling a pane rather than scrolling. A thumb swiping up a list arcs
+ * sideways, and a touch can only be one or the other, so a pane has to be clearly what was meant.
+ */
+export function dragClaims(dx: number, dy: number, sign: 1 | -1) {
+  return Math.sign(dx) === sign && Math.abs(dx) > Math.abs(dy) * 2;
+}
+
 interface Drag {
   /** The pane that follows the finger, and where it rests when the move hasn't happened or has. */
   pane: HTMLElement;
@@ -305,7 +313,7 @@ export function startPaneGestures() {
     if (!d.active) {
       if (Math.hypot(dx, dy) < SLOP) return;
       // Not this gesture: a scroll, or a swipe the other way.
-      if (Math.abs(dy) > Math.abs(dx) || Math.sign(dx) !== d.sign) {
+      if (!dragClaims(dx, dy, d.sign)) {
         drag = undefined;
         return;
       }
@@ -333,8 +341,9 @@ export function startPaneGestures() {
   };
   document.addEventListener("touchstart", onStart, { passive: true });
   document.addEventListener("touchmove", onMove, { passive: false });
-  document.addEventListener("touchend", onEnd);
-  document.addEventListener("touchcancel", onEnd);
+  // Passive: a listener that could cancel the lift makes every tap on the page wait for the main thread.
+  document.addEventListener("touchend", onEnd, { passive: true });
+  document.addEventListener("touchcancel", onEnd, { passive: true });
   window.addEventListener("popstate", followLayer);
   return () => {
     document.removeEventListener("touchstart", onStart);
