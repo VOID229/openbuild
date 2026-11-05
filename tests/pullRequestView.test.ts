@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PullCheck } from "../shared/types";
 import { usePanel } from "../src/lib/panel";
-import { actOnPull, clearPullFailure, mergeReadiness, prefetchPull, pullKey, usePullActivity } from "../src/lib/pulls";
+import { actOnPull, clearPullFailure, mergeReadiness, mergeUnsettled, prefetchPull, pullKey, usePullActivity } from "../src/lib/pulls";
 
 const fakeGh = `#!/bin/sh
 printf '%s\\n' "$*" >> "$GH_LOG"
@@ -23,7 +23,16 @@ JSON
 ]
 JSON
   ;;
-  "pr view") cat <<'JSON'
+  "pr view")
+    # #9 settles on the second ask for only its mergeability, #10 never does.
+    case "$3 $5" in
+      "9 mergeable,mergeStateStatus")
+        if [ "$(grep -c '^pr view 9 --json mergeable' "$GH_LOG")" -ge 2 ]; then echo '{"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'; else echo '{"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN"}'; fi
+        exit 0 ;;
+      "10 mergeable,mergeStateStatus") echo '{"mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN"}'; exit 0 ;;
+      "9 "*|"10 "*) printf '{"number":%s,"title":"T","url":"u","state":"OPEN","headRefName":"f","baseRefName":"main","updatedAt":"2026-11-02T00:00:00Z","headRefOid":"abc1234","mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN"}\\n' "$3"; exit 0 ;;
+    esac
+    cat <<'JSON'
 {"number":7,"title":"Mine","url":"https://github.com/o/r/pull/7","state":"OPEN","author":null,"headRefName":"feat","baseRefName":"main","updatedAt":"2026-11-02T00:00:00Z","body":"Why","headRefOid":"abc1234def","changedFiles":2,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","statusCheckRollup":[{"name":"test","status":"COMPLETED","conclusion":"FAILURE","detailsUrl":"https://ci/1"},{"context":"lint","state":"SUCCESS"},{"name":"docs","status":"COMPLETED","conclusion":"SKIPPED"},{"name":"e2e","status":"IN_PROGRESS","conclusion":""}],"latestReviews":[{"author":{"login":"ann"},"state":"APPROVED"}],"reviewRequests":[{"login":"ann"},{"slug":"core"}],"reviews":[{"id":"r1","author":{"login":"ann"},"state":"APPROVED","body":"","submittedAt":"2026-11-02T01:00:00Z"},{"id":"r2","author":{"login":"bob"},"state":"COMMENTED","body":"Hm","submittedAt":"2026-11-02T03:00:00Z"}],"labels":[{"name":"bug","color":"ff0000"}],"comments":[{"id":"c1","author":{"login":"cat"},"body":"Nice","createdAt":"2026-11-02T02:00:00Z"}],"commits":[{"oid":"abc1234def","messageHeadline":"first","committedDate":"2026-11-02T00:00:00Z","authors":[{"login":"","name":"Me"}]}]}
 JSON
   ;;
@@ -88,6 +97,20 @@ const script = `
   calls();
   await view.view(cwd, 7);
   assert.deepEqual(calls().filter(Boolean), [], "a pull request just read is read once");
+
+  // GitHub still working out whether it can merge: asked again, for only that, until it says.
+  const views = () => calls().map((l) => l.replace(/^pr view (\\d+) --json (mergeable)?.*/, "$1 $2").trim());
+  calls();
+  const answered = await view.view(cwd, 9);
+  assert.deepEqual([answered.mergeable, answered.mergeState, answered.title], ["MERGEABLE", "CLEAN", "T"]);
+  assert.deepEqual(views(), ["9", "9 mergeable", "9 mergeable"]);
+  await view.view(cwd, 9);
+  assert.deepEqual(calls().filter(Boolean), [], "an answer is shared");
+  const undecided = await view.view(cwd, 10);
+  assert.equal(undecided.mergeable, "UNKNOWN", "it stops waiting eventually");
+  assert.deepEqual(views(), ["10", "10 mergeable", "10 mergeable", "10 mergeable", "10 mergeable"]);
+  await view.view(cwd, 10);
+  assert.equal(views()[0], "10", "no answer yet, so the next read asks GitHub");
 
   // Diffs.
   assert.equal((await view.patch(cwd, 7)).patch, "diff --git a/a b/a");
@@ -181,6 +204,14 @@ describe("mergeReadiness", () => {
   test("while GitHub is working it out, or the branch is behind, it waits", () => {
     expect(check({ mergeable: "UNKNOWN", mergeState: "UNKNOWN" })).toEqual(["wait", "GitHub is checking if it can merge", false]);
     expect(check({ mergeState: "BEHIND" })[2]).toBe(false);
+  });
+  test("only an open pull request ready for review is worth asking about again", () => {
+    const unknown = { state: "open" as const, mergeable: "UNKNOWN", mergeState: "UNKNOWN" };
+    expect(mergeUnsettled(unknown)).toBe(true);
+    expect(mergeUnsettled({ ...unknown, mergeable: "MERGEABLE" })).toBe(true);
+    expect(mergeUnsettled({ ...unknown, draft: true })).toBe(false);
+    expect(mergeUnsettled({ ...unknown, state: "merged" })).toBe(false);
+    expect(mergeUnsettled({ state: "open", mergeable: "MERGEABLE", mergeState: "CLEAN" })).toBe(false);
   });
 });
 

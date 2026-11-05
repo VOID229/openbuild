@@ -74,7 +74,10 @@ export function preferredMethod(methods: PullMergeMethod[]): PullMergeMethod {
   return last && methods.includes(last) ? last : (methods[0] ?? "merge");
 }
 
-export { mergeReadiness, type Readiness } from "../../shared/pullReadiness";
+export { mergeReadiness, mergeUnsettled, type Readiness } from "../../shared/pullReadiness";
+
+/** How soon to read a pull request again while GitHub is still working out whether it can merge. */
+export const SETTLE_REFRESH = 3_000;
 
 // The last answer to each read, so showing the tab again doesn't start from nothing. Lists and pull
 // requests are also kept in localStorage for the next load; diffs can be big, so they aren't.

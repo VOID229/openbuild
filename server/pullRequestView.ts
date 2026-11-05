@@ -4,6 +4,7 @@
 //
 // Actions name the repository with `--repo`. Besides being explicit, that keeps `gh pr merge
 // --delete-branch` away from local branches: a worktree's checkout is the thread's, not ours to switch.
+import { mergeUnsettled } from "../shared/pullReadiness";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../shared/types";
 import { checksOf, FAILED, sweep } from "./pullRequests";
 import { fail, gh, MAX_VIEW_DIFF, run } from "./workspaceGit";
@@ -190,14 +191,15 @@ async function repoOf(cwd: string): Promise<GhRepo> {
 const READ_TTL = 15_000;
 const reads = new Map<string, { at: number; value: Promise<unknown> }>();
 
-/** `load`'s answer under `key`, reused for READ_TTL unless `fresh`; one ask at a time, and failures aren't kept. */
-function shared<T>(key: string, fresh: boolean, load: () => Promise<T>): Promise<T> {
+/** `load`'s answer under `key`, reused for READ_TTL unless `fresh`; one ask at a time, and failures, or answers `keep` turns down, aren't kept. */
+function shared<T>(key: string, fresh: boolean, load: () => Promise<T>, keep?: (value: T) => boolean): Promise<T> {
   const known = reads.get(key);
   if (known && !fresh && Date.now() - known.at < READ_TTL) return known.value as Promise<T>;
   const value = load();
   const entry = { at: Date.now(), value };
   reads.set(key, entry);
-  value.catch(() => reads.get(key) === entry && reads.delete(key));
+  const drop = () => reads.get(key) === entry && reads.delete(key);
+  value.then((v) => keep && !keep(v) && drop(), drop);
   return value;
 }
 
@@ -239,13 +241,35 @@ export async function repository(cwd: string): Promise<{ url: string }> {
   return { url: (await repoOf(cwd)).url };
 }
 
+// GitHub works out whether a pull request can merge when it's asked, usually within a few seconds.
+const SETTLE_WAITS = [500, 1000, 1500, 2000];
+
+/** Give GitHub a moment to answer whether it can merge, asking for only that. */
+async function settled(cwd: string, detail: PullDetail): Promise<PullDetail> {
+  for (const wait of SETTLE_WAITS) {
+    if (!mergeUnsettled(detail)) break;
+    await Bun.sleep(wait);
+    const r = await run([bin(), "pr", "view", String(detail.number), "--json", "mergeable,mergeStateStatus"], cwd, READ_TIMEOUT);
+    if (r.code !== 0) break;
+    const { mergeable, mergeStateStatus } = parse<Pick<GhDetail, "mergeable" | "mergeStateStatus">>(r.out);
+    detail = { ...detail, mergeable: mergeable ?? detail.mergeable, mergeState: mergeStateStatus ?? detail.mergeState };
+  }
+  return detail;
+}
+
 export async function view(cwd: string, number: unknown, fresh = false): Promise<PullDetail> {
   const n = validNumber(number);
-  return shared(`${await repoKey(cwd)}|view|${n}`, fresh, async () => {
-    const [repo, r] = await Promise.all([repoOf(cwd), run([bin(), "pr", "view", String(n), "--json", DETAIL_FIELDS], cwd, READ_TIMEOUT)]);
-    if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
-    return toDetail(parse<GhDetail>(r.out), repo);
-  });
+  return shared(
+    `${await repoKey(cwd)}|view|${n}`,
+    fresh,
+    async () => {
+      const [repo, r] = await Promise.all([repoOf(cwd), run([bin(), "pr", "view", String(n), "--json", DETAIL_FIELDS], cwd, READ_TIMEOUT)]);
+      if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
+      return settled(cwd, toDetail(parse<GhDetail>(r.out), repo));
+    },
+    // Still undecided: the next ask should go to GitHub, not get this answer back.
+    (detail) => !mergeUnsettled(detail),
+  );
 }
 
 /** A pull request's whole diff, or one of its commits'. */
