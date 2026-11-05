@@ -23,7 +23,7 @@ function harness(url = "/new") {
   const browser = { location, history, addEventListener: (event: string, f: () => void) => listeners.set(event, f), removeEventListener: (event: string) => listeners.delete(event) };
   const stop = startRouting(store, browser as unknown as Parameters<typeof startRouting>[1]);
   return {
-    store, location, stop,
+    store, location, stop, history,
     count: () => entries.length,
     go(offset: number) { at += offset; updateLocation(); listeners.get("popstate")?.(); },
     reload() { stop(); return startRouting(store, browser as unknown as Parameters<typeof startRouting>[1]); },
@@ -81,6 +81,21 @@ describe("clean URLs", () => {
     h.store.setState({ settingsOpen: false });
     expect(h.location.pathname + h.location.search).toBe("/thread-def?keep=1");
     stop();
+  });
+
+  test("Back and Forward keep what else an entry holds, like which OpenBots screen it is on a phone", () => {
+    const h = harness("/bots");
+    const history = h.history;
+    history.pushState({ ...history.state, botsLayer: "chat" }, "", "/bots");
+    history.pushState({ ...history.state, botsLayer: "details" }, "", "/bots");
+    h.go(-1);
+    expect(history.state?.botsLayer).toBe("chat");
+    h.go(1);
+    expect(history.state?.botsLayer).toBe("details");
+    // A different page is a new entry, and starts clean.
+    h.store.setState({ settingsOpen: true });
+    expect(h.location.pathname).toBe("/settings/profile");
+    expect(history.state?.botsLayer).toBeUndefined();
   });
 
   test("archiving or deleting the active thread routes back to new", () => {

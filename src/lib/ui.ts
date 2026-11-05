@@ -4,6 +4,12 @@ import { flushSync } from "react-dom";
 export const cx = (...classes: (string | false | null | undefined)[]) => classes.filter(Boolean).join(" ");
 
 /**
+ * Whether a pointer can rest over things. A tap on a touch screen also fires mouseenter, so a submenu
+ * that opened on hover would open and then have its click toggle it straight shut.
+ */
+export const canHover = () => window.matchMedia("(hover: hover)").matches;
+
+/**
  * Land whatever a change just set moving in the app, so the panes come in at rest. Showing a kept
  * subtree again restarts every entrance animation in it, and the crossfade is the only motion wanted.
  */
@@ -118,7 +124,20 @@ export function usePresence(open: boolean, exitMs = 180) {
   return { mounted, visible };
 }
 
-/** Close on outside pointerdown or Escape. Escape is captured so parent dialogs stay open. */
+function swallowNextClick() {
+  const swallow = (e: MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  document.addEventListener("click", swallow, { capture: true, once: true });
+  // A press that became a scroll never clicks, so the next real tap mustn't be eaten.
+  setTimeout(() => document.removeEventListener("click", swallow, { capture: true }), 500);
+}
+
+/**
+ * Close on outside pointerdown or Escape. Escape is captured so parent dialogs stay open. On a touch
+ * screen the tap that dismisses does only that, rather than also pressing whatever was under it.
+ */
 export function useDismiss(open: boolean, onClose: () => void, refs: RefObject<HTMLElement | null>[]) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -128,6 +147,7 @@ export function useDismiss(open: boolean, onClose: () => void, refs: RefObject<H
       const t = e.target as Node;
       if (refs.some((r) => r.current?.contains(t))) return;
       close.current();
+      if (e.pointerType === "touch") swallowNextClick();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;

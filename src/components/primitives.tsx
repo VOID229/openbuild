@@ -1,6 +1,6 @@
 import hermesLogo from "../assets/brands/hermes.svg" with { type: "text" };
 import { Boxes, CircleUserRound } from "lucide-react";
-import { forwardRef, memo, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { forwardRef, memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
 import { pluginBrandSvg, pluginIconsReady, pluginProviderSvg, usePlugins } from "../lib/plugins";
@@ -103,6 +103,82 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
   );
   // Fixed popovers live in <body> so transformed or clipping ancestors can't offset or cut them.
   return fixed ? createPortal(el, document.body) : el;
+}
+
+/**
+ * A panel rising from the bottom of a touch screen over a dimmed page, in reach of the thumb. Tap
+ * outside it or drag it down to dismiss. Taking focus also puts the keyboard away, to make room.
+ */
+export function Sheet({ open, onClose, label, className, children }: { open: boolean; onClose: () => void; label: string; className?: string; children: ReactNode }) {
+  const { mounted, visible } = usePresence(open, 280);
+  const panel = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useLayoutEffect(() => {
+    if (open && mounted) panel.current?.focus({ preventScroll: true });
+  }, [open, mounted]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close.current();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+  useEffect(() => {
+    const el = panel.current;
+    if (!el) return;
+    let start: number | undefined;
+    let pull = 0;
+    // Anything between the finger and the sheet that's scrolled down has to come back up first.
+    const scrolled = (target: EventTarget | null) => {
+      for (let node = target as Element | null; node && node !== el.parentElement; node = node.parentElement) if (node.scrollTop > 0) return true;
+      return false;
+    };
+    const down = (e: TouchEvent) => {
+      start = scrolled(e.target) ? undefined : e.touches[0]!.clientY;
+      pull = 0;
+    };
+    const move = (e: TouchEvent) => {
+      if (start === undefined) return;
+      const dy = e.touches[0]!.clientY - start;
+      if (dy <= 0 && pull === 0) return;
+      if (e.cancelable) e.preventDefault();
+      pull = Math.max(0, dy);
+      el.dataset.dragging = "";
+      el.style.setProperty("--sheet-drag", `${pull}px`);
+    };
+    const up = () => {
+      start = undefined;
+      delete el.dataset.dragging;
+      el.style.removeProperty("--sheet-drag");
+      if (pull > Math.min(120, el.offsetHeight * 0.3)) close.current();
+      pull = 0;
+    };
+    el.addEventListener("touchstart", down, { passive: true });
+    el.addEventListener("touchmove", move, { passive: false });
+    el.addEventListener("touchend", up);
+    el.addEventListener("touchcancel", up);
+    return () => {
+      el.removeEventListener("touchstart", down);
+      el.removeEventListener("touchmove", move);
+      el.removeEventListener("touchend", up);
+      el.removeEventListener("touchcancel", up);
+    };
+  }, [mounted]);
+  if (!mounted) return null;
+  return createPortal(
+    <div className="sheet-root" data-state={visible ? "open" : "closed"}>
+      <div className="sheet-scrim" onClick={onClose} aria-hidden />
+      <div ref={panel} className={cx("sheet", className)} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1}>
+        <div className="sheet-handle" aria-hidden />
+        {children}
+      </div>
+    </div>,
+    document.body,
+  );
 }
 
 export const BrandIcon = memo(function BrandIcon({ id, className }: { id: string; className?: string }) {

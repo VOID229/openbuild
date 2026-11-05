@@ -1,0 +1,1244 @@
+/* ==========================================================================
+   Phones. Loaded last, and nothing in here reaches a desktop window: layout sits behind
+   (max-width: 768px), and what only a finger can do behind (pointer: coarse) or (hover: none).
+   ========================================================================== */
+
+/* The bottom sheet (Sheet in primitives.tsx). Only touch screens open one, whatever their width. */
+.sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+
+.sheet-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 260ms var(--ease);
+}
+
+.sheet-root[data-state="open"] .sheet-scrim {
+  opacity: 1;
+}
+
+.sheet {
+  position: absolute;
+  left: max(8px, env(safe-area-inset-left));
+  right: max(8px, env(safe-area-inset-right));
+  bottom: calc(var(--kb-h, 0px) + max(8px, env(safe-area-inset-bottom)));
+  max-width: 480px;
+  max-height: calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 24px);
+  margin: 0 auto;
+  padding: 0 6px 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+  outline: none;
+  transform: translateY(calc(100% + 32px));
+  transition: transform 300ms var(--ease-panel);
+}
+
+.sheet-root[data-state="open"] .sheet {
+  transform: translateY(var(--sheet-drag, 0px));
+}
+
+.sheet[data-dragging] {
+  transition: none;
+}
+
+.sheet-handle {
+  width: 36px;
+  height: 4px;
+  margin: 8px auto 6px;
+  border-radius: 2px;
+  background: var(--border-strong);
+}
+
+.sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border-radius: 16px;
+  font-size: 16.5px;
+  text-align: left;
+  color: var(--text);
+  transition: background-color var(--fast) var(--ease);
+}
+
+.sheet-item:active:not(:disabled) {
+  background: var(--active);
+}
+
+.sheet-item svg {
+  flex: none;
+  color: var(--text-2);
+}
+
+.sheet-item:disabled {
+  opacity: 0.45;
+}
+
+/* What holding a bubble brings up: the message itself, then what can be done with it. */
+.bm-sheet-preview {
+  margin: 2px 6px 10px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: var(--bm-them);
+}
+
+.bm-sheet-preview-mine {
+  background: var(--bm-me);
+}
+
+.bm-sheet-who {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+/* Selectable, for when you want part of a message rather than all of it. */
+.bm-sheet-text {
+  max-height: 25dvh;
+  margin-top: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font-size: 15.5px;
+  line-height: 1.38;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.bm-sheet-reactions {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 4px 6px;
+  padding: 4px;
+  border-radius: 22px;
+  background: var(--hover);
+}
+
+.bm-sheet-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
+  justify-items: center;
+  gap: 2px;
+  margin: 0 4px 6px;
+}
+
+.bm-sheet .bm-react-btn {
+  width: 44px;
+  height: 44px;
+  font-size: 25px;
+}
+
+.bm-sheet .bm-react-btn:active {
+  background: var(--active);
+  transform: scale(1.15);
+}
+
+/* The arrow that comes into view as a bubble is swiped to reply. */
+.bm-swipe-icon {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- touch, at any size */
+
+@media (hover: none) {
+  .bm-row {
+    position: relative;
+    touch-action: pan-y;
+  }
+
+  /* Holding a bubble is for its actions, not for selecting a word or iOS's own menu. */
+  .bm-bubble,
+  .bm-reaction,
+  .bm-quote,
+  .bots-row,
+  .bots-tile,
+  .bots-head-pill {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .bm-row > * {
+    transform: translateX(var(--swipe, 0px));
+    transition: transform 240ms var(--ease);
+  }
+
+  .bm-row[data-swiping] > * {
+    transition: none;
+  }
+
+  /* Only there mid-swipe: parked beside the bubble, it would make the conversation scroll sideways. */
+  .bm-row[data-swiping] > .bm-swipe-icon {
+    position: absolute;
+    top: 50%;
+    right: -42px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    margin-top: -15px;
+    border-radius: 50%;
+    background: var(--hover);
+    color: var(--text-2);
+    opacity: 0.7;
+  }
+
+  .bm-row[data-swipe-ready] > .bm-swipe-icon {
+    background: var(--ink);
+    color: var(--ink-fg);
+    opacity: 1;
+  }
+
+  /* Sinks a little under the finger, a beat late so a scroll passing through doesn't flicker. */
+  .bm-bubble {
+    transition: box-shadow var(--fast) var(--ease), transform 220ms var(--ease) 90ms;
+  }
+
+  .bm-bubble:active {
+    transform: scale(0.97);
+  }
+
+  .bots-row:active,
+  .bots-tile:active {
+    background: var(--active);
+  }
+
+  .bm-option:active:not(:disabled),
+  .bots-chip:active,
+  .bots-pick:active,
+  .bm-reaction:active,
+  .bots-toggle:active,
+  .bots-composer-btn:active:not(:disabled),
+  .bm-jump:active,
+  .bm-quote:active {
+    background: var(--active);
+  }
+
+  .bots-head-side:active,
+  .bots-head-pill:active,
+  .bm-jump:active {
+    opacity: 0.6;
+  }
+}
+
+/* iOS zooms into any field under 16px when it's focused, and leaves the page zoomed. */
+@media (pointer: coarse) {
+  .bots-composer-input,
+  .bots-name-input,
+  .bots-textarea,
+  .bots-instructions,
+  .bots-details-name-input,
+  .bots-set-name,
+  .bm-own .input,
+  .bots-poll-option .input {
+    font-size: 16px;
+  }
+
+  /* The keyboard covers the home indicator, so its inset is just a gap there. */
+  [data-keyboard] .bots-dock {
+    padding-bottom: 6px;
+  }
+}
+
+/* ---------------------------------------------------------------- phones */
+
+@media (max-width: 768px) {
+  :root {
+    --bots-head-h: calc(52px + env(safe-area-inset-top));
+  }
+
+  /* OpenBuild's own top bar has nothing to do here, and hid the chat's header while it had nothing to do. */
+  .main-bots .floating-tools {
+    display: none;
+  }
+
+  /* --- The stack: the list underneath, the chat pushed on over it. --- */
+
+  .main-bots {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 55;
+    height: var(--app-h, 100dvh);
+    background: var(--surface);
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.14);
+    touch-action: pan-y;
+    transition: transform 340ms var(--ease-panel), visibility 0s;
+  }
+
+  .main-bots-under {
+    transform: translateX(100%);
+    box-shadow: none;
+    visibility: hidden;
+    transition: transform 340ms var(--ease-panel), visibility 0s 340ms;
+  }
+
+  .bots-sidebar,
+  .bots-sidebar.sidebar-closed {
+    width: 100%;
+    background: var(--surface);
+    box-shadow: none;
+    opacity: 1;
+    transition: transform 340ms var(--ease-panel), visibility 0s;
+  }
+
+  .bots-sidebar.sidebar-closed {
+    transform: translateX(-28%);
+    visibility: hidden;
+    transition: transform 340ms var(--ease-panel), visibility 0s 340ms;
+  }
+
+  .sidebar-scrim:has(+ .bots-sidebar) {
+    display: none;
+  }
+
+  .bots-sidebar-inner {
+    padding: max(6px, env(safe-area-inset-top)) 0 0;
+    /* The panes do their own moving; the fade-in is for the desktop's sidebar. */
+    animation: none;
+  }
+
+  .bots-sidebar .brand-row {
+    gap: 0;
+    height: 52px;
+    margin: 0;
+    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+  }
+
+  .bots-wordmark {
+    font-size: 30px;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .bots-sidebar .brand-row .icon-btn {
+    width: 44px;
+    height: 44px;
+    color: var(--text);
+  }
+
+  .bots-search {
+    height: 40px;
+    margin: 2px 16px 10px;
+    padding: 0 12px;
+    border-radius: 12px;
+  }
+
+  .bots-sidebar .history-wrap {
+    border: 0;
+  }
+
+  .bots-list {
+    padding: 0 0 8px;
+    overscroll-behavior: contain;
+  }
+
+  .bots-tiles {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 2px;
+    margin: 0 8px 8px;
+  }
+
+  .bots-tile {
+    padding: 10px 2px 8px;
+    border-radius: 18px;
+  }
+
+  .bots-tile-active {
+    background: none;
+  }
+
+  .bots-tile-name {
+    font-size: 12.5px;
+  }
+
+  /* A row is a screen-wide target, with the hairlines of a native list. */
+  .bots-row {
+    position: relative;
+    border-radius: 0;
+  }
+
+  .bots-row-active {
+    background: none;
+  }
+
+  .bots-row + .bots-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 78px;
+    right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+
+  .bots-row-main {
+    gap: 12px;
+    min-height: 72px;
+    padding: 10px max(16px, env(safe-area-inset-right)) 10px max(14px, env(safe-area-inset-left));
+  }
+
+  .bots-row-name {
+    font-size: 16.5px;
+  }
+
+  .bots-row-preview {
+    display: -webkit-box;
+    font-size: 14.5px;
+    line-height: 1.3;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .bots-row-text {
+    gap: 2px;
+  }
+
+  .bots-row-time {
+    font-size: 13px;
+  }
+
+  .bots-section .history-heading {
+    min-height: 44px;
+    padding: 0 max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
+    font-size: 14px;
+  }
+
+  .bots-sidebar .settings-row {
+    margin: 0;
+    padding: 6px max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+    border-top: 1px solid var(--border);
+  }
+
+  .bots-sidebar .settings-btn {
+    min-height: 44px;
+    font-size: 15.5px;
+  }
+
+  /* The way back to the threads says where it goes. */
+  .bots-sidebar .bots-toggle {
+    gap: 6px;
+    width: auto;
+    height: 44px;
+    padding: 0 12px;
+    display: flex;
+    align-items: center;
+    font-size: 15.5px;
+    color: var(--text);
+  }
+
+  .bots-sidebar .bots-toggle::after {
+    content: "Threads";
+  }
+
+  /* --- The chat's bar: back, who it is, and what they're doing. --- */
+
+  .bots-head {
+    top: 0;
+    align-items: center;
+    justify-content: flex-start;
+    height: var(--bots-head-h);
+    padding: env(safe-area-inset-top) max(8px, env(safe-area-inset-right)) 0 max(2px, env(safe-area-inset-left));
+    border-bottom: 1px solid var(--border);
+    /* Solid: Safari tints its status bar from this, and nothing shows through to read past. */
+    background: var(--surface);
+    pointer-events: auto;
+  }
+
+  .bots-head-side {
+    position: static;
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: flex-start;
+    width: auto;
+    min-width: 40px;
+    height: 44px;
+    color: var(--text);
+  }
+
+  /* Other chats waiting, beside the arrow that goes back to them. */
+  .bots-head-unread {
+    min-width: 20px;
+    height: 20px;
+    margin: 0 2px 0 -4px;
+    padding: 0 5px;
+    border-radius: 10px;
+    background: var(--hover);
+    color: var(--text-2);
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bots-head-pill {
+    flex: 1;
+    gap: 10px;
+    min-width: 0;
+    max-width: none;
+    height: 48px;
+    padding: 0 6px 0 4px;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+    text-align: left;
+  }
+
+  .bots-head-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+  }
+
+  .bots-head-name {
+    font-size: 16.5px;
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  .bots-head-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-weight: 400;
+    line-height: 1.3;
+    color: var(--text-3);
+  }
+
+  .bots-head-sub-live {
+    color: var(--text-2);
+    animation: bots-typing-text 1.4s ease-in-out infinite;
+  }
+
+  /* A problem floats under the bar, instead of pushing the whole conversation down. */
+  .bots-sync-status {
+    position: absolute;
+    top: calc(var(--bots-head-h) + 6px);
+    left: 10px;
+    right: 10px;
+    z-index: 7;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: var(--shadow-md);
+  }
+
+  /* --- The conversation. --- */
+
+  .bots-messages {
+    padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+  }
+
+  .bots-messages-inner {
+    padding: calc(var(--bots-head-h) + 6px) 0 10px;
+  }
+
+  .bm-group {
+    margin-top: 12px;
+  }
+
+  .bm-group-row {
+    gap: 6px;
+  }
+
+  .bm-stack {
+    gap: 2px;
+  }
+
+  .bm-avatar {
+    width: 28px;
+    margin-bottom: 2px;
+  }
+
+  .bm-name {
+    margin: 0 0 3px 46px;
+    font-size: 12.5px;
+  }
+
+  .bm-bubble {
+    max-width: min(78vw, 560px);
+    padding: 8px 13px;
+    border-radius: 19px;
+    font-size: 16px;
+    line-height: 1.36;
+  }
+
+  .bm-mine .bm-bubble {
+    max-width: min(80vw, 560px);
+  }
+
+  .bm-theirs:has(.bm-avatar) .bm-bubble {
+    max-width: min(calc(100vw - 70px), 560px);
+  }
+
+  .bm-bubble.bm-emoji {
+    padding: 0 2px;
+    font-size: 40px;
+  }
+
+  .bm-images {
+    margin: -3px -8px 6px;
+  }
+
+  .bm-image img {
+    max-width: min(66vw, 280px);
+    max-height: 300px;
+  }
+
+  .bm-quote {
+    max-width: 78vw;
+    min-height: 26px;
+    margin: 4px 6px 2px;
+    font-size: 13px;
+  }
+
+  .bm-reactions {
+    margin: -6px 0 0 8px;
+  }
+
+  .bm-reactions-mine {
+    margin: -6px 8px 0 0;
+  }
+
+  .bm-reaction {
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 14px;
+  }
+
+  .bm-reaction-emoji {
+    font-size: 15px;
+  }
+
+  .bm-divider {
+    margin: 20px 0 4px;
+  }
+
+  /* Bots' errors can be whole stack traces and file paths. A few lines; tapping shows the rest. */
+  .bm-event {
+    margin: 12px 4px 2px;
+    overflow-wrap: anywhere;
+  }
+
+  .bm-event-detail {
+    display: -webkit-box;
+    max-width: 100%;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+  }
+
+  .bm-event-open .bm-event-detail {
+    -webkit-line-clamp: unset;
+  }
+
+  .bm-working {
+    margin-top: 12px;
+  }
+
+  .bm-jump {
+    width: 44px;
+    height: 44px;
+    margin: -56px 0 0 0;
+    bottom: 12px;
+  }
+
+  /* Cards take the room they need, whatever fits beside them. */
+  .bm-bubble.bm-card {
+    width: min(480px, calc(100vw - 64px));
+    max-width: 100%;
+    padding: 13px 14px 10px;
+  }
+
+  .bm-poll {
+    min-width: 0;
+  }
+
+  .bm-own {
+    min-width: 0;
+  }
+
+  .bm-option {
+    min-height: 46px;
+    font-size: 15px;
+  }
+
+  .bm-own .input {
+    height: 42px;
+    border-radius: 21px;
+    padding: 0 14px;
+  }
+
+  .bm-step {
+    flex-wrap: wrap;
+    row-gap: 2px;
+    padding: 4px 0;
+    font-size: 15px;
+  }
+
+  .bm-step-text {
+    flex: 1 1 60%;
+  }
+
+  .bm-step-bot {
+    margin-left: 30px;
+  }
+
+  .bots-hello {
+    max-width: none;
+    margin: 0;
+    padding: calc(var(--bots-head-h) + 16px) 24px 16px;
+  }
+
+  .bots-chip {
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 20px;
+    font-size: 15px;
+  }
+
+  .bots-btn {
+    height: 44px;
+    border-radius: 22px;
+    font-size: 15.5px;
+  }
+
+  /* --- The composer: a pill with an add button, the text, and a mic that turns into send. --- */
+
+  .bots-dock {
+    position: relative;
+    padding: 6px max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+    background: var(--surface);
+  }
+
+  .bots-dock .stash {
+    width: calc(100% - 44px);
+  }
+
+  .bots-composer {
+    border-radius: 23px;
+    box-shadow: none;
+    background: var(--surface-2);
+  }
+
+  .bots-composer-row {
+    gap: 0;
+    padding: 2px;
+  }
+
+  .bots-composer-btn {
+    flex: none;
+    width: 42px;
+    height: 42px;
+  }
+
+  .bots-composer-add {
+    color: var(--text-2);
+  }
+
+  .bots-composer-input {
+    max-height: min(148px, 30dvh);
+    padding: 10px 6px 10px 2px;
+    line-height: 22px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .bots-composer-textarea::placeholder {
+    white-space: nowrap;
+  }
+
+  /* One button at the end of the field: nothing to send yet is a mic, and text makes it send. */
+  .bots-send {
+    display: none;
+    width: 38px;
+    height: 38px;
+    margin: 2px;
+  }
+
+  .bots-send-on {
+    display: grid;
+  }
+
+  .bots-composer-row:has(.bots-send-on) .bots-mic:not(.dictation-listening) {
+    display: none;
+  }
+
+  .bots-reply-bar {
+    margin: 4px 4px 0;
+    padding: 6px 4px 6px 12px;
+    font-size: 14px;
+  }
+
+  .bots-reply-x {
+    width: 34px;
+    height: 34px;
+    flex: none;
+  }
+
+  .bots-mentions {
+    left: 0;
+    right: 0;
+    bottom: calc(100% + 6px);
+    max-height: min(240px, 34dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .bots-mentions .menu-item {
+    height: 48px;
+    font-size: 16px;
+  }
+
+  .bots-composer-image-remove {
+    width: 26px;
+    height: 26px;
+    top: -8px;
+    right: -8px;
+  }
+
+  .bots-side-note {
+    padding: 10px 14px;
+    font-size: 14px;
+  }
+
+  /* --- A chat's details: a screen of its own, sliding over the chat. --- */
+
+  .bots-details {
+    touch-action: pan-y;
+  }
+
+  .bots-details-top {
+    justify-content: flex-start;
+    padding: env(safe-area-inset-top) 0 0 max(2px, env(safe-area-inset-left));
+  }
+
+  .bots-details-top .icon-btn {
+    width: 44px;
+    height: 44px;
+    color: var(--text);
+  }
+
+  .bots-details-scroll {
+    padding: 0 max(16px, env(safe-area-inset-right)) calc(24px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    overscroll-behavior: contain;
+  }
+
+  .bots-details-name {
+    font-size: 21px;
+  }
+
+  .bots-tab {
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .bots-card-row {
+    min-height: 54px;
+  }
+
+  .bots-card-text {
+    font-size: 15px;
+  }
+
+  .bots-routine-when,
+  .bots-routine-task {
+    font-size: 13.5px;
+  }
+
+  .bots-card-x {
+    width: 40px;
+    height: 40px;
+  }
+
+  .bots-look-editor .bots-shape {
+    width: 48px;
+    height: 48px;
+  }
+
+  .bots-look-editor .bots-color {
+    width: 34px;
+    height: 34px;
+  }
+
+  .bots-look-editor .bots-colors {
+    max-width: 270px;
+  }
+
+  /* --- Dialogs and menus: sheets along the bottom of the screen, above the keyboard if it's up. --- */
+
+  .bots-dialog,
+  .confirm-dialog {
+    position: fixed;
+    inset: auto 0 var(--kb-h, 0px) 0;
+    width: 100%;
+    max-width: 100%;
+    max-height: calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px));
+    margin: 0;
+    overscroll-behavior: contain;
+    border-width: 1px 0 0;
+    border-radius: 22px 22px 0 0;
+    animation: sheet-rise 320ms var(--ease-panel) both;
+  }
+
+  .confirm-dialog {
+    padding: 22px max(20px, env(safe-area-inset-right)) calc(16px + env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
+  }
+
+  [data-keyboard] .confirm-dialog {
+    padding-bottom: 12px;
+  }
+
+  .confirm-dialog p {
+    font-size: 15px;
+  }
+
+  .confirm-dialog .btn {
+    min-height: 44px;
+    padding: 0 18px;
+    font-size: 15px;
+  }
+
+  @keyframes sheet-rise {
+    from {
+      transform: translateY(100%);
+    }
+  }
+
+  /* Its title and its buttons stay put while what's between them scrolls. */
+  .bots-dialog-head {
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    padding: 10px 8px 10px max(20px, env(safe-area-inset-left));
+    background: var(--surface);
+  }
+
+  .bots-dialog-head .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bots-dialog-body {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+  }
+
+  .bots-dialog-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+    background: var(--surface);
+  }
+
+  [data-keyboard] .bots-dialog-foot {
+    padding-bottom: 10px;
+  }
+
+  .bots-dialog-foot .bots-btn {
+    flex: 1;
+    height: 46px;
+  }
+
+  .bots-dialog .bots-color {
+    width: 34px;
+    height: 34px;
+  }
+
+  .bots-dialog .bots-colors {
+    max-width: 280px;
+    gap: 10px 12px;
+  }
+
+  .bots-pick {
+    height: 46px;
+  }
+
+  .bots-poll-check input {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* Menus rise from the bottom too, wherever they were opened from, in reach of the thumb. */
+  .popover-portal.menu,
+  .context-menu {
+    position: fixed !important;
+    top: auto !important;
+    left: max(8px, env(safe-area-inset-left)) !important;
+    right: max(8px, env(safe-area-inset-right)) !important;
+    bottom: calc(var(--kb-h, 0px) + max(8px, env(safe-area-inset-bottom))) !important;
+    width: auto !important;
+    max-width: none;
+    max-height: calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 24px);
+    padding: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 22px;
+    background: var(--surface-2);
+    /* The rest of the page dims behind it. A tap out there closes it and goes no further (see useDismiss). */
+    box-shadow: 0 0 0 100vmax var(--scrim), var(--shadow-lg);
+    transform: translateY(24px);
+    transform-origin: bottom center !important;
+    transition: opacity 180ms var(--ease), transform 280ms var(--ease-panel);
+  }
+
+  .popover-portal.menu[data-state="open"],
+  .context-menu[data-state="open"] {
+    transform: none;
+  }
+
+  .popover-portal.menu .menu-item,
+  .context-menu .menu-item {
+    gap: 14px;
+    height: 50px;
+    padding: 0 12px;
+    border-radius: 14px;
+    font-size: 16px;
+  }
+
+  .popover-portal.menu .menu-item svg,
+  .context-menu .menu-item svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* A submenu opens in place, under its row, not off to the side of a sheet with no side. */
+  .popover-portal.menu .filter-flyout,
+  .context-menu .filter-flyout {
+    position: static;
+    width: auto;
+    max-width: none;
+    margin: 2px 0 6px 12px;
+    padding: 2px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--hover);
+    box-shadow: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  /* --- Settings: the sections scroll sideways, each with its name, since 13 icons don't fit. --- */
+
+  .settings-nav {
+    justify-content: flex-start;
+    gap: 4px;
+    padding: 10px 8px 10px max(12px, env(safe-area-inset-left));
+    overflow-x: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+
+  .settings-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-nav-item {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 7px;
+    max-width: none;
+    height: 40px;
+    padding: 0 13px 0 11px;
+    border-radius: 20px;
+    font-size: 14.5px;
+  }
+
+  .settings-nav-label {
+    display: inline;
+    white-space: nowrap;
+  }
+
+  /* --- A thread. --- */
+
+  .topbar-title {
+    flex: 1;
+    min-width: 0;
+    margin-right: calc(var(--tools-w, 0px) - 6px);
+    padding: 0 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    align-self: center;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .floating-tools .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* In line with the title bar, clear of the notch, and as easy to hit. */
+  .thread-tools {
+    top: max(8px, env(safe-area-inset-top));
+    right: max(8px, env(safe-area-inset-right));
+    padding: 0;
+    background: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .thread-tools .icon-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  /* Whatever the thread's panels and file tree start with, the notch doesn't get to sit on it. */
+  .side-panel,
+  .file-tree {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .messages {
+    overscroll-behavior: contain;
+  }
+
+  .messages-inner {
+    padding-top: calc(52px + env(safe-area-inset-top));
+    gap: 18px;
+  }
+
+  .scroll-down {
+    left: auto;
+    right: max(14px, env(safe-area-inset-right));
+    transform: translateY(6px);
+  }
+
+  .scroll-down-visible {
+    transform: none;
+  }
+
+  .dock {
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+  }
+
+  .composer {
+    padding: 8px 6px 6px 12px;
+    border-radius: 24px;
+    box-shadow: none;
+    background: var(--surface-2);
+  }
+
+  .composer-input {
+    line-height: 1.4;
+    padding-top: 4px;
+  }
+
+  .attach-btn,
+  .composer-controls .round-btn {
+    width: 40px;
+    height: 40px;
+    flex: none;
+  }
+
+  /* While typing, the words get the room: effort, permissions and the like come back with the keyboard gone. */
+  [data-keyboard] .composer-bar > .picker:not(.picker-static),
+  [data-keyboard] .composer-wrap .ws-bottom {
+    display: none;
+  }
+
+  /* --- OpenBuild's drawer: bigger targets and room to breathe. --- */
+
+  .sidebar:not(.bots-sidebar) .brand-row .icon-btn,
+  .sidebar:not(.bots-sidebar) .settings-row .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+
+  .sidebar:not(.bots-sidebar) {
+    touch-action: pan-y;
+  }
+
+  .new-chat {
+    min-height: 44px;
+  }
+
+  .search {
+    min-height: 40px;
+  }
+
+  .search input {
+    font-size: 16px;
+  }
+
+  .settings-btn {
+    min-height: 44px;
+  }
+
+  /* Under the title it belongs to, not off under the row's menu button. */
+  .history-meta {
+    justify-content: flex-start;
+    margin-left: 24px;
+  }
+
+  .scroll-down {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* One button at the end of the composer, as in OpenBots: a mic until there's something to send. On the
+   narrowest phones the mic gives way entirely (see styles.css), so send stays put there. */
+@media (min-width: 375px) and (max-width: 768px) {
+  .round-btn-send:disabled {
+    display: none;
+  }
+
+  .composer-controls:has(.round-btn-send:not(:disabled)) .round-btn-mic:not(.dictation-listening) {
+    display: none;
+  }
+}
+
+/* Keyboard shortcuts mean nothing without a keyboard. */
+@media (pointer: coarse) {
+  .menu-hint,
+  .side-launch-key {
+    display: none;
+  }
+}
+
+/* A phone on its side has little height to spare for the header's second line. */
+@media (max-width: 960px) and (max-height: 480px) {
+  .bots-head-sub {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet-scrim,
+  .main-bots,
+  .bots-sidebar,
+  .bm-row > * {
+    transition: none !important;
+  }
+}

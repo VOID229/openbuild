@@ -30,7 +30,8 @@ import { RELOAD_THREADS } from "./lib/pulls";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
-import { cx } from "./lib/ui";
+import { startPaneGestures } from "./lib/gestures";
+import { cx, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import type { Chat } from "./lib/types";
 import { initPlugins, PluginSlot } from "./lib/plugins";
@@ -196,6 +197,9 @@ function Main() {
   useFont();
   // Plugins load after the app hydrates, so a slow or broken plugin never holds up startup.
   useEffect(() => { initPlugins(); }, []);
+  useEffect(() => startPaneGestures(), []);
+  const phone = useMediaQuery("(max-width: 768px)");
+  const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const usageOpen = useStore((s) => s.usageOpen);
@@ -408,15 +412,18 @@ function Main() {
         {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
         <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
         <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
-        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots")}>
+        {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
-          <div className={cx("floating-tools", !sidebarOpen && !botsOpen && "floating-tools-visible")} inert={sidebarOpen || botsOpen}>
+          <div className={cx("floating-tools", !sidebarOpen && !botsOpen && "floating-tools-visible")} inert={sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
               <PanelLeft size={18} />
             </IconButton>
             <IconButton label="New thread" tooltipSide="right" onClick={newChat}>
               <SquarePen size={17} />
             </IconButton>
+            {/* On a phone this is the screen's title bar, so it says which thread this is. */}
+            {phone && chat && !usageOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
           </div>
           {!chatsLoaded ? (
             loadError && (

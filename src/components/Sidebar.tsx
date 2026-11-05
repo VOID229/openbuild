@@ -14,7 +14,8 @@ import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
-import { arrowNav, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
+import { useLongPress } from "../lib/gestures";
+import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
@@ -148,52 +149,6 @@ interface RowProps {
   onSelect: (chat: Chat, hit?: SearchHit) => void;
   onMenu: (chatId: string, x: number, y: number, fromButton?: boolean, snooze?: boolean) => void;
   onRenameDone: () => void;
-}
-
-/**
- * Long-press on touch screens opens the row's menu. iOS Safari never fires `contextmenu`, and
- * Android fires it too, so whichever comes first opens the menu and the click after it is dropped.
- */
-function useLongPress(open: (x: number, y: number) => void) {
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const start = useRef<{ x: number; y: number }>(undefined);
-  const fired = useRef(false);
-  const cancel = () => {
-    clearTimeout(timer.current);
-    start.current = undefined;
-  };
-  const fire = (x: number, y: number) => {
-    cancel();
-    if (fired.current) return;
-    fired.current = true;
-    navigator.vibrate?.(10);
-    open(x, y);
-  };
-  useEffect(() => cancel, []);
-  return {
-    pressing: () => !!start.current || fired.current,
-    fire,
-    handlers: {
-      onPointerDown: (e: React.PointerEvent) => {
-        fired.current = false;
-        if (e.pointerType !== "touch") return;
-        const { clientX: x, clientY: y } = e;
-        start.current = { x, y };
-        timer.current = setTimeout(() => fire(x, y), 450);
-      },
-      onPointerMove: (e: React.PointerEvent) => {
-        if (start.current && Math.hypot(e.clientX - start.current.x, e.clientY - start.current.y) > 8) cancel();
-      },
-      onPointerUp: cancel,
-      onPointerCancel: cancel,
-      onClickCapture: (e: React.MouseEvent) => {
-        if (!fired.current) return;
-        fired.current = false;
-        e.preventDefault();
-        e.stopPropagation();
-      },
-    },
-  };
 }
 
 /**
@@ -914,7 +869,7 @@ function ChatContextMenu({
     </>
   );
   const flyout = (id: "rename" | "copy" | "snooze", icon: React.ReactNode, label: string, items: React.ReactNode) => (
-    <div className="filter-row" onMouseEnter={() => setSub(id)}>
+    <div className="filter-row" onMouseEnter={() => canHover() && setSub(id)}>
       <button
         type="button"
         role="menuitem"
@@ -968,7 +923,7 @@ function ChatContextMenu({
       // Like a native menu, a submenu stays open until another item is hovered.
       onMouseOver={(e) => {
         const item = (e.target as Element).closest(".menu-item");
-        if (item && !item.closest(".filter-row")) setSub(undefined);
+        if (canHover() && item && !item.closest(".filter-row")) setSub(undefined);
       }}
     >
       {current?.snooze ? snoozeItems : <>
@@ -1168,7 +1123,7 @@ function FilterMenu() {
 
   // A row that opens a flyout on hover, click, or ArrowRight.
   const row = (id: Sub, label: string, value: string, flyout: React.ReactNode) => (
-    <div className="filter-row" onMouseEnter={() => setSub(id)}>
+    <div className="filter-row" onMouseEnter={() => canHover() && setSub(id)}>
       <button
         type="button"
         role="menuitem"
@@ -1297,7 +1252,7 @@ function FilterMenu() {
             role="menuitemcheckbox"
             aria-checked={view.includePinned}
             className="menu-item filter-toggle"
-            onMouseEnter={() => setSub(undefined)}
+            onMouseEnter={() => canHover() && setSub(undefined)}
             onClick={() => setView({ includePinned: !view.includePinned })}
           >
             <span className="menu-item-label">Include pinned</span>
@@ -1310,7 +1265,7 @@ function FilterMenu() {
             role="menuitemcheckbox"
             aria-checked={view.subagents}
             className="menu-item filter-toggle"
-            onMouseEnter={() => setSub(undefined)}
+            onMouseEnter={() => canHover() && setSub(undefined)}
             onClick={() => setView({ subagents: !view.subagents })}
           >
             <span className="menu-item-label">Show subagents</span>
@@ -1321,7 +1276,7 @@ function FilterMenu() {
           {active && (
             <>
               <div className="menu-sep" />
-              <button type="button" role="menuitem" className="menu-item filter-reset" onMouseEnter={() => setSub(undefined)} onClick={() => setView(DEFAULT_VIEW)}>
+              <button type="button" role="menuitem" className="menu-item filter-reset" onMouseEnter={() => canHover() && setSub(undefined)} onClick={() => setView(DEFAULT_VIEW)}>
                 <RotateCcw size={15} />
                 <span className="menu-item-label">Reset</span>
               </button>

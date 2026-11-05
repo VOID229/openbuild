@@ -6,7 +6,7 @@ import { COLORS, SHAPES, randomLook, type BotLook } from "../../lib/bots/looks";
 import { useBots } from "../../lib/bots/store";
 import { uid } from "../../lib/id";
 import { makePoll, POLL_OPTIONS } from "../../../shared/bots";
-import { cx } from "../../lib/ui";
+import { cx, useMediaQuery } from "../../lib/ui";
 import { IconButton } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 
@@ -85,6 +85,7 @@ export function DialogHead({ title, onClose }: { title: string; onClose: () => v
 
 export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; onCreated?: (conversationId: string) => void }) {
   const modal = useModal(onClose);
+  const touch = useMediaQuery("(pointer: coarse)");
   const [look, setLook] = useState(randomLook);
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
@@ -108,7 +109,7 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
           <div className="bots-dialog-hero">
             <BotAvatar look={look} size={112} lively track playful pulse={changes ? { key: changes, action: changes % 3 === 0 ? "spin" : "hop" } : undefined} />
           </div>
-          <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your bot" aria-label="Name" autoFocus onChange={(e) => setName(e.target.value)} />
+          <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your bot" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />
           <LookPicker
             look={look}
             onChange={(next) => {
@@ -141,6 +142,7 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
 }
 
 export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose: () => void; onCreated?: (conversationId: string) => void; preset?: string[] }) {
+  const touch = useMediaQuery("(pointer: coarse)");
   const modal = useModal(onClose);
   const bots = useBots((s) => s.bots);
   const [picked, setPicked] = useState<string[]>(preset);
@@ -170,7 +172,7 @@ export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose
               <div className="bots-hero-empty">Pick at least two bots</div>
             )}
           </div>
-          <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your group" aria-label="Name" autoFocus onChange={(e) => setName(e.target.value)} />
+          <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your group" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />
           <div className="bots-pick-list" role="group" aria-label="Members">
             {bots.map((b) => {
               const on = picked.includes(b.id);

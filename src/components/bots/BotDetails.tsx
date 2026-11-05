@@ -1,10 +1,11 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines; a group's members and goal; who's in a side chat.
-import { Minus, Pencil, Plus, Trash, X } from "lucide-react";
+import { ChevronLeft, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation } from "../../lib/bots/types";
-import { cx, usePresence } from "../../lib/ui";
+import { closeBotsLayer, isPhone } from "../../lib/gestures";
+import { cx, useMediaQuery, usePresence } from "../../lib/ui";
 import { IconButton, Toggle } from "../primitives";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
@@ -110,7 +111,10 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   const editable = conversation.kind === "group";
   const open = (bot: Bot) => {
     const c = directOf(useBots.getState().conversations, bot.id);
-    if (c) st.select(c.id);
+    if (!c) return;
+    st.select(c.id);
+    // The details cover the chat on a phone, and the chat is what was asked for.
+    if (isPhone()) closeBotsLayer("details");
   };
   return (
     <div className="bots-pane">
@@ -208,6 +212,7 @@ function LookEditor({ bot, onDone }: { bot: Bot; onDone: () => void }) {
 
 export function BotDetails({ conversation, open }: { conversation: Conversation; open: boolean }) {
   const { mounted, visible } = usePresence(open, 260);
+  const phone = useMediaQuery("(max-width: 768px)");
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
@@ -219,13 +224,13 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   useEffect(() => setEditingLook(false), [conversation.id]);
   if (!mounted) return null;
   const name = conversationName(conversation, bots);
-  const close = () => st.setDetailsOpen(false);
+  const close = () => (phone ? closeBotsLayer("details") : st.setDetailsOpen(false));
   return (
     <aside className={cx("bots-details", visible && "bots-details-open")} aria-label="Details">
       <div className="bots-details-inner">
         <div className="bots-details-top">
           <IconButton label="Close details" tooltipSide="left" onClick={close}>
-            <X size={18} />
+            {phone ? <ChevronLeft size={26} /> : <X size={18} />}
           </IconButton>
         </div>
         <div className="bots-details-scroll">

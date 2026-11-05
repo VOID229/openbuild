@@ -6,6 +6,7 @@ import "@fontsource-variable/jetbrains-mono";
 import "katex/dist/katex.min.css";
 import "./styles.css";
 import "./bots.css";
+import "./mobile.css";
 import { createRoot } from "react-dom/client";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { LocalAccess } from "./components/LocalAccess";

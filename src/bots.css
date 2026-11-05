@@ -918,6 +918,11 @@
   transform: scale(0.98);
 }
 
+/* Only a phone's bar has a second line to stack the name with. */
+.bots-head-text {
+  display: contents;
+}
+
 .bots-head-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1223,14 +1228,10 @@
   color: var(--text-3);
 }
 
+/* No hovering on touch screens: holding a bubble brings up these actions instead (see MessageSheet). */
 @media (hover: none) {
   .bm-actions {
-    opacity: 1;
-    pointer-events: auto;
-  }
-  .bm-action {
-    min-width: 44px;
-    min-height: 44px;
+    display: none;
   }
 }
 

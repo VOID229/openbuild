@@ -962,7 +962,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
             ) : (
               <button
                 type="button"
-                className="round-btn"
+                className="round-btn round-btn-send"
                 aria-label={editing ? "Save edit" : shellMode ? "Run command" : queueing ? "Queue message" : "Send message"}
                 data-tooltip={editing ? "Save edit" : shellMode ? (queueing ? "Run now, without waiting for the reply" : "Run command") : hasContent ? (queueing ? "Queue to send after this reply" : hint) : undefined}
                 data-tooltip-side={variant === "dock" ? "top" : "bottom"}

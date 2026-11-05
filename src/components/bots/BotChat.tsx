@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, PanelLeft, SmilePlus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
@@ -11,12 +11,13 @@ import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } fr
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
+import { closeBotsLayer, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
 import { Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
-import { IconButton, Popover } from "../primitives";
+import { IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
@@ -40,6 +41,11 @@ const everyoneIn = (c: Conversation, bots: Bot[]) => (c.kind === "group" ? bots.
 /** The mentions to draw in some text: bots, and @all where there's a group for it to mean. */
 const tagsIn = (text: string, bots: Bot[], everyone: Bot[]) => findTags(text, bots).filter((t) => t.bot || everyone.length);
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString();
+/** The composer's text box, if it's what has focus (and so what has the keyboard up). */
+const composerField = () => {
+  const el = document.activeElement;
+  return el instanceof HTMLTextAreaElement && el.closest(".bots-composer") ? el : undefined;
+};
 const firstName = (b: Bot) => b.name.split(/\s+/)[0]!;
 const EMOJI_ONLY = /^(?:\p{Extended_Pictographic}|\p{Emoji_Modifier}|‍|️){1,12}$/u;
 
@@ -485,10 +491,12 @@ interface RowProps {
   readonly: boolean;
   onReply: (id: string) => void;
   onPicker: (p: Picker, anchor: HTMLElement) => void;
+  /** Touch screens: this message's actions, by holding its bubble. */
+  onSheet: (id: string) => void;
   seen?: React.ReactNode;
 }
 
-const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, seen }: RowProps) {
+const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onSheet, seen }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
   const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
@@ -499,8 +507,24 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
     useBots.getState().toggleReaction(conversation.id, m.id, emoji, "me");
     if (!had && !mine) noticeReaction(m.author, emoji);
   };
+  const lastDoubleTap = useRef(0);
+  const fingers = useBubbleTouch({
+    onHold: () => onSheet(m.id),
+    onReply: readonly ? undefined : () => onReply(m.id),
+    onDoubleTap: readonly
+      ? undefined
+      : () => {
+          lastDoubleTap.current = Date.now();
+          react("❤️");
+        },
+  });
   return (
-    <div className={cx("bm-row", fresh && (mine ? "bm-send" : "bm-recv"))} data-pos={pos} data-id={m.id}>
+    <div className={cx("bm-row", fresh && (mine ? "bm-send" : "bm-recv"))} data-pos={pos} data-id={m.id} {...fingers}>
+      {!readonly && (
+        <span className="bm-swipe-icon" aria-hidden>
+          <CornerUpLeft size={18} />
+        </span>
+      )}
       {quoted && (
         <button type="button" className="bm-quote" onClick={() => useBots.getState().focusMessage(conversation.id, quoted.id)}>
           <CornerUpLeft size={12} />
@@ -512,7 +536,8 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
         <div
           className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card")}
           onDoubleClick={readonly ? undefined : (e) => {
-            if ((e.target as Element).closest("button, a")) return;
+            // Two taps also make a dblclick, but useBubbleTouch has already answered them.
+            if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
             window.getSelection()?.removeAllRanges();
             react("❤️");
           }}
@@ -554,6 +579,114 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
     </div>
   );
 });
+
+/** What holding a bubble brings up on a touch screen: the message, its reactions and what else can be done with it. */
+function MessageSheet({ message: m, conversation, bots, readonly, onClose, onReply }: { message?: BotMessage; conversation: Conversation; bots: Bot[]; readonly: boolean; onClose: () => void; onReply: (id: string) => void }) {
+  // Kept through the sheet's exit, so it doesn't go blank as it slides away.
+  const last = useRef(m);
+  if (m) last.current = m;
+  const shown = last.current;
+  const [more, setMore] = useState(false);
+  const [done, setDone] = useState<"copied" | "stashed">();
+  const crossStash = useStore((s) => s.settings.crossStash);
+  useEffect(() => {
+    if (!m) return;
+    setMore(false);
+    setDone(undefined);
+  }, [m?.id]);
+  const act = (next: "copied" | "stashed") => {
+    setDone(next);
+    setTimeout(onClose, 500);
+  };
+  const react = (emoji: string) => {
+    if (!shown) return;
+    const had = shown.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
+    useBots.getState().toggleReaction(conversation.id, shown.id, emoji, "me");
+    if (!had && shown.author !== "me") noticeReaction(shown.author, emoji);
+    onClose();
+  };
+  const mine = shown?.author === "me";
+  const text = shown ? shown.text || messageText(shown) : "";
+  const reacted = (emoji: string) => shown?.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
+  return (
+    <Sheet open={!!m} onClose={onClose} label="Message actions" className="bm-sheet">
+      {shown && (
+        <>
+          <div className={cx("bm-sheet-preview", mine && "bm-sheet-preview-mine")}>
+            <div className="bm-sheet-who">
+              {authorName(shown.author, bots).split(" ·")[0]} · {dividerTime(shown.at)}
+            </div>
+            {text && (
+              <div className="bm-sheet-text">
+                {shown.text ? <RichText text={shown.text} bots={bots} everyone={everyoneIn(conversation, bots)} botId={mine ? undefined : shown.author} /> : text}
+              </div>
+            )}
+          </div>
+          {!readonly && (
+            <>
+              <div className="bm-sheet-reactions">
+                {QUICK.map((e) => (
+                  <button key={e} type="button" className={cx("bm-react-btn", reacted(e) && "bm-react-btn-on")} onClick={() => react(e)}>
+                    {e}
+                  </button>
+                ))}
+                <button type="button" className="bm-react-btn bm-react-more" aria-label="More reactions" aria-expanded={more} onClick={() => setMore(!more)}>
+                  <SmilePlus size={22} />
+                </button>
+              </div>
+              {more && (
+                <div className="bm-sheet-grid">
+                  {MORE.map((e) => (
+                    <button key={e} type="button" className="bm-react-btn" onClick={() => react(e)}>
+                      {e}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+          <div className="bm-sheet-actions">
+            {!readonly && (
+              <button
+                type="button"
+                className="sheet-item"
+                onClick={() => {
+                  onClose();
+                  onReply(shown.id);
+                }}
+              >
+                <CornerUpLeft size={20} /> Reply
+              </button>
+            )}
+            <button
+              type="button"
+              className="sheet-item"
+              disabled={!text}
+              onClick={() => {
+                void copyText(text);
+                act("copied");
+              }}
+            >
+              {done === "copied" ? <Check size={20} /> : <Copy size={20} />} {done === "copied" ? "Copied" : "Copy"}
+            </button>
+            {!readonly && mine && !shown.poll && (shown.text.trim() || !!shown.images?.length) && (
+              <button
+                type="button"
+                className="sheet-item"
+                onClick={() => {
+                  botStashOf(crossStash).add(shown.text, imageFiles(shown.images ?? []));
+                  act("stashed");
+                }}
+              >
+                {done === "stashed" ? <Check size={20} /> : <Bookmark size={20} />} {done === "stashed" ? "Stashed" : "Stash"}
+              </button>
+            )}
+          </div>
+        </>
+      )}
+    </Sheet>
+  );
+}
 
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
 function Working({ botIds, bots }: { botIds: string[]; bots: Bot[] }) {
@@ -644,6 +777,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const anchor = useRef<HTMLElement | null>(null);
   const [picker, setPicker] = useState<Picker>();
   const [showAll, setShowAll] = useState(false);
+  const [sheetId, setSheetId] = useState<string>();
+  const touchY = useRef(0);
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
   const blocks = useMemo(() => blocksOf(conversation.messages), [conversation.messages]);
@@ -668,8 +803,14 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   useEffect(() => {
     const el = scroller.current;
     if (!el || !inner.current) return;
+    const coarse = window.matchMedia("(pointer: coarse)");
+    let height = el.clientHeight;
     const observer = new ResizeObserver(() => {
+      const shrunk = height - el.clientHeight;
+      height = el.clientHeight;
       if (stick.current) el.scrollTop = el.scrollHeight;
+      // The keyboard coming up keeps the last line you could see above it, as it does in any messaging app.
+      else if (shrunk && coarse.matches) el.scrollTop += shrunk;
     });
     observer.observe(inner.current);
     observer.observe(el);
@@ -696,7 +837,16 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       ref={scroller}
       className="bots-messages"
       onWheel={() => (userScrolled.current = Date.now())}
-      onTouchMove={() => (userScrolled.current = Date.now())}
+      onTouchStart={(e) => (touchY.current = e.touches[0]!.clientY)}
+      onTouchMove={(e) => {
+        userScrolled.current = Date.now();
+        // Dragging the conversation down puts the keyboard away, to read more of it.
+        if (e.touches[0]!.clientY - touchY.current > 24) composerField()?.blur();
+      }}
+      // So does tapping somewhere in it that isn't a control. Only touch screens have a keyboard to put away.
+      onClick={(e) => {
+        if (window.matchMedia("(pointer: coarse)").matches && !(e.target as Element).closest("button, a, input, textarea")) composerField()?.blur();
+      }}
       onKeyDown={() => (userScrolled.current = Date.now())}
       onScroll={(e) => {
         const el = e.currentTarget;
@@ -728,7 +878,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             // The bot the detail names, by id, so it still links after a rename.
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
             return (
-              <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id}>
+              // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
+              <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
                   <WithBotLinks text={m.event!.text} bots={bots} />
                 </span>
@@ -766,6 +917,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                         fresh={m.at > since}
                         readonly={readonly}
                         onReply={onReply}
+                        onSheet={setSheetId}
                         onPicker={(p, el) => {
                           anchor.current = el;
                           setShowAll(false);
@@ -849,6 +1001,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
           </div>
         )}
       </Popover>
+      <MessageSheet message={conversation.messages.find((x) => x.id === sheetId)} conversation={conversation} bots={bots} readonly={readonly} onClose={() => setSheetId(undefined)} onReply={onReply} />
     </div>
   );
 }
@@ -928,6 +1081,8 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const dictation = useFieldDictation({ value: text, setValue: setText, field: input, onError: setNotice, fallback: true });
   const file = useRef<HTMLInputElement>(null);
   const touch = useMediaQuery("(pointer: coarse)");
+  const phone = useMediaQuery("(max-width: 768px)");
+  const [adding, setAdding] = useState(false);
   const name = conversationName(conversation, bots);
   const quoted = replyTo ? conversation.messages.find((m) => m.id === replyTo) : undefined;
   const members = bots.filter((b) => conversation.botIds.includes(b.id));
@@ -1061,6 +1216,28 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   return (
     <div className="bots-dock">
       {polling && <PollDialog conversationId={conversation.id} onClose={() => setPolling(false)} />}
+      <Sheet open={adding} onClose={() => setAdding(false)} label="Add to message">
+        <button
+          type="button"
+          className="sheet-item"
+          onClick={() => {
+            setAdding(false);
+            file.current?.click();
+          }}
+        >
+          <ImagePlus size={20} /> Add images
+        </button>
+        <button
+          type="button"
+          className="sheet-item"
+          onClick={() => {
+            setAdding(false);
+            setPolling(true);
+          }}
+        >
+          <ListChecks size={20} /> New poll
+        </button>
+      </Sheet>
       {stashed.length > 0 && (
         <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={stash.remove} />
       )}
@@ -1123,13 +1300,28 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           </div>
         )}
         <div className="bots-composer-row">
-          <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => file.current?.click()}>
-            <ImagePlus size={18} />
-          </IconButton>
-          {conversation.kind === "group" && (
-            <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => setPolling(true)}>
-              <ListChecks size={18} />
+          {phone ? (
+            // One button, so the text gets the width. Only a group has more than images to offer.
+            <IconButton
+              label={conversation.kind === "group" ? "Add to message" : "Add images"}
+              tooltip={false}
+              className="bots-composer-btn bots-composer-add"
+              disabled={sending}
+              onClick={() => (conversation.kind === "group" ? setAdding(true) : file.current?.click())}
+            >
+              <Plus size={22} />
             </IconButton>
+          ) : (
+            <>
+              <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => file.current?.click()}>
+                <ImagePlus size={18} />
+              </IconButton>
+              {conversation.kind === "group" && (
+                <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => setPolling(true)}>
+                  <ListChecks size={18} />
+                </IconButton>
+              )}
+            </>
           )}
           <input
             ref={file}
@@ -1147,12 +1339,17 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <DraftBackdrop text={text} bots={bots} everyone={everyone} scroll={backdrop} />
           <textarea
             ref={input}
-            disabled={sending}
+            // A disabled field gives up focus, which on a touch screen closes the keyboard on every send.
+            disabled={sending && !touch}
+            readOnly={sending}
             className="bots-composer-input bots-composer-textarea"
             rows={1}
             value={text}
             placeholder={`Message ${name}`}
             aria-label={`Message ${name}`}
+            autoCapitalize="sentences"
+            autoCorrect="on"
+            enterKeyHint={touch ? "enter" : "send"}
             {...dictation.fieldProps}
             onChange={(e) => {
               setText(e.target.value);
@@ -1221,7 +1418,14 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           />
           </div>
           <DictationButton dictation={dictation} className="icon-btn bots-composer-btn bots-mic" size={18} />
-          <button type="submit" className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")} aria-label={sending ? "Sending…" : "Send"} disabled={sending || (!text.trim() && !images.length)}>
+          <button
+            type="submit"
+            className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")}
+            aria-label={sending ? "Sending…" : "Send"}
+            disabled={sending || (!text.trim() && !images.length)}
+            // Keep focus (and the keyboard) in the field, ready for the next message.
+            onMouseDown={(e) => e.preventDefault()}
+          >
             <ArrowUp size={18} strokeWidth={2.4} />
           </button>
         </div>
@@ -1264,7 +1468,13 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const bots = useBots((s) => s.bots);
   const detailsOpen = useBots((s) => s.detailsOpen);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
-  const sidebarOpen = useStore((s) => s.botsSidebarOpen);
+  // What the other side is up to, under the name on a phone, where there's a bar for it.
+  const activity = useBots((s) => {
+    const working = conversation.botIds.map((id) => s.status[id]).find((st) => st?.state === "working" && st.conversationId === conversation.id && !st.quiet);
+    return working ? working.activity || "Thinking" : undefined;
+  });
+  // Waiting elsewhere, on the back button.
+  const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);
   const mobile = useMediaQuery("(max-width: 768px)");
   const [replyTo, setReplyTo] = useState<string>();
   // Kept here, not in Messages: a new bot's first message mounts the list, and should still animate in.
@@ -1288,17 +1498,23 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
     );
   });
   const empty = conversation.kind === "direct" && !conversation.messages.length && !active;
+  const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
+  const sub = typing ? "typing…" : activity ?? members;
   return (
     <div className="bots-chat">
       <div className="bots-head">
-        {mobile && !sidebarOpen && (
-          <IconButton label="Open sidebar" className="bots-head-side" onClick={() => useStore.getState().setBotsSidebarOpen(true)}>
-            <PanelLeft size={18} />
+        {mobile && (
+          <IconButton label={unread ? `Back to chats, ${unread} unread` : "Back to chats"} tooltip={false} className="bots-head-side" onClick={() => closeBotsLayer("chat")}>
+            <ChevronLeft size={28} />
+            {unread > 0 && <span className="bots-head-unread">{unread}</span>}
           </IconButton>
         )}
-        <button type="button" className="bots-head-pill" aria-expanded={detailsOpen} onClick={() => useBots.getState().setDetailsOpen(!detailsOpen)}>
-          <ConversationAvatar conversation={conversation} size={26} mood={typing ? "thinking" : undefined} badge={false} />
-          <span className="bots-head-name">{name}</span>
+        <button type="button" className="bots-head-pill" aria-expanded={detailsOpen} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
+          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} mood={typing ? "thinking" : undefined} badge={false} />
+          <span className="bots-head-text">
+            <span className="bots-head-name">{name}</span>
+            {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+          </span>
         </button>
       </div>
       {empty ? <Hello conversation={conversation} /> : <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />}

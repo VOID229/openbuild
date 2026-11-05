@@ -7,7 +7,8 @@ import { createPortal } from "react-dom";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
-import { arrowNav, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
+import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
+import { arrowNav, canHover, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
@@ -148,28 +149,31 @@ function useSelect() {
   return useCallback(
     (id: string) => {
       useBots.getState().select(id);
-      if (mobile) useStore.getState().setBotsSidebarOpen(false);
+      if (mobile) openBotsChat();
     },
     [mobile],
   );
 }
 
-const Row = memo(function Row({ conversation, active, onMenu, peek }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek }) {
+const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 36 }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek; avatar?: number }) {
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const select = useSelect();
+  const longPress = useLongPress((x, y) => onMenu({ id: conversation.id, x, y }));
   const name = conversationName(conversation, bots);
   const [title, tag] = name.split(" · ");
   return (
     <div
       className={cx("bots-row", active && "bots-row-active", conversation.unread && "bots-row-unread")}
+      {...longPress.handlers}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (longPress.pressing()) return longPress.fire(e.clientX, e.clientY);
         onMenu({ id: conversation.id, x: e.clientX, y: e.clientY });
       }}
     >
       <button type="button" className="bots-row-main" {...peek(conversation.id, "right")} onClick={() => select(conversation.id)} aria-current={active ? "page" : undefined}>
-        <SidebarAvatar conversation={conversation} size={36} />
+        <SidebarAvatar conversation={conversation} size={avatar} />
         <span className="bots-row-text">
           <span className="bots-row-name">
             <span className="bots-row-title">{title}</span>
@@ -189,6 +193,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek }: { conversa
 const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void }) {
   const bots = useBots((s) => s.bots);
   const select = useSelect();
+  const longPress = useLongPress((x, y) => onMenu({ id: conversation.id, x, y }));
   const name = conversationName(conversation, bots);
   return (
     <button
@@ -196,8 +201,10 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       className={cx("bots-tile", active && "bots-tile-active")}
       aria-current={active ? "page" : undefined}
       onClick={() => select(conversation.id)}
+      {...longPress.handlers}
       onContextMenu={(e) => {
         e.preventDefault();
+        if (longPress.pressing()) return longPress.fire(e.clientX, e.clientY);
         onMenu({ id: conversation.id, x: e.clientX, y: e.clientY });
       }}
     >
@@ -270,13 +277,13 @@ function ConversationMenu({ state, onClose, onDialog }: { state?: MenuState; onC
       onContextMenu={(e) => e.preventDefault()}
       onMouseOver={(e) => {
         const item = (e.target as Element).closest(".menu-item");
-        if (item && !item.closest(".filter-row")) setSub(false);
+        if (canHover() && item && !item.closest(".filter-row")) setSub(false);
       }}
     >
       <button type="button" role="menuitem" className="menu-item" onClick={act(() => st.togglePin(conversation.id))}>
         {conversation.pinnedAt ? <PinOff size={15} /> : <Pin size={15} />} {conversation.pinnedAt ? "Unpin" : "Pin"}
       </button>
-      <div className="filter-row" onMouseEnter={() => setSub(true)}>
+      <div className="filter-row" onMouseEnter={() => canHover() && setSub(true)}>
         <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={sub} className={cx("menu-item", sub && "menu-item-active")} onClick={() => setSub(!sub)}>
           <FolderInput size={15} />
           <span className="menu-item-label">Move to section</span>
@@ -368,8 +375,12 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   const conversation = useBots((s) => (dialog && "id" in dialog ? s.conversations.find((c) => c.id === dialog.id) : undefined));
   const bots = useBots((s) => s.bots);
   if (!dialog) return null;
-  if (dialog.kind === "bot") return <CreateBotDialog onClose={onClose} />;
-  if (dialog.kind === "group") return <CreateGroupDialog preset={dialog.preset} onClose={onClose} />;
+  // Made on a phone, the new chat opens straight away: there's no chat beside the list to see it in.
+  const opened = () => {
+    if (isPhone()) openBotsChat();
+  };
+  if (dialog.kind === "bot") return <CreateBotDialog onClose={onClose} onCreated={opened} />;
+  if (dialog.kind === "group") return <CreateGroupDialog preset={dialog.preset} onClose={onClose} onCreated={opened} />;
   if (dialog.kind === "apps") return <AppsDialog initial={dialog.app} onClose={onClose} />;
   if (!conversation) return null;
   const st = useBots.getState();
@@ -406,7 +417,10 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
           : "The conversation is deleted for good. The bots in it stay."
       }
       onClose={onClose}
-      onConfirm={() => st.deleteConversation(conversation.id)}
+      onConfirm={() => {
+        st.deleteConversation(conversation.id);
+        if (isPhone()) backToBotsList();
+      }}
     />
   );
 }
@@ -507,7 +521,8 @@ export function BotsSidebar() {
     [q, conversations, bots],
   );
 
-  const row = (c: Conversation) => <Row key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} peek={bindPeek} />;
+  const row = (c: Conversation) => <Row key={c.id} conversation={c} active={c.id === activeId} onMenu={setMenu} peek={bindPeek} avatar={mobile ? 50 : 36} />;
+  const touch = useMediaQuery("(pointer: coarse)");
 
   return (
     <>
@@ -518,30 +533,35 @@ export function BotsSidebar() {
         ) : (
           <div className="sidebar-inner bots-sidebar-inner">
             <div className="brand-row">
-              <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
-                <PanelLeft size={18} />
-              </IconButton>
+              {/* On a phone the list is a screen of its own, with the search always at hand. */}
+              {!mobile && (
+                <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
+                  <PanelLeft size={18} />
+                </IconButton>
+              )}
               <span className="wordmark bots-wordmark">OpenBots</span>
-              <IconButton
-                label="Search"
-                aria-pressed={searching}
-                className={cx(searching && "filter-active")}
-                onClick={() => {
-                  setSearching(!searching);
-                  setQuery("");
-                }}
-              >
-                <Search size={18} />
-              </IconButton>
+              {!mobile && (
+                <IconButton
+                  label="Search"
+                  aria-pressed={searching}
+                  className={cx(searching && "filter-active")}
+                  onClick={() => {
+                    setSearching(!searching);
+                    setQuery("");
+                  }}
+                >
+                  <Search size={18} />
+                </IconButton>
+              )}
               <IconButton label="Apps" onClick={() => setDialog({ kind: "apps" })}>
                 <Blocks size={18} />
               </IconButton>
               <NewMenu onDialog={setDialog} />
             </div>
-            {searching && (
+            {(searching || mobile) && (
               <label className="search bots-search">
                 <Search size={16} />
-                <input type="text" value={query} placeholder="Search bots and messages…" aria-label="Search bots and messages" autoFocus onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))} />
+                <input type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))} />
                 {query && (
                   <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
                     <X size={14} />
@@ -571,7 +591,7 @@ export function BotsSidebar() {
                     {filed.map(([name, list]) => (
                       <Section key={name} name={name} label={name} count={list.length}>
                         {list.map(row)}
-                        {!list.length && <p className="history-empty">Right-click a bot and pick Move to section.</p>}
+                        {!list.length && <p className="history-empty">{touch ? "Press and hold" : "Right-click"} a bot and pick Move to section.</p>}
                       </Section>
                     ))}
                     {side.length > 0 && (
