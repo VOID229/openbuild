@@ -464,9 +464,6 @@ export function BotsSettingsSection() {
       </section>
 
       <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Harnesses in OpenBuild</h3>
-        </div>
         <BotHarnesses />
       </section>
 
