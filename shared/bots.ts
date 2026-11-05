@@ -82,6 +82,8 @@ export interface BotThreadAccess {
   approve?: boolean;
   /** It can merge pull requests. */
   merge?: boolean;
+  /** It can control threads it didn't start: the user's and other bots'. Otherwise it can only see them. */
+  others?: boolean;
 }
 
 /** Whether a grant covers a project. Something that isn't in a project is never covered. */

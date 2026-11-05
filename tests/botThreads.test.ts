@@ -215,6 +215,7 @@ test("a message to a working thread is steered in", async () => {
 });
 
 test("a bot held to the defaults can't write into a thread with more power", async () => {
+  grant({ others: true });
   const chat = { id: crypto.randomUUID(), title: "Mine", runtime: "claude", permission: "yolo", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [] };
   storage.putChat(chat as never);
   await expect(call("send", { thread: chat.id, text: "Do it" })).rejects.toThrow(/permissions you can't choose/);
@@ -276,7 +277,7 @@ test("closing refuses a working thread, and leaves uncommitted work alone", asyn
 test("merging needs the grant and every check green", async () => {
   view = { number: 7, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "failing" }], canWrite: true, methods: ["squash", "merge"], headSha: "abc" };
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/aren't allowed/);
-  grant({ merge: true });
+  grant({ merge: true, others: true });
   await expect(call("merge", { project: project.name, number: 7 })).rejects.toThrow(/every check/);
   view.checkList = [{ name: "ci", state: "passing" }];
   view.mergeState = "BEHIND";
@@ -286,4 +287,37 @@ test("merging needs the grant and every check green", async () => {
   expect(merged).toEqual([]);
   await call("merge", { project: project.name, number: 7 });
   expect(merged[0]).toEqual([repo, 7, "squash", "abc", false]);
+});
+
+test("threads it didn't start are only its to control with the grant", async () => {
+  const theirs = { id: crypto.randomUUID(), title: "Theirs", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [{ id: "u", role: "user", content: "Hi", createdAt: 1 }, { id: "a", role: "assistant", content: "Hello", createdAt: 1, model: { plan: "pi", id: "acme/one", name: "One" } }] };
+  storage.putChat(theirs as never);
+  await call("start", { project: project.name, prompt: "Go" });
+  const mine = admitted[0].threadId;
+  snapshots[0].status = "done";
+  // It still sees them, and knows which are its own.
+  const listed = (await call("list")).threads;
+  expect(listed.find((t: any) => t.title === "Theirs").yours).toBe(false);
+  expect(listed.find((t: any) => t.thread === mine.slice(0, 8)).yours).toBe(true);
+  expect((await call("read", { thread: theirs.id })).yours).toBe(false);
+  for (const action of ["send", "stop", "close"]) await expect(call(action, { thread: theirs.id, text: "Hey" })).rejects.toThrow(/didn't start that thread/);
+  await expect(call("answer", { thread: theirs.id, question: "a1", answer: "Red" })).rejects.toThrow(/didn't start that thread/);
+  expect(guide(svc.fullBot(bot.id)!)).toContain("only control the ones you started");
+  await call("send", { thread: mine, text: "More" });
+
+  view = { number: 9, title: "T", url: "u", state: "open", base: "main", draft: false, mergeable: "MERGEABLE", mergeState: "CLEAN", checkList: [{ name: "ci", state: "passing" }], canWrite: true, methods: ["squash"], headSha: "def" };
+  storage.putChat({ ...(storage.getChat(theirs.id) as any), workspace: { ...theirs.workspace, worktree: true }, pullRequest: { number: 9 } } as never);
+  grant({ merge: true });
+  await expect(call("merge", { thread: theirs.id })).rejects.toThrow(/didn't start that thread/);
+  await expect(call("merge", { project: project.name, number: 9 })).rejects.toThrow(/didn't open #9/);
+  expect(merged).toEqual([]);
+
+  grant({ merge: true, others: true });
+  expect((await call("options")).you_may.control_threads_you_didnt_start).toBe(true);
+  expect(guide(svc.fullBot(bot.id)!)).toContain("including ones the user or other bots started");
+  await call("send", { thread: theirs.id, text: "Hey" });
+  expect(admitted.at(-1).threadId).toBe(theirs.id);
+  expect((storage.getChat(theirs.id) as any).messages.at(-2).sentByBot).toBe(bot.id);
+  await call("merge", { project: project.name, number: 9 });
+  expect(merged[0]).toEqual([repo, 9, "squash", "def", false]);
 });
