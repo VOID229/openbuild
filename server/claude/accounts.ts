@@ -67,8 +67,8 @@ export function claudeAccounts(saved: unknown, home = homedir(), path = process.
     const id = accountId(String(entry?.name ?? ""));
     try {
       const configDir = accountPath(entry?.configDir);
-      const { binPath, launchArgs, autoCompactWindow } = entry;
-      if (id && id !== "claude" && !accounts.some((a) => a.id === id || a.configDir === configDir)) accounts.push({ id, name: entry.name, runtime: "claude", configDir, binPath, launchArgs, autoCompactWindow });
+      const { binPath, launchArgs, autoCompactWindow, ori } = entry;
+      if (id && id !== "claude" && !accounts.some((a) => a.id === id || a.configDir === configDir)) accounts.push({ id, name: entry.name, runtime: "claude", configDir, binPath, launchArgs, autoCompactWindow, ori });
     } catch {}
   }
   accounts.push(...detectAccounts(home, path).filter((a) => !accounts.some((b) => b.id === a.id || b.configDir === a.configDir)));

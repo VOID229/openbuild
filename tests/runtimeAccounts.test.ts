@@ -66,3 +66,29 @@ test("a shadow home shares everything but the sign-in", () => {
   const dir = withRuntimeAccount({ runtime: "codex", runtimeAccount: { id: "a", name: "a", runtime: "codex", configDir: home, shadowHome: shadow } } as PiChatRequest, () => accountEnvironment("codex", {}).CODEX_HOME);
   expect(dir).toBe(shadow);
 });
+test("an Ori account runs its harness through a shim that passes every argument on", async () => {
+  const root = mkdtempSync(join(tmpdir(), "ori-shim-"));
+  const env = { ORI_BIN: process.env.ORI_BIN, OPENCHAT_DATA_DIR: process.env.OPENCHAT_DATA_DIR };
+  const ori = join(root, "ori"), real = join(root, "bin", "claude");
+  mkdirSync(join(root, "bin"));
+  writeFileSync(ori, `#!/bin/sh\nprintf '%s\\n' "$PATH" "$@"\n`, { mode: 0o755 });
+  writeFileSync(real, "", { mode: 0o755 });
+  process.env.ORI_BIN = ori;
+  process.env.OPENCHAT_DATA_DIR = join(root, "data");
+  try {
+    const account = { id: "o", name: "claude-ori", runtime: "claude", configDir: "/x", ori: true } as const;
+    const shim = withRuntimeAccount({ runtime: "claude", runtimeAccount: account } as PiChatRequest, () => accountBin("claude", ""))!;
+    expect(shim.startsWith(join(root, "data", "ori"))).toBe(true);
+    expect(withRuntimeAccount({ runtime: "claude", runtimeAccount: account } as PiChatRequest, () => accountBin("claude", ""))).toBe(shim);
+    const chosen = withRuntimeAccount({ runtime: "claude", runtimeAccount: { ...account, binPath: real } } as PiChatRequest, () => accountBin("claude", ""))!;
+    const p = Bun.spawn([chosen, "--print", "a b"], { stdout: "pipe", env: { PATH: "/usr/bin:/bin" } });
+    expect((await new Response(p.stdout).text()).split("\n")).toEqual([`${join(root, "bin")}:/usr/bin:/bin`, "claude", "--", "--print", "a b", ""]);
+    expect(withRuntimeAccount({ runtime: "claude", runtimeAccount: { ...account, binPath: "/no/such/bin" } } as PiChatRequest, () => accountBin("claude", ""))).toBe("");
+    expect(() => withRuntimeAccount({ runtime: "cursor", runtimeAccount: { ...account, runtime: "cursor" } } as PiChatRequest, () => 1)).toThrow("Ori");
+    process.env.ORI_BIN = join(root, "missing");
+    expect(() => withRuntimeAccount({ runtime: "codex", runtimeAccount: { ...account, runtime: "codex" } } as PiChatRequest, () => accountBin("codex", ""))).toThrow("Ori isn't installed");
+  } finally {
+    for (const [key, value] of Object.entries(env)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    rmSync(root, { recursive: true, force: true });
+  }
+});

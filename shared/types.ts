@@ -570,6 +570,8 @@ export interface RuntimeAccount {
   shadowHome?: string;
   /** Claude Code: compact after this many tokens. */
   autoCompactWindow?: number;
+  /** Claude Code and Codex: launch through Ori Harness (`ori claude`), so requests use OpenRouter. */
+  ori?: boolean;
 }
 
 /** Another Claude Code login on a device, with the models that sign-in offers. */
