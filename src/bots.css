@@ -2645,6 +2645,124 @@ button.bots-details-name:hover {
   }
 }
 
+/* Shorter windows: tighten the dialogs step by step so the whole form fits without scrolling. */
+@media (max-height: 860px) {
+  .bots-dialog-body {
+    gap: 14px;
+    padding: 14px 24px 18px;
+  }
+
+  .bots-dialog-hero {
+    height: 96px;
+  }
+
+  /* Scaled rather than resized so a group's huddle shrinks with it. */
+  .bots-dialog-hero > * {
+    scale: 0.78;
+  }
+
+  .bots-name-input {
+    height: 42px;
+  }
+
+  .bots-dialog .bots-look-picker {
+    gap: 12px;
+  }
+
+  .bots-dialog .bots-shape {
+    width: 52px;
+    height: 52px;
+  }
+
+  .bots-dialog .bots-shape .bot,
+  .bots-dialog .bots-shape svg {
+    width: 34px !important;
+    height: 34px !important;
+  }
+
+  .bots-dialog .bots-colors {
+    gap: 10px 12px;
+    max-width: 230px;
+  }
+
+  .bots-dialog .bots-color {
+    width: 28px;
+    height: 28px;
+  }
+
+  .bots-textarea {
+    min-height: 64px;
+  }
+}
+
+@media (max-height: 700px) {
+  .bots-dialog {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .bots-dialog-head {
+    padding: 8px 10px 8px 20px;
+  }
+
+  .bots-dialog-body {
+    gap: 10px;
+    padding: 10px 20px 14px;
+  }
+
+  .bots-dialog-hero {
+    height: 68px;
+  }
+
+  .bots-dialog-hero > * {
+    scale: 0.57;
+  }
+
+  .bots-name-input {
+    height: 38px;
+  }
+
+  .bots-dialog .bots-look-picker {
+    gap: 10px;
+  }
+
+  .bots-dialog .bots-shapes {
+    gap: 2px;
+  }
+
+  .bots-dialog .bots-shape {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bots-dialog .bots-shape .bot,
+  .bots-dialog .bots-shape svg {
+    width: 30px !important;
+    height: 30px !important;
+  }
+
+  .bots-dialog .bots-colors {
+    gap: 8px 10px;
+    max-width: 200px;
+  }
+
+  .bots-dialog .bots-color {
+    width: 24px;
+    height: 24px;
+  }
+
+  .bots-textarea {
+    min-height: 52px;
+  }
+
+  .bots-dialog-foot {
+    padding: 10px 16px;
+  }
+
+  .bots-btn {
+    height: 36px;
+  }
+}
+
 .bots-small-dialog .input {
   margin-top: 4px;
 }
