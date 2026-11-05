@@ -1,13 +1,13 @@
 // The side panel's pull requests tab: what gh's answers become, the exact commands an action runs,
 // and what a pull request's state means for its Merge button. The server half runs in its own
 // process with its own data dir and a fake `gh`, so it never touches the user's database or GitHub.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PullCheck } from "../shared/types";
 import { usePanel } from "../src/lib/panel";
-import { mergeReadiness } from "../src/lib/pulls";
+import { actOnPull, clearPullFailure, mergeReadiness, prefetchPull, pullKey, usePullActivity } from "../src/lib/pulls";
 
 const fakeGh = `#!/bin/sh
 printf '%s\\n' "$*" >> "$GH_LOG"
@@ -201,5 +201,56 @@ describe("the pull requests tab", () => {
     expect(usePanel.getState().activePull).toBe("current");
     panel.closePulls();
     panel.setPanel(false);
+  });
+});
+
+describe("acting on a pull request", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+  const activity = (folder: { cwd: string }, number: number) => usePullActivity.getState()[pullKey(folder, number)];
+
+  test("stays going without the tab that started it, and leaves the new state behind", async () => {
+    const folder = { cwd: "/acting/merge" };
+    const reads: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      reads.push(url);
+      return Response.json({ number: 5, state: "merged" });
+    }) as unknown as typeof fetch;
+    let finish = () => {};
+    const merge = actOnPull(folder, 5, "merge", () => new Promise<void>((resolve) => (finish = resolve)));
+    // What a tab mounted now finds, and pressing Merge again from it.
+    expect(activity(folder, 5)).toEqual({ running: "merge" });
+    let again = 0;
+    await expect(actOnPull(folder, 5, "merge", async () => void again++)).rejects.toThrow("still busy");
+    expect(again).toBe(0);
+    expect(activity(folder, 5)).toEqual({ running: "merge" });
+    expect(reads).toEqual([]);
+
+    finish();
+    await merge;
+    expect(activity(folder, 5)).toEqual({});
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toContain("fresh=true");
+    expect(await prefetchPull(folder, 5)).toMatchObject({ state: "merged" });
+    expect(reads).toHaveLength(1);
+  });
+
+  test("a failure waits to be seen, until it's dismissed", async () => {
+    const folder = { cwd: "/acting/fail" };
+    await expect(actOnPull(folder, 6, "merge", () => Promise.reject(new Error("gh pr merge failed")))).rejects.toThrow("gh pr merge failed");
+    expect(activity(folder, 6)).toEqual({ failure: "gh pr merge failed" });
+    clearPullFailure(folder, 6);
+    expect(activity(folder, 6)).toEqual({});
+  });
+
+  test("an action that worked isn't failed by the read after it", async () => {
+    const folder = { cwd: "/acting/gone" };
+    globalThis.fetch = (async () => {
+      throw new Error("the worktree is gone");
+    }) as unknown as typeof fetch;
+    await actOnPull(folder, 7, "merge", async () => {});
+    expect(activity(folder, 7)).toEqual({});
   });
 });

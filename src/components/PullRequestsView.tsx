@@ -6,7 +6,7 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../../shared/types";
 import { usePanel, folderKey } from "../lib/panel";
-import { commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, usePullRead, viewPull, type Readiness } from "../lib/pulls";
+import { actOnPull, clearPullFailure, commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, usePullActivity, usePullRead, viewPull, type Readiness } from "../lib/pulls";
 import type { TerminalFolder } from "../lib/terminal";
 import { ago, copyText, cx } from "../lib/ui";
 import { FileSection, useDiffFiles, useDiffWrap } from "./DiffView";
@@ -133,7 +133,7 @@ type Tab = "overview" | "commits" | "code";
 
 function PullView({ folder, number }: { folder: TerminalFolder; number: number }) {
   const { setActivePull } = usePanel.getState();
-  const { data: pr, error, loading, reload } = usePullRead<PullDetail>(pullKey(folder, number), (fresh) => viewPull(folder, number, fresh), PULL_REFRESH);
+  const { data: pr, error, loading } = usePullRead<PullDetail>(pullKey(folder, number), (fresh) => viewPull(folder, number, fresh), PULL_REFRESH);
   // The Code tab's diff, ready before it's asked for.
   const head = pr?.headSha;
   useEffect(() => {
@@ -143,25 +143,16 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
   const [tab, setTab] = useState<Tab>("overview");
   const [commit, setCommit] = useState<string>();
   const [editing, setEditing] = useState(false);
-  const [busy, setBusy] = useState<string>();
-  const [failure, setFailure] = useState<string>();
+  const activity = usePullActivity((s) => s[pullKey(folder, number)]);
+  const busy = activity?.running;
+  const failure = activity?.failure;
 
   /** Do something to the pull request, then read it again. Says whether it worked. */
-  const act = async (what: string, action: () => Promise<unknown>) => {
-    if (busy) return false;
-    setBusy(what);
-    setFailure(undefined);
-    try {
-      await action();
-      await reload(true, true);
-      return true;
-    } catch (err) {
-      setFailure((err as Error).message);
-      return false;
-    } finally {
-      setBusy(undefined);
-    }
-  };
+  const act = (what: string, action: () => Promise<unknown>) =>
+    actOnPull(folder, number, what, action).then(
+      () => true,
+      () => false,
+    );
 
   const back = () => setActivePull(undefined);
   if (!pr)
@@ -249,7 +240,7 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
       )}
       {tab === "code" && <CodeTab folder={folder} pr={pr} commit={pr.commits.find((c) => c.sha === commit)} clearCommit={() => setCommit(undefined)} />}
 
-      <StatusBar folder={folder} pr={pr} readiness={readiness} busy={busy} failure={failure} clearFailure={() => setFailure(undefined)} act={act} />
+      <StatusBar folder={folder} pr={pr} readiness={readiness} busy={busy} failure={failure} clearFailure={() => clearPullFailure(folder, number)} act={act} />
     </div>
   );
 }

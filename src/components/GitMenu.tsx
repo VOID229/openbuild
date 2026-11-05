@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { GitChange, PullDetail } from "../../shared/types";
 import { commitPaths, commitScope, gitCommit, gitPullRequest, gitPush, useGitChanges, writeCommitMessage } from "../lib/git";
 import { usePanel } from "../lib/panel";
-import { DELETE_KEY, mergePull, mergeReadiness, preferredMethod, viewPull } from "../lib/pulls";
+import { actOnPull, DELETE_KEY, mergePull, mergeReadiness, preferredMethod, pullKey, usePullActivity, viewPull } from "../lib/pulls";
 import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
 import { cx } from "../lib/ui";
@@ -36,12 +36,15 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
   const [message, setMessage] = useState("");
   // Whether to commit only this thread's files; unset follows the default for the checkout.
   const [onlyMine, setOnlyMine] = useState<boolean>();
-  const [busy, setBusy] = useState<{ action: Action; step: string }>();
+  const [working, setBusy] = useState<{ action: Action; step: string }>();
   const [error, setError] = useState<string>();
   const [done, setDone] = useState<{ text: string; short: string; url?: string }>();
   const [showFiles, setShowFiles] = useState(false);
   // The thread's open pull request, as GitHub says it stands now: asked each time the menu opens.
   const threadPr = chat.pullRequest?.state === "open" ? chat.pullRequest : undefined;
+  // A merge goes on with the thread out of view, and the pull request tab can start one too.
+  const merging = usePullActivity((s) => !!ws && !!threadPr && s[pullKey(ws, threadPr.number)]?.running === "merge");
+  const busy = working ?? (merging ? { action: "merge" as const, step: `Merging #${threadPr?.number}…` } : undefined);
   const [pull, setPull] = useState<PullDetail>();
   const [pullError, setPullError] = useState<string>();
   const dictation = useFieldDictation({ value: message, setValue: setMessage, field: input, onError: setError });
@@ -143,8 +146,7 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         setDone({ text: sha ? `Committed ${sha} and pushed to ${r.upstream}` : `Pushed to ${r.upstream}`, short: "Pushed" });
       } else if (action === "merge") {
         if (!current || !method) return;
-        setBusy({ action, step: `Merging #${current.number}…` });
-        await mergePull(ws, current.number, method, current.headSha, localStorage.getItem(DELETE_KEY) === "1");
+        await actOnPull(ws, current.number, "merge", () => mergePull(ws, current.number, method, current.headSha, localStorage.getItem(DELETE_KEY) === "1"));
         setDone({ text: `Merged #${current.number} into ${current.base}`, short: "Merged", url: current.url });
         setOpen(true);
       } else if (action === "pr") {
