@@ -3,6 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readdirSync, symlinkSync, unlinkSync 
 import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import type { PiChatRequest, RuntimeAccount } from "../shared/types";
+import { ORI_HARNESSES, oriShim, type OriHarness } from "./ori";
 
 const scope = new AsyncLocalStorage<RuntimeAccount>();
 export const accountCacheKey = () => scope.getStore()?.configDir ?? "";
@@ -21,7 +22,9 @@ export function withRuntimeAccount<T>(req: PiChatRequest, run: () => T): T {
 }
 /** Check a client-supplied account, and point it at its shadow home when it has one. */
 function resolveAccount(account: RuntimeAccount): RuntimeAccount {
-  const { binPath, launchArgs, autoCompactWindow, shadowHome } = account;
+  const { binPath, launchArgs, autoCompactWindow, shadowHome, ori } = account;
+  if (ori !== undefined && typeof ori !== "boolean") throw new Error("Invalid Ori setting");
+  if (ori && !(ORI_HARNESSES as readonly string[]).includes(account.runtime)) throw new Error(`Ori can't launch ${account.runtime} accounts`);
   if (binPath !== undefined && (typeof binPath !== "string" || !binPath.trim() || binPath.includes("\0") || binPath.length > 4096)) throw new Error("Invalid account binary path");
   if (launchArgs !== undefined) splitArgs(launchArgs);
   if (autoCompactWindow !== undefined && (!Number.isInteger(autoCompactWindow) || autoCompactWindow < 100_000 || autoCompactWindow > 1_000_000)) throw new Error("Auto-compact must be between 100,000 and 1,000,000 tokens");
@@ -56,7 +59,12 @@ export const accountArgs = (runtime: RuntimeAccount["runtime"]): string[] => {
 /** The selected account's executable: undefined without one, "" when it can't be found. */
 export function accountBin(runtime: RuntimeAccount["runtime"], path: string): string | undefined {
   const account = scope.getStore();
-  const bin = account?.runtime === runtime ? account.binPath?.trim() : undefined;
+  if (account?.runtime !== runtime) return undefined;
+  const real = chosenBin(account.binPath?.trim(), path);
+  // An Ori account always runs the shim; without a chosen binary, Ori finds the harness on PATH.
+  return account.ori && real !== "" ? oriShim(runtime as OriHarness, real) : real;
+}
+function chosenBin(bin: string | undefined, path: string): string | undefined {
   if (!bin) return undefined;
   if (!bin.includes("/")) return Bun.which(bin, { PATH: path }) ?? "";
   const expanded = accountPath(bin);
