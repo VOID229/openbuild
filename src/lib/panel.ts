@@ -3,9 +3,9 @@
 // device it runs on, as the terminal does (terminal.ts): each folder keeps its own open files, in
 // this browser, so coming back to a thread brings its files back.
 //
-// What's open and how wide it is belongs to this browser tab, not to settings. The panel's width is
-// per thread (loadWidth); the tree's width and which parts are showing are shared, and all of it is
-// remembered across reloads.
+// What's open and how wide it is belongs to this browser tab, not to settings. Whether the panel is
+// showing and its width are per thread (loadOpen, loadWidth); the tree and its width are shared, and
+// all of it is remembered across reloads.
 import { create } from "zustand";
 import { adopts, type TerminalFolder } from "./terminal";
 
@@ -22,7 +22,6 @@ export interface BrowserTab {
 }
 
 interface Layout {
-  panel: boolean;
   tree: boolean;
   /** The panel takes the whole window, the thread hidden behind it. */
   expanded: boolean;
@@ -33,6 +32,8 @@ interface Layout {
 }
 
 interface PanelState extends Layout {
+  /** The panel is showing, in this thread. */
+  panel: boolean;
   view: PanelView;
   /** The folder the open files belong to. */
   folder?: TerminalFolder;
@@ -90,12 +91,11 @@ export function defaultWidth(): number {
 }
 
 function loadLayout(): Layout {
-  const fallback: Layout = { panel: false, tree: false, expanded: false, width: defaultWidth(), treeWidth: 260, hideIgnored: false };
+  const fallback: Layout = { tree: false, expanded: false, width: defaultWidth(), treeWidth: 260, hideIgnored: false };
   try {
     const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "null") as Partial<Layout> | null;
     if (!saved) return fallback;
     return {
-      panel: saved.panel === true,
       tree: saved.tree === true,
       expanded: false,
       // The width is the thread's (see loadWidth), set once the thread's folder is known.
@@ -110,7 +110,7 @@ function loadLayout(): Layout {
 
 function saveLayout(s: Layout) {
   try {
-    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION, panel: s.panel, tree: s.tree, treeWidth: s.treeWidth, hideIgnored: s.hideIgnored }));
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ v: LAYOUT_VERSION, tree: s.tree, treeWidth: s.treeWidth, hideIgnored: s.hideIgnored }));
   } catch {}
 }
 
@@ -184,6 +184,27 @@ function saveWidth(folder: TerminalFolder | undefined, width: number) {
   } catch {}
 }
 
+// Whether the panel is showing belongs to the thread, whatever folder it's in: closed until it's
+// opened there. The home screen isn't remembered; it starts closed.
+const openKey = (thread: string) => `openbuild:panel-open:${thread}`;
+
+function loadOpen(folder: TerminalFolder): boolean {
+  if (!folder.thread) return false;
+  try {
+    return localStorage.getItem(openKey(folder.thread)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveOpen(folder: TerminalFolder | undefined, open: boolean) {
+  if (!folder?.thread) return;
+  try {
+    if (open) localStorage.setItem(openKey(folder.thread), "1");
+    else localStorage.removeItem(openKey(folder.thread));
+  } catch {}
+}
+
 const newId = () => Math.random().toString(36).slice(2, 10);
 
 export const usePanel = create<PanelState>((set, get) => {
@@ -191,8 +212,13 @@ export const usePanel = create<PanelState>((set, get) => {
     set(patch);
     saveLayout(get());
   };
+  const setOpen = (panel: boolean) => {
+    set(panel ? { panel } : { panel, expanded: false });
+    saveOpen(get().folder, panel);
+  };
   return {
     ...loadLayout(),
+    panel: false,
     view: "launcher",
     files: [],
     diff: false,
@@ -201,7 +227,7 @@ export const usePanel = create<PanelState>((set, get) => {
     order: [],
     dirty: {},
 
-    setPanel: (panel) => layout(panel ? { panel } : { panel, expanded: false }),
+    setPanel: setOpen,
     setTree: (tree) => layout({ tree }),
     setExpanded: (expanded) => set({ expanded }),
     setView: (view) => set({ view }),
@@ -226,7 +252,12 @@ export const usePanel = create<PanelState>((set, get) => {
           localStorage.removeItem(widthKey(prev.folder!));
         } catch {}
       }
-      set({ width: width ?? defaultWidth() });
+      // The panel is as this thread left it. The home screen stays as it is while the composer moves
+      // between folders, and a thread just started from it keeps what's showing there.
+      const fromHome = !!prev.folder && !prev.folder.thread;
+      const panel = folder.thread ? loadOpen(folder) || (fromHome && !!folder.fresh && prev.panel) : fromHome && prev.panel;
+      saveOpen(folder, panel);
+      set({ width: width ?? defaultWidth(), panel, expanded: panel && prev.expanded });
       // A thread just started from the home screen keeps the tabs that were open there.
       if (adopts(prev.folder, folder) && !saved.files.length && !saved.diff && !saved.pulls && !saved.browsers.length && (prev.files.length || prev.diff || prev.pulls || prev.browsers.length)) {
         saved = { files: prev.files, active: prev.activeFile, diff: prev.diff, pulls: prev.pulls, activePull: prev.activePull, browsers: prev.browsers, activeBrowser: prev.activeBrowser, order: prev.order };
@@ -246,7 +277,7 @@ export const usePanel = create<PanelState>((set, get) => {
       const next = files.includes(path) ? files : [...files, path];
       set({ files: next, activeFile: path, view: "file" });
       save(get());
-      layout({ panel: true });
+      setOpen(true);
     },
 
     closeFile: (path) => {
@@ -263,7 +294,7 @@ export const usePanel = create<PanelState>((set, get) => {
     openDiff: () => {
       set({ diff: true, view: "diff" });
       save(get());
-      layout({ panel: true });
+      setOpen(true);
     },
 
     closeDiff: () => {
@@ -275,7 +306,7 @@ export const usePanel = create<PanelState>((set, get) => {
       const { pulls, activePull } = get();
       set({ pulls: true, view: "pulls", activePull: pull ?? (pulls ? activePull : "current") });
       save(get());
-      layout({ panel: true });
+      setOpen(true);
     },
 
     closePulls: () => {
@@ -292,7 +323,7 @@ export const usePanel = create<PanelState>((set, get) => {
       const tab: BrowserTab = { id: newId(), url };
       set({ browsers: [...get().browsers, tab], activeBrowser: tab.id, view: "browser" });
       save(get());
-      layout({ panel: true });
+      setOpen(true);
     },
 
     activateBrowser: (id) => {

@@ -6,6 +6,13 @@ import { usePanel } from "../src/lib/panel";
 import { useStore } from "../src/lib/store";
 import { refreshTerminal, useTerminal } from "../src/lib/terminal";
 
+const stored = new Map<string, string>();
+(globalThis as { localStorage?: unknown }).localStorage ??= {
+  getItem: (k: string) => stored.get(k) ?? null,
+  setItem: (k: string, v: string) => void stored.set(k, v),
+  removeItem: (k: string) => void stored.delete(k),
+};
+
 const pointer = (type: string, init: { pointerId?: number; buttons?: number; clientX?: number } = {}) =>
   Object.assign(new Event(type), { pointerId: 1, buttons: 1, ...init }) as unknown as PointerEvent;
 
@@ -96,9 +103,9 @@ describe("the new-thread screen", () => {
     expect(showing()).toEqual([true, true, true]);
   });
 
-  test("moving between threads leaves it alone", () => {
+  test("moving between threads leaves the tree and the drawer alone", () => {
     go("older");
-    expect(showing()).toEqual([true, true, true]);
+    expect(showing().slice(1)).toEqual([true, true]);
   });
 
   test("a thread started from it keeps what's open there, not what the last thread had", () => {
@@ -107,5 +114,66 @@ describe("the new-thread screen", () => {
     useStore.setState({ chats: [...useStore.getState().chats, chat("new", Date.now())] });
     go("new");
     expect(showing()).toEqual([true, false, false]);
+  });
+
+  test("a thread started from it with the panel closed starts closed", () => {
+    go(undefined);
+    useStore.setState({ chats: [...useStore.getState().chats, chat("closed", Date.now())] });
+    go("closed");
+    expect(usePanel.getState().panel).toBe(false);
+  });
+});
+
+describe("the panel in each thread", () => {
+  const chat = (id: string) => ({ id, createdAt: 0 }) as never;
+  const panel = () => usePanel.getState().panel;
+  const go = (activeChatId?: string) => {
+    useStore.setState({ activeChatId });
+    refreshTerminal();
+  };
+
+  beforeEach(() => {
+    stored.clear();
+    useStore.setState({ chats: [chat("a"), chat("b")], activeChatId: "a" });
+    refreshTerminal();
+    usePanel.getState().setPanel(false);
+  });
+
+  test("open in one thread stays closed in another, and comes back", () => {
+    usePanel.getState().openPulls();
+    go("b");
+    expect(panel()).toBe(false);
+    go("a");
+    expect(panel()).toBe(true);
+    expect(usePanel.getState().view).toBe("pulls");
+    usePanel.getState().closePulls();
+  });
+
+  test("each thread keeps its own, open or closed", () => {
+    go("b");
+    usePanel.getState().setPanel(true);
+    go("a");
+    expect(panel()).toBe(false);
+    go("b");
+    expect(panel()).toBe(true);
+    usePanel.getState().setPanel(false);
+    go("a");
+    go("b");
+    expect(panel()).toBe(false);
+  });
+
+  test("survives the new-thread screen", () => {
+    usePanel.getState().setPanel(true);
+    go(undefined);
+    expect(panel()).toBe(false);
+    go("a");
+    expect(panel()).toBe(true);
+  });
+
+  test("taking the window doesn't carry over to a thread with it closed", () => {
+    usePanel.getState().setPanel(true);
+    usePanel.getState().setExpanded(true);
+    go("b");
+    expect(usePanel.getState().expanded).toBe(false);
   });
 });
