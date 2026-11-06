@@ -13,6 +13,9 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
     const agent = join(dir, "agent");
     const marker = join(dir, "canary-loaded");
     mkdirSync(join(agent, "extensions"), { recursive: true });
+    writeFileSync(join(agent, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "shared-test-key" } }));
+    writeFileSync(join(agent, "SYSTEM.md"), "USER_SYSTEM_CANARY");
+    writeFileSync(join(agent, "APPEND_SYSTEM.md"), "USER_APPEND_CANARY");
     // The same tool name as one of ours, which stopped every bot from starting when user extensions loaded.
     writeFileSync(
       join(agent, "extensions", "canary.ts"),
@@ -31,7 +34,12 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       const use = (name, args) => sse({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + name, type: 'function', function: { name, arguments: JSON.stringify(args) } }] }) + sse({}, 'tool_calls') + 'data: [DONE]\\n\\n';
       const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(req) {
         if (new URL(req.url).pathname === '/search') return Response.json({ results: [{ title: 'Tea result', url: 'https://tea.test/', content: 'About tea' }] });
+        a.equal(req.headers.get('authorization'), 'Bearer shared-test-key');
         const body = await req.json();
+        const prompt = JSON.stringify(body.messages.filter((m) => m.role === 'system' || m.role === 'developer'));
+        a.ok(!prompt.includes('USER_SYSTEM_CANARY'), prompt);
+        a.ok(!prompt.includes('USER_APPEND_CANARY'), prompt);
+        a.ok(prompt.includes("one of the user's bots in OpenBots"), prompt);
         for (const t of body.tools ?? []) seenTools.add(t.function.name);
         const last = body.messages.at(-1);
         const text = JSON.stringify(last.content);
@@ -43,7 +51,7 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
         else out = say('pong');
         return new Response(out, { headers: { 'content-type': 'text/event-stream' } });
       } });
-      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', apiKey: 'x', models: [{ id: 'm' }] } } }));
+      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', models: [{ id: 'm' }] } } }));
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
       const { startBots } = await import('./server/bots/runner.ts');
@@ -81,11 +89,15 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
     const agent = join(dir, "agent");
     const marker = join(dir, "picked-loaded");
     mkdirSync(join(agent, "extensions"), { recursive: true });
+    writeFileSync(join(agent, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "shared-test-key" } }));
+    writeFileSync(join(agent, "SYSTEM.md"), "USER_SYSTEM_CANARY");
+    writeFileSync(join(agent, "APPEND_SYSTEM.md"), "USER_APPEND_CANARY");
     writeFileSync(
       join(agent, "extensions", "picked.ts"),
       `import { appendFileSync } from "node:fs";
        export default function (pi: any) {
          appendFileSync(${JSON.stringify(marker)}, "x");
+         pi.on("before_agent_start", (event: any) => { event.systemPromptOptions.appendSystemPrompt += "\\nPICKED_EXTENSION_PROMPT"; });
          pi.registerProvider("pickedprovider", { baseUrl: "http://127.0.0.1:1/v1", apiKey: "x", api: "openai-completions", models: [{ id: "extra", name: "Extra", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 1000, maxTokens: 100 }] });
          pi.registerTool({ name: "picked_tool", label: "x", description: "x", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: null }) });
        }`,
@@ -96,13 +108,20 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       import { strict as a } from 'node:assert';
       import { existsSync, writeFileSync } from 'node:fs';
       let tools = [];
+      let lastPrompt = '';
       const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(req) {
+        a.equal(req.headers.get('authorization'), 'Bearer shared-test-key');
         const body = await req.json();
+        const prompt = JSON.stringify(body.messages.filter((m) => m.role === 'system' || m.role === 'developer'));
+        a.ok(!prompt.includes('USER_SYSTEM_CANARY'), prompt);
+        a.ok(!prompt.includes('USER_APPEND_CANARY'), prompt);
+        a.ok(prompt.includes("one of the user's bots in OpenBots"), prompt);
+        lastPrompt = prompt;
         tools = (body.tools ?? []).map((t) => t.function.name);
         const chunk = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
         return new Response(chunk({ role: 'assistant', content: 'hi' }) + chunk({}, 'stop') + 'data: [DONE]\\n\\n', { headers: { 'content-type': 'text/event-stream' } });
       } });
-      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', apiKey: 'x', models: [{ id: 'm' }] } } }));
+      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', models: [{ id: 'm' }] } } }));
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
       const { available, botModels, piFlags } = await import('./server/bots/extensions.ts');
@@ -145,6 +164,7 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       a.ok((await providers()).has('pickedprovider'));
       await talk('two');
       a.ok(tools.includes('picked_tool'));
+      a.ok(lastPrompt.includes('PICKED_EXTENSION_PROMPT'));
       for (const name of ['bash', 'send_message', 'ask_bot', 'bot_web_search']) a.ok(tools.includes(name), name);
 
       // Off again takes it all back.
