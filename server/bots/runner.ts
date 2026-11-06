@@ -34,6 +34,10 @@ interface Mind {
   /** Keep the chat clear unless it starts typing (see BotStatus.quiet). */
   quiet: boolean;
   activity: string;
+  /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
+  steerable?: boolean;
+  /** Per conversation, the last message this turn has put in front of the bot, images and all. */
+  shown?: Map<string, number>;
   /** The model's last call failed (an expired sign-in, say): Pi ends the turn with no text, only this. */
   error?: string;
   onSettled?: () => void;
@@ -59,18 +63,27 @@ export function wake(botId: string, item: Wake) {
   const mind = minds.get(botId);
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
-  if ((item.kind === "messages" || item.kind === "reaction") && item.conversationId === getFocus(botId) && pumping.has(botId) && mind && !mind.proc.exited) {
+  const conversationId = item.conversationId;
+  if ((item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
+    const shown = mind.shown;
+    // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
+    const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
+    const through = db.latestSeq(conversationId);
     const text = render([item], botId);
+    const images = imagesBetween(conversationId, from, through);
+    shown.set(conversationId, through);
     if (item.kind === "messages") {
       mind.quiet = false;
       show(botId, mind);
     }
     void mind.proc
-      .send({ type: "steer", message: text }, 15_000)
-      .then(() => {
-        if (item.conversationId) db.setCursor(botId, item.conversationId, db.latestSeq(item.conversationId));
-      })
-      .catch(() => enqueue(botId, item));
+      // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
+      .send({ type: "steer", message: text, ...(images.length ? { images } : {}) }, 15_000)
+      .catch(() => {
+        // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
+        shown.set(conversationId, Math.min(shown.get(conversationId) ?? from, from));
+        enqueue(botId, item);
+      });
     return;
   }
   enqueue(botId, item);
@@ -223,7 +236,10 @@ function setTyping(botId: string, mind: Mind, on: boolean) {
 }
 
 export function onRecord(botId: string, mind: Mind, record: PiRecord) {
-  if (record.type === "agent_settled") mind.onSettled?.();
+  if (record.type === "agent_settled") {
+    mind.steerable = false;
+    mind.onSettled?.();
+  }
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
   mind.sent ||= successfulMessageTool(record);
   const ended = record.type === "message_end" ? record.message : undefined;
@@ -333,20 +349,26 @@ async function run(botId: string, all: Wake[]) {
     mind.typing = false;
     mind.quiet = quiet;
     mind.activity = "Thinking";
+    // The transcript is read now, so anything later is the next steer's or turn's to show.
+    const shown = new Map<string, number>();
+    for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));
+    mind.shown = shown;
     const message = render(jobs, botId);
     if (!message.trim()) return;
     await applyModel(mind.proc, botId);
     await applyEffort(mind.proc, botId);
-    const images = imagesFor(jobs, botId);
-    markSeen(botId, jobs);
+    const images = imagesFor(botId, shown);
+    markSeen(botId, shown);
     let settled = false;
     mind.onSettled = () => {
       settled = true;
     };
+    mind.steerable = true;
     const accepted = await mind.proc.send({ type: "prompt", message, ...(images.length ? { images } : {}) }, 60_000);
     if ((accepted as { disposition?: string })?.disposition === "handled" || settled) {
       if (!settled) return;
     } else await waitSettled(mind);
+    mind.steerable = false;
     if (!mind.sent) {
       const text = mind.draft.trim();
       if (conversationId) {
@@ -357,7 +379,7 @@ async function run(botId: string, all: Wake[]) {
       // Otherwise the reply just never shows up, and the chat looks like it lost the message.
       if (mind.error) throw new PiError(mind.error);
     }
-    for (const job of jobs) if (job.conversationId) db.setCursor(botId, job.conversationId, db.latestSeq(job.conversationId));
+    for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     setStatus(botId, { state: "idle" });
   } catch (err) {
@@ -374,7 +396,11 @@ async function run(botId: string, all: Wake[]) {
       minds.delete(botId);
     }
   } finally {
-    if (mind) mind.typing = false;
+    if (mind) {
+      mind.typing = false;
+      mind.steerable = false;
+      mind.shown = undefined;
+    }
     if (conversationId) {
       svc.setTyping(conversationId, botId, false);
       svc.setDraft(undefined, { conversationId, botId });
@@ -449,31 +475,41 @@ function pollBody(m: BotMessage, botId: string, name: (author: string) => string
   return `Poll${poll.closedAt ? " (closed)" : ""}, ${poll.multiple ? "pick any" : "pick one"}: “${poll.question}”${options.join("")}${hidden}${owed ? "\n  You haven't voted. Use vote_poll." : ""}`;
 }
 
-function imagesFor(jobs: Wake[], botId: string): { type: "image"; data: string; mimeType: string }[] {
-  for (const job of jobs) {
-    if (!job.conversationId) continue;
-    const cursor = db.cursor(botId, job.conversationId);
-    const rows = db.messagesAfter(job.conversationId, cursor, 20);
-    const mine = rows.filter((r) => r.message.author === "me" && r.message.images?.length).at(-1);
-    if (!mine) continue;
-    const out = [];
-    for (const url of mine.message.images!.slice(0, 4)) {
+const IMAGE_LIMIT = 4;
+
+/** The newest images the user attached after `from`, up to `through`, as Pi takes them. */
+function imagesBetween(conversationId: string, from: number, through: number): { type: "image"; data: string; mimeType: string }[] {
+  const out = [];
+  for (const row of db.messagesAfter(conversationId, from, 50)) {
+    if (row.seq > through || row.message.author !== "me") continue;
+    for (const url of row.message.images ?? []) {
       const m = /^data:(image\/[a-z0-9.+-]+);base64,([a-z0-9+/=\s]+)$/i.exec(url);
       if (m) out.push({ type: "image" as const, mimeType: m[1]!, data: m[2]!.replace(/\s/g, "") });
     }
-    if (out.length) return out;
+  }
+  return out.slice(-IMAGE_LIMIT);
+}
+
+function imagesFor(botId: string, shown: Map<string, number>) {
+  for (const [id, through] of shown) {
+    const images = imagesBetween(id, db.cursor(botId, id), through);
+    if (images.length) return images;
   }
   return [];
 }
 
-function markSeen(botId: string, jobs: Wake[]) {
-  for (const job of jobs) {
-    if (!job.conversationId) continue;
-    const cursor = db.cursor(botId, job.conversationId);
-    for (const row of db.messagesAfter(job.conversationId, cursor, 50)) {
+/** How far the bot has read once a turn ends: past its own replies, but not up to a message it never saw. */
+export function caughtUp(botId: string, conversationId: string, shown: number): number {
+  const missed = db.messagesAfter(conversationId, shown, 500).find((r) => r.message.author !== botId);
+  return missed ? missed.seq - 1 : db.latestSeq(conversationId);
+}
+
+function markSeen(botId: string, shown: Map<string, number>) {
+  for (const [id, through] of shown) {
+    for (const row of db.messagesAfter(id, db.cursor(botId, id), 50)) {
       const m = row.message;
-      if (m.author !== "me" || m.seenBy?.includes(botId)) continue;
-      svc.patchMessage(job.conversationId, m.id, { seenBy: [...(m.seenBy ?? []), botId] });
+      if (row.seq > through || m.author !== "me" || m.seenBy?.includes(botId)) continue;
+      svc.patchMessage(id, m.id, { seenBy: [...(m.seenBy ?? []), botId] });
     }
   }
 }
