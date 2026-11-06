@@ -2071,7 +2071,7 @@
   text-align: center;
 }
 
-/* An empty conversation, or OpenBots with nothing open. */
+/* OpenBots with nothing open. */
 .bots-hello {
   display: flex;
   flex: 1;
@@ -2102,30 +2102,6 @@
   font-size: 14.5px;
   line-height: 1.55;
   color: var(--text-2);
-}
-
-.bots-hello-starts {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-}
-
-.bots-chip {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 17px;
-  border: 1px solid var(--border-strong);
-  font-size: 13.5px;
-  color: var(--text-2);
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  .bots-chip:hover {
-    background: var(--hover);
-    color: var(--text);
-  }
 }
 
 /* ==========================================================================
