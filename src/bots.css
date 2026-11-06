@@ -3525,31 +3525,6 @@ button.bots-details-name:hover {
   font-size: 13px;
 }
 
-.bots-advanced .bot-projects-toggle {
-  gap: 8px;
-}
-
-.bots-advanced .bot-projects-toggle .setting-text {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.bots-advanced .bot-projects-toggle .setting-desc {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.bots-advanced .bot-projects-body {
-  padding-top: 8px;
-  padding-bottom: 6px;
-}
-
 /* The small switch; touch screens keep the big one. */
 @media (pointer: fine) {
   .bots-advanced .toggle {

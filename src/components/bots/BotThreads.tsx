@@ -1,7 +1,7 @@
 // Settings → Bots: what a bot may do in OpenBuild (server/bots/threads.ts), and how bots use each
 // harness there. Off until the user says otherwise.
-import { ChevronDown } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Check, ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { PERMISSION_HARNESSES, type BotProjectScope, type BotThreadAccess, type PermissionHarness } from "../../../shared/bots";
 import type { PermissionMode, ThreadRuntime } from "../../../shared/types";
 import { useBots } from "../../lib/bots/store";
@@ -10,25 +10,25 @@ import { permissionModes } from "../../lib/pi";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../../lib/runtimeStatus";
 import { runtimeName, RUNTIMES } from "../../lib/runtimes";
 import { useStore } from "../../lib/store";
-import { cx } from "../../lib/ui";
-import { OptionSelect } from "../ModelSelect";
-import { Toggle } from "../primitives";
+import { arrowNav, cx } from "../../lib/ui";
+import { OptionSelect, useSelectKeys } from "../ModelSelect";
+import { Popover, Toggle } from "../primitives";
 
 /** What turning access on starts from. A grant the bot already has keeps what's saved in it. */
 const NO_ACCESS: BotThreadAccess = { enabled: false, scope: "all", projects: [], choosePermission: true, approve: true };
-const SCOPES: { scope: BotProjectScope; label: string }[] = [
-  { scope: "all", label: "All projects" },
-  { scope: "choose", label: "Choose projects" },
-  { scope: "exclude", label: "Exclude projects" },
+const SCOPES: { value: BotProjectScope; label: string }[] = [
+  { value: "all", label: "All projects" },
+  { value: "choose", label: "Choose projects" },
+  { value: "exclude", label: "Exclude projects" },
 ];
 /** Bots can't use Durable threads yet. */
 const HARNESSES = RUNTIMES.map((r) => r.runtime).filter((r) => r !== "durable");
 const hasModes = (runtime: ThreadRuntime): runtime is PermissionHarness => PERMISSION_HARNESSES.includes(runtime as PermissionHarness);
 
 /** Compact, the description moves into a tooltip on the label so the row stays one line (the details panel's Advanced tab). */
-function Row({ label, desc, compact, children }: { label: string; desc: string; compact?: boolean; children: React.ReactNode }) {
+function Row({ label, desc, compact, disabled, children }: { label: string; desc: string; compact?: boolean; disabled?: boolean; children: React.ReactNode }) {
   return (
-    <div className="setting-row">
+    <div className={cx("setting-row", disabled && "setting-row-disabled")}>
       <div className="setting-text">
         <div className="setting-label" data-tooltip={compact ? desc : undefined} data-tooltip-side={compact ? "left" : undefined}>
           {label}
@@ -44,51 +44,56 @@ function names(list: string[]) {
   return list.length > 3 ? `${list.slice(0, 3).join(", ")} and ${list.length - 3} more` : list.join(", ");
 }
 
-function BotProjects({ access, save }: { access: BotThreadAccess; save: (patch: Partial<BotThreadAccess>) => void }) {
+/** A dropdown of the user's projects that stays open while they tick several. */
+function ProjectPicker({ label, picked, onChange, disabled, className }: { label: string; picked: string[]; onChange: (ids: string[]) => void; disabled?: boolean; className?: string }) {
   const projects = useStore((s) => s.projects).filter((p) => !p.deviceId);
-  // Collapsed by default: the row already says which projects the bot has.
   const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  const keys = useSelectKeys(open, setOpen, anchor);
+  const pickedNames = projects.filter((p) => picked.includes(p.id)).map((p) => p.name);
+  return (
+    <span className={cx("select-wrap", className)}>
+      <button ref={anchor} type="button" className={cx("select-trigger", "select-trigger-md", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} disabled={disabled} {...keys.trigger}>
+        <span className="select-value">{pickedNames.length ? names(pickedNames) : "None yet"}</span>
+        <ChevronDown size={14} className="select-chevron" />
+      </button>
+      <Popover open={open && !disabled} onClose={keys.close} anchor={anchor} className="menu select-menu" role="listbox" label={label} fixed="auto">
+        <div ref={keys.list} onKeyDown={(e) => arrowNav(e)}>
+          {projects.map((project) => {
+            const on = picked.includes(project.id);
+            return (
+              // Ids of projects since removed stay in the list: they're the user's, not this picker's.
+              <button key={project.id} type="button" role="option" aria-selected={on} className="menu-item" onClick={() => onChange(on ? picked.filter((id) => id !== project.id) : [...picked, project.id])}>
+                <span className="menu-item-label">{project.name}</span>
+                {on && <Check size={15} className="menu-check" />}
+              </button>
+            );
+          })}
+          {!projects.length && <p className="menu-empty">Add a project to OpenBuild first.</p>}
+        </div>
+      </Popover>
+    </span>
+  );
+}
+
+/** Which projects the bot can work in. Shown with access off too, greyed out, so what's saved there is still visible. */
+function BotProjects({ access, save, compact }: { access: BotThreadAccess; save: (patch: Partial<BotThreadAccess>) => void; compact?: boolean }) {
+  // Grants from before scopes existed have none, and mean "choose": never show them as broader.
   const scope = access.scope ?? "choose";
   const key = scope === "exclude" ? "excluded" : "projects";
-  const picked = access[key] ?? [];
-  const pickedNames = projects.filter((p) => picked.includes(p.id)).map((p) => p.name);
-  const summary = scope === "all" || (scope === "exclude" && !pickedNames.length) ? "All projects" : scope === "exclude" ? `All except ${names(pickedNames)}` : pickedNames.length ? names(pickedNames) : "No projects yet";
+  const disabled = !access.enabled;
+  const grow = compact ? "select-grow" : undefined;
   return (
-    <div className="setting-group bot-projects">
-      <button type="button" className="bot-projects-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="setting-text">
-          <span className="setting-label">Projects</span>
-          <span className="setting-desc">{summary}</span>
-        </span>
-        <ChevronDown size={15} className="bot-projects-chevron" />
-      </button>
-      <div className={cx("collapse", open && "collapse-open")} inert={!open}>
-        <div className="collapse-inner">
-          <div className="bot-projects-body">
-            <div className="segmented" role="radiogroup" aria-label="Projects this bot can work in">
-              {SCOPES.map((s) => (
-                <button key={s.scope} type="button" role="radio" aria-checked={scope === s.scope} className="segment" onClick={() => save({ scope: s.scope })}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
-            {scope !== "all" && (
-              <div className="segmented" role="group" aria-label={scope === "exclude" ? "Projects to exclude" : "Projects to choose"}>
-                {projects.map((project) => {
-                  const on = picked.includes(project.id);
-                  return (
-                    <button key={project.id} type="button" role="checkbox" aria-checked={on} className="segment" onClick={() => save({ [key]: on ? picked.filter((id) => id !== project.id) : [...picked, project.id] })}>
-                      {project.name}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-            {!projects.length && <p className="setting-desc">Add a project to OpenBuild first.</p>}
-          </div>
-        </div>
-      </div>
-    </div>
+    <>
+      <Row compact={compact} disabled={disabled} label="Projects" desc={disabled ? "Turn on Use OpenBuild to change which projects it can work in." : "Which projects it can start threads in and follow."}>
+        <OptionSelect label="Projects this bot can work in" value={scope} options={SCOPES} onChange={(next) => save({ scope: next })} disabled={disabled} className={grow} />
+      </Row>
+      {scope !== "all" && (
+        <Row compact={compact} disabled={disabled} label={scope === "exclude" ? "Excluded" : "Chosen"} desc={scope === "exclude" ? "Projects it can't work in. It can work in every other one." : "The projects it can work in."}>
+          <ProjectPicker label={scope === "exclude" ? "Projects to exclude" : "Projects to choose"} picked={access[key] ?? []} onChange={(ids) => save({ [key]: ids })} disabled={disabled} className={grow} />
+        </Row>
+      )}
+    </>
   );
 }
 
@@ -97,12 +102,12 @@ export function BotThreads({ bot, compact }: { bot: Bot; compact?: boolean }) {
   const save = (patch: Partial<BotThreadAccess>) => useBots.getState().updateBot(bot.id, { threads: { ...access, ...patch } });
   return (
     <>
+      <BotProjects access={access} save={save} compact={compact} />
       <Row compact={compact} label="Use OpenBuild" desc="Start and follow threads, send them messages, and answer the questions they ask. Threads run on this server as you, with your subscriptions and keys.">
         <Toggle checked={access.enabled} onChange={(enabled) => save({ enabled })} label="Use OpenBuild" />
       </Row>
       {access.enabled && (
         <>
-          <BotProjects access={access} save={save} />
           <Row compact={compact} label="Control others' threads" desc="Write to, answer, stop, close and merge threads it didn't start: yours and other bots'. Off, it can still see them but only controls its own.">
             <Toggle checked={!!access.others} onChange={(others) => save({ others })} label="Control others' threads" />
           </Row>

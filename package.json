@@ -64,6 +64,7 @@
     "@types/react-dom": "^19.3.0",
     "convex-test": "^0.0.60",
     "fake-indexeddb": "^6.2.5",
+    "happy-dom": "^21.0.4",
     "jose": "6.2.12",
     "typescript": "^7.0.2"
   },
