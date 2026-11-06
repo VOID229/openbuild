@@ -435,6 +435,14 @@ async function start(botId: string, p: Record<string, unknown>) {
   };
 }
 
+/** The worker's log only has a steer's text: saved on the reply, its sender survives a reload. */
+function noteSteerSender(threadId: string, streamId: string, steerId: string, botId: string) {
+  const chat = storage.getChat(threadId) as Chat | undefined;
+  if (!chat?.messages.some((m) => m.stream?.id === streamId)) return;
+  const sender = { sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId };
+  storage.putChat({ ...chat, messages: chat.messages.map((m) => (m.stream?.id === streamId ? { ...m, steerSenders: { ...m.steerSenders, [steerId]: sender } } : m)) } as never);
+}
+
 async function send(botId: string, p: Record<string, unknown>) {
   const access = accessOf(botId);
   const found = controlledThread(botId, access, p.thread);
@@ -447,7 +455,9 @@ async function send(botId: string, p: Record<string, unknown>) {
   const bot = firstName(db.getBot(botId)?.name ?? "A bot");
   if (running.length) {
     const profile = appSettings().profile;
-    const { handled } = await remote.steer(chat.id, crypto.randomUUID(), profile ? withProfileContext(text, profile) : text, images.length ? images : undefined, text).catch((err) => {
+    const steerId = crypto.randomUUID();
+    noteSteerSender(chat.id, running[0]!.id, steerId, botId);
+    const { handled } = await remote.steer(chat.id, steerId, profile ? withProfileContext(text, profile) : text, images.length ? images : undefined, text).catch((err) => {
       throw refuse(`It's still working and couldn't take that now: ${(err as Error).message}`, 409);
     });
     if (!handled) throw refuse("It's still working and couldn't take that now. You'll be told when it finishes; send it then.", 409);

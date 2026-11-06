@@ -244,6 +244,7 @@ function SteerMessage({ part, chatId, block }: { part: SteerPart; chatId: string
   const text = userVisiblePrompt(part.text ?? "");
   return (
     <div className="msg-user msg-steer" data-block={block}>
+      {part.sentBy && <SentBy id={part.sentByBot} name={part.sentBy} />}
       {part.attachments?.length ? <Attachments files={part.attachments} chatId={chatId} /> : null}
       {text.trim() && (
         <div className="bubble">

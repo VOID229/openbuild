@@ -28,6 +28,12 @@ test("worker replay repairs offline output, completion and stale saves without r
       a.deepEqual(landed.parts[0].attachments,[file]); a.equal(landed.steerFiles,undefined);
       const replayed = {...landed,status:'streaming',parts:[{type:'steer',id:'s1',text:'look'}]};
       a.deepEqual(projectReply(replayed,{...steering,status:'finished',endedAt:20},landed).parts[0].attachments,[file]);
+      const sender = {sentBy:'manager',sentByBot:'bot-1'};
+      a.deepEqual(projectReply({...message,steerSenders:{s1:sender}},steering).parts[0],{type:'steer',id:'s1',text:'look',...sender});
+      a.deepEqual(projectReply(message,steering,{...message,steerSenders:{s1:sender}}).steerSenders,{s1:sender});
+      const signed = projectReply({...message,steerSenders:{s1:sender}},{...steering,status:'finished',endedAt:20});
+      a.equal(signed.parts[0].sentBy,'manager'); a.equal(signed.steerSenders,undefined);
+      a.equal(projectReply({...signed,status:'streaming',parts:[{type:'steer',id:'s1',text:'look'}]},{...steering,status:'finished',endedAt:20},signed).parts[0].sentByBot,'bot-1');
       const pending = projectReply(message,snapshot);
       a.equal(pending.status,'streaming'); a.equal(pending.parts.at(-1).answer,undefined);
       a.equal(pending.parts[2].output,'/work'); a.equal(pending.parts[2].args.command,'pwd');
