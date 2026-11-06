@@ -342,8 +342,10 @@ test("threads it didn't start are only its to control with the grant", async () 
   expect((storage.getChat(theirs.id) as any).messages.at(-2).sentByBot).toBe(bot.id);
   await call("merge", { project: project.name, number: 9 });
   expect(merged[0]).toEqual([repo, 9, "squash", "def", false]);
-  // Named by number, the merge still links to the thread the pull request came from.
-  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.findLast((m) => m.event?.text === "Merged a pull request")?.event?.threadId).toBe(theirs.id);
+  // Named by number, the merge still links to the thread the pull request came from, and to the pull request itself.
+  const mergedEvent = svc.conversationView(svc.directId(bot.id)!)!.messages.findLast((m) => m.event?.text === "Merged a pull request")?.event;
+  expect(mergedEvent?.threadId).toBe(theirs.id);
+  expect(mergedEvent?.pullUrl).toBe("u");
 });
 
 test("saved local accounts are discoverable, selectable and preserved on continuation", async () => {
