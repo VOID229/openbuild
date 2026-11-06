@@ -310,3 +310,9 @@ test("the OpenBots switch lands entrance motion, keeps looping motion and outlas
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
 });
+
+test("a long thread doesn't slow the OpenBots switch: messages out of view skip rendering and keep their height", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.messages-inner > \.msg \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;/);
+});

@@ -2628,6 +2628,14 @@ svg {
   animation: rise 260ms var(--ease) both;
 }
 
+/* Messages out of view skip style, layout and paint, so a long thread costs what's on screen: coming
+   back from OpenBots (and the crossfade, which restyles the whole page) no longer redoes all of it.
+   Each one keeps its last real height, and ChatView holds the view still as estimates come true. */
+.messages-inner > .msg {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
 .msg-sent-by {
   display: flex;
   align-items: center;
