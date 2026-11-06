@@ -394,9 +394,6 @@ export function BotsSettingsSection() {
       </section>
 
       <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Custom extensions</h3>
-        </div>
         <BotExtensions />
       </section>
 
