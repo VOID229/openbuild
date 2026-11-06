@@ -266,11 +266,20 @@ test("closing refuses a working thread, and leaves uncommitted work alone", asyn
   await expect(call("close", { thread: threadId })).rejects.toThrow(/still working/);
   snapshots[0].status = "done";
   await Bun.write(join(cwd, "wip.txt"), "unsaved");
+  const stale = { ...(storage.getChat(threadId) as any), archived: false, done: true, woke: true };
   const closed = await call("close", { thread: threadId, remove_worktree: true });
   expect(closed.closed).toBe(true);
   expect(closed.note).toContain("uncommitted");
   expect(await Bun.file(join(cwd, "wip.txt")).text()).toBe("unsaved");
+  const saved = storage.getChat(threadId) as any;
+  expect(saved.archived).toBe(true);
+  expect(saved.autoClosedAt).toBeGreaterThan(0);
+  const { keepPullRequestFields } = await import("../server/pullRequests");
+  const persisted = keepPullRequestFields(stale, saved);
+  expect(persisted).toMatchObject({ archived: true, done: false, woke: false, autoClosedAt: saved.autoClosedAt });
+  storage.putChat(persisted as never);
   expect((storage.getChat(threadId) as any).archived).toBe(true);
+  expect(keepPullRequestFields({ ...stale, autoCloseOptOut: true }, saved).archived).toBe(false);
   runs.get(stream.id)!.end();
 });
 

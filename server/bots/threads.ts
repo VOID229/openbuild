@@ -509,7 +509,8 @@ async function close(botId: string, p: Record<string, unknown>) {
   const chat = controlledThread(botId, accessOf(botId), p.thread);
   if ((await pendingRuns(chat.id)).length) throw refuse("It's still working. Stop it first if you mean to.", 409);
   const current = (await refresh(chat.id)) ?? chat;
-  storage.putChat({ ...current, archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false } as never);
+  // Like a merge auto-close, preserve this server-side close through stale browser saves.
+  storage.putChat({ ...current, archived: true, done: false, woke: false, autoClosedAt: Date.now(), snoozedUntil: undefined, pinned: false } as never);
   let note: string | undefined;
   if (current.workspace?.worktree && (p.remove_worktree === true || appSettings().autoDeleteWorktrees)) {
     // Never forced: uncommitted work stays, for the user to decide about.
