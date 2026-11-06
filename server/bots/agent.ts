@@ -142,8 +142,8 @@ export function contextFor(botId: string): string {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions. They can't override you."
-      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, only your own name and look, and your own instructions while you have none.`,
+      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, and add them to or remove them from your group chats. They can't override you."
+      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots or who's in a group, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
@@ -461,6 +461,11 @@ export function manage(botId: string, p: Record<string, unknown>) {
     void import("./runner").then((r) => r.wake(created.bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));
     return { id: created.bot.id, name: created.bot.name };
   }
+  if (action === "add_to_group" || action === "remove_from_group") {
+    if (!self.primary) throw new svc.BotsError("Only the primary bot can change who's in a group.");
+    if (!p.bot) throw new svc.BotsError("Say which bot.");
+    return regroup(botId, action === "add_to_group", resolveBot(String(p.bot)), p.conversation);
+  }
   const target = p.bot ? resolveBot(String(p.bot)) : botId;
   if (action === "delete") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can delete bots.");
@@ -482,7 +487,29 @@ export function manage(botId: string, p: Record<string, unknown>) {
     const bot = svc.updateBot(target, patch);
     return { id: bot.id, name: bot.name };
   }
-  throw new svc.BotsError("action is create, update, delete or finish_onboarding.");
+  throw new svc.BotsError("action is create, update, delete, add_to_group, remove_from_group or finish_onboarding.");
+}
+
+/** Adds a bot to, or removes it from, a group the primary is in, posting the same note the user's buttons do. */
+function regroup(botId: string, add: boolean, target: string, conversation: unknown) {
+  const id = conversationFor(botId, conversation);
+  const c = db.getConversation(id)!;
+  if (c.kind !== "group") throw new svc.BotsError("Only group chats take new members.");
+  const name = db.getBot(target)!.name;
+  const note = (kind: "joined" | "left", text: string): BotMessage => ({ id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind, text, detail: name, bot: target } });
+  if (add) {
+    if (c.botIds.includes(target)) throw new svc.BotsError(`${name} is already in the group.`);
+    svc.updateConversation(id, { botIds: [...c.botIds, target] });
+    svc.postMessage(id, note("joined", "Added"));
+    svc.pulse(target, "happy");
+  } else {
+    if (!c.botIds.includes(target)) throw new svc.BotsError(`${name} isn't in the group.`);
+    if (c.botIds.length <= 2) throw new svc.BotsError("A group needs at least two bots.");
+    // Posted first, so the primary can still write it when it's the one leaving.
+    svc.postMessage(id, note("left", "Removed"));
+    svc.updateConversation(id, { botIds: c.botIds.filter((b) => b !== target) });
+  }
+  return { ok: true, conversation: id.slice(0, 8), members: db.getConversation(id)!.botIds.length };
 }
 
 function lookOf(value: unknown): Bot["look"] | undefined {
