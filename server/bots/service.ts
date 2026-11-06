@@ -13,7 +13,7 @@ import * as db from "./db";
 const MESSAGE_LIMIT = 200;
 const CHAIN_LIMIT = 8;
 /** How long a group keeps sending the user's untagged messages to the bots they last tagged. */
-const FOLLOW_MS = 5 * 60_000;
+const FOLLOW_MS = 20 * 60_000;
 
 export class BotsError extends Error {
   constructor(

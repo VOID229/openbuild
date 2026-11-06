@@ -92,7 +92,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
-test("a group keeps sending untagged messages to the non-primary bot the user is talking with for 5 minutes", async () => {
+test("a group keeps sending untagged messages to the non-primary bot the user is talking with for 20 minutes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
@@ -114,14 +114,14 @@ test("a group keeps sending untagged messages to the non-primary bot the user is
       const minute = 60_000;
       check('Hi', [boss]);
       check('@Helper can you look?', [helper]);
-      check('Thanks, and the other one?', [helper], 4 * minute);
-      check('Still there?', [helper], 5 * minute);
-      check('Back after a break', [boss], 5 * minute + 1);
+      check('Thanks, and the other one?', [helper], 19 * minute);
+      check('Still there?', [helper], 20 * minute);
+      check('Back after a break', [boss], 20 * minute + 1);
       check('Hi again', [boss]);
 
       check('@Helper one more', [helper]);
-      post(helper, 'On it', 4 * minute);
-      check('Great', [helper], 4 * minute);
+      post(helper, 'On it', 19 * minute);
+      check('Great', [helper], 19 * minute);
 
       check('@Helper @Tracer both of you', [helper, tracer]);
       check('Go ahead', [helper, tracer]);
