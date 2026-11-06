@@ -221,7 +221,10 @@ function serve(port: number, hostname: string) {
       "/api/auth/logout": { POST: (req) => forbidden(req) ?? localAuth.logout(req) },
       // Signed-in browsers only, and the current password is re-checked.
       "/api/auth/verify": { POST: (req) => forbidden(req) ?? localAuth.verify(req) },
-      "/api/auth/password": { POST: (req) => forbidden(req) ?? localAuth.change(req) },
+      "/api/auth/password": {
+        POST: (req) => forbidden(req) ?? localAuth.change(req),
+        DELETE: (req) => forbidden(req) ?? localAuth.remove(req),
+      },
 
       // Authenticated client config: the sync service to sign in to (shared/cloud.ts), unless
       // OPENCHAT_CLOUD_URL points this server at another one (e.g. a dev deployment).
@@ -615,4 +618,4 @@ void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Wa
 startPullRequestSweep(() => refreshChats(15_000));
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
-if (!localAuth.configured()) console.warn("  Access is locked. Set a local password with: openbuild set pass <password>\n");
+if (!localAuth.configured()) console.log("  No local password: anyone who can reach this server can use it. Set one with: openbuild set pass <password>\n");
