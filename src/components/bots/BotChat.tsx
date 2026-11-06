@@ -1106,11 +1106,13 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
             // PR or thread title, not a mention, so a bot name inside it stays plain text.
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
+            // A start names the bot that did it, looked up by author so a rename shows up on old lines too.
+            const starter = m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author) : undefined;
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  <WithBotLinks text={m.event!.text} bots={bots} />
+                  {starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={m.event!.text} bots={bots} />}
                 </span>
                 {m.event!.detail && (
                   <span className="bm-event-detail">
