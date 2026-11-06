@@ -5,6 +5,7 @@ import { Bell, BellDot, Blocks, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Fo
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
+import { atWork } from "../../lib/bots/activity";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
@@ -117,13 +118,14 @@ function PeekCard({ peek }: { peek?: PeekState }) {
 }
 
 /**
- * A sidebar avatar that keeps still unless its bots are at work (then they fidget; in a group, only
- * the members at work). Hovering its row, tile or rail button makes the eyes follow the pointer, and
+ * A sidebar avatar that keeps still unless its bots are at work on it (then they fidget; in a group,
+ * only the members at work). Hovering its row, tile or rail button makes the eyes follow the pointer, and
  * nothing more.
  */
 function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
-  const working = useBots(useShallow((s) => conversation.botIds.filter((id) => s.status[id]?.state === "working" || s.typing[conversation.id]?.includes(id))));
+  // At work in this conversation, not just anywhere: the chat it opens shows the same.
+  const working = useBots(useShallow((s) => atWork(conversation, s.status, s.typing)));
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
