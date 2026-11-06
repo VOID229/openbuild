@@ -142,7 +142,7 @@ export function contextFor(botId: string): string {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, and add them to or remove them from your group chats. They can't override you."
+      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. They can't override you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots or who's in a group, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
@@ -438,6 +438,7 @@ async function askBot(botId: string, p: Record<string, unknown>) {
 }
 
 function resolveBot(prefix: string): string {
+  if (db.getBot(prefix)) return prefix;
   const hits = db.listBots().filter((b) => b.id === prefix || b.id.startsWith(prefix) || [firstName(b.name), mentionName(b.name)].some((n) => n.toLowerCase() === prefix.toLowerCase()));
   if (hits.length === 1) return hits[0]!.id;
   throw new svc.BotsError(hits.length ? "That bot name is ambiguous." : "No such bot.");
@@ -459,6 +460,21 @@ export function manage(botId: string, p: Record<string, unknown>) {
     // The new bot introduces itself. Imported lazily: runner imports this file.
     void import("./runner").then((r) => r.wake(created.bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));
     return { id: created.bot.id, name: created.bot.name };
+  }
+  if (action === "create_group") {
+    if (!self.primary) throw new svc.BotsError("Only the primary bot can create groups.");
+    if (!Array.isArray(p.bots) || !p.bots.length || p.bots.some(b => typeof b !== "string" || !b.trim())) {
+      throw new svc.BotsError("Say which existing bots to include in bots.");
+    }
+    // Resolve every member before writing: a typo must not silently drop a participant.
+    const botIds = [...new Set([botId, ...p.bots.map(b => resolveBot(b))])];
+    const group = svc.createConversation({
+      kind: "group", name: typeof p.name === "string" ? p.name : "", botIds,
+      instructions: typeof p.instructions === "string" ? p.instructions : "",
+      messages: [{ id: crypto.randomUUID(), author: botId, at: Date.now(), text: "",
+        event: { kind: "created", text: "Created the group", detail: String(p.name ?? "") } }],
+    });
+    return { conversation: group.id, name: group.name, members: group.botIds };
   }
   if (action === "add_to_group" || action === "remove_from_group") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can change who's in a group.");
@@ -486,7 +502,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     const bot = svc.updateBot(target, patch);
     return { id: bot.id, name: bot.name };
   }
-  throw new svc.BotsError("action is create, update, delete, add_to_group or remove_from_group.");
+  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group or remove_from_group.");
 }
 
 /** Adds a bot to, or removes it from, a group the primary is in, posting the same note the user's buttons do. */
