@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { conversationTitle, firstName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
+import { conversationTitle, mentionName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -446,10 +446,10 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   if (!c) return "";
   const cursor = db.cursor(botId, conversationId);
   const rows = db.messages(conversationId, 16);
-  const name = (author: string) => (author === "me" ? user : author === botId ? "you" : firstName(bots.find((b) => b.id === author)?.name ?? "Bot"));
+  const name = (author: string) => (author === "me" ? user : author === botId ? "you" : mentionName(bots.find((b) => b.id === author)?.name ?? "Bot"));
   const lines = rows.map((r) => {
     const m = r.message;
-    const who = m.author === "me" ? user : firstName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
+    const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const body = m.event ? `(${m.event.text}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
     const mark = r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
