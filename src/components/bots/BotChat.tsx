@@ -12,6 +12,7 @@ import { eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reac
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
+import { accountName } from "../../lib/models";
 import { PULL_REF_RE, inPullContext, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
@@ -1136,13 +1137,18 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const starter = m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author) : undefined;
             // A message between bots names the other bot by id, so a rename shows up on old lines too.
             const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
+            // A fallback switch names the bot, the model it moved to and, as the detail, that model's account.
+            const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
+            const fallbackName = m.event!.text.replace(/^Switched to fallback model /, "");
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to fallback model {fallbackName}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
-                {m.event!.detail && (
+                {m.event!.kind === "model" && m.event!.detail ? (
+                  <span className="bm-event-detail">from {accountName(m.event!.detail)}</span>
+                ) : m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
                     {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}

@@ -948,3 +948,125 @@ test("only the primary bot adds bots to its groups or removes them", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a bot falls back through its models in order, only before its reply has done anything", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-fallback-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      const minds = globalThis.openbotsMinds = new Map();
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const { wake, stop, busy, onRecord, modelChain } = await import('./server/bots/runner.ts');
+      const { piFlags } = await import('./server/bots/extensions.ts');
+      svc.setHooks({ wake, stop });
+      svc.updateSettings({ onboarding: 'done' });
+      const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); a.ok(ok()); };
+
+      // Each model in 'turns' says what its turn does: 'refuse' (Pi can't switch to it), 'error' (the call fails at once),
+      // 'reject' (Pi refuses the prompt), 'partial' (writes, then fails), 'tool' (runs a tool, then fails) or 'ok' (replies).
+      const setup = (name, model, fallbackModels, turns, names = {}) => {
+        const { bot, conversationId } = svc.createBot({ name });
+        svc.updateBot(bot.id, { model, fallbackModels });
+        const log = [];
+        let current;
+        const mind = { token: 't', busy: false, sent: false, draft: '', loaded: JSON.stringify(piFlags()), proc: { exited: false, lastUsed: Date.now(), close() {}, send: async (cmd) => {
+          if (cmd.type === 'set_model') {
+            const id = cmd.provider + '/' + cmd.modelId;
+            log.push(id);
+            if (turns[id] === 'refuse') throw new Error('Model not found: ' + id);
+            current = id;
+            return { provider: cmd.provider, id: cmd.modelId, name: names[id] };
+          }
+          if (cmd.type === 'prompt') {
+            const turn = turns[current];
+            if (turn === 'reject') throw new Error('No API key found for ' + current);
+            setTimeout(() => {
+              const emit = (record) => onRecord(bot.id, mind, record);
+              if (turn === 'partial') emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Half a' } });
+              if (turn === 'tool') emit({ type: 'tool_execution_start', toolName: 'bash', args: { command: 'touch x' } });
+              if (turn === 'ok') emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello from ' + current } });
+              emit({ type: 'message_end', message: turn === 'ok' ? { role: 'assistant', stopReason: 'stop' } : { role: 'assistant', stopReason: 'error', errorMessage: current + ' is over its limit' } });
+              emit({ type: 'agent_settled' });
+            }, 1);
+            return {};
+          }
+          return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
+        } } };
+        minds.set(bot.id, mind);
+        const messages = () => db.messages(conversationId, 50).map((r) => r.message).filter((m) => m.author === bot.id);
+        const reply = async () => {
+          const before = messages().length;
+          svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'hi' });
+          await until(() => !busy(bot.id) && messages().slice(before).some((m) => !m.event || m.event.kind === 'error'));
+          const mine = messages().slice(before);
+          return { switches: mine.filter((m) => m.event?.kind === 'model'), errors: mine.filter((m) => m.event?.kind === 'error'), texts: mine.filter((m) => !m.event).map((m) => m.text) };
+        };
+        return { bot, log, reply };
+      };
+
+      // Fallbacks are kept in order, repeats and the bot's own model dropped.
+      const order = setup('Order', 'a/one', ['b/two', 'a/one', 'c/three', 'b/two'], {});
+      a.deepEqual(db.getBot(order.bot.id).fallbackModels, ['b/two', 'a/one', 'c/three']);
+      a.deepEqual(modelChain(order.bot.id), ['a/one', 'b/two', 'c/three']);
+      svc.updateBot(order.bot.id, { fallbackModels: [] });
+      a.equal(db.getBot(order.bot.id).fallbackModels, undefined);
+
+      // The primary fails, the next can't be switched to, the third (a second account) replies. Only that switch is posted.
+      const manager = setup('manager', 'anthropic/opus', ['claude-code-2/opus', 'openai-codex-2/gpt-6.1-sol'], { 'anthropic/opus': 'error', 'claude-code-2/opus': 'refuse', 'openai-codex-2/gpt-6.1-sol': 'ok' }, { 'openai-codex-2/gpt-6.1-sol': 'GPT 6.1 Sol' });
+      let r = await manager.reply();
+      a.deepEqual(manager.log, ['anthropic/opus', 'claude-code-2/opus', 'openai-codex-2/gpt-6.1-sol']);
+      a.equal(r.switches.length, 1);
+      a.deepEqual(r.switches[0].event, { kind: 'model', text: 'Switched to fallback model GPT 6.1 Sol', detail: 'openai-codex-2', model: 'openai-codex-2/gpt-6.1-sol' });
+      a.deepEqual(r.texts, ['Hello from openai-codex-2/gpt-6.1-sol']);
+      a.equal(r.errors.length, 0);
+      a.notEqual(svc.getStatus(manager.bot.id)?.state, 'error');
+
+      // The next reply starts on the bot's own model again.
+      manager.log.length = 0;
+      await manager.reply();
+      a.equal(manager.log[0], 'anthropic/opus');
+
+      // Text already written, or a tool already run, isn't redone on another model.
+      for (const turn of ['partial', 'tool']) {
+        const bot = setup('Busy ' + turn, 'a/one', ['b/two'], { 'a/one': turn, 'b/two': 'ok' });
+        r = await bot.reply();
+        a.deepEqual(bot.log, ['a/one'], turn);
+        a.equal(r.switches.length, 0, turn);
+        a.equal(r.errors.length, 1, turn);
+        a.match(r.errors[0].event.detail, /a\\/one is over its limit/);
+        a.doesNotMatch(r.errors[0].event.detail, /Every model failed/);
+      }
+
+      // Every model failing says so, with each one's reason, after posting each switch.
+      const doomed = setup('Doomed', 'a/one', ['b/two', 'c/three'], { 'a/one': 'error', 'b/two': 'error', 'c/three': 'refuse' }, { 'b/two': 'Two' });
+      r = await doomed.reply();
+      a.deepEqual(doomed.log, ['a/one', 'b/two', 'c/three']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model Two']);
+      a.equal(r.errors.length, 1);
+      a.match(r.errors[0].event.detail, /^Every model failed/);
+      for (const reason of ['a/one: a/one is over its limit', 'b/two: b/two is over its limit', 'c/three: Model not found: c/three']) a.ok(r.errors[0].event.detail.includes(reason), r.errors[0].event.detail);
+      a.equal(svc.getStatus(doomed.bot.id).state, 'error');
+
+      // A prompt Pi refuses outright (no key for that model) ran nothing either.
+      const keyless = setup('Keyless', 'a/one', ['b/two'], { 'a/one': 'reject', 'b/two': 'ok' });
+      r = await keyless.reply();
+      a.deepEqual(keyless.log, ['a/one', 'b/two']);
+      a.deepEqual(r.texts, ['Hello from b/two']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model two']);
+
+      // Without fallbacks a failure reads exactly as it always has.
+      const single = setup('Single', 'a/one', undefined, { 'a/one': 'error' });
+      r = await single.reply();
+      a.deepEqual(single.log, ['a/one']);
+      a.equal(r.switches.length, 0);
+      a.equal(r.errors[0].event.detail, 'a/one is over its limit');
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30_000);

@@ -366,6 +366,10 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (newPace) bot.proactivity = patch.proactivity;
   if (patch.model === null || patch.model === "") bot.model = undefined;
   else if (typeof patch.model === "string") bot.model = patch.model.slice(0, 200);
+  if (patch.fallbackModels === null || Array.isArray(patch.fallbackModels)) {
+    const list = strings(patch.fallbackModels?.map((m) => (typeof m === "string" ? m.trim().slice(0, 200) : m)).filter((m) => typeof m === "string" && m.includes("/")), 8);
+    bot.fallbackModels = list.length ? list : undefined;
+  }
   if (typeof patch.effort === "string") bot.effort = patch.effort.slice(0, 40);
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
     bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
