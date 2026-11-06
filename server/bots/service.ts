@@ -160,6 +160,9 @@ export function snapshot(): BotsSnapshot {
   };
 }
 
+export function getStatus(botId: string): BotStatus | undefined {
+  return status.get(botId);
+}
 export function setStatus(botId: string, next: BotStatus) {
   if (next.state === "idle") status.delete(botId);
   else status.set(botId, next);

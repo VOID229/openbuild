@@ -734,9 +734,15 @@ test("any number of routines stay active at once, each bot's separate, each in i
       wake(first.bot.id, { kind: 'messages', conversationId: group.id });
       await new Promise((r) => setTimeout(r, 10));
       a.equal(steers.length, 1);
+      // The group isn't left blank meanwhile: the bot shows there as holding on, still working in its DM.
+      const held = svc.snapshot().status[first.bot.id];
+      a.equal(held.conversationId, first.conversationId);
+      a.deepEqual(held.waiting, [group.id]);
       release();
       for (let i = 0; i < 200 && prompts.length < 2; i++) await new Promise((r) => setTimeout(r, 5));
       a.deepEqual(prompts.map((p) => p.focus), [first.conversationId, group.id]);
+      // Its turn came, so the group no longer waits.
+      a.equal(svc.snapshot().status[first.bot.id]?.waiting, undefined);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

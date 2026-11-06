@@ -6,6 +6,7 @@ export type {
   BotMessage,
   BotsEvent,
   BotsSettings,
+  BotStatus,
   BotsSnapshot,
   ComputerConfig,
   Conversation,
