@@ -9,7 +9,7 @@ import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
 import { SettingsHeading } from "../primitives";
-import { BotComputer, BotModel, BotModelSelect } from "./BotAdvanced";
+import { BotComputer, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
@@ -383,6 +383,7 @@ export function BotsSettingsSection() {
           </div>
           <BotModelSelect label="Default model" value={defaultModel} unset="Pi's default" onChange={st.setDefaultModel} />
         </div>
+        <DefaultFallbacks />
       </section>
 
       <section className="pi-block">

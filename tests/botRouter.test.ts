@@ -5,7 +5,7 @@ const primary = { id: 'primary', name: 'Primary', instructions: 'Coordinate', mo
 const helper = { id: 'helper', name: 'Researcher', instructions: 'Research' } as Bot;
 
 test('router passes roles, bounded context and configured model without a visible turn', async () => {
-  const result = await routeGroup(primary, [primary, helper], Array.from({ length: 30 }, () => ({ id: 'm', author: 'me', at: 1, text: 'x'.repeat(3000) })), 'default', async (model, system, prompt) => {
+  const result = await routeGroup(primary, [primary, helper], Array.from({ length: 30 }, () => ({ id: 'm', author: 'me', at: 1, text: 'x'.repeat(3000) })), { defaultModel: 'default' }, async (model, system, prompt) => {
     expect(model).toBe(primary.model!);
     expect(system).toContain('Usually choose exactly one');
     const data = JSON.parse(prompt);
@@ -41,5 +41,25 @@ test('router tries ordered fallback models without extending its deadline', asyn
     calls.push(model);
     return new Promise(() => {});
   }, 5)).toEqual(['primary']);
+  expect(calls).toEqual(['provider/model']);
+});
+
+test('router inherits the default model and its fallbacks when the primary is on Default, as its replies do', async () => {
+  const calls: string[] = [];
+  const failing = async (model: string) => { calls.push(model); throw new Error('unavailable'); };
+  const onDefault = { ...primary, model: undefined };
+  const defaults = { defaultModel: 'd/main', defaultFallbackModels: ['e/backup', 'd/main', 'openai-codex-2/sol'] };
+  expect(await routeGroup(onDefault, [primary, helper], [], defaults, failing)).toEqual(['primary']);
+  expect(calls).toEqual(['d/main', 'e/backup', 'openai-codex-2/sol']);
+  // No default model: Pi's default ("") leads, the default's fallbacks follow.
+  calls.length = 0;
+  await routeGroup(onDefault, [primary, helper], [], { defaultFallbackModels: ['e/backup'] }, failing);
+  expect(calls).toEqual(['', 'e/backup']);
+  // Its own fallbacks replace the default's; its own model keeps to its own list.
+  calls.length = 0;
+  await routeGroup({ ...onDefault, fallbackModels: ['g/own'] }, [primary, helper], [], defaults, failing);
+  expect(calls).toEqual(['d/main', 'g/own']);
+  calls.length = 0;
+  await routeGroup(primary, [primary, helper], [], defaults, failing);
   expect(calls).toEqual(['provider/model']);
 });

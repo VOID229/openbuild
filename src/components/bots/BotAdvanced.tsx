@@ -50,19 +50,21 @@ export function BotModelSelect({ label, value, unset, inherited, placeholder, ac
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">
-        {unset && (
-          <button type="button" role="option" aria-selected={!value} className="menu-item" onClick={() => pick("")}>
-            {fallback && <BrandIcon id={fallback} />}
-            <span className="menu-item-label">{unsetLabel}</span>
-            {fallback && <span className="menu-item-hint">{unset}</span>}
-            {!value && <Check size={15} className="menu-check" />}
-          </button>
-        )}
         <ModelMenu
           selected={{ plan: "pi", id: value ?? "" }}
           piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : { plan: "pi", status: failed ? "error" : "checking", models: [] }}
           scopedOnly
           onPick={(ref) => pick(ref.id)}
+          leading={
+            unset && (
+              <button type="button" role="option" aria-selected={!value} className="menu-item" onClick={() => pick("")}>
+                {fallback && <BrandIcon id={fallback} />}
+                <span className="menu-item-label">{unsetLabel}</span>
+                {fallback && <span className="menu-item-hint">{unset}</span>}
+                {!value && <Check size={15} className="menu-check" />}
+              </button>
+            )
+          }
         />
       </Popover>
     </span>
@@ -94,11 +96,21 @@ export function BotModel({ bot }: { bot: Bot }) {
 
 /**
  * Models the bot tries, top to bottom, when its own fails before replying. Each is one provider's
- * model, so a second account's ("openai-codex-2/…") is an entry of its own.
+ * model, so a second account's ("openai-codex-2/…") is an entry of its own. A bot on Default with
+ * none of its own follows the default's, until it lists some.
  */
 export function BotFallbacks({ bot }: { bot: Bot }) {
-  const list = bot.fallbackModels ?? [];
-  const set = (fallbackModels: string[]) => useBots.getState().updateBot(bot.id, { fallbackModels });
+  const inherited = useBots((s) => (bot.model || bot.fallbackModels?.length ? 0 : s.defaultFallbackModels.length));
+  return (
+    <>
+      {inherited > 0 && <p className="setting-desc bots-fallbacks-note">Following the {inherited === 1 ? "fallback" : `${inherited} fallbacks`} of the default model in Settings → Bots. Adding one here gives this bot its own list instead.</p>}
+      <FallbackList list={bot.fallbackModels ?? []} onChange={(fallbackModels) => useBots.getState().updateBot(bot.id, { fallbackModels })} />
+    </>
+  );
+}
+
+/** An ordered list of fallback models: the bot's own, or the default's in Settings → Bots. */
+export function FallbackList({ list, onChange: set }: { list: string[]; onChange: (models: string[]) => void }) {
   return (
     <div className="naming-list bots-fallbacks">
       {list.map((model, i) => (
@@ -128,6 +140,22 @@ export function BotFallbacks({ bot }: { bot: Bot }) {
 }
 
 const FALLBACKS_DESC = "Tried in order when the model fails before the bot has said or done anything. A reply that's under way isn't retried on another model. The chat notes each switch.";
+
+/** Settings → Bots: the fallbacks of the default model, for every bot on Default without fallbacks of its own. */
+export function DefaultFallbacks() {
+  const list = useBots((s) => s.defaultFallbackModels);
+  return (
+    <>
+      <div className="setting-row setting-row-top">
+        <div className="setting-text">
+          <div className="setting-label">Default fallback models</div>
+          <p className="setting-desc">{FALLBACKS_DESC} Bots set to Default use these unless they list their own; a bot with its own model keeps its own fallbacks.</p>
+        </div>
+      </div>
+      <FallbackList list={list} onChange={useBots.getState().setDefaultFallbackModels} />
+    </>
+  );
+}
 
 /** Container or host, shared by both layouts. */
 function ComputerSelect({ bot, className }: { bot: Bot; className?: string }) {

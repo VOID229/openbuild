@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { conversationTitle, eventText, mentionName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
+import { botModelChain, conversationTitle, eventText, mentionName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -42,6 +42,8 @@ interface Mind {
   error?: string;
   /** This attempt ran a tool or wrote text, so trying it again on another model could repeat what it did. */
   acted?: boolean;
+  /** Tells of the attempt's model once it takes the turn on: its first text or tool, or settling without either. */
+  onCommit?: () => void;
   onSettled?: () => void;
   onExit?: (e: Error) => void;
 }
@@ -190,14 +192,14 @@ function piDefaultModel(): string | undefined {
 
 /**
  * Put a bot's Pi on its model before a run, or on `fallback` when that's the one being tried. A model
- * that can't be used fails the attempt instead of quietly running on another. Resolves to the model's name, when Pi says.
+ * that can't be used fails the attempt instead of quietly running on another. Resolves to the model Pi is on, with its name when Pi says.
  *
  * A bot with no model of its own runs on Pi's default, or on whatever Pi picks when there's none. Pi
  * keeps the last model in a running process and in a resumed session, so after a fallback that would
  * be the fallback: the model it resolved to is kept (`primary:`), as is the fallback it's on (`fallback:`),
  * and the next primary attempt goes back, or fails rather than carry on on the fallback unannounced.
  */
-export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, fallback?: string): Promise<string | undefined> {
+export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, fallback?: string): Promise<{ model?: string; name?: string }> {
   const chosen = fallback || db.getBot(botId)?.model || svc.getSettings().defaultModel;
   const onFallback = db.getValue<string | null>(`fallback:${botId}`) || undefined;
   const state = await proc.send<{ model?: { provider: string; id: string; name?: string } }>({ type: "get_state" });
@@ -223,19 +225,12 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
     db.setValue(`fallback:${botId}`, null);
     if (!chosen && current) db.setValue(`primary:${botId}`, current);
   }
-  return name;
+  return { model: current, name };
 }
 
-/**
- * The models a reply tries, in order: the bot's own (undefined: the default, or Pi's), then its
- * fallbacks. A fallback that repeats one already in the list is skipped.
- */
+/** The models a reply tries, in order: see botModelChain. */
 export function modelChain(botId: string): (string | undefined)[] {
-  const bot = db.getBot(botId);
-  const primary = bot?.model || svc.getSettings().defaultModel || undefined;
-  const seen = new Set(primary ? [primary] : []);
-  const rest = (bot?.fallbackModels ?? []).filter((m) => m.includes("/") && !seen.has(m) && (seen.add(m), true));
-  return [primary, ...rest];
+  return botModelChain(db.getBot(botId), svc.getSettings());
 }
 
 /** A model failed before the reply did anything: no tool ran and no text was written, so another model can take the turn over. */
@@ -244,23 +239,27 @@ export class ModelFailure extends PiError {}
 /**
  * Try a turn on each model of the chain until one manages it. Only a ModelFailure moves on; anything
  * else (a partial reply, a tool that already ran, a timeout) fails the reply as it is. An attempt calls
- * `switched` once Pi is on its model, which posts the switch to a fallback in the conversation. When
- * every model fails, the error says how each one did.
+ * `ran` once its model has taken the turn on (it wrote, ran a tool or settled), with the model Pi is on
+ * and its name, which posts a change of model in the conversation (see noteRan). When every model
+ * fails, the error says how each one did.
  */
 export async function withFallbacks(
   botId: string,
   conversationId: string | undefined,
   chain: (string | undefined)[],
-  attempt: (model: string | undefined, index: number, switched: (name?: string) => void) => Promise<void>,
+  attempt: (model: string | undefined, index: number, ran: (on: { model?: string; name?: string }) => void) => Promise<void>,
 ): Promise<void> {
   const failures: string[] = [];
   for (let i = 0; i < chain.length; i++) {
     const model = chain[i];
-    const switched = (name?: string) => {
-      if (i > 0) announceFallback(botId, conversationId, model!, name);
+    let noted = false;
+    const ran = (on: { model?: string; name?: string }) => {
+      if (noted) return;
+      noted = true;
+      noteRan(botId, conversationId, i, { model: on.model ?? model, name: on.name });
     };
     try {
-      await attempt(model, i, switched);
+      await attempt(model, i, ran);
       return;
     } catch (err) {
       if (!(err instanceof ModelFailure) || i === chain.length - 1) {
@@ -273,12 +272,26 @@ export async function withFallbacks(
   }
 }
 
-/** "Switched to fallback model GPT 6.1 Sol", with the provider (the account, for a second login) as its detail. */
-function announceFallback(botId: string, conversationId: string | undefined, model: string, name?: string) {
+const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"];
+
+/**
+ * The model a bot's replies last ran on, and its place in the chain, are kept (`ran:`) so the chat
+ * hears only of a change: a fallback taking over ("Switched to fallback model GPT 6.1 Sol"), or a
+ * model higher up coming back ("Switched to first priority model Grok 4.7"). A reply that tried the
+ * primary, saw it fail and ended up on the same fallback as last time says nothing. The provider
+ * (the account, for a second login) is the detail.
+ */
+function noteRan(botId: string, conversationId: string | undefined, index: number, on: { model?: string; name?: string }) {
+  const last = db.getValue<{ model?: string; index: number } | null>(`ran:${botId}`) ?? undefined;
+  db.setValue(`ran:${botId}`, { model: on.model, index });
+  if (last?.model === on.model) return;
+  const recovered = !!last && last.index > index;
+  if (index === 0 && !recovered) return;
   const where = conversationId ?? svc.directId(botId);
-  if (!where) return;
-  const slash = model.indexOf("/");
-  svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "model", text: `Switched to fallback model ${name || model.slice(slash + 1)}`, detail: model.slice(0, slash), model } });
+  if (!where || !on.model) return;
+  const slash = on.model.indexOf("/");
+  const text = recovered ? `Switched to ${ORDINALS[index] ?? `#${index + 1}`} priority model` : "Switched to fallback model";
+  svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "model", text: `${text} ${on.name || on.model.slice(slash + 1)}`, detail: on.model.slice(0, slash), model: on.model } });
 }
 
 /** Our extension returns a posted message id only after the service actually accepted it. */
@@ -315,6 +328,12 @@ function setTyping(botId: string, mind: Mind, on: boolean) {
   if (conversationId) svc.setTyping(conversationId, botId, on);
 }
 
+function commit(mind: Mind) {
+  const told = mind.onCommit;
+  mind.onCommit = undefined;
+  told?.();
+}
+
 export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "agent_settled") {
     mind.steerable = false;
@@ -323,6 +342,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
   mind.sent ||= successfulMessageTool(record);
   if (record.type === "tool_execution_start") mind.acted = true;
+  if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
@@ -347,6 +367,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   const delta = ev?.type === "text_delta" ? String(ev.delta ?? "") : "";
   if (delta) {
     mind.acted = true;
+    commit(mind);
     mind.draft += delta;
     const conversationId = getFocus(botId);
     if (conversationId && !mind.sent && !"[silent]".startsWith(mind.draft.trim().toLowerCase())) {
@@ -441,7 +462,8 @@ async function run(botId: string, all: Wake[]) {
     markSeen(botId, shown, assigned);
     const m = mind;
     let handled = false;
-    await withFallbacks(botId, conversationId, modelChain(botId), async (model, index, switched) => {
+    await withFallbacks(botId, conversationId, modelChain(botId), async (model, index, ran) => {
+      m.onCommit = undefined;
       m.sent = false;
       m.acted = false;
       m.error = undefined;
@@ -451,9 +473,10 @@ async function run(botId: string, all: Wake[]) {
       // Nothing has happened yet: a model Pi can't switch to, or that it refuses to start, is the next one's turn.
       const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent ? err : new ModelFailure(err instanceof Error ? err.message : String(err)));
       try {
-        const name = await applyModel(m.proc, botId, index ? model : undefined);
+        const on = await applyModel(m.proc, botId, index ? model : undefined);
         await applyEffort(m.proc, botId);
-        switched(name);
+        // The switch is told once the model has taken the turn on, so a model that fails first isn't.
+        m.onCommit = () => ran(on);
       } catch (err) {
         throw untouched(err);
       }
@@ -467,12 +490,13 @@ async function run(botId: string, all: Wake[]) {
         throw /didn't answer .* in time/.test(String((err as Error)?.message)) ? err : untouched(err);
       });
       if ((accepted as { disposition?: string })?.disposition === "handled" || settled) {
-        if (!settled) return void (handled = true);
+        if (!settled) return void (handled = true, commit(m));
       } else await waitSettled(m);
       m.steerable = false;
       if (!m.sent) {
         // The model failed before saying or doing anything: the next one can answer instead.
         if (m.error && !m.acted && !m.proc.exited) throw new ModelFailure(m.error);
+        if (!m.error) commit(m);
         const text = m.draft.trim();
         if (conversationId) {
           for (const part of replyBubbles(text)) {
@@ -505,6 +529,7 @@ async function run(botId: string, all: Wake[]) {
       mind.typing = false;
       mind.steerable = false;
       mind.shown = undefined;
+      mind.onCommit = undefined;
     }
     if (conversationId) {
       svc.setTyping(conversationId, botId, false);

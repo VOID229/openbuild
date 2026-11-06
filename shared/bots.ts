@@ -293,6 +293,8 @@ export interface Conversation {
 export interface BotsSettings {
   /** "provider/model" for bots without their own. Pi's default when unset. */
   defaultModel?: string;
+  /** "provider/model"s a bot set to Default tries in order when the default fails, unless it lists fallbacks of its own. */
+  defaultFallbackModels?: string[];
   /** Bots don't look in on their own between these hours (24h clock, server time). */
   quietHours: { from: number; to: number };
   /** The user, as bots know them. */
@@ -462,4 +464,16 @@ export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botId
   if (c.kind === "group") return c.name || "Untitled group";
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
   return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");
+}
+
+/**
+ * The models a bot tries, in order: its own (undefined: the default, or Pi's), then its fallbacks. A bot
+ * on Default without fallbacks of its own takes the default's; a bot with its own model or its own list
+ * keeps to it. A fallback that repeats one already in the list is skipped.
+ */
+export function botModelChain(bot: Pick<Bot, "model" | "fallbackModels"> | undefined, settings: Pick<BotsSettings, "defaultModel" | "defaultFallbackModels">): (string | undefined)[] {
+  const primary = bot?.model || settings.defaultModel || undefined;
+  const fallbacks = bot?.fallbackModels?.length ? bot.fallbackModels : bot?.model ? [] : (settings.defaultFallbackModels ?? []);
+  const seen = new Set(primary ? [primary] : []);
+  return [primary, ...fallbacks.filter((m) => m.includes("/") && !seen.has(m) && (seen.add(m), true))];
 }

@@ -3566,3 +3566,8 @@ button.bots-details-name:hover {
   width: auto;
   min-width: 0;
 }
+
+/* A bot on Default with no fallbacks of its own says it follows the default's. */
+.bots-fallbacks-note {
+  margin: 0 0 6px;
+}
