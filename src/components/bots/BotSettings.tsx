@@ -1,16 +1,15 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
 // routines, model, how often it checks in; a group's members and goal), making and deleting
 // them, the default model and web search providers they share, and how lively bots are.
-import { ArrowLeft, Check, ChevronDown, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { botModels, type PiModels } from "../../lib/pi";
-import { providerName, providerOf } from "../../lib/models";
+import { ArrowLeft, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
+import { useEffect, useState } from "react";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
-import { ModelMenu, OptionSelect } from "../ModelSelect";
-import { BrandIcon, Popover, SettingsHeading } from "../primitives";
+import { OptionSelect } from "../ModelSelect";
+import { SettingsHeading } from "../primitives";
+import { BotComputer, BotModel, BotModelSelect } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
@@ -46,58 +45,9 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
   { value: "high", label: "Every hour" },
 ];
 
-/** A model to run bots on, with an option on top for leaving it unset and following what's `inherited` (Pi's own default without one). */
-function BotModelSelect({ label, value, unset, inherited, onChange }: { label: string; value?: string; unset: string; inherited?: string; onChange: (model: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const [listing, setListing] = useState<PiModels>();
-  const [failed, setFailed] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
-  const models = listing?.models;
-  const fallback = inherited || listing?.defaultModel;
-  useEffect(() => {
-    let live = true;
-    void botModels()
-      .then((r) => live && setListing(r))
-      .catch(() => live && setFailed(true));
-    return () => {
-      live = false;
-    };
-  }, []);
-  const nameOf = (id?: string) => models?.find((m) => m.id === id)?.name ?? id;
-  const current = models?.find((m) => m.id === value);
-  const pick = (model: string) => {
-    onChange(model);
-    setOpen(false);
-  };
-  const unsetLabel = `${unset}${fallback ? ` · ${nameOf(fallback)}` : ""}`;
-  return (
-    <span className="select-wrap select-grow bots-set-model">
-      <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
-        {value && <BrandIcon id={value} />}
-        <span className="select-value">{value ? (current?.name ?? (listing ? `${value} (unavailable)` : value)) : unsetLabel}</span>
-        {current && <span className="select-hint">{providerName(providerOf(current))}</span>}
-        <ChevronDown size={14} className="select-chevron" />
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">
-        <button type="button" role="option" aria-selected={!value} className="menu-item" onClick={() => pick("")}>
-          <span className="menu-item-label">{unsetLabel}</span>
-          {!value && <Check size={15} className="menu-check" />}
-        </button>
-        <ModelMenu
-          selected={{ plan: "pi", id: value ?? "" }}
-          piDetection={listing ? { plan: "pi", status: "valid", models: listing.models, scope: listing.scope } : { plan: "pi", status: failed ? "error" : "checking", models: [] }}
-          scopedOnly
-          onPick={(ref) => pick(ref.id)}
-        />
-      </Popover>
-    </span>
-  );
-}
-
 function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; onDelete: (conversationId: string) => void }) {
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
-  const defaultModel = useBots((s) => s.defaultModel);
   const st = useBots.getState();
   const [name, setName] = useState(bot.name);
   useEffect(() => setName(bot.name), [bot.name]);
@@ -168,25 +118,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
       </section>
       <section className="bots-set-block">
         <Label>Computer</Label>
-        <div className="setting-row">
-          <div className="setting-text">
-            <div className="setting-label">Execution environment</div>
-            <p className="setting-desc">Containers are isolated. Host access is unisolated: the bot can run commands and read or change files as the server user. Only choose host access if you trust this bot.</p>
-          </div>
-          <OptionSelect
-            label="Computer"
-            value={bot.computer ? `${bot.computer.device}:${bot.computer.kind}` : "local:container"}
-            options={[
-              { value: "local:container", label: "Container · this server" },
-              { value: "local:host", label: "Host · this server (unisolated)" },
-              ...(bot.computer && bot.computer.device !== "local" ? [{ value: `${bot.computer.device}:${bot.computer.kind}`, label: `${bot.computer.kind} · ${bot.computer.device}` }] : []),
-            ]}
-            onChange={(value) => {
-              if (value === "local:container" || value === "local:host") st.updateBot(bot.id, { computer: { device: "local", kind: value === "local:host" ? "host" : "container" } });
-            }}
-          />
-        </div>
-        <p className="setting-desc">Choosing an environment applies to the next request. This does not move files from an existing computer.</p>
+        <BotComputer bot={bot} />
       </section>
       <section className="bots-set-block">
         <Label>OpenBuild</Label>
@@ -194,13 +126,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
       </section>
       <section className="bots-set-block">
         <Label>Usage</Label>
-        <div className="setting-row setting-row-stack">
-          <div className="setting-text">
-            <div className="setting-label">Model</div>
-            <p className="setting-desc">Default follows the default model in Settings → Bots. Changes apply from the bot's next reply.</p>
-          </div>
-          <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => st.updateBot(bot.id, { model })} />
-        </div>
+        <BotModel bot={bot} />
         <div className="setting-row">
           <div className="setting-text">
             <div className="setting-label">Check in on its own</div>

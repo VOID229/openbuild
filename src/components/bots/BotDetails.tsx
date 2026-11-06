@@ -1,4 +1,5 @@
-// OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines; a group's members and goal; who's in a side chat.
+// OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
+// model, computer and OpenBuild permissions folded away under Advanced; a group's members and goal; who's in a side chat.
 import { ChevronLeft, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
@@ -7,6 +8,7 @@ import type { Bot, Conversation } from "../../lib/bots/types";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { cx, useMediaQuery, usePresence } from "../../lib/ui";
 import { IconButton, Toggle } from "../primitives";
+import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
@@ -281,6 +283,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 />
               )}
               {tab === "routines" && <Routines bot={bot} />}
+              <BotAdvanced bot={bot} />
               <div className="bots-details-foot">
                 <button
                   type="button"
