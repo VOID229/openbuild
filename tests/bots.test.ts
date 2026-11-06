@@ -382,6 +382,15 @@ test("send_message, models and check-ins against a real bots database", async ()
       const { bot, conversationId } = svc.createBot({ name: 'Egg' });
       setFocus(bot.id, conversationId);
       const count = () => db.messages(conversationId, 50).length;
+      const { forwardedImages } = await import('./server/bots/threads.ts');
+      const imageId = crypto.randomUUID();
+      svc.postMessage(conversationId, { id: imageId, author: 'me', at: Date.now(), text: 'Screenshot', images: ['data:image/png;base64,aGVsbG8='] });
+      a.deepEqual(forwardedImages(bot.id, [imageId.slice(0, 8)]), [{ mimeType: 'image/png', data: 'aGVsbG8=' }]);
+      a.deepEqual(forwardedImages(bot.id, [imageId, imageId]), [{ mimeType: 'image/png', data: 'aGVsbG8=' }]);
+      a.deepEqual(forwardedImages(bot.id, undefined), []);
+      a.throws(() => forwardedImages(bot.id, 'latest'), /array/);
+      a.throws(() => forwardedImages('not-a-member', [imageId]), /No such image message/);
+
 
       // [silent] through send_message posts nothing; real text still does.
       const before = count();
