@@ -256,7 +256,7 @@ function TextGeneration() {
   useStore((s) => TEXT_RUNTIMES.map((r) => planDetection(s, r)?.checkedAt ?? 0).join());
   const [statuses, setStatuses] = useState<Record<ThreadRuntime, RuntimeStatus> | undefined>(() => cachedRuntimeStatuses());
   // Rows are stored as a plan: a runtime other than Pi is a plan of its own.
-  const usable = TEXT_RUNTIMES.filter((r) => (r === "pi" ? !!detection.pi?.models.length : statuses?.[r]?.installed) && runtimeEnabled(settings, r));
+  const usable = TEXT_RUNTIMES.filter((r) => (r === "pi" ? !!detection.pi?.models.length : statuses?.[r]?.installed) && runtimeEnabled(settings, r, undefined, statuses));
   const runtimeOptions = (plan: TextRuntime) => [...new Set([plan, ...usable])].map((r) => ({ value: r, label: runtimeName(r), icon: <RuntimeIcon runtime={r} size={16} /> }));
   const setModels = (models: NamingModel[]) => update({ naming: { ...useStore.getState().settings.naming, models } });
   const modelsOf = (plan: TextRuntime) => planDetection(useStore.getState(), plan)?.models ?? [];

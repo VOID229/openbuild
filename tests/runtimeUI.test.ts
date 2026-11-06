@@ -172,14 +172,30 @@ test("external Pi observation never advertises a working Stop or steering contro
   expect(markup(createElement(Composer, { chatId: external.id, variant: "dock", streaming: true }))).toContain('aria-label="Stop generating"');
 });
 
-test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", () => {
+test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", async () => {
   reset({ threadRuntime: undefined });
   const html = markup(createElement(WorkspaceTop));
   expect(html).toContain('aria-label="Thread runtime: Default"');
   expect(html).not.toContain("Local checkout");
-  // Durable is off by default on a device with no saved runtime settings, so the picker falls back.
-  reset({ threadRuntime: "durable" });
-  expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+  const originalFetch = globalThis.fetch;
+  const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
+  const detect = async (missing: string[]) => {
+    globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].map((id) => [id, {
+      installed: !missing.includes(id), updateAvailable: false, install: "",
+    }])) })) as unknown as typeof fetch;
+    await loadRuntimeStatuses(true);
+  };
+  try {
+    // A device with no saved runtime settings turns on what's installed there: without Durable, the picker falls back.
+    await detect(["durable"]);
+    reset({ threadRuntime: "durable" });
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+    await detect([]);
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
+    // A saved choice wins over detection.
+    reset({ threadRuntime: "durable", disabledRuntimes: { "": ["durable"] } });
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+  } finally { globalThis.fetch = originalFetch; }
   reset({ threadRuntime: "durable", disabledRuntimes: { "": [] } });
   expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
   reset({ threadRuntime: "codex" });
@@ -200,6 +216,22 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
   expect(opencode).toContain('aria-label="Thread runtime: OpenCode"');
   expect(opencode).toContain("Native OpenCode");
   expect(opencode).toContain('fill-rule="evenodd"');
+});
+
+test("bots can only be let use the harnesses installed on this server", async () => {
+  const originalFetch = globalThis.fetch;
+  const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
+  const { BotHarnesses } = await import("../src/components/bots/BotThreads");
+  globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].map((id) => [id, {
+    installed: ["pi", "codex"].includes(id), updateAvailable: false, install: "",
+  }])) })) as unknown as typeof fetch;
+  try {
+    await loadRuntimeStatuses(true);
+    const html = renderToStaticMarkup(createElement(BotHarnesses));
+    expect(html).toContain('<span class="pi-subhead-note">Pi, Codex</span>');
+    expect(html).toMatch(/aria-checked="true" aria-label="Let bots use Codex" class="toggle"/);
+    expect(html).toMatch(/aria-checked="false" aria-label="Let bots use Claude Code" class="toggle toggle-disabled" disabled=""/);
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("the runtime picker tightens its rows as the list grows", () => {

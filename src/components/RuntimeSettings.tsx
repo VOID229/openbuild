@@ -164,9 +164,9 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
     }
   };
 
-  const enabledCount = RUNTIMES.filter((r) => runtimeEnabled(settings, r.runtime, deviceId)).length;
+  const enabledCount = RUNTIMES.filter((r) => runtimeEnabled(settings, r.runtime, deviceId, statuses)).length;
   const toggle = (runtime: ThreadRuntime, on: boolean) => {
-    const patch = setRuntimeEnabled(settings, runtime, on, deviceId);
+    const patch = setRuntimeEnabled(settings, runtime, on, deviceId, statuses);
     // Turning off the runtime new threads use on this device moves them to the first one left on.
     const current = settings.threadRuntime ?? "pi";
     const device = useStore.getState().settings.workspace;
@@ -193,7 +193,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
       )}
       <ul className="pi-list">
         {RUNTIMES.map((r) => {
-          const enabled = runtimeEnabled(settings, r.runtime, deviceId);
+          const enabled = runtimeEnabled(settings, r.runtime, deviceId, statuses);
           return (
             <RuntimeRow
               key={r.runtime}

@@ -7,6 +7,7 @@ import type { PermissionMode, ThreadRuntime } from "../../../shared/types";
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
 import { permissionModes } from "../../lib/pi";
+import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../../lib/runtimeStatus";
 import { runtimeName, RUNTIMES } from "../../lib/runtimes";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
@@ -118,11 +119,11 @@ export function BotThreads({ bot }: { bot: Bot }) {
 }
 
 /** One harness: whether bots may use it, and for those with modes, what their threads get by default. */
-function HarnessRow({ runtime }: { runtime: ThreadRuntime }) {
+function HarnessRow({ runtime, missing }: { runtime: ThreadRuntime; missing: boolean }) {
   const harnesses = useBots((s) => s.harnesses);
   const [modes, setModes] = useState<PermissionMode[]>([]);
   useEffect(() => {
-    if (!hasModes(runtime)) return;
+    if (!hasModes(runtime) || missing) return;
     let live = true;
     void permissionModes(runtime)
       .then((r) => live && setModes(r.modes))
@@ -130,8 +131,9 @@ function HarnessRow({ runtime }: { runtime: ThreadRuntime }) {
     return () => {
       live = false;
     };
-  }, [runtime]);
-  const blocked = harnesses.blocked?.includes(runtime) ?? false;
+  }, [runtime, missing]);
+  // A harness this server doesn't have is off and can't be turned on (server/bots/threads.ts refuses it too).
+  const blocked = missing || (harnesses.blocked?.includes(runtime) ?? false);
   const mode = hasModes(runtime) ? harnesses.permissions?.[runtime] : undefined;
   const setMode = (value: string) => {
     if (!hasModes(runtime)) return;
@@ -145,9 +147,9 @@ function HarnessRow({ runtime }: { runtime: ThreadRuntime }) {
     ...(mode && !modes.some((m) => m.id === mode) ? [{ value: mode, label: `${mode} (not listed)` }] : []),
   ];
   return (
-    <Row label={runtimeName(runtime)} desc={hasModes(runtime) ? "The permission mode for threads whose bot can't choose." : "OpenBuild can't set permissions here: it follows this harness's own configuration, so a bot using it gets whatever that allows."}>
-      {hasModes(runtime) && <OptionSelect label={`${runtimeName(runtime)} permission`} value={mode ?? ""} options={options} onChange={setMode} />}
-      <Toggle checked={!blocked} onChange={(on) => useBots.getState().setHarnesses({ ...harnesses, blocked: on ? harnesses.blocked?.filter((r) => r !== runtime) : [...(harnesses.blocked ?? []), runtime] })} label={`Let bots use ${runtimeName(runtime)}`} />
+    <Row label={runtimeName(runtime)} desc={missing ? "Not installed here. Set it up in Settings → Runtimes." : hasModes(runtime) ? "The permission mode for threads whose bot can't choose." : "OpenBuild can't set permissions here: it follows this harness's own configuration, so a bot using it gets whatever that allows."}>
+      {hasModes(runtime) && !missing && <OptionSelect label={`${runtimeName(runtime)} permission`} value={mode ?? ""} options={options} onChange={setMode} />}
+      <Toggle checked={!blocked} disabled={missing} onChange={(on) => useBots.getState().setHarnesses({ ...harnesses, blocked: on ? harnesses.blocked?.filter((r) => r !== runtime) : [...(harnesses.blocked ?? []), runtime] })} label={`Let bots use ${runtimeName(runtime)}`} />
     </Row>
   );
 }
@@ -156,7 +158,14 @@ export function BotHarnesses() {
   const blocked = useBots((s) => s.harnesses.blocked);
   // Collapsed by default, like web search: the header already says which harnesses bots can use.
   const [open, setOpen] = useState(false);
-  const allowed = HARNESSES.filter((r) => !blocked?.includes(r)).map(runtimeName);
+  // Bots run on this server, so what counts is what its detection found.
+  const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses());
+  useEffect(() => {
+    void loadRuntimeStatuses().then(setStatuses, () => {});
+    return subscribeRuntimeStatuses((next, device) => { if (!device) setStatuses(next); });
+  }, []);
+  const missing = (r: ThreadRuntime) => !!statuses && !statuses[r]?.installed;
+  const allowed = HARNESSES.filter((r) => !missing(r) && !blocked?.includes(r)).map(runtimeName);
   return (
     <>
       <div className="pi-subhead">
@@ -169,7 +178,7 @@ export function BotHarnesses() {
       <div className={cx("collapse", open && "collapse-open")} inert={!open}>
         <div className="collapse-inner">
           {HARNESSES.map((runtime) => (
-            <HarnessRow key={runtime} runtime={runtime} />
+            <HarnessRow key={runtime} runtime={runtime} missing={missing(runtime)} />
           ))}
         </div>
       </div>
