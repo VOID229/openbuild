@@ -31,11 +31,14 @@ test('mixed group wakes preserve assigned delivery and never steer pending user 
       }
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       const until = async check => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
-      const post = (where, author, text, image) => svc.postMessage(where, { id: crypto.randomUUID(), author, text, at: Date.now(), ...(image ? { images: ['data:image/png;base64,' + image] } : {}) });
+      let now = Date.now();
+      const post = (where, author, text, image) => svc.postMessage(where, { id: crypto.randomUUID(), author, text, at: now, ...(image ? { images: ['data:image/png;base64,' + image] } : {}) });
       for (const unscopedFirst of [false, true]) {
+        now += 21 * 60_000;
         let index = prompts.length;
         post(alpha.conversationId, 'me', 'BLOCK');
         await until(() => prompts.length === index + 1 && minds.get(alpha.bot.id).steerable);
+        // Expired follow keeps this request pending while the explicit request runs.
         const pending = post(group.id, 'me', 'PENDING', 'AAAA');
         const trigger = post(group.id, alpha.bot.id, 'react here');
         let explicit;

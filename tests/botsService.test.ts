@@ -92,7 +92,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
-test("untagged groups route privately without sticky follow or duplicate delivery", async () => {
+test("untagged groups follow recipients until expiry without duplicate delivery", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-router-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
@@ -107,20 +107,23 @@ test("untagged groups route privately without sticky follow or duplicate deliver
       const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [boss, helper] });
       const woken = [];
       svc.setHooks({ wake: id => woken.push(id), stop() {} });
-      const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
+      let now = Date.now();
+      const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: now });
       const check = async (text, expected) => {
         woken.length = 0; post(text); await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, expected);
       };
       await check('@Helper hello', [helper]); a.equal(calls, 0);
+      await check('Keep going', [helper]); a.equal(calls, 0);
+      now += 20 * 60_000;
       output = JSON.stringify([boss]); await check('A new topic', [boss]);
       a.equal(model, 'provider/primary');
-      output = JSON.stringify([helper, helper]); await check('Research this', [helper]);
-      output = JSON.stringify(['outsider']); await check('Invalid', [boss]);
-      output = 'not json'; await check('Broken', [boss]);
-      output = JSON.stringify([helper]);
+      now += 20 * 60_000; output = JSON.stringify([helper, helper]); await check('Research this', [helper]);
+      now += 20 * 60_000; output = JSON.stringify(['outsider']); await check('Invalid', [boss]);
+      now += 20 * 60_000; output = 'not json'; await check('Broken', [boss]);
+      now += 20 * 60_000; output = JSON.stringify([helper]);
       woken.length = 0; const message = post('Retry'); svc.postMessage(group.id, message);
       await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, [helper]);
-      a.equal(svc.messagePage(group.id).messages.filter(m => m.author === 'me' && !m.event).length, 6);
+      a.equal(svc.messagePage(group.id).messages.filter(m => m.author === 'me' && !m.event).length, 7);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
@@ -209,4 +212,51 @@ test("a message between bots shows as a linked activity line in each bot's own c
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('group follow refreshes only on user requests and stale routes cannot switch it', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'openbuild-follow-'));
+  try {
+    const child = Bun.spawn([process.execPath, '-e', `
+      import { strict as a } from 'node:assert';
+      import { mock } from 'bun:test';
+      const pending = [];
+      mock.module('./server/bots/router.ts', () => ({ routeGroup: () => new Promise(r => pending.push(r)) }));
+      const svc = await import('./server/bots/service.ts');
+      const boss = svc.createBot({ name: 'Boss' }).bot.id;
+      const helper = svc.createBot({ name: 'Helper' }).bot.id;
+      const group = svc.createConversation({ kind: 'group', name: 'Follow', botIds: [boss, helper] });
+      const wakes = [];
+      svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
+      let now = Date.now();
+      const post = (text, author = 'me') => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text, at: now });
+      const tick = () => new Promise(r => setTimeout(r, 0));
+      const first = post('Route one');
+      const second = post('Route two');
+      pending[1]([helper]); await tick();
+      pending[0]([boss]); await tick();
+      a.deepEqual(wakes.map(w => [w.id, w.messageIds]), [[helper, [second.id]], [boss, [first.id]]]);
+      now += 19 * 60_000; post('Continue');
+      a.equal(wakes.at(-1).id, helper); a.equal(pending.length, 2);
+      now += 19 * 60_000; post('Still here');
+      a.equal(wakes.at(-1).id, helper); a.equal(pending.length, 2);
+      post('@Boss switch'); post('Continue boss'); a.equal(wakes.at(-1).id, boss);
+      post('@Boss @Helper both'); post('Continue both');
+      a.deepEqual(wakes.slice(-2).map(w => w.id), [boss, helper]);
+      svc.updateConversation(group.id, { botIds: [helper] });
+      post('Only remaining member'); a.equal(wakes.at(-1).id, helper);
+      now += 19 * 60_000;
+      const chatter = post('Bot chatter', helper);
+      svc.toggleReaction(group.id, chatter.id, '👍', 'me');
+      now += 60_000; post('Expired'); a.equal(pending.length, 3);
+      post('@Helper newer explicit');
+      pending[2]([boss]); await tick(); // removed selection falls back to an eligible member
+      a.equal(wakes.at(-1).id, helper);
+      post('Follow explicit'); a.equal(pending.length, 3);
+      a.equal(wakes.at(-1).id, helper);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe(''); expect(code).toBe(0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
