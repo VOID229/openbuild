@@ -871,7 +871,7 @@ export function holdingLine(conversationId: string, botId: string): string {
 }
 
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
-function Working({ conversationId, botIds, bots }: { conversationId: string; botIds: string[]; bots: Bot[] }) {
+function Working({ conversationId, direct, botIds, bots }: { conversationId: string; direct: boolean; botIds: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
   return (
     <>
@@ -879,9 +879,11 @@ function Working({ conversationId, botIds, bots }: { conversationId: string; bot
         const bot = bots.find((b) => b.id === id);
         const activity = holding(statuses[id], conversationId) ? holdingLine(conversationId, id) : statuses[id]?.activity || "Thinking";
         if (!bot) return null;
+        // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
+        const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy pulse={{ key: activity, mood: "idle", action: "squish" }} />;
         return (
           <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
-            <BotAvatar look={bot.look} size={30} busy pulse={{ key: activity, mood: "idle", action: "squish" }} />
+            {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
             <span key={activity} className="bm-working-text shimmer">
               {activity}
             </span>
@@ -901,12 +903,8 @@ function Typing({ conversation, botIds, bots }: { conversation: Conversation; bo
         if (!bot) return null;
         const draft = drafts.find((d) => d.conversationId === conversation.id && d.botId === id)?.text;
         return (
-          <div key={id} className="bm-group bm-theirs bm-typing-group">
-            {conversation.kind !== "direct" && (
-              <div className="bm-name" style={{ "--who": colorOf(bot.look).hex } as React.CSSProperties}>
-                {bot.name}
-              </div>
-            )}
+          // No name: names belong to sent messages. Same avatar column and row as those, so it lines up.
+          <div key={id} className="bm-group bm-theirs">
             <div className="bm-group-row">
               {conversation.kind !== "direct" && (
                 <span className="bm-avatar">
@@ -915,19 +913,21 @@ function Typing({ conversation, botIds, bots }: { conversation: Conversation; bo
               )}
               <div className="bm-stack">
                 <div className="bm-row bm-recv" data-pos="single">
-                  {draft ? (
-                    <div className="bm-bubble">
-                      <div className="bm-text">
-                        <RichText text={draft} bots={bots} everyone={everyoneIn(conversation, bots)} botId={id} />
+                  <div className="bm-line">
+                    {draft ? (
+                      <div className="bm-bubble">
+                        <div className="bm-text">
+                          <RichText text={draft} bots={bots} everyone={everyoneIn(conversation, bots)} botId={id} />
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="bm-bubble bm-typing" role="status" aria-label={`${bot.name} is typing`}>
-                      <i />
-                      <i />
-                      <i />
-                    </div>
-                  )}
+                    ) : (
+                      <div className="bm-bubble bm-typing" role="status" aria-label={`${bot.name} is typing`}>
+                        <i />
+                        <i />
+                        <i />
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1132,7 +1132,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             </div>
           );
         })}
-        <Working conversationId={conversation.id} botIds={working} bots={bots} />
+        <Working conversationId={conversation.id} direct={conversation.kind === "direct"} botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
       </div>
       {away && (

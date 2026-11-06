@@ -1461,8 +1461,12 @@
   align-items: center;
   gap: 10px;
   margin-top: 14px;
-  padding-left: 2px;
   animation: bm-working-in 260ms var(--ease-out, ease-out) both;
+}
+
+.bm-working .bm-avatar {
+  position: static;
+  margin-bottom: 0;
 }
 
 .bm-working-text {
@@ -1477,42 +1481,44 @@
   }
 }
 
-/* Writing a message: three soft dots rolling through a wave. */
+/* Writing a message: three small dots hopping through a quick, even wave. */
 .bm-typing {
   display: flex;
   align-items: center;
-  gap: 5px;
-  height: 38px;
-  padding: 0 15px;
+  gap: 4px;
+  height: 34px;
+  padding: 0 14px;
 }
 
 .bm-typing i {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: var(--text-2);
-  opacity: 0.35;
-  animation: bm-dot 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  opacity: 0.3;
+  animation: bm-dot 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform, opacity;
+}
+
+/* Negative delays: the wave is already moving on mount, no dot waits frozen for its first beat. */
+.bm-typing i:nth-child(1) {
+  animation-delay: -0.28s;
 }
 
 .bm-typing i:nth-child(2) {
-  animation-delay: 0.16s;
-}
-
-.bm-typing i:nth-child(3) {
-  animation-delay: 0.32s;
+  animation-delay: -0.14s;
 }
 
 @keyframes bm-dot {
   0%,
-  55%,
+  60%,
   100% {
-    transform: none;
-    opacity: 0.35;
+    transform: translateY(0);
+    opacity: 0.3;
   }
-  25% {
-    transform: translateY(-3px) scale(1.15);
-    opacity: 0.95;
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
   }
 }
 

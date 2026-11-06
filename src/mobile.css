@@ -864,6 +864,7 @@
   }
 
   .bm-working {
+    gap: 6px;
     margin-top: 12px;
   }
 
