@@ -216,6 +216,8 @@ test("the bot hears when a turn ends, and the chat is brought up to date without
   await call("send", { thread: threadId, text: "Next" });
   expect(admitted[1]).toMatchObject({ threadId, model: "acme/one", prior: 1 });
   expect(admitted[1].message).toContain("Next");
+  const activity = svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1);
+  expect(activity?.event).toMatchObject({ kind: "thread", text: "Wrote a prompt", threadId });
 });
 
 test("a message to a working thread is steered in", async () => {
@@ -225,6 +227,7 @@ test("a message to a working thread is steered in", async () => {
   expect(steers[0][0]).toBe(threadId);
   expect(steers[0][4]).toBe("Also this");
   expect(admitted.length).toBe(1);
+  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Wrote a prompt", threadId });
   // Saved on the reply, so the steer shows who sent it.
   const reply = (storage.getChat(threadId) as any).messages.at(-1);
   expect(reply.steerSenders[steers[0][1]]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
