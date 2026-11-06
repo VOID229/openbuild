@@ -1,10 +1,9 @@
 import { spawn } from "node:child_process";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { GITHUB_SCOPE } from "../shared/types";
+import { githubToken as savedGithubToken } from "./github/auth";
 import { dataDir } from "./paths";
 import { prepareUserPlugins } from "./pluginFiles";
-import { secrets } from "./vault";
 
 export type Track = "stable" | "nightly";
 export interface Release { tag_name: string; prerelease: boolean; draft: boolean; published_at: string; html_url: string }
@@ -41,8 +40,9 @@ function git(args: string[], root = ROOT) {
 async function githubToken() {
   const env = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   if (env) return env;
-  const saved = await secrets(GITHUB_SCOPE).catch(() => [] as string[]);
-  if (saved[0]) return saved[0];
+  // The CLI runs this too, so it never refreshes the GitHub App's token: only the server does.
+  const saved = await savedGithubToken("releases", { refresh: false }).catch(() => undefined);
+  if (saved) return saved.token;
   const gh = Bun.which("gh", { PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin` });
   if (!gh) return undefined;
   try {

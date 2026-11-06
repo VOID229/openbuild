@@ -4,8 +4,7 @@
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, normalize, relative, sep } from "node:path";
 import type { CatalogApp } from "../../shared/apps";
-import { GITHUB_SCOPE } from "../../shared/types";
-import * as vault from "../vault";
+import { githubToken } from "../github/auth";
 import { botsDir } from "./db";
 
 export interface InstalledSkill {
@@ -26,7 +25,7 @@ export const skillsDir = (appId?: string) => join(botsDir(), "apps", "skills", .
 
 /** The public API, with the user's GitHub key if there is one, for its higher rate limit. */
 async function github(path: string): Promise<Response> {
-  const [token] = await vault.secrets(GITHUB_SCOPE).catch(() => [] as string[]);
+  const token = (await githubToken("skills").catch(() => undefined))?.token;
   const get = (key?: string) =>
     fetch(`https://api.github.com${path}`, {
       headers: { accept: "application/vnd.github+json", "user-agent": "OpenBuild", ...(key ? { authorization: `Bearer ${key}` } : {}) },

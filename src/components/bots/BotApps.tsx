@@ -5,10 +5,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
 import { useRemoteWorkspace } from "../../lib/bots/store";
+import { useGithub } from "../../lib/github";
 import { arrowNav, copyText, cx } from "../../lib/ui";
 import { IconButton, Popover, Spinner } from "../primitives";
 import { DialogHead, useModal } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
+import { GithubSignIn } from "./GithubSignIn";
 
 export function AppLogo({ app, size = 40 }: { app: CatalogApp; size?: number }) {
   const [broken, setBroken] = useState(false);
@@ -97,7 +99,7 @@ function Section({ title, apps, onOpen, onAll }: { title: string; apps: CatalogA
   );
 }
 
-function CopyLine({ value, label }: { value: string; label: string }) {
+export function CopyLine({ value, label }: { value: string; label: string }) {
   return (
     <div className="app-copy">
       <code>{value}</code>
@@ -124,7 +126,12 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
   const guide = c.kind === "client" && !OAUTH_CLIENTS[c.client].env ? OAUTH_CLIENTS[c.client] : undefined;
   const hasClient = c.kind === "client" && clients.includes(c.client);
   const connected = isConnected(view);
-  const canReuseKey = app.id === "github" && githubKey;
+  // GitHub signs in with OpenBuild's GitHub credential: the GitHub App, or a token the user picks.
+  const github = useGithub((s) => s.view);
+  const [patShown, setPatShown] = useState(false);
+  const githubMode = app.githubAuth ? github?.mode : undefined;
+  const showPat = !app.githubAuth || patShown || githubMode === "pat" || github?.configured === false;
+  const canReuseKey = !!app.githubAuth && githubKey && githubMode === "pat";
 
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
@@ -137,11 +144,12 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
       setBusy(false);
     }
   };
+  const connectWith = (input: ConnectInput) => useApps.getState().connect(app.id, input).finally(() => (app.githubAuth ? useGithub.getState().load() : undefined));
   const connect = () => {
     const input: ConnectInput = {};
     if (app.fields?.length) input.fields = fields;
     if (guide && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
-    void run(() => useApps.getState().connect(app.id, input));
+    void run(() => connectWith(input));
   };
   const finish = () => void run(() => useApps.getState().finish(app.id, pasted).then(() => setPasted("")));
   const pastes = pastesSignIn(app);
@@ -216,7 +224,9 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
         </div>
       )}
 
-      {app.fields?.map((field) => (
+      {app.githubAuth && <GithubSignIn patShown={showPat} onPat={() => setPatShown(true)} onConnected={() => run(() => connectWith({ fields }))} />}
+
+      {app.fields?.filter((field) => !(app.githubAuth && field.id === "token" && !showPat)).map((field) => (
         <label key={field.id} className="bots-field">
           <span className="bots-field-label">{field.label}</span>
           {field.options ? (
@@ -281,9 +291,9 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
       )}
 
       <div className="app-page-actions">
-        {!(connected && c.kind === "open") && (
+        {!(connected && c.kind === "open") && !(app.githubAuth && !showPat && githubMode !== "app") && (
           <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy} onClick={connect}>
-            {busy ? <Spinner size={13} /> : connected || view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
+            {busy ? <Spinner size={13} /> : connected && app.githubAuth ? "Save" : connected || view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
           </button>
         )}
         {connected && (
@@ -293,7 +303,8 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
         )}
         {view && view.status !== "off" && (
           <button type="button" className="btn bots-btn bots-danger" disabled={busy} onClick={() => void run(() => useApps.getState().disconnect(app.id))}>
-            Disconnect
+            {/* GitHub's own sign-in has its Disconnect above; this only takes the app away from bots. */}
+            {app.githubAuth ? "Remove from bots" : "Disconnect"}
           </button>
         )}
       </div>

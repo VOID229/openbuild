@@ -57,7 +57,7 @@ export async function handleSearchCheck(provider: unknown, credential: string | 
 }
 
 /** Run a chat turn (with web search tools when configured) and stream it back as NDJSON. `signal` stops it. */
-export async function handleChat(signal: AbortSignal, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean } = {}): Promise<Response> {
+export async function handleChat(signal: AbortSignal, body: ChatRequest | undefined, keysFor: KeysFor, opts: { hosted?: boolean; githubToken?: () => Promise<string | undefined> } = {}): Promise<Response> {
   if (!body || !isPlan(body.plan) || typeof body.model !== "string" || !validateMessages(body.messages) || (body.search !== undefined && !isSearchList(body.search)) || (body.digest !== undefined && !isDigest(body.digest))) {
     return bad("Malformed chat request");
   }
@@ -80,8 +80,9 @@ export async function handleChat(signal: AbortSignal, body: ChatRequest | undefi
       : [];
   const usable = creds.filter((c) => c.keys.length);
   // A GitHub token (optional) only goes to the page reader, for GitHub's own hosts.
-  const github = model.tools !== false ? await keysFor(GITHUB_SCOPE) : [];
-  const search = model.tools !== false ? searchToolkit(usable, { hosted: opts.hosted, githubToken: github[0] }) : undefined;
+  // The local server picks it with the user's GitHub credential choice; the hosted site gets it with the request.
+  const github = model.tools === false ? undefined : opts.githubToken ? await opts.githubToken() : (await keysFor(GITHUB_SCOPE))[0];
+  const search = model.tools !== false ? searchToolkit(usable, { hosted: opts.hosted, githubToken: github }) : undefined;
   const system = [typeof body.system === "string" ? body.system.trim() : "", search?.guidance ?? ""].filter(Boolean).join("\n\n");
   const { secrets: _secrets, stream: _stream, ...rest } = body as ChatRequest & { secrets?: unknown };
   const request: ChatRequest = {
