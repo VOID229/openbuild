@@ -34,18 +34,21 @@ export function BotModelSelect({ label, value, unset, inherited, onChange }: { l
     onChange(model);
     setOpen(false);
   };
-  const unsetLabel = `${unset}${fallback ? ` · ${nameOf(fallback)}` : ""}`;
+  // Unset reads like the model it follows, tagged with `unset`; without a known fallback it's just `unset`.
+  const unsetLabel = fallback ? nameOf(fallback) : unset;
   return (
     <span className="select-wrap select-grow bots-set-model">
       <button ref={anchor} type="button" className={cx("select-trigger", open && "select-trigger-open")} aria-haspopup="listbox" aria-expanded={open} aria-label={label} onClick={() => setOpen((o) => !o)}>
-        {value && <BrandIcon id={value} />}
+        {(value || fallback) && <BrandIcon id={value || fallback!} />}
         <span className="select-value">{value ? (current?.name ?? (listing ? `${value} (unavailable)` : value)) : unsetLabel}</span>
-        {current && <span className="select-hint">{providerName(providerOf(current))}</span>}
+        {value ? current && <span className="select-hint">{providerName(providerOf(current))}</span> : fallback && <span className="select-hint">{unset}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu model-select-menu" role="listbox" label={label} fixed="auto">
         <button type="button" role="option" aria-selected={!value} className="menu-item" onClick={() => pick("")}>
+          {fallback && <BrandIcon id={fallback} />}
           <span className="menu-item-label">{unsetLabel}</span>
+          {fallback && <span className="menu-item-hint">{unset}</span>}
           {!value && <Check size={15} className="menu-check" />}
         </button>
         <ModelMenu
