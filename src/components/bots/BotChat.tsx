@@ -1199,25 +1199,54 @@ function ClockGlyph() {
   );
 }
 
-/** Shrink a picked image so it fits in this browser's storage alongside everything else. */
-function shrink(file: File, max = 720): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.onload = () => {
-      const k = Math.min(1, max / Math.max(img.width, img.height));
+/** The longest edge a picked image keeps: a full-HD screenshot stays 1:1, a Retina one is halved. */
+const IMAGE_EDGE = 2048;
+/** A data URL's length to stay under, leaving room below the server's 2.5 MB limit per image. */
+const IMAGE_BUDGET = 2_000_000;
+
+/**
+ * Fit a picked image into what the bot receives. Screenshots stay sharp enough to read: one that
+ * already fits is kept as it is, a PNG stays a PNG (text compresses well losslessly), and only an
+ * image over the budget becomes a JPEG, at the highest quality that fits.
+ */
+async function shrink(file: File): Promise<string> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    throw new Error("Couldn't read that image");
+  }
+  try {
+    const original = Math.max(bitmap.width, bitmap.height) <= IMAGE_EDGE && /^image\/(png|jpeg|webp|gif)$/.test(file.type) && (await readAsDataUrl(file));
+    if (original && original.length <= IMAGE_BUDGET) return original;
+    let edge = Math.min(IMAGE_EDGE, Math.max(bitmap.width, bitmap.height));
+    for (;;) {
+      const k = edge / Math.max(bitmap.width, bitmap.height);
       const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * k);
-      canvas.height = Math.round(img.height * k);
-      canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
-    };
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error("Couldn't read that image"));
-    };
-    img.src = url;
+      canvas.width = Math.max(1, Math.round(bitmap.width * k));
+      canvas.height = Math.max(1, Math.round(bitmap.height * k));
+      canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      if (file.type === "image/png") {
+        const png = canvas.toDataURL("image/png");
+        if (png.length <= IMAGE_BUDGET) return png;
+      }
+      for (const quality of [0.92, 0.85, 0.75]) {
+        const jpeg = canvas.toDataURL("image/jpeg", quality);
+        if (jpeg.length <= IMAGE_BUDGET || edge <= 512) return jpeg;
+      }
+      edge = Math.round(edge * 0.75);
+    }
+  } finally {
+    bitmap.close();
+  }
+}
+
+function readAsDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
   });
 }
 
