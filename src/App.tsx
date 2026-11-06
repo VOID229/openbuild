@@ -348,7 +348,11 @@ function Main() {
           break;
         case "openUsage":
           st.setUsageOpen(true);
-          if (window.innerWidth <= 768) st.setSidebarOpen(false);
+          // On a phone Usage is the pane, so it slides in over whichever list is showing.
+          if (window.innerWidth <= 768) {
+            if (st.botsOpen) st.setBotsSidebarOpen(false);
+            else st.setSidebarOpen(false);
+          }
           break;
         case "focusSearch":
           if (st.sidebarOpen) shown(".search input")?.focus();
@@ -392,7 +396,7 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = botsOpen ? "OpenBots · OpenBuild" : usageOpen ? "Usage · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+    document.title = usageOpen ? "Usage · OpenBuild" : botsOpen ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
   }, [chat?.title, titling, usageOpen, botsOpen]);
 
   // The server serves the app at every client route, including on reload.
@@ -439,11 +443,12 @@ function Main() {
             )
           ) : (
             <>
-              <Activity mode={botsOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              <Activity mode={botsOpen && !usageOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              {botsOpen && usageOpen && <UsagePage />}
               <Activity mode={botsOpen ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                    {usageOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
+                    {usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
                     <TerminalPanel />
                   </div>
                   {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}

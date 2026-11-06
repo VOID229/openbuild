@@ -744,8 +744,9 @@ export const useStore = create<State>()(
 
       openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
       closeSettings: () => set({ settingsOpen: false }),
-      setUsageOpen: (open) => set(open ? { usageOpen: true, botsOpen: false } : { usageOpen: false }),
-      setBotsOpen: (open) => set(open ? { botsOpen: true, usageOpen: false } : { botsOpen: false }),
+      // Usage opens over whichever side is showing, so closing it goes back there; switching sides closes it.
+      setUsageOpen: (open) => set({ usageOpen: open }),
+      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 

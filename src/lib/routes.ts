@@ -15,6 +15,7 @@ export function readRoute(pathname: string, hash = ""): Route {
     const thread = /^\/thread-([^/]+)$/.exec(path);
     if (thread) return { threadId: decodeURIComponent(thread[1]!) };
     if (path === "/usage") return { usage: true };
+    if (path === "/bots/usage") return { bots: true, usage: true };
     if (path === "/bots") return { bots: true };
     const settings = /^\/settings(?:\/([^/]+))?$/.exec(path);
     if (settings) {
@@ -49,7 +50,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
   let applying = false;
   const pathFor = (state: RouteState) => state.settingsOpen
     ? `/settings/${state.settingsSection}`
-    : state.usageOpen ? "/usage" : state.botsOpen ? "/bots" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
+    : state.usageOpen ? (state.botsOpen ? "/bots/usage" : "/usage") : state.botsOpen ? "/bots" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
   const write = (replace: boolean) => {
     const state = store.getState();
     const url = pathFor(state) + location.search;
