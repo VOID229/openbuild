@@ -78,6 +78,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   track,
   playful,
   busy,
+  working,
   mood,
   badge = true,
 }: {
@@ -88,6 +89,8 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   track?: boolean;
   playful?: boolean;
   busy?: boolean;
+  /** The bots at work, so a group animates just those members rather than all of them. */
+  working?: string[];
   mood?: Mood;
   badge?: boolean;
 }) {
@@ -108,7 +111,8 @@ export const ConversationAvatar = memo(function ConversationAvatar({
     );
   }
   const looks = members.map((b) => b?.look ?? MISSING);
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} track={track} extra={looks.length > 4 ? looks.length - 4 : undefined} />;
+  const active = working && conversation.botIds.map((id) => working.includes(id));
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} extra={looks.length > 4 ? looks.length - 4 : undefined} />;
 });
 
 export { conversationName };

@@ -4,6 +4,7 @@
 import { Bell, BellDot, Blocks, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useShallow } from "zustand/react/shallow";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
@@ -116,13 +117,14 @@ function PeekCard({ peek }: { peek?: PeekState }) {
 }
 
 /**
- * A sidebar avatar that keeps still unless one of its bots is at work (then it fidgets). Hovering its
- * row, tile or rail button makes the eyes follow the pointer, and nothing more.
+ * A sidebar avatar that keeps still unless its bots are at work (then they fidget; in a group, only
+ * the members at work). Hovering its row, tile or rail button makes the eyes follow the pointer, and
+ * nothing more.
  */
 function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
-  const working = useBots((s) => conversation.botIds.some((id) => s.status[id]?.state === "working"));
-  const busy = typing || working;
+  const working = useBots(useShallow((s) => conversation.botIds.filter((id) => s.status[id]?.state === "working" || s.typing[conversation.id]?.includes(id))));
+  const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
   useEffect(() => {
@@ -139,7 +141,7 @@ function SidebarAvatar({ conversation, size, playful }: { conversation: Conversa
   }, []);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} track={hover} playful={playful} mood={typing ? "thinking" : undefined} />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover} playful={playful} mood={typing ? "thinking" : undefined} />
     </span>
   );
 }

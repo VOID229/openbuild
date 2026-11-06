@@ -302,9 +302,10 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
 
 /**
  * A group's avatar: its members huddled together (up to four, the rest as a count). The user can
- * sit in the huddle too, as their profile picture.
+ * sit in the huddle too, as their profile picture. `active` picks, by member, who is at work: only those
+ * come alive and fidget, in place of `alive` and `busy`.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, track, extra, me }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; track?: boolean; extra?: number; me?: React.ReactNode }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, extra, me }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; extra?: number; me?: React.ReactNode }) {
   const members = looks.slice(0, me ? 3 : 4);
   const count = members.length + (me ? 1 : 0);
   // Where each member sits, as fractions of the box (centre x, centre y, size).
@@ -318,7 +319,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   const layout = spots[Math.min(count, 4)] ?? [];
   const items: React.ReactNode[] = [];
   if (me) items.push(me);
-  members.forEach((look, i) => items.push(<BotAvatar key={i} look={look} size={Math.round(size * (layout[i + (me ? 1 : 0)]?.[2] ?? 0.5))} alive={alive} busy={busy} track={track} />));
+  members.forEach((look, i) => items.push(<BotAvatar key={i} look={look} size={Math.round(size * (layout[i + (me ? 1 : 0)]?.[2] ?? 0.5))} alive={active ? active[i] : alive} busy={active ? active[i] : busy} track={track} />));
   return (
     <span className="bot-huddle" style={{ width: size, height: size }} aria-hidden>
       {items.map((item, i) => {
