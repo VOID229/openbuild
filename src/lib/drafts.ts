@@ -7,6 +7,7 @@
 // writes or uploads an image again.
 import type { Attachment } from "../../shared/types";
 import { createStore, del, entries, set } from "./kv";
+import { imageFiles } from "./stash";
 
 /** A draft as stored and synced. */
 export interface StoredDraft {
@@ -132,4 +133,24 @@ export async function applyDraftRecord(record: string, value: StoredDraft | Atta
   persist(record);
   remoteListeners.forEach((fn) => fn(key));
   return true;
+}
+
+// ---------------------------------------------------------------- OpenBots
+
+// An OpenBots conversation's draft is kept the same way, under "bot:<conversation id>", with its
+// images (data URLs) as attachments. An image already in the draft keeps its attachment, so typing
+// never stores or uploads it again.
+
+export const botDraftKey = (conversationId: string) => `bot:${conversationId}`;
+
+export function getBotDraft(conversationId: string): { text: string; images: string[] } | undefined {
+  const d = getDraft(botDraftKey(conversationId));
+  return d && { text: d.text, images: d.files.map((f) => f.dataUrl) };
+}
+
+export function saveBotDraft(conversationId: string, text: string, images: string[]) {
+  const key = botDraftKey(conversationId);
+  const have = new Map((getDraft(key)?.files ?? []).map((f) => [f.dataUrl, f]));
+  const list = images.map((dataUrl) => have.get(dataUrl) ?? imageFiles([dataUrl])[0]!);
+  saveDraft(key, text, list);
 }
