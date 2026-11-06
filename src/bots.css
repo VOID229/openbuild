@@ -2519,8 +2519,11 @@ button.bots-details-name:hover {
 }
 
 .bots-dialog-hero {
-  display: grid;
-  place-items: center;
+  /* Flex, not grid: a grid row would stretch to the avatar's unscaled size and push it down
+     onto the name field when the shorter-window rules below scale it. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
   height: 132px;
 }
 
