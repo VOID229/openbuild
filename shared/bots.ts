@@ -411,6 +411,9 @@ export const isBotId = (id: unknown): id is string => typeof id === "string" && 
 /** A bot's first name: "Juniper · notes" → "Juniper". */
 export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0]!;
 
+/** An activity line's text. Older follow-ups were saved as "Wrote to a thread"; they read as prompts now. */
+export const eventText = (event: { text: string }) => (event.text === "Wrote to a thread" ? "Wrote a prompt" : event.text);
+
 /** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 

@@ -205,7 +205,15 @@ test("thread activity details are titles, so bot names inside them don't become 
 test("a started thread's activity line names the bot that started it", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author)');
-  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={m.event!.text} bots={bots} />}");
+  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+});
+
+test("older follow-up prompts read with the current wording", async () => {
+  const { eventText } = await import("../shared/bots");
+  expect(eventText({ text: "Wrote to a thread" })).toBe("Wrote a prompt");
+  expect(eventText({ text: "Started a thread" })).toBe("Started a thread");
+  const common = await Bun.file("src/components/bots/common.tsx").text();
+  expect(common).toContain("[eventText(m.event), m.event.detail]");
 });
 
 test("a merge's pull request number and thread title are separate links", async () => {

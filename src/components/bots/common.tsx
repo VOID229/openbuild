@@ -4,6 +4,7 @@ import { memo, useEffect, useState } from "react";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
+import { eventText } from "../../../shared/bots";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 
 /**
@@ -47,7 +48,7 @@ export function messageText(m: BotMessage): string {
   if (m.question) return `❓ ${m.question.title}`;
   if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
-  if (m.event) return [m.event.text, m.event.detail].filter(Boolean).join(" ");
+  if (m.event) return [eventText(m.event), m.event.detail].filter(Boolean).join(" ");
   const text = m.text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
   if (text) return text;
   return m.images?.length ? (m.images.length === 1 ? "📷 Photo" : `📷 ${m.images.length} photos`) : "";
