@@ -66,7 +66,8 @@ export function wake(botId: string, item: Wake) {
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
   const conversationId = item.conversationId;
-  if ((item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
+  // Group wakes must queue: an unscoped steer could expose user requests still awaiting routing.
+  if (db.getConversation(conversationId ?? "")?.kind !== "group" && !item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
     const shown = mind.shown;
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
@@ -122,8 +123,8 @@ async function pump(botId: string) {
     while (queue.get(botId)?.length) {
       const jobs = queue.get(botId)!;
       const first = jobs[0]!;
-      // One conversation a turn, and each routine alone.
-      const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId);
+      // Keep assigned deliveries separate from context-only wakes, even in the same group.
+      const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId && !!j.messageIds === !!first.messageIds);
       queue.set(botId, jobs.filter((j: Wake) => !turn.includes(j)));
       await run(botId, turn);
     }
@@ -431,8 +432,13 @@ async function run(botId: string, all: Wake[]) {
     mind.shown = shown;
     const message = render(jobs, botId);
     if (!message.trim()) return;
-    const images = imagesFor(botId, shown);
-    markSeen(botId, shown);
+    const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
+      ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
+    const images = assigned ? [...assigned].flatMap(id => {
+      const row = db.getMessage(id);
+      return row ? imagesBetween(conversationId!, row.seq - 1, row.seq) : [];
+    }).slice(-IMAGE_LIMIT) : imagesFor(botId, shown);
+    markSeen(botId, shown, assigned);
     const m = mind;
     let handled = false;
     await withFallbacks(botId, conversationId, modelChain(botId), async (model, index, switched) => {
@@ -532,7 +538,9 @@ function render(jobs: Wake[], botId: string): string {
   for (const job of jobs) {
     if (job.conversationId && !seen.has(job.conversationId)) {
       seen.add(job.conversationId);
-      parts.push(transcript(job.conversationId, bots, user, botId));
+      const scoped = jobs.filter(j => j.conversationId === job.conversationId);
+      const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
@@ -540,17 +548,26 @@ function render(jobs: Wake[], botId: string): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string): string {
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[]): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const cursor = db.cursor(botId, conversationId);
   const rows = db.messages(conversationId, 16);
+  // A delayed decision can target a message older than the history window or cursor.
+  for (const id of assigned ?? []) {
+    const row = db.getMessage(id);
+    if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
+  }
+  rows.sort((a, b) => a.seq - b.seq);
   const name = (author: string) => (author === "me" ? user : author === botId ? "you" : mentionName(bots.find((b) => b.id === author)?.name ?? "Bot"));
   const lines = rows.map((r) => {
     const m = r.message;
     const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const body = m.event ? `(${eventText(m.event)}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
-    const mark = r.seq > cursor ? "" : " [already seen]";
+    // Unscoped group wakes may react to bots/events, never adopt user requests awaiting routing.
+    const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
+      : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
+      : r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
     const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${quoted.message.text.slice(0, 200)}”)` : "";
     const list = m.reactions ?? [];
@@ -603,7 +620,14 @@ export function caughtUp(botId: string, conversationId: string, shown: number): 
   return missed ? missed.seq - 1 : db.latestSeq(conversationId);
 }
 
-function markSeen(botId: string, shown: Map<string, number>) {
+function markSeen(botId: string, shown: Map<string, number>, assigned?: Set<string>) {
+  if (assigned) {
+    for (const id of assigned) {
+      const row = db.getMessage(id);
+      if (row && row.message.author === "me" && !row.message.seenBy?.includes(botId)) svc.patchMessage(row.conversationId, id, { seenBy: [...(row.message.seenBy ?? []), botId] });
+    }
+    return;
+  }
   for (const [id, through] of shown) {
     for (const row of db.messagesAfter(id, db.cursor(botId, id), 50)) {
       const m = row.message;

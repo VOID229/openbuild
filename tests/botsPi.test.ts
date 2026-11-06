@@ -196,3 +196,76 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
     rmSync(dir, { recursive: true, force: true });
   }
 }, 90_000);
+
+test.skipIf(!pi)("headless routing uses extension fallback models and delivers reversed decisions independently", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "openbuild-routing-delivery-"));
+  const agent = join(dir, "agent");
+  mkdirSync(join(agent, "extensions"), { recursive: true });
+  try {
+    const child = Bun.spawn([process.execPath, '-e', `
+      import { strict as a } from 'node:assert';
+      import { writeFileSync } from 'node:fs';
+      let release, firstStarted = false;
+      const held = new Promise(r => release = r);
+      let alpha, beta;
+      const requests = [];
+      const sse = text => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }] }) + '\\n\\n' + 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta: {}, finish_reason: 'stop' }] }) + '\\n\\ndata: [DONE]\\n\\n';
+      const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(req) {
+        const body = await req.json();
+        const system = JSON.stringify(body.messages.filter(m => m.role === 'system' || m.role === 'developer'));
+        let text;
+        if (system.includes('routing a group message')) {
+          a.equal((body.tools ?? []).length, 0, 'router must have no tools, including extension tools');
+          const user = body.messages.findLast(m => m.role === 'user');
+          const prompt = typeof user.content === 'string' ? user.content : user.content.map(p => p.text ?? '').join('');
+          const history = JSON.parse(prompt).history;
+          const last = history.at(-1).text;
+          if (last === 'FIRST') { firstStarted = true; await held; text = JSON.stringify([alpha]); }
+          else { a.equal(last, 'SECOND'); text = JSON.stringify([beta]); }
+        } else {
+          const prompt = JSON.stringify(body.messages.at(-1).content);
+          requests.push(prompt);
+          // Return only the explicitly assigned request; context must never become another task.
+          if (prompt.includes('[assigned request: answer this]: FIRST')) text = 'ANSWER FIRST';
+          else if (prompt.includes('[assigned request: answer this]: SECOND')) text = 'ANSWER SECOND';
+          else if (prompt.includes('[assigned request: answer this]: @Alpha EXPLICIT')) text = 'ANSWER EXPLICIT';
+          else throw new Error('No assigned request: ' + prompt);
+        }
+        return new Response(sse(text), { headers: { 'content-type': 'text/event-stream' } });
+      } });
+      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/extensions/account.ts', 'export default function(pi) { pi.registerProvider("account", { baseUrl: "http://127.0.0.1:' + server.port + '/v1", apiKey: "key", api: "openai-completions", models: [{ id: "m", name: "Account", reasoning: false, input: ["text"], cost: {input:0,output:0,cacheRead:0,cacheWrite:0}, contextWindow: 32000, maxTokens: 500 }] }); pi.registerTool({name:"canary",label:"Canary",description:"Must not reach router",parameters:{type:"object",properties:{}},execute:async()=>{throw new Error("tool ran")}}); }');
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const runner = await import('./server/bots/runner.ts');
+      svc.updateSettings({ defaultModel: 'account/m', customExtensions: { enabled: true, ids: ['extensions/account.ts'] } });
+      alpha = svc.createBot({ name: 'Alpha' }).bot.id;
+      beta = svc.createBot({ name: 'Beta' }).bot.id;
+      svc.updateBot(alpha, { model: 'missing/model', fallbackModels: ['account/m'], proactivity: 'off' });
+      svc.updateBot(beta, { proactivity: 'off' });
+      const group = svc.createConversation({ kind: 'group', name: 'Delivery', botIds: [alpha, beta] });
+      svc.setHooks({ wake: runner.wake, stop: runner.stop });
+      const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
+      const until = async check => { const end = Date.now() + 15000; while (!check()) { a.ok(Date.now() < end, 'delivery deadline'); await Bun.sleep(20); } };
+      const answered = text => db.messages(group.id).some(r => r.message.text === text);
+      const first = post('FIRST');
+      await until(() => firstStarted);
+      const second = post('SECOND');
+      await until(() => answered('ANSWER SECOND'));
+      const explicit = post('@Alpha EXPLICIT');
+      await until(() => answered('ANSWER EXPLICIT'));
+      release();
+      await until(() => answered('ANSWER FIRST'));
+      await until(() => !runner.busy(alpha) && !runner.busy(beta));
+      const replies = db.messages(group.id).filter(r => r.message.author !== 'me' && !r.message.event).map(r => [r.message.author, r.message.text]);
+      a.deepEqual(replies, [[beta, 'ANSWER SECOND'], [alpha, 'ANSWER EXPLICIT'], [alpha, 'ANSWER FIRST']]);
+      a.deepEqual(db.getMessage(first.id).message.seenBy, [alpha]);
+      a.deepEqual(db.getMessage(second.id).message.seenBy, [beta]);
+      a.deepEqual(db.getMessage(explicit.id).message.seenBy, [alpha]);
+      a.equal(requests.length, 3);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, 'data'), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: '1' }, stdout: 'pipe', stderr: 'pipe' });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe('');
+    expect(code).toBe(0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}, 60_000);
