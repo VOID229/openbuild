@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleD
 import { createPortal } from "react-dom";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { atWork, holding, showWorking, workingHere } from "../../lib/bots/activity";
+import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
@@ -1771,9 +1771,19 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
     const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
     return held ? holdingLine(conversation.id, held) : undefined;
   });
-  // Its mascot fidgets while it's at work here, quietly too, as the sidebar's does. Work elsewhere leaves it be.
-  const working = useBots(useShallow((s) => atWork(conversation, s.status, s.typing)));
+  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does.
+  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
   const busy = working.length > 0;
+  // Busy in another chat: said as that, never as thinking here.
+  const away = useBots((s) => {
+    const first = elsewhere(conversation, s.status)[0];
+    if (!first) return undefined;
+    const there = s.conversations.find((c) => c.id === first.conversationId);
+    const where = there && !there.hidden ? `Busy in ${conversationName(there, s.bots)}` : "Busy in another chat";
+    if (conversation.kind === "direct") return where;
+    const bot = s.bots.find((b) => b.id === first.botId);
+    return `${bot ? firstName(bot) : "A bot"}: ${where[0]!.toLowerCase()}${where.slice(1)}`;
+  });
   // Waiting elsewhere, on the back button.
   const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);
   const mobile = useMediaQuery("(max-width: 768px)");
@@ -1783,7 +1793,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
-  const sub = typing ? "typing…" : activity ?? members;
+  const sub = typing ? "typing…" : activity ?? away ?? members;
   return (
     <div className="bots-chat">
       <div className="bots-head">
@@ -1798,6 +1808,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           <span className="bots-head-text">
             <span className="bots-head-name">{name}</span>
             {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+            {!mobile && !typing && !activity && away && <span className="bots-head-away">{away}</span>}
           </span>
         </button>
       </div>
