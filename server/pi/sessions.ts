@@ -711,7 +711,7 @@ export async function complete(model: string, system: string, prompt: string, si
     const files = images.map((_, i) => join(dir!, `image-${i}`));
     await Promise.all(images.map((image, i) => Bun.write(files[i]!, Buffer.from(image.data, "base64"))));
     const proc = Bun.spawn(
-      [bin, "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", "--model", model, "--thinking", "off", "--system-prompt", system, "--", ...files.map((f) => `@${f}`), prompt],
+      [bin, "-p", "--no-session", "--no-tools", "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", ...(model ? ["--model", model] : []), "--thinking", "off", "--system-prompt", system, "--", ...files.map((f) => `@${f}`), prompt],
       { cwd: homedir(), stdout: "pipe", stderr: "pipe", stdin: "ignore", env: piEnv() },
     );
     const kill = () => proc.kill();

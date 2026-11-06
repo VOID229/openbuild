@@ -92,57 +92,40 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
-test("a group keeps sending untagged messages to the non-primary bot the user is talking with for 5 minutes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
+test("untagged groups route privately without sticky follow or duplicate delivery", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-router-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
-      import * as svc from './server/bots/service.ts';
-      const boss = svc.createBot({ name: 'Boss' }).bot.id;
+      import { mock } from 'bun:test';
+      let output = '[]', calls = 0, model;
+      mock.module('./server/pi/sessions.ts', () => ({ complete: async (m) => { calls++; model = m; return output; } }));
+      const svc = await import('./server/bots/service.ts');
+      const boss = svc.createBot({ name: 'Boss', model: 'provider/primary' }).bot.id;
+      svc.updateBot(boss, { model: 'provider/primary' });
       const helper = svc.createBot({ name: 'Helper' }).bot.id;
-      const tracer = svc.createBot({ name: 'Tracer' }).bot.id;
-      const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [boss, helper, tracer] });
+      const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [boss, helper] });
       const woken = [];
       svc.setHooks({ wake: id => woken.push(id), stop() {} });
-      let at = Date.now();
-      const post = (author, text, after = 1000) => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text, at: at += after });
-      const check = (text, expected, after) => {
-        woken.length = 0;
-        post('me', text, after);
-        a.deepEqual(woken, expected, text);
+      const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
+      const check = async (text, expected) => {
+        woken.length = 0; post(text); await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, expected);
       };
-      const minute = 60_000;
-      check('Hi', [boss]);
-      check('@Helper can you look?', [helper]);
-      check('Thanks, and the other one?', [helper], 4 * minute);
-      check('Still there?', [helper], 5 * minute);
-      check('Back after a break', [boss], 5 * minute + 1);
-      check('Hi again', [boss]);
-
-      check('@Helper one more', [helper]);
-      post(helper, 'On it', 4 * minute);
-      check('Great', [helper], 4 * minute);
-
-      check('@Helper @Tracer both of you', [helper, tracer]);
-      check('Go ahead', [helper, tracer]);
-      check('@Boss your call', [boss]);
-      check('And now?', [boss]);
-
-      check('@Tracer check it', [tracer]);
-      check('@everyone status?', [boss, helper, tracer]);
-      check('Ok', [boss]);
-
-      check('@Tracer once more', [tracer]);
-      svc.updateConversation(group.id, { botIds: [boss, helper] });
-      check('Tracer left', [boss]);
+      await check('@Helper hello', [helper]); a.equal(calls, 0);
+      output = JSON.stringify([boss]); await check('A new topic', [boss]);
+      a.equal(model, 'provider/primary');
+      output = JSON.stringify([helper, helper]); await check('Research this', [helper]);
+      output = JSON.stringify(['outsider']); await check('Invalid', [boss]);
+      output = 'not json'; await check('Broken', [boss]);
+      output = JSON.stringify([helper]);
+      woken.length = 0; const message = post('Retry'); svc.postMessage(group.id, message);
+      await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, [helper]);
+      a.equal(svc.messagePage(group.id).messages.filter(m => m.author === 'me' && !m.event).length, 6);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe("");
-    expect(code).toBe(0);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
+    expect(err).toBe(""); expect(code).toBe(0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
 test("group replies wake the quoted bot instead of falling back to the primary", async () => {
@@ -150,7 +133,9 @@ test("group replies wake the quoted bot instead of falling back to the primary",
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
-      import * as svc from './server/bots/service.ts';
+      import { mock } from 'bun:test';
+      mock.module('./server/pi/sessions.ts', () => ({ complete: async () => '[]' }));
+      const svc = await import('./server/bots/service.ts');
       const primary = svc.createBot({ name: 'Boss' });
       const second = svc.createBot({ name: 'Helper' });
       const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [primary.bot.id, second.bot.id] });
@@ -162,20 +147,22 @@ test("group replies wake the quoted bot instead of falling back to the primary",
       const quoted = post(group.id, second.bot.id, 'Hello');
       const mine = post(group.id, 'me', 'Generic');
       const foreign = post(second.conversationId, second.bot.id, 'Private');
-      const check = (text, replyTo, expected) => {
+      await new Promise(r => setTimeout(r, 10));
+      const check = async (text, replyTo, expected) => {
         woken.length = 0;
         post(group.id, 'me', text, replyTo);
+        await new Promise(r => setTimeout(r, 10));
         a.deepEqual(woken, expected);
       };
-      check('Tell me more', quoted.id, [second.bot.id]);
-      check('Generic', undefined, [primary.bot.id]);
-      check('Follow up', mine.id, [primary.bot.id]);
-      check('Missing quote', crypto.randomUUID(), [primary.bot.id]);
-      check('Foreign quote', foreign.id, [primary.bot.id]);
-      check('@Boss your thoughts?', quoted.id, [primary.bot.id, second.bot.id]);
-      check('@Helper tell me more', quoted.id, [second.bot.id]);
+      await check('Tell me more', quoted.id, [second.bot.id]);
+      await check('Generic', undefined, [primary.bot.id]);
+      await check('Follow up', mine.id, [primary.bot.id]);
+      await check('Missing quote', crypto.randomUUID(), [primary.bot.id]);
+      await check('Foreign quote', foreign.id, [primary.bot.id]);
+      await check('@Boss your thoughts?', quoted.id, [primary.bot.id, second.bot.id]);
+      await check('@Helper tell me more', quoted.id, [second.bot.id]);
       svc.updateConversation(group.id, { botIds: [primary.bot.id] });
-      check('Removed bot', quoted.id, [primary.bot.id]);
+      await check('Removed bot', quoted.id, [primary.bot.id]);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
