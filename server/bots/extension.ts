@@ -45,17 +45,33 @@ const text = (value: unknown) => [{ type: "text" as const, text: typeof value ==
 const ok = (value: unknown) => ({ content: text(value), details: value });
 const fail = (err: unknown) => ({ content: text(`Error: ${err instanceof Error ? err.message : String(err)}`), details: null, isError: true });
 
+// These already show as typing or need no status line.
+const NO_STATUS = new Set(["send_message", "react", "question", "poll"]);
+const status = { type: "string", description: "Optional. A few words the user sees while this runs, saying what it's for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
+
+/** Add the optional status to a work tool's parameters. */
+function withStatus(name: string, parameters: object) {
+  const schema = parameters as { properties?: Record<string, unknown> };
+  return NO_STATUS.has(name) ? parameters : { ...schema, properties: { ...schema.properties, status } };
+}
+
+/** The tool's own parameters, without the status meant for the user. */
+function own(params: Params | undefined): Params {
+  const { status: _, ...rest } = params ?? {};
+  return rest;
+}
+
 function tool(name: string, label: string, description: string, parameters: object, run: (params: Params) => Promise<unknown>) {
   return {
     name,
     label,
     description,
-    parameters,
+    parameters: withStatus(name, parameters),
     executionMode: "sequential" as const,
     exposure: "model-only" as const,
     async execute(_id: string, params: Params) {
       try {
-        return ok(await run(params ?? {}));
+        return ok(await run(own(params)));
       } catch (err) {
         return fail(err);
       }
@@ -179,12 +195,12 @@ export default function openbots(pi: any) {
     name: "use_app",
     label: "Use app",
     description: "Call a tool of one of the user's connected apps. Look up its parameters with apps (action tools) first. It acts as the user in that service.",
-    parameters: { type: "object", properties: { app: str("The app's id, e.g. github."), tool: str("The tool's name."), arguments: { type: "object", description: "The tool's arguments." } }, required: ["app", "tool"] },
+    parameters: withStatus("use_app", { type: "object", properties: { app: str("The app's id, e.g. github."), tool: str("The tool's name."), arguments: { type: "object", description: "The tool's arguments." } }, required: ["app", "tool"] }),
     executionMode: "sequential" as const,
     exposure: "model-only" as const,
     async execute(_id: string, params: Params) {
       try {
-        const out = (await call("use_app", params ?? {})) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
+        const out = (await call("use_app", own(params))) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
         const images = (out.images ?? []).map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
         return { content: [...(out.text || !images.length ? text(out.text || "(no output)") : []), ...images], details: { app: params?.app, tool: params?.tool }, ...(out.isError ? { isError: true } : {}) };
       } catch (err) {

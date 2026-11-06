@@ -193,6 +193,12 @@ test("polls ask the whole group, from the user or a bot, and only in groups", as
       a.equal(successfulMessageTool(event), true);
       a.equal(successfulMessageTool({ ...event, toolName: 'vote_poll', result: { details: { ok: true } } }), false);
       a.equal(activityFor('vote_poll', {}), 'Voting in the poll');
+      // A status the bot wrote wins over the canned one, cleaned up to one short line.
+      a.equal(activityFor('edit', { path: 'notes/school.md', status: 'updating your school.md' }), 'Updating your school.md');
+      a.equal(activityFor('bash', { command: 'ls', status: '  Restoring that previous layout...\\nand more' }), 'Restoring that previous layout');
+      a.equal(activityFor('bash', { command: 'ls', status: 'x'.repeat(80) }), 'X' + 'x'.repeat(48) + '…');
+      a.equal(activityFor('bash', { command: 'ls', status: '  ' }), 'Running a command');
+      a.equal(activityFor('bash', { command: 'ls', status: 42 }), 'Running a command');
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

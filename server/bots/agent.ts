@@ -358,7 +358,7 @@ export async function webSearchNote(): Promise<string> {
   ].join("\n");
 }
 
-export async function webSearch(botId: string, p: Record<string, unknown>) {
+export async function webSearch(_botId: string, p: Record<string, unknown>) {
   const query = String(p.query ?? "").trim().slice(0, 500);
   if (!query) throw new svc.BotsError("Say what to search for.");
   const creds = await searchProviders();
@@ -368,7 +368,6 @@ export async function webSearch(botId: string, p: Record<string, unknown>) {
   // Named providers only: the toolkit's page reader runs on the server, outside this bot's computer.
   const id = asked ? creds.find((c) => c.provider === asked)?.provider : (toolkit.specs[0]!.name.replace(/^search_/, "") as SearchProviderId);
   if (!id) throw new svc.BotsError(`${asked} isn't set up. You have: ${creds.map((c) => c.provider).join(", ")}.`);
-  svc.setStatus(botId, { state: "working", activity: "searching the web", conversationId: focus.get(botId), since: Date.now() });
   const outcome = await toolkit.run(toolName(id), JSON.stringify({ ...p, query }), AbortSignal.timeout(120_000));
   if (outcome.error) throw new svc.BotsError(creds.flatMap((c) => c.keys).reduce((text, key) => text.replaceAll(key, "[hidden]"), `${SEARCH_PROVIDERS[id].label}: ${outcome.error}`));
   return outcome.text;
@@ -540,7 +539,6 @@ async function bash(botId: string, p: Record<string, unknown>) {
   const { api, id } = await computerOf(botId);
   const command = String(p.command ?? "");
   if (!command.trim()) throw new svc.BotsError("Give a command.");
-  svc.setStatus(botId, { state: "working", activity: "running a command", conversationId: focus.get(botId), since: Date.now() });
   const chunks: Buffer[] = [];
   let size = 0;
   const timeout = Math.min(Number(p.timeout) || 120_000, 600_000);
@@ -587,7 +585,6 @@ async function edit(botId: string, p: Record<string, unknown>) {
 async function browser(botId: string, p: Record<string, unknown>) {
   const { api, id } = await computerOf(botId);
   const action = String(p.action ?? "snapshot");
-  svc.setStatus(botId, { state: "working", activity: action === "open" ? `opening ${String(p.url ?? "").slice(0, 80)}` : "using the browser", conversationId: focus.get(botId), since: Date.now() });
   const result = await api.call(id, "browser", {
     action,
     url: p.url,

@@ -252,8 +252,18 @@ export function modelError(message: unknown): string {
 
 const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
 
+/** The status the bot wrote for this call: one short line, or nothing usable. */
+function ownStatus(value: unknown) {
+  const line = typeof value === "string" ? value.split("\n")[0]!.replace(/\s+/g, " ").trim().replace(/[.…]+$/, "") : "";
+  if (!line) return undefined;
+  const short = line.length > 50 ? `${line.slice(0, 49).trimEnd()}…` : line;
+  return short[0]!.toUpperCase() + short.slice(1);
+}
+
 export function activityFor(tool: string, args: unknown): string {
   const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
+  const own = ownStatus(a.status);
+  if (own) return own;
   if (tool === "bash") return "Running a command";
   if (tool === "openbuild") return a.action === "start" ? "Starting a thread" : a.action === "merge" ? "Merging a pull request" : "Checking on threads";
   if (tool === "process") return a.action === "start" ? "Starting a program" : "Checking on a program";
