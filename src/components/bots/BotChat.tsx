@@ -21,6 +21,7 @@ import { IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
+import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
@@ -1068,10 +1069,14 @@ function DraftBackdrop({ text, bots, everyone, scroll }: { text: string; bots: B
   );
 }
 
+/** A draft from another device doesn't replace the text while you've typed within this long. */
+const TYPING_PAUSE = 3000;
+
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
-  const [text, setText] = useState("");
-  const [images, setImages] = useState<string[]>([]);
+  const [text, setText] = useState(() => getBotDraft(conversation.id)?.text ?? "");
+  const [images, setImages] = useState<string[]>(() => getBotDraft(conversation.id)?.images ?? []);
+  const lastTyped = useRef(0);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [mention, setMention] = useState<{ query: string; index: number }>();
@@ -1102,6 +1107,34 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const [stashIndex, setStashIndex] = useState(0);
   const [polling, setPolling] = useState(false);
   const stashList = stashOpen ? stashed : [];
+
+  // Right after a reload the saved drafts may still be loading; fill them in unless typing has started.
+  useEffect(() => {
+    let live = true;
+    void draftsReady.then(() => {
+      const d = getBotDraft(conversation.id);
+      if (!live || !d) return;
+      setText((t) => t || d.text);
+      setImages((i) => (i.length ? i : d.images));
+    });
+    // An edit from another device shows up here, unless you're typing in this box right now.
+    const off = onRemoteDraft((key) => {
+      if (key !== botDraftKey(conversation.id) || Date.now() - lastTyped.current < TYPING_PAUSE) return;
+      const d = getBotDraft(conversation.id);
+      setText(d?.text ?? "");
+      setImages(d?.images ?? []);
+    });
+    return () => {
+      live = false;
+      off();
+    };
+  }, [conversation.id]);
+  // Save the draft as it changes (not on mount, which would stamp an untouched draft as fresh).
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (mounted.current) saveBotDraft(conversation.id, text, images);
+    mounted.current = true;
+  }, [text, images]);
 
   useLayoutEffect(() => {
     const el = input.current;
@@ -1352,6 +1385,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             enterKeyHint={touch ? "enter" : "send"}
             {...dictation.fieldProps}
             onChange={(e) => {
+              lastTyped.current = Date.now();
               setText(e.target.value);
               setStashOpen(false);
               findMention(e.target.value, e.target.selectionStart);
