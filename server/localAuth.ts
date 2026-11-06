@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { closeSync, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir } from "./paths";
 
@@ -111,7 +111,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
 
   // Credentials and hashed session tokens share one atomic file, so changing the
   // password also durably revokes every session. Raw bearer tokens never reach disk.
-  function persist(hash: string): void {
+  // `exclusive` only creates the file: it throws EEXIST, across processes too, if one exists.
+  function persist(hash: string, exclusive = false): void {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     const temporary = `${file}.${randomBytes(16).toString("hex")}.tmp`;
     let fd: number | undefined;
@@ -122,7 +123,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       fsyncSync(fd);
       closeSync(fd);
       fd = undefined;
-      renameSync(temporary, file);
+      if (exclusive) linkSync(temporary, file);
+      else renameSync(temporary, file);
     } finally {
       if (fd !== undefined) closeSync(fd);
       try { unlinkSync(temporary); } catch { /* Renamed or never created. */ }
@@ -182,6 +184,31 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
     try { persist(hash); }
     catch { sessions.clear(); return json({ error: "Could not save session" }, 503); }
+    return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS, httpsHosts) });
+  }
+
+  /**
+   * Set the first password from an open browser. Hashing takes a while, so another request or the
+   * CLI may set one meanwhile: the file is only ever created, never replaced, so whoever set it
+   * first wins and everyone else gets a 409 without a session.
+   */
+  async function createFirst(req: Request, password: string): Promise<Response> {
+    const taken = () => json({ error: "A password is already set" }, 409);
+    if (refresh() !== undefined || !open) return taken();
+    let hash: string;
+    try { hash = await Bun.password.hash(password, { algorithm: "argon2id" }); }
+    catch { return json({ error: "Could not save password" }, 503); }
+    if (refresh() !== undefined || !open) return taken();
+    const token = randomBytes(32).toString("hex");
+    sessions.clear();
+    sessions.set(tokenKey(token), now() + SESSION_SECONDS * 1000);
+    try { persist(hash, true); }
+    catch (err) {
+      sessions.clear();
+      return (err as NodeJS.ErrnoException)?.code === "EEXIST" ? taken() : json({ error: "Could not save password" }, 503);
+    }
+    knownHash = hash;
+    open = false;
     return json({ authenticated: true }, 200, { "Set-Cookie": cookie(req, token, SESSION_SECONDS, httpsHosts) });
   }
 
@@ -296,13 +323,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
         next = passwordField(body.password);
       } catch { return json({ error: "Invalid body" }, 400); }
       if (next.length < 4) return json({ error: "Password must contain 4–1024 characters" }, 400);
-      if (!hash) {
-        // Nothing to check against, but another process may have set one meanwhile.
-        if (refresh() !== undefined || !open) return json({ error: "Password changed" }, 409);
-        try { await setPassword(next); }
-        catch { return json({ error: "Could not save password" }, 503); }
-        return issue(req, knownHash!);
-      }
+      if (!hash) return createFirst(req, next);
       const valid = await matches(current!, hash);
       if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
       if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 403);
