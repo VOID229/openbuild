@@ -1722,6 +1722,11 @@ svg {
   transition: opacity var(--med) var(--ease), transform var(--med) var(--ease);
 }
 
+/* Over a thread opened inside OpenBots: the way back, and below it the way out to OpenBuild. */
+.floating-tools-bots {
+  flex-direction: column;
+}
+
 .floating-tools-visible {
   padding: 3px;
   border-radius: 12px;

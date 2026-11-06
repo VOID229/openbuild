@@ -474,9 +474,11 @@
     display: none;
   }
 
-  /* Except over a thread opened from a bot chat, where it's the way back. */
+  /* Except over a thread opened from a bot chat, where it's the way back (and out to OpenBuild),
+     in a row along the title bar. */
   .main-bots .floating-tools-bots {
     display: flex;
+    flex-direction: row;
   }
 
   /* --- The stack: the list underneath, the chat pushed on over it. --- */
