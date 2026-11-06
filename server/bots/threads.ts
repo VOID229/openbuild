@@ -286,13 +286,13 @@ function record(botId: string, text: string, detail: string, threadId?: string, 
 
 /** Only saved accounts on this server are selectable; never accept account configuration from a bot. */
 function localAccounts(): RuntimeAccount[] {
-  return (appSettings().runtimeAccounts ?? []).filter((a) => !a.deviceId && ["claude", "codex", "cursor"].includes(a.runtime));
+  return (appSettings().runtimeAccounts ?? []).filter((a) => (!a.deviceId || a.deviceId === serverId()) && ["claude", "codex", "cursor"].includes(a.runtime));
 }
 
 function usableHarness(value: unknown): { runtime: ThreadRuntime; account?: RuntimeAccount } {
   const id = String(value || "pi");
   const builtin = !!MODEL_LISTERS[id as ThreadRuntime];
-  const matches = builtin ? [] : localAccounts().filter((a) => a.id === id || a.name === id);
+  const matches = builtin ? [] : localAccounts().filter((a) => a.id === id || a.name.toLowerCase() === id.toLowerCase());
   if (matches.length > 1) throw refuse("That account name is ambiguous. Use its id from options.");
   const account = matches[0];
   const runtime = account?.runtime ?? id as ThreadRuntime;

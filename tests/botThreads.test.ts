@@ -55,6 +55,7 @@ const svc = await import("../server/bots/service");
 const projects = await import("../server/projects");
 const storage = await import("../server/storage");
 const threads = await import("../server/bots/threads");
+const { serverId } = await import("../server/devices");
 const { coversProject } = await import("../shared/bots");
 const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide } = threads;
 
@@ -366,6 +367,28 @@ test("saved local accounts are discoverable, selectable and preserved on continu
   expect((await call("options")).accounts).toEqual([]);
   await expect(call("start", { project: project.name, prompt: "Go", harness: "claude2" })).rejects.toThrow(/doesn't let bots/);
 });
+
+
+for (const deviceId of [undefined, "", "self"]) {
+  test(`Add runtime account on ${deviceId ?? "legacy local"} is usable by name and id`, async () => {
+    const account = { id: "added-login", name: "Claude2", runtime: "claude", configDir: "/tmp/bot-added-claude", deviceId: deviceId === "self" ? serverId() : deviceId };
+    storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account, { ...account, id: "remote-login", deviceId: "other" }] } } }));
+    expect((await call("options")).accounts).toEqual([{ id: account.id, name: "Claude2", harness: "claude" }]);
+    expect((await call("options", { harness: "claude2" })).models[0].id).toBe("claude/one");
+    await expect(call("options", { harness: "remote-login" })).rejects.toThrow(/Unknown harness/);
+    for (const harness of ["claude2", account.id]) {
+      const started = await call("start", { project: project.name, prompt: "Go", harness, mode: "local" });
+      expect(started.account).toBe(account.id);
+      expect(admitted.at(-1).runtimeAccount).toEqual(account);
+      snapshots = [];
+      await call("send", { thread: started.thread, text: "Continue" });
+      expect(admitted.at(-1).runtimeAccount).toEqual(account);
+    }
+    svc.updateSettings({ harnesses: { blocked: ["claude"] } });
+    expect((await call("options")).accounts).toEqual([]);
+    await expect(call("options", { harness: "claude2" })).rejects.toThrow(/doesn't let bots/);
+  });
+}
 
 
 for (const runtime of ["codex", "cursor"]) {
