@@ -558,9 +558,6 @@ export function BotsSidebar() {
                   <Search size={18} />
                 </IconButton>
               )}
-              <IconButton label="Apps" onClick={() => setDialog({ kind: "apps" })}>
-                <Blocks size={18} />
-              </IconButton>
               <NewMenu onDialog={setDialog} />
             </div>
             {(searching || mobile) && (
@@ -626,6 +623,10 @@ export function BotsSidebar() {
                 <Avatar src={avatar} name={profileName} size={26} />
                 <span className="bots-me-name">Settings</span>
               </button>
+              {/* The way into the apps sits beside the way out, as it does in the rail. */}
+              <IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
+                <Blocks size={19} />
+              </IconButton>
               <BotsToggle />
             </div>
           </div>

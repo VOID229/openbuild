@@ -245,6 +245,20 @@ test("a thread open inside OpenBots has a button under Back that opens it out to
   expect(sidebar).toMatch(/export function expandBotsThread\(\) \{\n  crossfade\(\(\) => \{\n    const st = useStore.getState\(\);\n    st.setBotsOpen\(false\);/);
 });
 
+test("Apps sits in the OpenBots sidebar's footer, just left of the way back to OpenBuild, not at its top", async () => {
+  const sidebar = await Bun.file("src/components/bots/BotsSidebar.tsx").text();
+  const open = sidebar.slice(sidebar.indexOf("export function BotsSidebar"));
+  const top = open.slice(open.indexOf('<div className="brand-row">'), open.indexOf('<div className="history-wrap">'));
+  const footer = open.slice(open.indexOf('<div className="settings-row">'));
+  expect(top).not.toContain('kind: "apps"');
+  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*<IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick=\{\(\) => setDialog\(\{ kind: "apps" \}\)\}>\s*<Blocks size=\{19\} \/>\s*<\/IconButton>\s*<BotsToggle \/>/);
+  // The rail keeps it in its foot, beside the same toggle.
+  expect(sidebar).toMatch(/<IconButton label="Apps" tooltipSide="right" className="bots-rail-btn"[\s\S]*?<\/IconButton>\s*<BotsToggle \/>/);
+  // A phone's bigger targets cover it too.
+  const mobile = await Bun.file("src/mobile.css").text();
+  expect(mobile).toMatch(/\.bots-sidebar \.bots-apps-btn \{\s*width: 44px;\s*height: 44px;/);
+});
+
 test("memory stays out of sight, and routines are the bots' to write: people can only see, pause and delete", async () => {
   const details = await Bun.file("src/components/bots/BotDetails.tsx").text();
   const store = await Bun.file("src/lib/bots/store.ts").text();

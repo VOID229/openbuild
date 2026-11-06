@@ -375,6 +375,13 @@
   }
 }
 
+/* Apps, in the footer beside the toggle, at the toggle's size. */
+.bots-apps-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+}
+
 .bots-sidebar-inner {
   animation: bots-fade-in 240ms var(--ease) both;
 }
