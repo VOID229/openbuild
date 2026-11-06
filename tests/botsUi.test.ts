@@ -205,7 +205,7 @@ test("thread activity details are titles, so bot names inside them don't become 
 test("a started thread's activity line names the bot that started it", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author)');
-  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to fallback model {fallbackName}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
 });
 
 test("older follow-up prompts read with the current wording", async () => {
@@ -335,4 +335,23 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   expect(css).toMatch(/\.messages-inner > \.msg \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;/);
+});
+
+test("a fallback switch names the bot, its model and the model's account", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
+  expect(chat).toContain("<BotLink bot={switcher} /> switched to fallback model {fallbackName}");
+  expect(chat).toContain("from {accountName(m.event!.detail)}");
+  const { accountName } = await import("../src/lib/models");
+  expect(accountName("openai-codex-2")).toBe("Codex 2");
+  expect(accountName("openai-codex")).toBe("Codex");
+  expect(accountName("glm-local")).toBe("Glm Local");
+});
+
+test("a bot's fallback models are listed in order in both settings layouts, each tagged with its account", async () => {
+  const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
+  expect(advanced.match(/<BotFallbacks bot=\{bot\} \/>/g)?.length).toBe(2);
+  expect(advanced).toContain('<BotModelSelect label={`Fallback model ${i + 1}`} value={model} account');
+  expect(advanced).toContain('label="Try earlier"');
+  expect(advanced).toContain("providerName(account ? (m.provider ?? m.id.split(\"/\")[0]!) : providerOf(m))");
 });

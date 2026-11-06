@@ -3548,3 +3548,10 @@ button.bots-details-name:hover {
     transform: translateX(14px);
   }
 }
+
+/* A bot's fallback models: the pickers take the row, so a long model name and its account both fit. */
+.bots-fallbacks .bots-set-model {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
