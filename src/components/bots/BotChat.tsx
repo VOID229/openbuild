@@ -7,7 +7,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
-import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
+import type { Bot, BotMessage, BotStatus, Conversation, Reaction } from "../../lib/bots/types";
 import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -843,14 +843,25 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
+/** Busy replying in another chat, with this one's message next in line. */
+const holding = (st: BotStatus | undefined, conversationId: string) => !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId);
+
+/** What a bot says in a chat while it finishes replying in another. Stable per chat, so it doesn't flicker. */
+const HOLDING = ["Hold on a second", "Finishing up something", "One moment, wrapping something up", "Be right with you"];
+export function holdingLine(conversationId: string, botId: string): string {
+  let hash = 0;
+  for (const ch of conversationId + botId) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return HOLDING[Math.abs(hash) % HOLDING.length]!;
+}
+
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
-function Working({ botIds, bots }: { botIds: string[]; bots: Bot[] }) {
+function Working({ conversationId, botIds, bots }: { conversationId: string; botIds: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
   return (
     <>
       {botIds.map((id) => {
         const bot = bots.find((b) => b.id === id);
-        const activity = statuses[id]?.activity || "Thinking";
+        const activity = holding(statuses[id], conversationId) ? holdingLine(conversationId, id) : statuses[id]?.activity || "Thinking";
         if (!bot) return null;
         return (
           <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
@@ -918,7 +929,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
   const working = useBots(
-    useShallow((s) => Object.entries(s.status).filter(([id, st]) => st.state === "working" && st.conversationId === conversation.id && !st.quiet && !typing.includes(id)).map(([id]) => id)),
+    useShallow((s) => Object.entries(s.status).filter(([id, st]) => !typing.includes(id) && (holding(st, conversation.id) || (st.state === "working" && st.conversationId === conversation.id && !st.quiet))).map(([id]) => id)),
   );
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   const scroller = useRef<HTMLDivElement>(null);
@@ -1104,7 +1115,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             </div>
           );
         })}
-        <Working botIds={working} bots={bots} />
+        <Working conversationId={conversation.id} botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
       </div>
       {away && (
@@ -1660,7 +1671,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   // What the other side is up to, under the name on a phone, where there's a bar for it.
   const activity = useBots((s) => {
     const working = conversation.botIds.map((id) => s.status[id]).find((st) => st?.state === "working" && st.conversationId === conversation.id && !st.quiet);
-    return working ? working.activity || "Thinking" : undefined;
+    if (working) return working.activity || "Thinking";
+    const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
+    return held ? holdingLine(conversation.id, held) : undefined;
   });
   // Waiting elsewhere, on the back button.
   const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);

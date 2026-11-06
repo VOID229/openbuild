@@ -16,6 +16,7 @@ import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus } f
 import * as svc from "./service";
 import { resumeWatches } from "./threads";
 import type { Wake } from "./service";
+import type { BotStatus } from "../../shared/bots";
 
 const IDLE = 20 * 60 * 1000;
 
@@ -79,7 +80,22 @@ function enqueue(botId: string, item: Wake) {
   const list = queue.get(botId) ?? [];
   list.push(item);
   queue.set(botId, list);
+  // Busy in another chat: that one shows it holding on until its turn comes.
+  const now = svc.getStatus(botId);
+  if (pumping.has(botId) && now && now.state !== "idle") setStatus(botId, now);
   void pump(botId);
+}
+
+/** Conversations whose messages wait for the bot to finish elsewhere. Reactions and routines don't need an answer shown. */
+export function waitingIn(botId: string): string[] {
+  const focus = getFocus(botId);
+  const ids: string[] = (queue.get(botId) ?? []).filter((j: Wake) => j.kind === "messages" && j.conversationId && j.conversationId !== focus).map((j: Wake) => j.conversationId!);
+  return [...new Set(ids)];
+}
+
+function setStatus(botId: string, next: BotStatus) {
+  const waiting = next.state === "idle" ? [] : waitingIn(botId);
+  svc.setStatus(botId, { ...next, waiting: waiting.length ? waiting : undefined });
 }
 
 async function pump(botId: string) {
@@ -196,7 +212,7 @@ const WRITING = new Set(["send_message", "question", "poll"]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
-  svc.setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: mind.quiet || undefined, since: Date.now() });
+  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: mind.quiet || undefined, since: Date.now() });
 }
 
 function setTyping(botId: string, mind: Mind, on: boolean) {
@@ -295,8 +311,8 @@ async function run(botId: string, all: Wake[]) {
   const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
   // A reaction may well get no answer, so the chat shows nothing unless the bot starts typing.
   const quiet = jobs.every((j) => j.kind === "reaction");
-  svc.setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || undefined, since: Date.now() });
   setFocus(botId, conversationId);
+  setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || undefined, since: Date.now() });
   let mind: Mind | undefined;
   try {
     mind = await ensureMind(botId);
@@ -333,10 +349,10 @@ async function run(botId: string, all: Wake[]) {
     }
     for (const job of jobs) if (job.conversationId) db.setCursor(botId, job.conversationId, db.latestSeq(job.conversationId));
     svc.touchHeartbeat(botId);
-    svc.setStatus(botId, { state: "idle" });
+    setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    svc.setStatus(botId, { state: "error", error: message, since: Date.now() });
+    setStatus(botId, { state: "error", error: message, since: Date.now() });
     const where = conversationId ?? svc.directId(botId);
     const last = db.getValue<number>(`told:${botId}`) ?? 0;
     if (where && Date.now() - last > 60_000) {

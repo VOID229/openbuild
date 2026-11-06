@@ -61,6 +61,8 @@ export interface BotStatus {
   conversationId?: string;
   /** Working, but nothing to show in the chat yet (a reaction it may let be, or tidying up after a reply). */
   quiet?: boolean;
+  /** Other conversations with messages it'll get to once it's free. They show it holding on, not silence. */
+  waiting?: string[];
   error?: string;
   since?: number;
 }
