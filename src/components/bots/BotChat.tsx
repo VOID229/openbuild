@@ -1055,12 +1055,16 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     if (!el || !inner.current) return;
     const coarse = window.matchMedia("(pointer: coarse)");
     let height = el.clientHeight;
+    let windowHeight = window.innerHeight;
     const observer = new ResizeObserver(() => {
       const shrunk = height - el.clientHeight;
+      const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
+      windowHeight = window.innerHeight;
       if (stick.current) el.scrollTop = el.scrollHeight;
-      // The keyboard coming up keeps the last line you could see above it, as it does in any messaging app.
-      else if (shrunk && coarse.matches) el.scrollTop += shrunk;
+      // The keyboard coming up, or the composer growing and shrinking with the draft, keeps the last line
+      // you could see above it, as it does in any messaging app. A desktop window resized keeps its top.
+      else if (shrunk && (coarse.matches || !resized)) el.scrollTop += shrunk;
     });
     observer.observe(inner.current);
     observer.observe(el);
@@ -1431,8 +1435,14 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const el = input.current;
     if (!el || (sized.current?.el === el && sized.current.text === text)) return;
     sized.current = { el, text };
+    // The row holds its height while the box is measured. Collapsing it for a moment would make the
+    // conversation taller, and the browser would pull it up off the bottom to fit, a line per keystroke.
+    // (Not the field: the box stretches to fill that, and would measure as tall as it was.)
+    const row = el.closest<HTMLElement>(".bots-composer-row");
+    if (row) row.style.minHeight = `${row.offsetHeight}px`;
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+    if (row) row.style.minHeight = "";
   }, [text]);
   useEffect(() => {
     if (replyTo) input.current?.focus();
