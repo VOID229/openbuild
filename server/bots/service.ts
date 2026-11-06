@@ -12,6 +12,8 @@ import * as db from "./db";
 
 const MESSAGE_LIMIT = 200;
 const CHAIN_LIMIT = 8;
+/** How long a group keeps sending the user's untagged messages to the bots they last tagged. */
+const FOLLOW_MS = 5 * 60_000;
 
 export class BotsError extends Error {
   constructor(
@@ -45,6 +47,7 @@ const mem = globalThis as {
   openbotsStatus?: Map<string, BotStatus>;
   openbotsChains?: Map<string, number>;
   openbotsChainWarned?: Set<string>;
+  openbotsFollows?: Map<string, Follow>;
   openbotsWaiters?: Waiter[];
 };
 let hooks: Hooks = (mem.openbotsHooks ??= { wake() {}, stop() {} });
@@ -81,6 +84,12 @@ const status = (mem.openbotsStatus ??= new Map<string, BotStatus>());
 /** Bot-to-bot replies in a row, per conversation, so two bots can't talk forever. */
 const chains = (mem.openbotsChains ??= new Map<string, number>());
 let chainWarned = (mem.openbotsChainWarned ??= new Set<string>());
+/** Who the user is talking with in a group when it isn't the primary, and when either last spoke. */
+interface Follow {
+  botIds: string[];
+  at: number;
+}
+const follows = (mem.openbotsFollows ??= new Map<string, Follow>());
 
 interface Waiter {
   botId: string;
@@ -313,6 +322,7 @@ export async function resetAll() {
   status.clear();
   chains.clear();
   chainWarned = mem.openbotsChainWarned = new Set();
+  follows.clear();
   for (const id of Object.keys(typing)) delete typing[id];
   typingSince.clear();
   drafts.length = 0;
@@ -502,10 +512,26 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
     const reply = message.replyTo ? db.getMessage(message.replyTo) : undefined;
     const replied = reply?.conversationId === c.id && members.includes(reply.message.author) ? [reply.message.author] : [];
     const addressed = [...new Set([...mentioned, ...replied])];
-    if (addressed.length) return addressed;
     const primary = members.find((id) => db.getBot(id)?.primary);
+    if (addressed.length) {
+      // Tagging other bots starts a follow; tagging only the primary or everyone ends one.
+      const everyone = findTags(message.text, members.flatMap((id) => db.getBot(id) ?? [])).some((t) => !t.bot);
+      if (!everyone && addressed.some((id) => id !== primary)) follows.set(c.id, { botIds: addressed, at: message.at });
+      else follows.delete(c.id);
+      return addressed;
+    }
+    const follow = follows.get(c.id);
+    const followed = follow && message.at - follow.at <= FOLLOW_MS ? follow.botIds.filter((id) => members.includes(id)) : [];
+    if (followed.length) {
+      follows.set(c.id, { botIds: followed, at: message.at });
+      return followed;
+    }
+    follows.delete(c.id);
     return primary ? [primary] : members.slice(0, 1);
   }
+  // A followed bot answering keeps the conversation going.
+  const follow = c.kind === "group" ? follows.get(c.id) : undefined;
+  if (follow?.botIds.includes(message.author) && message.at - follow.at <= FOLLOW_MS) follow.at = Math.max(follow.at, message.at);
   const others = members.filter((id) => id !== message.author);
   if (c.kind === "side") return others;
   const mentioned = mentionedBots(message.text, others);

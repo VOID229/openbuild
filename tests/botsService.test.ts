@@ -92,6 +92,59 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
+test("a group keeps sending untagged messages to the non-primary bot the user is talking with for 5 minutes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as svc from './server/bots/service.ts';
+      const boss = svc.createBot({ name: 'Boss' }).bot.id;
+      const helper = svc.createBot({ name: 'Helper' }).bot.id;
+      const tracer = svc.createBot({ name: 'Tracer' }).bot.id;
+      const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [boss, helper, tracer] });
+      const woken = [];
+      svc.setHooks({ wake: id => woken.push(id), stop() {} });
+      let at = Date.now();
+      const post = (author, text, after = 1000) => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text, at: at += after });
+      const check = (text, expected, after) => {
+        woken.length = 0;
+        post('me', text, after);
+        a.deepEqual(woken, expected, text);
+      };
+      const minute = 60_000;
+      check('Hi', [boss]);
+      check('@Helper can you look?', [helper]);
+      check('Thanks, and the other one?', [helper], 4 * minute);
+      check('Still there?', [helper], 5 * minute);
+      check('Back after a break', [boss], 5 * minute + 1);
+      check('Hi again', [boss]);
+
+      check('@Helper one more', [helper]);
+      post(helper, 'On it', 4 * minute);
+      check('Great', [helper], 4 * minute);
+
+      check('@Helper @Tracer both of you', [helper, tracer]);
+      check('Go ahead', [helper, tracer]);
+      check('@Boss your call', [boss]);
+      check('And now?', [boss]);
+
+      check('@Tracer check it', [tracer]);
+      check('@everyone status?', [boss, helper, tracer]);
+      check('Ok', [boss]);
+
+      check('@Tracer once more', [tracer]);
+      svc.updateConversation(group.id, { botIds: [boss, helper] });
+      check('Tracer left', [boss]);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("group replies wake the quoted bot instead of falling back to the primary", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-replies-"));
   try {
@@ -103,7 +156,9 @@ test("group replies wake the quoted bot instead of falling back to the primary",
       const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [primary.bot.id, second.bot.id] });
       const woken = [];
       svc.setHooks({ wake: id => woken.push(id), stop() {} });
-      const post = (conversationId, author, text, replyTo) => svc.postMessage(conversationId, { id: crypto.randomUUID(), author, text, replyTo, at: Date.now() });
+      // Each message is an hour apart, so no follow carries over from the one before.
+      let at = Date.now();
+      const post = (conversationId, author, text, replyTo) => svc.postMessage(conversationId, { id: crypto.randomUUID(), author, text, replyTo, at: at += 3_600_000 });
       const quoted = post(group.id, second.bot.id, 'Hello');
       const mine = post(group.id, 'me', 'Generic');
       const foreign = post(second.conversationId, second.bot.id, 'Private');
