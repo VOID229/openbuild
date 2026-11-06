@@ -151,6 +151,8 @@ function useSelect() {
   return useCallback(
     (id: string) => {
       useBots.getState().select(id);
+      // Out of a thread opened from a chat, back to the chats.
+      useStore.setState({ botsThread: false });
       if (mobile) openBotsChat();
     },
     [mobile],

@@ -270,6 +270,8 @@ test("closing refuses a working thread, and leaves uncommitted work alone", asyn
   const closed = await call("close", { thread: threadId, remove_worktree: true });
   expect(closed.closed).toBe(true);
   expect(closed.note).toContain("uncommitted");
+  // The activity links to the thread it closed.
+  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.findLast((m) => m.event?.text === "Closed a thread")?.event?.threadId).toBe(threadId);
   expect(await Bun.file(join(cwd, "wip.txt")).text()).toBe("unsaved");
   const saved = storage.getChat(threadId) as any;
   expect(saved.archived).toBe(true);
@@ -329,4 +331,6 @@ test("threads it didn't start are only its to control with the grant", async () 
   expect((storage.getChat(theirs.id) as any).messages.at(-2).sentByBot).toBe(bot.id);
   await call("merge", { project: project.name, number: 9 });
   expect(merged[0]).toEqual([repo, 9, "squash", "def", false]);
+  // Named by number, the merge still links to the thread the pull request came from.
+  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.findLast((m) => m.event?.text === "Merged a pull request")?.event?.threadId).toBe(theirs.id);
 });

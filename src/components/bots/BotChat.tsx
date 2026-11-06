@@ -9,6 +9,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, BotStatus, Conversation, Reaction } from "../../lib/bots/types";
 import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { PULL_REF_RE, pullRefUrl } from "../../lib/bots/pullRefs";
@@ -135,18 +136,41 @@ function Mention({ bot, text }: { bot: Bot; text: string }) {
   );
 }
 
-/** Keep normal browser link actions while plain clicks use the app's thread navigation. */
+/** Keep normal browser link actions while plain clicks open the thread inside OpenBots. */
 function ThreadLink({ id, children }: { id: string; children: React.ReactNode }) {
   return <a className="link" href={threadPath(id)} onClick={(e) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();
-    useStore.getState().selectChat(id);
+    // An event row toggles open on click; following its link shouldn't do that as well.
+    e.stopPropagation();
+    useStore.getState().openThreadInBots(id);
+    // A thread a bot has only just started may not have reached this tab yet; it opens once it does.
+    if (!useStore.getState().chats.some((c) => c.id === id)) window.dispatchEvent(new Event(RELOAD_THREADS));
   }}>{children}</a>;
 }
 
 /** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
 function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
   return <a className="link" href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+}
+
+/**
+ * The thread an activity is about. Closes and merges recorded before they carried an id fall back to
+ * the one thread with that title, or that pull request, so older history links too.
+ */
+function useEventThread(event: NonNullable<BotMessage["event"]>): string | undefined {
+  return useStore((s) => {
+    if (event.threadId || event.kind !== "thread" || !event.detail) return event.threadId;
+    const pull = event.text === "Merged a pull request" ? /^#(\d+) /.exec(event.detail) : null;
+    const matches = s.chats.filter((c) => (pull ? c.pullRequest?.number === Number(pull[1]) : c.title === event.detail));
+    return matches.length === 1 ? matches[0]!.id : undefined;
+  });
+}
+
+/** An activity's detail: a link to the thread it's about, when there is one. */
+function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
+  const id = useEventThread(event);
+  return id ? <ThreadLink id={id}>{event.detail}</ThreadLink> : <>{event.detail}</>;
 }
 
 /** Only link IDs that resolve uniquely to a known thread, and PR numbers to a known repository; ordinary hex text stays text. */
@@ -1070,7 +1094,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 {m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
-                    {m.event!.threadId ? <ThreadLink id={m.event!.threadId}>{m.event!.detail}</ThreadLink> : eventBot ? <BotLink bot={eventBot} /> : m.event!.kind === "thread" ? m.event!.detail : <WithBotLinks text={m.event!.detail} bots={bots} />}
+                    {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
                   </span>
                 )}
               </div>

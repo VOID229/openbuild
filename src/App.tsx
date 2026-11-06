@@ -1,5 +1,5 @@
 import { prefetchUsage } from "./lib/usageStats";
-import { KeyRound, PanelLeft, SquarePen } from "lucide-react";
+import { ArrowLeft, KeyRound, PanelLeft, SquarePen } from "lucide-react";
 import { Activity, useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
@@ -208,6 +208,10 @@ function Main() {
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const titling = useStore((s) => !!s.activeChatId && s.titling.has(s.activeChatId)) && !chat?.titleSource;
+  // A thread opened from a link in OpenBots shows in place of the bot chat, with the bots' sidebar kept.
+  // Usage opened over it covers it, and closing Usage comes back to it.
+  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && !!chat;
+  const botsChat = botsOpen && !botsThread;
   const { setSidebarOpen, newChat } = useStore.getState();
   const folder = usePanel((s) => s.folder);
   const panelOpen = usePanel((s) => s.panel);
@@ -396,8 +400,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = usageOpen ? "Usage · OpenBuild" : botsOpen ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, titling, usageOpen, botsOpen]);
+    document.title = usageOpen ? "Usage · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, usageOpen, botsChat]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -419,13 +423,21 @@ function Main() {
         {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
         <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
-          <div className={cx("floating-tools", !sidebarOpen && !botsOpen && "floating-tools-visible")} inert={sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
-            <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
-              <PanelLeft size={18} />
-            </IconButton>
-            <IconButton label="New thread" tooltipSide="right" onClick={newChat}>
-              <SquarePen size={17} />
-            </IconButton>
+          <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
+            {botsThread ? (
+              <IconButton label="Back to chat" tooltipSide="right" onClick={() => useStore.setState({ botsThread: false })}>
+                <ArrowLeft size={18} />
+              </IconButton>
+            ) : (
+              <>
+                <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
+                  <PanelLeft size={18} />
+                </IconButton>
+                <IconButton label="New thread" tooltipSide="right" onClick={newChat}>
+                  <SquarePen size={17} />
+                </IconButton>
+              </>
+            )}
             {/* On a phone this is the screen's title bar, so it says which thread this is. */}
             {phone && chat && !usageOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
           </div>
@@ -443,9 +455,9 @@ function Main() {
             )
           ) : (
             <>
-              <Activity mode={botsOpen && !usageOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              <Activity mode={botsChat && !usageOpen ? "visible" : "hidden"}><BotsView /></Activity>
               {botsOpen && usageOpen && <UsagePage />}
-              <Activity mode={botsOpen ? "hidden" : "visible"}>
+              <Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
                     {usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}

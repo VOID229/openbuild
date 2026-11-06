@@ -17,6 +17,9 @@ export function readRoute(pathname: string, hash = ""): Route {
     if (path === "/usage") return { usage: true };
     if (path === "/bots/usage") return { bots: true, usage: true };
     if (path === "/bots") return { bots: true };
+    // A thread opened from OpenBots, showing inside it.
+    const botsThread = /^\/bots\/thread-([^/]+)$/.exec(path);
+    if (botsThread) return { bots: true, threadId: decodeURIComponent(botsThread[1]!) };
     const settings = /^\/settings(?:\/([^/]+))?$/.exec(path);
     if (settings) {
       const section = settings[1] ?? "profile";
@@ -34,12 +37,13 @@ interface RouteState {
   settingsSection: SettingsSection;
   usageOpen?: boolean;
   botsOpen?: boolean;
+  botsThread?: boolean;
   chats: { id: string }[];
 }
 interface RouteStore {
   getState(): RouteState;
   selectChat(id: string): void;
-  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection" | "usageOpen" | "botsOpen"> & { searchFocus?: undefined }): void;
+  setState(patch: Pick<RouteState, "activeChatId" | "settingsOpen" | "settingsSection" | "usageOpen" | "botsOpen" | "botsThread"> & { searchFocus?: undefined }): void;
   subscribe(listener: () => void): () => void;
 }
 type Browser = Pick<Window, "location" | "history" | "addEventListener" | "removeEventListener">;
@@ -48,13 +52,17 @@ type Browser = Pick<Window, "location" | "history" | "addEventListener" | "remov
 export function startRouting(store: RouteStore, browser: Browser = window): () => void {
   const { location, history } = browser;
   let applying = false;
+  // What the URL last said, so only a change to it writes: a listener that runs on Back before ours
+  // (gestures.ts, on a phone) mustn't push the page being left back on.
+  let written: string | undefined;
   const pathFor = (state: RouteState) => state.settingsOpen
     ? `/settings/${state.settingsSection}`
-    : state.usageOpen ? (state.botsOpen ? "/bots/usage" : "/usage") : state.botsOpen ? "/bots" : state.activeChatId ? threadPath(state.activeChatId) : "/new";
+    : state.usageOpen ? (state.botsOpen ? "/bots/usage" : "/usage") : state.botsOpen ? (state.botsThread && state.activeChatId ? `/bots${threadPath(state.activeChatId)}` : "/bots") : state.activeChatId ? threadPath(state.activeChatId) : "/new";
   const write = (replace: boolean) => {
     const state = store.getState();
     const url = pathFor(state) + location.search;
     const context = { threadId: state.activeChatId };
+    written = `${url} ${state.activeChatId}`;
     // The same entry keeps whatever else it holds: which of OpenBots' screens it is, on a phone (see gestures.ts).
     const same = { ...history.state, ...context };
     if (replace) history.replaceState(same, "", url);
@@ -75,6 +83,7 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
         settingsSection: route.section ?? state.settingsSection,
         usageOpen: !!route.usage,
         botsOpen: !!route.bots,
+        botsThread: !!route.bots && !!chat && !!route.threadId,
         searchFocus: undefined,
       });
     } finally {
@@ -84,7 +93,10 @@ export function startRouting(store: RouteStore, browser: Browser = window): () =
     write(true);
   };
   read();
-  const unsubscribe = store.subscribe(() => { if (!applying) write(false); });
+  const unsubscribe = store.subscribe(() => {
+    const state = store.getState();
+    if (!applying && `${pathFor(state)}${location.search} ${state.activeChatId}` !== written) write(false);
+  });
   browser.addEventListener("popstate", read);
   browser.addEventListener("hashchange", read);
   return () => {
