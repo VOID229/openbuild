@@ -721,8 +721,8 @@ async function generate(chatId: string, messageId: string, resume = false) {
   const st2 = useStore.getState();
   const latest = st2.chats.find((c) => c.id === chatId);
   if (!latest) return;
-  // Finished, the thread moves to the sidebar's "Done" (reopening it if it was closed), open or not.
-  st2.upsertChat({ ...latest, updatedAt: Date.now(), unread: latest.unread || (!error && st2.activeChatId !== chatId), done: true, woke: false, archived: false });
+  // Finished replies move to Done unless the bot or merge sweep already closed the thread.
+  st2.upsertChat({ ...latest, updatedAt: Date.now(), unread: latest.unread || (!error && st2.activeChatId !== chatId), done: !latest.autoClosedAt, woke: false, archived: !!latest.autoClosedAt });
   // Done, stopped or failed, the chat is free again: send what was queued meanwhile.
   if ((!ctrl.signal.aborted && !error) || run.drainOnStop) drainQueue(chatId);
 }

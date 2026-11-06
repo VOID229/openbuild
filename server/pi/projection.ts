@@ -114,7 +114,7 @@ export function projectChat(chat: Chat, snapshots: PiSnapshot[], previous?: Chat
     }
     return projected;
   });
-  return { ...chat, messages, updatedAt, ...(completed ? { unread: true, done: true, woke: false, archived: false } : {}) };
+  return { ...chat, messages, updatedAt, ...(completed ? { unread: true, done: !chat.autoClosedAt, woke: false, archived: !!chat.autoClosedAt } : {}) };
 }
 
 // Polls must not re-read and reduce a thread's entire history when neither its saved body nor

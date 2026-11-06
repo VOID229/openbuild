@@ -33,6 +33,10 @@ test("worker replay repairs offline output, completion and stale saves without r
       a.equal(pending.parts[2].output,'/work'); a.equal(pending.parts[2].args.command,'pwd');
       snapshot.events.push({t:'asked',id:'ask-1',answer:'Yes'},{t:'text',v:'world'}, {t:'usage',usage:{input:20,output:4}}, {t:'done',finish:'stop'});
       snapshot.status='finished'; snapshot.endedAt=200;
+      const closed = projectChat({...chat, archived:true, done:false, autoClosedAt:150}, [snapshot]);
+      a.equal(closed.archived,true); a.equal(closed.done,false);
+      const reopened = projectChat({...chat, autoCloseOptOut:true}, [snapshot]);
+      a.equal(reopened.archived,false); a.equal(reopened.done,true);
       storage.putChat(chat);
       projectStoredChats([snapshot]);
       const stored=storage.getChat(chat.id);

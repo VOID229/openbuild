@@ -82,7 +82,7 @@ const working = (chat: Chat) => {
 /** Whether this thread should be closed now that its pull request is `pr`. */
 export function shouldClose(chat: Chat, pr: ThreadPullRequest, now: number): boolean {
   if (pr.state !== "merged" || pr.mergedAt === undefined) return false;
-  if (chat.archived || chat.pinned || chat.autoCloseOptOut || chat.autoClosedAt) return false;
+  if (chat.archived || chat.pinned || chat.autoCloseOptOut) return false;
   if (chat.snoozedUntil !== undefined && chat.snoozedUntil > now) return false;
   if (working(chat)) return false;
   // Talking to the thread after the merge means it's still in use.

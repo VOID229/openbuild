@@ -93,6 +93,14 @@ const script = `
   delete process.env.GH_MERGED;
   assert.ok(calls().some((line) => line.startsWith("pr view 7") && line.endsWith("--repo github.com/o/r")), "removed worktrees read from the surviving repository explicitly");
 
+  // A removed worktree never read by this process has no in-memory location or repo cache.
+  const projects = await import("./server/projects.ts");
+  const storage = await import("./server/storage.ts");
+  const project = await projects.addProject(cwd);
+  const gone = process.env.TEST_ROOT + "/never-read";
+  storage.putChat({id:"closed", title:"closed", createdAt:1, updatedAt:1, archived:true, messages:[], workspace:{cwd:gone, projectId:project.id, worktree:true}});
+  assert.equal((await view.view(gone, 7, true)).number, 7);
+
   // One pull request.
   const pr = await view.view(cwd, "7", true);
   assert.equal(pr.repo, "o/r");

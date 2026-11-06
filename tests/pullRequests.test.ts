@@ -46,6 +46,8 @@ const script = `
     { id: "a1", role: "assistant", content: "", createdAt: t0 + 1001, status: "done" },
   ] };
   assert.equal(pr.shouldClose(base, merged, t0 + 7000), true);
+  assert.equal(pr.shouldClose({ ...base, done: true, archived: false, autoClosedAt: t0 + 6000 }, merged, t0 + 7000), true, "repair an auto-closed thread reopened by completion");
+  assert.equal(pr.shouldClose({ ...base, autoClosedAt: t0 + 6000, autoCloseOptOut: true }, merged, t0 + 7000), false);
   assert.equal(pr.shouldClose({ ...base, pinned: true }, merged, t0 + 7000), false);
   assert.equal(pr.shouldClose({ ...base, autoCloseOptOut: true }, merged, t0 + 7000), false);
   assert.equal(pr.shouldClose({ ...base, snoozedUntil: t0 + 99999 }, merged, t0 + 7000), false);
@@ -87,6 +89,12 @@ const script = `
   assert.equal(b.archived, undefined);
   assert.deepEqual([b.pullRequest.number, b.pullRequest.state, b.pullRequest.checks], [42, "open", "pending"]);
   assert.equal(existsSync(ws2.cwd), true);
+
+  // A late completion used to reopen an auto-closed thread after its worktree was removed.
+  storage.putChat({ ...a, archived: false, done: true });
+  await pr.sweep();
+  assert.equal(storage.getChat("merged").archived, true);
+  assert.equal(storage.getChat("merged").done, false);
 
   // Unchanged results don't rewrite the chat.
   const v = storage.chatIndex().find((e) => e.id === "open").v;
