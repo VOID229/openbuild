@@ -226,7 +226,14 @@ export async function nameWorktree(cwd: string, expected: string, name: string):
  * merge leaves the branch's commits off the base, so only GitHub can say it merged).
  */
 export async function removeWorktree(cwd: string, force = false, forceBranch = force): Promise<void> {
-  const real = realpathSync(cwd);
+  let real: string;
+  try {
+    real = realpathSync(cwd);
+  } catch (err) {
+    // A pruned or never-created checkout is already cleaned up.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
   if (!real.startsWith(realpathSync(worktreesDir()) + sep)) throw new Error("Only worktrees OpenBuild made can be removed here");
   const top = await git(real, ["rev-parse", "--git-common-dir"]);
   const branch = (await git(real, ["branch", "--show-current"])).out;
