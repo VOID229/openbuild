@@ -765,3 +765,53 @@ test("bots write their own instructions, and only a blank slate is open to a non
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("only the primary bot adds bots to its groups or removes them", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-groups-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      import * as svc from './server/bots/service.ts';
+      import { manage, setFocus } from './server/bots/agent.ts';
+      svc.setHooks({ wake() {}, stop() {} });
+      const primary = svc.createBot({ name: 'Boss' }).bot;
+      const helper = svc.createBot({ name: 'Helper' }).bot;
+      const coach = manage(primary.id, { action: 'create', name: 'Coach' });
+      const group = svc.createConversation({ kind: 'group', name: 'Plans', botIds: [primary.id, helper.id] });
+      const short = group.id.slice(0, 8);
+
+      // Other bots can't change who's in a group, in either direction.
+      setFocus(helper.id, group.id);
+      a.throws(() => manage(helper.id, { action: 'add_to_group', bot: coach.id }), /Only the primary bot/);
+      a.throws(() => manage(helper.id, { action: 'remove_from_group', bot: primary.id }), /Only the primary bot/);
+      a.deepEqual(db.getConversation(group.id).botIds, [primary.id, helper.id]);
+
+      // The primary adds the bot it made, by name, to the group it names, with a note in the chat.
+      a.equal(manage(primary.id, { action: 'add_to_group', bot: 'Coach', conversation: short }).members, 3);
+      a.deepEqual(db.getConversation(group.id).botIds, [primary.id, helper.id, coach.id]);
+      const joined = db.messages(group.id, 10).map((m) => m.message).find((m) => m.event?.kind === 'joined');
+      a.equal(joined.author, primary.id);
+      a.equal(joined.event.bot, coach.id);
+      a.throws(() => manage(primary.id, { action: 'add_to_group', bot: 'Coach', conversation: short }), /already in the group/);
+
+      // It needs a group it's in, and a bot to move.
+      a.throws(() => manage(primary.id, { action: 'add_to_group', bot: 'Coach', conversation: svc.directId(primary.id).slice(0, 8) }), /Only group chats/);
+      a.throws(() => manage(primary.id, { action: 'add_to_group', conversation: short }), /Say which bot/);
+
+      // Removing, from the group it's focused on, keeps at least two bots.
+      setFocus(primary.id, group.id);
+      manage(primary.id, { action: 'remove_from_group', bot: helper.id });
+      a.deepEqual(db.getConversation(group.id).botIds, [primary.id, coach.id]);
+      a.ok(db.messages(group.id, 10).some((m) => m.message.event?.kind === 'left' && m.message.event.bot === helper.id));
+      a.throws(() => manage(primary.id, { action: 'remove_from_group', bot: coach.id }), /at least two bots/);
+      a.throws(() => manage(primary.id, { action: 'remove_from_group', bot: helper.id }), /isn't in the group/);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
