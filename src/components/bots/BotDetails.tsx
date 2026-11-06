@@ -1,5 +1,5 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
-// model, computer and OpenBuild permissions folded away under Advanced; a group's members and goal; who's in a side chat.
+// model, computer and OpenBuild permissions under an Advanced tab; a group's members and goal; who's in a side chat.
 import { ChevronLeft, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
@@ -219,7 +219,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "routines" | "members" | "goal">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
   const st = useBots.getState();
   useEffect(() => setTab(conversation.kind === "direct" ? "instructions" : "members"), [conversation.id, conversation.kind]);
@@ -270,6 +270,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", `Routines${bot.routines.length ? ` ${bot.routines.length}` : ""}`],
+                  ["advanced", "Advanced"],
                 ]}
                 value={tab}
                 onChange={setTab}
@@ -283,7 +284,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 />
               )}
               {tab === "routines" && <Routines bot={bot} />}
-              <BotAdvanced bot={bot} />
+              {tab === "advanced" && <BotAdvanced bot={bot} />}
               <div className="bots-details-foot">
                 <button
                   type="button"
