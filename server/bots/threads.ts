@@ -489,13 +489,13 @@ async function send(botId: string, p: Record<string, unknown>) {
     });
     if (!handled) throw refuse("It's still working and couldn't take that now. You'll be told when it finishes; send it then.", 409);
     if (!watches().some((w) => w.runId === running[0]!.id)) startFollowing(botId, chat.id, running[0]!.id);
-    record(botId, "Wrote a prompt", chat.title, chat.id);
+    record(botId, "Wrote a prompt in", chat.title, chat.id);
     return { sent: true, note: `${bot}'s message went into its current turn.` };
   }
   const last = chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
   if (!last || !chat.workspace) throw refuse("That thread has nothing to continue from.");
   await startTurn(botId, chat, text, { id: last.id, name: last.name ?? last.id, effort: last.effort ?? "medium", speed: last.speed }, images);
-  record(botId, "Wrote a prompt", chat.title, chat.id);
+  record(botId, "Wrote a prompt in", chat.title, chat.id);
   return { sent: true, next: "You'll be told when it asks something or finishes." };
 }
 

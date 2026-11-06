@@ -210,7 +210,9 @@ test("a started thread's activity line names the bot that started it", async () 
 
 test("older follow-up prompts read with the current wording", async () => {
   const { eventText } = await import("../shared/bots");
-  expect(eventText({ text: "Wrote to a thread" })).toBe("Wrote a prompt");
+  expect(eventText({ text: "Wrote to a thread" })).toBe("Wrote a prompt in");
+  expect(eventText({ text: "Wrote a prompt" })).toBe("Wrote a prompt in");
+  expect(eventText({ text: "Wrote a prompt in" })).toBe("Wrote a prompt in");
   expect(eventText({ text: "Started a thread" })).toBe("Started a thread");
   const common = await Bun.file("src/components/bots/common.tsx").text();
   expect(common).toContain("[eventText(m.event), m.event.detail]");
