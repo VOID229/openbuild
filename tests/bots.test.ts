@@ -331,14 +331,14 @@ test("web search uses the user's providers and keeps their keys from the bot", a
   }
 });
 
-test("Dr Eggbot introduces itself on first open and offers the starter team", async () => {
+test("Dr Eggbot is asked to introduce itself on first open and offer the starter team", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
-      import { contextFor } from './server/bots/agent.ts';
+      import { askUser, contextFor, setFocus } from './server/bots/agent.ts';
       const woken = [];
       svc.setHooks({ wake: (botId, wake) => woken.push({ botId, wake }), stop() {} });
       svc.ensureStarted();
@@ -346,25 +346,35 @@ test("Dr Eggbot introduces itself on first open and offers the starter team", as
       const conversationId = svc.directId(bot.id);
       a.equal(bot.primary, true);
       a.equal(bot.name, 'Dr Eggbot');
+      a.deepEqual(bot.look, { shape: 'puff', color: 'white' });
       a.match(bot.instructions, /primary bot/);
       a.equal(svc.getSettings().onboarding, 'active');
       a.equal(db.messages(conversationId, 10).length, 0);
 
+      // Nothing is written for it: the bot is woken to write its own welcome.
       svc.greetOnFirstOpen();
-      const said = db.messages(conversationId, 10).map(r => r.message);
-      a.equal(said.length, 3);
-      a.ok(said.every(m => m.author === bot.id));
-      a.match(said[0].text, /Dr Eggbot, your primary bot/);
-      const offer = said[2];
-      a.equal(offer.question.offer, 'team');
-      a.deepEqual(offer.question.options.map(o => o.label), ['Set up the team', 'Not now']);
+      a.equal(db.messages(conversationId, 10).length, 0);
+      a.equal(woken.length, 1);
+      a.equal(woken[0].botId, bot.id);
+      a.equal(woken[0].wake.kind, 'note');
+      a.equal(woken[0].wake.conversationId, conversationId);
+      a.match(woken[0].wake.text, /Introduce yourself/);
+      a.match(woken[0].wake.text, /offer "team"/);
       a.equal(svc.getSettings().onboarding, 'done');
-      a.equal(woken.length, 0, 'the welcome needs no model call');
-      a.match(contextFor(bot.id), /starter team/);
 
       // Opening it again is just opening it.
       svc.greetOnFirstOpen();
-      a.equal(db.messages(conversationId, 10).length, 3);
+      a.equal(woken.length, 1);
+
+      // The bot's offer gets the app's choices, whatever it wrote.
+      setFocus(bot.id, conversationId);
+      askUser(bot.id, { title: 'Want a team?', options: ['Sure', 'Maybe', 'No'], offer: 'team' });
+      const offer = db.messages(conversationId, 10).map(r => r.message).find(m => m.question);
+      a.equal(offer.author, bot.id);
+      a.equal(offer.question.offer, 'team');
+      a.deepEqual(offer.question.options.map(o => o.label), ['Set up the team', 'Not now']);
+      a.match(contextFor(bot.id), /starter team/);
+      woken.length = 0;
 
       // Taking the offer makes the team, with a group, once.
       svc.answerQuestion(conversationId, offer.id, 'A');
@@ -388,6 +398,9 @@ test("Dr Eggbot introduces itself on first open and offers the starter team", as
       await svc.resetAll();
       const again = db.listBots()[0];
       const chat = svc.directId(again.id);
+      a.equal(woken.at(-1).botId, again.id, 'a reset welcomes again');
+      setFocus(again.id, chat);
+      askUser(again.id, { title: 'Want a team?', offer: 'team' });
       const card = db.messages(chat, 10).map(r => r.message).find(m => m.question);
       svc.answerQuestion(chat, card.id, 'B');
       a.equal(db.listBots().length, 1);
