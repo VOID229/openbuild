@@ -279,9 +279,9 @@ function startFollowing(botId: string, threadId: string, runId: string) {
 // ------------------------------------------------------------------ actions
 
 /** Shows in the bot's conversation, so the user can see what it did with their threads. */
-function record(botId: string, text: string, detail: string, threadId?: string) {
+function record(botId: string, text: string, detail: string, threadId?: string, pullUrl?: string) {
   const conversationId = getFocus(botId) ?? svc.directId(botId);
-  if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}) } });
+  if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}), ...(pullUrl ? { pullUrl } : {}) } });
 }
 
 /** Only saved accounts on this server are selectable; never accept account configuration from a bot. */
@@ -615,7 +615,7 @@ async function merge(botId: string, p: Record<string, unknown>) {
   const method = p.method === undefined ? detail.methods[0] : p.method;
   if (!detail.methods.includes(method as (typeof detail.methods)[number])) throw refuse(`This repository merges with: ${detail.methods.join(", ")}.`);
   await pullRequestView.merge(cwd, number, method, detail.headSha, p.delete_branch === true);
-  record(botId, "Merged a pull request", `#${number} ${detail.title}`, threadId ?? (projectId ? pullThread(projectId, number) : undefined));
+  record(botId, "Merged a pull request", `#${number} ${detail.title}`, threadId ?? (projectId ? pullThread(projectId, number) : undefined), detail.url);
   return { merged: true, number, url: detail.url };
 }
 

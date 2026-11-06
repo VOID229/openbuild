@@ -167,10 +167,31 @@ function useEventThread(event: NonNullable<BotMessage["event"]>): string | undef
   });
 }
 
-/** An activity's detail: a link to the thread it's about, when there is one. */
+/** Where a merge's "#n" goes: the URL it was recorded with, else the pull request that number names. */
+function useEventPull(event: NonNullable<BotMessage["event"]>, threadId: string | undefined): string | undefined {
+  const pull = event.text === "Merged a pull request" ? /^#(\d+) /.exec(event.detail ?? "") : null;
+  return useStore((s) => {
+    if (!pull) return;
+    if (event.pullUrl) return event.pullUrl;
+    const own = threadId ? s.chats.find((c) => c.id === threadId)?.pullRequest : undefined;
+    if (own?.number === Number(pull[1])) return own.url;
+    return pullRefUrl(Number(pull[1]), s.chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])));
+  });
+}
+
+/**
+ * An activity's detail: a link to the thread it's about, when there is one. A merge's "#n" is its own
+ * link, to the pull request on GitHub, with the title after it opening the thread.
+ */
 function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
   const id = useEventThread(event);
-  return id ? <ThreadLink id={id}>{event.detail}</ThreadLink> : <>{event.detail}</>;
+  const pullUrl = useEventPull(event, id);
+  const detail = event.detail ?? "";
+  const ref = pullUrl ? /^#\d+ /.exec(detail)?.[0] : undefined;
+  const title = ref ? detail.slice(ref.length) : detail;
+  const thread = id ? <ThreadLink id={id}>{title}</ThreadLink> : <>{title}</>;
+  if (!ref) return thread;
+  return <><span onClick={(e) => e.stopPropagation()}><PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
 }
 
 /** Only link IDs that resolve uniquely to a known thread, and PR numbers to a known repository; ordinary hex text stays text. */
