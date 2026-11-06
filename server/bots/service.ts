@@ -220,7 +220,7 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; thre
     name: "Manager",
     look: { shape: "gem", color: "blue" },
     instructions:
-      "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green and reviewed, and close threads when they're done. Ask Tracer to review a pull request before you merge it, and Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
+      "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green, and close threads when they're done. Ask Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
     threads: { enabled: true, scope: "all", projects: [], merge: true },
   },
   {
