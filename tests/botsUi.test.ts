@@ -205,7 +205,7 @@ test("thread activity details are titles, so bot names inside them don't become 
 test("a started thread's activity line names the bot that started it", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author)');
-  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
 });
 
 test("older follow-up prompts read with the current wording", async () => {
@@ -214,6 +214,12 @@ test("older follow-up prompts read with the current wording", async () => {
   expect(eventText({ text: "Started a thread" })).toBe("Started a thread");
   const common = await Bun.file("src/components/bots/common.tsx").text();
   expect(common).toContain("[eventText(m.event), m.event.detail]");
+});
+
+test("a message between bots links to the side chat and to the other bot", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain('m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined');
+  expect(chat).toContain("<ConversationLink id={event.conversationId!}>");
 });
 
 test("a merge's pull request number and thread title are separate links", async () => {

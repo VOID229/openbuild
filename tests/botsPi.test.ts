@@ -67,7 +67,8 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       startBots();
       svc.postMessage(alpha.conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'ASK' });
 
-      const said = (id) => db.messages(id, 50).map((r) => r.message.text);
+      const said = (id) => db.messages(id, 50).filter((r) => !r.message.event).map((r) => r.message.text);
+      const activity = (id) => db.messages(id, 50).flatMap((r) => r.message.event?.kind === 'message' ? [r.message.event.text] : []);
       const until = Date.now() + 45000;
       while (Date.now() < until && !said(alpha.conversationId).includes('all done')) await Bun.sleep(100);
       a.deepEqual(said(alpha.conversationId).filter((t) => t !== 'ASK'), ['all done']);
@@ -76,6 +77,9 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       const side = db.listConversations().find((c) => c.kind === 'side');
       a.ok(side.botIds.includes(alpha.bot.id) && side.botIds.includes(beta.bot.id));
       a.deepEqual(said(side.id), ['ping', 'pong']);
+      // Each bot's own chat notes the exchange, linking to the side chat.
+      a.deepEqual(activity(alpha.conversationId), ['Sent a message to Beta']);
+      a.deepEqual(activity(beta.conversationId), ['Received a message from Alpha']);
       for (const name of ['send_message', 'ask_bot', 'bot_web_search', 'remember', 'routine']) a.ok(seenTools.has(name), 'missing ' + name);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });

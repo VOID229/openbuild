@@ -149,6 +149,29 @@ function ThreadLink({ id, children }: { id: string; children: React.ReactNode })
   }}>{children}</a>;
 }
 
+/** Opens a conversation in OpenBots, such as the side chat a message between bots went to. */
+function ConversationLink({ id, children }: { id: string; children: React.ReactNode }) {
+  const known = useBots((s) => s.conversations.some((c) => c.id === id));
+  if (!known) return <>{children}</>;
+  return (
+    <button type="button" className="link bm-conversation-link" onClick={(e) => {
+      // An event row toggles open on click; following its link shouldn't do that as well.
+      e.stopPropagation();
+      useBots.getState().select(id);
+    }}>{children}</button>
+  );
+}
+
+/** A message between bots, from one side: the bot links to its thread, the rest to the side chat. */
+function MessageActivity({ event, other }: { event: NonNullable<BotMessage["event"]>; other: Bot }) {
+  const sent = event.text.startsWith("Sent");
+  return (
+    <>
+      <ConversationLink id={event.conversationId!}>{sent ? "Sent a message" : "Received a message"}</ConversationLink> {sent ? "to" : "from"} <BotLink bot={other} />
+    </>
+  );
+}
+
 /** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
 function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
   return <a className="link" href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
@@ -1111,11 +1134,13 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
             // A start names the bot that did it, looked up by author so a rename shows up on old lines too.
             const starter = m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author) : undefined;
+            // A message between bots names the other bot by id, so a rename shows up on old lines too.
+            const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
                 {m.event!.detail && (
                   <span className="bm-event-detail">

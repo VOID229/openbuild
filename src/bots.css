@@ -1100,14 +1100,16 @@
 
 /* Links in bot chat are blue as well as underlined, so they read as clickable at a glance. */
 .bm-text .link,
-.bm-event-detail .link {
+.bm-event-detail .link,
+.bm-event-text .bm-conversation-link {
   color: var(--file-link);
   text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 @media (hover: hover) {
   .bm-text .link:hover,
-  .bm-event-detail .link:hover {
+  .bm-event-detail .link:hover,
+  .bm-event-text .bm-conversation-link:hover {
     text-decoration-color: currentColor;
   }
 }
@@ -1391,6 +1393,14 @@
   align-items: center;
   gap: 5px;
   color: var(--text-2);
+}
+
+/* A button that reads as a link, inside an activity line. */
+.bm-conversation-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
 }
 
 .bm-bot-link {
