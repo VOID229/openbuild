@@ -1,6 +1,6 @@
 // Custom select controls used in Settings, styled like the composer's pickers.
 import { Check, ChevronDown, CircleAlert } from "lucide-react";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { type Effort } from "../../shared/types";
 import { findModel, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
@@ -193,10 +193,54 @@ export function EffortSelect({ value, levels, onChange, label }: { value: Effort
   );
 }
 
+/**
+ * Keyboard use of a select's menu, which lives in <body> out of the tab order: opening it from the
+ * keyboard (Enter, Space or ↓) moves focus to the chosen option, and closing it from inside hands
+ * focus back to the trigger. Opening it with the mouse leaves focus alone.
+ */
+export function useSelectKeys(open: boolean, setOpen: (open: boolean) => void, anchor: RefObject<HTMLButtonElement | null>) {
+  const list = useRef<HTMLDivElement>(null);
+  const fromKeys = useRef(false);
+  useEffect(() => {
+    if (!open || !fromKeys.current) return;
+    // Two frames: the popover is hidden until it's been measured and placed.
+    let inner = 0;
+    const outer = requestAnimationFrame(() => {
+      inner = requestAnimationFrame(() => {
+        const el = list.current;
+        (el?.querySelector<HTMLElement>('[aria-selected="true"]') ?? el?.querySelector<HTMLElement>("button:not(:disabled)"))?.focus({ preventScroll: true });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(outer);
+      cancelAnimationFrame(inner);
+    };
+  }, [open]);
+  const close = () => {
+    if (list.current?.contains(document.activeElement)) anchor.current?.focus();
+    setOpen(false);
+  };
+  const trigger = {
+    // A click from the keyboard has no pointer behind it, so its detail is 0.
+    onClick: (e: React.MouseEvent) => {
+      fromKeys.current = e.detail === 0;
+      setOpen(!open);
+    },
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.key !== "ArrowDown" || open) return;
+      e.preventDefault();
+      fromKeys.current = true;
+      setOpen(true);
+    },
+  };
+  return { list, close, trigger };
+}
+
 /** Themed dropdown for a short fixed list of options. An option's icon stands in for its label on the closed trigger. */
-export function OptionSelect<T extends string>({ value, options, onChange, label, className }: { value: T; options: { value: T; label: string; icon?: ReactNode }[]; onChange: (v: T) => void; label: string; className?: string }) {
+export function OptionSelect<T extends string>({ value, options, onChange, label, className, disabled }: { value: T; options: { value: T; label: string; icon?: ReactNode }[]; onChange: (v: T) => void; label: string; className?: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
+  const keys = useSelectKeys(open, setOpen, anchor);
   const current = options.find((o) => o.value === value);
   return (
     <span className={cx("select-wrap", className)}>
@@ -208,13 +252,14 @@ export function OptionSelect<T extends string>({ value, options, onChange, label
         aria-expanded={open}
         aria-label={current?.icon ? `${label}: ${current.label}` : label}
         data-tooltip={current?.icon && !open ? current.label : undefined}
-        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        {...keys.trigger}
       >
         {current?.icon ?? <span className="select-value">{current?.label ?? value}</span>}
         <ChevronDown size={14} className="select-chevron" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu select-menu" role="listbox" label={label} fixed="auto">
-        <div onKeyDown={(e) => arrowNav(e)}>
+      <Popover open={open && !disabled} onClose={keys.close} anchor={anchor} className="menu select-menu" role="listbox" label={label} fixed="auto">
+        <div ref={keys.list} onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => (
             <button
               key={o.value}
@@ -224,7 +269,7 @@ export function OptionSelect<T extends string>({ value, options, onChange, label
               className="menu-item"
               onClick={() => {
                 onChange(o.value);
-                setOpen(false);
+                keys.close();
               }}
             >
               {o.icon}
