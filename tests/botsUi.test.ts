@@ -88,6 +88,47 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
   expect(stdout.trim()).toBe("ok");
 });
 
+test("an update to a message from before the loaded ones doesn't land at the bottom of the chat", async () => {
+  const script = `
+    import { mock } from "bun:test";
+    import { resolve } from "node:path";
+    import assert from "node:assert/strict";
+    mock.module(resolve("src/lib/store.ts"), () => ({ useStore: { getState: () => ({ settings: { profile: {} } }) } }));
+    globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+    const { useBots } = await import(resolve("src/lib/bots/store.ts"));
+    const group = { id: "group", kind: "group", name: "G", botIds: ["a", "b"], createdAt: 1, updatedAt: 30, more: true, messages: [
+      { id: "m20", author: "me", text: "recent", at: 20 },
+      { id: "m30", author: "a", text: "latest", at: 30 },
+    ] };
+    const snapshot = { bots: [], conversations: [group], settings: { sections: [] }, typing: {}, drafts: [], status: {} };
+    globalThis.fetch = async (path) => {
+      if (path === "/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
+        const events = [
+          { t: "snapshot", ...snapshot },
+          // Waking on @all, a bot marks an early prompt seen and votes on an old, closed poll.
+          { t: "message", conversationId: "group", message: { id: "m1", author: "me", text: "early prompt", at: 1, seenBy: ["b"] } },
+          { t: "message", conversationId: "group", message: { id: "m5", author: "a", text: "", at: 5, poll: { question: "Old?", options: [] } } },
+          { t: "message", conversationId: "group", message: { id: "m25", author: "b", text: "in between", at: 25 } },
+          { t: "message", conversationId: "group", message: { id: "m40", author: "b", text: "new", at: 40 } },
+        ];
+        controller.enqueue(new TextEncoder().encode(events.map((e) => JSON.stringify(e)).join("\\n") + "\\n"));
+      } }));
+      return Response.json({ ok: true });
+    };
+    useBots.getState().ensureSeeded();
+    await new Promise((r) => setTimeout(r, 10));
+    const c = useBots.getState().conversations[0];
+    assert.deepEqual(c.messages.map((m) => m.id), ["m20", "m25", "m30", "m40"]);
+    assert.equal(c.updatedAt, 40);
+    console.log("ok");
+    process.exit(0);
+  `;
+  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
+  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
+  expect(stdout.trim()).toBe("ok");
+});
+
 test("bots paint from the cache, then the server's snapshot replaces it and is cached in turn", async () => {
   const script = `
     import { mock } from "bun:test";
