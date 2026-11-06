@@ -40,14 +40,20 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
         a.ok(!prompt.includes('USER_SYSTEM_CANARY'), prompt);
         a.ok(!prompt.includes('USER_APPEND_CANARY'), prompt);
         a.ok(prompt.includes("one of the user's bots in OpenBots"), prompt);
-        for (const t of body.tools ?? []) seenTools.add(t.function.name);
+        a.ok(prompt.includes('For every tool that has a status parameter'), prompt);
+        for (const t of body.tools ?? []) {
+          seenTools.add(t.function.name);
+          if (['ask_bot', 'bot_web_search', 'bash', 'use_app'].includes(t.function.name)) {
+            a.ok(t.function.parameters.required.includes('status'), JSON.stringify(t));
+          }
+        }
         const last = body.messages.at(-1);
         const text = JSON.stringify(last.content);
         let out;
-        if (last.role === 'tool' && text.includes('pong')) out = use('bot_web_search', { query: 'tea', provider: 'searxng' });
+        if (last.role === 'tool' && text.includes('pong')) out = use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' });
         else if (last.role === 'tool' && text.includes('Tea result')) out = say('all done');
         else if (last.role === 'tool') out = say('tool failed: ' + text.slice(0, 300));
-        else if (text.includes('ASK')) out = use('ask_bot', { bot: 'Beta', text: 'ping' });
+        else if (text.includes('ASK')) out = use('ask_bot', { bot: 'Beta', text: 'ping', status: 'Checking with Beta' });
         else out = say('pong');
         return new Response(out, { headers: { 'content-type': 'text/event-stream' } });
       } });

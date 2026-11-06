@@ -47,12 +47,12 @@ const fail = (err: unknown) => ({ content: text(`Error: ${err instanceof Error ?
 
 // These already show as typing or need no status line.
 const NO_STATUS = new Set(["send_message", "react", "question", "poll"]);
-const status = { type: "string", description: "Optional. A few words the user sees while this runs, saying what it's for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
+const status = { type: "string", minLength: 1, description: "Required. A short custom status (a few words, at most 50 characters) the user sees while this runs. Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
 
-/** Add the optional status to a work tool's parameters. */
+/** Require a custom status in a work tool's parameters. */
 function withStatus(name: string, parameters: object) {
-  const schema = parameters as { properties?: Record<string, unknown> };
-  return NO_STATUS.has(name) ? parameters : { ...schema, properties: { ...schema.properties, status } };
+  const schema = parameters as { properties?: Record<string, unknown>; required?: string[] };
+  return NO_STATUS.has(name) ? parameters : { ...schema, properties: { ...schema.properties, status }, required: [...(schema.required ?? []), "status"] };
 }
 
 /** The tool's own parameters, without the status meant for the user. */
