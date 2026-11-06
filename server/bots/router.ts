@@ -1,6 +1,7 @@
 // A private, stateless decision: never runs a bot turn or writes to a conversation.
 import type { Bot, BotMessage } from "../../shared/bots";
-import { complete } from "../pi/sessions";
+import type { complete as Complete } from "../pi/sessions";
+const complete: typeof Complete = async (...args) => (await import("../pi/sessions")).complete(...args);
 
 type Member = Pick<Bot, "id" | "name" | "instructions" | "model">;
 
