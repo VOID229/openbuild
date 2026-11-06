@@ -547,7 +547,8 @@ export const useStore = create<State>()(
       },
       setPiCache: (patch, deviceId) => set((s) => withPi(s, deviceId, patch)),
       loadDevices: async () => {
-        let remote: Device[] = [];
+        // A failed list isn't an empty one: keep the paired devices already known until it answers.
+        let remote = get().devices.filter((d) => !d.local);
         try {
           remote = await listDevices();
         } catch {}

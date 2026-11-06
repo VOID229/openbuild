@@ -87,12 +87,24 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
   return { value: c.value, at: c.at, error: c.error, pending: !!c.running };
 }
 
-export const remoteDevices = () => devices.readDevices();
+/** Paired devices, read fresh each time; an unpaired device's cached answers are dropped with it. */
+export function remoteDevices() {
+  const list = devices.readDevices();
+  const m = hot.usageRemote;
+  if (m) {
+    const paired = new Set(list.map((d) => d.id));
+    let dropped = false;
+    for (const k of m.keys()) if (!paired.has(k.slice(0, k.indexOf("|")))) dropped = m.delete(k);
+    if (dropped) save(m);
+  }
+  return list;
+}
 
 // ------------------------------------------------------------------ reports
 
 /** One report per machine; `machine` picks one (this one is "local") or "all". */
 export async function machineReports(range: UsageRange, tz: string, force: boolean, local: () => Promise<UsageReport>) {
+  await store();
   const list = remoteDevices().filter((d) => !d.external);
   const path = `/api/usage?scope=local&range=${range}&tz=${encodeURIComponent(tz)}`;
   const [mine, ...theirs] = await Promise.all([local(), ...list.map((d) => remote<UsageReport>(d, `report:${range}:${tz}`, path, force))]);
@@ -209,6 +221,7 @@ const ACCOUNT_IDS = new Set<UsageProvider>(["claude", "codex"]);
 
 /** Limits from every machine; an account signed in on several shows once, from its freshest reading. */
 export async function machineLimits(force: boolean, local: () => Promise<UsageLimits[]>): Promise<UsageLimitsReport> {
+  await store();
   const list = remoteDevices();
   const [mine, ...theirs] = await Promise.all([local(), ...list.map((d) => remote<UsageLimitsReport>(d, "limits", "/api/usage/limits?scope=local", force))]);
   const byId = new Map<string, UsageLimits>();

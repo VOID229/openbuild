@@ -87,12 +87,21 @@ export function UsagePage() {
       setBusy(false);
     }
   };
-  // Machines are known from any answer; the last one keeps the picker steady while switching.
-  const machines = (report.data?.machines ?? lim.data?.machines ?? []).filter((m) => !m.external);
+  // The machines the shown answer comes from, so the picker names the same ones as Limits'
+  // problems; the other answer keeps it steady while this one loads.
+  const shown = tab === "limits" ? (lim.data ?? report.data) : (report.data ?? lim.data);
+  const machines = (shown?.machines ?? []).filter((m) => !m.external);
   // The picked device may have been marked external or unpaired since.
   useEffect(() => {
-    if (machine !== "all" && report.data?.machines && !machines.some((m) => m.id === machine)) setMachine("all");
-  }, [machine, report.data, machines]);
+    if (machine !== "all" && report.data?.machines && !report.data.machines.some((m) => m.id === machine && !m.external)) setMachine("all");
+  }, [machine, report.data]);
+  // Usage reads the server's paired devices on every answer; when they differ from the device list
+  // this page loaded (paired or unpaired elsewhere since), reload it so the device pickers agree.
+  const paired = useStore((s) => (s.devicesLoaded ? s.devices.filter((d) => !d.local && !d.external).map((d) => d.id).sort().join() : undefined));
+  const answered = shown?.machines?.filter((m) => !m.local && !m.external).map((m) => m.id).sort().join();
+  useEffect(() => {
+    if (paired !== undefined && answered !== undefined && paired !== answered) void useStore.getState().loadDevices().catch(() => {});
+  }, [paired, answered]);
 
   return (
     <div className="ustats">

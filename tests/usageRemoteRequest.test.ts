@@ -38,3 +38,15 @@ test("tries another address after an immediate HTTP failure", async () => {
     expect(calls).toBe(2);
   } finally { server.stop(true); }
 });
+
+test("a revoked pairing says so instead of trying every address", async () => {
+  let calls = 0;
+  const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch() {
+    calls++;
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  } });
+  try {
+    await expect(requestUsage([server.url.href, server.url.href], "/usage", "test")).rejects.toThrow("no longer accepts this pairing");
+    expect(calls).toBe(1);
+  } finally { server.stop(true); }
+});
