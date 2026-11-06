@@ -98,6 +98,20 @@ describe("clean URLs", () => {
     expect(history.state?.botsLayer).toBeUndefined();
   });
 
+  test("Usage opened from OpenBots stays there, and closing it goes back to OpenBots", () => {
+    expect(readRoute("/bots/usage")).toEqual({ bots: true, usage: true });
+    const h = harness("/bots");
+    h.store.setState({ usageOpen: true } as never);
+    expect(h.location.pathname).toBe("/bots/usage");
+    const stop = h.reload();
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, usageOpen: true });
+    h.store.setState({ usageOpen: false } as never);
+    expect(h.location.pathname).toBe("/bots");
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, usageOpen: true });
+    stop();
+  });
+
   test("archiving or deleting the active thread routes back to new", () => {
     const h = harness("/thread-abc");
     h.store.setState({ activeChatId: undefined });
