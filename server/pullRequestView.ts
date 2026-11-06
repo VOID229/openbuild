@@ -5,6 +5,8 @@
 // Actions name the repository with `--repo`. Besides being explicit, that keeps `gh pr merge
 // --delete-branch` away from local branches: a worktree's checkout is the thread's, not ours to switch.
 import { existsSync } from "node:fs";
+import { findProject } from "./projects";
+import { pullRequestChatSummaries } from "./storage";
 import { mergeUnsettled } from "../shared/pullReadiness";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../shared/types";
 import { checksOf, FAILED, sweep } from "./pullRequests";
@@ -177,7 +179,16 @@ const validSha = (sha: unknown): string => {
 const REPO_TTL = 60_000;
 const repos = new Map<string, { at: number; repo: GhRepo }>();
 
+// Persisted workspace ownership survives server restarts and worktree cleanup.
+function survivingCheckout(cwd: string): string {
+  if (existsSync(cwd)) return cwd;
+  const thread = pullRequestChatSummaries().find(c => c.workspace?.cwd === cwd && !c.workspace.deviceId);
+  const project = thread?.workspace?.projectId && findProject(thread.workspace.projectId);
+  return project && existsSync(project.path) ? project.path : cwd;
+}
+
 async function repoOf(cwd: string): Promise<GhRepo> {
+  cwd = survivingCheckout(cwd);
   const known = repos.get(cwd);
   if (known && (Date.now() - known.at < REPO_TTL || !existsSync(cwd))) return known.repo;
   const r = await run([bin(), "repo", "view", "--json", "nameWithOwner,url,squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed,viewerPermission"], cwd, READ_TIMEOUT);
@@ -220,7 +231,7 @@ async function whereIs(cwd: string): Promise<{ common: string; branch: string } 
 // Remember the repository while the thread exists: a merge can remove its worktree.
 const locations = new Map<string, string>();
 const repoKey = async (cwd: string) => {
-  if (!existsSync(cwd)) return locations.get(cwd) ?? cwd;
+  if (!existsSync(cwd)) return locations.get(cwd) ?? survivingCheckout(cwd);
   const common = (await whereIs(cwd))?.common ?? cwd;
   locations.set(cwd, common);
   return common;
