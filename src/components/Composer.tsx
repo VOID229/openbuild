@@ -368,10 +368,15 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const dictation = useFieldDictation({ value: text, setValue: setText, field: textarea, onError: setNotice, fallback: true });
   useEffect(() => { dictation.cancel(); }, [draftKey]);
 
-  // Auto-size the textarea to its content.
+  // Auto-size the textarea to its content. Measuring lays out the whole page there and then, and the
+  // thread coming back from OpenBots runs this again, so it's skipped when nothing it measures changed.
+  const sized = useRef<{ el: HTMLTextAreaElement; key: string }>(undefined);
   useLayoutEffect(() => {
     const el = textarea.current;
     if (!el) return;
+    const key = `${window.innerHeight}:${text}`;
+    if (sized.current?.el === el && sized.current.key === key) return;
+    sized.current = { el, key };
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, window.innerHeight * 0.4)}px`;
   }, [text]);

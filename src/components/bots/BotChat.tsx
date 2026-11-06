@@ -1372,9 +1372,12 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     mounted.current = true;
   }, [text, images]);
 
+  // Measuring lays out the whole page, and coming back to OpenBots runs this again: skipped when the text is the same.
+  const sized = useRef<{ el: HTMLTextAreaElement; text: string }>(undefined);
   useLayoutEffect(() => {
     const el = input.current;
-    if (!el) return;
+    if (!el || (sized.current?.el === el && sized.current.text === text)) return;
+    sized.current = { el, text };
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
   }, [text]);
