@@ -541,7 +541,7 @@ async function close(botId: string, p: Record<string, unknown>) {
       note = `The worktree stayed: ${(err as Error).message}`;
     });
   }
-  record(botId, "Closed a thread", current.title);
+  record(botId, "Closed a thread", current.title, chat.id);
   return { closed: true, ...(note ? { note } : {}) };
 }
 
@@ -551,13 +551,19 @@ function ownsPull(botId: string, projectId: string, number: number) {
 }
 
 /** Where a pull request is looked up: the thread's checkout, or a project's. */
-function pullFolder(access: BotThreadAccess, p: Record<string, unknown>, controller?: string): { cwd: string; number?: number } {
+function pullFolder(access: BotThreadAccess, p: Record<string, unknown>, controller?: string): { cwd: string; number?: number; threadId?: string; projectId?: string } {
   const number = typeof p.number === "number" ? p.number : undefined;
   if (p.thread) {
     const chat = controller ? controlledThread(controller, access, p.thread) : grantedThread(access, p.thread);
-    return { cwd: chat.workspace!.cwd, number: number ?? chat.pullRequest?.number };
+    return { cwd: chat.workspace!.cwd, number: number ?? chat.pullRequest?.number, threadId: chat.id };
   }
-  return { cwd: grantedProject(access, p.project).path, number };
+  const project = grantedProject(access, p.project);
+  return { cwd: project.path, number, projectId: project.id };
+}
+
+/** The thread a project's pull request came from, if one did. */
+function pullThread(projectId: string, number: number) {
+  return storage.pullRequestChatSummaries().find((c) => c.workspace?.projectId === projectId && c.pullRequest?.number === number)?.id;
 }
 
 async function pr(botId: string, p: Record<string, unknown>) {
@@ -581,9 +587,9 @@ async function pr(botId: string, p: Record<string, unknown>) {
 async function merge(botId: string, p: Record<string, unknown>) {
   const access = accessOf(botId);
   if (!access.merge) throw refuse("You aren't allowed to merge pull requests. Ask the user to, or to let you in Settings → Bots.", 403);
-  const { cwd, number } = pullFolder(access, p, botId);
+  const { cwd, number, threadId, projectId } = pullFolder(access, p, botId);
   if (!number) throw refuse("That thread has no pull request yet. Name its number, if it has one.");
-  if (!access.others && !p.thread && !ownsPull(botId, grantedProject(access, p.project).id, number)) throw refuse(`You didn't open #${number} from a thread you started, and you can only control your own threads. Ask the user, or to let you in Settings → Bots.`, 403);
+  if (!access.others && projectId && !ownsPull(botId, projectId, number)) throw refuse(`You didn't open #${number} from a thread you started, and you can only control your own threads. Ask the user, or to let you in Settings → Bots.`, 403);
   const detail = await pullRequestView.view(cwd, number);
   const standing = mergeReadiness(detail);
   if (!standing.canMerge) throw refuse(`Can't merge #${number}: ${standing.text}.`, 409);
@@ -592,7 +598,7 @@ async function merge(botId: string, p: Record<string, unknown>) {
   const method = p.method === undefined ? detail.methods[0] : p.method;
   if (!detail.methods.includes(method as (typeof detail.methods)[number])) throw refuse(`This repository merges with: ${detail.methods.join(", ")}.`);
   await pullRequestView.merge(cwd, number, method, detail.headSha, p.delete_branch === true);
-  record(botId, "Merged a pull request", `#${number} ${detail.title}`);
+  record(botId, "Merged a pull request", `#${number} ${detail.title}`, threadId ?? (projectId ? pullThread(projectId, number) : undefined));
   return { merged: true, number, url: detail.url };
 }
 

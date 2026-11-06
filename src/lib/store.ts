@@ -265,6 +265,8 @@ interface State {
   usageOpen: boolean;
   /** OpenBots is showing: its own sidebar and chat in place of threads. */
   botsOpen: boolean;
+  /** Over OpenBots, the open thread shows in place of the bot chat (opened from a link there). */
+  botsThread: boolean;
   /** Projects threads can work in (from this server, and from paired devices). Remote ids are namespaced. */
   projects: Project[];
   projectsLoaded: boolean;
@@ -340,6 +342,8 @@ interface State {
   setSpeed: (speed: string | undefined, selection?: Selection) => void;
   newChat: () => void;
   selectChat: (id: string) => void;
+  /** Open a thread inside OpenBots, keeping its sidebar, with a way back to the bot chat. */
+  openThreadInBots: (id: string) => void;
   removeChat: (id: string) => void;
   removeAllChats: () => void;
   setChats: (chats: Chat[]) => void;
@@ -395,6 +399,7 @@ export const useStore = create<State>()(
       settingsSection: "profile",
       usageOpen: false,
       botsOpen: false,
+      botsThread: false,
       projects: [],
       projectsLoaded: false,
       devices: [],
@@ -746,7 +751,7 @@ export const useStore = create<State>()(
       closeSettings: () => set({ settingsOpen: false }),
       // Usage opens over whichever side is showing, so closing it goes back there; switching sides closes it.
       setUsageOpen: (open) => set({ usageOpen: open }),
-      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false }),
+      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false, botsThread: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 
@@ -790,13 +795,18 @@ export const useStore = create<State>()(
         activeChatId: undefined,
         usageOpen: false,
         botsOpen: false,
+        botsThread: false,
         searchFocus: undefined,
         settings: s.settings.workspace.defaultMode === "last-used"
           ? s.settings
           : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },
       })),
       selectChat: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: false });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: false, botsThread: false });
+        if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
+      },
+      openThreadInBots: (id) => {
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: true, botsThread: true });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       removeChat: (id) => {

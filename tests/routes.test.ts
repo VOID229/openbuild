@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { readRoute, startRouting, threadPath } from "../src/lib/routes";
 
 function harness(url = "/new") {
-  let state = { activeChatId: undefined as string | undefined, settingsOpen: false, settingsSection: "profile" as import("../src/lib/store").SettingsSection, chats: [{ id: "abc" }, { id: "def" }] };
+  let state = { activeChatId: undefined as string | undefined, settingsOpen: false, settingsSection: "profile" as import("../src/lib/store").SettingsSection, botsOpen: undefined as boolean | undefined, botsThread: undefined as boolean | undefined, chats: [{ id: "abc" }, { id: "def" }] };
   const subscribers = new Set<() => void>();
   const listeners = new Map<string, () => void>();
   let entries = [{ url, state: null as any }];
@@ -25,7 +25,8 @@ function harness(url = "/new") {
   return {
     store, location, stop, history,
     count: () => entries.length,
-    go(offset: number) { at += offset; updateLocation(); listeners.get("popstate")?.(); },
+    /** `before` is another popstate listener, one that runs ahead of the router's. */
+    go(offset: number, before?: () => void) { at += offset; updateLocation(); before?.(); listeners.get("popstate")?.(); },
     reload() { stop(); return startRouting(store, browser as unknown as Parameters<typeof startRouting>[1]); },
   };
 }
@@ -39,6 +40,7 @@ describe("clean URLs", () => {
     expect(readRoute("/settings/appearance/")).toEqual({ section: "appearance" });
     expect(readRoute("/settings/shortcuts")).toEqual({ section: "shortcuts" });
     expect(readRoute("/settings/invalid")).toEqual({ section: "profile" });
+    expect(readRoute("/bots/thread-abc")).toEqual({ bots: true, threadId: "abc" });
     expect(readRoute("/thread-%ZZ")).toEqual({});
   });
 
@@ -110,6 +112,29 @@ describe("clean URLs", () => {
     h.go(-1);
     expect(h.store.getState()).toMatchObject({ botsOpen: true, usageOpen: true });
     stop();
+  });
+
+  test("a thread opened from OpenBots stays in OpenBots, and Back returns to the bot chat", () => {
+    const h = harness("/bots");
+    h.store.setState({ activeChatId: "abc", botsOpen: true, botsThread: true });
+    expect(h.location.pathname).toBe("/bots/thread-abc");
+    h.go(-1);
+    expect(h.location.pathname).toBe("/bots");
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, botsThread: false });
+    h.go(1);
+    expect(h.store.getState()).toMatchObject({ activeChatId: "abc", botsOpen: true, botsThread: true });
+    // On a phone, gestures.ts hears Back first and changes the store before the route is read.
+    h.go(-1, () => h.store.setState({ chats: [...h.store.getState().chats] }));
+    expect(h.location.pathname).toBe("/bots");
+    expect(h.store.getState().botsThread).toBe(false);
+    h.go(1);
+    expect(h.location.pathname).toBe("/bots/thread-abc");
+    h.stop();
+    // A link to a thread that's gone is the bot chat.
+    const gone = harness("/bots/thread-missing");
+    expect(gone.location.pathname).toBe("/bots");
+    expect(gone.store.getState().botsThread).toBe(false);
+    gone.stop();
   });
 
   test("archiving or deleting the active thread routes back to new", () => {
