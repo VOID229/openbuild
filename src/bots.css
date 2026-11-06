@@ -3449,3 +3449,93 @@ button.bots-details-name:hover {
     width: 100%;
   }
 }
+
+/* ==========================================================================
+   OpenBots — Advanced, folded away at the foot of a bot's details (src/components/bots/BotAdvanced.tsx)
+   ========================================================================== */
+
+.bots-advanced {
+  margin-top: 22px;
+  border-top: 1px solid var(--border);
+}
+
+.bots-advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  text-align: left;
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-advanced-toggle:hover {
+    background: var(--hover);
+  }
+}
+
+.bots-advanced-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bots-advanced-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.bots-advanced-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.bots-advanced-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--med) var(--ease);
+}
+
+.bots-advanced-toggle[aria-expanded="false"] .bots-advanced-chevron {
+  transform: rotate(-90deg);
+}
+
+/* The panel is narrow: every control drops under its label, and the padding keeps focus rings clear of the collapse's clipped edge. */
+.bots-advanced-body {
+  display: flex;
+  flex-direction: column;
+  margin: 0 -2px;
+  padding: 0 2px 2px;
+}
+
+.bots-advanced-body .setting-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px 0;
+}
+
+.bots-advanced-body .setting-row:has(> .toggle) {
+  flex-direction: row;
+  align-items: center;
+}
+
+.bots-advanced-body .bots-set-model {
+  width: 100%;
+}
+
+.bots-advanced-body > .setting-desc {
+  padding: 10px 0 4px;
+}
+
+.bots-advanced-body .bots-pane-label {
+  margin-top: 16px;
+}
