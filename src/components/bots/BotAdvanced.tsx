@@ -88,8 +88,8 @@ export function BotComputer({ bot }: { bot: Bot }) {
           label="Computer"
           value={bot.computer ? `${bot.computer.device}:${bot.computer.kind}` : "local:container"}
           options={[
-            { value: "local:container", label: "Container · this server" },
-            { value: "local:host", label: "Host · this server (unisolated)" },
+            { value: "local:container", label: "Container" },
+            { value: "local:host", label: "Host (unisolated)" },
             ...(bot.computer && bot.computer.device !== "local" ? [{ value: `${bot.computer.device}:${bot.computer.kind}`, label: `${bot.computer.kind} · ${bot.computer.device}` }] : []),
           ]}
           onChange={(value) => {
