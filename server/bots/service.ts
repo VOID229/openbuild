@@ -570,6 +570,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     w.resolve(message);
   }
   const skip = new Set(waiting.map((w) => w.botId));
+  if (c.kind === "side" && message.author !== "me" && !message.event) noteSideMessage(c, message.author);
 
   if (!message.event) {
     if (message.author === "me") {
@@ -593,6 +594,26 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     }
   }
   return message;
+}
+
+/**
+ * A line in each bot's own chat saying a message went between them, linking to the side chat. It never
+ * says what the message was. A back-and-forth adds one line per chat, not one per message: nothing is
+ * added while that chat's latest message is already a line about the same side chat.
+ */
+function noteSideMessage(side: db.StoredConversation, from: string) {
+  const name = (id: string) => db.getBot(id)?.name ?? "a bot";
+  for (const botId of side.botIds) {
+    const own = directId(botId);
+    if (!own || !db.getBot(botId)) continue;
+    const latest = db.messages(own, 1)[0]?.message.event;
+    if (latest?.kind === "message" && latest.conversationId === side.id) continue;
+    const others = side.botIds.filter((id) => id !== botId);
+    const other = botId === from ? others[0] : from;
+    if (!other) continue;
+    const text = botId === from ? `Sent a message to ${name(other)}` : `Received a message from ${name(other)}`;
+    postMessage(own, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "message", text, bot: other, conversationId: side.id } });
+  }
 }
 
 /** Block until another bot writes in this conversation, or the time runs out. */

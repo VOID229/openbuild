@@ -236,7 +236,7 @@ export interface PlanStep {
   status: "todo" | "doing" | "done";
 }
 
-export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread";
+export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread" | "message";
 
 export interface BotMessage {
   id: string;
@@ -248,7 +248,7 @@ export interface BotMessage {
   replyTo?: string;
   reactions?: Reaction[];
   /** Something that happened rather than something said ("Created routine …"), shown as a centred line. */
-  event?: { kind: EventKind; text: string; detail?: string; /** The OpenBuild thread this activity concerns. */ threadId?: string; /** The pull request a merge concerns, on GitHub. */ pullUrl?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string };
+  event?: { kind: EventKind; text: string; detail?: string; /** The OpenBuild thread this activity concerns. */ threadId?: string; /** The pull request a merge concerns, on GitHub. */ pullUrl?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string; /** The between-bots conversation a message activity links to. */ conversationId?: string };
   /** A bot asking the user to pick. */
   question?: Question;
   /** A bot laying out who does what. */
