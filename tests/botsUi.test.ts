@@ -199,7 +199,13 @@ test("composer clears only after ack and routine/memory actions do not fabricate
 test("thread activity details are titles, so bot names inside them don't become bot links", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot');
-  expect(chat).toContain("id ? <ThreadLink id={id}>{event.detail}</ThreadLink> : <>{event.detail}</>");
+  expect(chat).toContain("id ? <ThreadLink id={id}>{title}</ThreadLink> : <>{title}</>");
+});
+
+test("a merge's pull request number and thread title are separate links", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain("<PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}");
+  expect(chat).toContain("if (event.pullUrl) return event.pullUrl;");
 });
 
 test("thread links in a bot chat open the thread inside OpenBots", async () => {
