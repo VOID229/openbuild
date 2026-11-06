@@ -230,21 +230,21 @@ const PRIMARY = {
 export const TEAM: { name: string; look: Bot["look"]; instructions: string; threads?: Bot["threads"] }[] = [
   {
     name: "Manager",
-    look: { shape: "gem", color: "blue" },
+    look: { shape: "jelly", color: "amber" },
     instructions:
       "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green, and close threads when they're done. Ask Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
     threads: { enabled: true, scope: "all", projects: [], merge: true },
   },
   {
     name: "Tracer",
-    look: { shape: "spark", color: "orange" },
+    look: { shape: "pill", color: "blue" },
     instructions:
       "You check the work. Review pull requests and point out real bugs first, style last. Spot bugs, write tests, try to reproduce a reported bug before anyone fixes it, and check a fix didn't break something else. In polls and brainstorms give your honest opinion, with your reasons.",
     threads: { enabled: true, scope: "all", projects: [] },
   },
   {
     name: "Researcher",
-    look: { shape: "drop", color: "teal" },
+    look: { shape: "orb", color: "green" },
     instructions:
       "You find things out. Search the web, find things in repositories, and check GitHub and the status of the user's organisation: pull requests, issues, checks, releases. Say where each answer came from, and say so when you couldn't find something.",
   },
