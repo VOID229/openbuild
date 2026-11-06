@@ -362,7 +362,6 @@
   }
 
   .bm-option:active:not(:disabled),
-  .bots-chip:active,
   .bots-pick:active,
   .bm-reaction:active,
   .bots-toggle:active,
@@ -398,7 +397,6 @@
   .reasoning-toggle,
   .history-heading-toggle,
   .scroll-down,
-  .bots-chip,
   .bots-pick,
   .bots-toggle,
   .bots-composer-btn {
@@ -423,7 +421,6 @@
   .reasoning-toggle:active,
   .history-heading-toggle:active,
   .scroll-down:active,
-  .bots-chip:active,
   .bots-pick:active,
   .bots-toggle:active,
   .bots-composer-btn:active {
@@ -922,13 +919,6 @@
     max-width: none;
     margin: 0;
     padding: calc(var(--bots-head-h) + 16px) 24px 16px;
-  }
-
-  .bots-chip {
-    height: 40px;
-    padding: 0 16px;
-    border-radius: 20px;
-    font-size: 15px;
   }
 
   .bots-btn {

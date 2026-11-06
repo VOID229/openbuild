@@ -324,46 +324,66 @@ test("web search uses the user's providers and keeps their keys from the bot", a
   }
 });
 
-test("the first bot writes its own welcome, only when OpenBots is first opened", async () => {
+test("Dr Eggbot introduces itself on first open and offers the starter team", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
+      import { contextFor } from './server/bots/agent.ts';
       const woken = [];
       svc.setHooks({ wake: (botId, wake) => woken.push({ botId, wake }), stop() {} });
       svc.ensureStarted();
       const bot = db.listBots()[0];
       const conversationId = svc.directId(bot.id);
       a.equal(bot.primary, true);
+      a.equal(bot.name, 'Dr Eggbot');
+      a.match(bot.instructions, /primary bot/);
       a.equal(svc.getSettings().onboarding, 'active');
       a.equal(db.messages(conversationId, 10).length, 0);
-      a.equal(woken.length, 0);
 
       svc.greetOnFirstOpen();
-      a.deepEqual(woken.map(w => [w.botId, w.wake.kind, w.wake.conversationId]), [[bot.id, 'note', conversationId]]);
+      const said = db.messages(conversationId, 10).map(r => r.message);
+      a.equal(said.length, 3);
+      a.ok(said.every(m => m.author === bot.id));
+      a.match(said[0].text, /Dr Eggbot, your primary bot/);
+      const offer = said[2];
+      a.equal(offer.question.offer, 'team');
+      a.deepEqual(offer.question.options.map(o => o.label), ['Set up the team', 'Not now']);
+      a.equal(svc.getSettings().onboarding, 'done');
+      a.equal(woken.length, 0, 'the welcome needs no model call');
+      a.match(contextFor(bot.id), /starter team/);
 
-      // Still working on it: a second tab doesn't ask twice.
-      svc.setStatus(bot.id, { state: 'working' });
+      // Opening it again is just opening it.
       svc.greetOnFirstOpen();
-      a.equal(woken.length, 1);
+      a.equal(db.messages(conversationId, 10).length, 3);
 
-      // A failed try stays visible for a moment, then the next open clears it and tries again.
-      svc.setStatus(bot.id, { state: 'idle' });
-      const failure = { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text: '', event: { kind: 'error', text: "Couldn't reply" } };
-      db.addMessage(conversationId, failure);
-      svc.greetOnFirstOpen();
-      a.equal(woken.length, 1);
-      db.updateMessage({ ...failure, at: Date.now() - 61_000 });
-      svc.greetOnFirstOpen();
-      a.equal(woken.length, 2);
-      a.equal(db.messages(conversationId, 10).length, 0);
+      // Taking the offer makes the team, with a group, once.
+      svc.answerQuestion(conversationId, offer.id, 'A');
+      svc.answerQuestion(conversationId, offer.id, 'A');
+      const team = db.listBots().filter(b => !b.primary);
+      a.deepEqual(team.map(b => b.name).sort(), ['Manager', 'Researcher', 'Tracer']);
+      a.ok(team.every(b => b.by === bot.id && b.instructions));
+      const byName = Object.fromEntries(team.map(b => [b.name, b]));
+      a.equal(byName.Manager.threads.enabled, true);
+      a.equal(byName.Manager.threads.merge, true);
+      a.equal(byName.Tracer.threads.enabled, true);
+      a.equal(byName.Tracer.threads.merge, false);
+      a.equal(byName.Researcher.threads, undefined);
+      const group = db.listConversations().find(c => c.kind === 'group');
+      a.equal(group.name, 'Team');
+      a.deepEqual([...group.botIds].sort(), [bot.id, ...team.map(b => b.id)].sort());
+      a.equal(db.messages(conversationId, 20).filter(r => r.message.event?.kind === 'created').length, 3);
+      a.equal(woken.length, 0, 'the new bots wait to be spoken to');
 
-      // Once anything has been said, opening it again is just opening it.
-      svc.postMessage(conversationId, { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text: 'Welcome!' });
-      svc.greetOnFirstOpen();
-      a.equal(woken.length, 2);
+      // Saying no makes nothing.
+      await svc.resetAll();
+      const again = db.listBots()[0];
+      const chat = svc.directId(again.id);
+      const card = db.messages(chat, 10).map(r => r.message).find(m => m.question);
+      svc.answerQuestion(chat, card.id, 'B');
+      a.equal(db.listBots().length, 1);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

@@ -149,6 +149,16 @@ export const SHAPES: Shape[] = [
     face: { x: 56, y: 52, gap: 14 },
   },
   {
+    id: "egg",
+    label: "Egg",
+    // Narrower at the top than the bottom.
+    path: smooth(Array.from({ length: 64 }, (_, i) => {
+      const t = (i / 64) * TAU;
+      return [50 + Math.cos(t) * 33 * (1 + 0.2 * Math.sin(t)), 51 + Math.sin(t) * 41] as Point;
+    })),
+    face: { x: 55, y: 56, gap: 14 },
+  },
+  {
     id: "pill",
     label: "Pill",
     path: roundedPolygon(rect(78, 48, -10), 24),

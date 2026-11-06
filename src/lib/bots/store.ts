@@ -29,8 +29,6 @@ interface BotsState {
   connected: boolean;
   /** The server's state has arrived. Until then an empty list means "not known yet", not "no bots". */
   loaded: boolean;
-  /** The primary bot is still welcoming the user. */
-  onboarding: boolean;
   clearError: () => void;
   loadOlder: (conversationId: string) => Promise<void>;
   /** Sections the user made, in order. */
@@ -110,7 +108,6 @@ export const useBots = create<BotsState>()(
       status: {},
       connected: true,
       loaded: false,
-      onboarding: false,
       clearError: () => set({ error: undefined }),
       loadOlder: async (id) => {
         const c = get().conversations.find((c) => c.id === id);
@@ -486,7 +483,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       typing: e.typing,
       drafts: e.drafts,
       status: e.status,
-      onboarding: e.settings.onboarding === "active",
       defaultModel: e.settings.defaultModel,
       searxng: e.settings.searxng ?? [],
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
@@ -570,6 +566,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set({ sections: e.settings.sections, onboarding: e.settings.onboarding === "active", defaultModel: e.settings.defaultModel, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
+    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
   }
 }

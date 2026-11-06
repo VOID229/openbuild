@@ -1623,36 +1623,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   );
 }
 
-/** A conversation with nothing in it yet: the bot says hello and offers a start. */
-function Hello({ conversation }: { conversation: Conversation }) {
-  const bots = useBots((s) => s.bots);
-  const pulses = useBots((s) => s.pulses);
-  const bot = bots.find((b) => b.id === conversation.botIds[0]);
-  if (!bot) return null;
-  const starts = ["What can you do?", "Introduce yourself", "Help me plan my week"];
-  return (
-    <div className="bots-hello">
-      <BotAvatar look={bot.look} size={120} lively track playful pulse={pulses[bot.id]} />
-      <h2>{bot.name}</h2>
-      <p>{bot.instructions || "A new bot. Tell it what it's for, or just say hi."}</p>
-      <div className="bots-hello-starts">
-        {starts.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="bots-chip"
-            onClick={() => {
-              void useBots.getState().post(conversation.id, { author: "me", text: s }).then((m) => { if (m) respond(conversation.id, m); });
-            }}
-          >
-            {s}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export function BotChat({ conversation }: { conversation: Conversation }) {
   const bots = useBots((s) => s.bots);
   const detailsOpen = useBots((s) => s.detailsOpen);
@@ -1670,23 +1640,6 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const [openedAt] = useState(Date.now);
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
-  // The hello is for bots the user made, which wait to be spoken to. The primary bot welcomes the user
-  // and bots it makes introduce themselves, so their chat shows them at work from the start; so does
-  // any bot already writing in it.
-  const active = useBots((s) => {
-    const id = conversation.botIds[0];
-    const bot = s.bots.find((b) => b.id === id);
-    if (!bot) return false;
-    const st = s.status[bot.id];
-    return (
-      (!!bot.by && bot.by !== "me") ||
-      (s.onboarding && !!bot.primary) ||
-      (st?.state === "working" && st.conversationId === conversation.id) ||
-      !!s.typing[conversation.id]?.length ||
-      s.drafts.some((d) => d.conversationId === conversation.id)
-    );
-  });
-  const empty = conversation.kind === "direct" && !conversation.messages.length && !active;
   const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
   const sub = typing ? "typing…" : activity ?? members;
   return (
@@ -1706,7 +1659,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </span>
         </button>
       </div>
-      {empty ? <Hello conversation={conversation} /> : <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />}
+      <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />
       {conversation.kind === "side" ? (
         <div className="bots-dock">
           <div className="bots-side-note">
