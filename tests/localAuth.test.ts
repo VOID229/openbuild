@@ -30,14 +30,45 @@ afterEach(() => {
 });
 
 describe("local password authentication", () => {
-  test("fails closed before configuration and reports only public status", async () => {
+  test("is open without a password, and issues no cookies for it", async () => {
     const { auth } = fixture();
     expect(auth.configured()).toBe(false);
-    expect(auth.authorize(request())?.status).toBe(401);
-    expect(await auth.authorize(request())!.json()).toEqual({ error: "Unauthorized" });
-    expect(await auth.status(request()).json()).toEqual({ configured: false, authenticated: false });
+    expect(auth.authorize(request())).toBeUndefined();
+    const status = auth.status(request());
+    expect(await status.json()).toEqual({ configured: false, authenticated: true });
+    expect(status.headers.get("set-cookie")).toBeNull();
+    const protectedResponse = await auth.protect(request(), () => new Response("ok"));
+    expect(await protectedResponse.text()).toBe("ok");
+    expect(protectedResponse.headers.get("set-cookie")).toBeNull();
     expect((await auth.login(loginRequest())).status).toBe(503);
     expect(auth.logout(request()).status).toBe(200);
+  });
+
+  test("a browser can set the first password, then remove it with the current one", async () => {
+    const { auth, directory } = fixture();
+    const send = (body: object, method = "POST", cookie?: string) =>
+      new Request("http://localhost/password", { method, headers: cookie ? { cookie } : {}, body: JSON.stringify(body) });
+    expect((await auth.verify(send({ password: PASSWORD }))).status).toBe(409);
+    expect((await auth.change(send({ password: "abc" }))).status).toBe(400);
+    const cookie = session(await auth.change(send({ password: PASSWORD })));
+    expect(auth.configured()).toBe(true);
+    expect(auth.authorize(request())?.status).toBe(401);
+    expect(auth.authorize(request(cookie))).toBeUndefined();
+
+    expect((await auth.remove(send({ current: PASSWORD }, "DELETE"))).status).toBe(401);
+    expect((await auth.remove(send({ current: "wrong password" }, "DELETE", cookie))).status).toBe(403);
+    expect(auth.configured()).toBe(true);
+    expect((await auth.remove(send({ current: PASSWORD }, "DELETE", cookie))).status).toBe(200);
+    expect(auth.configured()).toBe(false);
+    expect(readdirSync(directory)).toEqual([]);
+    expect(auth.authorize(request())).toBeUndefined();
+
+    // Setting it again revokes whatever was issued under the old one.
+    await auth.setPassword("another password");
+    expect(auth.authorize(request(cookie))?.status).toBe(401);
+    auth.clearPassword();
+    auth.clearPassword();
+    expect(auth.configured()).toBe(false);
   });
 
   test("validates password bounds and atomically stores only a private Argon2id hash", async () => {
@@ -207,13 +238,18 @@ describe("local password authentication", () => {
     expect(auth.authorize(request(cookie))?.status).toBe(401);
     const fresh = session(await auth.login(loginRequest()));
     unlinkSync(join(directory, "access.json"));
-    expect(auth.authorize(request(fresh))?.status).toBe(401);
+    // Removing the password opens access; it never revives the sessions issued under it.
     expect(auth.configured()).toBe(false);
+    expect(auth.authorize(request())).toBeUndefined();
     writeFileSync(join(directory, "access.json"), original);
     expect(auth.authorize(request(fresh))?.status).toBe(401);
+    // A credential file that exists but can't be trusted fails closed rather than open.
     writeFileSync(join(directory, "access.json"), "not json");
-    expect(auth.configured()).toBe(false);
+    expect(auth.configured()).toBe(true);
+    expect(auth.authorize(request())?.status).toBe(401);
+    expect(await auth.status(request()).json()).toEqual({ configured: true, authenticated: false });
     writeFileSync(join(directory, "access.json"), JSON.stringify({ hash: PASSWORD }));
+    expect(auth.authorize(request())?.status).toBe(401);
     expect((await auth.login(loginRequest())).status).toBe(503);
   });
 

@@ -1,22 +1,29 @@
-/* Local device access: a native modal, with no dismiss action or underlying app. */
+/* Local device access: just a password prompt, with nothing of the app mounted behind it. */
 .local-access-screen, .local-access-loading { min-height: 100%; background: var(--bg); }
 .local-access-loading { display: grid; place-items: center; color: var(--text-2); }
-.local-access-dialog { width: min(400px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface); color: var(--text); }
-.local-access-dialog::backdrop { background: var(--scrim); }
-.local-access-dialog h1 { font-size: 20px; margin: 0 0 12px; }
-.local-access-dialog p { font-size: 14px; line-height: 1.5; color: var(--text-2); margin: 0 0 20px; }
-.local-access-dialog form { display: flex; flex-direction: column; gap: 12px; }
-.local-access-dialog label { font-size: 14px; }
-.local-access-dialog input { width: 100%; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); }
-.local-access-dialog button { padding: 10px 16px; border: 0; border-radius: 8px; background: var(--ink); color: var(--ink-fg); }
-.local-access-dialog .local-access-error { color: var(--danger); margin: 16px 0 0; }
-.local-access-dialog code { overflow-wrap: anywhere; }
+.local-access-locked { display: grid; place-items: center; padding: 24px 16px; }
+.local-access-prompt { width: min(320px, 100%); display: flex; flex-direction: column; align-items: center; animation: local-access-in 300ms ease both; }
+.local-access-icon { color: var(--text-3); margin-bottom: 14px; }
+.local-access-prompt h1 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); margin: 0 0 22px; }
+.local-access-field { width: 100%; display: flex; align-items: center; gap: 4px; padding: 4px 4px 4px 14px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface); transition: border-color 120ms ease, box-shadow 120ms ease; }
+.local-access-field:focus-within { border-color: var(--text-3); box-shadow: 0 0 0 3px var(--focus); }
+.local-access-field.local-access-invalid { border-color: var(--danger); animation: local-access-shake 320ms ease; }
+.local-access-field.local-access-invalid:focus-within { box-shadow: 0 0 0 3px var(--danger-bg); }
+.local-access-field input { flex: 1; min-width: 0; height: 32px; padding: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 16px; }
+.local-access-field input::placeholder { color: var(--text-3); }
+.local-access-field button { flex-shrink: 0; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 50%; background: var(--ink); color: var(--ink-fg); cursor: pointer; transition: opacity 120ms ease, background 120ms ease; }
+.local-access-field button:hover:not(:disabled) { background: var(--ink-hover); }
+.local-access-field button:disabled { opacity: 0.25; cursor: default; }
+.local-access-spinner { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: local-access-spin 700ms linear infinite; }
+.local-access-error { min-height: 18px; margin: 10px 0 0; font-size: 13px; line-height: 18px; color: var(--danger); text-align: center; }
+@keyframes local-access-shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+@keyframes local-access-spin { to { transform: rotate(360deg); } }
 .local-access-waiting { display: grid; place-items: center; color: var(--text-3); font-size: 13px; }
 .local-access-waiting > div { display: inline-flex; align-items: center; gap: 8px; animation: local-access-in 300ms ease both; }
 .local-access-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: local-access-pulse 1.2s ease-in-out infinite; }
 @keyframes local-access-pulse { 50% { opacity: 0.3; } }
 @keyframes local-access-in { from { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .local-access-dot, .local-access-waiting > div { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .local-access-dot, .local-access-waiting > div, .local-access-prompt, .local-access-field.local-access-invalid { animation: none; } }
 
 /* ==========================================================================
    OpenBuild — design tokens
@@ -3637,6 +3644,7 @@ svg {
   color: var(--text-3);
 }
 
+.security-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .security-cli {
   margin-top: 12px;
   line-height: 1.55;

@@ -104,6 +104,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     .map(hostnameOf).filter(Boolean);
   const sessions = new Map<string, number>();
   let knownHash: string | undefined;
+  // No credential file at all: the password is optional, so access isn't gated.
+  let open = false;
   let attempts: number[] = [];
   let verifying = 0;
 
@@ -128,9 +130,11 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
   }
 
   // Read on every request: another process may replace or remove the credential.
-  // Errors and malformed files fail closed and revoke all existing sessions.
+  // A missing file means no password is set. Any other error or a malformed file fails
+  // closed and revokes all existing sessions.
   function refresh(): string | undefined {
     let hash: string | undefined;
+    let missing = false;
     try {
       if (statSync(file).size > 262_144) throw new Error("Invalid credential file");
       const value = JSON.parse(readFileSync(file, "utf8"));
@@ -143,9 +147,10 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
       sessions.clear();
       for (const [key, expires] of saved) if (expires > now()) sessions.set(key, expires);
       hash = value.hash;
-    } catch { /* Unconfigured, including unreadable files. */ }
+    } catch (err) { missing = (err as NodeJS.ErrnoException)?.code === "ENOENT"; }
     if (!hash) sessions.clear();
     knownHash = hash;
+    open = missing;
     return hash;
   }
 
@@ -190,13 +195,22 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     knownHash = hash;
   }
 
+  /** Remove the password: access is open again and every session is revoked. */
+  function clearPassword(): void {
+    try { unlinkSync(file); }
+    catch (err) { if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err; }
+    sessions.clear();
+    knownHash = undefined;
+    open = true;
+  }
+
   function prune(): void {
     const time = now();
     for (const [key, expires] of sessions) if (expires <= time) sessions.delete(key);
   }
 
   function authenticated(req: Request): boolean {
-    if (!refresh()) return false;
+    if (!refresh()) return open;
     prune();
     const token = requestToken(req);
     if (token === undefined || !sessions.has(tokenKey(token))) return false;
@@ -208,11 +222,14 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
   }
 
   return {
+    /** Whether a password gates access. A malformed credential file still counts: it fails closed. */
     configured(): boolean {
-      return refresh() !== undefined;
+      refresh();
+      return !open;
     },
 
     setPassword,
+    clearPassword,
 
     authorize(req: Request): Response | undefined {
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
@@ -220,6 +237,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
 
     async protect(req: Request, handler: () => Response | Promise<Response>): Promise<Response> {
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      if (!knownHash) return handler();
       const token = requestToken(req)!;
       const response = await handler();
       const headers = new Headers(response.headers);
@@ -229,8 +247,8 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
 
     status(req: Request): Response {
       const authenticatedSession = authenticated(req);
-      return json({ configured: knownHash !== undefined, authenticated: authenticatedSession }, 200,
-        authenticatedSession ? { "Set-Cookie": cookie(req, requestToken(req)!, SESSION_SECONDS, httpsHosts) } : undefined);
+      return json({ configured: !open, authenticated: authenticatedSession }, 200,
+        authenticatedSession && knownHash ? { "Set-Cookie": cookie(req, requestToken(req)!, SESSION_SECONDS, httpsHosts) } : undefined);
     },
 
     async login(req: Request): Promise<Response> {
@@ -251,6 +269,7 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     /** Check the current password for a signed-in browser (the first step of changing it). */
     async verify(req: Request): Promise<Response> {
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      if (!knownHash) return json({ error: "Password not configured" }, 409);
       const limited = throttled();
       if (limited) return limited;
       let password: string;
@@ -262,27 +281,52 @@ export function createLocalAuth(options: { directory?: string; now?: () => numbe
     },
 
     /**
-     * Change the password from a signed-in browser, re-checking the current one. Every
-     * session is revoked, then this browser gets a fresh one so it stays unlocked.
+     * Set or change the password from a signed-in browser, re-checking the current one when
+     * there is one. Every session is revoked, then this browser gets a fresh one so it stays unlocked.
      */
     async change(req: Request): Promise<Response> {
       if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
-      const hash = knownHash!;
+      const hash = knownHash;
       const limited = throttled();
       if (limited) return limited;
-      let current: string, next: string;
+      let current: string | undefined, next: string;
       try {
         const body = await jsonBody(req);
-        current = passwordField(body.current);
+        if (hash) current = passwordField(body.current);
         next = passwordField(body.password);
       } catch { return json({ error: "Invalid body" }, 400); }
       if (next.length < 4) return json({ error: "Password must contain 4–1024 characters" }, 400);
-      const valid = await matches(current, hash);
+      if (!hash) {
+        // Nothing to check against, but another process may have set one meanwhile.
+        if (refresh() !== undefined || !open) return json({ error: "Password changed" }, 409);
+        try { await setPassword(next); }
+        catch { return json({ error: "Could not save password" }, 503); }
+        return issue(req, knownHash!);
+      }
+      const valid = await matches(current!, hash);
       if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
       if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 403);
       try { await setPassword(next); }
       catch { return json({ error: "Could not save password" }, 503); }
       return issue(req, knownHash!);
+    },
+
+    /** Remove the password from a signed-in browser, re-checking it first. Access is open afterwards. */
+    async remove(req: Request): Promise<Response> {
+      if (!authenticated(req)) return json({ error: "Unauthorized" }, 401);
+      const hash = knownHash;
+      if (!hash) return json({ removed: true });
+      const limited = throttled();
+      if (limited) return limited;
+      let current: string;
+      try { current = passwordField((await jsonBody(req)).current); }
+      catch { return json({ error: "Invalid body" }, 400); }
+      const valid = await matches(current, hash);
+      if (valid === undefined) return json({ error: "Busy" }, 429, { "Retry-After": "1" });
+      if (!valid || refresh() !== hash) return json({ error: "Invalid credentials" }, 403);
+      try { clearPassword(); }
+      catch { return json({ error: "Could not remove password" }, 503); }
+      return json({ removed: true }, 200, { "Set-Cookie": cookie(req, "", 0, httpsHosts) });
     },
 
     logout(req: Request): Response {

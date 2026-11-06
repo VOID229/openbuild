@@ -70,7 +70,10 @@ Being extra careful is always worth it, set a password to protect your machines
 
 ```sh
 ob password # must be 4 or more characters
+ob unset pass # remove it again
 ```
+
+The password is optional. Without one, OpenBuild opens straight away for anyone who can reach it.
 
 Upon setting the password, the website will ask for it in order to start
 using OpenBuild, so that not anything that can reach the URL has access

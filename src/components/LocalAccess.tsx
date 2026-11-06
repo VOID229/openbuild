@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
+import { ArrowRight, LockKeyhole } from "lucide-react";
 import { useServerOutage } from "../lib/serverOutage";
 
-/** Nothing behind this gate is mounted until the server accepts this browser's session. */
+/**
+ * Nothing behind this gate is mounted until the server accepts this browser. With no local
+ * password set it always does; with one, this is a single password prompt.
+ */
 export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
   const [status, setStatus] = useState<{ configured: boolean; authenticated: boolean }>();
   const [content, setContent] = useState<ReactNode>(null);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const dialog = useRef<HTMLDialogElement>(null);
+  const input = useRef<HTMLInputElement>(null);
 
   // Server unreachable (restart, tunnel blip). Never shown as "locked": we don't know that it is.
   const [offline, setOffline] = useState(false);
@@ -80,9 +84,7 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
   }, [offline]);
   // The app stays usable while the server is away: Notices says so, and sends and saves retry on their own.
   useEffect(() => useServerOutage.setState({ outage: slow && !!status }), [slow, !!status]);
-  useEffect(() => {
-    if (locked && dialog.current && !dialog.current.open) dialog.current.showModal();
-  }, [locked]);
+  useEffect(() => { if (locked) input.current?.focus(); }, [locked]);
 
   const unlock = async (event: FormEvent) => {
     event.preventDefault();
@@ -92,6 +94,7 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
       const res = await fetch("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ password }) });
       if (!res.ok) {
         setError(res.status === 429 ? "Too many attempts. Wait a minute and try again." : res.status === 401 ? "Incorrect password." : "Couldn't unlock the server. Try again.");
+        input.current?.select();
         return;
       }
       setPassword("");
@@ -107,19 +110,20 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
     </div>
   );
   return (
-    <div className="local-access-screen">
-      <dialog ref={dialog} className="local-access-dialog" aria-labelledby="local-access-title" aria-describedby="local-access-description" onCancel={(e) => e.preventDefault()}>
-        <h1 id="local-access-title">OpenBuild is locked</h1>
-        <p id="local-access-description">Enter this server's local password to access Pi and this device. No cloud account required.</p>
-        {status?.configured ? (
-          <form onSubmit={unlock}>
-            <label htmlFor="local-password">Password</label>
-            <input id="local-password" type="password" autoComplete="current-password" autoFocus required maxLength={1024} value={password} onChange={(e) => setPassword(e.target.value)} aria-describedby={error ? "local-access-error" : undefined} />
-            <button type="submit" disabled={busy || !password}>{busy ? "Unlocking…" : "Unlock"}</button>
-          </form>
-        ) : <p>Set a password in a terminal on the host computer:<br /><code>openbuild set pass &lt;password&gt;</code></p>}
-        {error && <p id="local-access-error" className="local-access-error" role="alert">{error}</p>}
-      </dialog>
-    </div>
+    <main className="local-access-screen local-access-locked">
+      <form className="local-access-prompt" onSubmit={unlock} aria-labelledby="local-access-title">
+        <LockKeyhole className="local-access-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+        <h1 id="local-access-title">OpenBuild</h1>
+        <div className={error ? "local-access-field local-access-invalid" : "local-access-field"}>
+          <input ref={input} id="local-password" type="password" autoComplete="current-password" autoFocus required maxLength={1024}
+            placeholder="Password" aria-label="Password" aria-invalid={!!error} aria-describedby={error ? "local-access-error" : undefined}
+            value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} />
+          <button type="submit" disabled={busy || !password} aria-label={busy ? "Unlocking" : "Unlock"}>
+            {busy ? <span className="local-access-spinner" aria-hidden="true" /> : <ArrowRight size={16} aria-hidden="true" />}
+          </button>
+        </div>
+        <p id="local-access-error" className="local-access-error" role="alert">{error}</p>
+      </form>
+    </main>
   );
 }
