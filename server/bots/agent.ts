@@ -263,11 +263,13 @@ function react(botId: string, p: Record<string, unknown>) {
   return { ok: true };
 }
 
-function askUser(botId: string, p: Record<string, unknown>) {
+export function askUser(botId: string, p: Record<string, unknown>) {
   const conversationId = conversationFor(botId, p.conversation);
   const title = String(p.title ?? p.question ?? "").trim().slice(0, 300);
   if (!title) throw new svc.BotsError("Write the question.");
-  const options = asStrings(p.options).slice(0, 8);
+  // The starter team is the app's to make, so its offer has fixed choices: taking it is A.
+  const offer = p.offer === "team" && requireBot(botId).primary && conversationId === svc.directId(botId) ? "team" : undefined;
+  const options = offer ? ["Set up the team", "Not now"] : asStrings(p.options).slice(0, 8);
   const message: BotMessage = {
     id: crypto.randomUUID(),
     author: botId,
@@ -277,6 +279,7 @@ function askUser(botId: string, p: Record<string, unknown>) {
       title,
       hint: typeof p.hint === "string" ? p.hint.slice(0, 200) : undefined,
       options: options.map((label, i) => ({ key: String.fromCharCode(65 + i), label })),
+      offer,
     },
   };
   svc.postMessage(conversationId, message);

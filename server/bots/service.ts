@@ -212,7 +212,7 @@ export function directId(botId: string): string | undefined {
 /** The bot every install starts with. It runs the others, so its job is written down from the start. */
 const PRIMARY = {
   name: "Dr Eggbot",
-  look: { shape: "egg", color: "white" },
+  look: { shape: "puff", color: "white" },
   instructions:
     "You're the user's primary bot. You orchestrate: you make new bots when the user needs one, give them clear instructions, put them in groups and hand each the work that's theirs. Do quick things yourself; pass bigger jobs to the bot that fits.",
 };
@@ -260,7 +260,7 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
-/** The first time OpenBots is opened, the primary bot introduces itself and offers the starter team. */
+/** The first time OpenBots is opened, the primary bot is asked to introduce itself and offer the starter team, in its own words. */
 export function greetOnFirstOpen() {
   if (settings().onboarding !== "active") return;
   const bot = db.listBots().find((b) => b.primary);
@@ -269,17 +269,10 @@ export function greetOnFirstOpen() {
   updateSettings({ onboarding: "done" });
   // An install from before this welcome may already be talking; leave that chat alone.
   if (db.messages(conversationId, 1).length) return;
-  const say = (text: string, question?: BotMessage["question"]) => postMessage(conversationId, { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text, question });
-  say(`Hi, I'm ${bot.name}, your primary bot.`);
-  say("I run the place: I make new bots, hand out the work and keep everyone pointed the same way. Tell me what you need and I'll sort out who does it.");
-  say("Want a team that's ready to work?", {
-    title: "Want a team that's ready to work?",
-    hint: "Manager runs threads in your projects and merges their PRs, Tracer reviews and tests, Researcher looks things up. You can change what each may do in its settings.",
-    options: [
-      { key: "A", label: "Set up the team" },
-      { key: "B", label: "Not now" },
-    ],
-    offer: "team",
+  hooks.wake(bot.id, {
+    kind: "note",
+    conversationId,
+    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then offer them a starter team with the question tool and offer "team": ${TEAM.map((m) => m.name).join(", ")}. In a few words, say what each does: Manager runs threads in their projects and merges their PRs, Tracer reviews and tests, Researcher looks things up, and they can change what each may do in its settings. The app makes the team itself if they take it.`,
   });
 }
 
