@@ -91,6 +91,9 @@ export const replyDrag = (dx: number) => {
   return pull <= REPLY_AT ? pull : REPLY_AT + (pull - REPLY_AT) * 0.25;
 };
 
+/** While a finger rests on a bubble, the browser mustn't start selecting the text around it (or the whole page). */
+const noSelect = (e: Event) => e.preventDefault();
+
 /** A chat bubble under a finger: hold for actions, swipe left to reply, tap twice to love it. */
 export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () => void; onReply?: () => void; onDoubleTap?: () => void }) {
   const press = useRef<{ x: number; y: number; moved: "no" | "swipe" | "scroll"; over: boolean }>(undefined);
@@ -103,9 +106,10 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
     row.current?.style.removeProperty("--swipe");
     row.current?.removeAttribute("data-swiping");
     row.current?.removeAttribute("data-swipe-ready");
+    document.removeEventListener("selectstart", noSelect);
     press.current = undefined;
   };
-  useEffect(() => () => clearTimeout(hold.current), []);
+  useEffect(() => settle, []);
   return {
     onTouchStart: (e: React.TouchEvent<HTMLElement>) => {
       if (e.touches.length !== 1) return settle();
@@ -113,9 +117,11 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
       row.current = e.currentTarget;
       held.current = false;
       press.current = { x: t.clientX, y: t.clientY, moved: "no", over: false };
+      document.addEventListener("selectstart", noSelect);
       hold.current = setTimeout(() => {
         if (press.current?.moved !== "no" || !onHold) return;
         held.current = true;
+        window.getSelection()?.removeAllRanges();
         navigator.vibrate?.(10);
         ignoreTapOnLift();
         onHold();
@@ -146,7 +152,10 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
     onTouchEnd: (e: React.TouchEvent<HTMLElement>) => {
       const p = press.current;
       settle();
-      if (held.current) return;
+      if (held.current) {
+        held.current = false;
+        return;
+      }
       if (p?.moved === "swipe") {
         if (p.over) onReply?.();
         return;
@@ -159,7 +168,39 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
       } else lastTap.current = now;
     },
     onTouchCancel: settle,
+    // Android's own long-press (a menu, or selecting a word) comes as a contextmenu while the finger is down.
+    onContextMenu: (e: React.MouseEvent) => {
+      if (press.current || held.current) e.preventDefault();
+    },
   };
+}
+
+/** Where the parts of a held bubble's menu go, within the screen less its margins. */
+export interface HoldLayout {
+  /** Top of the column: reactions, bubble, actions; or, flipped, actions, reactions, bubble. */
+  top: number;
+  /** The actions go above, there being no room for them under the bubble. */
+  flipped: boolean;
+  /** How far the bubble had to move from where it was to fit everything on screen. */
+  shift: number;
+  /** The bubble's height, cut short if it's too tall to fit beside its menu. */
+  bubbleHeight: number;
+}
+
+/**
+ * Lays out what holding a bubble brings up: the bubble where it was, its reactions just above and its
+ * actions just below. Near the bottom the actions go above instead, and when neither fits the whole
+ * column slides back onto the screen.
+ */
+export function holdLayout({ bubbleTop, bubbleHeight, bar, menu, viewTop, viewBottom, gap }: { bubbleTop: number; bubbleHeight: number; bar: number; menu: number; viewTop: number; viewBottom: number; gap: number }): HoldLayout {
+  const barPart = bar ? bar + gap : 0;
+  const height = Math.min(bubbleHeight, Math.max(80, viewBottom - viewTop - barPart - gap - menu));
+  const below = bubbleTop + height + gap + menu <= viewBottom;
+  const above = bubbleTop - barPart - gap - menu >= viewTop;
+  const flipped = !below && above;
+  const natural = bubbleTop - barPart - (flipped ? menu + gap : 0);
+  const top = Math.max(viewTop, Math.min(natural, viewBottom - (barPart + height + gap + menu)));
+  return { top, flipped, shift: top - natural, bubbleHeight: height };
 }
 
 // ---------------------------------------------------------------- back, on phones
@@ -251,7 +292,7 @@ interface Drag {
 function dragFor(x: number, y: number, target: Element): Drag | undefined {
   const st = useStore.getState();
   // Something's on top of the panes.
-  if (st.settingsOpen || document.querySelector("dialog[open], .sheet-root, .popover-portal, .context-menu, .ar-root")) return;
+  if (st.settingsOpen || document.querySelector("dialog[open], .sheet-root, .bm-hold-root, .popover-portal, .context-menu, .ar-root")) return;
   const width = window.innerWidth;
   const base = { width, startX: x, startY: y, active: false, lastX: x, lastAt: performance.now(), velocity: 0 };
   const edge = x <= EDGE;

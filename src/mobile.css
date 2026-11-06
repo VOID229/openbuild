@@ -86,64 +86,201 @@
   opacity: 0.45;
 }
 
-/* What holding a bubble brings up: the message itself, then what can be done with it. */
-.bm-sheet-preview {
-  margin: 2px 6px 10px;
-  padding: 10px 14px;
-  border-radius: 18px;
-  background: var(--bm-them);
+/* What holding a bubble brings up (MessageMenu in BotChat.tsx): the bubble lifted where it was over
+   the blurred conversation, its reactions just above and its actions just below. Only touch screens
+   open it. The padding is the room it keeps from the screen's edges. */
+.bm-hold-root {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  padding: max(12px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) calc(var(--kb-h, 0px) + max(12px, env(safe-area-inset-bottom))) max(10px, env(safe-area-inset-left));
+  outline: none;
 }
 
-.bm-sheet-preview-mine {
-  background: var(--bm-me);
+.bm-hold-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  backdrop-filter: blur(14px) saturate(1.15);
+  opacity: 0;
+  touch-action: none;
+  transition: opacity 240ms var(--ease);
 }
 
-.bm-sheet-who {
-  font-size: 12.5px;
-  font-weight: 600;
-  color: var(--text-3);
+.bm-hold-root[data-state="open"] .bm-hold-scrim {
+  opacity: 1;
 }
 
-/* Selectable, for when you want part of a message rather than all of it. */
-.bm-sheet-text {
-  max-height: 25dvh;
-  margin-top: 3px;
+/* Reactions, bubble and actions, hanging from the bubble's outer edge. It starts where the bubble was
+   and glides to wherever there's room for all of it. */
+.bm-hold-stack {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+  transform: translateY(var(--hold-shift, 0px));
+  transition: transform 300ms var(--ease-panel);
+}
+
+.bm-hold-stack[data-mine] {
+  align-items: flex-end;
+}
+
+.bm-hold-root[data-state="open"] .bm-hold-stack {
+  transform: none;
+}
+
+.bm-hold-stack[data-flipped] .bm-hold-menu {
+  order: -2;
+}
+
+.bm-hold-reactions,
+.bm-hold-menu {
+  max-width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 180ms var(--ease), transform 240ms var(--ease-panel), visibility 0s 240ms;
+}
+
+.bm-hold-root[data-state="open"] :is(.bm-hold-reactions, .bm-hold-menu) {
+  opacity: 1;
+  transform: none;
+  transition: opacity 180ms var(--ease), transform 240ms var(--ease-panel);
+}
+
+/* Selecting leaves the bubble on its own. */
+.bm-hold-root[data-selecting] :is(.bm-hold-reactions, .bm-hold-menu) {
+  visibility: hidden;
+  opacity: 0;
+  transform: scale(0.92);
+  pointer-events: none;
+}
+
+/* Each grows out of the bubble's side of it. */
+.bm-hold-reactions {
+  transform-origin: bottom left;
+}
+
+.bm-hold-menu {
+  transform-origin: top left;
+}
+
+.bm-hold-stack[data-mine] .bm-hold-reactions {
+  transform-origin: bottom right;
+}
+
+.bm-hold-stack[data-mine] .bm-hold-menu {
+  transform-origin: top right;
+}
+
+.bm-hold-stack[data-flipped] .bm-hold-menu {
+  transform-origin: bottom left;
+}
+
+.bm-hold-stack[data-mine][data-flipped] .bm-hold-menu {
+  transform-origin: bottom right;
+}
+
+.bm-hold-reactions {
+  order: -1;
+  padding: 4px;
+  border-radius: 26px;
+}
+
+.bm-hold-quick {
+  display: flex;
+  gap: 2px;
+}
+
+.bm-hold-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 42px);
+  justify-content: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.bm-hold-reactions .bm-react-btn {
+  width: 42px;
+  height: 42px;
+  font-size: 24px;
+}
+
+.bm-hold-reactions .bm-react-btn:active {
+  background: var(--active);
+  transform: scale(1.15);
+}
+
+.bm-hold-bubble {
+  overflow: hidden;
+}
+
+.bm-hold-bubble:not(.bm-emoji) {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Too tall to sit beside its menu: it fades out where it's cut short. */
+.bm-hold-bubble[data-clipped] {
+  -webkit-mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(#000 calc(100% - 32px), transparent);
+}
+
+.bm-hold-bubble[data-selecting] {
   overflow-y: auto;
   overscroll-behavior: contain;
-  font-size: 15.5px;
-  line-height: 1.38;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  pointer-events: auto;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.bm-hold-bubble[data-selecting],
+.bm-hold-bubble[data-selecting] * {
+  -webkit-touch-callout: default;
   -webkit-user-select: text;
   user-select: text;
 }
 
-.bm-sheet-reactions {
+.bm-hold-menu {
+  min-width: 220px;
+  padding: 5px;
+  border-radius: 18px;
+}
+
+.bm-hold-item {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  margin: 0 4px 6px;
-  padding: 4px;
-  border-radius: 22px;
-  background: var(--hover);
+  gap: 16px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px 0 14px;
+  border-radius: 13px;
+  font-size: 16px;
+  text-align: left;
+  color: var(--text);
+  transition: background-color var(--fast) var(--ease);
 }
 
-.bm-sheet-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(44px, 1fr));
-  justify-items: center;
-  gap: 2px;
-  margin: 0 4px 6px;
-}
-
-.bm-sheet .bm-react-btn {
-  width: 44px;
-  height: 44px;
-  font-size: 25px;
-}
-
-.bm-sheet .bm-react-btn:active {
+.bm-hold-item:active:not(:disabled) {
   background: var(--active);
-  transform: scale(1.15);
+}
+
+.bm-hold-item svg {
+  flex: none;
+  color: var(--text-2);
+}
+
+.bm-hold-item:disabled {
+  opacity: 0.45;
 }
 
 /* The arrow that comes into view as a bubble is swiped to reply. */
@@ -159,7 +296,9 @@
     touch-action: pan-y;
   }
 
-  /* Holding a bubble is for its actions, not for selecting a word or iOS's own menu. */
+  /* Holding a bubble is for its actions, not for selecting a word or iOS's own menu, nor for a
+     selection that spills over from the bubble to the names, times and the rest of the page. */
+  .bots-messages,
   .bm-bubble,
   .bm-reaction,
   .bm-quote,
@@ -169,6 +308,12 @@
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+
+  /* Fields in a card still need it, or iOS won't let them be typed in. */
+  .bots-messages :is(input, textarea, [contenteditable="true"]) {
+    -webkit-user-select: text;
+    user-select: text;
   }
 
   .bm-row > * {
@@ -1316,6 +1461,10 @@
 @media (prefers-reduced-motion: reduce) {
   .sheet,
   .sheet-scrim,
+  .bm-hold-scrim,
+  .bm-hold-stack,
+  .bm-hold-reactions,
+  .bm-hold-menu,
   .main-bots,
   .bots-sidebar,
   .bm-row > * {
