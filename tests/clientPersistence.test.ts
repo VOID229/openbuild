@@ -72,3 +72,17 @@ test("cloud merge does not replace a regenerated run with the older finished att
   const finished = { ...retry, messages: [{ ...retry.messages[0], content: 'new answer', status: 'done' }] };
   assert.equal(mergeChats(retry, finished).messages[0].content, 'new answer');
 `));
+
+test("saved state is written only when a saved part of it changes", () => scenario(`
+  const { skipUnchanged } = await import('./src/lib/stateStorage.ts');
+  const writes = [];
+  const storage = skipUnchanged({ getItem: () => null, removeItem: () => {}, setItem: (name, value) => writes.push(value.state) });
+  const settings = { theme: 'dark' };
+  storage.setItem('openchat', { state: { settings, sidebarOpen: true }, version: 5 });
+  // Something left out of the saved state changed (opening OpenBots): the same parts come again.
+  storage.setItem('openchat', { state: { settings, sidebarOpen: true }, version: 5 });
+  assert.equal(writes.length, 1);
+  storage.setItem('openchat', { state: { settings, sidebarOpen: false }, version: 5 });
+  storage.setItem('openchat', { state: { settings: { theme: 'light' }, sidebarOpen: false }, version: 5 });
+  assert.equal(writes.length, 3);
+`));

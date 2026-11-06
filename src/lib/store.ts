@@ -11,7 +11,7 @@ import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { effortFor, effortKey, speedFor, threadModel } from "./effort";
 import type { ClaudeAccountModels, Effort, ModelInfo, PermissionModes, RuntimeAccount } from "../../shared/types";
-import { serverStorage } from "./stateStorage";
+import { serverStorage, skipUnchanged } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
@@ -859,7 +859,7 @@ export const useStore = create<State>()(
     {
       name: "openchat",
       // Saved by the local server on disk, so every port and browser sees the same settings.
-      storage: createJSONStorage(() => serverStorage),
+      storage: skipUnchanged(createJSONStorage(() => serverStorage)),
       version: 5,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;

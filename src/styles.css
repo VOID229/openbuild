@@ -1126,6 +1126,12 @@ svg {
   border-radius: 9px;
   background: var(--row-bg);
   transition: background-color var(--fast) var(--ease);
+  /* Hundreds of threads make the list most of the page: rows out of view skip style, layout and
+     paint, so coming back from OpenBots (which shows the list again) costs what's on screen. The
+     clip margin keeps a keyboard focus ring, which sits just outside the row. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 58px;
+  overflow-clip-margin: 4px;
 }
 
 :where([data-keyboard-nav]) .history-row:has(:focus-visible) {

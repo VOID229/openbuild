@@ -355,3 +355,9 @@ test("a bot's fallback models are listed in order in both settings layouts, each
   expect(advanced).toContain('label="Try earlier"');
   expect(advanced).toContain("providerName(account ? (m.provider ?? m.id.split(\"/\")[0]!) : providerOf(m))");
 });
+
+test("a long thread list doesn't slow the OpenBots switch: rows out of view skip rendering, keeping a focus ring", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.history-row \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;[^}]*overflow-clip-margin: \d+px;/);
+});
