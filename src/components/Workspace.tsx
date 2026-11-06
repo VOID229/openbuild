@@ -375,9 +375,6 @@ export function useRuntimeOptions() {
   const selected = useStore((s) => s.settings.threadRuntime ?? "pi");
   // Runtimes turned off in Settings → Runtimes for the device new threads run on aren't offered.
   const device = useStore((s) => threadDevice(s));
-  // A device with nothing saved yet gets the same defaults Settings shows for it.
-  const disabledRuntimes = useStore((s) => s.settings.disabledRuntimes);
-  const options = useMemo(() => RUNTIMES.filter((o) => runtimeEnabled({ disabledRuntimes }, o.runtime, device)), [disabledRuntimes, device]);
   // Runtimes not installed on that device are shown grayed out and lead to Settings → Runtimes instead.
   const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses(device));
   useEffect(() => {
@@ -385,6 +382,9 @@ export function useRuntimeOptions() {
     void loadRuntimeStatuses(false, device).then(setStatuses, () => {});
     return subscribeRuntimeStatuses((next, id) => { if ((id ?? "") === (device ?? "")) setStatuses(next); });
   }, [device]);
+  // A device with nothing saved yet gets the same defaults Settings shows for it: what's installed there.
+  const disabledRuntimes = useStore((s) => s.settings.disabledRuntimes);
+  const options = useMemo(() => RUNTIMES.filter((o) => runtimeEnabled({ disabledRuntimes }, o.runtime, device, statuses)), [disabledRuntimes, device, statuses]);
   const missing = (r: ThreadRuntime) => statuses?.[r]?.installed === false;
   const usable = options.filter((o) => !missing(o.runtime));
   const runtime = usable.some((o) => o.runtime === selected) ? selected : (usable[0]?.runtime ?? options[0]?.runtime ?? selected);
