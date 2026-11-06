@@ -965,12 +965,15 @@ test("a bot falls back through its models in order, only before its reply has do
 
       // Each model in 'turns' says what its turn does: 'refuse' (Pi can't switch to it), 'error' (the call fails at once),
       // 'reject' (Pi refuses the prompt), 'partial' (writes, then fails), 'tool' (runs a tool, then fails) or 'ok' (replies).
-      const setup = (name, model, fallbackModels, turns, names = {}) => {
+      // 'start' is the model Pi is on when the process starts: its own pick, or the one a resumed session had.
+      const setup = (name, model, fallbackModels, turns, names = {}, start) => {
         const { bot, conversationId } = svc.createBot({ name });
         svc.updateBot(bot.id, { model, fallbackModels });
         const log = [];
-        let current;
-        const mind = { token: 't', busy: false, sent: false, draft: '', loaded: JSON.stringify(piFlags()), proc: { exited: false, lastUsed: Date.now(), close() {}, send: async (cmd) => {
+        let current, mind;
+        const open = (on) => {
+        current = on;
+        mind = { token: 't', busy: false, sent: false, draft: '', loaded: JSON.stringify(piFlags()), proc: { exited: false, lastUsed: Date.now(), close() {}, send: async (cmd) => {
           if (cmd.type === 'set_model') {
             const id = cmd.provider + '/' + cmd.modelId;
             log.push(id);
@@ -991,9 +994,12 @@ test("a bot falls back through its models in order, only before its reply has do
             }, 1);
             return {};
           }
+          if (cmd.type === 'get_state') return current ? { model: { provider: current.slice(0, current.indexOf('/')), id: current.slice(current.indexOf('/') + 1), name: names[current] } } : {};
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
         minds.set(bot.id, mind);
+        };
+        open(start);
         const messages = () => db.messages(conversationId, 50).map((r) => r.message).filter((m) => m.author === bot.id);
         const reply = async () => {
           const before = messages().length;
@@ -1002,7 +1008,9 @@ test("a bot falls back through its models in order, only before its reply has do
           const mine = messages().slice(before);
           return { switches: mine.filter((m) => m.event?.kind === 'model'), errors: mine.filter((m) => m.event?.kind === 'error'), texts: mine.filter((m) => !m.event).map((m) => m.text) };
         };
-        return { bot, log, reply };
+        // A new Pi process, resuming the bot's session on whatever model it was left on.
+        const reopen = () => open(current);
+        return { bot, log, reply, reopen };
       };
 
       // Fallbacks are kept in order, repeats and the bot's own model dropped.
@@ -1055,6 +1063,41 @@ test("a bot falls back through its models in order, only before its reply has do
       a.deepEqual(r.texts, ['Hello from b/two']);
       a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model two']);
 
+      // No model set anywhere and no Pi default: the bot runs on Pi's own pick. A fallback that worked
+      // doesn't stay on for the next reply, in this process or a resumed one, and not quietly either.
+      const own = { 'pi/own': 'error', 'b/two': 'ok' };
+      const unset = setup('Unset', undefined, ['b/two'], own, { 'b/two': 'Two' }, 'pi/own');
+      r = await unset.reply();
+      a.deepEqual(unset.log, ['b/two']);
+      a.deepEqual(r.texts, ['Hello from b/two']);
+      a.equal(r.switches.length, 1);
+      own['pi/own'] = 'ok';
+      r = await unset.reply();
+      a.deepEqual(unset.log, ['b/two', 'pi/own']);
+      a.deepEqual(r.texts, ['Hello from pi/own']);
+      a.equal(r.switches.length, 0);
+      own['pi/own'] = 'error';
+      r = await unset.reply();
+      a.deepEqual(r.texts, ['Hello from b/two']);
+      unset.log.length = 0;
+      unset.reopen();
+      own['pi/own'] = 'ok';
+      r = await unset.reply();
+      a.deepEqual(unset.log, ['pi/own']);
+      a.deepEqual(r.texts, ['Hello from pi/own']);
+      a.equal(r.switches.length, 0);
+      // Pi's own pick can't be had back: the reply still says it's on the fallback.
+      own['pi/own'] = 'error';
+      await unset.reply();
+      own['pi/own'] = 'refuse';
+      unset.log.length = 0;
+      r = await unset.reply();
+      // Pi is still on the fallback, so only the way back is asked for.
+      a.deepEqual(unset.log, ['pi/own']);
+      a.deepEqual(r.texts, ['Hello from b/two']);
+      a.equal(r.errors.length, 0);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model Two']);
+
       // Without fallbacks a failure reads exactly as it always has.
       const single = setup('Single', 'a/one', undefined, { 'a/one': 'error' });
       r = await single.reply();
@@ -1062,7 +1105,7 @@ test("a bot falls back through its models in order, only before its reply has do
       a.equal(r.switches.length, 0);
       a.equal(r.errors[0].event.detail, 'a/one is over its limit');
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
     expect(err).toBe("");
     expect(code).toBe(0);

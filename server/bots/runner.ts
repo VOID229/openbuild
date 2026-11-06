@@ -190,21 +190,39 @@ function piDefaultModel(): string | undefined {
 /**
  * Put a bot's Pi on its model before a run, or on `fallback` when that's the one being tried. A model
  * that can't be used fails the attempt instead of quietly running on another. Resolves to the model's name, when Pi says.
+ *
+ * A bot with no model of its own runs on Pi's default, or on whatever Pi picks when there's none. Pi
+ * keeps the last model in a running process and in a resumed session, so after a fallback that would
+ * be the fallback: the model it resolved to is kept (`primary:`), as is the fallback it's on (`fallback:`),
+ * and the next primary attempt goes back, or fails rather than carry on on the fallback unannounced.
  */
 export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, fallback?: string): Promise<string | undefined> {
   const chosen = fallback || db.getBot(botId)?.model || svc.getSettings().defaultModel;
-  const model = chosen || piDefaultModel();
-  if (!model?.includes("/")) return;
-  const slash = model.indexOf("/");
-  const provider = model.slice(0, slash);
-  const modelId = model.slice(slash + 1);
+  const onFallback = db.getValue<string | null>(`fallback:${botId}`) || undefined;
   const state = await proc.send<{ model?: { provider: string; id: string; name?: string } }>({ type: "get_state" });
-  if (state.model?.provider === provider && state.model?.id === modelId) return state.model.name;
-  // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so Pi's next best will do.
-  const set = await proc.send<{ name?: string } | undefined>({ type: "set_model", provider, modelId }, 20_000).catch((err) => {
-    if (chosen) throw err;
-  });
-  return set?.name;
+  let current = state.model ? `${state.model.provider}/${state.model.id}` : undefined;
+  let name = state.model?.name;
+  const wanted = chosen ? [chosen] : [...new Set([piDefaultModel(), db.getValue<string>(`primary:${botId}`)].filter((m): m is string => !!m?.includes("/")))];
+  for (const model of wanted) {
+    if (current === model) break;
+    const slash = model.indexOf("/");
+    try {
+      const set = await proc.send<{ name?: string } | undefined>({ type: "set_model", provider: model.slice(0, slash), modelId: model.slice(slash + 1) }, 20_000);
+      current = model;
+      name = set?.name;
+      break;
+    } catch (err) {
+      // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so the next candidate, or Pi's own pick, will do.
+      if (chosen) throw err;
+    }
+  }
+  if (fallback) db.setValue(`fallback:${botId}`, fallback);
+  else {
+    if (!chosen && onFallback && current === onFallback) throw new PiError(`Couldn't switch back from fallback model ${onFallback} to the default model.`);
+    db.setValue(`fallback:${botId}`, null);
+    if (!chosen && current) db.setValue(`primary:${botId}`, current);
+  }
+  return name;
 }
 
 /**
