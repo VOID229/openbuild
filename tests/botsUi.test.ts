@@ -155,6 +155,11 @@ test("composer clears only after ack and routine/memory actions do not fabricate
   expect(details).not.toContain('author: bot.id, text: "", event:');
 });
 
+test("thread activity details are titles, so bot names inside them don't become bot links", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain('m.event!.kind === "thread" ? m.event!.detail : <WithBotLinks text={m.event!.detail} bots={bots} />');
+});
+
 test("memory stays out of sight, and routines are the bots' to write: people can only see, pause and delete", async () => {
   const details = await Bun.file("src/components/bots/BotDetails.tsx").text();
   const store = await Bun.file("src/lib/bots/store.ts").text();
