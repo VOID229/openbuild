@@ -246,6 +246,16 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   expect(html).not.toContain('title="Pi runtime"');
 });
 
+test("a thread closed elsewhere while OpenBots is open leaves OpenBots in front", () => {
+  const chat = { ...thread(), id: "closes-under-bots" };
+  reset({}, [chat]);
+  useStore.setState({ activeChatId: chat.id, botsOpen: true });
+  useStore.setState({ chats: [{ ...chat, archived: true }] });
+  expect(useStore.getState().botsOpen).toBe(true);
+  expect(useStore.getState().activeChatId).toBeUndefined();
+  useStore.setState({ botsOpen: false });
+});
+
 test("OpenCode sidebar identity and runtime filter use the shared controls", () => {
   reset({}, [{ ...thread("opencode"), title: "OpenCode thread" }, { ...thread("pi"), id: "pi-only", title: "pi-only" }]);
   useStore.setState((s) => ({ view: { ...s.view, runtime: "opencode" } }));
