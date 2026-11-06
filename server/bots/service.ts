@@ -206,6 +206,38 @@ export function directId(botId: string): string | undefined {
 
 // ------------------------------------------------------------------ lifecycle
 
+/** The bot every install starts with. It runs the others, so its job is written down from the start. */
+const PRIMARY = {
+  name: "Dr Eggbot",
+  look: { shape: "egg", color: "white" },
+  instructions:
+    "You're the user's primary bot. You orchestrate: you make new bots when the user needs one, give them clear instructions, put them in groups and hand each the work that's theirs. Do quick things yourself; pass bigger jobs to the bot that fits.",
+};
+
+/** The starter team the primary bot offers on a new install. */
+export const TEAM: { name: string; look: Bot["look"]; instructions: string; threads?: Bot["threads"] }[] = [
+  {
+    name: "Manager",
+    look: { shape: "gem", color: "blue" },
+    instructions:
+      "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green and reviewed, and close threads when they're done. Ask Tracer to review a pull request before you merge it, and Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
+    threads: { enabled: true, scope: "all", projects: [], merge: true },
+  },
+  {
+    name: "Tracer",
+    look: { shape: "spark", color: "orange" },
+    instructions:
+      "You check the work. Review pull requests and point out real bugs first, style last. Spot bugs, write tests, try to reproduce a reported bug before anyone fixes it, and check a fix didn't break something else. In polls and brainstorms give your honest opinion, with your reasons.",
+    threads: { enabled: true, scope: "all", projects: [] },
+  },
+  {
+    name: "Researcher",
+    look: { shape: "drop", color: "teal" },
+    instructions:
+      "You find things out. Search the web, find things in repositories, and check GitHub and the status of the user's organisation: pull requests, issues, checks, releases. Say where each answer came from, and say so when you couldn't find something.",
+  },
+];
+
 export function ensureStarted() {
   if (db.listBots().length) return;
   const now = Date.now();
@@ -213,10 +245,8 @@ export function ensureStarted() {
   const conversationId = crypto.randomUUID();
   const bot: db.StoredBot = {
     id: botId,
-    name: "Assistant",
-    look: { shape: "puff", color: "white" },
+    ...PRIMARY,
     primary: true,
-    instructions: "",
     createdAt: now,
     proactivity: "normal",
     by: "me",
@@ -227,16 +257,42 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
-/** The first time OpenBots is opened, the primary bot writes its own welcome. A failed try is retried on a later open. */
+/** The first time OpenBots is opened, the primary bot introduces itself and offers the starter team. */
 export function greetOnFirstOpen() {
   if (settings().onboarding !== "active") return;
   const bot = db.listBots().find((b) => b.primary);
   const conversationId = bot && directId(bot.id);
-  if (!bot || !conversationId || status.get(bot.id)?.state === "working") return;
-  const rows = db.messages(conversationId, MESSAGE_LIMIT);
-  if (rows.some((r) => !r.message.event || Date.now() - r.message.at < 60_000)) return;
-  for (const r of rows) removeMessage(conversationId, r.message.id);
-  hooks.wake(bot.id, { kind: "note", conversationId, text: "The user just opened OpenBots for the first time. Say hello now." });
+  if (!bot || !conversationId) return;
+  updateSettings({ onboarding: "done" });
+  // An install from before this welcome may already be talking; leave that chat alone.
+  if (db.messages(conversationId, 1).length) return;
+  const say = (text: string, question?: BotMessage["question"]) => postMessage(conversationId, { id: crypto.randomUUID(), author: bot.id, at: Date.now(), text, question });
+  say(`Hi, I'm ${bot.name}, your primary bot.`);
+  say("I run the place: I make new bots, hand out the work and keep everyone pointed the same way. Tell me what you need and I'll sort out who does it.");
+  say("Want a team that's ready to work?", {
+    title: "Want a team that's ready to work?",
+    hint: "Manager runs threads in your projects and merges their PRs, Tracer reviews and tests, Researcher looks things up. You can change what each may do in its settings.",
+    options: [
+      { key: "A", label: "Set up the team" },
+      { key: "B", label: "Not now" },
+    ],
+    offer: "team",
+  });
+}
+
+/** Makes the starter team, gives the primary a group with them, and notes each new bot in its chat. */
+export function createTeam(primaryId: string) {
+  const primaryChat = directId(primaryId);
+  const ids: string[] = [];
+  for (const member of TEAM) {
+    const { bot } = createBot({ name: member.name, look: member.look, instructions: member.instructions, by: primaryId });
+    if (member.threads) updateBot(bot.id, { threads: member.threads });
+    ids.push(bot.id);
+    if (primaryChat) postMessage(primaryChat, { id: crypto.randomUUID(), author: primaryId, at: Date.now(), text: "", event: { kind: "created", text: "New bot", detail: bot.name, bot: bot.id } });
+  }
+  const group = createConversation({ kind: "group", name: "Team", botIds: [primaryId, ...ids], instructions: "Work through the user's projects together. Manager runs the threads and merges, Tracer checks the work, Researcher looks things up." });
+  updateConversation(group.id, { pinnedAt: Date.now() });
+  return { botIds: ids, conversationId: group.id };
 }
 
 export async function resetAll() {
@@ -579,8 +635,12 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
 
 export function answerQuestion(conversationId: string, messageId: string, key: string) {
   const row = db.getMessage(messageId);
-  if (!row?.message.question) throw new BotsError("That message isn't a question.", 404);
-  return patchMessage(conversationId, messageId, { question: { ...row.message.question, answer: key.slice(0, 2000) } });
+  const question = row?.conversationId === conversationId ? row.message.question : undefined;
+  if (!row || !question) throw new BotsError("That message isn't a question.", 404);
+  const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
+  // The first-run offer is the app's, not the bot's: taking it makes the team here, once.
+  if (question.offer === "team" && !question.answer && key === "A" && db.getBot(row.message.author)?.primary) createTeam(row.message.author);
+  return patched;
 }
 
 /** A changed answer on a closed poll has to stay this long before the poll's author hears of it, so a slip stays quiet. */

@@ -163,9 +163,10 @@ export function contextFor(botId: string): string {
     threads.guide(bot),
     `You have a computer: a home folder, a terminal (bash), files (read, write, edit) and a browser. It stays around between chats. The time is ${new Date().toString()}.`,
   ];
-  if (bot.primary && settings.onboarding === "active") {
+  const ownChat = bot.primary ? svc.directId(botId) : undefined;
+  if (ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId)) {
     lines.push(
-      "This is the user's first time in OpenBots, and your name is only a placeholder until they choose one. If you haven't said hello yet, welcome them to OpenBots in your own words, say you're their primary bot, and ask what they'd like to call you and what they'd like you to do. Ask in plain chat, without suggesting names or using a question card. Once they answer, rename yourself with manage_bot before anything else and write your instructions from what they told you. You can offer to make other bots for the things they do often. When the basics are settled, call manage_bot with finish_onboarding. Keep it to a few short messages.",
+      "You offered the user a starter team in your chat. If they take it, the app makes Manager, Tracer and Researcher and a Team group with you in it by itself, so don't make them with manage_bot. Once they're there, say in a message or two how to put them to work. If the user would rather not, ask what they'd like to do, and offer to make bots for the things they do often.",
     );
   }
   return lines.filter(Boolean).join("\n\n");
@@ -442,11 +443,6 @@ function resolveBot(prefix: string): string {
 export function manage(botId: string, p: Record<string, unknown>) {
   const self = requireBot(botId);
   const action = String(p.action ?? "");
-  if (action === "finish_onboarding") {
-    if (!self.primary) throw new svc.BotsError("Only the primary bot finishes setup.");
-    svc.updateSettings({ onboarding: "done" });
-    return { ok: true };
-  }
   if (action === "create") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can make bots.");
     const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
@@ -487,7 +483,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     const bot = svc.updateBot(target, patch);
     return { id: bot.id, name: bot.name };
   }
-  throw new svc.BotsError("action is create, update, delete, add_to_group, remove_from_group or finish_onboarding.");
+  throw new svc.BotsError("action is create, update, delete, add_to_group or remove_from_group.");
 }
 
 /** Adds a bot to, or removes it from, a group the primary is in, posting the same note the user's buttons do. */
