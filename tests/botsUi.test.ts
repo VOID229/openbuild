@@ -235,7 +235,7 @@ test("computer settings require explicit host selection and explain isolation", 
   const settings = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
   expect(settings).toContain('label="Computer"');
   expect(settings).toContain(': "local:container"}');
-  expect(settings).toContain('label: "Host · this server (unisolated)"');
+  expect(settings).toContain('label: "Host (unisolated)"');
   expect(settings).toContain("Host access is unisolated");
   expect(settings).toContain('kind: value === "local:host" ? "host" : "container"');
   expect(settings).not.toContain("<select");
