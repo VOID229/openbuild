@@ -52,9 +52,9 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
     const tick = async () => {
       try {
         const status = await useGithub.getState().pollDevice();
-        if (stopped) return;
-        if (status?.status === "connected") await onConnected();
-        else if (status?.status === "pending") timer = setTimeout(tick, 2000);
+        // Connected ends this effect (nothing is pending anymore), so it's handled before that matters.
+        if (status?.status === "connected") return void (await onConnected());
+        if (!stopped && status?.status === "pending") timer = setTimeout(tick, 2000);
       } catch (err) {
         if (!stopped) setProblem((err as Error).message);
       }
@@ -142,7 +142,7 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
                 <p className="field-help">Not installed anywhere yet, so bots can't reach any repository. Install it on your account or an organization.</p>
               )}
               <p className="field-help">
-                You pick the account and its repositories on GitHub, and only those are reachable. On an organization, its owners install the app or approve your request; it shows up here once they have.
+                Bots can use every installation listed here at once; this list doesn't limit them. What does is set on GitHub: install the app only where bots should work, with only those repositories. On an organization, its owners install the app or approve your request; it shows up here once they have.
               </p>
               <div className="app-page-actions">
                 {view.installPersonalUrl && (
@@ -187,7 +187,7 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
         </>
       ) : (
         <>
-          {view.mode === "pat" && view.hasPat && <p className="field-help">Bots use your personal access token. The GitHub App is safer: its tokens expire, and you pick accounts and repositories on GitHub.</p>}
+          {view.mode === "pat" && view.hasPat && view.configured && <p className="field-help">Bots use your personal access token. The GitHub App is safer: its tokens expire, and you pick accounts and repositories on GitHub.</p>}
           {view.mode === "off" && <p className="field-help">Disconnected. Nothing uses a GitHub credential until you connect one.</p>}
           {view.configured ? (
             <>
@@ -201,7 +201,7 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
                     Use my saved personal access token
                   </button>
                 )}
-                {view.mode === "off" && !patShown && (
+                {view.mode !== "app" && !patShown && (
                   <button type="button" className="apps-link" onClick={onPat}>
                     Paste a personal access token instead
                   </button>

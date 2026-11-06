@@ -130,7 +130,9 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
   const github = useGithub((s) => s.view);
   const [patShown, setPatShown] = useState(false);
   const githubMode = app.githubAuth ? github?.mode : undefined;
-  const showPat = !app.githubAuth || patShown || githubMode === "pat" || github?.configured === false;
+  // A token is in use (or the GitHub App can't be): show its field. A fresh install with nothing saved starts at the app.
+  const usingPat = githubMode === "pat" && (!!github?.hasPat || !github?.legacy);
+  const showPat = !app.githubAuth || patShown || usingPat || github?.configured === false;
   const canReuseKey = !!app.githubAuth && githubKey && githubMode === "pat";
 
   const run = async (work: () => Promise<void>) => {

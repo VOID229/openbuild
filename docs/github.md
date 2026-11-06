@@ -8,21 +8,30 @@ changes them.
 ## Two different accounts
 
 - **The app's developer account** registers the GitHub App once and owns its settings: its name,
-  permissions and client ID. For now that's a personal account. It can be moved to an organization
-  later on GitHub (Settings → Developer settings → GitHub Apps → Advanced → Transfer ownership) with
-  the same client ID.
+  permissions and client ID. It can be a personal account or an organization; either works the same
+  for users. An organization is the safer home when more than one person maintains the app. Ownership
+  can be transferred later (the app's settings → Advanced → Transfer ownership).
 - **Installation accounts** are wherever users install the app: their own personal account, or an
   organization. They pick the repositories there: all of them, or only selected ones. On an
   organization, an owner installs it or approves a member's request. Installing on organizations
   requires a public app.
 
 A user's token reaches only what all three allow: the app's permissions, the user's own access, and
-the repositories of installations they can use. OpenBuild doesn't widen or narrow that on GitHub's
-side.
+the repositories of installations they can use.
+
+**OpenBuild doesn't choose between installations.** One token reaches every installation the user
+can use, all at once. Apps → GitHub lists them, but that list doesn't limit anything. What limits bots
+is GitHub's: each installation's repository selection and the user's own access. To keep bots out of
+an account or a repository, uninstall the app there or take the repository out of its selection on
+GitHub. Within what's reachable, OpenBuild's only rule is read-only (below).
 
 ## Registering the app (once, by its developer)
 
-On GitHub: Settings → Developer settings → GitHub Apps → New GitHub App.
+Register it under whichever account should own it:
+
+- **A personal account:** Settings → Developer settings → GitHub Apps → New GitHub App.
+- **An organization:** the organization's Settings → Developer settings → GitHub Apps → New GitHub
+  App. This takes an organization owner, or a member the organization lets manage all its apps.
 
 | Setting | Value |
 | --- | --- |
