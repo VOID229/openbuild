@@ -54,9 +54,13 @@ const limitOf = (chat: Chat) => {
 /** Midnight at the start of today. */
 const startOfToday = () => new Date().setHours(0, 0, 0, 0);
 
-/** Closed by the user, or a thread from before today that isn't pinned, working, done or woken. */
+/**
+ * Closed by the user, or a thread that isn't pinned, working, done or woken. A subagent thread or one
+ * cut off by a usage limit keeps its own section until the day is over.
+ */
 const isClosed = (chat: Chat, today = startOfToday()) =>
-  !!chat.archived || (!chat.pinned && !chat.done && !chat.woke && !isWorking(chat) && chat.updatedAt < today);
+  !!chat.archived ||
+  (!chat.pinned && !chat.done && !chat.woke && !isWorking(chat) && (chat.updatedAt < today || (!chat.subagent && !limitOf(chat))));
 
 /** Closing a thread files it under "Closed" (and unpins it); reopening one puts it back in "Done". */
 const closePatch = (chat: Chat, today?: number) =>
@@ -100,7 +104,7 @@ function snoozeOptions(now = new Date()) {
   return options;
 }
 
-/** Start of today, refreshed at midnight so the day's threads roll over into "Closed". */
+/** Start of today, refreshed at midnight so the day's subagent and limited threads roll over into "Closed". */
 function useToday() {
   const [today, setToday] = useState(startOfToday);
   useEffect(() => {
@@ -1374,7 +1378,7 @@ export function Sidebar() {
   // One cut off by a usage limit or an empty balance lives in "Limits", not "Done": its work isn't finished.
   // Everything else that is generating lives in "Working", then
   // stays in "Done" until the user closes it; a snooze that ran out stays in "Woke" the same way.
-  // Other threads from today are under "Today", and the rest (closed, or from an earlier day) under "Closed".
+  // The rest are under "Closed".
   const rest = useMemo(() => awake.filter((c) => !isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
   // Subagent threads, when listed, keep to their own section, working or not.
   const subagents = useMemo(() => rest.filter((c) => c.subagent), [rest]);
@@ -1383,7 +1387,6 @@ export function Sidebar() {
   const limits = useMemo(() => rest.filter((c) => !c.subagent && limitOf(c)), [rest]);
   const woke = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && c.woke), [rest]);
   const done = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && !c.woke && c.done), [rest]);
-  const todays = useMemo(() => rest.filter((c) => !c.subagent && !isWorking(c) && !limitOf(c) && !c.woke && !c.done), [rest]);
   const closed = useMemo(() => awake.filter((c) => isClosed(c, today) && !(c.pinned && view.includePinned)), [awake, view.includePinned, today]);
 
   // What's on screen, in order. Collapsed sections don't count, unless the open thread is in one.
@@ -1401,7 +1404,6 @@ export function Sidebar() {
               [woke, sections.woke],
               [done, sections.done],
               [working, sections.working],
-              [todays, sections.today],
               [snoozed, sections.snoozed],
               [closed, sections.closed],
             ] as const
@@ -1591,17 +1593,12 @@ export function Sidebar() {
                     {working.map((c) => row(c))}
                   </Collapsible>
                 )}
-                {todays.length > 0 && (
-                  <Collapsible label={`Today (${todays.length})`} open={sections.today} onToggle={() => toggleSection("today")}>
-                    {todays.map((c) => row(c))}
-                  </Collapsible>
-                )}
                 {snoozed.length > 0 && (
                   <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")}>
                     {snoozed.map((c) => row(c))}
                   </Collapsible>
                 )}
-                {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !todays.length && !snoozed.length && !closed.length && (
+                {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
                     {view.runtime === "all"
                       ? "No threads with the selected models."
