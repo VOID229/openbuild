@@ -533,11 +533,23 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       conversations: s.conversations.map((c) => {
         if (c.id !== e.conversationId) return c;
         const exists = c.messages.some((m) => m.id === e.message.id);
+        // Old messages change too (a bot marking early prompts seen once @all wakes it, a vote on a
+        // closed poll). One from before what's loaded stays for "Load older messages" to bring:
+        // appending it would put old history at the bottom of the chat.
+        const first = c.messages[0];
+        if (!exists && c.more && first && e.message.at < first.at) return c;
+        const last = c.messages.at(-1);
+        const fresh = !exists && (!last || e.message.at >= last.at);
+        const messages = exists
+          ? c.messages.map((m) => (m.id === e.message.id ? e.message : m))
+          : fresh
+            ? [...c.messages, e.message]
+            : [...c.messages.filter((m) => m.at <= e.message.at), e.message, ...c.messages.filter((m) => m.at > e.message.at)];
         return {
           ...c,
-          messages: exists ? c.messages.map((m) => (m.id === e.message.id ? e.message : m)) : [...c.messages, e.message],
-          updatedAt: e.message.at,
-          unread: !exists && e.message.author !== "me" && s.activeId !== c.id ? true : c.unread,
+          messages,
+          updatedAt: Math.max(c.updatedAt, e.message.at),
+          unread: fresh && e.message.author !== "me" && s.activeId !== c.id ? true : c.unread,
           hidden: e.message.author !== "me" ? false : c.hidden,
         };
       }),
