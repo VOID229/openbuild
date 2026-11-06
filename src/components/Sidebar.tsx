@@ -566,7 +566,9 @@ function leaveThread(id: string) {
   const order = threadOrder.filter((t) => t === id || !moving.has(t));
   const at = order.indexOf(id);
   const next = at < 0 ? order[0] : (order[at + 1] ?? order[at - 1]);
-  if (next) s.selectChat(next);
+  // Over OpenBots or Usage, change the thread underneath without bringing OpenBuild forward.
+  if (s.botsOpen || s.usageOpen) useStore.setState({ activeChatId: next, searchFocus: undefined });
+  else if (next) s.selectChat(next);
   else s.newChat();
 }
 
