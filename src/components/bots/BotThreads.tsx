@@ -25,12 +25,15 @@ const SCOPES: { scope: BotProjectScope; label: string }[] = [
 const HARNESSES = RUNTIMES.map((r) => r.runtime).filter((r) => r !== "durable");
 const hasModes = (runtime: ThreadRuntime): runtime is PermissionHarness => PERMISSION_HARNESSES.includes(runtime as PermissionHarness);
 
-function Row({ label, desc, children }: { label: string; desc: string; children: React.ReactNode }) {
+/** Compact, the description moves into a tooltip on the label so the row stays one line (the details panel's Advanced tab). */
+function Row({ label, desc, compact, children }: { label: string; desc: string; compact?: boolean; children: React.ReactNode }) {
   return (
     <div className="setting-row">
       <div className="setting-text">
-        <div className="setting-label">{label}</div>
-        <p className="setting-desc">{desc}</p>
+        <div className="setting-label" data-tooltip={compact ? desc : undefined} data-tooltip-side={compact ? "left" : undefined}>
+          {label}
+        </div>
+        {!compact && <p className="setting-desc">{desc}</p>}
       </div>
       {children}
     </div>
@@ -89,27 +92,27 @@ function BotProjects({ access, save }: { access: BotThreadAccess; save: (patch: 
   );
 }
 
-export function BotThreads({ bot }: { bot: Bot }) {
+export function BotThreads({ bot, compact }: { bot: Bot; compact?: boolean }) {
   const access = bot.threads ?? NO_ACCESS;
   const save = (patch: Partial<BotThreadAccess>) => useBots.getState().updateBot(bot.id, { threads: { ...access, ...patch } });
   return (
     <>
-      <Row label="Use OpenBuild" desc="Start and follow threads, send them messages, and answer the questions they ask. Threads run on this server as you, with your subscriptions and keys.">
+      <Row compact={compact} label="Use OpenBuild" desc="Start and follow threads, send them messages, and answer the questions they ask. Threads run on this server as you, with your subscriptions and keys.">
         <Toggle checked={access.enabled} onChange={(enabled) => save({ enabled })} label="Use OpenBuild" />
       </Row>
       {access.enabled && (
         <>
           <BotProjects access={access} save={save} />
-          <Row label="Control others' threads" desc="Write to, answer, stop, close and merge threads it didn't start: yours and other bots'. Off, it can still see them but only controls its own.">
+          <Row compact={compact} label="Control others' threads" desc="Write to, answer, stop, close and merge threads it didn't start: yours and other bots'. Off, it can still see them but only controls its own.">
             <Toggle checked={!!access.others} onChange={(others) => save({ others })} label="Control others' threads" />
           </Row>
-          <Row label="Choose permissions" desc="Pick each thread's permission mode itself, including the unrestricted ones. Off, its threads use the defaults under Harnesses in OpenBuild.">
+          <Row compact={compact} label="Choose permissions" desc="Pick each thread's permission mode itself, including the unrestricted ones. Off, its threads use the defaults under Harnesses in OpenBuild.">
             <Toggle checked={!!access.choosePermission} onChange={(choosePermission) => save({ choosePermission })} label="Choose permissions" />
           </Row>
-          <Row label="Answer permission prompts" desc="Allow or deny what a thread's agent asks to do. Off, those prompts wait for you, and the bot tells you about them.">
+          <Row compact={compact} label="Answer permission prompts" desc="Allow or deny what a thread's agent asks to do. Off, those prompts wait for you, and the bot tells you about them.">
             <Toggle checked={!!access.approve} onChange={(approve) => save({ approve })} label="Answer permission prompts" />
           </Row>
-          <Row label="Merge pull requests" desc="Merge once every check passes.">
+          <Row compact={compact} label="Merge pull requests" desc="Merge once every check passes.">
             <Toggle checked={!!access.merge} onChange={(merge) => save({ merge })} label="Merge pull requests" />
           </Row>
         </>

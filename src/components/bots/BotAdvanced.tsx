@@ -1,5 +1,5 @@
-// A bot's model and computer, shared by Settings → Bots and the Advanced section folded away at the
-// bottom of the OpenBots details panel, which also holds what the bot may do in OpenBuild.
+// A bot's model and computer for Settings → Bots, and the Advanced tab of the OpenBots details panel,
+// which puts them on one line each beside what the bot may do in OpenBuild.
 import { Check, ChevronDown } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { botModels, type PiModels } from "../../lib/pi";
@@ -73,7 +73,24 @@ export function BotModel({ bot }: { bot: Bot }) {
   );
 }
 
-const computerName = (bot: Bot) => (!bot.computer ? "Container" : bot.computer.device === "local" ? (bot.computer.kind === "host" ? "Host access" : "Container") : `${bot.computer.kind} · ${bot.computer.device}`);
+/** Container or host, shared by both layouts. */
+function ComputerSelect({ bot, className }: { bot: Bot; className?: string }) {
+  return (
+    <OptionSelect
+      label="Computer"
+      className={className}
+      value={bot.computer ? `${bot.computer.device}:${bot.computer.kind}` : "local:container"}
+      options={[
+        { value: "local:container", label: "Container" },
+        { value: "local:host", label: "Host (unisolated)" },
+        ...(bot.computer && bot.computer.device !== "local" ? [{ value: `${bot.computer.device}:${bot.computer.kind}`, label: `${bot.computer.kind} · ${bot.computer.device}` }] : []),
+      ]}
+      onChange={(value) => {
+        if (value === "local:container" || value === "local:host") useBots.getState().updateBot(bot.id, { computer: { device: "local", kind: value === "local:host" ? "host" : "container" } });
+      }}
+    />
+  );
+}
 
 /** Where the bot's computer runs: an isolated container, or the server itself. */
 export function BotComputer({ bot }: { bot: Bot }) {
@@ -84,48 +101,31 @@ export function BotComputer({ bot }: { bot: Bot }) {
           <div className="setting-label">Execution environment</div>
           <p className="setting-desc">Containers are isolated. Host access is unisolated: the bot can run commands and read or change files as the server user. Only choose host access if you trust this bot.</p>
         </div>
-        <OptionSelect
-          label="Computer"
-          value={bot.computer ? `${bot.computer.device}:${bot.computer.kind}` : "local:container"}
-          options={[
-            { value: "local:container", label: "Container" },
-            { value: "local:host", label: "Host (unisolated)" },
-            ...(bot.computer && bot.computer.device !== "local" ? [{ value: `${bot.computer.device}:${bot.computer.kind}`, label: `${bot.computer.kind} · ${bot.computer.device}` }] : []),
-          ]}
-          onChange={(value) => {
-            if (value === "local:container" || value === "local:host") useBots.getState().updateBot(bot.id, { computer: { device: "local", kind: value === "local:host" ? "host" : "container" } });
-          }}
-        />
+        <ComputerSelect bot={bot} />
       </div>
       <p className="setting-desc">Choosing an environment applies to the next request. This does not move files from an existing computer.</p>
     </>
   );
 }
 
-/** The details panel's Advanced section: folded away, with a one-line summary of what's set. */
+/** The details panel's Advanced tab: the same settings as above, one line each so it fits the panel. The descriptions sit in tooltips on the labels. */
 export function BotAdvanced({ bot }: { bot: Bot }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => setOpen(false), [bot.id]);
-  const summary = [bot.model ? "Own model" : "Default model", computerName(bot), bot.threads?.enabled ? "Uses OpenBuild" : "No OpenBuild"].join(" · ");
+  const defaultModel = useBots((s) => s.defaultModel);
   return (
-    <section className="bots-advanced">
-      <button type="button" className="bots-advanced-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="bots-advanced-text">
-          <span className="bots-advanced-title">Advanced</span>
-          <span className="bots-advanced-note">{summary}</span>
-        </span>
-        <ChevronDown size={15} className="bots-advanced-chevron" />
-      </button>
-      <div className={cx("collapse", open && "collapse-open")} inert={!open}>
-        <div className="collapse-inner">
-          <div className="bots-advanced-body">
-            <BotModel bot={bot} />
-            <BotComputer bot={bot} />
-            <div className="bots-pane-label">Permissions in OpenBuild</div>
-            <BotThreads bot={bot} />
-          </div>
+    <div className="bots-pane bots-advanced">
+      <div className="setting-row">
+        <div className="setting-label" data-tooltip="Default follows the default model in Settings → Bots. Changes apply from the bot's next reply." data-tooltip-side="left">
+          Model
         </div>
+        <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
       </div>
-    </section>
+      <div className="setting-row">
+        <div className="setting-label" data-tooltip="Containers are isolated. Host access is unisolated: the bot can run commands and read or change files as the server user. Applies to the next request, without moving files." data-tooltip-side="left">
+          Environment
+        </div>
+        <ComputerSelect bot={bot} className="select-grow" />
+      </div>
+      <BotThreads bot={bot} compact />
+    </div>
   );
 }
