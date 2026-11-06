@@ -31,8 +31,11 @@ interface Mind {
   draft: string;
   /** Writing a message right now: the chat shows it typing. */
   typing: boolean;
-  /** Keep the chat clear unless it starts typing (see BotStatus.quiet). */
-  quiet: boolean;
+  /**
+   * Keep the chat clear unless it starts typing (see BotStatus.quiet): a turn for reactions only
+   * ("reaction", until it writes), or just after a message ("sent", until it picks up real work).
+   */
+  quiet: false | "reaction" | "sent";
   activity: string;
   /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
   steerable?: boolean;
@@ -318,7 +321,7 @@ const WRITING = new Set(["send_message", "question", "poll"]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
-  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: mind.quiet || undefined, since: Date.now() });
+  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, since: Date.now() });
 }
 
 function setTyping(botId: string, mind: Mind, on: boolean) {
@@ -353,13 +356,15 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     if (WRITING.has(tool)) setTyping(botId, mind, true);
     else if (tool !== "react") {
       setTyping(botId, mind, false);
+      // Work after a message is still work: the chat shows it, as the sidebar does.
+      if (mind.quiet === "sent") mind.quiet = false;
       show(botId, mind, activityFor(tool, record.args));
     }
   }
   if (record.type === "tool_execution_end" && WRITING.has(tool)) {
     // Sent. Whatever it does next stays out of the chat until it types again or picks up real work.
     setTyping(botId, mind, false);
-    mind.quiet = true;
+    mind.quiet = "sent";
     show(botId, mind, "Thinking");
   }
   const ev = record.type === "message_update" ? record.assistantMessageEvent : undefined;
@@ -446,7 +451,7 @@ async function run(botId: string, all: Wake[]) {
   try {
     mind = await ensureMind(botId);
     mind.busy = true;
-    mind.quiet = quiet;
+    mind.quiet = quiet && "reaction";
     // The transcript is read now, so anything later is the next steer's or turn's to show.
     const shown = new Map<string, number>();
     for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));

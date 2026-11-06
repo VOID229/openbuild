@@ -557,6 +557,26 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(svc.snapshot().status[bot.id].quiet, true);
       onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '[sil' } });
       a.equal(typingNow(), false);
+      // Work after the message shows in the chat again, and keeps up as it moves from tool to tool.
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'openbuild', args: { action: 'list' } });
+      a.equal(svc.snapshot().status[bot.id].quiet, undefined);
+      a.equal(svc.snapshot().status[bot.id].activity, 'Checking on threads');
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'openbuild', result: {} });
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'bash', args: { command: 'gh pr checks', status: 'Watching CI on #115' } });
+      a.equal(svc.snapshot().status[bot.id].quiet, undefined);
+      a.equal(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'send_message', args: {} });
+      a.equal(typingNow(), true);
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
+      a.equal(svc.snapshot().status[bot.id].quiet, true);
+      // A reaction is no work to show.
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'react', args: {} });
+      a.equal(svc.snapshot().status[bot.id].quiet, true);
+      // Nor is a turn for a reaction, until it writes.
+      mind.quiet = 'reaction';
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'read', args: { path: '/home/x/notes.md' } });
+      a.equal(svc.snapshot().status[bot.id].quiet, true);
+      mind.quiet = false;
       a.equal(activityFor('read', { path: '/home/x/notes.md' }), 'Reading notes.md');
 
       // A failed model call (an xAI refresh rejected with invalid_grant) is kept, so the run can show it instead of nothing.
