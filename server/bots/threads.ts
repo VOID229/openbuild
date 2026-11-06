@@ -7,7 +7,7 @@
 import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { readEvents } from "../../shared/replies";
-import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime } from "../../shared/types";
+import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime, type RuntimeAccount } from "../../shared/types";
 import { withProfileContext } from "../../src/lib/profile";
 import type { Chat, Message, Profile } from "../../src/lib/types";
 import * as claudeInstall from "../claude/install";
@@ -26,6 +26,7 @@ import { admitTurn } from "../pi/turn";
 import * as projects from "../projects";
 import * as pullRequestView from "../pullRequestView";
 import { requestRunStop } from "../runStops";
+import { withRuntimeAccount } from "../runtimeAccounts";
 import { runtimes } from "../runtimes";
 import * as storage from "../storage";
 import { getFocus } from "./agent";
@@ -54,7 +55,7 @@ function permissionModes(runtime: PermissionHarness, cwd?: string): Promise<Perm
 }
 
 /** The app's settings, as the last browser saved them. */
-function appSettings(): { profile?: Profile; effort?: Effort; autoDeleteWorktrees?: boolean } {
+function appSettings(): { profile?: Profile; effort?: Effort; autoDeleteWorktrees?: boolean; runtimeAccounts?: RuntimeAccount[] } {
   try {
     return JSON.parse(storage.getValue("client-state") ?? "{}")?.state?.settings ?? {};
   } catch {
@@ -283,14 +284,27 @@ function record(botId: string, text: string, detail: string, threadId?: string) 
   if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}) } });
 }
 
-function usableHarness(value: unknown): ThreadRuntime {
-  const runtime = String(value || "pi") as ThreadRuntime;
-  if (runtime === "durable") throw refuse("Bots can't use Durable threads yet.");
-  if (!MODEL_LISTERS[runtime]) throw refuse(`Unknown harness ${runtime}.`);
-  if (svc.getSettings().harnesses?.blocked?.includes(runtime)) throw refuse(`The user doesn't let bots use ${runtime}.`, 403);
-  if (!runtimes()[runtime]?.installed) throw refuse(`${runtime} isn't installed here.`);
-  return runtime;
+/** Only saved accounts on this server are selectable; never accept account configuration from a bot. */
+function localAccounts(): RuntimeAccount[] {
+  return (appSettings().runtimeAccounts ?? []).filter((a) => !a.deviceId && ["claude", "codex", "cursor"].includes(a.runtime));
 }
+
+function usableHarness(value: unknown): { runtime: ThreadRuntime; account?: RuntimeAccount } {
+  const id = String(value || "pi");
+  const builtin = !!MODEL_LISTERS[id as ThreadRuntime];
+  const matches = builtin ? [] : localAccounts().filter((a) => a.id === id || a.name === id);
+  if (matches.length > 1) throw refuse("That account name is ambiguous. Use its id from options.");
+  const account = matches[0];
+  const runtime = account?.runtime ?? id as ThreadRuntime;
+  if (runtime === "durable") throw refuse("Bots can't use Durable threads yet.");
+  if (!MODEL_LISTERS[runtime]) throw refuse(`Unknown harness ${id}.`);
+  if (svc.getSettings().harnesses?.blocked?.includes(runtime)) throw refuse(`The user doesn't let bots use ${runtime}.`, 403);
+  if (!withRuntimeAccount({ runtime, runtimeAccount: account } as PiChatRequest, () => runtimes()[runtime]?.installed)) throw refuse(`${id} isn't installed here.`);
+  return { runtime, account };
+}
+
+const inAccount = <T>(runtime: ThreadRuntime, account: RuntimeAccount | undefined, run: () => T): T =>
+  withRuntimeAccount({ runtime, runtimeAccount: account } as PiChatRequest, run);
 
 async function options(botId: string, p: Record<string, unknown>) {
   const access = accessOf(botId);
@@ -300,14 +314,15 @@ async function options(botId: string, p: Record<string, unknown>) {
     return {
       projects: grantedProjects(access).map((project) => ({ id: project.id, name: project.name, git: project.git })),
       harnesses: Object.keys(MODEL_LISTERS).filter((r) => all[r as ThreadRuntime]?.installed && !settings?.blocked?.includes(r)),
+      accounts: localAccounts().filter((a) => !settings?.blocked?.includes(a.runtime) && inAccount(a.runtime, a, () => runtimes()[a.runtime]?.installed)).map((a) => ({ id: a.id, name: a.name, harness: a.runtime })),
       you_may: { control_threads_you_didnt_start: !!access.others, choose_permissions: !!access.choosePermission, answer_permission_prompts: !!access.approve, merge_pull_requests: !!access.merge },
     };
   }
-  const runtime = usableHarness(p.harness);
-  const { models, defaultModel } = await MODEL_LISTERS[runtime]!();
+  const { runtime, account } = usableHarness(p.harness);
+  const { models, defaultModel } = await inAccount(runtime, account, () => MODEL_LISTERS[runtime]!());
   const query = typeof p.query === "string" ? p.query.toLowerCase() : "";
   const matching = models.filter((m) => !query || m.id.toLowerCase().includes(query) || m.name.toLowerCase().includes(query));
-  const permissions = !isPermissionHarness(runtime) ? "This harness has no permission modes in OpenBuild: it follows its own configuration." : access.choosePermission ? await permissionModes(runtime) : { fixed: settings?.permissions?.[runtime] ?? "the harness's own default" };
+  const permissions = !isPermissionHarness(runtime) ? "This harness has no permission modes in OpenBuild: it follows its own configuration." : access.choosePermission ? await inAccount(runtime, account, () => permissionModes(runtime)) : { fixed: settings?.permissions?.[runtime] ?? "the harness's own default" };
   return {
     default_model: defaultModel,
     models: matching.slice(0, 40).map((m) => ({ id: m.id, name: m.name, efforts: m.reasoning?.efforts, speeds: m.speeds?.map((s) => s.id) })),
@@ -405,11 +420,11 @@ async function start(botId: string, p: Record<string, unknown>) {
   if (!prompt) throw refuse("Say what the thread should do, in prompt.");
   if (prompt.length >= 1_000_000) throw refuse("That prompt is too long.");
   const images = forwardedImages(botId, p.image_messages);
-  const runtime = usableHarness(p.harness);
-  const model = await pickModel(runtime, p.model);
+  const { runtime, account } = usableHarness(p.harness);
+  const model = await inAccount(runtime, account, () => pickModel(runtime, p.model));
   const effort = pickEffort(model, p.effort);
   const speed = pickSpeed(model, p.speed);
-  const permission = await resolvePermission(runtime, p.permission, access, svc.getSettings().harnesses?.permissions, (r) => permissionModes(r, project.path));
+  const permission = await resolvePermission(runtime, p.permission, access, svc.getSettings().harnesses?.permissions, (r) => inAccount(runtime, account, () => permissionModes(r, project.path)));
   const workspace = await projects.prepareWorkspace(project.id, p.mode === "local" || !project.git ? "local" : "worktree", typeof p.branch === "string" && p.branch ? p.branch : undefined).catch((err) => {
     throw refuse((err as Error).message);
   });
@@ -418,7 +433,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   }
   const now = Date.now();
   const title = clip((typeof p.title === "string" && p.title.trim()) || prompt.split("\n")[0]!, 80);
-  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(permission ? { permission } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
+  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
   await startTurn(botId, chat, prompt, { id: model.id, name: model.name, effort, speed }, images);
   record(botId, "Started a thread", `${title} · ${runtime}`, chat.id);
   return {
@@ -426,6 +441,7 @@ async function start(botId: string, p: Record<string, unknown>) {
     title,
     branch: workspace.branch,
     harness: runtime,
+    ...(account ? { account: account.id } : {}),
     model: model.id,
     effort,
     speed,
@@ -491,6 +507,7 @@ async function read(botId: string, p: Record<string, unknown>) {
     project: chat.workspace?.projectName,
     branch: chat.workspace?.branch,
     harness: chat.runtime ?? "pi",
+    ...(chat.runtimeAccount ? { account: chat.runtimeAccount.id } : {}),
     yours: startedBy(chat, botId),
     permission: chat.permission,
     working: running.length > 0,
@@ -511,7 +528,7 @@ async function list(botId: string, p: Record<string, unknown>) {
   return {
     threads: chats.slice(0, 30).map((c) => {
       const runs = running.filter((run) => run.threadId === c.id);
-      return { thread: short(c.id), title: c.title, project: c.workspace?.projectName, branch: c.workspace?.branch, harness: c.runtime ?? "pi", yours: startedBy((storage.getChat(c.id) as Chat | undefined) ?? c, botId), working: runs.length > 0, waiting_on: runs.flatMap((run) => waitingAsks(run.events)).map((ask) => ask.title), pull_request: c.pullRequest && { number: c.pullRequest.number, state: c.pullRequest.state, checks: c.pullRequest.checks } };
+      return { thread: short(c.id), title: c.title, project: c.workspace?.projectName, branch: c.workspace?.branch, harness: c.runtime ?? "pi", account: c.runtimeAccount?.id, yours: startedBy((storage.getChat(c.id) as Chat | undefined) ?? c, botId), working: runs.length > 0, waiting_on: runs.flatMap((run) => waitingAsks(run.events)).map((ask) => ask.title), pull_request: c.pullRequest && { number: c.pullRequest.number, state: c.pullRequest.state, checks: c.pullRequest.checks } };
     }),
     ...(chats.length > 30 ? { more: chats.length - 30 } : {}),
   };
@@ -628,7 +645,7 @@ export function guide(bot: Pick<Bot, "threads">): string {
   const access = bot.threads;
   if (!access?.enabled) return "";
   return [
-    "You can run coding agents in the user's OpenBuild with the openbuild tool. Each thread is an agent working in one of the projects you've been given, and the user can see and join any of them. Start with action options. Prefer a worktree unless asked otherwise, and give new threads a short title and branch_name.",
+    "You can run coding agents in the user's OpenBuild with the openbuild tool. Each thread is an agent working in one of the projects you've been given, and the user can see and join any of them. Start with action options. Its accounts list contains extra logins: pass an account id or name as harness to inspect its models or start a thread with it. Prefer a worktree unless asked otherwise, and give new threads a short title and branch_name.",
     access.others ? "You can control any thread in your projects, including ones the user or other bots started: read a thread before you step into one that isn't yours." : "You can see every thread in your projects, but only control the ones you started: tell the user about anything another thread needs.",
     "When a thread you started or wrote to asks something or finishes, you'll get a note. A thread waits for an answer forever, so don't leave it hanging: answer it if you know what the user would want, and otherwise ask the user and pass on what they say.",
     `${access.choosePermission ? "You choose each thread's permission mode, so pick the least it needs." : "Threads you start use the permission mode the user set for that harness."} ${access.approve ? "You can answer permission prompts: read what's being asked before you allow it." : "Permission prompts are the user's to answer: when one comes up, tell them."} ${access.merge ? "You can merge pull requests once every check passes." : "Merging is the user's call: tell them when a pull request is ready."}`,

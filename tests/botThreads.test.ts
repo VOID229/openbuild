@@ -3,6 +3,7 @@ import { execSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { accountCacheKey } from "../server/runtimeAccounts";
 import { Run } from "../server/runs";
 
 const dir = mkdtempSync(join(tmpdir(), "openbuild-bot-threads-"));
@@ -39,8 +40,14 @@ mock.module("../server/pi/remote", () => ({
 }));
 mock.module("../server/pi/routes", () => ({ modelListing: async () => ({ models, defaultModel: "acme/one" }) }));
 mock.module("../server/pi/sessions", () => ({ listModels: async () => ({}), isThreadId: () => true }));
-mock.module("../server/runtimes", () => ({ runtimes: () => ({ pi: { installed: true }, claude: { installed: true }, grok: { installed: true } }) }));
+mock.module("../server/runtimes", () => ({ runtimes: () => ({ pi: { installed: true }, claude: { installed: true }, codex: { installed: true }, cursor: { installed: true }, grok: { installed: true } }) }));
 mock.module("../server/claude/install", () => ({ listModels: async () => ({ models: [{ id: "claude/one", name: "Claude One" }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
+for (const runtime of ["codex", "cursor"]) {
+  mock.module(`../server/${runtime}/install`, () => ({
+    listModels: async () => ({ models: [{ id: `${runtime}/one`, name: accountCacheKey() || "main" }], defaultModel: `${runtime}/one` }),
+    listPermissions: async () => ({ modes: [{ id: accountCacheKey(), name: "Account mode" }], checkedAt: 0 }),
+  }));
+}
 mock.module("../server/pullRequestView", () => ({ view: async () => view, merge: async (...args: any[]) => void merged.push(args) }));
 mock.module("../server/bots/runner", () => ({ wake: (id: string, item: any) => wakes.push({ id, ...item }) }));
 
@@ -60,6 +67,7 @@ const settle = () => Bun.sleep(20);
 beforeEach(() => {
   admitted.length = answers.length = steers.length = wakes.length = merged.length = 0;
   snapshots = [];
+  storage.setValue("client-state", "{}");
   grant();
   svc.updateSettings({ harnesses: {} });
 });
@@ -330,3 +338,37 @@ test("threads it didn't start are only its to control with the grant", async () 
   await call("merge", { project: project.name, number: 9 });
   expect(merged[0]).toEqual([repo, 9, "squash", "def", false]);
 });
+
+test("saved local accounts are discoverable, selectable and preserved on continuation", async () => {
+  const account = { id: "login-2", name: "claude2", runtime: "claude", configDir: "/tmp/bot-claude2" };
+  storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account, { ...account, id: "remote", name: "remote", deviceId: "other" }] } } }));
+  expect((await call("options")).accounts).toEqual([{ id: "login-2", name: "claude2", harness: "claude" }]);
+  expect((await call("options", { harness: "claude2" })).models[0].id).toBe("claude/one");
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "login-2", mode: "local" });
+  expect(started.account).toBe(account.id);
+  expect(admitted[0]).toMatchObject({ runtime: "claude", runtimeAccount: account, model: "claude/one" });
+  expect((storage.getChat(admitted[0].threadId) as any).runtimeAccount).toEqual(account);
+  expect((await call("read", { thread: started.thread })).account).toBe(account.id);
+  snapshots = [];
+  await call("send", { thread: started.thread, text: "Continue" });
+  expect(admitted[1].runtimeAccount).toEqual(account);
+  await expect(call("options", { harness: "remote" })).rejects.toThrow(/Unknown harness/);
+  svc.updateSettings({ harnesses: { blocked: ["claude"] } });
+  expect((await call("options")).accounts).toEqual([]);
+  await expect(call("start", { project: project.name, prompt: "Go", harness: "claude2" })).rejects.toThrow(/doesn't let bots/);
+});
+
+
+for (const runtime of ["codex", "cursor"]) {
+  test(`${runtime} models and permissions use the selected login`, async () => {
+    const account = { id: `${runtime}-extra`, name: `${runtime}2`, runtime, configDir: `/tmp/bot-${runtime}2` };
+    storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account] } } }));
+    grant({ choosePermission: true });
+    const options = await call("options", { harness: account.name });
+    expect(options.models[0].name).toBe(account.configDir);
+    expect(options.permissions.modes[0].id).toBe(account.configDir);
+    await call("start", { project: project.name, prompt: "Go", harness: account.id, permission: account.configDir, mode: "local" });
+    expect(admitted[0]).toMatchObject({ runtime, runtimeAccount: account, permission: account.configDir });
+    expect(accountCacheKey()).toBe("");
+  });
+}
