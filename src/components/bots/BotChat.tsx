@@ -1031,7 +1031,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             );
           if (b.kind === "event") {
             const m = b.message;
-            // The bot the detail names, by id, so it still links after a rename.
+            // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
+            // PR or thread title, not a mention, so a bot name inside it stays plain text.
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
@@ -1042,7 +1043,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 {m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
-                    {m.event!.threadId ? <ThreadLink id={m.event!.threadId}>{m.event!.detail}</ThreadLink> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
+                    {m.event!.threadId ? <ThreadLink id={m.event!.threadId}>{m.event!.detail}</ThreadLink> : eventBot ? <BotLink bot={eventBot} /> : m.event!.kind === "thread" ? m.event!.detail : <WithBotLinks text={m.event!.detail} bots={bots} />}
                   </span>
                 )}
               </div>
