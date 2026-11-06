@@ -923,6 +923,17 @@
   display: contents;
 }
 
+/* Busy in another chat: beside the name, quiet, so it doesn't read as work here. */
+.bots-head-away {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
 .bots-head-name {
   overflow: hidden;
   text-overflow: ellipsis;

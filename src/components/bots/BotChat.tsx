@@ -5,9 +5,10 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleD
 import { createPortal } from "react-dom";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
+import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
-import type { Bot, BotMessage, BotStatus, Conversation, Reaction } from "../../lib/bots/types";
+import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
 import { eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
@@ -931,9 +932,6 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
-/** Busy replying in another chat, with this one's message next in line. */
-const holding = (st: BotStatus | undefined, conversationId: string) => !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId);
-
 /** What a bot says in a chat while it finishes replying in another. Stable per chat, so it doesn't flicker. */
 const HOLDING = ["Hold on a second", "Finishing up something", "One moment, wrapping something up", "Be right with you"];
 export function holdingLine(conversationId: string, botId: string): string {
@@ -1016,9 +1014,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
-  const working = useBots(
-    useShallow((s) => Object.entries(s.status).filter(([id, st]) => !typing.includes(id) && (holding(st, conversation.id) || (st.state === "working" && st.conversationId === conversation.id && !st.quiet))).map(([id]) => id)),
-  );
+  const working = useBots(useShallow((s) => showWorking(conversation.id, s.status, typing)));
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -1770,10 +1766,23 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   // What the other side is up to, under the name on a phone, where there's a bar for it.
   const activity = useBots((s) => {
-    const working = conversation.botIds.map((id) => s.status[id]).find((st) => st?.state === "working" && st.conversationId === conversation.id && !st.quiet);
+    const working = conversation.botIds.map((id) => s.status[id]).find((st) => workingHere(st, conversation.id) && !st!.quiet);
     if (working) return working.activity || "Thinking";
     const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
     return held ? holdingLine(conversation.id, held) : undefined;
+  });
+  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does.
+  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
+  const busy = working.length > 0;
+  // Busy in another chat: said as that, never as thinking here.
+  const away = useBots((s) => {
+    const first = elsewhere(conversation, s.status)[0];
+    if (!first) return undefined;
+    const there = s.conversations.find((c) => c.id === first.conversationId);
+    const where = there && !there.hidden ? `Busy in ${conversationName(there, s.bots)}` : "Busy in another chat";
+    if (conversation.kind === "direct") return where;
+    const bot = s.bots.find((b) => b.id === first.botId);
+    return `${bot ? firstName(bot) : "A bot"}: ${where[0]!.toLowerCase()}${where.slice(1)}`;
   });
   // Waiting elsewhere, on the back button.
   const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);
@@ -1784,7 +1793,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
-  const sub = typing ? "typing…" : activity ?? members;
+  const sub = typing ? "typing…" : activity ?? away ?? members;
   return (
     <div className="bots-chat">
       <div className="bots-head">
@@ -1795,10 +1804,11 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </IconButton>
         )}
         <button type="button" className="bots-head-pill" aria-expanded={detailsOpen} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
-          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} mood={typing ? "thinking" : undefined} badge={false} />
+          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={busy ? working : undefined} mood={typing ? "thinking" : undefined} badge={false} />
           <span className="bots-head-text">
             <span className="bots-head-name">{name}</span>
             {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+            {!mobile && !typing && !activity && away && <span className="bots-head-away">{away}</span>}
           </span>
         </button>
       </div>
