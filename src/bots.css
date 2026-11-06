@@ -1481,13 +1481,14 @@
   }
 }
 
-/* Writing a message: three small dots hopping through a quick, even wave. */
+/* Writing a message: three small dots hopping through a quick, even wave. Bare dots, no bubble:
+   they start at the bubbles' edge, like an emoji-only message, and keep a bubble's height. */
 .bm-typing {
   display: flex;
   align-items: center;
   gap: 4px;
   height: 34px;
-  padding: 0 14px;
+  padding: 0 2px;
 }
 
 .bm-typing i {
