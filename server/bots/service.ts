@@ -582,7 +582,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
         if (primary) {
           // Capture context through this message; later arrivals cannot change this decision.
           const history = db.messages(conversationId, 20, seq + 1).map(row => row.message);
-          void routeGroup(primary, members, history, settings().defaultModel).then(ids => {
+          void routeGroup(primary, members, history, settings()).then(ids => {
             const current = db.getConversation(conversationId);
             if (!current) return;
             const eligible = current.botIds.filter(id => db.getBot(id));
