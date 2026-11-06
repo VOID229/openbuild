@@ -55,6 +55,9 @@ export function piFlags(): string[] {
   const extra = selected();
   return [
     "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",
+    // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery.
+    // Empty CLI values suppress both while retaining Pi's default prompt and extension hooks.
+    "--system-prompt", "", "--append-system-prompt", "",
     // The list keeps a bot to its own tools. An extension the user switched on brings tools of its own, so it goes.
     ...(extra.length ? [] : ["--tools", TOOLS]),
     "-e", OWN,
