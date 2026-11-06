@@ -563,7 +563,9 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   const lines = rows.map((r) => {
     const m = r.message;
     const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
-    const body = m.event ? `(${eventText(m.event)}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
+    const text = m.event && eventText(m.event);
+    // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
+    const body = m.event ? `(${text}${m.event.detail ? `${text!.endsWith(" in") ? " " : ": "}${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
     // Unscoped group wakes may react to bots/events, never adopt user requests awaiting routing.
     const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
