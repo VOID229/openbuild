@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, firstName, isSilent, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { conversationTitle, firstName, isSilent, mentionName, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { computerApi } from "../computers/api";
 import { capabilities } from "../computers/index";
@@ -333,7 +333,7 @@ function search(botId: string, p: Record<string, unknown>) {
     return db.searchMessages(query, ids, 12).map((r) => ({
       conversation: r.conversationId.slice(0, 8),
       id: r.message.id.slice(0, 8),
-      author: r.message.author === "me" ? "user" : firstName(db.getBot(r.message.author)?.name ?? r.message.author),
+      author: r.message.author === "me" ? "user" : mentionName(db.getBot(r.message.author)?.name ?? r.message.author),
       text: r.message.text.slice(0, 400),
     }));
   }
@@ -435,7 +435,7 @@ async function askBot(botId: string, p: Record<string, unknown>) {
 }
 
 function resolveBot(prefix: string): string {
-  const hits = db.listBots().filter((b) => b.id === prefix || b.id.startsWith(prefix) || firstName(b.name).toLowerCase() === prefix.toLowerCase());
+  const hits = db.listBots().filter((b) => b.id === prefix || b.id.startsWith(prefix) || [firstName(b.name), mentionName(b.name)].some((n) => n.toLowerCase() === prefix.toLowerCase()));
   if (hits.length === 1) return hits[0]!.id;
   throw new svc.BotsError(hits.length ? "That bot name is ambiguous." : "No such bot.");
 }

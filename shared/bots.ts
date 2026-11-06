@@ -415,14 +415,15 @@ export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 
 /**
- * Where each @mention of a bot sits in some text. The full name wins ("@Dr Eggbot"),
- * and the first name alone ("@Dr") still counts, as bots and older messages write it.
+ * Where each @mention of a bot sits in some text. A bot is mentioned by its whole name, spaces and all
+ * ("@Dr Eggbot"); "@Dr" alone isn't Dr Eggbot, so a half-typed name never tags it.
  */
 export function findMentions<B extends Pick<Bot, "name">>(text: string, bots: B[]): { start: number; end: number; bot: B }[] {
   const names = bots
-    .flatMap((bot) => [mentionName(bot.name), firstName(bot.name)].filter(Boolean).map((name, i) => ({ name: name.toLowerCase(), bot, full: i === 0 })))
-    // Longest first; on a tie, a bot's whole name beats another's first name.
-    .sort((a, b) => b.name.length - a.name.length || Number(b.full) - Number(a.full));
+    .map((bot) => ({ name: mentionName(bot.name).toLowerCase(), bot }))
+    .filter(({ name }) => name)
+    // Longest first, so "@Dr Eggbot" isn't taken for a bot called "Dr".
+    .sort((a, b) => b.name.length - a.name.length);
   const lower = text.toLowerCase();
   const out: { start: number; end: number; bot: B }[] = [];
   for (let i = lower.indexOf("@"); i !== -1; i = lower.indexOf("@", i + 1)) {

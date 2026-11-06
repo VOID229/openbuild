@@ -12,12 +12,19 @@ test("[silent] never becomes a bubble", () => {
   expect(replyBubbles("One\n\nTwo")).toEqual(["One", "Two"]);
 });
 
-test("@mentions match a bot's whole name, or its first name alone", () => {
+test("@mentions match a bot's whole name, spaces and all", () => {
   const bots = [{ name: "Dr Eggbot" }, { name: "Dr" }, { name: "helper · notes" }];
   const found = (text: string) => findMentions(text, bots).map((m) => [text.slice(m.start, m.end), m.bot.name]);
   expect(found("hey @dr eggbot, and @helper")).toEqual([["@dr eggbot", "Dr Eggbot"], ["@helper", "helper · notes"]]);
   expect(found("@Dr hi")).toEqual([["@Dr", "Dr"]]);
   expect(found("me@helper.com @helpers")).toEqual([]);
+});
+
+test("a half-typed name doesn't tag a bot whose name has a space", () => {
+  const found = (text: string) => findMentions(text, [{ name: "Dr Eggbot" }]).map((m) => text.slice(m.start, m.end));
+  expect(found("@Dr")).toEqual([]);
+  expect(found("@Dr Egg")).toEqual([]);
+  expect(found("@Dr Eggbot hi")).toEqual(["@Dr Eggbot"]);
 });
 
 test("@all and @everyone tag the whole conversation, among the bots' own mentions", () => {
