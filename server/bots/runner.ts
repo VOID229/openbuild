@@ -33,6 +33,8 @@ interface Mind {
   /** Keep the chat clear unless it starts typing (see BotStatus.quiet). */
   quiet: boolean;
   activity: string;
+  /** The model's last call failed (an expired sign-in, say): Pi ends the turn with no text, only this. */
+  error?: string;
   onSettled?: () => void;
   onExit?: (e: Error) => void;
 }
@@ -208,6 +210,8 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "agent_settled") mind.onSettled?.();
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
   mind.sent ||= successfulMessageTool(record);
+  const ended = record.type === "message_end" ? record.message : undefined;
+  if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
     mind.draft = "";
@@ -236,6 +240,14 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
       svc.setDraft({ conversationId, botId, text: mind.draft.slice(-4000) }, { conversationId, botId });
     }
   }
+}
+
+/** What a failed model call says in the chat. A lapsed sign-in leads with the fix, as the chat clips the detail. */
+export function modelError(message: unknown): string {
+  const text = String(message || "The model returned an error.");
+  return /invalid_grant|oauth|refresh token|unauthori[sz]ed|\b401\b|sign.?in|log.?in again|expired/i.test(text)
+    ? `The sign-in for this model has expired. Sign in again in Settings → Providers.\n${text}`
+    : text;
 }
 
 const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
@@ -290,6 +302,7 @@ async function run(botId: string, all: Wake[]) {
     mind = await ensureMind(botId);
     mind.busy = true;
     mind.sent = false;
+    mind.error = undefined;
     mind.draft = "";
     mind.typing = false;
     mind.quiet = quiet;
@@ -315,6 +328,8 @@ async function run(botId: string, all: Wake[]) {
           svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: part.slice(0, 8000) });
         }
       }
+      // Otherwise the reply just never shows up, and the chat looks like it lost the message.
+      if (mind.error) throw new PiError(mind.error);
     }
     for (const job of jobs) if (job.conversationId) db.setCursor(botId, job.conversationId, db.latestSeq(job.conversationId));
     svc.touchHeartbeat(botId);

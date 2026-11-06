@@ -377,7 +377,7 @@ test("send_message, models and check-ins against a real bots database", async ()
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
       import { sendMessage, setFocus, routine } from './server/bots/agent.ts';
-      import { applyModel, applyEffort, successfulMessageTool, transcript, onRecord, activityFor } from './server/bots/runner.ts';
+      import { applyModel, applyEffort, successfulMessageTool, transcript, onRecord, activityFor, modelError } from './server/bots/runner.ts';
 
       const { bot, conversationId } = svc.createBot({ name: 'Egg' });
       setFocus(bot.id, conversationId);
@@ -502,6 +502,16 @@ test("send_message, models and check-ins against a real bots database", async ()
       onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '[sil' } });
       a.equal(typingNow(), false);
       a.equal(activityFor('read', { path: '/home/x/notes.md' }), 'Reading notes.md');
+
+      // A failed model call (an xAI refresh rejected with invalid_grant) is kept, so the run can show it instead of nothing.
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: 'OAuth token refresh failed: invalid_grant' } });
+      a.equal(mind.error, 'The sign-in for this model has expired. Sign in again in Settings → Providers.\\nOAuth token refresh failed: invalid_grant');
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'aborted' } });
+      a.ok(mind.error, 'a stop after the failure keeps it');
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'stop' } });
+      a.equal(mind.error, undefined, 'a later good reply clears it');
+      a.equal(modelError('Rate limit exceeded'), 'Rate limit exceeded');
+      a.equal(modelError(''), 'The model returned an error.');
       svc.setStatus(bot.id, { state: 'idle' });
 
       // Group instructions are included in the actual bot transcript.
