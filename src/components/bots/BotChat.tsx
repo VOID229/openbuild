@@ -11,6 +11,7 @@ import type { Bot, BotMessage, BotStatus, Conversation, Reaction } from "../../l
 import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
+import { PULL_REF_RE, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
@@ -143,19 +144,34 @@ function ThreadLink({ id, children }: { id: string; children: React.ReactNode })
   }}>{children}</a>;
 }
 
-/** Only link IDs that resolve uniquely to a known thread; ordinary hex text stays text. */
+/** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
+function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
+  return <a className="link" href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+}
+
+/** Only link IDs that resolve uniquely to a known thread, and PR numbers to a known repository; ordinary hex text stays text. */
 function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
   const chats = useStore((s) => s.chats);
+  const pulls = useMemo(() => chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])), [chats]);
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/\b(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{8})\b/gi)) {
-    const matches = chats.filter((c) => c.id.toLowerCase() === m[0].toLowerCase() || c.id.toLowerCase().startsWith(m[0].toLowerCase() + "-"));
-    if (matches.length !== 1) continue;
+  const refs = new RegExp(`\\b(?:[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}|[a-f0-9]{8})\\b|${PULL_REF_RE.source}`, "gi");
+  for (const m of text.matchAll(refs)) {
     // Let the URL renderer own IDs inside URLs.
     const token = text.slice(0, m.index).match(/[^\s]*$/)?.[0] ?? "";
     if (/[/:]/.test(token)) continue;
+    let link: React.ReactNode;
+    if (m[1]) {
+      const url = pullRefUrl(Number(m[1]), pulls);
+      if (!url) continue;
+      link = <PullLink key={m.index + "-pull"} url={url}>{m[0]}</PullLink>;
+    } else {
+      const matches = chats.filter((c) => c.id.toLowerCase() === m[0].toLowerCase() || c.id.toLowerCase().startsWith(m[0].toLowerCase() + "-"));
+      if (matches.length !== 1) continue;
+      link = <ThreadLink key={m.index + "-thread"} id={matches[0]!.id}>{m[0]}</ThreadLink>;
+    }
     parts.push(<Linkify key={last} text={text.slice(last, m.index)} fileHref={fileHref} bare />);
-    parts.push(<ThreadLink key={m.index + "-thread"} id={matches[0]!.id}>{m[0]}</ThreadLink>);
+    parts.push(link);
     last = m.index + m[0].length;
   }
   parts.push(<Linkify key="end" text={text.slice(last)} fileHref={fileHref} bare />);
