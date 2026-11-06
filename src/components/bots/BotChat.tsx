@@ -945,7 +945,7 @@ function Typing({ conversation, botIds, bots }: { conversation: Conversation; bo
                         </div>
                       </div>
                     ) : (
-                      <div className="bm-bubble bm-typing" role="status" aria-label={`${bot.name} is typing`}>
+                      <div className="bm-typing" role="status" aria-label={`${bot.name} is typing`}>
                         <i />
                         <i />
                         <i />
