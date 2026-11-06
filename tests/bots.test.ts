@@ -721,6 +721,68 @@ test("any number of routines stay active at once, each bot's separate, each in i
   }
 }, 30_000);
 
+test("a screenshot sent while a bot is replying reaches it, by steering or in the next turn", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-images-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      const minds = globalThis.openbotsMinds = new Map();
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const { wake, stop } = await import('./server/bots/runner.ts');
+      const { piFlags } = await import('./server/bots/extensions.ts');
+      svc.setHooks({ wake, stop });
+      svc.updateSettings({ onboarding: 'done' });
+      const { bot, conversationId } = svc.createBot({ name: 'Shot' });
+
+      const sent = [];
+      let release, steerFails = false;
+      const mind = { token: 't', busy: false, sent: false, draft: '', loaded: JSON.stringify(piFlags()), proc: { exited: false, lastUsed: Date.now(), close() {}, send: async (cmd) => {
+        if (cmd.type === 'steer' || cmd.type === 'prompt') sent.push({ type: cmd.type, message: cmd.message, images: (cmd.images ?? []).map((i) => i.data) });
+        if (cmd.type === 'steer' && steerFails) throw new Error('Pi is gone');
+        if (cmd.type === 'prompt') release = () => mind.onSettled?.();
+        return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
+      } } };
+      minds.set(bot.id, mind);
+      const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); a.ok(ok()); };
+      const post = (text, data) => svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text, images: data ? ['data:image/png;base64,' + data] : undefined });
+
+      post('first', 'AAAA');
+      await until(() => sent.length === 1 && release);
+      a.deepEqual(sent[0].images, ['AAAA']);
+
+      // Mid-reply: steered in with its image, and the first prompt's image isn't sent again.
+      post('look at this', 'BBBB');
+      await until(() => sent.length === 2);
+      a.equal(sent[1].type, 'steer');
+      a.deepEqual(sent[1].images, ['BBBB']);
+
+      // A steer that doesn't land waits for the next turn, which still has the image and the text.
+      steerFails = true;
+      post('and this', 'CCCC');
+      await until(() => sent.length === 3);
+      await new Promise((r) => setTimeout(r, 10));
+      steerFails = false;
+      const r1 = release; release = undefined;
+      r1();
+      await until(() => sent.length === 4 && release);
+      a.equal(sent[3].type, 'prompt');
+      a.deepEqual(sent[3].images, ['CCCC']);
+      // Still unread in that turn's transcript.
+      const line = sent[3].message.split('\\n').find((l) => l.endsWith(': and this'));
+      a.ok(line && !line.includes('[already seen]'), sent[3].message);
+      release();
+      await until(() => db.cursor(bot.id, conversationId) === db.latestSeq(conversationId));
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test("bots write their own instructions, and only a blank slate is open to a non-primary bot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-instructions-"));
   try {
