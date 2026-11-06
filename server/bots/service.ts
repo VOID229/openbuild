@@ -455,7 +455,14 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   if ("section" in patch) c.section = clip(patch.section, 40);
   if (patch.botIds && c.kind === "group") {
     const ids = [...new Set(patch.botIds)].filter((b) => db.getBot(b));
-    if (ids.length >= 1) c.botIds = ids;
+    if (ids.length >= 1) {
+      c.botIds = ids;
+      const follow = groupFollow.get(id);
+      if (follow) {
+        follow.ids = follow.ids.filter(botId => ids.includes(botId));
+        if (!follow.ids.length) groupFollow.delete(id);
+      }
+    }
   }
   db.putConversation(c);
   emitConversation(id);
@@ -467,6 +474,8 @@ export function deleteConversation(id: string) {
   const c = db.getConversation(id);
   if (!c) throw new BotsError("No such conversation.", 404);
   if (c.kind === "direct") throw new BotsError("Delete the bot to remove its chat.");
+  groupFollow.delete(id);
+  groupUserSeq.delete(id);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
 }
@@ -517,6 +526,11 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   const replied = reply && others.includes(reply.message.author) ? [reply.message.author] : [];
   return [...new Set([...mentioned, ...replied])];
 }
+
+const GROUP_FOLLOW_MS = 20 * 60_000;
+// Sequence guards decisions independently of completion order; only user requests refresh the clock.
+const groupFollow = new Map<string, { ids: string[]; at: number }>();
+const groupUserSeq = new Map<string, number>();
 
 function mentionedBots(text: string, ids: string[]): string[] {
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
@@ -575,7 +589,17 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
         });
       }
     } else {
-      const targets = wakeTargets(c, message);
+      let targets = wakeTargets(c, message);
+      const groupRequest = message.author === "me" && c.kind === "group" && !message.poll;
+      if (groupRequest) {
+        groupUserSeq.set(conversationId, seq);
+        const follow = groupFollow.get(conversationId);
+        if (!targets.length && follow && message.at >= follow.at && message.at - follow.at < GROUP_FOLLOW_MS) {
+          targets = follow.ids.filter(id => c.botIds.includes(id) && db.getBot(id));
+        }
+        if (targets.length) groupFollow.set(conversationId, { ids: targets, at: message.at });
+        else groupFollow.delete(conversationId);
+      }
       if (message.author === "me" && c.kind === "group" && !message.poll && !targets.length) {
         const members = c.botIds.flatMap(id => db.getBot(id) ?? []);
         const primary = members.find(b => b.primary) ?? members[0];
@@ -588,6 +612,9 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
             const eligible = current.botIds.filter(id => db.getBot(id));
             let selected = ids.filter(id => eligible.includes(id));
             if (!selected.length) selected = [eligible.find(id => db.getBot(id)?.primary) ?? eligible[0]!].filter(Boolean);
+            if (groupUserSeq.get(conversationId) === seq && selected.length) {
+              groupFollow.set(conversationId, { ids: selected, at: message.at });
+            }
             for (const id of selected) if (!skip.has(id)) hooks.wake(id, { kind: "messages", conversationId, messageIds: [message.id] });
           });
         }
