@@ -1,5 +1,18 @@
 import type { Effort } from "../../shared/types";
-import type { Chat, Selection, Settings } from "./types";
+import type { Chat, ModelRef, Selection, Settings } from "./types";
+
+const accountRefs = new WeakMap<ModelRef, ModelRef>();
+/**
+ * A reply's model as the thread's account lists it. Bot-started account threads saved the runtime's
+ * own id ("claude/opus") where the picker lists the account's ("claude2/opus"). Memoised per saved
+ * ref, so selectors keep getting the same object.
+ */
+export function threadModel(chat: Pick<Chat, "runtimeAccount"> | undefined, ref: ModelRef): ModelRef {
+  const account = chat?.runtimeAccount?.id;
+  if (!account || account === ref.plan || (ref.plan !== "claude" && ref.plan !== "codex") || !ref.id.startsWith(`${ref.plan}/`)) return ref;
+  if (!accountRefs.has(ref)) accountRefs.set(ref, { ...ref, id: `${account}${ref.id.slice(ref.plan.length)}` });
+  return accountRefs.get(ref)!;
+}
 
 /** Provider/plan is part of the identity; auto has its own preference. */
 export function effortKey(selection: Selection): string {
@@ -12,7 +25,7 @@ export function effortFor(settings: Settings, chat: Chat | undefined, selection:
   const saved = (chat ? chat.efforts : settings.modelEfforts)?.[effortKey(selection)];
   if (saved) return saved;
   if (chat && !("auto" in selection)) {
-    const previous = chat.messages.findLast((m) => m.role === "assistant" && m.model?.plan === selection.plan && m.model.id === selection.id && m.model.effort);
+    const previous = chat.messages.findLast((m) => m.role === "assistant" && m.model?.plan === selection.plan && threadModel(chat, m.model).id === selection.id && m.model.effort);
     if (previous?.model?.effort) return previous.model.effort;
   }
   // Keep the old global value only as a migration/default, not as a live toggle.
@@ -28,7 +41,7 @@ export function speedFor(settings: Settings, chat: Chat | undefined, selection: 
   const saved = (chat ? chat.speeds : settings.modelSpeeds)?.[effortKey(selection)];
   if (saved !== undefined) return saved || undefined;
   if (chat) {
-    const previous = chat.messages.findLast((m) => m.role === "assistant" && m.model?.plan === selection.plan && m.model.id === selection.id);
+    const previous = chat.messages.findLast((m) => m.role === "assistant" && m.model?.plan === selection.plan && threadModel(chat, m.model).id === selection.id);
     return previous?.model?.speed;
   }
   return undefined;

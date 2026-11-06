@@ -420,9 +420,13 @@ test("UI-discovered Claude login is usable and saved configuration wins", async 
   expect((await call("options", { harness: "claude2" })).models[0].id).toBe("claude/one");
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude2", mode: "local" });
   expect(admitted[0].runtimeAccount).toEqual(account);
+  // Saved under the id the UI lists for the account, so the composer keeps it; sent as the runtime's own.
+  expect((storage.getChat(admitted[0].threadId) as any).messages.at(-1).model).toMatchObject({ plan: "claude", id: "claude2/one" });
+  expect(admitted[0].model).toBe("claude/one");
   snapshots = [];
   await call("send", { thread: started.thread, text: "Continue" });
-  expect(admitted[1].runtimeAccount).toEqual(account);
+  expect(admitted[1]).toMatchObject({ runtimeAccount: account, model: "claude/one" });
+  expect((storage.getChat(admitted[1].threadId) as any).messages.at(-1).model).toMatchObject({ id: "claude2/one" });
   const saved = { ...account, id: "saved-id", name: "Work", launchArgs: "--verbose" };
   storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [saved] } } }));
   expect((await call("options")).accounts).toEqual([{ id: saved.id, name: saved.name, harness: "claude" }]);

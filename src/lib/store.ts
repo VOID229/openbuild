@@ -9,7 +9,7 @@ import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { clearQueue } from "./queue";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
-import { effortFor, effortKey, speedFor } from "./effort";
+import { effortFor, effortKey, speedFor, threadModel } from "./effort";
 import type { ClaudeAccountModels, Effort, ModelInfo, PermissionModes, RuntimeAccount } from "../../shared/types";
 import { serverStorage } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
@@ -1072,7 +1072,8 @@ function nativeSelectionFor(
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
   if (id) {
     const picked = s.selections[id];
-    const reply = s.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant" && m.model?.plan === plan)?.model;
+    const saved = chat?.messages.findLast((m) => m.role === "assistant" && m.model?.plan === plan)?.model;
+    const reply = saved && threadModel(chat, saved);
     if (known(picked)) return picked;
     if (reply && known(reply)) return reply;
   }
