@@ -18,6 +18,7 @@ export interface Draft {
 }
 
 const NO_EXTENSIONS = { enabled: false, ids: [] as string[] };
+const NO_MODELS: string[] = [];
 
 interface BotsState {
   bots: Bot[];
@@ -41,6 +42,8 @@ interface BotsState {
   seeded: boolean;
   /** "provider/model" for bots without their own. Pi's default when unset. */
   defaultModel?: string;
+  /** What a bot on the default model tries when it fails, unless the bot lists its own. */
+  defaultFallbackModels: string[];
   /** SearXNG instances for web search. The other providers' keys are in the vault. */
   searxng: string[];
   /** The user's own Pi extensions to load into bots as well. */
@@ -60,6 +63,7 @@ interface BotsState {
   /** Throw everything away and start again from the starter bots. */
   reset: () => void;
   setDefaultModel: (model: string) => void;
+  setDefaultFallbackModels: (models: string[]) => void;
   setSearxng: (urls: string[]) => void;
   setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   setHarnesses: (harnesses: BotHarnessSettings) => void;
@@ -128,6 +132,7 @@ export const useBots = create<BotsState>()(
       folded: ["hidden"],
       detailsOpen: false,
       seeded: false,
+      defaultFallbackModels: NO_MODELS,
       searxng: [],
       customExtensions: NO_EXTENSIONS,
       harnesses: {},
@@ -143,6 +148,10 @@ export const useBots = create<BotsState>()(
       setDefaultModel: (model) => {
         set({ defaultModel: model || undefined });
         void send("PATCH", "/api/bots/settings", { defaultModel: model });
+      },
+      setDefaultFallbackModels: (defaultFallbackModels) => {
+        set({ defaultFallbackModels });
+        void send("PATCH", "/api/bots/settings", { defaultFallbackModels });
       },
       setSearxng: (searxng) => {
         set({ searxng });
@@ -484,6 +493,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       drafts: e.drafts,
       status: e.status,
       defaultModel: e.settings.defaultModel,
+      defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS,
       searxng: e.settings.searxng ?? [],
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       harnesses: e.settings.harnesses ?? {},
@@ -578,6 +588,6 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
-    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
+    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
   }
 }

@@ -11,7 +11,8 @@ import { arrowNav, cx, useDevicePref, useFocusOnShow } from "../lib/ui";
 import { BrandIcon, Popover } from "./primitives";
 
 /** Search box + Pi's models grouped by provider. Mounts fresh per open. */
-export function ModelMenu({ selected, onPick, piDetection, scopedOnly = false }: { selected?: ModelRef; onPick: (ref: ModelRef) => void; piDetection?: Detection; scopedOnly?: boolean }) {
+/** `leading` is an option of the caller's own (Settings → Bots' "Pi's default"), listed first under the search and set off from the models; it steps aside while searching. */
+export function ModelMenu({ selected, onPick, piDetection, scopedOnly = false, leading }: { selected?: ModelRef; onPick: (ref: ModelRef) => void; piDetection?: Detection; scopedOnly?: boolean; leading?: ReactNode }) {
   usePlugins((s) => s.version);
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useDevicePref("models.showAll");
@@ -57,6 +58,12 @@ export function ModelMenu({ selected, onPick, piDetection, scopedOnly = false }:
         }}
       />
       <div ref={list} className="select-list" onKeyDown={(e) => arrowNav(e)}>
+        {leading && !query.trim() && (
+          <>
+            {leading}
+            <div className="menu-sep" role="separator" />
+          </>
+        )}
         {scoped && !scopedOnly && (
           <button
             type="button"

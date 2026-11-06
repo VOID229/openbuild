@@ -205,7 +205,7 @@ test("thread activity details are titles, so bot names inside them don't become 
 test("a started thread's activity line names the bot that started it", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author)');
-  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to fallback model {fallbackName}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
 });
 
 test("older follow-up prompts read with the current wording", async () => {
@@ -349,7 +349,9 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
 test("a fallback switch names the bot, its model and the model's account", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
-  expect(chat).toContain("<BotLink bot={switcher} /> switched to fallback model {fallbackName}");
+  // "switched to fallback model GPT 6.1 Sol", or back up: "switched to first priority model Grok 4.7".
+  expect(chat).toContain("<BotLink bot={switcher} /> switched to {switchedTo}");
+  expect(chat).toContain('const switchedTo = m.event!.text.replace(/^Switched to /, "");');
   expect(chat).toContain("from {accountName(m.event!.detail)}");
   const { accountName } = await import("../src/lib/models");
   expect(accountName("openai-codex-2")).toBe("Codex 2");
@@ -363,6 +365,29 @@ test("a bot's fallback models are listed in order in both settings layouts, each
   expect(advanced).toContain('<BotModelSelect label={`Fallback model ${i + 1}`} value={model} account');
   expect(advanced).toContain('label="Try earlier"');
   expect(advanced).toContain("providerName(account ? (m.provider ?? m.id.split(\"/\")[0]!) : providerOf(m))");
+});
+
+test("Settings → Bots lists the default model's fallbacks, which bots on Default follow until they list their own", async () => {
+  const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
+  const settings = await Bun.file("src/components/bots/BotSettings.tsx").text();
+  expect(settings).toMatch(/label="Default model"[^\n]*\n\s*<\/div>\n\s*<DefaultFallbacks \/>/);
+  expect(advanced).toContain("<FallbackList list={list} onChange={useBots.getState().setDefaultFallbackModels} />");
+  expect(advanced).toContain("bot.model || bot.fallbackModels?.length ? 0 : s.defaultFallbackModels.length");
+  const store = await Bun.file("src/lib/bots/store.ts").text();
+  expect(store).toContain('void send("PATCH", "/api/bots/settings", { defaultFallbackModels });');
+});
+
+test("the unset model option sits under the search, set off from the provider lists, with its resolved model, logo and muted tag", async () => {
+  const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
+  const menu = await Bun.file("src/components/ModelSelect.tsx").text();
+  // It's ModelMenu's leading option, not a row squeezed in above the search.
+  expect(advanced).not.toMatch(/\{unset && \(\s*<button[^]*?<ModelMenu/);
+  expect(advanced).toMatch(/leading=\{\s*unset && \(\s*<button[^>]*aria-selected=\{!value\}[^]*?<BrandIcon id=\{fallback\} \/>[^]*?<span className="menu-item-hint">\{unset\}<\/span>/);
+  const search = menu.indexOf('placeholder="Search models or providers…"');
+  const leading = menu.indexOf("{leading && !query.trim() && (");
+  expect(search).toBeGreaterThan(0);
+  expect(leading).toBeGreaterThan(search);
+  expect(menu.slice(leading, menu.indexOf("{groups.map", leading))).toContain('<div className="menu-sep" role="separator" />');
 });
 
 test("a long thread list doesn't slow the OpenBots switch: rows out of view skip rendering, keeping a focus ring", async () => {

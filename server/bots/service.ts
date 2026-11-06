@@ -99,9 +99,16 @@ function settings(): BotsSettings {
 export function getSettings(): BotsSettings {
   return settings();
 }
+/** Up to 8 "provider/model"s, in order, without repeats; undefined when there are none. */
+function modelList(value: unknown): string[] | undefined {
+  const list = strings(Array.isArray(value) ? value.map((m) => (typeof m === "string" ? m.trim().slice(0, 200) : m)).filter((m) => typeof m === "string" && m.includes("/")) : [], 8);
+  return list.length ? list : undefined;
+}
+
 export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   const next: BotsSettings = { ...settings(), ...patch };
   if ("defaultModel" in patch) next.defaultModel = typeof patch.defaultModel === "string" && patch.defaultModel ? patch.defaultModel.slice(0, 200) : undefined;
+  if ("defaultFallbackModels" in patch) next.defaultFallbackModels = modelList(patch.defaultFallbackModels);
   if (patch.quietHours) next.quietHours = { from: num(patch.quietHours.from, 0, 23), to: num(patch.quietHours.to, 0, 23) };
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
@@ -299,11 +306,11 @@ export async function resetAll() {
     const device = bot.computer?.device ?? "local";
     await computerApi(device).call(bot.id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
   }
-  // Reset is about bots and chats. Their default model, how the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
-  const { defaultModel, searxng, customExtensions } = settings();
+  // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
+  const { defaultModel, defaultFallbackModels, searxng, customExtensions } = settings();
   const apps = db.getValue("apps");
   db.wipe();
-  if (defaultModel || searxng?.length || customExtensions) db.setValue("settings", { ...settings(), defaultModel, searxng, customExtensions });
+  if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions });
   if (apps) db.setValue("apps", apps);
   status.clear();
   chains.clear();
@@ -359,8 +366,7 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (patch.model === null || patch.model === "") bot.model = undefined;
   else if (typeof patch.model === "string") bot.model = patch.model.slice(0, 200);
   if (patch.fallbackModels === null || Array.isArray(patch.fallbackModels)) {
-    const list = strings(patch.fallbackModels?.map((m) => (typeof m === "string" ? m.trim().slice(0, 200) : m)).filter((m) => typeof m === "string" && m.includes("/")), 8);
-    bot.fallbackModels = list.length ? list : undefined;
+    bot.fallbackModels = modelList(patch.fallbackModels);
   }
   if (typeof patch.effort === "string") bot.effort = patch.effort.slice(0, 40);
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
