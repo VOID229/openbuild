@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { dragClaims, dragCommits, REPLY_AT, replyDrag } from "../src/lib/gestures";
+import { dragClaims, dragCommits, holdLayout, REPLY_AT, replyDrag } from "../src/lib/gestures";
 
 describe("dragging a pane", () => {
   const width = 400;
@@ -28,7 +28,7 @@ describe("swiping a bubble to reply", () => {
 });
 
 describe("the phone stylesheet", () => {
-  // Nothing in it may reach a desktop window: outside the sheet, which only touch screens open, every
+  // Nothing in it may reach a desktop window: outside the sheet and the held bubble's menu, which only touch screens open, every
   // rule sits behind a media query for phones or for touch.
   const css = readFileSync("src/mobile.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
   const topLevel: string[] = [];
@@ -46,7 +46,7 @@ describe("the phone stylesheet", () => {
   }
   test("keeps its rules behind phone or touch media queries", () => {
     const loose = topLevel.filter((s) => !s.startsWith("@media"));
-    for (const s of loose) expect(s).toMatch(/^\.(sheet|bm-sheet|bm-swipe-icon)/);
+    for (const s of loose) expect(s).toMatch(/^\.(sheet|bm-hold|bm-swipe-icon)/);
   });
   test("its queries only match phones, touch screens, or reduced motion", () => {
     const queries = topLevel.filter((s) => s.startsWith("@media"));
@@ -70,5 +70,35 @@ describe("dragClaims", () => {
   test("a swipe the other way leaves the pane alone", () => {
     expect(dragClaims(20, 0, -1)).toBe(false);
     expect(dragClaims(-20, 0, 1)).toBe(false);
+  });
+});
+
+describe("the menu for a held bubble", () => {
+  const view = { viewTop: 20, viewBottom: 800, gap: 8, bar: 50, menu: 150 };
+  test("keeps the bubble where it was, its reactions above and its actions below", () => {
+    const at = holdLayout({ ...view, bubbleTop: 300, bubbleHeight: 60 });
+    expect(at).toEqual({ top: 300 - 58, flipped: false, shift: 0, bubbleHeight: 60 });
+  });
+  test("puts the actions above when there's no room for them below", () => {
+    const at = holdLayout({ ...view, bubbleTop: 700, bubbleHeight: 60 });
+    expect(at.flipped).toBe(true);
+    expect(at.shift).toBe(0);
+    expect(at.top).toBe(700 - 58 - 158);
+  });
+  test("slides back onto the screen when neither way fits", () => {
+    const top = holdLayout({ ...view, bubbleTop: 30, bubbleHeight: 60 });
+    expect(top.flipped).toBe(false);
+    expect(top.top).toBe(20);
+    expect(top.shift).toBe(20 - (30 - 58));
+    const low = holdLayout({ ...view, bubbleTop: 790, bubbleHeight: 400, viewBottom: 1000 });
+    expect(low.top + 58 + low.bubbleHeight + 8 + 150).toBeLessThanOrEqual(1000);
+  });
+  test("cuts a bubble too tall to fit beside its menu short", () => {
+    const at = holdLayout({ ...view, bubbleTop: 0, bubbleHeight: 2000 });
+    expect(at.bubbleHeight).toBe(800 - 20 - 58 - 8 - 150);
+    expect(at.top).toBe(20);
+  });
+  test("leaves no room for reactions it doesn't show", () => {
+    expect(holdLayout({ ...view, bar: 0, bubbleTop: 300, bubbleHeight: 60 }).top).toBe(300);
   });
 });

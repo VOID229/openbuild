@@ -1,7 +1,8 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
+import { createPortal } from "react-dom";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { colorOf } from "../../lib/bots/looks";
@@ -11,8 +12,8 @@ import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } fr
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { useShallow } from "zustand/react/shallow";
-import { closeBotsLayer, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
-import { copyText, cx, useMediaQuery } from "../../lib/ui";
+import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
+import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
 import { Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
@@ -492,11 +493,11 @@ interface RowProps {
   onReply: (id: string) => void;
   onPicker: (p: Picker, anchor: HTMLElement) => void;
   /** Touch screens: this message's actions, by holding its bubble. */
-  onSheet: (id: string) => void;
+  onHold: (id: string, bubble: HTMLElement) => void;
   seen?: React.ReactNode;
 }
 
-const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onSheet, seen }: RowProps) {
+const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
   const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
@@ -508,8 +509,9 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
     if (!had && !mine) noticeReaction(m.author, emoji);
   };
   const lastDoubleTap = useRef(0);
+  const bubble = useRef<HTMLDivElement>(null);
   const fingers = useBubbleTouch({
-    onHold: () => onSheet(m.id),
+    onHold: () => bubble.current && onHold(m.id, bubble.current),
     onReply: readonly ? undefined : () => onReply(m.id),
     onDoubleTap: readonly
       ? undefined
@@ -534,6 +536,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       )}
       <div className="bm-line">
         <div
+          ref={bubble}
           className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card")}
           onDoubleClick={readonly ? undefined : (e) => {
             // Two taps also make a dblclick, but useBubbleTouch has already answered them.
@@ -580,111 +583,262 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
   );
 });
 
-/** What holding a bubble brings up on a touch screen: the message, its reactions and what else can be done with it. */
-function MessageSheet({ message: m, conversation, bots, readonly, onClose, onReply }: { message?: BotMessage; conversation: Conversation; bots: Bot[]; readonly: boolean; onClose: () => void; onReply: (id: string) => void }) {
-  // Kept through the sheet's exit, so it doesn't go blank as it slides away.
-  const last = useRef(m);
-  if (m) last.current = m;
-  const shown = last.current;
+/** The computed styles a bubble gets from where it sits in the conversation, which its lifted copy has to carry along. */
+const LIFTED_STYLES = [
+  "background-color",
+  "background-image",
+  "color",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "line-height",
+  ...["top", "right", "bottom", "left"].flatMap((side) => [`padding-${side}`, `border-${side}-width`, `border-${side}-style`, `border-${side}-color`]),
+  ...["top-left", "top-right", "bottom-right", "bottom-left"].map((corner) => `border-${corner}-radius`),
+];
+
+/**
+ * A bubble's box as it stands, before the press that's sinking it. Its rounded offsetWidth could make
+ * the copy one pixel narrower and wrap its text differently.
+ */
+function unpressedBox(bubble: HTMLElement) {
+  const r = bubble.getBoundingClientRect();
+  const transform = getComputedStyle(bubble).transform;
+  const scale = transform && transform !== "none" ? new DOMMatrix(transform).a || 1 : 1;
+  const width = r.width / scale;
+  const height = r.height / scale;
+  return { left: r.left + (r.width - width) / 2, top: r.top + (r.height - height) / 2, width, height };
+}
+
+/** Room left between the lifted bubble, its reactions and its actions. */
+const HOLD_GAP = 8;
+
+/**
+ * What holding a bubble brings up on a touch screen: the bubble lifted where it was over the blurred
+ * conversation, its reactions just above and what else can be done with it just below.
+ */
+function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?: { message: BotMessage; bubble: HTMLElement }; conversation: Conversation; readonly: boolean; onClose: () => void; onReply: (id: string) => void }) {
+  // Kept through the menu's exit, so it doesn't go blank as it fades away.
+  const last = useRef(held);
+  if (held) last.current = held;
+  const shown = last.current?.message;
+  const bubble = last.current?.bubble;
+  const { mounted, visible } = usePresence(!!held, 280);
+  const root = useRef<HTMLDivElement>(null);
+  const holder = useRef<HTMLDivElement>(null);
+  const lifted = useRef<HTMLElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ top: number; left: number; right: number; flipped: boolean; shift: number }>();
   const [more, setMore] = useState(false);
   const [done, setDone] = useState<"copied" | "stashed">();
+  const [selecting, setSelecting] = useState(false);
   const crossStash = useStore((s) => s.settings.crossStash);
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
-    if (!m) return;
+    if (!held) return;
     setMore(false);
     setDone(undefined);
-  }, [m?.id]);
+    setSelecting(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [held?.message.id]);
+
+  // A copy of the bubble, styled as it was in its row, rises over the blur while the real one makes way.
+  useLayoutEffect(() => {
+    if (!mounted || !bubble || !holder.current) return;
+    const copy = bubble.cloneNode(true) as HTMLElement;
+    const from = getComputedStyle(bubble);
+    for (const prop of LIFTED_STYLES) copy.style.setProperty(prop, from.getPropertyValue(prop));
+    copy.classList.add("bm-hold-bubble");
+    copy.setAttribute("aria-hidden", "true");
+    copy.style.boxSizing = "border-box";
+    copy.style.width = `${unpressedBox(bubble).width}px`;
+    copy.style.maxWidth = "none";
+    copy.style.transform = "none";
+    copy.style.transition = "none";
+    holder.current.replaceChildren(copy);
+    lifted.current = copy;
+    bubble.style.visibility = "hidden";
+    return () => {
+      bubble.style.removeProperty("visibility");
+      copy.remove();
+      lifted.current = null;
+    };
+  }, [mounted, bubble]);
+
+  useLayoutEffect(() => {
+    if (!mounted || !bubble) return;
+    const layout = () => {
+      const page = root.current;
+      const copy = lifted.current;
+      if (!page || !copy) return;
+      const { left, top, width, height } = unpressedBox(bubble);
+      const pad = getComputedStyle(page);
+      const at = holdLayout({
+        bubbleTop: top,
+        bubbleHeight: height,
+        bar: bar.current?.offsetHeight ?? 0,
+        menu: menu.current?.offsetHeight ?? 0,
+        viewTop: parseFloat(pad.paddingTop),
+        viewBottom: page.clientHeight - parseFloat(pad.paddingBottom),
+        gap: HOLD_GAP,
+      });
+      copy.style.maxHeight = `${at.bubbleHeight}px`;
+      copy.toggleAttribute("data-clipped", at.bubbleHeight < height);
+      // The column hangs from the bubble's outer edge: the right for the user's own, the left for a bot's.
+      const mine = shown?.author === "me";
+      setPlace({
+        top: at.top,
+        left: mine ? parseFloat(pad.paddingLeft) : left,
+        right: mine ? page.clientWidth - left - width : parseFloat(pad.paddingRight),
+        flipped: at.flipped,
+        shift: at.shift,
+      });
+    };
+    layout();
+    // Taking focus puts the keyboard away, and the conversation moves with it.
+    window.addEventListener("resize", layout);
+    window.visualViewport?.addEventListener("resize", layout);
+    return () => {
+      window.removeEventListener("resize", layout);
+      window.visualViewport?.removeEventListener("resize", layout);
+    };
+  }, [mounted, bubble, more, shown?.author]);
+
+  const open = !!held;
+  useLayoutEffect(() => {
+    if (open && mounted) root.current?.focus({ preventScroll: true });
+  }, [open, mounted]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      close.current();
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open]);
+  useEffect(() => {
+    if (!open && selecting) window.getSelection()?.removeAllRanges();
+  }, [open, selecting]);
+
+  if (!mounted || !shown) return null;
   const act = (next: "copied" | "stashed") => {
     setDone(next);
     setTimeout(onClose, 500);
   };
   const react = (emoji: string) => {
-    if (!shown) return;
     const had = shown.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
     useBots.getState().toggleReaction(conversation.id, shown.id, emoji, "me");
     if (!had && shown.author !== "me") noticeReaction(shown.author, emoji);
     onClose();
   };
-  const mine = shown?.author === "me";
-  const text = shown ? shown.text || messageText(shown) : "";
-  const reacted = (emoji: string) => shown?.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
-  return (
-    <Sheet open={!!m} onClose={onClose} label="Message actions" className="bm-sheet">
-      {shown && (
-        <>
-          <div className={cx("bm-sheet-preview", mine && "bm-sheet-preview-mine")}>
-            <div className="bm-sheet-who">
-              {authorName(shown.author, bots).split(" ·")[0]} · {dividerTime(shown.at)}
+  // The lifted bubble takes the stage alone, its text all selected so the handles can trim it.
+  const select = () => {
+    const copy = lifted.current;
+    if (!copy) return;
+    copy.setAttribute("data-selecting", "");
+    setSelecting(true);
+    const range = document.createRange();
+    range.selectNodeContents(copy.querySelector(".bm-text") ?? copy);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  };
+  const mine = shown.author === "me";
+  const text = shown.text || messageText(shown);
+  const reacted = (emoji: string) => shown.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
+  return createPortal(
+    <div
+      ref={root}
+      className="bm-hold-root"
+      data-state={visible && place ? "open" : "closed"}
+      data-selecting={selecting ? "" : undefined}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Message actions"
+      tabIndex={-1}
+    >
+      <div className="bm-hold-scrim" onClick={onClose} aria-hidden />
+      <div
+        className="bm-hold-stack"
+        data-mine={mine ? "" : undefined}
+        data-flipped={place?.flipped ? "" : undefined}
+        style={place ? ({ top: place.top, left: place.left, right: place.right, "--hold-shift": `${-place.shift}px` } as React.CSSProperties) : { visibility: "hidden" }}
+      >
+        {!readonly && (
+          <div ref={bar} className="bm-hold-reactions">
+            <div className="bm-hold-quick">
+              {QUICK.map((e) => (
+                <button key={e} type="button" className={cx("bm-react-btn", reacted(e) && "bm-react-btn-on")} onClick={() => react(e)}>
+                  {e}
+                </button>
+              ))}
+              <button type="button" className="bm-react-btn bm-react-more" aria-label="More reactions" aria-expanded={more} onClick={() => setMore(!more)}>
+                <SmilePlus size={22} />
+              </button>
             </div>
-            {text && (
-              <div className="bm-sheet-text">
-                {shown.text ? <RichText text={shown.text} bots={bots} everyone={everyoneIn(conversation, bots)} botId={mine ? undefined : shown.author} /> : text}
-              </div>
-            )}
-          </div>
-          {!readonly && (
-            <>
-              <div className="bm-sheet-reactions">
-                {QUICK.map((e) => (
-                  <button key={e} type="button" className={cx("bm-react-btn", reacted(e) && "bm-react-btn-on")} onClick={() => react(e)}>
+            {more && (
+              <div className="bm-hold-grid">
+                {MORE.map((e) => (
+                  <button key={e} type="button" className="bm-react-btn" onClick={() => react(e)}>
                     {e}
                   </button>
                 ))}
-                <button type="button" className="bm-react-btn bm-react-more" aria-label="More reactions" aria-expanded={more} onClick={() => setMore(!more)}>
-                  <SmilePlus size={22} />
-                </button>
               </div>
-              {more && (
-                <div className="bm-sheet-grid">
-                  {MORE.map((e) => (
-                    <button key={e} type="button" className="bm-react-btn" onClick={() => react(e)}>
-                      {e}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-          <div className="bm-sheet-actions">
-            {!readonly && (
-              <button
-                type="button"
-                className="sheet-item"
-                onClick={() => {
-                  onClose();
-                  onReply(shown.id);
-                }}
-              >
-                <CornerUpLeft size={20} /> Reply
-              </button>
-            )}
-            <button
-              type="button"
-              className="sheet-item"
-              disabled={!text}
-              onClick={() => {
-                void copyText(text);
-                act("copied");
-              }}
-            >
-              {done === "copied" ? <Check size={20} /> : <Copy size={20} />} {done === "copied" ? "Copied" : "Copy"}
-            </button>
-            {!readonly && mine && !shown.poll && (shown.text.trim() || !!shown.images?.length) && (
-              <button
-                type="button"
-                className="sheet-item"
-                onClick={() => {
-                  botStashOf(crossStash).add(shown.text, imageFiles(shown.images ?? []));
-                  act("stashed");
-                }}
-              >
-                {done === "stashed" ? <Check size={20} /> : <Bookmark size={20} />} {done === "stashed" ? "Stashed" : "Stash"}
-              </button>
             )}
           </div>
-        </>
-      )}
-    </Sheet>
+        )}
+        <div ref={holder} className="bm-hold-holder" />
+        <div ref={menu} className="bm-hold-menu" role="menu">
+          {!readonly && (
+            <button
+              type="button"
+              role="menuitem"
+              className="bm-hold-item"
+              onClick={() => {
+                onClose();
+                onReply(shown.id);
+              }}
+            >
+              Reply <CornerUpLeft size={18} />
+            </button>
+          )}
+          <button
+            type="button"
+            role="menuitem"
+            className="bm-hold-item"
+            disabled={!text}
+            onClick={() => {
+              void copyText(text);
+              act("copied");
+            }}
+          >
+            {done === "copied" ? "Copied" : "Copy"} {done === "copied" ? <Check size={18} /> : <Copy size={18} />}
+          </button>
+          {!!shown.text.trim() && !shown.question && !shown.poll && !shown.connect && (
+            <button type="button" role="menuitem" className="bm-hold-item" onClick={select}>
+              Select <TextSelect size={18} />
+            </button>
+          )}
+          {!readonly && mine && !shown.poll && (shown.text.trim() || !!shown.images?.length) && (
+            <button
+              type="button"
+              role="menuitem"
+              className="bm-hold-item"
+              onClick={() => {
+                botStashOf(crossStash).add(shown.text, imageFiles(shown.images ?? []));
+                act("stashed");
+              }}
+            >
+              {done === "stashed" ? "Stashed" : "Stash"} {done === "stashed" ? <Check size={18} /> : <Bookmark size={18} />}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -777,7 +931,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const anchor = useRef<HTMLElement | null>(null);
   const [picker, setPicker] = useState<Picker>();
   const [showAll, setShowAll] = useState(false);
-  const [sheetId, setSheetId] = useState<string>();
+  const [held, setHeld] = useState<{ id: string; bubble: HTMLElement }>();
   const touchY = useRef(0);
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
@@ -829,6 +983,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   }, [focus]);
 
   const picked = picker ? conversation.messages.find((m) => m.id === picker.messageId) : undefined;
+  const heldMessage = held ? conversation.messages.find((m) => m.id === held.id) : undefined;
   const closePicker = () => setPicker(undefined);
   const st = useBots.getState();
 
@@ -917,7 +1072,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                         fresh={m.at > since}
                         readonly={readonly}
                         onReply={onReply}
-                        onSheet={setSheetId}
+                        onHold={(id, bubble) => setHeld({ id, bubble })}
                         onPicker={(p, el) => {
                           anchor.current = el;
                           setShowAll(false);
@@ -1001,7 +1156,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
           </div>
         )}
       </Popover>
-      <MessageSheet message={conversation.messages.find((x) => x.id === sheetId)} conversation={conversation} bots={bots} readonly={readonly} onClose={() => setSheetId(undefined)} onReply={onReply} />
+      <MessageMenu held={heldMessage && held && { message: heldMessage, bubble: held.bubble }} conversation={conversation} readonly={readonly} onClose={() => setHeld(undefined)} onReply={onReply} />
     </div>
   );
 }
