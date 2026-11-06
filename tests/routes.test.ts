@@ -137,6 +137,16 @@ describe("clean URLs", () => {
     gone.stop();
   });
 
+  test("a thread opened out of OpenBots to OpenBuild gets its own route, and Back returns to it in OpenBots", () => {
+    const h = harness("/bots/thread-abc");
+    expect(h.store.getState()).toMatchObject({ activeChatId: "abc", botsOpen: true, botsThread: true });
+    h.store.setState({ botsOpen: false, botsThread: false });
+    expect(h.location.pathname).toBe("/thread-abc");
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ activeChatId: "abc", botsOpen: true, botsThread: true });
+    h.stop();
+  });
+
   test("archiving or deleting the active thread routes back to new", () => {
     const h = harness("/thread-abc");
     h.store.setState({ activeChatId: undefined });

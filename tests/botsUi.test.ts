@@ -234,6 +234,15 @@ test("thread links in a bot chat open the thread inside OpenBots", async () => {
   expect(chat).not.toContain("useStore.getState().selectChat(id);");
 });
 
+test("a thread open inside OpenBots has a button under Back that opens it out to OpenBuild in place", async () => {
+  const app = await Bun.file("src/App.tsx").text();
+  const sidebar = await Bun.file("src/components/Sidebar.tsx").text();
+  expect(app).toMatch(/label="Back to chat"[\s\S]*?label="Open in OpenBuild" tooltipSide="right" onClick=\{expandBotsThread\}/);
+  // Same pane on both sides, so the thread isn't remounted: only the sidebars swap.
+  expect(app).toContain('<Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>');
+  expect(sidebar).toMatch(/export function expandBotsThread\(\) \{\n  crossfade\(\(\) => \{\n    const st = useStore.getState\(\);\n    st.setBotsOpen\(false\);/);
+});
+
 test("memory stays out of sight, and routines are the bots' to write: people can only see, pause and delete", async () => {
   const details = await Bun.file("src/components/bots/BotDetails.tsx").text();
   const store = await Bun.file("src/lib/bots/store.ts").text();
