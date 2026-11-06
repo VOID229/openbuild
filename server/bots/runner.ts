@@ -66,7 +66,8 @@ export function wake(botId: string, item: Wake) {
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
   const conversationId = item.conversationId;
-  if (!item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
+  // Group wakes must queue: an unscoped steer could expose user requests still awaiting routing.
+  if (db.getConversation(conversationId ?? "")?.kind !== "group" && !item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
     const shown = mind.shown;
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
@@ -122,8 +123,8 @@ async function pump(botId: string) {
     while (queue.get(botId)?.length) {
       const jobs = queue.get(botId)!;
       const first = jobs[0]!;
-      // One conversation a turn, and each routine alone.
-      const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId);
+      // Keep assigned deliveries separate from context-only wakes, even in the same group.
+      const turn = first.kind === "routine" ? [first] : jobs.filter((j: Wake) => j.kind !== "routine" && j.conversationId === first.conversationId && !!j.messageIds === !!first.messageIds);
       queue.set(botId, jobs.filter((j: Wake) => !turn.includes(j)));
       await run(botId, turn);
     }
@@ -431,8 +432,9 @@ async function run(botId: string, all: Wake[]) {
     mind.shown = shown;
     const message = render(jobs, botId);
     if (!message.trim()) return;
-    const assigned = jobs.every(j => j.messageIds) ? new Set(jobs.flatMap(j => j.messageIds!)) : undefined;
-    const images = assigned ? jobs.flatMap(j => j.messageIds!).flatMap(id => {
+    const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
+      ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
+    const images = assigned ? [...assigned].flatMap(id => {
       const row = db.getMessage(id);
       return row ? imagesBetween(conversationId!, row.seq - 1, row.seq) : [];
     }).slice(-IMAGE_LIMIT) : imagesFor(botId, shown);
@@ -562,7 +564,10 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     const m = r.message;
     const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const body = m.event ? `(${eventText(m.event)}${m.event.detail ? `: ${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
-    const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]") : r.seq > cursor ? "" : " [already seen]";
+    // Unscoped group wakes may react to bots/events, never adopt user requests awaiting routing.
+    const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
+      : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
+      : r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
     const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${quoted.message.text.slice(0, 200)}”)` : "";
     const list = m.reactions ?? [];
