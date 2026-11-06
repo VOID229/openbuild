@@ -12,7 +12,7 @@ import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } fr
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
-import { PULL_REF_RE, pullRefUrl } from "../../lib/bots/pullRefs";
+import { PULL_REF_RE, inPullContext, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
@@ -194,7 +194,10 @@ function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
   return <><span onClick={(e) => e.stopPropagation()}><PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
 }
 
-/** Only link IDs that resolve uniquely to a known thread, and PR numbers to a known repository; ordinary hex text stays text. */
+/**
+ * Only link IDs that resolve uniquely to a known thread, and "#n" that reads as a pull request and is one
+ * a thread opened; ordinary hex text, and numbered labels like a model's "#2", stay text.
+ */
 function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
   const chats = useStore((s) => s.chats);
   const pulls = useMemo(() => chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])), [chats]);
@@ -207,7 +210,7 @@ function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: s
     if (/[/:]/.test(token)) continue;
     let link: React.ReactNode;
     if (m[1]) {
-      const url = pullRefUrl(Number(m[1]), pulls);
+      const url = inPullContext(text, m.index, m.index + m[0].length) ? pullRefUrl(Number(m[1]), pulls) : undefined;
       if (!url) continue;
       link = <PullLink key={m.index + "-pull"} url={url}>{m[0]}</PullLink>;
     } else {
