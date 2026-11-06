@@ -172,3 +172,41 @@ test("group replies wake the quoted bot instead of falling back to the primary",
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("a message between bots shows as a linked activity line in each bot's own chat, without its text", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-side-activity-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      import * as svc from './server/bots/service.ts';
+      svc.setHooks({ wake() {}, stop() {} });
+      const asker = svc.createBot({ name: 'Asker' });
+      const helper = svc.createBot({ name: 'Helper' });
+      const side = svc.createConversation({ kind: 'side', botIds: [asker.bot.id, helper.bot.id] });
+      const events = (id) => db.messages(id).map((m) => m.message.event).filter((e) => e?.kind === 'message');
+      const post = (author, text) => svc.postMessage(side.id, { id: crypto.randomUUID(), author, at: Date.now(), text });
+
+      post(asker.bot.id, 'The secret plan');
+      a.deepEqual(events(asker.conversationId), [{ kind: 'message', text: 'Sent a message to Helper', bot: helper.bot.id, conversationId: side.id }]);
+      a.deepEqual(events(helper.conversationId), [{ kind: 'message', text: 'Received a message from Asker', bot: asker.bot.id, conversationId: side.id }]);
+      a.ok(!JSON.stringify(db.messages(helper.conversationId)).includes('secret'));
+
+      // A back-and-forth stays one line per chat until something else happens there.
+      post(helper.bot.id, 'Reply');
+      post(asker.bot.id, 'Thanks');
+      a.equal(events(asker.conversationId).length, 1);
+      a.equal(events(helper.conversationId).length, 1);
+      svc.postMessage(helper.conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'Hi' });
+      post(asker.bot.id, 'One more');
+      a.equal(events(asker.conversationId).length, 1);
+      a.equal(events(helper.conversationId).length, 2);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

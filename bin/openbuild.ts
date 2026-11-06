@@ -239,7 +239,7 @@ function disableServe(s?: Pick<State, "servePort" | "serveHttpPort">) {
 
 async function start(mode: Mode, managed?: { active: boolean; restart: boolean }) {
   if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${mode}". Use: openbuild start [local|lan|tailscale]`);
-  if (mode !== "local" && !localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
+  if (mode !== "local" && !localAuth.configured()) console.warn(`No local password set: anyone who can reach this server over ${mode === "lan" ? "the network" : "your tailnet"} can use it. Set one with: openbuild set pass <password>`);
   const STOPPING = "Stopping the server", PREPARING = "Preparing the network", STARTING = "Starting the server", PUBLISHING = "Publishing on Tailscale";
   const opened = (switching: boolean) => stage.open({
     scene: "lifecycle",
@@ -499,7 +499,8 @@ function help() {
   openbuild remote server stop   stop a paired device's server, keep it paired
   openbuild remote server start  start that server again
   openbuild remote status       where each paired device's server stands
-  openbuild set pass <pw>     set/change the local access password
+  openbuild set pass <pw>     set/change the local access password (optional)
+  openbuild unset pass        remove it: anyone who can reach the server can use it
   openbuild password          the same, typed at a hidden prompt instead
   openbuild stop              stop the server; agent work keep running
   openbuild stop --all        also terminate agent and Durable workers
@@ -539,7 +540,6 @@ async function pairHost() {
   const suggested = devices.deviceName();
   const name = (await ask(`Name this device [${suggested}]: `)) || suggested;
   const mode = await chooseTransport("Share this device");
-  if (!localAuth.configured()) fail("set a local access password first: openbuild set pass <password>");
   devices.setDeviceName(name);
   const WAITING = "Waiting for the other device";
   const STARTING = "Starting the server";
@@ -957,6 +957,13 @@ if (service) {
     const rest = args.slice(2);
     if (!rest.length) fail("usage: openbuild set pass <password>");
     await savePassword(rest.join(" "));
+    break;
+  }
+  case "unset": {
+    if (arg !== "pass" && arg !== "password") fail(`unknown setting "${arg ?? ""}". Use: openbuild unset pass`);
+    try { localAuth.clearPassword(); }
+    catch (err) { fail((err as Error).message); }
+    console.log("Local password removed. Anyone who can reach this server can use it.");
     break;
   }
   case "password": {

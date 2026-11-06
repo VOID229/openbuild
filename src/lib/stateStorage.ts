@@ -6,7 +6,7 @@
 // Nothing is written to the server until the saved state has been read from it. zustand's persist
 // writes on every change, including changes made before hydration finishes, and those would
 // otherwise replace your saved settings with the defaults.
-import type { StateStorage } from "zustand/middleware";
+import type { PersistStorage, StateStorage } from "zustand/middleware";
 import { config } from "./runtime";
 import { fetchWithTimeout } from "./abort";
 
@@ -101,3 +101,25 @@ export const serverStorage: StateStorage = {
   },
   removeItem: () => {},
 };
+
+/**
+ * `storage` that writes only when part of the saved state changed. persist writes on every change to
+ * the store, saved or not: opening OpenBots, or anything else that's left out of the saved state,
+ * would otherwise turn the whole of it (hundreds of KB, with the model lists) into JSON for
+ * localStorage there and then, and send it to the server again. The parts are compared by reference,
+ * as the store replaces whatever it changes.
+ */
+export function skipUnchanged<S>(storage: PersistStorage<S> | undefined): PersistStorage<S> | undefined {
+  if (!storage) return;
+  let last: { state: S; version?: number } | undefined;
+  return {
+    ...storage,
+    setItem: (name, value) => {
+      const prev = last;
+      const same = prev && prev.version === value.version && (Object.keys(value.state as object) as (keyof S)[]).every((k) => value.state[k] === prev.state[k]);
+      if (same) return;
+      last = value;
+      return storage.setItem(name, value);
+    },
+  };
+}

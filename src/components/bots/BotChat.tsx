@@ -5,14 +5,16 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleD
 import { createPortal } from "react-dom";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
+import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
-import type { Bot, BotMessage, BotStatus, Conversation, Reaction } from "../../lib/bots/types";
-import { findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
+import { eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
-import { PULL_REF_RE, pullRefUrl } from "../../lib/bots/pullRefs";
+import { accountName } from "../../lib/models";
+import { PULL_REF_RE, inPullContext, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
@@ -149,6 +151,29 @@ function ThreadLink({ id, children }: { id: string; children: React.ReactNode })
   }}>{children}</a>;
 }
 
+/** Opens a conversation in OpenBots, such as the side chat a message between bots went to. */
+function ConversationLink({ id, children }: { id: string; children: React.ReactNode }) {
+  const known = useBots((s) => s.conversations.some((c) => c.id === id));
+  if (!known) return <>{children}</>;
+  return (
+    <button type="button" className="link bm-conversation-link" onClick={(e) => {
+      // An event row toggles open on click; following its link shouldn't do that as well.
+      e.stopPropagation();
+      useBots.getState().select(id);
+    }}>{children}</button>
+  );
+}
+
+/** A message between bots, from one side: the bot links to its thread, the rest to the side chat. */
+function MessageActivity({ event, other }: { event: NonNullable<BotMessage["event"]>; other: Bot }) {
+  const sent = event.text.startsWith("Sent");
+  return (
+    <>
+      <ConversationLink id={event.conversationId!}>{sent ? "Sent a message" : "Received a message"}</ConversationLink> {sent ? "to" : "from"} <BotLink bot={other} />
+    </>
+  );
+}
+
 /** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
 function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
   return <a className="link" href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
@@ -194,7 +219,10 @@ function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
   return <><span onClick={(e) => e.stopPropagation()}><PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
 }
 
-/** Only link IDs that resolve uniquely to a known thread, and PR numbers to a known repository; ordinary hex text stays text. */
+/**
+ * Only link IDs that resolve uniquely to a known thread, and "#n" that reads as a pull request and is one
+ * a thread opened; ordinary hex text, and numbered labels like a model's "#2", stay text.
+ */
 function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
   const chats = useStore((s) => s.chats);
   const pulls = useMemo(() => chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])), [chats]);
@@ -207,7 +235,7 @@ function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: s
     if (/[/:]/.test(token)) continue;
     let link: React.ReactNode;
     if (m[1]) {
-      const url = pullRefUrl(Number(m[1]), pulls);
+      const url = inPullContext(text, m.index, m.index + m[0].length) ? pullRefUrl(Number(m[1]), pulls) : undefined;
       if (!url) continue;
       link = <PullLink key={m.index + "-pull"} url={url}>{m[0]}</PullLink>;
     } else {
@@ -904,9 +932,6 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
-/** Busy replying in another chat, with this one's message next in line. */
-const holding = (st: BotStatus | undefined, conversationId: string) => !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId);
-
 /** What a bot says in a chat while it finishes replying in another. Stable per chat, so it doesn't flicker. */
 const HOLDING = ["Hold on a second", "Finishing up something", "One moment, wrapping something up", "Be right with you"];
 export function holdingLine(conversationId: string, botId: string): string {
@@ -989,9 +1014,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
-  const working = useBots(
-    useShallow((s) => Object.entries(s.status).filter(([id, st]) => !typing.includes(id) && (holding(st, conversation.id) || (st.state === "working" && st.conversationId === conversation.id && !st.quiet))).map(([id]) => id)),
-  );
+  const working = useBots(useShallow((s) => showWorking(conversation.id, s.status, typing)));
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
@@ -1108,13 +1131,20 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
             // A start names the bot that did it, looked up by author so a rename shows up on old lines too.
             const starter = m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author) : undefined;
+            // A message between bots names the other bot by id, so a rename shows up on old lines too.
+            const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
+            // A fallback switch names the bot, the model it moved to and, as the detail, that model's account.
+            const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
+            const fallbackName = m.event!.text.replace(/^Switched to fallback model /, "");
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={m.event!.text} bots={bots} />}
+                  {starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to fallback model {fallbackName}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
-                {m.event!.detail && (
+                {m.event!.kind === "model" && m.event!.detail ? (
+                  <span className="bm-event-detail">from {accountName(m.event!.detail)}</span>
+                ) : m.event!.detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
                     {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
@@ -1736,10 +1766,23 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   // What the other side is up to, under the name on a phone, where there's a bar for it.
   const activity = useBots((s) => {
-    const working = conversation.botIds.map((id) => s.status[id]).find((st) => st?.state === "working" && st.conversationId === conversation.id && !st.quiet);
+    const working = conversation.botIds.map((id) => s.status[id]).find((st) => workingHere(st, conversation.id) && !st!.quiet);
     if (working) return working.activity || "Thinking";
     const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
     return held ? holdingLine(conversation.id, held) : undefined;
+  });
+  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does.
+  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
+  const busy = working.length > 0;
+  // Busy in another chat: said as that, never as thinking here.
+  const away = useBots((s) => {
+    const first = elsewhere(conversation, s.status)[0];
+    if (!first) return undefined;
+    const there = s.conversations.find((c) => c.id === first.conversationId);
+    const where = there && !there.hidden ? `Busy in ${conversationName(there, s.bots)}` : "Busy in another chat";
+    if (conversation.kind === "direct") return where;
+    const bot = s.bots.find((b) => b.id === first.botId);
+    return `${bot ? firstName(bot) : "A bot"}: ${where[0]!.toLowerCase()}${where.slice(1)}`;
   });
   // Waiting elsewhere, on the back button.
   const unread = useBots((s) => s.conversations.filter((c) => c.unread && c.id !== conversation.id && !c.hidden).length);
@@ -1750,7 +1793,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
-  const sub = typing ? "typing…" : activity ?? members;
+  const sub = typing ? "typing…" : activity ?? away ?? members;
   return (
     <div className="bots-chat">
       <div className="bots-head">
@@ -1761,10 +1804,11 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </IconButton>
         )}
         <button type="button" className="bots-head-pill" aria-expanded={detailsOpen} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
-          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} mood={typing ? "thinking" : undefined} badge={false} />
+          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={busy ? working : undefined} mood={typing ? "thinking" : undefined} badge={false} />
           <span className="bots-head-text">
             <span className="bots-head-name">{name}</span>
             {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+            {!mobile && !typing && !activity && away && <span className="bots-head-away">{away}</span>}
           </span>
         </button>
       </div>

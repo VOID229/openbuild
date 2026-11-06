@@ -5,6 +5,7 @@ import { Bell, BellDot, Blocks, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Fo
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
+import { busyBots } from "../../lib/bots/activity";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
@@ -123,7 +124,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
  */
 function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
-  const working = useBots(useShallow((s) => conversation.botIds.filter((id) => s.status[id]?.state === "working" || s.typing[conversation.id]?.includes(id))));
+  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);

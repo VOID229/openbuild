@@ -1,5 +1,5 @@
 import { prefetchUsage } from "./lib/usageStats";
-import { ArrowLeft, KeyRound, PanelLeft, SquarePen } from "lucide-react";
+import { ArrowLeft, KeyRound, Maximize2, PanelLeft, SquarePen } from "lucide-react";
 import { Activity, useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
@@ -15,7 +15,7 @@ import { SidePanel } from "./components/SidePanel";
 import { ThreadTools } from "./components/ThreadTools";
 import { TooltipLayer } from "./components/Tooltip";
 import { ProjectHeading } from "./components/Workspace";
-import { Sidebar, toggleBots } from "./components/Sidebar";
+import { expandBotsThread, Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
 import { UsagePage } from "./components/UsagePage";
@@ -425,9 +425,14 @@ function Main() {
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
-              <IconButton label="Back to chat" tooltipSide="right" onClick={() => useStore.setState({ botsThread: false })}>
-                <ArrowLeft size={18} />
-              </IconButton>
+              <>
+                <IconButton label="Back to chat" tooltipSide="right" onClick={() => useStore.setState({ botsThread: false })}>
+                  <ArrowLeft size={18} />
+                </IconButton>
+                <IconButton label="Open in OpenBuild" tooltipSide="right" onClick={expandBotsThread}>
+                  <Maximize2 size={16} />
+                </IconButton>
+              </>
             ) : (
               <>
                 <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>

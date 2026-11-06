@@ -216,6 +216,8 @@ test("the bot hears when a turn ends, and the chat is brought up to date without
   await call("send", { thread: threadId, text: "Next" });
   expect(admitted[1]).toMatchObject({ threadId, model: "acme/one", prior: 1 });
   expect(admitted[1].message).toContain("Next");
+  const activity = svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1);
+  expect(activity?.event).toMatchObject({ kind: "thread", text: "Wrote a prompt", threadId });
 });
 
 test("a message to a working thread is steered in", async () => {
@@ -225,6 +227,7 @@ test("a message to a working thread is steered in", async () => {
   expect(steers[0][0]).toBe(threadId);
   expect(steers[0][4]).toBe("Also this");
   expect(admitted.length).toBe(1);
+  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Wrote a prompt", threadId });
   // Saved on the reply, so the steer shows who sent it.
   const reply = (storage.getChat(threadId) as any).messages.at(-1);
   expect(reply.steerSenders[steers[0][1]]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
@@ -417,9 +420,13 @@ test("UI-discovered Claude login is usable and saved configuration wins", async 
   expect((await call("options", { harness: "claude2" })).models[0].id).toBe("claude/one");
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude2", mode: "local" });
   expect(admitted[0].runtimeAccount).toEqual(account);
+  // Saved under the id the UI lists for the account, so the composer keeps it; sent as the runtime's own.
+  expect((storage.getChat(admitted[0].threadId) as any).messages.at(-1).model).toMatchObject({ plan: "claude", id: "claude2/one" });
+  expect(admitted[0].model).toBe("claude/one");
   snapshots = [];
   await call("send", { thread: started.thread, text: "Continue" });
-  expect(admitted[1].runtimeAccount).toEqual(account);
+  expect(admitted[1]).toMatchObject({ runtimeAccount: account, model: "claude/one" });
+  expect((storage.getChat(admitted[1].threadId) as any).messages.at(-1).model).toMatchObject({ id: "claude2/one" });
   const saved = { ...account, id: "saved-id", name: "Work", launchArgs: "--verbose" };
   storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [saved] } } }));
   expect((await call("options")).accounts).toEqual([{ id: saved.id, name: saved.name, harness: "claude" }]);

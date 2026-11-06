@@ -80,4 +80,18 @@ describe("external devices", () => {
     expect(by("codex:theirs")).toMatchObject({ external: true });
     expect(by("codex:theirs")?.account).toBeUndefined();
   });
+
+  test("unpairing a device drops it, and its cached readings, from usage", async () => {
+    devices.addDevice(device("laptop"));
+    const request = spyOn(remoteUsage, "requestUsage").mockImplementation((async () => ({ providers: [limit("claude", "claude:laptop")], checkedAt: Date.now() })) as never);
+    const before = await machineLimits(false, async () => []);
+    expect(before.machines?.map((m) => m.id)).toEqual(["local", "laptop"]);
+    devices.removeDevice("laptop");
+    const after = await machineLimits(false, async () => []);
+    request.mockRestore();
+    expect(after.machines?.map((m) => m.id)).toEqual(["local"]);
+    expect(after.providers.find((p) => p.machineId === "laptop")).toBeUndefined();
+    const cache = (globalThis as { usageRemote?: Map<string, unknown> }).usageRemote!;
+    expect([...cache.keys()].some((k) => k.startsWith("laptop|"))).toBe(false);
+  });
 });

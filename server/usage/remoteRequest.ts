@@ -18,6 +18,9 @@ export async function requestUsage<T>(urls: string[], path: string, token: strin
         redirect: "error",
         signal: AbortSignal.timeout(Math.min(addressTimeoutMs, remaining)),
       });
+      // Its token was revoked over there: no address or retry will be let in again.
+      if (res.status === 401)
+        throw Object.assign(new Error("it no longer accepts this pairing. Unpair it in Settings → Devices, or pair again."), { final: true });
       if (res.status === 404 || res.status === 403)
         throw Object.assign(new Error("its OpenBuild doesn't report usage yet. Update it there."), { final: true });
       if (!res.ok) {

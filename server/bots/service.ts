@@ -356,6 +356,10 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (newPace) bot.proactivity = patch.proactivity;
   if (patch.model === null || patch.model === "") bot.model = undefined;
   else if (typeof patch.model === "string") bot.model = patch.model.slice(0, 200);
+  if (patch.fallbackModels === null || Array.isArray(patch.fallbackModels)) {
+    const list = strings(patch.fallbackModels?.map((m) => (typeof m === "string" ? m.trim().slice(0, 200) : m)).filter((m) => typeof m === "string" && m.includes("/")), 8);
+    bot.fallbackModels = list.length ? list : undefined;
+  }
   if (typeof patch.effort === "string") bot.effort = patch.effort.slice(0, 40);
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
     bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
@@ -543,6 +547,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     w.resolve(message);
   }
   const skip = new Set(waiting.map((w) => w.botId));
+  if (c.kind === "side" && message.author !== "me" && !message.event) noteSideMessage(c, message.author);
 
   if (!message.event) {
     if (message.author === "me") {
@@ -582,6 +587,26 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     }
   }
   return message;
+}
+
+/**
+ * A line in each bot's own chat saying a message went between them, linking to the side chat. It never
+ * says what the message was. A back-and-forth adds one line per chat, not one per message: nothing is
+ * added while that chat's latest message is already a line about the same side chat.
+ */
+function noteSideMessage(side: db.StoredConversation, from: string) {
+  const name = (id: string) => db.getBot(id)?.name ?? "a bot";
+  for (const botId of side.botIds) {
+    const own = directId(botId);
+    if (!own || !db.getBot(botId)) continue;
+    const latest = db.messages(own, 1)[0]?.message.event;
+    if (latest?.kind === "message" && latest.conversationId === side.id) continue;
+    const others = side.botIds.filter((id) => id !== botId);
+    const other = botId === from ? others[0] : from;
+    if (!other) continue;
+    const text = botId === from ? `Sent a message to ${name(other)}` : `Received a message from ${name(other)}`;
+    postMessage(own, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "message", text, bot: other, conversationId: side.id } });
+  }
 }
 
 /** Block until another bot writes in this conversation, or the time runs out. */

@@ -121,6 +121,8 @@ export interface Bot {
   createdAt: number;
   /** "provider/model"; the OpenBots default when unset. */
   model?: string;
+  /** "provider/model"s to try in order when the model fails before replying. A provider can be one account of several ("openai-codex-2"). */
+  fallbackModels?: string[];
   effort?: string;
   proactivity?: Proactivity;
   computer?: ComputerConfig;
@@ -236,7 +238,7 @@ export interface PlanStep {
   status: "todo" | "doing" | "done";
 }
 
-export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread";
+export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread" | "message" | "model";
 
 export interface BotMessage {
   id: string;
@@ -248,7 +250,7 @@ export interface BotMessage {
   replyTo?: string;
   reactions?: Reaction[];
   /** Something that happened rather than something said ("Created routine …"), shown as a centred line. */
-  event?: { kind: EventKind; text: string; detail?: string; /** The OpenBuild thread this activity concerns. */ threadId?: string; /** The pull request a merge concerns, on GitHub. */ pullUrl?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string };
+  event?: { kind: EventKind; text: string; detail?: string; /** The OpenBuild thread this activity concerns. */ threadId?: string; /** The pull request a merge concerns, on GitHub. */ pullUrl?: string; /** The bot the event is about, shown as a link to its thread. */ bot?: string; /** The between-bots conversation a message activity links to. */ conversationId?: string; /** A fallback switch: the "provider/model" it switched to. */ model?: string };
   /** A bot asking the user to pick. */
   question?: Question;
   /** A bot laying out who does what. */
@@ -410,6 +412,9 @@ export const isBotId = (id: unknown): id is string => typeof id === "string" && 
 
 /** A bot's first name: "Juniper · notes" → "Juniper". */
 export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0]!;
+
+/** An activity line's text. Older follow-ups were saved as "Wrote to a thread"; they read as prompts now. */
+export const eventText = (event: { text: string }) => (event.text === "Wrote to a thread" ? "Wrote a prompt" : event.text);
 
 /** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();

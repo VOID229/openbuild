@@ -205,7 +205,21 @@ test("thread activity details are titles, so bot names inside them don't become 
 test("a started thread's activity line names the bot that started it", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author)');
-  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : <WithBotLinks text={m.event!.text} bots={bots} />}");
+  expect(chat).toContain("{starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to fallback model {fallbackName}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+});
+
+test("older follow-up prompts read with the current wording", async () => {
+  const { eventText } = await import("../shared/bots");
+  expect(eventText({ text: "Wrote to a thread" })).toBe("Wrote a prompt");
+  expect(eventText({ text: "Started a thread" })).toBe("Started a thread");
+  const common = await Bun.file("src/components/bots/common.tsx").text();
+  expect(common).toContain("[eventText(m.event), m.event.detail]");
+});
+
+test("a message between bots links to the side chat and to the other bot", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain('m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined');
+  expect(chat).toContain("<ConversationLink id={event.conversationId!}>");
 });
 
 test("a merge's pull request number and thread title are separate links", async () => {
@@ -218,6 +232,15 @@ test("thread links in a bot chat open the thread inside OpenBots", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain("useStore.getState().openThreadInBots(id);");
   expect(chat).not.toContain("useStore.getState().selectChat(id);");
+});
+
+test("a thread open inside OpenBots has a button under Back that opens it out to OpenBuild in place", async () => {
+  const app = await Bun.file("src/App.tsx").text();
+  const sidebar = await Bun.file("src/components/Sidebar.tsx").text();
+  expect(app).toMatch(/label="Back to chat"[\s\S]*?label="Open in OpenBuild" tooltipSide="right" onClick=\{expandBotsThread\}/);
+  // Same pane on both sides, so the thread isn't remounted: only the sidebars swap.
+  expect(app).toContain('<Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>');
+  expect(sidebar).toMatch(/export function expandBotsThread\(\) \{\n  crossfade\(\(\) => \{\n    const st = useStore.getState\(\);\n    st.setBotsOpen\(false\);/);
 });
 
 test("memory stays out of sight, and routines are the bots' to write: people can only see, pause and delete", async () => {
@@ -321,4 +344,29 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   expect(css).toMatch(/\.messages-inner > \.msg \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;/);
+});
+
+test("a fallback switch names the bot, its model and the model's account", async () => {
+  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
+  expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
+  expect(chat).toContain("<BotLink bot={switcher} /> switched to fallback model {fallbackName}");
+  expect(chat).toContain("from {accountName(m.event!.detail)}");
+  const { accountName } = await import("../src/lib/models");
+  expect(accountName("openai-codex-2")).toBe("Codex 2");
+  expect(accountName("openai-codex")).toBe("Codex");
+  expect(accountName("glm-local")).toBe("Glm Local");
+});
+
+test("a bot's fallback models are listed in order in both settings layouts, each tagged with its account", async () => {
+  const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
+  expect(advanced.match(/<BotFallbacks bot=\{bot\} \/>/g)?.length).toBe(2);
+  expect(advanced).toContain('<BotModelSelect label={`Fallback model ${i + 1}`} value={model} account');
+  expect(advanced).toContain('label="Try earlier"');
+  expect(advanced).toContain("providerName(account ? (m.provider ?? m.id.split(\"/\")[0]!) : providerOf(m))");
+});
+
+test("a long thread list doesn't slow the OpenBots switch: rows out of view skip rendering, keeping a focus ring", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+  expect(css).toMatch(/\.history-row \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;[^}]*overflow-clip-margin: \d+px;/);
 });

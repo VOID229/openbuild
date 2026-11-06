@@ -9,9 +9,9 @@ import { deleteAllChats, deleteChat, saveChat } from "./db";
 import { clearQueue } from "./queue";
 import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
-import { effortFor, effortKey, speedFor } from "./effort";
+import { effortFor, effortKey, speedFor, threadModel } from "./effort";
 import type { ClaudeAccountModels, Effort, ModelInfo, PermissionModes, RuntimeAccount } from "../../shared/types";
-import { serverStorage } from "./stateStorage";
+import { serverStorage, skipUnchanged } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
 
@@ -547,7 +547,8 @@ export const useStore = create<State>()(
       },
       setPiCache: (patch, deviceId) => set((s) => withPi(s, deviceId, patch)),
       loadDevices: async () => {
-        let remote: Device[] = [];
+        // A failed list isn't an empty one: keep the paired devices already known until it answers.
+        let remote = get().devices.filter((d) => !d.local);
         try {
           remote = await listDevices();
         } catch {}
@@ -858,7 +859,7 @@ export const useStore = create<State>()(
     {
       name: "openchat",
       // Saved by the local server on disk, so every port and browser sees the same settings.
-      storage: createJSONStorage(() => serverStorage),
+      storage: skipUnchanged(createJSONStorage(() => serverStorage)),
       version: 5,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
@@ -1071,7 +1072,8 @@ function nativeSelectionFor(
   const known = (sel: Selection | undefined): sel is ModelRef => !!sel && !isAuto(sel) && sel.plan === plan && (!d || d.status === "checking" || d.models.some((m) => m.id === sel.id));
   if (id) {
     const picked = s.selections[id];
-    const reply = s.chats.find((c) => c.id === id)?.messages.findLast((m) => m.role === "assistant" && m.model?.plan === plan)?.model;
+    const saved = chat?.messages.findLast((m) => m.role === "assistant" && m.model?.plan === plan)?.model;
+    const reply = saved && threadModel(chat, saved);
     if (known(picked)) return picked;
     if (reply && known(reply)) return reply;
   }

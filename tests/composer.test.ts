@@ -18,7 +18,7 @@ await idb.set("draftfile:kept", { id: "kept", name: "k.png", mime: "image/png", 
 await idb.set("draft:stale", { text: "too old", fileIds: ["orphan"], updatedAt: Date.now() - 90 * 24 * 60 * 60_000 }, saved);
 await idb.set("draftfile:orphan", { id: "orphan", name: "o.png", mime: "image/png", size: 1, dataUrl: "data:," }, saved);
 
-const { selectionFor, deviceDetection, useStore } = await import("../src/lib/store");
+const { composerEffort, selectionFor, deviceDetection, useStore } = await import("../src/lib/store");
 const { sendMessage } = await import("../src/lib/chat");
 // A fresh copy of the module, as a page load would have (other test files may have loaded it already).
 const { draftsReady, getDraft, saveDraft } = await import("../src/lib/drafts?reload" as string);
@@ -140,6 +140,45 @@ describe("native Codex model selection", () => {
     expect(selectionFor(st)).toEqual({ plan: "codex", id: "codex/first" });
     expect(st.settings.selection).toEqual(settings.selection);
   });
+});
+
+describe("native account model selection", () => {
+  const account = (runtime: "claude" | "codex") => ({ id: `${runtime}2`, name: `${runtime}2`, runtime, configDir: `/tmp/${runtime}2` });
+  for (const runtime of ["claude", "codex"] as const) {
+    const listed = { plan: runtime, status: "valid", models: [model(`${runtime}/haiku`)], defaultModel: `${runtime}/haiku`, accounts: [{ account: account(runtime), models: [{ ...model(`${runtime}2/haiku`), provider: `${runtime}2` }, { ...model(`${runtime}2/opus`), provider: `${runtime}2` }] }] } as any;
+    // Bot-started threads saved the runtime's own id on the reply.
+    const chat = (id: string): Chat => ({ ...qwenChat, runtime, runtimeAccount: account(runtime), messages: [qwenChat.messages[0]!, { ...qwenChat.messages[1]!, model: { plan: runtime, id, name: "Opus", effort: "high" } }] });
+    const st = (c: Chat) => ({
+      activeChatId: "q", chats: [c], selections: {}, detection,
+      settings: { ...settings, threadRuntime: runtime, nativeSelections: { [runtime]: { "": { plan: runtime, id: `${runtime}2/haiku` } } } } as Settings,
+      [`${runtime}Models`]: { "": listed },
+    });
+    test(`${runtime}: an account thread keeps its reply's model and effort, not the new-thread preference`, () => {
+      for (const id of [`${runtime}/opus`, `${runtime}2/opus`]) {
+        const s = st(chat(id));
+        expect(selectionFor(s)).toMatchObject({ plan: runtime, id: `${runtime}2/opus` });
+        expect(selectionFor(s)).toBe(selectionFor(s));
+        expect(composerEffort(s)).toBe("high");
+      }
+    });
+    test(`${runtime}: a follow-up reply stays on the account and its model`, async () => {
+      const previous = useStore.getState();
+      const original = globalThis.fetch;
+      globalThis.fetch = (async () => new Response("{}", { status: 500 })) as never;
+      try {
+        const c = { ...chat(`${runtime}/opus`), id: `acct-${runtime}`, workspace: { cwd: "/tmp" } } as Chat;
+        const { settings: own, ...rest } = st(c);
+        useStore.setState({ ...rest, activeChatId: c.id, settings: { ...previous.settings, ...own, naming: { enabled: false, models: [] } } } as never);
+        expect(sendMessage("Continue", [])).toBe(true);
+        const sent = useStore.getState().chats.find((x) => x.id === c.id)!;
+        expect(sent.runtimeAccount).toEqual(account(runtime));
+        expect(sent.messages.at(-1)!.model).toMatchObject({ plan: runtime, id: `${runtime}2/opus`, effort: "high" });
+      } finally {
+        globalThis.fetch = original;
+        useStore.setState({ settings: previous.settings, chats: previous.chats, activeChatId: previous.activeChatId, selections: previous.selections, detection: previous.detection, [`${runtime}Models`]: (previous as any)[`${runtime}Models`] } as never);
+      }
+    });
+  }
 });
 
 describe("drafts", () => {

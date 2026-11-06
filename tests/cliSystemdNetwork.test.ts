@@ -56,11 +56,10 @@ esac
       });
       return { code: result.exitCode, output: result.stdout.toString() + result.stderr.toString(), calls: readFileSync(log, "utf8") };
     };
-    expect(cli(["start", "lan"]).code).toBe(1);
-    expect(existsSync(override)).toBe(false);
-    expect(cli(["set", "pass", "test-password"]).code).toBe(0);
+    // The local password is optional: LAN starts without one, with a warning.
     const lan = cli(["start", "lan"]);
     expect(lan.code).toBe(0);
+    expect(lan.output).toContain("No local password set");
     expect(lan.calls).toContain("systemctl --user daemon-reload");
     expect(lan.calls).toContain("systemctl --user restart openbuild.service");
     expect(lan.output).toContain(":3210");
@@ -68,8 +67,10 @@ esac
     expect(lanConfig).toContain('"HOST=0.0.0.0"');
     expect(existsSync(join(data, "server.json"))).toBe(false);
     expect(existsSync(join(data, "keeper.json"))).toBe(false);
+    expect(cli(["set", "pass", "test-password"]).code).toBe(0);
     const again = cli(["start"]);
     expect(again.code).toBe(0);
+    expect(again.output).not.toContain("No local password set");
     expect(again.calls).toContain("systemctl --user start openbuild.service");
     expect(again.calls).not.toContain("daemon-reload");
     expect(cli(["restart"]).calls).toContain("systemctl --user restart openbuild.service");

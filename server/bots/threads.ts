@@ -384,12 +384,16 @@ export function forwardedImages(botId: string, refs: unknown): NonNullable<PiCha
   return images;
 }
 
+/** Account threads save the id the UI lists for that account ("claude2/opus"), as its own replies do. */
+const accountModelId = (chat: Chat, id: string) =>
+  chat.runtimeAccount && (chat.runtime === "claude" || chat.runtime === "codex") ? id.replace(/^[^/]+/, chat.runtimeAccount.id) : id;
+
 /** The user's message and the reply it starts, saved on the thread and sent to its harness. */
 async function startTurn(botId: string, base: Chat, text: string, model: { id: string; name: string; effort: Effort; speed?: string }, images: NonNullable<PiChatRequest["images"]> = []): Promise<void> {
   const now = Date.now();
   const stream = { id: crypto.randomUUID(), via: serverId() };
   const user: Message = { id: crypto.randomUUID(), role: "user", content: text, ...(images.length ? { attachments: images.map((image) => ({ id: crypto.randomUUID(), name: "Image", mime: image.mimeType, dataUrl: `data:${image.mimeType};base64,${image.data}`, size: Buffer.from(image.data, "base64").length })) } : {}), createdAt: now, sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId };
-  const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", status: "streaming", model: { plan: (base.runtime ?? "pi") as PlanId, id: model.id, name: model.name, effort: model.effort, speed: model.speed }, stream, createdAt: now, startedAt: now };
+  const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", status: "streaming", model: { plan: (base.runtime ?? "pi") as PlanId, id: accountModelId(base, model.id), name: model.name, effort: model.effort, speed: model.speed }, stream, createdAt: now, startedAt: now };
   const chat: Chat = { ...base, updatedAt: now, archived: false, done: false, messages: [...base.messages, user, assistant] };
   if (!storage.putChat(chat as never)) throw refuse("That thread was deleted.", 410);
   const profile = appSettings().profile;
@@ -485,13 +489,13 @@ async function send(botId: string, p: Record<string, unknown>) {
     });
     if (!handled) throw refuse("It's still working and couldn't take that now. You'll be told when it finishes; send it then.", 409);
     if (!watches().some((w) => w.runId === running[0]!.id)) startFollowing(botId, chat.id, running[0]!.id);
-    record(botId, "Wrote to a thread", chat.title, chat.id);
+    record(botId, "Wrote a prompt", chat.title, chat.id);
     return { sent: true, note: `${bot}'s message went into its current turn.` };
   }
   const last = chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
   if (!last || !chat.workspace) throw refuse("That thread has nothing to continue from.");
   await startTurn(botId, chat, text, { id: last.id, name: last.name ?? last.id, effort: last.effort ?? "medium", speed: last.speed }, images);
-  record(botId, "Wrote to a thread", chat.title, chat.id);
+  record(botId, "Wrote a prompt", chat.title, chat.id);
   return { sent: true, next: "You'll be told when it asks something or finishes." };
 }
 

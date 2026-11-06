@@ -72,10 +72,9 @@ if [ "$2" = status ]; then echo 'OpenBuild active (running)'; fi
     expect(all.code).toBe(0);
     expect(all.calls).toContain("--user stop openbuild.service");
     expect(cli(["restart", "--all"]).code).toBe(1);
+    // The local password is optional: a network mode without one warns instead of refusing.
     const mode = cli(["start", "tailscale"]);
-    expect(mode.code).toBe(1);
-    expect(mode.output).toContain("set a local access password first");
-    expect(mode.calls).not.toContain("--user start");
+    expect(mode.output).toContain("No local password set");
     for (const command of ["start", "restart"]) {
       const unsafe = cli([command, "lan"], "active", false, "control-group");
       expect(unsafe.code).toBe(1);

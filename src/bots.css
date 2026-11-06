@@ -923,6 +923,17 @@
   display: contents;
 }
 
+/* Busy in another chat: beside the name, quiet, so it doesn't read as work here. */
+.bots-head-away {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
 .bots-head-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1100,14 +1111,16 @@
 
 /* Links in bot chat are blue as well as underlined, so they read as clickable at a glance. */
 .bm-text .link,
-.bm-event-detail .link {
+.bm-event-detail .link,
+.bm-event-text .bm-conversation-link {
   color: var(--file-link);
   text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 @media (hover: hover) {
   .bm-text .link:hover,
-  .bm-event-detail .link:hover {
+  .bm-event-detail .link:hover,
+  .bm-event-text .bm-conversation-link:hover {
     text-decoration-color: currentColor;
   }
 }
@@ -1391,6 +1404,14 @@
   align-items: center;
   gap: 5px;
   color: var(--text-2);
+}
+
+/* A button that reads as a link, inside an activity line. */
+.bm-conversation-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
 }
 
 .bm-bot-link {
@@ -3537,4 +3558,11 @@ button.bots-details-name:hover {
   .bots-advanced .toggle[aria-checked="true"] .toggle-knob {
     transform: translateX(14px);
   }
+}
+
+/* A bot's fallback models: the pickers take the row, so a long model name and its account both fit. */
+.bots-fallbacks .bots-set-model {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
 }

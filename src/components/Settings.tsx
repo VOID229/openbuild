@@ -398,14 +398,25 @@ function AppearanceSection() {
 // ------------------------------------------------------------------ Security
 
 function SecuritySection() {
-  // Closed → check the current password → choose the new one twice.
-  const [step, setStep] = useState<"closed" | "current" | "new">("closed");
+  // The password is optional. With one: check it → choose the new one twice (or remove it).
+  // Without one: choose it twice.
+  const [configured, setConfigured] = useState<boolean>();
+  const [step, setStep] = useState<"closed" | "current" | "new" | "remove">("closed");
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState<string>();
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/status", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((status) => { if (active && typeof status?.configured === "boolean") setConfigured(status.configured); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   const reset = (to: typeof step = "closed") => {
     setStep(to);
@@ -415,11 +426,11 @@ function SecuritySection() {
     setError(undefined);
   };
 
-  const post = async (path: string, body: object) => {
+  const send = async (path: string, body: object, method = "POST") => {
     setBusy(true);
     setError(undefined);
     try {
-      const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch(path, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
       if (res.ok) return true;
       setError(res.status === 403 ? "That isn't the current password." : res.status === 429 ? "Too many attempts. Wait a minute and try again." : "Couldn't reach the server. Try again.");
     } catch {
@@ -433,15 +444,29 @@ function SecuritySection() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (step === "current") {
-      if (await post("/api/auth/verify", { password: current })) setStep("new");
+      if (await send("/api/auth/verify", { password: current })) setStep("new");
+      return;
+    }
+    if (step === "remove") {
+      if (await send("/api/auth/password", { current }, "DELETE")) {
+        reset();
+        setConfigured(false);
+        setSaved("Password removed. Anyone who can reach this server can use it.");
+      }
       return;
     }
     if (next.length < MIN_LOCAL_PASSWORD) return setError(`Use at least ${MIN_LOCAL_PASSWORD} characters.`);
     if (next !== confirm) return setError("The new passwords don't match.");
-    if (await post("/api/auth/password", { current, password: next })) {
+    if (await send("/api/auth/password", configured ? { current, password: next } : { password: next })) {
       reset();
-      setSaved(true);
+      setSaved(configured ? "Password changed. Other browsers were signed out." : "Password set. Other browsers need it to get in.");
+      setConfigured(true);
     }
+  };
+
+  const open = (to: typeof step) => {
+    setSaved(undefined);
+    reset(to);
   };
 
   return (
@@ -450,36 +475,47 @@ function SecuritySection() {
       <div className={step === "closed" ? "setting-row" : "setting-row setting-row-top"}>
         <div className="setting-text">
           <div className="setting-label">Instance password</div>
-          <p className="setting-desc">Anyone who unlocks this instance can run Pi as the server user.</p>
+          <p className="setting-desc">
+            {configured === false
+              ? "Off. Anyone who can reach this server can run Pi as the server user."
+              : "Anyone who unlocks this instance can run Pi as the server user."}
+          </p>
           {saved && step === "closed" && (
             <p className="field-help" role="status">
-              Password changed. Other browsers were signed out.
+              {saved}
             </p>
           )}
         </div>
-        {step === "closed" && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              setSaved(false);
-              reset("current");
-            }}
-          >
-            Change password
-          </button>
+        {step === "closed" && configured !== undefined && (
+          configured ? (
+            <div className="security-actions">
+              <button type="button" className="link-btn" onClick={() => open("remove")}>
+                Remove
+              </button>
+              <button type="button" className="btn" onClick={() => open("current")}>
+                Change password
+              </button>
+            </div>
+          ) : (
+            <button type="button" className="btn" onClick={() => open("new")}>
+              Set password
+            </button>
+          )
         )}
       </div>
       {step === "closed" ? (
         <p className="field-help security-cli">
-          Changing it signs out every other browser. From the host you can also run <code>openbuild set pass &lt;password&gt;</code>
+          {configured === false ? "Optional. " : "Changing it signs out every other browser. "}
+          From the host you can also run <code>openbuild set pass &lt;password&gt;</code>
+          {configured && <> or <code>openbuild unset pass</code></>}
         </p>
       ) : (
         <div className="field">
           <form className="account-form" onSubmit={submit}>
-            {step === "current" ? (
+            {step === "current" || step === "remove" ? (
               <Field label="Current password" htmlFor="security-current">
                 <input id="security-current" className="input" type="password" autoComplete="current-password" autoFocus maxLength={1024} value={current} onChange={(e) => setCurrent(e.target.value)} />
+                {step === "remove" && <p className="field-help">Without a password, anyone who can reach this server can use it.</p>}
               </Field>
             ) : (
               <>
@@ -498,8 +534,8 @@ function SecuritySection() {
               </p>
             )}
             <div className="account-actions">
-              <button type="submit" className="btn" disabled={busy || (step === "current" ? !current : !next || !confirm)}>
-                {step === "current" ? "Continue" : "Confirm"}
+              <button type="submit" className="btn" disabled={busy || (step === "current" || step === "remove" ? !current : !next || !confirm)}>
+                {step === "current" ? "Continue" : step === "remove" ? "Remove password" : "Confirm"}
               </button>
               <button type="button" className="link-btn" onClick={() => reset()}>
                 Cancel

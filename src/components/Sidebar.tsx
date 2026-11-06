@@ -1058,6 +1058,19 @@ export function toggleBots() {
   });
 }
 
+/**
+ * Take the thread open inside OpenBots out to OpenBuild, as it is. The thread's pane is the same one
+ * on both sides, so only the sidebars swap: its scroll, draft and panels stay put.
+ */
+export function expandBotsThread() {
+  crossfade(() => {
+    const st = useStore.getState();
+    st.setBotsOpen(false);
+    // On a phone the sidebar is a drawer, which would cover the thread just opened out.
+    if (window.innerWidth <= 768) st.setSidebarOpen(false);
+  });
+}
+
 /** The footer button for that switch: OpenBots' puff to go in, a back arrow to leave. */
 export function BotsToggle() {
   const open = useStore((s) => s.botsOpen);

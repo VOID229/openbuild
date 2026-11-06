@@ -109,6 +109,13 @@ const PROVIDER_NAMES: Record<string, string> = {
 export const providerName = (provider: string) =>
   providerOverride(provider)?.name ?? PROVIDER_NAMES[provider] ?? provider.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 
+/** A provider as one account among several: "openai-codex-2" → "Codex 2", where providerName would spell it out. */
+export function accountName(provider: string): string {
+  const numbered = /^(.+)-(\d+)$/.exec(provider);
+  if (providerOverride(provider) || PROVIDER_NAMES[provider] || !numbered) return providerName(provider);
+  return `${providerName(numbered[1]!)} ${numbered[2]}`;
+}
+
 export function brandSvg(modelId: string): string {
   // Native Claude Code ids are its aliases ("claude/opus", "claude/default"): all Claude models.
   if (/^claude\d*\//.test(modelId)) return claude;
