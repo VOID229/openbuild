@@ -26,3 +26,20 @@ test('error, invalid and timed out routing return primary exactly once', async (
   expect(await routeGroup(primary, [primary, helper], [], undefined, async (_m, _s, _p, s) => { signal = s; return new Promise(() => {}); }, 5)).toEqual(['primary']);
   expect(signal?.aborted).toBe(true);
 });
+
+test('router tries ordered fallback models without extending its deadline', async () => {
+  const calls: string[] = [];
+  const configured = { ...primary, fallbackModels: ['provider/model', 'account/second', 'account/third'] };
+  expect(await routeGroup(configured, [primary, helper], [], undefined, async model => {
+    calls.push(model);
+    if (model !== 'account/third') throw new Error('unavailable');
+    return '["helper"]';
+  })).toEqual(['helper']);
+  expect(calls).toEqual(['provider/model', 'account/second', 'account/third']);
+  calls.length = 0;
+  expect(await routeGroup(configured, [primary, helper], [], undefined, async model => {
+    calls.push(model);
+    return new Promise(() => {});
+  }, 5)).toEqual(['primary']);
+  expect(calls).toEqual(['provider/model']);
+});

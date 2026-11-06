@@ -27,6 +27,8 @@ export interface Wake {
   /** Why the bot is being asked to look. */
   kind: "messages" | "routine" | "heartbeat" | "note" | "reaction";
   conversationId?: string;
+  /** Exact user messages assigned to this delivery, independent of conversation cursors. */
+  messageIds?: string[];
   text?: string;
   /** For a reaction: dropped if it's taken back before the bot looks. */
   reaction?: { messageId: string; emoji: string; by: string; to?: string };
@@ -580,10 +582,10 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
             const eligible = current.botIds.filter(id => db.getBot(id));
             let selected = ids.filter(id => eligible.includes(id));
             if (!selected.length) selected = [eligible.find(id => db.getBot(id)?.primary) ?? eligible[0]!].filter(Boolean);
-            for (const id of selected) if (!skip.has(id)) hooks.wake(id, { kind: "messages", conversationId });
+            for (const id of selected) if (!skip.has(id)) hooks.wake(id, { kind: "messages", conversationId, messageIds: [message.id] });
           });
         }
-      } else for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId });
+      } else for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(message.author === "me" && c.kind === "group" ? { messageIds: [message.id] } : {}) });
     }
   }
   return message;

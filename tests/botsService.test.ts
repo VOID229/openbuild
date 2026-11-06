@@ -99,7 +99,7 @@ test("untagged groups route privately without sticky follow or duplicate deliver
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
       let output = '[]', calls = 0, model;
-      mock.module('./server/pi/sessions.ts', () => ({ complete: async (m) => { calls++; model = m; return output; } }));
+      mock.module('./server/bots/routingComplete.ts', () => ({ routingComplete: async (m) => { calls++; model = m; return output; } }));
       const svc = await import('./server/bots/service.ts');
       const boss = svc.createBot({ name: 'Boss', model: 'provider/primary' }).bot.id;
       svc.updateBot(boss, { model: 'provider/primary' });
@@ -134,7 +134,7 @@ test("group replies wake the quoted bot instead of falling back to the primary",
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
-      mock.module('./server/pi/sessions.ts', () => ({ complete: async () => '[]' }));
+      mock.module('./server/bots/routingComplete.ts', () => ({ routingComplete: async () => '[]' }));
       const svc = await import('./server/bots/service.ts');
       const primary = svc.createBot({ name: 'Boss' });
       const second = svc.createBot({ name: 'Helper' });

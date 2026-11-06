@@ -51,6 +51,12 @@ function selected(): string[] {
     .filter((target) => !isAbsolute(target) || existsSync(target));
 }
 
+/** Same selected model/account providers as bot turns, with a final tool-denial guard. */
+export function routingFlags(): string[] {
+  return ["--no-extensions", "--no-skills", "--no-prompt-templates", "--no-context-files", "--no-mcp", "--no-builtin-tools", "--no-tools",
+    ...selected().flatMap(target => ["-e", target]), "-e", join(import.meta.dir, "routingGuard.ts")];
+}
+
 export function piFlags(): string[] {
   const extra = selected();
   return [
