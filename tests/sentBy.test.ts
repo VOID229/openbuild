@@ -33,3 +33,11 @@ test("a deleted bot keeps the name it signed with, without a mascot", () => {
   expect(html).toContain("<span>manager</span>");
   expect(html).not.toContain("<svg");
 });
+
+test("a bot's follow-up steered into a running reply is signed too", () => {
+  withBots([eggbot]);
+  const message = { id: "a", role: "assistant", content: "", createdAt: 0, parts: [{ type: "steer", id: "s1", text: "Also this", sentBy: "Dr", sentByBot: eggbot.id }] } as const;
+  const html = renderToStaticMarkup(createElement(MessageItem, { message: message as never, chatId: "c", isLast: false }));
+  expect(html).toContain("Sent by");
+  expect(html).toContain("<span>Dr Eggbot</span>");
+});

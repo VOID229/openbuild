@@ -220,6 +220,9 @@ test("a message to a working thread is steered in", async () => {
   expect(steers[0][0]).toBe(threadId);
   expect(steers[0][4]).toBe("Also this");
   expect(admitted.length).toBe(1);
+  // Saved on the reply, so the steer shows who sent it.
+  const reply = (storage.getChat(threadId) as any).messages.at(-1);
+  expect(reply.steerSenders[steers[0][1]]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
 });
 
 test("a bot held to the defaults can't write into a thread with more power", async () => {

@@ -22,6 +22,11 @@ const steerFiles = (message: Message | undefined, id: string | undefined) => {
   return (part?.type === "steer" ? part.attachments : undefined) ?? (id ? message?.steerFiles?.[id] : undefined);
 };
 
+const steerSender = (message: Message | undefined, id: string | undefined) => {
+  const part = message?.parts?.find(p => p.type === "steer" && p.id === id);
+  return (part?.type === "steer" && part.sentBy ? { sentBy: part.sentBy, ...(part.sentByBot ? { sentByBot: part.sentByBot } : {}) } : undefined) ?? (id ? message?.steerSenders?.[id] : undefined);
+};
+
 /** Pure replay; timings are based on saved timestamps, never on when the server reconnects. */
 export function projectReply(message: Message, snapshot: PiSnapshot, previous?: Message): Message {
   const parts: Part[] = [];
@@ -63,8 +68,9 @@ export function projectReply(message: Message, snapshot: PiSnapshot, previous?: 
       case "steer": {
         // The log has no files, and a tab that replayed it may have saved the steer without them.
         const attachments = steerFiles(message, event.id) ?? steerFiles(previous, event.id);
+        const sender = steerSender(message, event.id) ?? steerSender(previous, event.id);
         // Logs from before steers carried their display text still hold the model's prompt.
-        parts.push({ type: "steer", id: event.id, text: userVisiblePrompt(event.text), ...(attachments ? { attachments } : {}) });
+        parts.push({ type: "steer", id: event.id, text: userVisiblePrompt(event.text), ...(attachments ? { attachments } : {}), ...sender });
         break;
       }
       case "notice": parts.push({ type: "notice", text: event.message }); break;
@@ -79,9 +85,11 @@ export function projectReply(message: Message, snapshot: PiSnapshot, previous?: 
     if (p.type === "tool" && p.status === "running") p.status = "error";
     if (p.type === "ask" && p.answer === undefined) p.answer = "";
   }
+  // A browser's save doesn't know who the server saw steer in, so keep the saved record.
+  const steerSenders = message.steerSenders ?? previous?.steerSenders;
   return { ...message, content, parts: parts.length ? parts : undefined, status, error, finish, usage, notice: undefined,
-    reasoning: undefined, reasoningMs: undefined,
-    ...(ended ? { workedMs: Math.max(0, (snapshot.endedAt ?? snapshot.startedAt) - (message.startedAt ?? snapshot.startedAt)), steerFiles: undefined } : {}),
+    reasoning: undefined, reasoningMs: undefined, ...(steerSenders ? { steerSenders } : {}),
+    ...(ended ? { workedMs: Math.max(0, (snapshot.endedAt ?? snapshot.startedAt) - (message.startedAt ?? snapshot.startedAt)), steerFiles: undefined, steerSenders: undefined } : {}),
   };
 }
 

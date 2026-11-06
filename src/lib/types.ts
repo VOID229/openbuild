@@ -213,7 +213,12 @@ export interface SteerPart {
   id?: string;
   text: string;
   attachments?: Attachment[];
+  /** A bot steered it in: its name and id, as on a user message. */
+  sentBy?: string;
+  sentByBot?: string;
 }
+
+export type SteerSender = Pick<SteerPart, "sentBy" | "sentByBot">;
 
 /** A note from Pi during the reply (a retry, a compaction), where it happened. */
 export interface NoticePart {
@@ -260,6 +265,8 @@ export interface Message {
   workedMs?: number;
   /** Files of steers made during this reply, by steer id, until the finished reply's parts hold them. */
   steerFiles?: Record<string, Attachment[]>;
+  /** Which bot sent each steer made during this reply, by steer id, until its part holds it. */
+  steerSenders?: Record<string, SteerSender>;
   searches?: SearchCall[];
   /** e.g. "Opencode Go key 1 failed, so key 2 was used." */
   notice?: string;

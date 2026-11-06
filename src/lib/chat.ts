@@ -625,8 +625,12 @@ async function generate(chatId: string, messageId: string, resume = false) {
           consumeSteer(chatId, item.id);
         }
         endThought();
-        const saved = ev.id ? useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId)?.steerFiles?.[ev.id] : undefined;
-        parts.push({ type: "steer", id: ev.id, text: item ? item.text : userVisiblePrompt(ev.text), attachments: item?.files.length ? item.files : saved });
+        const message = ev.id ? useStore.getState().chats.find((c) => c.id === chatId)?.messages.find((m) => m.id === messageId) : undefined;
+        const saved = ev.id ? message?.steerFiles?.[ev.id] : undefined;
+        // A bot's steer: the server saved who sent it, on the reply or on the part it already projected.
+        const before = message?.parts?.find((p) => p.type === "steer" && p.id === ev.id);
+        const sender = (ev.id && message?.steerSenders?.[ev.id]) || (before?.type === "steer" && before.sentBy ? { sentBy: before.sentBy, sentByBot: before.sentByBot } : undefined);
+        parts.push({ type: "steer", id: ev.id, text: item ? item.text : userVisiblePrompt(ev.text), attachments: item?.files.length ? item.files : saved, ...sender });
         flushParts();
       } else if (ev.t === "reasoning") {
         if (pi) {
