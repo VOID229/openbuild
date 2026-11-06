@@ -22,6 +22,9 @@ const state = {
   refreshDelay: 0,
   secretsSeen: 0,
   revoked: [] as string[],
+  failInstallations: false,
+  /** Delays (ms) for the next device-code requests, one per request, so tests can reorder them. */
+  deviceDelays: [] as number[],
   writes: 0,
   readonlyHeaders: [] as string[],
 };
@@ -38,7 +41,8 @@ function issue() {
 }
 
 const bearer = (req: Request) => req.headers.get("authorization")?.replace(/^Bearer /, "") ?? "";
-const signedIn = (req: Request) => state.access.has(bearer(req));
+/** A personal access token: any `github_pat_fake…` works, reaching what the installations do. */
+const signedIn = (req: Request) => state.access.has(bearer(req)) || bearer(req).startsWith("github_pat_fake");
 
 function mcp() {
   const server = new McpServer({ name: "fake-github", version: "1" });
@@ -62,7 +66,9 @@ const server = Bun.serve({
 
     if (url.pathname === "/control") {
       if (req.method === "POST") {
-        const body = (await req.json()) as { approve?: string; deny?: string; expiresIn?: number; refreshDelay?: number; dropRefresh?: boolean };
+        const body = (await req.json()) as { approve?: string; deny?: string; expiresIn?: number; refreshDelay?: number; dropRefresh?: boolean; failInstallations?: boolean; deviceDelays?: number[] };
+        if (body.failInstallations !== undefined) state.failInstallations = body.failInstallations;
+        if (body.deviceDelays) state.deviceDelays = body.deviceDelays;
         if (body.approve) state.devices.set(body.approve, "approved");
         if (body.deny) state.devices.set(body.deny, "denied");
         if (body.expiresIn !== undefined) state.expiresIn = body.expiresIn;
@@ -77,7 +83,9 @@ const server = Bun.serve({
       if (body.client_id !== CLIENT_ID) return json({ error: "incorrect_client_credentials" });
       const code = `device-${state.devices.size + 1}`;
       state.devices.set(code, "pending");
-      return json({ device_code: code, user_code: `CODE-${state.devices.size}`, verification_uri: `${origin}/login/device`, expires_in: 900, interval: 0 });
+      const delay = state.deviceDelays.shift();
+      if (delay) await Bun.sleep(delay);
+      return json({ device_code: code, user_code: `CODE-${code.slice(7)}`, verification_uri: `${origin}/login/device`, expires_in: 900, interval: 0 });
     }
 
     if (url.pathname === "/login/oauth/access_token" && req.method === "POST") {
@@ -119,6 +127,7 @@ const server = Bun.serve({
     if (url.pathname === "/user") return signedIn(req) ? json({ login: "octo", id: 42 }) : json({ message: "Bad credentials" }, 401);
     if (url.pathname === "/user/installations") {
       if (!signedIn(req)) return json({ message: "Bad credentials" }, 401);
+      if (state.failInstallations) return json({ message: "Server Error" }, 500);
       return json({
         total_count: 2,
         installations: [

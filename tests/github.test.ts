@@ -191,6 +191,32 @@ test("GitHub App: device flow, installations, refresh, read-only, disconnect and
         assert.ok(revoked.includes(record.app.access) && revoked.includes(record.app.refresh));
         assert.equal((await gh.view()).mode, "off");
 
+        // A sign-in still waiting for its code when the user disconnects never gets going,
+        // and approving it afterwards changes nothing.
+        await control({ deviceDelays: [300] });
+        const slow = gh.startDevice("owner-a");
+        await Bun.sleep(50);
+        await gh.disconnect();
+        await assert.rejects(slow, /replaced/);
+        await control({ approve: "device-" + Object.keys((await control()).devices).length });
+        await Bun.sleep(200);
+        assert.equal((await gh.view()).mode, "off");
+        // Two sign-ins whose codes come back in reverse order: only the later one stands.
+        await control({ deviceDelays: [300, 0] });
+        const first = gh.startDevice("owner-a");
+        await Bun.sleep(50);
+        const second = await gh.startDevice("owner-a");
+        await assert.rejects(first, /replaced/);
+        const latest = Object.keys((await control()).devices).length;
+        await control({ approve: "device-" + (latest - 1) });
+        await Bun.sleep(200);
+        assert.equal((await gh.view()).mode, "off");
+        assert.equal(gh.deviceStatus(second.flowId, "owner-a").status, "pending");
+        await control({ approve: "device-" + latest });
+        await until(() => gh.deviceStatus(second.flowId, "owner-a").status === "connected", "the later sign-in");
+        assert.equal((await gh.view()).mode, "app");
+        await gh.disconnect();
+
         // GitHub tokens are never in account key sync.
         await signIn();
         noTokens(await vault.allSecrets(), "key sync");

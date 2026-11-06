@@ -97,7 +97,7 @@ export async function githubToken(purpose: Purpose, opts: { pasted?: string; ref
   return token ? { token, source: "app" } : undefined;
 }
 
-const kept = globalThis as { openbuildGithubRefresh?: Map<string, Promise<string | undefined>>; openbuildGithubFlows?: Map<string, Flow> };
+const kept = globalThis as { openbuildGithubRefresh?: Map<string, Promise<string | undefined>>; openbuildGithubFlows?: Map<string, Flow>; openbuildGithubStarts?: { n: number } };
 const refreshing = (kept.openbuildGithubRefresh ??= new Map());
 
 async function appAccess(allowRefresh: boolean): Promise<string | undefined> {
@@ -330,7 +330,15 @@ function end(flow: Flow, status: DeviceStatus) {
   flow.endedAt = Date.now();
 }
 
+/**
+ * Bumped by every new sign-in and every change of credential. A sign-in still waiting for GitHub to
+ * hand out its code checks this afterwards, so one started before a disconnect or another sign-in
+ * never gets going.
+ */
+const starts = (kept.openbuildGithubStarts ??= { n: 0 });
+
 function cancelAllFlows() {
+  starts.n++;
   for (const flow of flows.values()) if (flow.status.status === "pending") end(flow, { status: "cancelled" });
 }
 
@@ -342,8 +350,9 @@ export async function startDevice(owner: string): Promise<{ flowId: string; stat
   const { clientId } = appConfig();
   if (!clientId) throw new GithubError("The GitHub App isn't set up on this server. See docs/github.md.", 503);
   prune();
-  // One sign-in at a time: a new one replaces any still waiting.
+  // One sign-in at a time: a new one replaces any still waiting, or still starting.
   cancelAllFlows();
+  const start = starts.n;
   let body: { device_code?: string; user_code?: string; verification_uri?: string; expires_in?: number; interval?: number; error?: string };
   try {
     const res = await fetch(`${oauthOrigin()}/login/device/code`, {
@@ -358,6 +367,8 @@ export async function startDevice(owner: string): Promise<{ flowId: string; stat
   }
   if (body.error === "device_flow_disabled") throw new GithubError("The GitHub App doesn't have device flow turned on. See docs/github.md.", 503);
   if (!body.device_code || !body.user_code || !body.verification_uri) throw new GithubError(body.error ? `GitHub refused to start signing in (${body.error}).` : "GitHub didn't start signing in.", 502);
+  // Disconnected, or another sign-in started, while GitHub answered: this one is dropped unused.
+  if (start !== starts.n) throw new GithubError("Another sign-in or a disconnect replaced this one.", 409);
   const expiresAt = Date.now() + (body.expires_in ?? 900) * 1000;
   const flow: Flow = {
     id: crypto.randomUUID(),
