@@ -11,6 +11,7 @@ import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, 
 import { withProfileContext } from "../../src/lib/profile";
 import type { Chat, Message, Profile } from "../../src/lib/types";
 import * as claudeInstall from "../claude/install";
+import { detectAccounts } from "../claude/accounts";
 import * as codexInstall from "../codex/install";
 import * as cursorInstall from "../cursor/install";
 import { serverId } from "../devices";
@@ -26,7 +27,7 @@ import { admitTurn } from "../pi/turn";
 import * as projects from "../projects";
 import * as pullRequestView from "../pullRequestView";
 import { requestRunStop } from "../runStops";
-import { withRuntimeAccount } from "../runtimeAccounts";
+import { accountPath, withRuntimeAccount } from "../runtimeAccounts";
 import { runtimes } from "../runtimes";
 import * as storage from "../storage";
 import { getFocus } from "./agent";
@@ -284,9 +285,15 @@ function record(botId: string, text: string, detail: string, threadId?: string, 
   if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}), ...(pullUrl ? { pullUrl } : {}) } });
 }
 
-/** Only saved accounts on this server are selectable; never accept account configuration from a bot. */
+/** Use the UI's Claude discovery as well as accounts saved on this server. */
 function localAccounts(): RuntimeAccount[] {
-  return (appSettings().runtimeAccounts ?? []).filter((a) => (!a.deviceId || a.deviceId === serverId()) && ["claude", "codex", "cursor"].includes(a.runtime));
+  const saved = (appSettings().runtimeAccounts ?? []).filter((a) => (!a.deviceId || a.deviceId === serverId()) && ["claude", "codex", "cursor"].includes(a.runtime));
+  const detected = detectAccounts().filter((a) => !saved.some((s) => {
+    if (s.runtime !== "claude") return false;
+    if (s.id === a.id || s.name.toLowerCase() === a.name.toLowerCase()) return true;
+    try { return accountPath(s.configDir) === a.configDir; } catch { return false; }
+  }));
+  return [...saved, ...detected];
 }
 
 function usableHarness(value: unknown): { runtime: ThreadRuntime; account?: RuntimeAccount } {
