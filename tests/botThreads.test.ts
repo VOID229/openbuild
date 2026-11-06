@@ -12,6 +12,9 @@ process.env.OPENCHAT_DATA_DIR = dir;
 const repo = realpathSync(mkdtempSync(join(tmpdir(), "openbuild-bot-repo-")));
 execSync("git init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init", { cwd: repo });
 
+let discovered: any[] = [];
+mock.module("../server/claude/accounts", () => ({ detectAccounts: () => discovered }));
+
 const admitted: any[] = [];
 const answers: any[] = [];
 const steers: any[] = [];
@@ -68,6 +71,7 @@ const settle = () => Bun.sleep(20);
 beforeEach(() => {
   admitted.length = answers.length = steers.length = wakes.length = merged.length = 0;
   snapshots = [];
+  discovered = [];
   storage.setValue("client-state", "{}");
   grant();
   svc.updateSettings({ harnesses: {} });
@@ -404,3 +408,24 @@ for (const runtime of ["codex", "cursor"]) {
     expect(accountCacheKey()).toBe("");
   });
 }
+
+
+test("UI-discovered Claude login is usable and saved configuration wins", async () => {
+  const account = { id: "claude2", name: "claude2", runtime: "claude", configDir: "/tmp/bot-discovered-claude" };
+  discovered = [account];
+  expect((await call("options")).accounts).toEqual([{ id: account.id, name: account.name, harness: "claude" }]);
+  expect((await call("options", { harness: "claude2" })).models[0].id).toBe("claude/one");
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude2", mode: "local" });
+  expect(admitted[0].runtimeAccount).toEqual(account);
+  snapshots = [];
+  await call("send", { thread: started.thread, text: "Continue" });
+  expect(admitted[1].runtimeAccount).toEqual(account);
+  const saved = { ...account, id: "saved-id", name: "Work", launchArgs: "--verbose" };
+  storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [saved] } } }));
+  expect((await call("options")).accounts).toEqual([{ id: saved.id, name: saved.name, harness: "claude" }]);
+  await call("start", { project: project.name, prompt: "Go", harness: saved.id, mode: "local" });
+  expect(admitted.at(-1).runtimeAccount).toEqual(saved);
+  svc.updateSettings({ harnesses: { blocked: ["claude"] } });
+  expect((await call("options")).accounts).toEqual([]);
+  await expect(call("options", { harness: saved.id })).rejects.toThrow(/doesn't let bots/);
+});
