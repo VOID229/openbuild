@@ -28,6 +28,7 @@ import { StashTray } from "../StashTray";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
+import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
@@ -1485,11 +1486,15 @@ function DraftBackdrop({ text, bots, everyone, scroll }: { text: string; bots: B
 /** A draft from another device doesn't replace the text while you've typed within this long. */
 const TYPING_PAUSE = 3000;
 
+/** How far each chat's draft was scrolled, for the text it was scrolled in. Local to this page, as the caret is. */
+const draftScrolls = new Map<string, { text: string; top: number }>();
+
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
   // Unsent text is the workspace's, like the conversation it's for.
   const [workspace] = useState(() => useBots.getState().workspace ?? "");
   const local = isLocalWorkspace(workspace);
+  const draftKey = botDraftKey(workspace, conversation.id);
   const [text, setText] = useState(() => getBotDraft(workspace, conversation.id, local)?.text ?? "");
   const [images, setImages] = useState<string[]>(() => getBotDraft(workspace, conversation.id, local)?.images ?? []);
   const lastTyped = useRef(0);
@@ -1567,6 +1572,21 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
     if (row) row.style.minHeight = "";
   }, [text]);
+  // Back in a chat, its caret and selection are where they were left, also when the saved draft loads
+  // after mount. Typing and selecting save the live caret first, so restoring keeps it.
+  useLayoutEffect(() => {
+    if (input.current) restoreDraftSelection(draftKey, input.current);
+  }, [text]);
+  // And a draft taller than the box is scrolled where it was. Again on showing OpenBots, which hides it.
+  useLayoutEffect(() => {
+    const el = input.current;
+    const saved = draftScrolls.get(draftKey);
+    if (el && saved?.text === el.value) el.scrollTop = saved.top;
+  }, []);
+  const keepPlace = (el: HTMLTextAreaElement) => {
+    rememberDraftSelection(draftKey, el);
+    draftScrolls.set(draftKey, { text: el.value, top: el.scrollTop });
+  };
   useEffect(() => {
     if (replyTo) input.current?.focus();
   }, [replyTo]);
@@ -1811,12 +1831,16 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             {...dictation.fieldProps}
             onChange={(e) => {
               lastTyped.current = Date.now();
+              keepPlace(e.currentTarget);
               setText(e.target.value);
               setStashOpen(false);
               findMention(e.target.value, e.target.selectionStart);
             }}
+            onSelect={(e) => keepPlace(e.currentTarget)}
             onScroll={(e) => {
               if (backdrop.current) backdrop.current.scrollTop = e.currentTarget.scrollTop;
+              // Not while OpenBots is hidden, which takes the box's scroll away.
+              if (e.currentTarget.offsetParent) keepPlace(e.currentTarget);
             }}
             onPaste={(e) => {
               if (sending) return;
