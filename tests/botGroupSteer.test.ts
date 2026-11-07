@@ -18,17 +18,27 @@ async function run(name: string, body: string) {
       const { getFocus } = await import('./server/bots/agent.ts');
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       svc.updateSettings({ onboarding: 'done' });
-      const prompts = [], steers = [];
+      const prompts = [], steers = [], commands = [];
+      // Pi's own steering queue: a prompt reads what's left in it first, and clear_queue empties it.
+      const piQueues = new Map();
+      const piQueue = (bot) => piQueues.get(bot.id) ?? piQueues.set(bot.id, []).get(bot.id);
       // steer(bot, cmd) decides what a steer does: resolve, throw, or wait on a promise.
       const pi = { steer: async () => ({}) };
       const fake = (bot) => {
         const mind = { token: 't', loaded: JSON.stringify(piFlags()), busy: false, sent: false, draft: '', proc: { exited: false, lastUsed: Date.now(), close() {}, async send(cmd) {
+          commands.push({ bot: bot.id, type: cmd.type });
+          if (cmd.type === 'clear_queue') return { steering: piQueue(bot).splice(0), followUp: [] };
           if (cmd.type === 'steer') {
             const entry = { bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), ok: undefined };
             steers.push(entry);
-            try { const out = await pi.steer(bot, cmd); entry.ok = true; return out; } catch (err) { entry.ok = false; throw err; }
+            try {
+              const out = await pi.steer(bot, cmd);
+              if ((out?.disposition ?? 'queued') === 'queued') piQueue(bot).push(cmd.message);
+              entry.ok = true;
+              return out;
+            } catch (err) { entry.ok = false; throw err; }
           }
-          if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), finish(text) { mind.draft = text; mind.onSettled?.(); }, fail(error) { runner.onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: error } }); mind.onSettled?.(); } });
+          if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), drained: piQueue(bot).splice(0), finish(text) { mind.draft = text; mind.onSettled?.(); }, fail(error) { runner.onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: error } }); mind.onSettled?.(); } });
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
         minds.set(bot.id, mind);
@@ -197,9 +207,14 @@ test('a request steered into a model that fails before acting is answered in a t
   const steered = post(group.id, 'me', '@Alpha STEERED', { image: 'SSSS' });
   await until(() => steers.length === 1 && steers[0].ok);
   // The primary fails before doing anything: the fallback retries the turn, and the steered request
-  // isn't in its prompt, so it gets a turn of its own afterwards.
+  // isn't in its prompt, so it gets a turn of its own afterwards. Pi still holds the unread steer,
+  // which the fallback would read too: it's cleared first.
+  a.equal(piQueue(alpha.bot).length, 1);
   of(alpha.bot)[0].fail('overloaded');
   await until(() => of(alpha.bot).length === 2 && minds.get(alpha.bot.id).steerable);
+  a.deepEqual(of(alpha.bot)[1].drained, []);
+  const alphaCommands = commands.filter(c => c.bot === alpha.bot.id).map(c => c.type);
+  a.ok(alphaCommands.indexOf('clear_queue') > alphaCommands.indexOf('steer') && alphaCommands.indexOf('clear_queue') < alphaCommands.lastIndexOf('prompt'), alphaCommands.join());
   a.ok(!lineFor(of(alpha.bot)[1].message, '@Alpha STEERED')?.includes('answer this'));
   of(alpha.bot)[1].finish('DONE');
   await until(() => of(alpha.bot).length === 3 && minds.get(alpha.bot.id).steerable);
@@ -230,4 +245,21 @@ test('steering never moves the cursor past a bot message still waiting its turn'
   of(alpha.bot)[1].finish('[silent]');
   await until(() => !runner.busy(alpha.bot.id));
   a.equal(steers.length, 1);
+`), 30_000);
+
+test('a steer an extension handled is done with, even when the model then fails over', () => run('handled', `
+  svc.updateBot(alpha.bot.id, { model: 'one/primary', fallbackModels: ['two/fallback'] });
+  post(group.id, 'me', '@Alpha START');
+  await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
+  pi.steer = async () => ({ disposition: 'handled' });
+  const handled = post(group.id, 'me', '@Alpha /command');
+  await until(() => steers.length === 1 && steers[0].ok);
+  await until(() => db.getMessage(handled.id).message.seenBy?.includes(alpha.bot.id));
+  of(alpha.bot)[0].fail('overloaded');
+  await until(() => of(alpha.bot).length === 2 && minds.get(alpha.bot.id).steerable);
+  of(alpha.bot)[1].finish('DONE');
+  await until(() => !runner.busy(alpha.bot.id));
+  await settle();
+  a.equal(of(alpha.bot).length, 2);
+  a.ok(!commands.some(c => c.type === 'clear_queue'));
 `), 30_000);
