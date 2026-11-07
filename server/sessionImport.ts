@@ -692,6 +692,8 @@ interface Tracked {
   /** OpenBuild ran a turn in it, or the user deleted it: discovery leaves it alone from then on. */
   left?: boolean;
   mapping?: string; archived?: boolean; working?: boolean;
+  /** The user opened or closed the thread by hand: open or closed is theirs from then on. */
+  chosen?: boolean;
 }
 const STATE = "session-import:v2:";
 const trackedKey = (id: string) => `${STATE}thread:${id}`;
@@ -802,15 +804,17 @@ function create(source: Source, f: Found, { chat, mapping, working }: Projected)
 }
 
 /**
- * Whether the thread is closed: discovery's call (open while the runtime works on it, closed once
- * it's finished) until the user opens or closes it themselves; from then on it's theirs.
+ * Whether the user has opened or closed the thread by hand: it isn't as discovery left it, or it
+ * carries the done mark a reopen leaves (Sidebar's closePatch; discovery never sets it). Once seen,
+ * it's remembered, as the thread then matches what discovery records.
  */
-const closedState = (old: Chat, was: Pick<Tracked, "archived">, working: boolean) =>
-  // Reopening by hand also marks it done (Sidebar's closePatch); discovery never does.
-  !!old.archived === !!was.archived && !old.done ? !working : old.archived;
+const chosen = (old: Chat, was: Pick<Tracked, "archived" | "chosen">) => !!was.chosen || !!old.archived !== !!was.archived || !!old.done;
+
+/** Whether the thread is closed: open while the runtime works on it, closed once it's finished, unless the user chose. */
+const closedState = (old: Chat, was: Pick<Tracked, "archived" | "chosen">, working: boolean) => chosen(old, was) ? !!old.archived : !working;
 
 /** History comes from the native session; what the user did with the thread stays theirs. */
-export function merged(old: Chat, next: Chat, was: Pick<Tracked, "archived">, working: boolean): Chat {
+export function merged(old: Chat, next: Chat, was: Pick<Tracked, "archived" | "chosen">, working: boolean): Chat {
   const keepTitle = old.titleSource === "user" || (old.titleSource === "auto" && !next.titleSource);
   return {
     ...old, messages: next.messages, updatedAt: Math.max(old.updatedAt, next.updatedAt),
@@ -829,7 +833,7 @@ function refresh(id: string, was: Tracked, f: Found, { chat, mapping, working }:
     if (!storage.putChat(next as unknown as storage.StoredChat)) return;
     const saved = JSON.stringify(mapping);
     storage.setValue(`${runtime}-session:${id}`, saved);
-    track(id, { ...was, stamp: f.stamp, mapping: saved, archived: next.archived, working });
+    track(id, { ...was, stamp: f.stamp, mapping: saved, archived: next.archived, working, chosen: chosen(old, was) });
   });
 }
 
@@ -850,7 +854,7 @@ function settle(source: Source, listed: Set<string>) {
         const ended = running ? chat.messages.map((m) => { if (m !== reply) return m; const { stream: _, ...rest } = m; return { ...rest, status: "stopped" as const }; }) : chat.messages;
         storage.putChat({ ...chat, messages: ended, archived } as unknown as storage.StoredChat);
       }
-      track(id, { ...was, working: false, archived });
+      track(id, { ...was, working: false, archived, chosen: chosen(chat, was) });
     });
   }
 }

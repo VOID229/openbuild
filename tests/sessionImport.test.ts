@@ -160,34 +160,68 @@ test("classifies from live activity: a busy process shows working, stale registr
   `);
 });
 
-test("closing or reopening a discovered thread by hand sticks through later work and finishing", async () => {
+// Drives Claude Code sessions turn by turn, in any process: each turn continues the transcript's
+// latest record, and the session's process (this one, or its parent) says whether it's busy.
+const claudeTurns = `
+  import { strict as assert } from "node:assert";
+  import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+  import { join } from "node:path";
+  import { createHash } from "node:crypto";
+  const cwd = process.env.OPENCHAT_DATA_DIR + "-work";
+  const dir = join(process.env.CLAUDE_CONFIG_DIR, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+  await mkdir(dir, { recursive: true });
+  const storage = await import("./server/storage.ts");
+  const mod = await import("./server/sessionImport.ts");
+  const threadOf = (id) => "claude-" + createHash("sha256").update(id).digest("hex").slice(0, 32);
+  const closedByHand = "c1c1c1c1-c1c1-4c1c-8c1c-c1c1c1c1c1c1", openedByHand = "d2d2d2d2-d2d2-4d2d-8d2d-d2d2d2d2d2d2", untouched = "e3e3e3e3-e3e3-4e3e-8e3e-e3e3e3e3e3e3";
+  // Live processes for each session: this one, the test runner, and init (alive, if not ours to signal).
+  const pids = { [closedByHand]: process.pid, [openedByHand]: process.ppid, [untouched]: 1 };
+  let n = 0;
+  const record = (uuid, parentUuid, type, content) => JSON.stringify({ type, uuid, parentUuid, timestamp: new Date().toISOString(), isSidechain: false, cwd, entrypoint: "cli", message: { role: type, content, ...(type === "assistant" ? { model: "claude-test-1" } : {}) } }) + "\\n";
+  const leaf = async (id) => { try { return (await readFile(join(dir, id + ".jsonl"), "utf8")).trim().split("\\n").map((l) => JSON.parse(l)).findLast((r) => r.uuid)?.uuid ?? null; } catch { return null; } };
+  /** One step of a session: a prompt it's still busy on, or the reply that finishes it. */
+  const step = async (id, status) => {
+    const parent = await leaf(id), u = id.slice(0, 4) + "-" + process.pid + "-" + n++;
+    await appendFile(join(dir, id + ".jsonl"), status === "busy" ? record(u, parent, "user", "Prompt " + u) : record(u, parent, "assistant", [{ type: "text", text: "Reply " + u }]));
+    await mkdir(join(process.env.CLAUDE_CONFIG_DIR, "sessions"), { recursive: true });
+    await writeFile(join(process.env.CLAUDE_CONFIG_DIR, "sessions", pids[id] + ".json"), JSON.stringify({ pid: pids[id], sessionId: id, status, kind: "interactive" }));
+  };
+  const pass = async (...steps) => { for (const [id, status] of steps) await step(id, status); await mod.discover(); };
+  const closed = (id) => storage.getChat(threadOf(id)).archived;
+  const last = (id) => storage.getChat(threadOf(id)).messages.at(-1).status;
+`;
+
+test("closing or reopening a discovered thread by hand sticks through every later pass, finish and restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-user-"));
-  await run(dir, `${claudeFixture}
-    import { strict as assert } from "node:assert";
-    import { appendFile } from "node:fs/promises";
-    const mod = await import("./server/sessionImport.ts");
-    const id = threadOf(native);
-    const turn = async (u, a, parent, status) => {
-      await appendFile(join(dir, native + ".jsonl"), jsonl([rec(u, parent, "user", "Prompt " + u), ...(status === "idle" ? [rec(a, u, "assistant", [{ type: "text", text: "Reply " + a }])] : [])]));
-      await registry(native, status);
-      await mod.discover();
-      return storage.getChat(id);
-    };
-    await registry(native, "busy");
-    await appendFile(join(dir, native + ".jsonl"), jsonl([rec("u3", "a4", "user", "Working")]));
-    await mod.discover();
-    assert.equal(storage.getChat(id).archived, false);
-    // Closed by hand while it works (Sidebar's closePatch): it stays closed while working and after.
-    storage.putChat({ ...storage.getChat(id), archived: true, done: false });
-    assert.equal((await turn("u4", "a5", "u3", "busy")).archived, true);
-    const done = await turn("u5", "a6", "u4", "idle");
-    assert.equal(done.archived, true);
-    assert.equal(done.messages.at(-1).status, "done");
-    // Reopened by hand (archived: false, done: true): finishing again doesn't close it.
-    storage.putChat({ ...storage.getChat(id), archived: false, done: true });
-    assert.equal((await turn("u6", "a7", "a6", "busy")).archived, false);
-    const after = await turn("u7", "a8", "u6", "idle");
-    assert.deepEqual([after.archived, after.done, after.messages.at(-1).status], [false, true, "done"]);
+  await run(dir, `${claudeTurns}
+    // One session works; another arrives finished (so, closed).
+    await pass([closedByHand, "busy"], [openedByHand, "busy"]);
+    await pass([openedByHand, "idle"]);
+    assert.deepEqual([closed(closedByHand), closed(openedByHand)], [false, true]);
+    // By hand (Sidebar's closePatch): the working one closed, the finished one reopened.
+    storage.putChat({ ...storage.getChat(threadOf(closedByHand)), archived: true, done: false });
+    storage.putChat({ ...storage.getChat(threadOf(openedByHand)), archived: false, done: true });
+    // Several changed busy passes, then finish, then work again.
+    for (let i = 0; i < 3; i++) {
+      await pass([closedByHand, "busy"], [openedByHand, "busy"]);
+      assert.deepEqual([closed(closedByHand), closed(openedByHand), last(closedByHand)], [true, false, "streaming"], "busy pass " + i);
+    }
+    await pass([closedByHand, "idle"], [openedByHand, "idle"]);
+    assert.deepEqual([closed(closedByHand), closed(openedByHand), last(closedByHand)], [true, false, "done"]);
+    await pass([closedByHand, "busy"], [openedByHand, "busy"]);
+    assert.deepEqual([closed(closedByHand), closed(openedByHand)], [true, false]);
+  `);
+  // After a restart, the choices still hold through more work and finishing.
+  await run(dir, `${claudeTurns}
+    for (const status of ["busy", "busy", "idle", "busy", "idle"]) {
+      await pass([closedByHand, status], [openedByHand, status]);
+      assert.deepEqual([closed(closedByHand), closed(openedByHand), last(closedByHand)], [true, false, status === "busy" ? "streaming" : "done"], status);
+    }
+    // Discovery still decides for a thread nobody touched: open while working, closed once finished.
+    for (const status of ["busy", "idle", "busy", "idle"]) {
+      await pass([untouched, status]);
+      assert.equal(closed(untouched), status === "idle", "untouched " + status);
+    }
   `);
 });
 
@@ -427,7 +461,8 @@ test("Codex is only asked again when its files change; its sessions follow each 
     const { mkdir, writeFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
     const homes = [];
-    let threads = ["native-codex", "kept-open"].map((id) => ({ id, cwd: "/tmp", updatedAt: Math.floor(Date.now() / 1000), status: { type: "active" } }));
+    const listing = (ids, at, type) => ids.map((id) => ({ id, cwd: "/tmp", updatedAt: at, status: { type } }));
+    let threads = listing(["native-codex", "kept-open", "closed-by-hand"], Math.floor(Date.now() / 1000), "active");
     mock.module("./server/codex/install.ts", () => ({ codexBin: () => "/fake/codex", codexEnv: () => ({ CODEX_HOME: process.env.CODEX_HOME }) }));
     mock.module("./server/codex/rpc.ts", () => ({ CodexProcess: class {
       async initialize() { homes.push(process.env.CODEX_HOME); } close() {}
@@ -450,6 +485,8 @@ test("Codex is only asked again when its files change; its sessions follow each 
     // The user closed and reopened this one by hand while it worked.
     const kept = threadId("codex", "kept-open");
     storage.putChat({ ...storage.getChat(kept), archived: false, done: true });
+    const shut = threadId("codex", "closed-by-hand");
+    storage.putChat({ ...storage.getChat(shut), archived: true, done: false });
     await mod.discover();
     a.equal(homes.length, 1);
     // Codex writes to the rollout: listed again. The thread is gone from the listing: it isn't running anymore.
@@ -462,12 +499,20 @@ test("Codex is only asked again when its files change; its sessions follow each 
     a.equal(settled.archived, true);
     const reopened = storage.getChat(kept);
     a.deepEqual([reopened.messages.at(-1).status, reopened.archived], ["stopped", false]);
-    a.equal(storage.listChats().length, 2);
+    a.equal(storage.getChat(shut).archived, true);
+    a.equal(storage.listChats().length, 3);
     // Settled once: later passes leave both alone.
     const versions = JSON.stringify(storage.chatIndex());
     await writeFile(join(process.env.CODEX_HOME, "sessions", "rollout.jsonl"), "{}\\n{}\\n{}\\n");
     await mod.discover();
     a.equal(JSON.stringify(storage.chatIndex()), versions);
+    // Back at work after settling: the untouched one opens, the user's choices hold, then and when they finish.
+    for (const [type, n] of [["active", 60], ["idle", 120], ["active", 180]]) {
+      threads = listing(["native-codex", "kept-open", "closed-by-hand"], Math.floor(Date.now() / 1000) + n, type);
+      await writeFile(join(process.env.CODEX_HOME, "sessions", "rollout.jsonl"), "{}\\n".repeat(n));
+      await mod.discover();
+      a.deepEqual([chat.id, kept, shut].map((id) => storage.getChat(id).archived), [type === "idle", false, true], type + n);
+    }
   `);
 });
 
