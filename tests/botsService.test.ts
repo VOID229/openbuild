@@ -251,3 +251,79 @@ test('group follow refreshes only on user requests and follows membership change
     expect(err).toBe(''); expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+test('group follow survives a restart mid-window, still expires, refreshes only on user requests and is cleaned up', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'openbuild-follow-restart-'));
+  // Each run is a fresh server process on the same data folder: a restart between them.
+  const run = async (script: string) => {
+    const child = Bun.spawn([process.execPath, '-e', `
+      import { strict as a } from 'node:assert';
+      import * as db from './server/bots/db.ts';
+      const svc = await import('./server/bots/service.ts');
+      const wakes = [];
+      svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
+      const post = (conversationId, text, at, author = 'me') => svc.postMessage(conversationId, { id: crypto.randomUUID(), author, text, at });
+      const woken = (conversationId, text, at) => { wakes.length = 0; const m = post(conversationId, text, at); return wakes.map(w => [w.id, w.conversationId, w.messageIds]).concat([[m.id]]); };
+      const rows = () => db.db.query('SELECT conversation_id AS id FROM group_follows ORDER BY conversation_id').all().map(r => r.id);
+      ${script}
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
+    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    expect(err).toBe(''); expect(code).toBe(0);
+    return out.trim() ? JSON.parse(out) : undefined;
+  };
+  try {
+    const T = Date.now();
+    const ids = await run(`
+      const boss = svc.createBot({ name: 'Boss' }).bot.id;
+      const manager = svc.createBot({ name: 'Manager' }).bot.id;
+      const one = svc.createConversation({ kind: 'group', name: 'One', botIds: [boss, manager] }).id;
+      const two = svc.createConversation({ kind: 'group', name: 'Two', botIds: [boss, manager] }).id;
+      const three = svc.createConversation({ kind: 'group', name: 'Three', botIds: [boss, manager] }).id;
+      post(one, '@Manager take this', ${T});
+      post(three, '@Manager and this', ${T});
+      console.log(JSON.stringify({ boss, manager, one, two, three }));
+    `);
+    const { boss, manager, one, two, three } = ids;
+    // After the restart, 19 minutes in, the follow still holds: exactly one wake, for that message, in that chat.
+    await run(`
+      const [w, [id]] = woken('${one}', 'Keep going', ${T} + 19 * 60_000);
+      a.deepEqual(w, ['${manager}', '${one}', [id]]);
+      // Another group has no follow of its own, so the primary takes it.
+      const [o] = woken('${two}', 'Elsewhere', ${T} + 19 * 60_000);
+      a.equal(o[0], '${boss}');
+      // Bot chatter and reactions don't refresh the follow in "three".
+      const chatter = post('${three}', 'Bot chatter', ${T} + 19 * 60_000, '${manager}');
+      svc.toggleReaction('${three}', chatter.id, '👍', 'me');
+    `);
+    // Another restart: "one" was refreshed by the user at +19 min, "three" only by bots.
+    await run(`
+      a.equal(woken('${one}', 'Still here', ${T} + 38 * 60_000)[0][0], '${manager}');
+      a.equal(woken('${three}', 'Expired', ${T} + 20 * 60_000)[0][0], '${boss}');
+      // Exactly 20 minutes after the last request, it's over.
+      a.equal(woken('${one}', 'Too late', ${T} + 58 * 60_000)[0][0], '${boss}');
+      // A small step back of the clock still follows; a row stamped far ahead doesn't.
+      post('${one}', '@Manager again', ${T} + 60 * 60_000);
+      a.equal(woken('${one}', 'Clock stepped back', ${T} + 60 * 60_000 - 30_000)[0][0], '${manager}');
+      db.setGroupFollow('${two}', { ids: ['${manager}'], at: ${T} + 10 * 60 * 60_000 });
+      a.equal(woken('${two}', 'Future row', ${T} + 61 * 60_000)[0][0], '${boss}');
+    `);
+    // Cleanup: expired and future-stamped rows are swept on tick, deleted groups and emptied follows leave nothing, and a corrupt row is dropped.
+    await run(`
+      const now = Date.now();
+      db.setGroupFollow('${one}', { ids: ['${manager}'], at: now - svc.GROUP_FOLLOW_MS });
+      db.setGroupFollow('${two}', { ids: ['${manager}'], at: now + svc.GROUP_FOLLOW_MS });
+      db.setGroupFollow('${three}', { ids: ['${manager}'], at: now });
+      svc.tick(() => false);
+      a.deepEqual(rows(), ['${three}']);
+      svc.updateConversation('${three}', { botIds: ['${boss}'] });
+      a.deepEqual(rows(), []);
+      db.setGroupFollow('${two}', { ids: ['${manager}'], at: now });
+      svc.deleteConversation('${two}');
+      a.deepEqual(rows(), []);
+      db.db.query("INSERT INTO group_follows (conversation_id, bot_ids, at) VALUES (?1, 'nope', ?2)").run('${one}', now);
+      a.equal(db.groupFollow('${one}'), undefined);
+      a.deepEqual(rows(), []);
+    `);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
