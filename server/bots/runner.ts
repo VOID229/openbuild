@@ -137,28 +137,34 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
   const ids = item.messageIds!;
   const prior = mind.steering;
   const turn = mind.shown;
-  const attempt = (async () => {
-    if (prior && !(await prior)) return false;
+  // Called as Pi answers, before the turn's release() reads queuedSteers.
+  const record = (disposition?: string) => {
+    if (!disposition) return enqueue(botId, item);
+    // Pi reads its queue in order: release() puts back the ones it never read, where the turn started.
+    if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from: turn?.get(conversationId) ?? db.cursor(botId, conversationId) });
+    // A model that fails before acting hands the turn to the next one, whose prompt doesn't have these.
+    // One an extension handled is done with.
+    if (disposition !== "handled" && mind.shown === turn) (mind.steered ??= []).push(item);
+    markSeen(botId, new Map(), new Set(ids));
+  };
+  const attempt = (async (): Promise<string | undefined> => {
+    if (prior && !(await prior)) return void record();
     // The turn this was meant for may have ended while an earlier steer was on its way.
-    if (mind.shown !== turn || !steerableIn(botId, mind, conversationId)) return false;
+    if (mind.shown !== turn || !steerableIn(botId, mind, conversationId)) return void record();
     const images = ids.flatMap((id) => {
       const row = db.getMessage(id);
       return row?.conversationId === conversationId ? imagesBetween(conversationId, row.seq - 1, row.seq) : [];
     }).slice(-IMAGE_LIMIT);
     mind.quiet = false;
     show(botId, mind);
-    const took = await mind.proc.send<{ disposition?: string } | undefined>({ type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, 15_000);
-    return took?.disposition ?? "queued";
-  })().catch(() => undefined);
-  // Recorded as part of the chain, so whoever waits on it sees where every steer ended up.
-  mind.steering = attempt.then((disposition) => {
-    if (!disposition) return void enqueue(botId, item), false;
-    // A model that fails before acting hands the turn to the next one, whose prompt doesn't have these.
-    // One an extension handled is done with.
-    if (disposition !== "handled" && mind.shown === turn) (mind.steered ??= []).push(item);
-    markSeen(botId, new Map(), new Set(ids));
-    return true;
-  });
+    // A steer Pi is slow to answer is waited out, and the turn holds on to Pi until it is.
+    return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, (disposition) => {
+      resolve(disposition);
+      record(disposition);
+    }));
+  })().catch(() => void record());
+  // record() has run by the time the chain moves on, so whoever waits on it sees where every steer ended up.
+  mind.steering = attempt.then((disposition) => !!disposition);
 }
 
 function enqueue(botId: string, item: Wake) {
@@ -564,12 +570,15 @@ async function run(botId: string, all: Wake[]) {
         // one Pi took late would otherwise land in this attempt unrecorded.
         m.steerable = false;
         await m.steering;
-      }
-      // Steered into an attempt whose model failed before acting: answered in a turn of their own, not lost.
-      if (m.steered?.length) {
-        // Pi keeps the steers it never read for the next prompt, which would answer them a second time.
-        await m.proc.send({ type: "clear_queue" }, 30_000);
-        for (const job of m.steered.splice(0)) enqueue(botId, job);
+        // One Pi still hasn't answered may yet start something or queue itself: recovered from before any new prompt.
+        // Pi also keeps the steers it never read for the next prompt, which would answer them a second time.
+        if (m.needsRecovery) await recoverPrompt(m);
+        else if (m.steered?.length) await m.proc.send({ type: "clear_queue" }, 30_000);
+        // Only group steers join a group turn, and each Pi queued is among these: none is left for release() to put back.
+        m.queuedSteers = [];
+        m.dropped = 0;
+        // Steered into an attempt whose model failed before acting: answered in a turn of their own, not lost.
+        for (const job of m.steered?.splice(0) ?? []) enqueue(botId, job);
       }
       // Nothing has happened yet: a model Pi can't switch to, or that it refuses to start, is the next one's turn.
       const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent ? err : new ModelFailure(err instanceof Error ? err.message : String(err)));
