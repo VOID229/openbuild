@@ -15,6 +15,7 @@ import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
+import { EXTERNAL_VIA } from "../../shared/replies";
 import { useLongPress } from "../lib/gestures";
 import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
@@ -1309,6 +1310,21 @@ function FilterMenu() {
   );
 }
 
+/**
+ * The threads working now, and those that stopped since `before` and move into "Done", reopening if
+ * closed. (The server marks replies that finish elsewhere; see server/pi/projection.ts.) A discovered
+ * thread whose native runtime finished is left where the server files it: under Closed.
+ */
+export function finishedWork(before: Map<string, boolean> | undefined, chats: Chat[]): { working: Map<string, boolean>; done: string[] } {
+  const working = new Map(chats.filter(isWorking).map((c) => [c.id, !!c.imported && lastReply(c)?.stream?.via === EXTERNAL_VIA]));
+  const done: string[] = [];
+  for (const [id, discovered] of before ?? []) {
+    const c = chats.find((c) => c.id === id);
+    if (c && !discovered && !working.has(id) && (!c.done || c.archived)) done.push(id);
+  }
+  return { working, done };
+}
+
 export function Sidebar() {
   const sidebarRef = useRef<HTMLElement>(null);
   const open = useStore((s) => s.sidebarOpen);
@@ -1441,16 +1457,12 @@ export function Sidebar() {
     return () => clearTimeout(timer);
   }, [chats, updateChat]);
 
-  // A reply that finishes while the app is open moves its thread into "Done", reopening it if it was
-  // closed. (The server marks replies that finish elsewhere; see server/pi/projection.ts.)
-  const workingIds = useRef<Set<string>>(undefined);
+  // A reply that finishes while the app is open moves its thread into "Done" (see finishedWork).
+  const workingIds = useRef<Map<string, boolean>>(undefined);
   useEffect(() => {
-    const now = new Set(chats.filter(isWorking).map((c) => c.id));
-    for (const id of workingIds.current ?? []) {
-      const c = chats.find((c) => c.id === id);
-      if (c && !now.has(id) && (!c.done || c.archived)) updateChat(id, { done: true, archived: false });
-    }
-    workingIds.current = now;
+    const { working, done } = finishedWork(workingIds.current, chats);
+    for (const id of done) updateChat(id, { done: true, archived: false });
+    workingIds.current = working;
   }, [chats, updateChat]);
   const filtered = view.models.length > 0 || view.runtime !== "all";
 

@@ -33,7 +33,7 @@ const { canSteer } = await import("../src/lib/chat");
 const { runShell } = await import("../src/lib/shell");
 const { WorkspaceTop, WorkspaceBelow } = await import("../src/components/Workspace");
 const { runtimeMenuDensity } = await import("../src/lib/runtimes");
-const { Sidebar } = await import("../src/components/Sidebar");
+const { Sidebar, finishedWork } = await import("../src/components/Sidebar");
 const { sendMessage, regenerate, answerQuestion } = await import("../src/lib/chat");
 const { AskCard } = await import("../src/components/ToolCalls");
 const { Composer } = await import("../src/components/Composer");
@@ -276,6 +276,23 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   html = markup(createElement(Sidebar));
   expect(titles(html)).toEqual(["durable-thread"]);
   expect(html).not.toContain('title="Pi runtime"');
+});
+
+test("finished work moves into Done, except a discovered thread whose native runtime finished", () => {
+  const now = 1_700_000_000_000;
+  const reply = (status: "streaming" | "done", via?: string) => ({ id: "a", role: "assistant" as const, content: "", status, createdAt: now, ...(via ? { stream: { id: "", via } } : {}) });
+  const chat = (id: string, last: ReturnType<typeof reply>, extra: Partial<Chat> = {}): Chat => ({ id, title: id, createdAt: now, updatedAt: now, messages: [{ id: "u", role: "user", content: "go", createdAt: now }, last], ...extra });
+  const ids = ["own", "pi-external", "discovered", "discovered-own-turn"];
+  const before = finishedWork(undefined, [
+    chat("own", reply("streaming", "server")),
+    chat("pi-external", reply("streaming", "external")),
+    chat("discovered", reply("streaming", "external"), { imported: true }),
+    chat("discovered-own-turn", reply("streaming", "server"), { imported: true }),
+  ]);
+  expect([...before.working.keys()]).toEqual(ids);
+  const after = finishedWork(before.working, ids.map((id) => chat(id, reply("done"), { imported: id.startsWith("discovered"), archived: true })));
+  expect(after.done).toEqual(["own", "pi-external", "discovered-own-turn"]);
+  expect(after.working.size).toBe(0);
 });
 
 test("a thread closed elsewhere while OpenBots is open leaves OpenBots in front", () => {
