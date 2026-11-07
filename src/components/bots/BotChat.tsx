@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { authoredEventText, eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { authoredEventText, eventDetail, eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -1257,21 +1257,20 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;
             // A message between bots names the other bot by id, so a rename shows up on old lines too.
             const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
-            // A change of model names the bot, the model it moved to ("fallback model …", "first priority model …") and, as the detail, that model's account.
+            // A change of model names the bot and the model it moved to, with its account only when the bot has two of that model.
             const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
-            const switchedTo = m.event!.text.replace(/^Switched to /, "");
+            const detail = eventDetail(m.event!);
+            const switchedTo = eventText(m.event!).replace(/^Switched to /, "") + (m.event!.kind === "model" && detail ? ` (${accountName(detail)})` : "");
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
                   {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
-                {m.event!.kind === "model" && m.event!.detail ? (
-                  <span className="bm-event-detail">from {accountName(m.event!.detail)}</span>
-                ) : m.event!.detail && (
+                {m.event!.kind !== "model" && detail && (
                   <span className="bm-event-detail">
                     {m.event!.kind === "routine" && <ClockGlyph />}
-                    {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={m.event!.detail} bots={bots} />}
+                    {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
                   </span>
                 )}
               </div>

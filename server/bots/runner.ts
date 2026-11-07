@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { botModelChain, conversationTitle, eventText, mentionName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
+import { botModelChain, conversationTitle, eventDetail, eventText, MODEL_SIGN_IN, mentionName, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -240,15 +240,18 @@ export function modelChain(botId: string): (string | undefined)[] {
   return botModelChain(db.getBot(botId), svc.getSettings());
 }
 
+/** A reply failed on the model's side: the provider's error, which the server log keeps and the chat doesn't show. */
+export class ProviderError extends PiError {}
+
 /** A model failed before the reply did anything: no tool ran and no text was written, so another model can take the turn over. */
-export class ModelFailure extends PiError {}
+export class ModelFailure extends ProviderError {}
 
 /**
  * Try a turn on each model of the chain until one manages it. Only a ModelFailure moves on; anything
  * else (a partial reply, a tool that already ran, a timeout) fails the reply as it is. An attempt calls
  * `ran` once its model has taken the turn on (it wrote, ran a tool or settled), with the model Pi is on
  * and its name, which posts a change of model in the conversation (see noteRan). When every model
- * fails, the error says how each one did.
+ * fails, the error says how each one did, for the server log.
  */
 export async function withFallbacks(
   botId: string,
@@ -263,7 +266,7 @@ export async function withFallbacks(
     const ran = (on: { model?: string; name?: string }) => {
       if (noted) return;
       noted = true;
-      noteRan(botId, conversationId, i, { model: on.model ?? model, name: on.name });
+      noteRan(botId, conversationId, chain, i, { model: on.model ?? model, name: on.name });
     };
     try {
       await attempt(model, i, ran);
@@ -272,23 +275,21 @@ export async function withFallbacks(
       if (!(err instanceof ModelFailure) || i === chain.length - 1) {
         if (!failures.length) throw err;
         const last = err instanceof Error ? err.message : String(err);
-        throw new PiError(`Every model failed.\n${[...failures, `${model}: ${last}`].join("\n")}`);
+        throw new ProviderError(`Every model failed.\n${[...failures, `${model}: ${last}`].join("\n")}`);
       }
       failures.push(`${model ?? "Default model"}: ${err.message.split("\n").pop()!.slice(0, 160)}`);
     }
   }
 }
 
-const ORDINALS = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"];
-
 /**
  * The model a bot's replies last ran on, and its place in the chain, are kept (`ran:`) so the chat
- * hears only of a change: a fallback taking over ("Switched to fallback model GPT 6.1 Sol"), or a
- * model higher up coming back ("Switched to first priority model Grok 4.7"). A reply that tried the
- * primary, saw it fail and ended up on the same fallback as last time says nothing. The provider
- * (the account, for a second login) is the detail.
+ * hears only of a change: a fallback taking over, or a model higher up coming back, both "Switched to
+ * GPT 6.1 Sol". A reply that tried the primary, saw it fail and ended up on the same fallback as last
+ * time says nothing, and a model that failed is never named. The provider (the account, for a second
+ * login) is the detail only when another model in the chain has the same id, to tell the two apart.
  */
-function noteRan(botId: string, conversationId: string | undefined, index: number, on: { model?: string; name?: string }) {
+function noteRan(botId: string, conversationId: string | undefined, chain: (string | undefined)[], index: number, on: { model?: string; name?: string }) {
   const last = db.getValue<{ model?: string; index: number } | null>(`ran:${botId}`) ?? undefined;
   db.setValue(`ran:${botId}`, { model: on.model, index });
   if (last?.model === on.model) return;
@@ -297,8 +298,9 @@ function noteRan(botId: string, conversationId: string | undefined, index: numbe
   const where = conversationId ?? svc.directId(botId);
   if (!where || !on.model) return;
   const slash = on.model.indexOf("/");
-  const text = recovered ? `Switched to ${ORDINALS[index] ?? `#${index + 1}`} priority model` : "Switched to fallback model";
-  svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "model", text: `${text} ${on.name || on.model.slice(slash + 1)}`, detail: on.model.slice(0, slash), model: on.model } });
+  const id = on.model.slice(slash + 1);
+  const twin = chain.some((m) => m && m !== on.model && m.slice(m.indexOf("/") + 1) === id);
+  svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "model", text: `Switched to ${on.name || id}`, ...(twin ? { detail: on.model.slice(0, slash) } : {}), model: on.model } });
 }
 
 /** Our extension returns a posted message id only after the service actually accepted it. */
@@ -386,12 +388,21 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   }
 }
 
-/** What a failed model call says in the chat. A lapsed sign-in leads with the fix, as the chat clips the detail. */
+/** What a failed model call says. A lapsed sign-in leads with the fix, which is all the chat shows of it. */
 export function modelError(message: unknown): string {
   const text = String(message || "The model returned an error.");
   return /invalid_grant|oauth|refresh token|unauthori[sz]ed|\b401\b|sign.?in|log.?in again|expired/i.test(text)
-    ? `The sign-in for this model has expired. Sign in again in Settings → Providers.\n${text}`
+    ? `${MODEL_SIGN_IN}\n${text}`
     : text;
+}
+
+/** A provider's error with anything that looks like a key or token taken out, for the server log. */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, "$1 [redacted]")
+    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
+    .replace(/\b(?:sk|pk|rk|xai|gsk|ghp|gho|ghs|github_pat)[-_][\w-]{8,}/g, "[redacted]")
+    .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
 }
 
 const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
@@ -513,7 +524,7 @@ async function run(botId: string, all: Wake[]) {
           }
         }
         // Otherwise the reply just never shows up, and the chat looks like it lost the message.
-        if (m.error) throw new PiError(m.error);
+        if (m.error) throw new ProviderError(m.error);
       }
     });
     if (handled) return;
@@ -522,12 +533,16 @@ async function run(botId: string, all: Wake[]) {
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    setStatus(botId, { state: "error", error: message, since: Date.now() });
+    // The provider's errors, each fallback's included, are for the log. The chat says only that it couldn't reply, or how to sign in again.
+    const provider = err instanceof ProviderError;
+    setStatus(botId, { state: "error", error: message, provider: provider || undefined, since: Date.now() });
+    if (provider) console.warn(`[bots] ${botId} couldn't reply:`, redactSecrets(message));
+    const detail = provider ? shownReplyError(message, true) : message.slice(0, 300);
     const where = conversationId ?? svc.directId(botId);
     const last = db.getValue<number>(`told:${botId}`) ?? 0;
     if (where && Date.now() - last > 60_000) {
       db.setValue(`told:${botId}`, Date.now());
-      svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "error", text: "Couldn't reply", detail: message.slice(0, 300) } });
+      svc.postMessage(where, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "error", text: "Couldn't reply", ...(detail ? { detail } : {}) } });
     }
     if (mind?.proc.exited) {
       revokeToken(mind.token);
@@ -598,8 +613,9 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     const m = r.message;
     const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const text = m.event && eventText(m.event);
+    const detail = m.event && eventDetail(m.event);
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
-    const body = m.event ? `(${text}${m.event.detail ? `${text!.endsWith(" in") ? " " : ": "}${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
+    const body = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
     const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"

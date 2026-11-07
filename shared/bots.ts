@@ -65,6 +65,8 @@ export interface BotStatus {
   /** Other conversations with messages it'll get to once it's free. They show it holding on, not silence. */
   waiting?: string[];
   error?: string;
+  /** The error is the provider's (every fallback's, say): kept whole, but not for the chat to show. */
+  provider?: boolean;
   since?: number;
 }
 
@@ -459,7 +461,38 @@ export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0
  * An activity line's text. Older follow-ups were saved as "Wrote to a thread" or "Wrote a prompt"; they
  * read as "Wrote a prompt in", before the thread's title, now.
  */
-export const eventText = (event: { text: string }) => (event.text === "Wrote to a thread" || event.text === "Wrote a prompt" ? "Wrote a prompt in" : event.text);
+export const eventText = (event: { kind?: string; text: string }) =>
+  event.text === "Wrote to a thread" || event.text === "Wrote a prompt" ? "Wrote a prompt in"
+  : event.kind === "model" ? event.text.replace(LEGACY_SWITCH, "Switched to ")
+  : event.text;
+
+/** A model switch as saved before: "Switched to fallback model GPT 6.1 Sol", "Switched to first priority model Grok 4.7". */
+const LEGACY_SWITCH = /^Switched to (?:fallback model|\S+ priority model) /;
+
+/** What a lapsed sign-in says in the chat: the fix, without the provider's error. */
+export const MODEL_SIGN_IN = "The sign-in for this model has expired. Sign in again in Settings → Providers.";
+
+/**
+ * Why a reply failed, as the chat shows it. A provider's own error, or each fallback's, is kept in the
+ * server log instead; only a lapsed sign-in's fix is worth showing. Older lines saved those errors whole
+ * ("Every model failed.\n…", a provider's JSON or HTTP status), so they're hidden here too.
+ */
+export function shownReplyError(detail: string | undefined, provider?: boolean): string | undefined {
+  if (!detail) return;
+  if (detail.includes(MODEL_SIGN_IN)) return MODEL_SIGN_IN;
+  if (provider || /^Every model failed/.test(detail) || /[{}]|\b[45]\d\d\b/.test(detail)) return;
+  return detail;
+}
+
+/**
+ * An activity line's detail, as shown. A model switch saved before named the model's provider as its
+ * detail every time; one now names it only to tell two of the same model apart.
+ */
+export function eventDetail(event: { kind: string; text: string; detail?: string }): string | undefined {
+  if (event.kind === "model") return LEGACY_SWITCH.test(event.text) ? undefined : event.detail;
+  if (event.kind === "error" && event.text === "Couldn't reply") return shownReplyError(event.detail);
+  return event.detail;
+}
 
 /** Activity texts that are nouns, as the verb they read as after a bot's name. Routines saved these before. */
 const AUTHORED_PHRASES: Record<string, string> = {

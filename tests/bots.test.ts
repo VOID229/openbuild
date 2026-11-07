@@ -1181,7 +1181,8 @@ test("a bot falls back through its models in order, only before its reply has do
               if (turn === 'partial') emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Half a' } });
               if (turn === 'tool') emit({ type: 'tool_execution_start', toolName: 'bash', args: { command: 'touch x' } });
               if (turn === 'ok') emit({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Hello from ' + current } });
-              emit({ type: 'message_end', message: turn === 'ok' ? { role: 'assistant', stopReason: 'stop' } : { role: 'assistant', stopReason: 'error', errorMessage: current + ' is over its limit' } });
+              const errorMessage = turn === 'expired' ? 'invalid_grant: refresh token expired for key sk-live-abcdef1234567890' : current + ' is over its limit';
+              emit({ type: 'message_end', message: turn === 'ok' ? { role: 'assistant', stopReason: 'stop' } : { role: 'assistant', stopReason: 'error', errorMessage } });
               emit({ type: 'agent_settled' });
             }, 1);
             return {};
@@ -1217,7 +1218,8 @@ test("a bot falls back through its models in order, only before its reply has do
       let r = await manager.reply();
       a.deepEqual(manager.log, ['anthropic/opus', 'claude-code-2/opus', 'openai-codex-2/gpt-6.1-sol']);
       a.equal(r.switches.length, 1);
-      a.deepEqual(r.switches[0].event, { kind: 'model', text: 'Switched to fallback model GPT 6.1 Sol', detail: 'openai-codex-2', model: 'openai-codex-2/gpt-6.1-sol' });
+      // Only the model it switched to: no priority, no account, as no other model in the chain is a GPT 6.1 Sol.
+      a.deepEqual(r.switches[0].event, { kind: 'model', text: 'Switched to GPT 6.1 Sol', model: 'openai-codex-2/gpt-6.1-sol' });
       a.deepEqual(r.texts, ['Hello from openai-codex-2/gpt-6.1-sol']);
       a.equal(r.errors.length, 0);
       a.notEqual(svc.getStatus(manager.bot.id)?.state, 'error');
@@ -1234,26 +1236,45 @@ test("a bot falls back through its models in order, only before its reply has do
         a.deepEqual(bot.log, ['a/one'], turn);
         a.equal(r.switches.length, 0, turn);
         a.equal(r.errors.length, 1, turn);
-        a.match(r.errors[0].event.detail, /a\\/one is over its limit/);
-        a.doesNotMatch(r.errors[0].event.detail, /Every model failed/);
+        // The chat says it couldn't reply; the provider's error is the log's.
+        a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" }, turn);
+        a.equal(svc.getStatus(bot.bot.id).state, 'error', turn);
+        a.equal(svc.getStatus(bot.bot.id).provider, true, turn);
+        a.match(svc.getStatus(bot.bot.id).error, /a\\/one is over its limit/, turn);
+        a.doesNotMatch(svc.getStatus(bot.bot.id).error, /Every model failed/, turn);
       }
 
       // Every model failing says so, with each one's reason. A fallback that failed too was never switched to.
-      const doomed = setup('Doomed', 'a/one', ['b/two', 'c/three'], { 'a/one': 'error', 'b/two': 'error', 'c/three': 'refuse' }, { 'b/two': 'Two' });
+      const doomedTurns = { 'a/one': 'error', 'b/two': 'error', 'c/three': 'refuse' };
+      const doomed = setup('Doomed', 'a/one', ['b/two', 'c/three'], doomedTurns, { 'b/two': 'Two' });
       r = await doomed.reply();
       a.deepEqual(doomed.log, ['a/one', 'b/two', 'c/three']);
       a.equal(r.switches.length, 0);
       a.equal(r.errors.length, 1);
-      a.match(r.errors[0].event.detail, /^Every model failed/);
-      for (const reason of ['a/one: a/one is over its limit', 'b/two: b/two is over its limit', 'c/three: Model not found: c/three']) a.ok(r.errors[0].event.detail.includes(reason), r.errors[0].event.detail);
-      a.equal(svc.getStatus(doomed.bot.id).state, 'error');
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.deepEqual(r.texts, []);
+      // How each one failed is kept for diagnostics, not posted.
+      const status = svc.getStatus(doomed.bot.id);
+      a.equal(status.state, 'error');
+      a.match(status.error, /^Every model failed/);
+      for (const reason of ['a/one: a/one is over its limit', 'b/two: b/two is over its limit', 'c/three: Model not found: c/three']) a.ok(status.error.includes(reason), status.error);
+      a.doesNotMatch(JSON.stringify(r), /over its limit|Every model failed|Model not found/);
+      // The bot isn't left stuck: the next reply tries the primary again, and replies once it can.
+      doomed.log.length = 0;
+      db.setValue('told:' + doomed.bot.id, 0);
+      Object.assign(doomedTurns, { 'a/one': 'ok' });
+      r = await doomed.reply();
+      a.deepEqual(doomed.log, ['a/one']);
+      a.deepEqual(r.texts, ['Hello from a/one']);
+      a.equal(r.switches.length, 0);
+      a.equal(svc.getStatus(doomed.bot.id), undefined);
 
       // A prompt Pi refuses outright (no key for that model) ran nothing either.
       const keyless = setup('Keyless', 'a/one', ['b/two'], { 'a/one': 'reject', 'b/two': 'ok' });
       r = await keyless.reply();
       a.deepEqual(keyless.log, ['a/one', 'b/two']);
       a.deepEqual(r.texts, ['Hello from b/two']);
-      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model two']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to two']);
 
       // No model set anywhere and no Pi default: the bot runs on Pi's own pick. A fallback that worked
       // doesn't stay on for the next reply, in this process or a resumed one, and not quietly either.
@@ -1267,18 +1288,18 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await unset.reply();
       a.deepEqual(unset.log, ['b/two', 'pi/own']);
       a.deepEqual(r.texts, ['Hello from pi/own']);
-      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to first priority model own']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to own']);
       own['pi/own'] = 'error';
       r = await unset.reply();
       a.deepEqual(r.texts, ['Hello from b/two']);
-      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to fallback model Two']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to Two']);
       unset.log.length = 0;
       unset.reopen();
       own['pi/own'] = 'ok';
       r = await unset.reply();
       a.deepEqual(unset.log, ['pi/own']);
       a.deepEqual(r.texts, ['Hello from pi/own']);
-      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to first priority model own']);
+      a.deepEqual(r.switches.map((m) => m.event.text), ['Switched to own']);
       // Pi's own pick can't be had back: the reply runs on the fallback, as the chat was last told.
       own['pi/own'] = 'error';
       r = await unset.reply();
@@ -1294,12 +1315,13 @@ test("a bot falls back through its models in order, only before its reply has do
 
       // The chat hears of a change of model, not of every reply that tried the primary first: the same fallback
       // again says nothing, in this process or a resumed one; another fallback, or one higher up coming back, says so.
+      // Two GPT 6.1 Sols, one per account, are told apart by their account; Grok, the only one of its kind, isn't.
       const turns = { 'xai/grok-4.7': 'error', 'openai-codex/gpt-6.1-sol': 'ok', 'openai-codex-2/gpt-6.1-sol': 'ok' };
       const names = { 'xai/grok-4.7': 'Grok 4.7', 'openai-codex/gpt-6.1-sol': 'GPT 6.1 Sol', 'openai-codex-2/gpt-6.1-sol': 'GPT 6.1 Sol' };
       const steady = setup('Steady', 'xai/grok-4.7', ['openai-codex/gpt-6.1-sol', 'openai-codex-2/gpt-6.1-sol'], turns, names);
       const said = (r) => r.switches.map((m) => [m.event.text, m.event.detail]);
       r = await steady.reply();
-      a.deepEqual(said(r), [['Switched to fallback model GPT 6.1 Sol', 'openai-codex']]);
+      a.deepEqual(said(r), [['Switched to GPT 6.1 Sol', 'openai-codex']]);
       steady.log.length = 0;
       r = await steady.reply();
       // The primary is still tried first each reply, as before...
@@ -1314,33 +1336,38 @@ test("a bot falls back through its models in order, only before its reply has do
       turns['openai-codex/gpt-6.1-sol'] = 'error';
       r = await steady.reply();
       a.deepEqual(r.texts, ['Hello from openai-codex-2/gpt-6.1-sol']);
-      a.deepEqual(said(r), [['Switched to fallback model GPT 6.1 Sol', 'openai-codex-2']]);
+      a.deepEqual(said(r), [['Switched to GPT 6.1 Sol', 'openai-codex-2']]);
       r = await steady.reply();
       a.deepEqual(said(r), []);
       // The first fallback is back: up one place.
       turns['openai-codex/gpt-6.1-sol'] = 'ok';
       r = await steady.reply();
-      a.deepEqual(said(r), [['Switched to second priority model GPT 6.1 Sol', 'openai-codex']]);
+      a.deepEqual(said(r), [['Switched to GPT 6.1 Sol', 'openai-codex']]);
       // The primary is back, after a reopen: up to the first, once.
       steady.reopen();
       turns['xai/grok-4.7'] = 'ok';
       r = await steady.reply();
       a.deepEqual(r.texts, ['Hello from xai/grok-4.7']);
-      a.deepEqual(r.switches.map((m) => m.event), [{ kind: 'model', text: 'Switched to first priority model Grok 4.7', detail: 'xai', model: 'xai/grok-4.7' }]);
+      a.deepEqual(r.switches.map((m) => m.event), [{ kind: 'model', text: 'Switched to Grok 4.7', model: 'xai/grok-4.7' }]);
       r = await steady.reply();
       a.deepEqual(said(r), []);
       // A fallback that fails before replying is never announced, even on the way to one that works.
       turns['xai/grok-4.7'] = 'error';
       turns['openai-codex/gpt-6.1-sol'] = 'reject';
       r = await steady.reply();
-      a.deepEqual(said(r), [['Switched to fallback model GPT 6.1 Sol', 'openai-codex-2']]);
+      a.deepEqual(said(r), [['Switched to GPT 6.1 Sol', 'openai-codex-2']]);
 
-      // Without fallbacks a failure reads exactly as it always has.
+      // Without fallbacks the provider's error stays out of the chat too.
       const single = setup('Single', 'a/one', undefined, { 'a/one': 'error' });
       r = await single.reply();
       a.deepEqual(single.log, ['a/one']);
       a.equal(r.switches.length, 0);
-      a.equal(r.errors[0].event.detail, 'a/one is over its limit');
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      // A lapsed sign-in still says how to fix it, and only that.
+      const lapsed = setup('Lapsed', 'a/one', ['b/two'], { 'a/one': 'expired', 'b/two': 'expired' });
+      r = await lapsed.reply();
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: 'The sign-in for this model has expired. Sign in again in Settings → Providers.' });
+      a.doesNotMatch(JSON.stringify(r.errors[0].event), /invalid_grant|sk-live/);
 
       // The default model's fallbacks are kept in order, without repeats or anything that isn't "provider/model".
       svc.updateSettings({ defaultModel: 'd/main', defaultFallbackModels: [' e/backup ', 'bad', 'e/backup', 'openai-codex-2/gpt-6.1-sol', 7] });
@@ -1352,7 +1379,7 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await inherits.reply();
       a.deepEqual(inherits.log, ['d/main', 'e/backup', 'openai-codex-2/gpt-6.1-sol']);
       a.deepEqual(r.texts, ['Hello from openai-codex-2/gpt-6.1-sol']);
-      a.deepEqual(r.switches.map((m) => m.event), [{ kind: 'model', text: 'Switched to fallback model GPT 6.1 Sol', detail: 'openai-codex-2', model: 'openai-codex-2/gpt-6.1-sol' }]);
+      a.deepEqual(r.switches.map((m) => m.event), [{ kind: 'model', text: 'Switched to GPT 6.1 Sol', model: 'openai-codex-2/gpt-6.1-sol' }]);
       // ...and the next reply goes back to the default model.
       inherits.log.length = 0;
       await inherits.reply();
@@ -1383,7 +1410,7 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await none.reply();
       a.deepEqual(none.log, ['a/one']);
       a.equal(r.switches.length, 0);
-      a.equal(r.errors[0].event.detail, 'a/one is over its limit');
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
       svc.updateBot(none.bot.id, { model: '' });
       a.deepEqual(modelChain(none.bot.id), ['d/main']);
       // The choice survives a round trip through the API's JSON and the database.
@@ -1404,7 +1431,8 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await halfway.reply();
       a.deepEqual(halfway.log, ['d/main']);
       a.equal(r.switches.length, 0);
-      a.doesNotMatch(r.errors[0].event.detail, /Every model failed/);
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.doesNotMatch(svc.getStatus(halfway.bot.id).error, /Every model failed/);
 
       // With no default model, Pi's default leads the chain and the default's fallbacks follow it.
       svc.updateSettings({ defaultModel: '', defaultFallbackModels: ['e/backup'] });
@@ -1415,7 +1443,11 @@ test("a bot falls back through its models in order, only before its reply has do
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe("");
+    // Each failed reply is in the server log, with the provider's reasons and without the key.
+    expect(err).toMatch(/^\[bots\] \S+ couldn't reply: /);
+    expect(err).toMatch(/\[bots\] \S+ couldn't reply: Every model failed\.\na\/one: a\/one is over its limit\nb\/two: b\/two is over its limit\nc\/three: Model not found: c\/three\n/);
+    expect(err).toContain("invalid_grant");
+    expect(err).not.toContain("sk-live-abcdef1234567890");
     expect(code).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });

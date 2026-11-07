@@ -38,8 +38,8 @@ const lines = () => [...document.querySelectorAll(".bm-event")];
 const line = (id: string) => document.querySelector(`.bm-event[data-id="${id}"]`)!;
 const lead = (id: string) => line(id).querySelector(".bm-event-text")!;
 
-async function show(messages: any[], bots: any[] = [scout, juniper]) {
-  snapshot = { bots, conversations: [{ id: "chat", kind: "direct", botIds: ["scout"], createdAt: 1, updatedAt: 1, messages }], settings: { sections: [] }, typing: {}, drafts: [], status: {} };
+async function show(messages: any[], bots: any[] = [scout, juniper], status: Record<string, unknown> = {}) {
+  snapshot = { bots, conversations: [{ id: "chat", kind: "direct", botIds: ["scout"], createdAt: 1, updatedAt: 1, messages }], settings: { sections: [] }, typing: {}, drafts: [], status };
   await act(async () => void (await switchWorkspace("srv")));
   await frames();
   useBots.setState({ activeId: "chat" });
@@ -100,7 +100,9 @@ test("the user's own lines, and lines that already name a bot, keep their wordin
   expect(line("e2").querySelector(".bm-event-detail")!.textContent).toBe("Juniper");
   expect(lead("e3").textContent).toBe("Juniper left");
   expect(lead("e4").textContent).toBe("Sent a message to Juniper");
-  expect(lead("e5").textContent).toBe("Scout switched to fallback model Sonnet");
+  // An older switch keeps only the model's name: no place in the chain, no provider.
+  expect(lead("e5").textContent).toBe("Scout switched to Sonnet");
+  expect(line("e5").querySelector(".bm-event-detail")).toBeNull();
   expect(lead("e6").textContent).toBe("Poll closed");
 });
 
@@ -124,4 +126,49 @@ test("routines, other bot events and older saved wording read naturally after th
   ]);
   expect(line("e1").querySelector(".bm-event-detail")!.textContent).toContain("Standup · Weekdays at 9:00");
   expect(line("e6").querySelector(".bm-event-detail")!.textContent).toBe("Juniper");
+});
+
+test("a model switch links its bot and names the model, with the account only to tell two apart", async () => {
+  await show([
+    event("e1", "scout", { kind: "model", text: "Switched to GPT 6.1 Sol", detail: "openai-codex-2", model: "openai-codex-2/gpt-6.1-sol" }),
+    event("e2", "scout", { kind: "model", text: "Switched to Grok 4.7", model: "xai/grok-4.7" }),
+    event("e3", "scout", { kind: "model", text: "Switched to second priority model GPT 6.1 Sol", detail: "openai-codex", model: "openai-codex/gpt-6.1-sol" }),
+  ], [{ ...scout, name: "Ranger" }, juniper]);
+  expect(lead("e1").textContent).toBe("Ranger switched to GPT 6.1 Sol (Codex 2)");
+  expect(lead("e2").textContent).toBe("Ranger switched to Grok 4.7");
+  expect(lead("e3").textContent).toBe("Ranger switched to GPT 6.1 Sol");
+  for (const id of ["e1", "e2", "e3"]) {
+    expect(lead(id).querySelector("a, button")?.textContent).toBe("Ranger");
+    expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+  }
+});
+
+test("a failed reply says so, without the provider's error, on old lines as on new", async () => {
+  await show([
+    // Saved before: every fallback's error, a provider's JSON, an HTTP status.
+    event("e1", "scout", { kind: "error", text: "Couldn't reply", detail: "Every model failed.\nanthropic/opus: 429 rate_limit_error\nopenai-codex/gpt-6.1-sol: over its limit" }),
+    event("e2", "scout", { kind: "error", text: "Couldn't reply", detail: '{"type":"error","error":{"type":"overloaded_error"}}' }),
+    event("e3", "scout", { kind: "error", text: "Couldn't reply", detail: "Request failed with status 503" }),
+    // New: no detail at all, or only a lapsed sign-in's fix.
+    event("e4", "scout", { kind: "error", text: "Couldn't reply" }),
+    event("e5", "scout", { kind: "error", text: "Couldn't reply", detail: "The sign-in for this model has expired. Sign in again in Settings → Providers.\ninvalid_grant: token expired" }),
+    // OpenBuild's own reasons, which aren't the provider's, still show.
+    event("e6", "scout", { kind: "error", text: "Couldn't reply", detail: "The reply took too long and was stopped." }),
+  ]);
+  for (const id of ["e1", "e2", "e3", "e4", "e5", "e6"]) expect(lead(id).textContent).toBe("Scout couldn't reply");
+  for (const id of ["e1", "e2", "e3", "e4"]) expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+  expect(line("e5").querySelector(".bm-event-detail")!.textContent).toBe("The sign-in for this model has expired. Sign in again in Settings → Providers.");
+  expect(line("e6").querySelector(".bm-event-detail")!.textContent).toBe("The reply took too long and was stopped.");
+  expect(document.body.textContent).not.toMatch(/Every model failed|rate_limit|overloaded|503|invalid_grant/);
+});
+
+test("the bar over the chat gives a failed reply's gist, not the provider's error it keeps", async () => {
+  const failed = { state: "error", conversationId: "chat", provider: true, error: "Every model failed.\nanthropic/opus: 429 rate_limit_error" };
+  await show([], undefined, { scout: failed });
+  expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Bot could not complete the request.");
+  const set = (status: Record<string, unknown>) => act(async () => void useBots.setState({ status } as any));
+  await set({ scout: { ...failed, error: "The sign-in for this model has expired. Sign in again in Settings → Providers.\ninvalid_grant" } });
+  expect(document.querySelector(".bots-sync-status")!.textContent).toBe("The sign-in for this model has expired. Sign in again in Settings → Providers.");
+  await set({ scout: { state: "error", conversationId: "chat", error: "Pi isn't installed. Install it in Settings → Pi." } });
+  expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Pi isn't installed. Install it in Settings → Pi.");
 });

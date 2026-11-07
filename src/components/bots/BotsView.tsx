@@ -1,5 +1,6 @@
 // OpenBots' main pane: the open conversation, and its details panel beside it.
 import { Plus } from "lucide-react";
+import { shownReplyError } from "../../../shared/bots";
 import { useEffect } from "react";
 import { useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
@@ -76,7 +77,8 @@ export function BotsView() {
     <div className="bots-view">
       {!isGone && trouble && <div className="bots-sync-status bots-workspace-trouble" role="alert"><span>{trouble}</span></div>}
       {!isGone && (error || slow || botStatus) && <div className="bots-sync-status" role={error || botStatus?.state === "error" ? "alert" : "status"}>
-        <span>{error || (slow ? "Reconnecting to OpenBots…" : botStatus?.error || "Bot could not complete the request.")}</span>
+        {/* A provider's error, or every fallback's, stays in the server log: up here it's only the gist. */}
+        <span>{error || (slow ? "Reconnecting to OpenBots…" : shownReplyError(botStatus?.error, botStatus?.provider) || "Bot could not complete the request.")}</span>
         {error && <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>}
       </div>}
       {!isGone && <NotConfirmed />}

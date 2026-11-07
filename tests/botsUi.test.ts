@@ -234,7 +234,7 @@ test("older follow-up prompts read with the current wording", async () => {
   expect(eventText({ text: "Wrote a prompt in" })).toBe("Wrote a prompt in");
   expect(eventText({ text: "Started a thread" })).toBe("Started a thread");
   const common = await Bun.file("src/components/bots/common.tsx").text();
-  expect(common).toContain("[eventText(m.event), m.event.detail]");
+  expect(common).toContain("[eventText(m.event), detail && m.event.kind === \"model\" ? `(${accountName(detail)})` : detail]");
 });
 
 test("a message between bots links to the side chat and to the other bot", async () => {
@@ -384,13 +384,18 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
   expect(css).toMatch(/\.messages-inner > \.msg \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;/);
 });
 
-test("a fallback switch names the bot, its model and the model's account", async () => {
+test("a model switch names the bot and its model, and the account only to tell two of a model apart", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
-  // "switched to fallback model GPT 6.1 Sol", or back up: "switched to first priority model Grok 4.7".
   expect(chat).toContain("<BotLink bot={switcher} /> switched to {switchedTo}");
-  expect(chat).toContain('const switchedTo = m.event!.text.replace(/^Switched to /, "");');
-  expect(chat).toContain("from {accountName(m.event!.detail)}");
+  const { eventDetail, eventText } = await import("../shared/bots");
+  // Lines saved before said where in the chain the model sat, and always named its provider.
+  expect(eventText({ kind: "model", text: "Switched to fallback model GPT 6.1 Sol" })).toBe("Switched to GPT 6.1 Sol");
+  expect(eventText({ kind: "model", text: "Switched to first priority model Grok 4.7" })).toBe("Switched to Grok 4.7");
+  expect(eventText({ kind: "model", text: "Switched to #12 priority model Grok 4.7" })).toBe("Switched to Grok 4.7");
+  expect(eventDetail({ kind: "model", text: "Switched to fallback model GPT 6.1 Sol", detail: "openai-codex" })).toBeUndefined();
+  expect(eventDetail({ kind: "model", text: "Switched to GPT 6.1 Sol", detail: "openai-codex-2" })).toBe("openai-codex-2");
+  expect(eventDetail({ kind: "model", text: "Switched to Grok 4.7" })).toBeUndefined();
   const { accountName } = await import("../src/lib/models");
   expect(accountName("openai-codex-2")).toBe("Codex 2");
   expect(accountName("openai-codex")).toBe("Codex");
