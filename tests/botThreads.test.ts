@@ -44,7 +44,7 @@ mock.module("../server/pi/remote", () => ({
 mock.module("../server/pi/routes", () => ({ modelListing: async () => ({ models, defaultModel: "acme/one" }) }));
 mock.module("../server/pi/sessions", () => ({ listModels: async () => ({}), isThreadId: () => true }));
 mock.module("../server/runtimes", () => ({ runtimes: () => ({ pi: { installed: true }, claude: { installed: true }, codex: { installed: true }, cursor: { installed: true }, grok: { installed: true } }) }));
-mock.module("../server/claude/install", () => ({ listModels: async () => ({ models: [{ id: "claude/one", name: "Claude One" }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
+mock.module("../server/claude/install", () => ({ listModels: async () => ({ models: [{ id: "claude/one", name: "Claude One" }, { id: "claude/two", name: "Claude Two", reasoning: { efforts: ["low", "high"] }, speeds: [{ id: "fast" }] }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
 for (const runtime of ["codex", "cursor"]) {
   mock.module(`../server/${runtime}/install`, () => ({
     listModels: async () => ({ models: [{ id: `${runtime}/one`, name: accountCacheKey() || "main" }], defaultModel: `${runtime}/one` }),
@@ -435,4 +435,147 @@ test("UI-discovered Claude login is usable and saved configuration wins", async 
   svc.updateSettings({ harnesses: { blocked: ["claude"] } });
   expect((await call("options")).accounts).toEqual([]);
   await expect(call("options", { harness: saved.id })).rejects.toThrow(/doesn't let bots/);
+});
+
+
+/** A finished turn, so the next send starts a new one. */
+const finish = () => {
+  for (const snapshot of snapshots) snapshot.status = "done";
+};
+
+test("send changes model, effort and permission for the next turn, and keeps the thread", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
+  const { threadId, cwd } = admitted[0];
+  finish();
+  const before = storage.getChat(threadId) as any;
+  const sent = await call("send", { thread: started.thread, text: "Harder", model: "claude/two", effort: "high", speed: "fast", permission: "yolo" });
+  expect(sent).toMatchObject({ sent: true, harness: "claude", model: "claude/two", effort: "high", speed: "fast", permission: "yolo", changed: ["model", "effort", "speed", "permission"] });
+  // The next turn on the same thread carries them; the harness applies them to its warm session.
+  expect(admitted[1]).toMatchObject({ threadId, cwd, runtime: "claude", model: "claude/two", effort: "high", speed: "fast", permission: "yolo", prior: 1 });
+  const chat = storage.getChat(threadId) as any;
+  expect(chat).toMatchObject({ id: threadId, permission: "yolo", workspace: before.workspace });
+  expect(chat.messages.slice(0, 2).map((m: any) => m.id)).toEqual(before.messages.map((m: any) => m.id));
+  expect(chat.messages.at(-1).model).toMatchObject({ plan: "claude", id: "claude/two", effort: "high", speed: "fast" });
+  expect(await call("read", { thread: started.thread })).toMatchObject({ model: "claude/two", effort: "high", speed: "fast", permission: "yolo", working: true });
+  // Nothing global moves.
+  expect(svc.getSettings().harnesses?.permissions).toEqual({});
+  expect(JSON.parse(storage.getValue("client-state")!)).toEqual({});
+});
+
+test("what send leaves out stays as the thread had it", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", model: "claude/two", effort: "low", speed: "fast", permission: "safe" });
+  finish();
+  const effortOnly = await call("send", { thread: started.thread, text: "More", effort: "high" });
+  expect(effortOnly).toMatchObject({ model: "claude/two", effort: "high", speed: "fast", permission: "safe", changed: ["effort"] });
+  expect(admitted[1]).toMatchObject({ model: "claude/two", effort: "high", speed: "fast", permission: "safe" });
+  finish();
+  const plain = await call("send", { thread: started.thread, text: "Again" });
+  expect(plain.changed).toBeUndefined();
+  expect(admitted[2]).toMatchObject({ model: "claude/two", effort: "high", speed: "fast", permission: "safe" });
+  finish();
+  // A model that doesn't take the old effort or speed falls back, and says so.
+  const switched = await call("send", { thread: started.thread, text: "Simpler", model: "claude/one" });
+  expect(switched).toMatchObject({ model: "claude/one", permission: "safe" });
+  expect(switched.speed).toBeUndefined();
+  expect(switched.note).toContain("standard speed");
+  expect(admitted[3].speed).toBeUndefined();
+  finish();
+  await call("send", { thread: started.thread, text: "Plain", model: "claude/two", speed: "standard" });
+  expect(admitted[4].speed).toBeUndefined();
+});
+
+test("send refuses another harness's model or harness, and saves nothing", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go" });
+  const { threadId } = admitted[0];
+  finish();
+  const before = JSON.stringify(storage.getChat(threadId));
+  await expect(call("send", { thread: started.thread, text: "x", model: "claude/one" })).rejects.toThrow(/pi has no model "claude\/one"/);
+  await expect(call("send", { thread: started.thread, text: "x", harness: "claude" })).rejects.toThrow(/send keeps it there/);
+  await expect(call("send", { thread: started.thread, text: "x", permission: "yolo" })).rejects.toThrow(/no permission modes/);
+  await expect(call("send", { thread: started.thread, text: "x", effort: "max" })).rejects.toThrow(/efforts/);
+  expect(admitted.length).toBe(1);
+  expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
+  // Naming its own harness is fine.
+  await call("send", { thread: started.thread, text: "x", harness: "pi" });
+  expect(admitted.length).toBe(2);
+});
+
+test("an invalid combination writes nothing, even with valid parts", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
+  const { threadId } = admitted[0];
+  finish();
+  const before = JSON.stringify(storage.getChat(threadId));
+  await expect(call("send", { thread: started.thread, text: "x", model: "claude/two", effort: "high", permission: "banned" })).rejects.toThrow(/doesn't offer/);
+  await expect(call("send", { thread: started.thread, text: "x", model: "claude/two", effort: "max", permission: "yolo" })).rejects.toThrow(/efforts/);
+  await expect(call("send", { thread: started.thread, text: "x", model: "claude/two", speed: "warp" })).rejects.toThrow(/speeds/);
+  await expect(call("send", { thread: started.thread, text: "x", model: "nope", permission: "yolo" })).rejects.toThrow(/no model/);
+  expect(admitted.length).toBe(1);
+  expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
+  // If the harness won't take the turn, the thread keeps the mode it had.
+  admit = async () => {
+    throw Object.assign(new Error("worker gone"), { status: 503 });
+  };
+  try {
+    await expect(call("send", { thread: started.thread, text: "x", permission: "yolo" })).rejects.toThrow(/worker gone/);
+  } finally {
+    admit = async (req: any) => {
+      admitted.push(req);
+      const run = new Run();
+      runs.set(req.stream.id, run);
+      snapshots.push({ id: req.stream.id, threadId: req.threadId, kind: "run", status: "pending", events: [], startedAt: Date.now() });
+      return run;
+    };
+  }
+  expect((storage.getChat(threadId) as any).permission).toBe("safe");
+});
+
+test("settings don't change under a running turn", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
+  const { threadId } = admitted[0];
+  const before = JSON.stringify(storage.getChat(threadId));
+  for (const over of [{ model: "claude/two" }, { effort: "high" }, { permission: "yolo" }, { speed: "fast" }]) {
+    await expect(call("send", { thread: started.thread, text: "Now", ...over })).rejects.toThrow(/still working/);
+  }
+  expect(steers).toEqual([]);
+  expect(admitted.length).toBe(1);
+  expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
+  // Without them, it's steered in as before.
+  await call("send", { thread: started.thread, text: "Also" });
+  expect(steers.length).toBe(1);
+});
+
+test("a bot held to the defaults can't change a thread's permission mode", async () => {
+  svc.updateSettings({ harnesses: { permissions: { claude: "safe" } } });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude" });
+  const { threadId } = admitted[0];
+  finish();
+  const before = JSON.stringify(storage.getChat(threadId));
+  await expect(call("send", { thread: started.thread, text: "x", permission: "yolo", model: "claude/two" })).rejects.toThrow(/can't choose permissions/);
+  expect(admitted.length).toBe(1);
+  expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
+  // Its current mode, or other settings, are fine.
+  const sent = await call("send", { thread: started.thread, text: "x", permission: "safe", model: "claude/two" });
+  expect(sent).toMatchObject({ model: "claude/two", permission: "safe" });
+  // Claude Two doesn't take the medium effort it ran at, so it says what it uses instead.
+  expect(sent.changed).toEqual(["model", "effort"]);
+  expect(sent.note).toContain("doesn't take effort medium");
+  expect(admitted[1].permission).toBe("safe");
+});
+
+test("account threads take their models by either id, and keep the account", async () => {
+  const account = { id: "login-3", name: "claude3", runtime: "claude", configDir: "/tmp/bot-claude3" };
+  storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account] } } }));
+  const started = await call("start", { project: project.name, prompt: "Go", harness: account.id, mode: "local" });
+  finish();
+  expect((await call("read", { thread: started.thread })).model).toBe("claude/one");
+  await call("send", { thread: started.thread, text: "x", model: "login-3/two", harness: "claude3" });
+  expect(admitted[1]).toMatchObject({ runtimeAccount: account, model: "claude/two" });
+  expect((storage.getChat(admitted[1].threadId) as any).messages.at(-1).model.id).toBe("login-3/two");
+  finish();
+  await expect(call("send", { thread: started.thread, text: "x", harness: "claude" })).rejects.toThrow(/claude3 account/);
 });
