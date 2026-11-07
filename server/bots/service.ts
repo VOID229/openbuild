@@ -893,7 +893,7 @@ export function tick(busy: (botId: string) => boolean) {
       author: botId,
       at: now,
       text: "",
-      event: { kind: "routine", text: routine.followUp ? "Follow-up" : "Routine", detail: routine.title },
+      event: { kind: "routine", text: routine.followUp ? "Followed up" : "Ran a routine", detail: routine.title },
     });
     hooks.wake(botId, { kind: "routine", conversationId, text });
   }
