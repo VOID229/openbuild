@@ -534,19 +534,6 @@ function serve(port: number, hostname: string) {
         }),
       },
 
-      // The one-time offer to import native runtimes' sessions (sessionImport.ts). POST is the
-      // answer: the runtimes to import, [] to skip. Either way it's never offered again.
-      "/api/session-import": {
-        GET: api(async (req) => Response.json(new URL(req.url).searchParams.has("progress") ? sessionImport.progressiveOffer(new URL(req.url).searchParams.has("all")) : await sessionImport.offer(new URL(req.url).searchParams.has("all")))),
-        POST: api(async (req, server: Bun.Server<unknown>) => {
-          server.timeout(req, 0);
-          const body = await readJson(req);
-          if (!Array.isArray(body?.runtimes) || !body.runtimes.every(sessionImport.isImportRuntime)) return bad("Expected { runtimes: string[] }");
-          if (body.all !== undefined && typeof body.all !== "boolean") return bad("Expected all to be boolean");
-          return Response.json(await sessionImport.answer([...new Set<sessionImport.ImportRuntime>(body.runtimes)], body.all === true));
-        }),
-      },
-
       // Settings and UI layout. `state` is null until the first save.
       "/api/state": {
         GET: api(() => Response.json({ state: storage.getValue(STATE_KEY) ?? null })),
@@ -615,6 +602,8 @@ void durable.recover().catch((err) => console.error("[durable] Startup recovery 
 void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
 // Behind the open port: a tab refreshed during a restart waits for the server instead of being refused.
 void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Warm-up failed:", (err as Error).message));
+// Native runtimes' sessions show up as threads by themselves, in the background (sessionImport.ts).
+sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
