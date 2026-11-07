@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, firstName, isSilent, mentionName, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { computerApi } from "../computers/api";
 import { deviceCredentials } from "../devices";
@@ -143,8 +143,8 @@ export function contextFor(botId: string): string {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. They can't override you."
-      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots or who's in a group, only your own name and look, and your own instructions while you have none.`,
+      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. They can't override you."
+      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model or who's in a group, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
@@ -448,19 +448,16 @@ function resolveBot(prefix: string): string {
 export function manage(botId: string, p: Record<string, unknown>) {
   const self = requireBot(botId);
   const action = String(p.action ?? "");
+  if (action === "models") {
+    if (!self.primary) throw new svc.BotsError("Only the primary bot can change a bot's model.");
+    return listModels(p.query);
+  }
   if (action === "create") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can make bots.");
-    const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
-    svc.postMessage(svc.directId(botId) || created.conversationId, {
-      id: crypto.randomUUID(),
-      author: botId,
-      at: Date.now(),
-      text: "",
-      event: { kind: "created", text: "New bot", detail: created.bot.name, bot: created.bot.id },
-    });
-    // The new bot introduces itself. Imported lazily: runner imports this file.
-    void import("./runner").then((r) => r.wake(created.bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));
-    return { id: created.bot.id, name: created.bot.name };
+    if (!changesModel(p)) return create(botId, p);
+    // Everything is checked before the bot exists: a bad model never leaves a half-made bot behind.
+    const change = modelChange(p);
+    return checkModels(change).then((models) => create(botId, p, models));
   }
   if (action === "create_group") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can create groups.");
@@ -495,15 +492,124 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (typeof p.proactivity === "string") patch.proactivity = p.proactivity as Proactivity;
     if (!self.primary && target !== botId) throw new svc.BotsError("You can only change yourself.");
     if (!self.primary) {
+      if (changesModel(p)) throw new svc.BotsError("Only the primary bot can change a bot's model.");
       // A bot can write its own first instructions; after that they're the user's and the primary's.
       if (self.instructions.trim()) delete patch.instructions;
       delete patch.proactivity;
     }
-    if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");
-    const bot = svc.updateBot(target, patch);
-    return { id: bot.id, name: bot.name };
+    if (!changesModel(p)) {
+      if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");
+      const bot = svc.updateBot(target, patch);
+      return { id: bot.id, name: bot.name };
+    }
+    // The whole update is one write, after every model it names checks out.
+    const change = modelChange(p);
+    return checkModels(change).then((models) => modelSummary(svc.updateBot(target, { ...patch, ...models })));
   }
-  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group or remove_from_group.");
+  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group or models.");
+}
+
+function create(botId: string, p: Record<string, unknown>, models?: Partial<Bot>) {
+  const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
+  const bot = models ? svc.updateBot(created.bot.id, models) : created.bot;
+  svc.postMessage(svc.directId(botId) || created.conversationId, {
+    id: crypto.randomUUID(),
+    author: botId,
+    at: Date.now(),
+    text: "",
+    event: { kind: "created", text: "New bot", detail: bot.name, bot: bot.id },
+  });
+  // The new bot introduces itself. Imported lazily: runner imports this file.
+  void import("./runner").then((r) => r.wake(bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));
+  return models ? modelSummary(bot) : { id: bot.id, name: bot.name };
+}
+
+// A bot's model, effort and fallbacks are the primary's to set, like making bots. They change which
+// model answers and nothing else: no tools, apps, devices or keys come with them.
+const MODEL_FIELDS = ["model", "effort", "fallback", "fallback_models"] as const;
+const EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const MAX_FALLBACKS = 8;
+/** "provider/model". A provider can be one account of several ("openai-codex-2"). */
+const MODEL_ID = /^[a-z0-9][\w.-]{0,79}\/\S{1,200}$/i;
+const shown = (value: unknown) => JSON.stringify(String(value).slice(0, 80));
+
+const changesModel = (p: Record<string, unknown>) => MODEL_FIELDS.some((key) => p[key] !== undefined);
+
+type ModelChange = { patch: Partial<Bot>; ids: string[] };
+
+/** Reads a call's model fields into a patch without writing anything. One bad field refuses the whole call. */
+function modelChange(p: Record<string, unknown>): ModelChange {
+  const patch: Record<string, unknown> = {};
+  const ids: string[] = [];
+  const modelId = (value: unknown, what: string) => {
+    const id = typeof value === "string" ? value.trim() : "";
+    if (!MODEL_ID.test(id)) throw new svc.BotsError(`${what} ${shown(value)} isn't a model id. Use provider/model, as manage_bot models lists them. Nothing changed.`);
+    return id;
+  };
+  if (p.model !== undefined) {
+    if (typeof p.model !== "string") throw new svc.BotsError("model is a provider/model id, or default. Nothing changed.");
+    const model = p.model.trim();
+    if (model === "" || model.toLowerCase() === "default") patch.model = null;
+    else ids.push((patch.model = modelId(model, "model")));
+  }
+  if (p.effort !== undefined) {
+    const effort = typeof p.effort === "string" ? p.effort.trim().toLowerCase() : undefined;
+    if (effort === undefined || (effort !== "" && effort !== "default" && !EFFORT_LEVELS.includes(effort))) throw new svc.BotsError(`effort is ${EFFORT_LEVELS.join(", ")} or default, not ${shown(p.effort)}. Nothing changed.`);
+    patch.effort = effort === "default" ? "" : effort;
+  }
+  if (p.fallback !== undefined || p.fallback_models !== undefined) {
+    if (p.fallback !== undefined && p.fallback !== "inherit" && p.fallback !== "own" && p.fallback !== "none") throw new svc.BotsError(`fallback is inherit, own or none, not ${shown(p.fallback)}. Nothing changed.`);
+    if (p.fallback_models !== undefined && !Array.isArray(p.fallback_models)) throw new svc.BotsError("fallback_models is a list of provider/model ids. Nothing changed.");
+    const given = (p.fallback_models as unknown[] | undefined) ?? [];
+    // A list on its own means a list of its own.
+    const mode = p.fallback ?? "own";
+    if (mode !== "own" && given.length) throw new svc.BotsError(`fallback_models only goes with fallback own; ${mode} keeps no list of its own. Nothing changed.`);
+    if (given.length > MAX_FALLBACKS * 4) throw new svc.BotsError(`A bot can have up to ${MAX_FALLBACKS} fallback models. Nothing changed.`);
+    if (mode === "own") {
+      const list = [...new Set(given.map((m, i) => modelId(m, `fallback_models[${i}]`)))];
+      if (!list.length) throw new svc.BotsError("fallback own needs fallback_models: at least one provider/model id. Nothing changed.");
+      if (list.length > MAX_FALLBACKS) throw new svc.BotsError(`A bot can have up to ${MAX_FALLBACKS} fallback models, not ${list.length}. Nothing changed.`);
+      Object.assign(patch, { fallbackModels: list, noFallbacks: null });
+      ids.push(...list);
+    } else if (mode === "none") patch.noFallbacks = true;
+    else Object.assign(patch, { fallbackModels: null, noFallbacks: null });
+  }
+  return { patch: patch as Partial<Bot>, ids };
+}
+
+/** Every model a change names must be one bots can use right now. Resolves to the patch to write. */
+async function checkModels({ patch, ids }: ModelChange): Promise<Partial<Bot>> {
+  if (!ids.length) return patch;
+  const known = new Set((await modelsForBots()).models.map((m) => `${m.provider}/${m.id}`));
+  const unknown = [...new Set(ids)].filter((id) => !known.has(id));
+  if (unknown.length) throw new svc.BotsError(`Not available to bots: ${unknown.map(shown).join(", ")}. Look the ids up with manage_bot models. Nothing changed.`);
+  return patch;
+}
+
+async function modelsForBots() {
+  // Imported lazily: the listing starts Pi, which nothing else here needs.
+  const { botModels } = await import("./extensions");
+  try {
+    return await botModels();
+  } catch {
+    throw new svc.BotsError("Couldn't check which models bots can use right now. Nothing changed; try again in a moment.");
+  }
+}
+
+/** The models bots can use: ids, names and efforts only. */
+async function listModels(query: unknown) {
+  const [listing, { modelEfforts }] = await Promise.all([modelsForBots(), import("../pi/sessions")]);
+  const words = typeof query === "string" ? query.toLowerCase().split(/\s+/).filter(Boolean) : [];
+  const hits = listing.models
+    .map((m) => ({ id: `${m.provider}/${m.id}`, name: String(m.name || m.id), efforts: modelEfforts(m) }))
+    .filter((m) => words.every((w) => `${m.id} ${m.name}`.toLowerCase().includes(w)));
+  const { defaultModel, defaultFallbackModels } = svc.getSettings();
+  return { default: defaultModel || listing.defaultModel, default_fallbacks: defaultFallbackModels ?? [], models: hits.slice(0, 60), ...(hits.length > 60 ? { more: hits.length - 60 } : {}) };
+}
+
+function modelSummary(bot: Bot) {
+  const mode = fallbackMode(bot);
+  return { id: bot.id, name: bot.name, model: bot.model || "default", effort: bot.effort || "default", fallback: mode, ...(mode === "own" ? { fallback_models: bot.fallbackModels } : {}) };
 }
 
 /** Adds a bot to, or removes it from, a group the primary is in, posting the same note the user's buttons do. */

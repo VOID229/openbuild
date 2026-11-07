@@ -975,6 +975,125 @@ test("only the primary bot adds bots to its groups or removes them", async () =>
   }
 });
 
+test("the primary sets bots' models and fallbacks with manage_bot, checked against the real list first", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-manage-models-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import { mock } from 'bun:test';
+      let listing = { models: [
+        { provider: 'anthropic', id: 'claude-opus-5-5', name: 'Opus 5.5', reasoning: true },
+        { provider: 'openai-codex', id: 'gpt-6', name: 'GPT-6' },
+        { provider: 'openai-codex-2', id: 'gpt-6', name: 'GPT-6' },
+        { provider: 'google', id: 'gemini-4', name: 'Gemini 4' },
+      ], defaultModel: 'anthropic/claude-opus-5-5', checkedAt: 0 };
+      let asked = 0;
+      mock.module('./server/bots/extensions.ts', () => ({ botModels: async () => { asked++; if (!listing) throw new Error('pi: secret-token-123 failed'); return listing; } }));
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const { manage, contextFor } = await import('./server/bots/agent.ts');
+      svc.setHooks({ wake() {}, stop() {} });
+      const primary = svc.createBot({ name: 'Boss' }).bot;
+      const helper = svc.createBot({ name: 'Helper' }).bot;
+      const fields = (id) => { const b = db.getBot(id); return { model: b.model, effort: b.effort, fallbackModels: b.fallbackModels, noFallbacks: b.noFallbacks, name: b.name, instructions: b.instructions, threads: b.threads, computer: b.computer, primary: b.primary }; };
+
+      // Discoverable for the primary, and clearly the primary's alone.
+      a.match(contextFor(primary.id), /Only you can set a bot's model, effort and fallbacks/);
+      a.match(contextFor(helper.id), /anyone's model/);
+
+      // Create with a model, effort and an own list, deduped in order. Account variants are entries of their own.
+      const made = await manage(primary.id, { action: 'create', name: 'Coach', model: 'google/gemini-4', effort: 'High', fallback: 'own', fallback_models: ['openai-codex/gpt-6', ' openai-codex-2/gpt-6', 'openai-codex/gpt-6'] });
+      a.deepEqual(made, { id: made.id, name: 'Coach', model: 'google/gemini-4', effort: 'high', fallback: 'own', fallback_models: ['openai-codex/gpt-6', 'openai-codex-2/gpt-6'] });
+      a.deepEqual(db.getBot(made.id).fallbackModels, ['openai-codex/gpt-6', 'openai-codex-2/gpt-6']);
+      // Nothing beyond the model came with it: no projects, no computer, not primary.
+      a.equal(db.getBot(made.id).threads, undefined);
+      a.equal(db.getBot(made.id).computer, undefined);
+      a.equal(db.getBot(made.id).primary, undefined);
+
+      // Three-state roundtrip: own -> none -> inherit -> own, then a list alone means own.
+      a.equal((await manage(primary.id, { action: 'update', bot: 'Coach', fallback: 'none' })).fallback, 'none');
+      a.equal(db.getBot(made.id).noFallbacks, true);
+      a.equal((await manage(primary.id, { action: 'update', bot: 'Coach', fallback: 'inherit' })).fallback, 'inherit');
+      a.equal(db.getBot(made.id).fallbackModels, undefined);
+      a.equal(db.getBot(made.id).noFallbacks, undefined);
+      a.equal((await manage(primary.id, { action: 'update', bot: 'Coach', fallback: 'none' })).fallback, 'none');
+      const own = await manage(primary.id, { action: 'update', bot: 'Coach', fallback_models: ['anthropic/claude-opus-5-5'] });
+      a.deepEqual([own.fallback, own.fallback_models, db.getBot(made.id).noFallbacks], ['own', ['anthropic/claude-opus-5-5'], undefined]);
+      // Back to the default model and effort, along with a rename, in one write.
+      const reset = await manage(primary.id, { action: 'update', bot: 'Coach', name: 'Trainer', model: 'default', effort: 'default' });
+      a.deepEqual([reset.name, reset.model, reset.effort, db.getBot(made.id).model], ['Trainer', 'default', 'default', undefined]);
+      // The primary can set its own model too.
+      a.equal((await manage(primary.id, { action: 'update', model: 'openai-codex-2/gpt-6' })).model, 'openai-codex-2/gpt-6');
+
+      // Validation failures change nothing, including the other fields of the same call.
+      const before = fields(made.id);
+      const count = db.listBots().length;
+      const refuse = async (params, pattern) => {
+        await a.rejects(async () => manage(primary.id, params), pattern);
+        a.deepEqual(fields(made.id), before);
+        a.equal(db.listBots().length, count);
+      };
+      await refuse({ action: 'update', bot: made.id, name: 'Nope', model: 'google/gemini-9' }, /Not available to bots: "google\\/gemini-9".*Nothing changed/);
+      await refuse({ action: 'update', bot: made.id, instructions: 'Nope', fallback: 'own', fallback_models: ['google/gemini-4', 'anthropic-2/claude-opus-5-5'] }, /Not available to bots: "anthropic-2\\/claude-opus-5-5"/);
+      await refuse({ action: 'update', bot: made.id, name: 'Nope', model: 'gemini-4' }, /isn't a model id/);
+      await refuse({ action: 'update', bot: made.id, fallback_models: ['google/gemini-4', 'bad id/x'] }, /fallback_models\\[1\\] .* isn't a model id/);
+      await refuse({ action: 'update', bot: made.id, fallback_models: [42] }, /isn't a model id/);
+      await refuse({ action: 'update', bot: made.id, fallback_models: 'google/gemini-4' }, /is a list/);
+      await refuse({ action: 'update', bot: made.id, fallback: 'sometimes' }, /inherit, own or none/);
+      await refuse({ action: 'update', bot: made.id, fallback: 'own' }, /needs fallback_models/);
+      await refuse({ action: 'update', bot: made.id, fallback: 'none', fallback_models: ['google/gemini-4'] }, /only goes with fallback own/);
+      await refuse({ action: 'update', bot: made.id, name: 'Nope', effort: 'turbo' }, /effort is off, minimal/);
+      await refuse({ action: 'update', bot: made.id, model: 42 }, /model is a provider\\/model id/);
+      const nine = Array.from({ length: 9 }, (_, i) => 'p' + i + '/m');
+      await refuse({ action: 'update', bot: made.id, fallback_models: nine }, /up to 8 fallback models, not 9/);
+      await refuse({ action: 'update', bot: made.id, fallback_models: Array(100).fill('google/gemini-4') }, /up to 8 fallback models/);
+      await refuse({ action: 'create', name: 'Ghost', model: 'google/gemini-9' }, /Not available to bots/);
+      // Dupes count once against the bound.
+      a.deepEqual((await manage(primary.id, { action: 'update', bot: made.id, fallback_models: Array(10).fill('google/gemini-4') })).fallback_models, ['google/gemini-4']);
+      // A listing that can't be read refuses without leaking what Pi said.
+      const settled = fields(made.id);
+      listing = undefined;
+      await a.rejects(async () => manage(primary.id, { action: 'update', bot: made.id, model: 'google/gemini-4' }), (err) => /Couldn't check/.test(err.message) && !/secret-token/.test(err.message));
+      a.deepEqual(fields(made.id), settled);
+      await a.rejects(async () => manage(primary.id, { action: 'models' }), (err) => !/secret-token/.test(err.message));
+      a.equal(db.listBots().length, count);
+
+      // A non-primary bot can never set any bot's model, its own included, and asks nothing of Pi.
+      const seen = asked;
+      const helperBefore = fields(helper.id);
+      a.throws(() => manage(helper.id, { action: 'update', model: 'google/gemini-4' }), /Only the primary bot can change a bot's model/);
+      a.throws(() => manage(helper.id, { action: 'update', name: 'Sneaky', fallback: 'none' }), /Only the primary bot/);
+      a.throws(() => manage(helper.id, { action: 'update', effort: 'high' }), /Only the primary bot/);
+      a.throws(() => manage(helper.id, { action: 'update', bot: made.id, model: 'google/gemini-4' }), /only change yourself/);
+      a.throws(() => manage(helper.id, { action: 'create', name: 'X', model: 'google/gemini-4' }), /Only the primary bot can make bots/);
+      a.throws(() => manage(helper.id, { action: 'models' }), /Only the primary bot/);
+      a.equal(asked, seen);
+      a.deepEqual(fields(helper.id), helperBefore);
+      // Its self-serve rules are unchanged.
+      a.equal(manage(helper.id, { action: 'update', name: 'Helpy' }).name, 'Helpy');
+
+      // models lists ids, names and efforts only, narrowed by a query.
+      listing = { models: [{ provider: 'anthropic', id: 'claude-opus-5-5', name: 'Opus 5.5', reasoning: true, apiKey: 'sk-should-not-show' }, { provider: 'google', id: 'gemini-4', name: 'Gemini 4' }], defaultModel: 'anthropic/claude-opus-5-5', checkedAt: 0 };
+      const models = await manage(primary.id, { action: 'models', query: 'opus' });
+      a.deepEqual(models.models.map((m) => m.id), ['anthropic/claude-opus-5-5']);
+      a.ok(models.models[0].efforts.includes('high'));
+      a.equal(models.default, 'anthropic/claude-opus-5-5');
+      a.doesNotMatch(JSON.stringify(models), /sk-should-not-show/);
+
+      // The settings API keeps its own behaviour: a list there still clears No fallback.
+      svc.updateBot(made.id, { noFallbacks: true });
+      svc.updateBot(made.id, { fallbackModels: ['x/y'] });
+      a.deepEqual([db.getBot(made.id).fallbackModels, db.getBot(made.id).noFallbacks], [['x/y'], undefined]);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test("a bot falls back through its models in order, only before its reply has done anything", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-fallback-"));
   try {
