@@ -11,7 +11,7 @@ export const NO_GRANTS: BotToolGrants = { files: false, terminal: false, browser
 
 export const GRANT_ROWS: { key: keyof BotToolGrants; label: string; desc: string }[] = [
   { key: "files", label: "Files", desc: "Read and write files in their computer here." },
-  { key: "terminal", label: "Terminal", desc: "Run commands and long-running processes." },
+  { key: "terminal", label: "Terminal", desc: "Run commands and long-running processes. Commands can also read and change files and start programs, browsers included." },
   { key: "browser", label: "Browser", desc: "Open and drive a browser here." },
   { key: "unisolated", label: "Unisolated", desc: "Run as you, outside a container. They can reach everything you can." },
 ];
@@ -37,6 +37,7 @@ export function BotAccess({ client }: { client: PairedClient }) {
   return (
     <div className="bot-access" role="group" aria-label={`What bots from ${client.name} may use on this device`}>
       <span className="bot-access-title">Bots from {client.name} may use this device's</span>
+      <span className="pi-row-desc">These choose which tools they get; they aren't a sandbox. Only a container keeps them apart from the rest of this device.</span>
       {GRANT_ROWS.map((row) => (
         <div key={row.key} className="bot-access-row">
           <div className="pi-row-text">

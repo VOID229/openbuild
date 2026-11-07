@@ -5,7 +5,8 @@
 //
 // A paired server only gets what this machine allowed it (Settings → Devices → Using this device):
 // files, terminal and browser are separate grants, all off after pairing, and so is running
-// unisolated instead of in a container. Its computers live apart from this machine's own bots', so
+// unisolated instead of in a container. They pick tools, not a boundary: a command can read files
+// or start a browser too. The container is what keeps a bot apart from this machine. Its computers live apart from this machine's own bots', so
 // it can only reach the ones its own bots made. Every answer names this server, and the caller
 // refuses one from any other: a tool never runs on a machine the bot wasn't pointed at.
 import { createHash } from "node:crypto";
@@ -30,7 +31,11 @@ function needs(op: string): Tool | undefined {
   return undefined;
 }
 
-/** A paired server's computer, apart from this machine's bots' and other paired servers'. */
+/**
+ * A paired server's computer, apart from this machine's bots' and other paired servers'. Computers a
+ * paired server made before grants are under the bare bot id, which can't be told apart from this
+ * machine's own bots', so they're never reused or removed from here: they stay as they were.
+ */
 export const guestComputerId = (clientId: string, id: string) => "g" + createHash("sha256").update(`${clientId}\n${id}`).digest("hex").slice(0, 40);
 
 /** Why a paired server can't run `op` here, or undefined when it may. */
@@ -165,52 +170,77 @@ export function computerRoutes(api: Api) {
         return stamp(Response.json({ ...(await capabilities()), serverId: devices.serverId(), machine: devices.deviceName(), ...(who && { grants: who.botTools }) } satisfies ComputerCapabilities));
       }),
     },
+    // This server's own bots service never comes over HTTP (it calls `dispatch`), so this is for a
+    // browser session only. A paired device has to use the bound route below.
     "/api/computers/:id/:op": {
-      POST: api(async (req: Bun.BunRequest<"/api/computers/:id/:op">, server: Bun.Server<unknown>) => {
-        server.timeout(req, 0);
-        let body = ((await readJson(req)) ?? {}) as Body;
-        let { id } = req.params;
-        const { op } = req.params;
-        const who = devices.authenticateDevice(req);
-        if (who) {
-          try {
-            id = guestComputerId(who.id, id);
-            // A new guest computer is a container unless it asks otherwise; an existing one keeps its kind.
-            const asked = body.kind === "host" || body.kind === "container" ? body.kind : undefined;
-            const c = computer(id, asked ?? "container");
-            const why = refusal(who, op, op === "ensure" && asked ? asked : c.config.kind);
-            if (why) return stamp(bad(why, 403));
-            body = { ...body, kind: asked ?? c.config.kind };
-          } catch (err) {
-            const e = err as Error & { status?: number };
-            return stamp(bad(e.message, e.status ?? 500));
-          }
-        }
-        if (op === "exec") {
-          const enc = new TextEncoder();
-          const stream = new ReadableStream<Uint8Array>({
-            async start(controller) {
-              const send = (o: unknown) => controller.enqueue(enc.encode(JSON.stringify(o) + "\n"));
-              try {
-                const r = (await dispatch(id, op, body, req.signal, (d) => send({ t: "out", v: b64(d) }))) as { exitCode: number | null };
-                send({ t: "exit", code: r.exitCode });
-              } catch (err) {
-                send({ t: "error", message: (err as Error).message });
-              }
-              controller.close();
-            },
-          });
-          return stamp(new Response(stream, { headers: { "content-type": "application/x-ndjson" } }));
-        }
-        try {
-          return stamp(Response.json(await dispatch(id, op, body, req.signal)));
-        } catch (err) {
-          const e = err as Error & { status?: number };
-          return stamp(bad(e.message, e.status ?? 500));
-        }
+      POST: api((req: Bun.BunRequest<"/api/computers/:id/:op">, server: Bun.Server<unknown>) => {
+        if (presentsDeviceToken(req)) return stamp(bad("A paired device names the machine it means: /api/computers/to/<server id>/…", 403));
+        return operate(req, server, req.params.id, req.params.op);
+      }),
+    },
+    // A paired server's bots. The path names the machine the caller means, and this server runs it
+    // only if that's itself: a request sent to an address that now belongs to another machine fails
+    // there, and an older OpenBuild, which has no such route, never runs it at all.
+    "/api/computers/to/:target/:id/:op": {
+      POST: api((req: Bun.BunRequest<"/api/computers/to/:target/:id/:op">, server: Bun.Server<unknown>) => {
+        if (!presentsDeviceToken(req)) return stamp(bad("Only a paired device uses this route", 403));
+        if (req.params.target !== devices.serverId()) return stamp(bad(`This is ${devices.deviceName()}, not the machine this was meant for. Nothing ran.`, 409));
+        return operate(req, server, req.params.id, req.params.op, true);
       }),
     },
   };
+}
+
+/** A request that carries a device token. api() admits it only when the token is paired here, as a device, never as a browser. */
+const presentsDeviceToken = (req: Request) => /^Bearer /.test(req.headers.get("authorization") ?? "");
+
+/**
+ * Run one operation for a request. A paired device's request is authenticated again once its body
+ * has arrived, with the grants as they are then: a pairing revoked, or a grant taken back, while
+ * the body was on its way fails it, and it never becomes a local request on the way.
+ */
+async function operate(req: Request, server: Bun.Server<unknown>, rawId: string, op: string, guest = false): Promise<Response> {
+  server.timeout(req, 0);
+  let body = ((await readJson(req)) ?? {}) as Body;
+  let id = rawId;
+  if (guest) {
+    const who = devices.authenticateDevice(req);
+    if (!who) return stamp(bad("Unknown device token", 401));
+    try {
+      id = guestComputerId(who.id, id);
+      // A new guest computer is a container unless it asks otherwise; an existing one keeps its kind.
+      const asked = body.kind === "host" || body.kind === "container" ? body.kind : undefined;
+      const c = computer(id, asked ?? "container");
+      const why = refusal(who, op, op === "ensure" && asked ? asked : c.config.kind);
+      if (why) return stamp(bad(why, 403));
+      body = { ...body, kind: asked ?? c.config.kind };
+    } catch (err) {
+      const e = err as Error & { status?: number };
+      return stamp(bad(e.message, e.status ?? 500));
+    }
+  }
+  if (op === "exec") {
+    const enc = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (o: unknown) => controller.enqueue(enc.encode(JSON.stringify(o) + "\n"));
+        try {
+          const r = (await dispatch(id, op, body, req.signal, (d) => send({ t: "out", v: b64(d) }))) as { exitCode: number | null };
+          send({ t: "exit", code: r.exitCode });
+        } catch (err) {
+          send({ t: "error", message: (err as Error).message });
+        }
+        controller.close();
+      },
+    });
+    return stamp(new Response(stream, { headers: { "content-type": "application/x-ndjson" } }));
+  }
+  try {
+    return stamp(Response.json(await dispatch(id, op, body, req.signal)));
+  } catch (err) {
+    const e = err as Error & { status?: number };
+    return stamp(bad(e.message, e.status ?? 500));
+  }
 }
 
 // ------------------------------------------------------------------ client
@@ -242,9 +272,9 @@ const verified = new Map<string, { base: string; at: number }>();
 const VERIFIED_FOR = 15_000;
 
 /**
- * The address a paired device answers at as itself. Asked with a read-only request first, so an
- * address that now belongs to another machine (or an older OpenBuild, which doesn't check grants)
- * is found out before anything runs there.
+ * The address a paired device answers at as itself, asked with a read-only request. This is for a
+ * clear error before trying; what keeps an operation off the wrong machine is the bound route,
+ * which the receiver checks itself, since the address can change after this answer.
  */
 async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string> {
   const known = verified.get(device.id);
@@ -255,7 +285,7 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
   for (const url of device.urls) {
     const base = url.replace(/\/$/, "");
     try {
-      const res = await fetch(`${base}/api/computers/identity`, { headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
+      const res = await fetch(`${base}/api/computers/identity`, { redirect: "error", headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
       void res.body?.cancel().catch(() => {});
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         last = `it answered HTTP ${res.status}`;
@@ -288,7 +318,7 @@ async function deviceFetch(deviceId: string, path: string, init: RequestInit = {
   const base = await reach(device, init.signal ?? undefined);
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
+    res = await fetch(`${base}${path}`, { ...init, redirect: "error", headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
   } catch (err) {
     verified.delete(deviceId);
     if (init.signal?.aborted) throw new Error("aborted");
@@ -301,22 +331,25 @@ async function deviceFetch(deviceId: string, path: string, init: RequestInit = {
   if (res.headers.get(SERVER_HEADER) !== device.id) {
     verified.delete(deviceId);
     void res.body?.cancel().catch(() => {});
-    throw new TargetError("mismatch", `${device.name}'s address answered as another machine.`);
+    throw new TargetError("mismatch", `${device.name}'s address answered as a different or older OpenBuild, which runs nothing it's sent this way. Nothing ran.`);
   }
   if (res.status === 403) throw new TargetError("denied", ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `${device.name} hasn't allowed this.`);
   return res;
 }
 
+/** An operation's path, naming the machine it's for, which runs it only if that's itself. */
+const bound = (deviceId: string, id: string, op: string) => `/api/computers/to/${encodeURIComponent(deviceId)}/${encodeURIComponent(id)}/${encodeURIComponent(op)}`;
+
 function remote(deviceId: string): ComputerApi {
   return {
     async call(id, op, body = {}, signal) {
-      const res = await deviceFetch(deviceId, `/api/computers/${encodeURIComponent(id)}/${op}`, { method: "POST", body: JSON.stringify(body), signal });
+      const res = await deviceFetch(deviceId, bound(deviceId, id, op), { method: "POST", body: JSON.stringify(body), signal });
       const data = (await res.json().catch(() => ({}))) as any;
       if (!res.ok) throw new Error(data.error ?? `The device answered HTTP ${res.status}`);
       return data;
     },
     async exec(id, body, onData, signal) {
-      const res = await deviceFetch(deviceId, `/api/computers/${encodeURIComponent(id)}/exec`, { method: "POST", body: JSON.stringify(body), signal });
+      const res = await deviceFetch(deviceId, bound(deviceId, id, "exec"), { method: "POST", body: JSON.stringify(body), signal });
       if (!res.ok || !res.body) throw new Error(((await res.json().catch(() => ({}))) as any).error ?? `The device answered HTTP ${res.status}`);
       const dec = new TextDecoder();
       let buf = "";

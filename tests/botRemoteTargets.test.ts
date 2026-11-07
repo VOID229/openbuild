@@ -183,6 +183,100 @@ test("a target that goes offline fails the tool without running it here, and wor
   expect(back.result.output).toBe("remote");
 }, 60_000);
 
+/** Pair another server with the target the way `openbuild pair --host` and `--client` do. Returns its token and the target's id for it. */
+async function pairAnother(name: string) {
+  const open = Bun.spawnSync([process.execPath, "-e", `const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Target Box", mode: "lan", urls: [] })));`], { env: { ...process.env, OPENCHAT_DATA_DIR: targetData }, stdout: "pipe", stderr: "pipe" });
+  const { code } = JSON.parse(open.stdout.toString());
+  const claimed = (await (await fetch(`${base()}/api/pair/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name }) })).json()) as { token: string };
+  const clients = ((await (await fetch(`${base()}/api/paired-clients`)).json()) as { clients: { id: string; name: string }[] }).clients;
+  return { token: claimed.token, id: clients.find((c) => c.name === name)!.id };
+}
+
+/**
+ * Send a request's headers, wait until the server is handling it, do `meanwhile`, then send the
+ * body. Over a raw socket, so the delay is ours and not the client library's.
+ */
+async function delayedBody(path: string, headers: Record<string, string>, body: string, meanwhile: () => Promise<void>) {
+  let answer = "";
+  let closed!: () => void;
+  const done = new Promise<void>((r) => (closed = r));
+  const socket = await Bun.connect({ hostname: "127.0.0.1", port, socket: { data: (_s, d) => void (answer += d.toString()), close: () => closed(), error: () => closed() } });
+  const head = Object.entries({ host: `127.0.0.1:${port}`, "content-type": "application/json", "content-length": String(Buffer.byteLength(body)), connection: "close", ...headers }).map(([k, v]) => `${k}: ${v}`).join("\r\n");
+  socket.write(`POST ${path} HTTP/1.1\r\n${head}\r\n\r\n`);
+  await Bun.sleep(300);
+  await meanwhile();
+  socket.write(body);
+  await Promise.race([done, Bun.sleep(10_000)]);
+  socket.end();
+  return Number(/^HTTP\/1\.1 (\d+)/.exec(answer)?.[1]);
+}
+
+test("a pairing revoked while a request's body is on its way runs nothing, as a guest or as this machine", async () => {
+  const marker = join(directory, "raced");
+  const command = JSON.stringify({ command: `touch ${marker}`, kind: "host" });
+  for (const route of ["bound", "plain"] as const) {
+    const racer = await pairAnother(`Racer ${route}`);
+    await fetch(`${base()}/api/paired-clients/${racer.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ botTools: { terminal: true, unisolated: true } }) });
+    const before = targetComputers();
+    const path = route === "bound" ? `/api/computers/to/${target}/${bot}/exec` : `/api/computers/${bot}/exec`;
+    const status = await delayedBody(path, { authorization: `Bearer ${racer.token}` }, command, async () => {
+      expect((await fetch(`${base()}/api/paired-clients/${racer.id}`, { method: "DELETE" })).ok).toBe(true);
+    });
+    // The bound route checks the token again after the body; the plain one refuses any device up front.
+    expect(status).toBe(route === "bound" ? 401 : 403);
+    expect(existsSync(marker)).toBe(false);
+    expect(targetComputers()).toEqual(before);
+    expect(targetComputers()).not.toContain(bot);
+    expect(targetComputers()).not.toContain(guestComputerId(racer.id, bot));
+  }
+  // A paired device's request names its machine; sent to any other, it fails there before its body is read.
+  const elsewhere = await fetch(`${base()}/api/computers/to/some-other-server/${bot}/exec`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: command });
+  expect(elsewhere.status).toBe(409);
+  expect(existsSync(marker)).toBe(false);
+}, 60_000);
+
+test("an address taken over after a successful check, by an older OpenBuild or a redirect, runs nothing", async () => {
+  // A call that works leaves the address checked and remembered.
+  expect((await tool(bot, "bash", { command: "pwd" })).error).toBeUndefined();
+  await stopTarget();
+  // An older OpenBuild without a password now has the address. It runs whatever reaches its
+  // /api/computers/:id/:op for any token, and has no identity route.
+  const seen: string[] = [];
+  let ran = 0;
+  const old = Bun.serve({
+    port,
+    hostname: "127.0.0.1",
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      seen.push(`${req.method} ${path}`);
+      if (req.method === "POST" && /^\/api\/computers\/[^/]+\/[^/]+$/.test(path)) {
+        ran++;
+        return Response.json({ exitCode: 0 });
+      }
+      return Response.json({ error: "Not found" }, { status: 404 });
+    },
+  });
+  const run = await tool(bot, "bash", { command: "echo should-not-run" });
+  expect(run.error).toContain("Nothing ran");
+  expect(ran).toBe(0);
+  // It went straight to the remembered address: the operation's own path is what kept it from running.
+  expect(seen.some((s) => s.startsWith("POST /api/computers/to/"))).toBe(true);
+  old.stop(true);
+
+  // An address that redirects elsewhere isn't followed, for the check or the operation.
+  let followed = 0;
+  const sink = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => (followed++, Response.json({ exitCode: 0 }, { headers: { "x-openbuild-server": target } })) });
+  const redirect = Bun.serve({ port, hostname: "127.0.0.1", fetch: (req) => Response.redirect(`http://127.0.0.1:${sink.port}${new URL(req.url).pathname}`, 307) });
+  expect((await tool(bot, "bash", { command: "echo should-not-run" })).error).toContain("Target Box");
+  expect(followed).toBe(0);
+  redirect.stop(true);
+  sink.stop(true);
+  expect(workspaceComputers()).toEqual([]);
+
+  await launchTarget();
+  expect((await tool(bot, "bash", { command: "cat note.txt" })).result.output).toBe("remote");
+}, 60_000);
+
 test("an address that answers as another machine, or as an OpenBuild without grants, gets nothing", async () => {
   let posts = 0;
   const impostor = (header?: string) =>
