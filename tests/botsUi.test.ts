@@ -8,7 +8,10 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     import assert from "node:assert/strict";
     mock.module(resolve("src/lib/store.ts"), () => ({ useStore: { getState: () => ({ settings: { profile: {} } }) } }));
     globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
-    const { useBots } = await import(resolve("src/lib/bots/store.ts"));
+    const { useBots, enterWorkspace } = await import(resolve("src/lib/bots/store.ts"));
+    const { useWorkspace } = await import(resolve("src/lib/bots/workspace.ts"));
+    useWorkspace.setState({ localId: "srv", localName: "Studio" });
+    enterWorkspace("srv");
     const c = { id: "chat", kind: "direct", botIds: ["bot"], createdAt: 1, updatedAt: 1, messages: [{ id: "latest", author: "me", text: "hello", at: 1 }], more: true };
     const snapshot = { bots: [], conversations: [c], settings: { sections: [] }, typing: {}, drafts: [], status: {} };
     useBots.setState({ conversations: [c] });
@@ -16,7 +19,7 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     let ack;
     globalThis.fetch = async (path, init) => {
       calls.push([path, init]);
-      if (path === "/api/bots") return Response.json(snapshot);
+      if (path === "/api/workspace/to/srv/api/bots") return Response.json(snapshot, { headers: { "x-openbuild-server": "srv" } });
       return new Promise((r) => { ack = r; });
     };
     const first = useBots.getState().post("chat", { author: "me", text: "retain me" });
@@ -63,8 +66,9 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     await new Promise((r) => setTimeout(r, 0));
     assert.deepEqual(JSON.parse(requests.at(-1)[1].body), { section: null, pinnedAt: null });
     globalThis.fetch = async (path) => {
-      if (path === "/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
+      if (path === "/api/workspace/to/srv/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
         const events = [
+          { t: "hello", workspace: "srv" },
           { t: "snapshot", ...snapshot },
           { t: "message", conversationId: "chat", message: { id: "confirmed-after-snapshot", author: "me", text: "saved", at: 2 } },
           { t: "status", botId: "bot", status: { state: "error", conversationId: "chat", error: "provider failed" } },
@@ -95,15 +99,19 @@ test("an update to a message from before the loaded ones doesn't land at the bot
     import assert from "node:assert/strict";
     mock.module(resolve("src/lib/store.ts"), () => ({ useStore: { getState: () => ({ settings: { profile: {} } }) } }));
     globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
-    const { useBots } = await import(resolve("src/lib/bots/store.ts"));
+    const { useBots, enterWorkspace } = await import(resolve("src/lib/bots/store.ts"));
+    const { useWorkspace } = await import(resolve("src/lib/bots/workspace.ts"));
+    useWorkspace.setState({ localId: "srv", localName: "Studio" });
+    enterWorkspace("srv");
     const group = { id: "group", kind: "group", name: "G", botIds: ["a", "b"], createdAt: 1, updatedAt: 30, more: true, messages: [
       { id: "m20", author: "me", text: "recent", at: 20 },
       { id: "m30", author: "a", text: "latest", at: 30 },
     ] };
     const snapshot = { bots: [], conversations: [group], settings: { sections: [] }, typing: {}, drafts: [], status: {} };
     globalThis.fetch = async (path) => {
-      if (path === "/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
+      if (path === "/api/workspace/to/srv/api/bots/stream") return new Response(new ReadableStream({ start(controller) {
         const events = [
+          { t: "hello", workspace: "srv" },
           { t: "snapshot", ...snapshot },
           // Waking on @all, a bot marks an early prompt seen and votes on an old, closed poll.
           { t: "message", conversationId: "group", message: { id: "m1", author: "me", text: "early prompt", at: 1, seenBy: ["b"] } },
@@ -135,18 +143,20 @@ test("bots paint from the cache, then the server's snapshot replaces it and is c
     import { resolve } from "node:path";
     import assert from "node:assert/strict";
     mock.module(resolve("src/lib/store.ts"), () => ({ useStore: { getState: () => ({ settings: { profile: {} } }) } }));
-    const KEY = "openchat-kv:openbuild-bots/cache:snapshot";
+    const KEY = "openchat-kv:openbuild-bots/cache:snapshot:srv";
     const saved = new Map();
     globalThis.localStorage = { getItem: (k) => saved.get(k) ?? null, setItem: (k, v) => saved.set(k, v), removeItem: (k) => saved.delete(k) };
     const chat = (id, count) => ({ id, kind: "direct", botIds: ["bot"], createdAt: 1, updatedAt: 1, messages: Array.from({ length: count }, (_, i) => ({ id: id + i, author: "me", text: "", at: i })) });
     saved.set(KEY, JSON.stringify({ bots: [{ id: "bot" }], conversations: [chat("cached", 1)], sections: ["work"] }));
     const { preloadBots, useBots } = await import(resolve("src/lib/bots/store.ts"));
+    const { useWorkspace } = await import(resolve("src/lib/bots/workspace.ts"));
+    useWorkspace.setState({ localId: "srv", localName: "Studio" });
     const paths = [];
     let answer;
     globalThis.fetch = async (path) => {
       paths.push(path);
       await new Promise((r) => { answer = r; });
-      return Response.json({ bots: [], conversations: [chat("fresh", 60)], settings: { sections: [] }, typing: {}, drafts: [], status: {} });
+      return Response.json({ bots: [], conversations: [chat("fresh", 60)], settings: { sections: [] }, typing: {}, drafts: [], status: {} }, { headers: { "x-openbuild-server": "srv" } });
     };
 
     // The cached copy shows without the server, and isn't mistaken for the server's state.
@@ -156,7 +166,7 @@ test("bots paint from the cache, then the server's snapshot replaces it and is c
     assert.equal(useBots.getState().loaded, false);
     assert.equal(useBots.getState().connected, true);
     // Preloading holds no connection open.
-    assert.deepEqual(paths, ["/api/bots"]);
+    assert.deepEqual(paths, ["/api/workspace/to/srv/api/bots"]);
 
     answer();
     await new Promise((r) => setTimeout(r, 1100));
@@ -251,9 +261,10 @@ test("Apps sits in the OpenBots sidebar's footer, just left of the way back to O
   const top = open.slice(open.indexOf('<div className="brand-row">'), open.indexOf('<div className="history-wrap">'));
   const footer = open.slice(open.indexOf('<div className="settings-row">'));
   expect(top).not.toContain('kind: "apps"');
-  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*<IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick=\{\(\) => setDialog\(\{ kind: "apps" \}\)\}>\s*<Blocks size=\{19\} \/>\s*<\/IconButton>\s*<BotsToggle \/>/);
+  // Another device's workspace has no apps to manage from here, so it's left out there.
+  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*\{!remote && \(\s*<IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick=\{\(\) => setDialog\(\{ kind: "apps" \}\)\}>\s*<Blocks size=\{19\} \/>\s*<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
   // The rail keeps it in its foot, beside the same toggle.
-  expect(sidebar).toMatch(/<IconButton label="Apps" tooltipSide="right" className="bots-rail-btn"[\s\S]*?<\/IconButton>\s*<BotsToggle \/>/);
+  expect(sidebar).toMatch(/<IconButton label="Apps" tooltipSide="right" className="bots-rail-btn"[\s\S]*?<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
   // A phone's bigger targets cover it too.
   const mobile = await Bun.file("src/mobile.css").text();
   expect(mobile).toMatch(/\.bots-sidebar \.bots-apps-btn \{\s*width: 44px;\s*height: 44px;/);

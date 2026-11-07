@@ -4,6 +4,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
+import { useRemoteWorkspace } from "../../lib/bots/store";
 import { arrowNav, copyText, cx } from "../../lib/ui";
 import { IconButton, Popover, Spinner } from "../primitives";
 import { DialogHead, useModal } from "./BotDialogs";
@@ -451,13 +452,37 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
 
 /** A bot offering an app in a chat. */
 export function ConnectCard({ appId }: { appId: string }) {
+  const host = useRemoteWorkspace();
   const app = appById(appId);
+  if (!app) return <div className="bm-text">This app isn't in the catalog anymore.</div>;
+  return host ? <RemoteConnectCard app={app} host={host} /> : <LocalConnectCard app={app} />;
+}
+
+/**
+ * A bot on another device offering an app: it would be connected there, in that device's own
+ * session, so neither its state nor its logo is fetched from here, and the card says so.
+ */
+function RemoteConnectCard({ app, host }: { app: CatalogApp; host: string }) {
+  return (
+    <div className="bm-connect bm-unavailable-card">
+      <span className="app-logo" style={{ width: 40, height: 40 }} aria-hidden>
+        <span className="app-logo-letter">{app.name[0]}</span>
+      </span>
+      <div className="bm-connect-text">
+        <div className="bm-question-title">{app.name}</div>
+        <div className="bm-question-hint">Apps for these bots are connected on {host}. Connect {app.name} there.</div>
+      </div>
+    </div>
+  );
+}
+
+function LocalConnectCard({ app }: { app: CatalogApp }) {
+  const appId = app.id;
   const view = useApps((s) => s.apps[appId]);
   const loaded = useApps((s) => s.loaded);
   useEffect(() => {
     if (!loaded) void useApps.getState().load().catch(() => {});
   }, [loaded]);
-  if (!app) return <div className="bm-text">This app isn't in the catalog anymore.</div>;
   return (
     <div className="bm-connect">
       <AppLogo app={app} />

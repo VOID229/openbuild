@@ -6,7 +6,8 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
 import { busyBots } from "../../lib/bots/activity";
-import { conversationName, useBots } from "../../lib/bots/store";
+import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
+import { useWorkspace } from "../../lib/bots/workspace";
 import type { Conversation } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
@@ -18,6 +19,7 @@ import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime } from "./common";
+import { WorkspacePicker } from "./WorkspacePicker";
 
 type Dialog =
   | { kind: "bot" }
@@ -432,6 +434,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
 
 function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conversation[]; rest: Conversation[]; activeId?: string; onMenu: (m: MenuState) => void; onDialog: (d: Dialog) => void; peek: Peek }) {
   const bots = useBots((s) => s.bots);
+  const remote = !!useRemoteWorkspace();
   const avatar = useStore((s) => s.settings.profile.avatar);
   const name = useStore((s) => s.settings.profile.name);
   const listRef = useRef<HTMLElement>(null);
@@ -467,10 +470,12 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
         </nav>
       </div>
       <div className="bots-rail-foot">
-        <NewMenu onDialog={onDialog} rail />
-        <IconButton label="Apps" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
-          <Blocks size={18} />
-        </IconButton>
+        {!remote && <NewMenu onDialog={onDialog} rail />}
+        {!remote && (
+          <IconButton label="Apps" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
+            <Blocks size={18} />
+          </IconButton>
+        )}
         <BotsToggle />
         <button type="button" className="bots-rail-me" aria-label="Settings" data-tooltip="Settings" data-tooltip-side="right" onClick={() => useStore.getState().openSettings()}>
           <Avatar src={avatar} name={name} size={30} />
@@ -480,13 +485,21 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   );
 }
 
+const NONE: Conversation[] = [];
+
 export function BotsSidebar() {
   const open = useStore((s) => s.botsSidebarOpen);
   const avatar = useStore((s) => s.settings.profile.avatar);
   const profileName = useStore((s) => s.settings.profile.name);
   const mobile = useMediaQuery("(max-width: 768px)");
   const rail = !open && !mobile;
-  const conversations = useBots((s) => s.conversations);
+  // Another device's workspace is used, not managed, from here: no new bots, apps or conversation menu.
+  const remote = !!useRemoteWorkspace();
+  // A workspace that isn't here anymore shows nothing of its own or anyone else's.
+  const workspace = useBots((s) => s.workspace);
+  const gone = useWorkspace((s) => s.problem?.kind === "gone" && s.problem.workspace === workspace);
+  const all = useBots((s) => s.conversations);
+  const conversations = gone ? NONE : all;
   const bots = useBots((s) => s.bots);
   const sections = useBots((s) => s.sections);
   const activeId = useBots((s) => s.activeId);
@@ -558,8 +571,9 @@ export function BotsSidebar() {
                   <Search size={18} />
                 </IconButton>
               )}
-              <NewMenu onDialog={setDialog} />
+              {!remote && <NewMenu onDialog={setDialog} />}
             </div>
+            <WorkspacePicker />
             {(searching || mobile) && (
               <label className="search bots-search">
                 <Search size={16} />
@@ -606,12 +620,14 @@ export function BotsSidebar() {
                         {hidden.map(row)}
                       </Section>
                     )}
-                    {!conversations.length && (
+                    {!conversations.length && !gone && (
                       <div className="bots-empty-list">
                         <p>No bots yet.</p>
-                        <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: "bot" })}>
-                          <Plus size={14} /> New bot
-                        </button>
+                        {!remote && (
+                          <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: "bot" })}>
+                            <Plus size={14} /> New bot
+                          </button>
+                        )}
                       </div>
                     )}
                   </>
@@ -624,16 +640,18 @@ export function BotsSidebar() {
                 <span className="bots-me-name">Settings</span>
               </button>
               {/* The way into the apps sits beside the way out, as it does in the rail. */}
-              <IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
-                <Blocks size={19} />
-              </IconButton>
+              {!remote && (
+                <IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
+                  <Blocks size={19} />
+                </IconButton>
+              )}
               <BotsToggle />
             </div>
           </div>
         )}
       </aside>
       <PeekCard peek={peek} />
-      <ConversationMenu state={menu} onClose={closeMenu} onDialog={setDialog} />
+      <ConversationMenu state={remote ? undefined : menu} onClose={closeMenu} onDialog={setDialog} />
       <Dialogs dialog={dialog} onClose={() => setDialog(undefined)} />
     </>
   );

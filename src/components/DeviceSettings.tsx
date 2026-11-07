@@ -7,7 +7,7 @@ import type { Device, PairedClient } from "../../shared/types";
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { ago, cx } from "../lib/ui";
-import { BotAccess } from "./BotAccess";
+import { BotAccess, WorkspaceAccess } from "./BotAccess";
 import { PairDevice } from "./PairDevice";
 import { IconButton, SettingsHeading, Spinner } from "./primitives";
 
@@ -134,6 +134,7 @@ function ClientRow({ client, onChanged }: { client: PairedClient; onChanged: () 
           </IconButton>
         </span>
       </div>
+      <WorkspaceAccess client={client} />
       <BotAccess client={client} />
     </li>
   );

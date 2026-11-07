@@ -37,6 +37,7 @@ import * as folderPicker from "./folderPicker";
 import * as sessionImport from "./sessionImport";
 import { computerRoutes } from "./computers/api";
 import { botRoutes } from "./bots/routes";
+import { workspaceRoutes } from "./bots/workspace";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -106,6 +107,9 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/terminals(\/|$)/.test(path) ||
   // A bot on the paired server can keep its computer on this machine.
   /^\/api\/computers(\/|$)/.test(path) ||
+  // This server's OpenBots workspace, once this machine's own session allowed it. That route checks
+  // the grant and its own short list of operations (server/bots/workspace.ts).
+  /^\/api\/workspace\/to\//.test(path) ||
   // Managing Pi on this device. It already runs Pi turns here — tools included — so this is not
   // a wider grant: it's the same power through a settings page instead of a prompt.
   /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
@@ -367,10 +371,15 @@ function serve(port: number, hostname: string) {
         GET: api(() => Response.json({ clients: devices.pairedClients() })),
       },
       "/api/paired-clients/:id": {
-        // What that device's bots may do here. Only this machine's own session can change it: a
+        // What that device's bots may do here, and whether it may use this server's OpenBots
+        // workspace. Only this machine's own session can change either: a
         // paired device's token never reaches this route (see devicePathAllowed).
         PATCH: api(async (req: Bun.BunRequest<"/api/paired-clients/:id">) => {
           const body = await readJson(req);
+          if (typeof body?.workspace === "boolean") {
+            const workspace = devices.setClientWorkspace(req.params.id, body.workspace);
+            return workspace === undefined ? bad("No such device", 404) : Response.json({ workspace });
+          }
           const patch = body?.botTools;
           if (!patch || typeof patch !== "object" || !Object.values(patch).every((v) => typeof v === "boolean")) return bad("Expected { botTools: { files?, terminal?, browser?, unisolated? } }");
           const botTools = devices.setClientBotTools(req.params.id, patch);
@@ -603,6 +612,8 @@ function serve(port: number, hostname: string) {
       ...computerRoutes(api),
 
       ...botRoutes(api),
+
+      ...workspaceRoutes(api),
 
       "/api/*": api(() => bad("Not found", 404)),
     },
