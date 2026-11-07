@@ -25,6 +25,7 @@ export function reportProblem(source: string, message: string) {
 }
 
 export class PiError extends Error {}
+export class PiTimeoutError extends PiError {}
 
 export class PiProcess {
   readonly cwd: string;
@@ -139,7 +140,7 @@ export class PiProcess {
     const response = await new Promise<PiRecord>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new PiError(`Pi didn't answer "${command.type}" in time`));
+        reject(new PiTimeoutError(`Pi didn't answer "${command.type}" in time`));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (r) => (clearTimeout(timer), resolve(r)),

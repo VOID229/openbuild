@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { appById } from "../../shared/apps";
 import { botModelChain, conversationTitle, eventText, mentionName, reactionId, pollVotesVisible, replyBubbles, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
-import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
+import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
 import { piFlags } from "./extensions";
 import { botsDir } from "./db";
@@ -26,6 +26,8 @@ interface Mind {
   /** The extensions it started with. */
   loaded: string;
   busy: boolean;
+  /** A previous deadline expired; no new work until abort confirms idle. */
+  needsRecovery?: boolean;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
   draft: string;
@@ -163,12 +165,15 @@ function workDir(botId: string) {
 
 async function ensureMind(botId: string): Promise<Mind> {
   const existing = minds.get(botId);
+  if (existing?.needsRecovery && !existing.proc.exited) await recoverPrompt(existing);
   // The user changed which extensions bots load. Only ever reached between turns, and the session carries on.
   if (existing && !existing.proc.exited && existing.loaded !== JSON.stringify(piFlags())) {
     revokeToken(existing.token);
     existing.proc.close();
     minds.delete(botId);
-  } else if (existing && !existing.proc.exited) return existing;
+  } else if (existing && !existing.proc.exited) {
+    return existing;
+  }
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
   const token = mintToken(botId);
   const flags = piFlags();
@@ -491,8 +496,8 @@ async function run(botId: string, all: Wake[]) {
       };
       m.steerable = true;
       // Pi refusing the prompt (no key for this model, say) ran nothing. One that went unanswered may still be running, so it isn't tried again.
-      const accepted = await m.proc.send({ type: "prompt", message, ...(images.length ? { images } : {}) }, 60_000).catch((err) => {
-        throw /didn't answer .* in time/.test(String((err as Error)?.message)) ? err : untouched(err);
+      const accepted = await promptSafely(m, { type: "prompt", message, ...(images.length ? { images } : {}) }).catch((err) => {
+        throw err instanceof PiTimeoutError || m.needsRecovery ? err : untouched(err);
       });
       if ((accepted as { disposition?: string })?.disposition === "handled" || settled) {
         if (!settled) return void (handled = true, commit(m));
@@ -535,6 +540,8 @@ async function run(botId: string, all: Wake[]) {
       mind.steerable = false;
       mind.shown = undefined;
       mind.onCommit = undefined;
+      mind.onSettled = undefined;
+      mind.onExit = undefined;
     }
     if (conversationId) {
       svc.setTyping(conversationId, botId, false);
@@ -548,11 +555,43 @@ function stillReacted({ messageId, emoji, by, to }: NonNullable<Wake["reaction"]
   return !!db.getMessage(messageId)?.message.reactions?.some((r) => r.by === by && r.emoji === emoji && r.to === to);
 }
 
+/** Abort is an idle barrier in Pi RPC. Keep the session and host queue intact on failure. */
+export async function recoverPrompt(mind: { proc: Pick<PiProcess, "send">; needsRecovery?: boolean; steerable?: boolean }) {
+  mind.steerable = false;
+  mind.needsRecovery = true;
+  await mind.proc.send({ type: "abort" }, 30_000);
+  mind.needsRecovery = false;
+}
+
+/** A lost acknowledgement is ambiguous: stop safely, but never replay this attempt on a fallback. */
+export async function promptSafely(
+  mind: { proc: Pick<PiProcess, "send">; needsRecovery?: boolean; steerable?: boolean },
+  command: PiRecord,
+  timeoutMs = 60_000,
+) {
+  try {
+    return await mind.proc.send(command, timeoutMs);
+  } catch (err) {
+    if (err instanceof PiTimeoutError || /Agent is already processing/.test(String((err as Error)?.message))) {
+      await recoverPrompt(mind);
+      // A busy rejection can be residue from an older ambiguous attempt; never replay it.
+      throw err instanceof PiTimeoutError ? err : new PiTimeoutError(String((err as Error)?.message));
+    }
+    throw err;
+  }
+}
+
 function waitSettled(mind: Mind): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
-      mind.proc.close();
-      reject(new PiError("The reply took too long and was stopped."));
+      mind.onSettled = undefined;
+      mind.onExit = undefined;
+      mind.steerable = false;
+      mind.needsRecovery = true;
+      void recoverPrompt(mind).then(
+        () => reject(new PiTimeoutError("The reply took too long and was stopped.")),
+        reject,
+      );
     }, 15 * 60 * 1000);
     timer.unref?.();
     mind.onSettled = () => (clearTimeout(timer), resolve());
