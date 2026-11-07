@@ -473,15 +473,29 @@ const LEGACY_SWITCH = /^Switched to (?:fallback model|\S+ priority model) /;
 export const MODEL_SIGN_IN = "The sign-in for this model has expired. Sign in again in Settings → Providers.";
 
 /**
- * Why a reply failed, as the chat shows it. A provider's own error, or each fallback's, is kept in the
- * server log instead; only a lapsed sign-in's fix is worth showing. Older lines saved those errors whole
- * ("Every model failed.\n…", a provider's JSON or HTTP status), so they're hidden here too.
+ * OpenBuild's own reasons a reply failed, which say what happened (and what to do) without anything a
+ * provider sent. Anything else, "rate limited" and "insufficient credits" included, may carry the
+ * provider's words or a key, so it isn't shown.
+ */
+const SAFE_REPLY_ERRORS = [
+  /^Pi isn't installed\. Install it in Settings → Pi\.$/,
+  /^The reply took too long and was stopped\.$/,
+  /^Pi didn't answer "\w+" in time$/,
+  /^Pi isn't running \(exited with code -?\d+\)$/,
+  /^Pi exited(?: \(code -?\d+\))?$/,
+];
+
+/**
+ * Why a reply failed, as the chat shows it: a lapsed sign-in's fix, or one of OpenBuild's own reasons,
+ * and nothing else. A provider's error, or each fallback's, is kept in the server log and the bot's
+ * status instead. Older lines saved those errors whole, in any shape, so they're hidden here too.
  */
 export function shownReplyError(detail: string | undefined, provider?: boolean): string | undefined {
   if (!detail) return;
   if (detail.includes(MODEL_SIGN_IN)) return MODEL_SIGN_IN;
-  if (provider || /^Every model failed/.test(detail) || /[{}]|\b[45]\d\d\b/.test(detail)) return;
-  return detail;
+  if (provider) return;
+  const line = detail.trim();
+  return SAFE_REPLY_ERRORS.some((safe) => safe.test(line)) ? line : undefined;
 }
 
 /**

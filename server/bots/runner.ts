@@ -533,11 +533,12 @@ async function run(botId: string, all: Wake[]) {
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // The provider's errors, each fallback's included, are for the log. The chat says only that it couldn't reply, or how to sign in again.
+    // The provider's errors, each fallback's included, are for the log. The chat says only that it
+    // couldn't reply, how to sign in again, or one of OpenBuild's own reasons; whatever it leaves out is logged.
     const provider = err instanceof ProviderError;
     setStatus(botId, { state: "error", error: message, provider: provider || undefined, since: Date.now() });
-    if (provider) console.warn(`[bots] ${botId} couldn't reply:`, redactSecrets(message));
-    const detail = provider ? shownReplyError(message, true) : message.slice(0, 300);
+    const detail = shownReplyError(message, provider);
+    if (provider || detail !== message.trim()) console.warn(`[bots] ${botId} couldn't reply:`, redactSecrets(message));
     const where = conversationId ?? svc.directId(botId);
     const last = db.getValue<number>(`told:${botId}`) ?? 0;
     if (where && Date.now() - last > 60_000) {

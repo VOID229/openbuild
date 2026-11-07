@@ -171,4 +171,31 @@ test("the bar over the chat gives a failed reply's gist, not the provider's erro
   expect(document.querySelector(".bots-sync-status")!.textContent).toBe("The sign-in for this model has expired. Sign in again in Settings → Providers.");
   await set({ scout: { state: "error", conversationId: "chat", error: "Pi isn't installed. Install it in Settings → Pi." } });
   expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Pi isn't installed. Install it in Settings → Pi.");
+  // A status saved without the provider mark still shows a plain provider error only as the gist.
+  for (const error of PLAIN_PROVIDER_ERRORS) {
+    await set({ scout: { state: "error", conversationId: "chat", error } });
+    expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Bot could not complete the request.");
+  }
+});
+
+// Plain one-line provider errors, as older lines saved them: no JSON, no HTTP status, maybe a key.
+const PLAIN_PROVIDER_ERRORS = ["rate limited", "insufficient credits", "Invalid API key: sk-live-abcdef1234567890", "a/one is over its limit", "Pi exited (code 1): No API key found for anthropic"];
+
+test("a plain provider error saved on an older line stays hidden in the chat, the preview and a copy", async () => {
+  const { messageText } = await import("../src/components/bots/common");
+  const lines = PLAIN_PROVIDER_ERRORS.map((detail, i) => event(`e${i + 1}`, "scout", { kind: "error", text: "Couldn't reply", detail }));
+  await show(lines);
+  lines.forEach((m) => {
+    expect(lead(m.id).textContent).toBe("Scout couldn't reply");
+    expect(line(m.id).querySelector(".bm-event-detail")).toBeNull();
+    // The preview, a reply quote and a copy all read the line through messageText.
+    expect(messageText(m as any)).toBe("Couldn't reply");
+  });
+  expect(document.body.textContent).not.toMatch(/rate limited|insufficient|sk-live|over its limit|No API key/);
+  // The sidebar preview of a chat whose last word is one of them.
+  expect(document.body.textContent).not.toContain("sk-live");
+  const { shownReplyError } = await import("../shared/bots");
+  for (const safe of ["Pi isn't installed. Install it in Settings → Pi.", "The reply took too long and was stopped.", 'Pi didn\'t answer "prompt" in time', "Pi isn't running (exited with code 1)", "Pi exited (code 137)"]) expect(shownReplyError(safe)).toBe(safe);
+  for (const unsafe of PLAIN_PROVIDER_ERRORS) expect(shownReplyError(unsafe)).toBeUndefined();
+  expect(shownReplyError("Pi isn't installed. Install it in Settings → Pi.", true)).toBeUndefined();
 });
