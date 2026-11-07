@@ -99,6 +99,9 @@ export const permissionModes = (runtime: "codex" | "cursor" | "claude", deviceId
   return get<PermissionModes>(apiUrl(deviceId, `/api/${runtime}/permissions${q.size ? `?${q}` : ""}`));
 };
 
+/** The device's Codex app-server daemon, which owns Codex Remote Control for the whole machine. */
+export const codexDaemon = (deviceId?: DeviceId) => get<{ installed: boolean; status?: string; version?: string; error?: string; checkedAt: number }>(apiUrl(deviceId, "/api/codex/status/remote-control"));
+
 /** Models fx (Vercel's coding agent, installed on the device) can use, as "fx/<id>". */
 export const fxModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/fx/models${fresh ? "?fresh=1" : ""}`));
 export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));

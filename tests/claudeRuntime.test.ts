@@ -97,6 +97,38 @@ test("history guards and request validation", async () => {
   release(req.threadId);
 });
 
+test("Remote Control is off by default and opened once per process when the thread opts in", async () => {
+  const off = request("plain");
+  let from = protocol().length;
+  expect((await collect(off)).find((e) => e.t === "notice")).toBeUndefined();
+  expect(protocol().slice(from)).not.toContain("remote_control");
+  // The opt-in is the SDK's control request; the CLI's --remote-control flag does nothing headless.
+  const on = { ...request("remote"), remoteControl: true };
+  from = protocol().length;
+  const first = await collect(on);
+  expect(first.find((e) => e.t === "notice")).toEqual({ t: "notice", message: "Remote Control is on: continue this thread at https://claude.ai/code/session_fixture" });
+  expect(text(first)).toBe("reply 1 to remote");
+  expect(protocol().slice(from)).toContain("control remote_control true");
+  expect(protocol().slice(from)).not.toContain("--remote-control");
+  from = protocol().length;
+  const second = await collect({ ...on, message: "again", prior: 1 });
+  expect(second.find((e) => e.t === "notice")).toBeUndefined();
+  expect(protocol().slice(from)).not.toContain("remote_control");
+  release(on.threadId); release(off.threadId);
+});
+
+test("a sign-in without Remote Control still runs the turn and says why", async () => {
+  process.env.FAKE_REMOTE_CONTROL_ERROR = "Remote Control requires a claude.ai subscription";
+  try {
+    const req = { ...request("api key"), remoteControl: true };
+    const events = await collect(req);
+    expect(events.find((e) => e.t === "notice")).toMatchObject({ message: expect.stringContaining("Remote Control didn't start (Remote Control requires a claude.ai subscription)") });
+    expect(text(events)).toBe("reply 1 to api key");
+    expect(events.find((e) => e.t === "done")).toMatchObject({ finish: "stop" });
+    release(req.threadId);
+  } finally { delete process.env.FAKE_REMOTE_CONTROL_ERROR; }
+});
+
 test("tool permission prompts reach the user; 'for this session' never writes settings files", async () => {
   writeFileSync(join(work, "a.txt"), "one\n");
   const req = request("edit it");

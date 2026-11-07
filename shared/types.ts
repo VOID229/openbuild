@@ -602,6 +602,8 @@ export interface PiChatRequest {
   cursorAllowAllTools?: boolean;
   /** A mode from the runtime's own permission listing (Codex, Cursor, Claude Code); absent = the runtime's configured default. */
   permission?: string;
+  /** Claude Code only: open a Remote Control session (claude.ai/code, the Claude app) for this thread. Absent = off. */
+  remoteControl?: boolean;
   cwd: string;
   /** "<provider>/<model id>" */
   model: string;

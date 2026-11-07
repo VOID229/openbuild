@@ -23,6 +23,7 @@ export function isPiChat(b: any): b is PiChatRequest {
     isThreadId(b.threadId) &&
     (b.runtime === undefined || validRuntime(b.runtime)) &&
     (b.cursorAllowAllTools === undefined || (b.runtime === "cursor" && typeof b.cursorAllowAllTools === "boolean")) &&
+    (b.remoteControl === undefined || (b.runtime === "claude" && typeof b.remoteControl === "boolean")) &&
     (b.permission === undefined || ((b.runtime === "codex" || b.runtime === "cursor" || b.runtime === "claude") && isPermissionId(b.permission))) &&
     str(b.cwd, 1024) &&
     str(b.model, 512) &&

@@ -47,6 +47,14 @@ OpenBuild appends question guidance to Claude's native `claude_code` system prom
 
 `AskUserQuestion` is a native exception to automatic tool approval: [Claude's permission evaluation](https://code.claude.com/docs/en/agent-sdk/permissions) sends it to `canUseTool` even in **bypassPermissions** and with allow rules. A blanket hook or permission override is neither needed nor installed. **Don't ask (`dontAsk`) deliberately denies interactive questions**, and explicit deny rules can block them in any mode. Select another permission mode if you want question cards; OpenBuild does not override your native policy. These instructions encourage tool use but cannot force every model to comply.
 
+## Remote Control
+
+A new Claude Code thread can start with **Remote Control** on (the pill beside permissions; bots pass `remote_control: true` to `openbuild start`). It's off by default and saved on the thread. You can then continue the thread from claude.ai/code or the Claude app.
+
+- It needs a claude.ai sign-in. With an API key or a custom endpoint the turn still runs, and the thread says Remote Control didn't start.
+- `--remote-control` only starts the bridge in the interactive CLI. Under the Agent SDK (headless stream-json) Claude Code 2.1.314 accepts the flag and ignores it. So OpenBuild sends the SDK's `remote_control` control request once per process, before the turn, and shows the session link it returns.
+- A thread with Remote Control on keeps its Claude process when idle, so the remote session stays reachable. If the process restarts anyway (OpenBuild or the worker restarts), the next turn opens a new session with a new link.
+
 ## Tool calls
 
 Claude Code's tools appear in OpenBuild's usual rows: `Bash` as commands with their output, `Read`, `Edit`/`MultiEdit`/`Write` with the diff Claude actually applied (from its structured patch), `Grep`/`Glob` as searches, `WebSearch`/`WebFetch`, `TodoWrite` as a checklist, `Task`/`Agent` subagents (with their tools nested in the same run), `ExitPlanMode` and MCP tools under their own names. Thinking streams as reasoning, text streams token by token. The native input and structured result stay on each row (`args.claude`). Claude Code runs every tool itself; OpenBuild never runs one again.

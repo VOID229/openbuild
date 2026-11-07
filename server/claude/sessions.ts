@@ -73,12 +73,14 @@ interface Live {
   turn?: Turn;
   /** The permission mode the process is in (Claude can leave plan mode itself). */
   mode?: string;
+  /** Remote Control is on: claude.ai/code can reach this process, so it isn't retired when idle. */
+  remote?: boolean;
 }
 const hot = globalThis as typeof globalThis & { openbuildClaudeLive?: Map<string, Live>; openbuildClaudeReaper?: ReturnType<typeof setInterval> };
 const live = hot.openbuildClaudeLive ??= new Map<string, Live>();
 if (hot.openbuildClaudeReaper) clearInterval(hot.openbuildClaudeReaper);
 hot.openbuildClaudeReaper = setInterval(() => {
-  for (const [id, l] of live) if (l.exited || (!l.busy && Date.now() - l.lastUsed > 20 * 60_000)) release(id);
+  for (const [id, l] of live) if (l.exited || (!l.busy && !l.remote && Date.now() - l.lastUsed > 20 * 60_000)) release(id);
 }, 60_000);
 hot.openbuildClaudeReaper.unref();
 
@@ -231,6 +233,17 @@ const userMessage = (req: Pick<PiChatRequest, "message" | "images">, sessionId: 
   },
 });
 
+/**
+ * Remote Control for a headless session is the SDK's `remote_control` control request: the
+ * `--remote-control` flag only starts the bridge in the interactive CLI (checked on 2.1.314).
+ * The SDK has the method but doesn't declare it yet.
+ */
+function remoteControl(q: Query, enabled: boolean): Promise<{ session_url?: string } | undefined> {
+  const call = (q as Query & { enableRemoteControl?: (enabled: boolean) => Promise<{ session_url?: string } | undefined> }).enableRemoteControl;
+  if (!call) return Promise.reject(new Error("this Claude Agent SDK can't start Remote Control"));
+  return call.call(q, enabled);
+}
+
 const withTimeout = <T>(p: Promise<T>, ms: number, what: string) =>
   Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`Claude Code didn't answer ${what} in time`)), ms).unref?.())]);
 
@@ -289,6 +302,16 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           await withTimeout(proc.q.setModel(row.value), 30_000, "the model change");
           await withTimeout(proc.q.applyFlagSettings({ effortLevel: row.supportsEffort && req.effort !== "off" ? req.effort as never : null, fastMode: req.speed === FAST ? true : null }), 30_000, "the settings change");
           if (proc.mode !== mode) { await withTimeout(proc.q.setPermissionMode(mode), 30_000, "the permission change"); proc.mode = mode; }
+          // The thread's opt-in, once per process. A failure is reported, not fatal: the turn still runs here.
+          if (!!req.remoteControl !== !!proc.remote) {
+            try {
+              const r = await withTimeout(remoteControl(proc.q, !!req.remoteControl), 30_000, "the Remote Control change");
+              proc.remote = !!req.remoteControl;
+              if (proc.remote) send({ t: "notice", message: `Remote Control is on: continue this thread at ${r?.session_url ?? "claude.ai/code"}` });
+            } catch (e) {
+              if (req.remoteControl) send({ t: "notice", message: `Remote Control didn't start (${e instanceof Error ? e.message : String(e)}). It needs a claude.ai sign-in.` });
+            }
+          }
           if (signal.aborted) { send({ t: "done", finish: "aborted" }); return; }
 
           const usage: Usage = {};

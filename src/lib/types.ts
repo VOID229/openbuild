@@ -294,6 +294,8 @@ export interface Chat {
   cursorAllowAllTools?: boolean;
   /** Codex/Cursor/Claude Code: the permission mode picked for this thread, from the runtime's own listing. Absent = its configured default. */
   permission?: string;
+  /** Claude Code: chosen when the thread starts, so it can be continued from claude.ai/code or the Claude app. Absent = off. */
+  remoteControl?: boolean;
   /** Reasoning preferences keyed by model identity (including the auto router). */
   efforts?: Record<string, Effort>;
   /** Speed (service tier id, "" = standard) keyed like `efforts`. */

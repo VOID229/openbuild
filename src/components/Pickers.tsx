@@ -1,4 +1,4 @@
-import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
+import { Check, KeyRound, MonitorSmartphone, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   EFFORTS,
@@ -17,6 +17,8 @@ import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
 import { RUNTIME_LABEL, RuntimeIcon, useRuntimeOptions } from "./Workspace";
 import { runtimeName } from "../lib/runtimes";
+import { codexDaemon } from "../lib/pi";
+import { REMOTE_CONTROL } from "../../shared/remoteControl";
 import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
@@ -771,6 +773,90 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
           </div>
           <RuntimeRow />
         </div>
+      </Popover>
+    </div>
+  );
+}
+
+type Daemon = Awaited<ReturnType<typeof codexDaemon>>;
+
+/**
+ * Remote Control, as each vendor offers it. Claude Code opts in per session, so a new thread can
+ * start with it on. Codex pairs a daemon for the whole machine and Cursor sets it in the account:
+ * for those the pill explains where it's set (and, for Codex, how the daemon is doing) instead.
+ */
+export function RemoteControlPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; chatId?: string; deviceId?: string }) {
+  const [open, setOpen] = useState(false);
+  const [daemon, setDaemon] = useState<Daemon | { error: string } | undefined>();
+  const anchor = useRef<HTMLButtonElement>(null);
+  const runtime = useStore((s) => runtimeOf(s, chatId));
+  const chatOn = useStore((s) => (chatId ? !!s.chats.find((c) => c.id === chatId)?.remoteControl : false));
+  const draftOn = useStore((s) => s.draftRemoteControl);
+  const setDraft = useStore((s) => s.setDraftRemoteControl);
+  const remote = REMOTE_CONTROL[runtime];
+  useEffect(() => {
+    if (!open || runtime !== "codex") return;
+    let live = true;
+    setDaemon(undefined);
+    codexDaemon(deviceId).then((d) => live && setDaemon(d), (err: Error) => live && setDaemon({ error: err.message }));
+    return () => { live = false; };
+  }, [open, runtime, deviceId]);
+  if (!remote) return null;
+  const name = RUNTIME_NAME[runtime];
+  // A thread keeps what it started with: only Claude Code threads that opted in show it afterwards.
+  if (chatId) {
+    if (!chatOn || remote.scope !== "thread") return null;
+    return (
+      <span className="pill pill-plain permission-pill" data-tooltip="Remote Control is on for this thread: continue it from claude.ai/code or the Claude app." data-tooltip-side={dropUp ? "top" : "bottom"}>
+        <MonitorSmartphone size={14} aria-hidden />
+        Remote on
+      </span>
+    );
+  }
+  const label = remote.scope === "thread" ? (draftOn ? "Remote on" : "Remote off") : remote.scope === "machine" ? "Remote · machine" : "Remote · account";
+  return (
+    <div className="picker">
+      <button
+        ref={anchor}
+        type="button"
+        className={cx("pill pill-plain permission-pill", open && "pill-open")}
+        aria-haspopup={remote.scope === "thread" ? "listbox" : "dialog"}
+        aria-expanded={open}
+        aria-label={`Remote Control: ${label}`}
+        data-tooltip={open ? undefined : `${name} Remote Control`}
+        data-tooltip-side={dropUp ? "top" : "bottom"}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <MonitorSmartphone size={14} aria-hidden />
+        {label}
+      </button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu effort-menu speed-menu" role={remote.scope === "thread" ? "listbox" : "dialog"} label="Remote Control" fixed={dropUp ? "up" : "auto"}>
+        <div className="menu-label">{name} Remote Control</div>
+        {remote.scope === "thread" ? (
+          <div onKeyDown={(e) => arrowNav(e)}>
+            {[false, true].map((on) => (
+              <button key={String(on)} type="button" role="option" aria-selected={draftOn === on} className="menu-item" onClick={() => { setDraft(on); setOpen(false); }}>
+                <span className="menu-item-label">
+                  {on ? "On for this thread" : "Off"}
+                  {on && <span className="speed-desc">{remote.note}</span>}
+                </span>
+                {draftOn === on && <Check size={15} className="menu-check" />}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="menu-item remote-control-info" aria-disabled>
+            <span className="menu-item-label">
+              {remote.scope === "machine" ? "Set for the whole machine" : `Set in your ${name} account`}
+              <span className="speed-desc">{remote.note}</span>
+              {runtime === "codex" && (
+                <span className="speed-desc" role="status">
+                  {!daemon ? <><Spinner /> Checking this machine's Codex daemon…</> : "status" in daemon && daemon.status ? `This machine's Codex daemon: ${daemon.status}${daemon.version ? ` (app-server ${daemon.version})` : ""}` : `Couldn't check the Codex daemon: ${daemon.error ?? "Codex isn't installed"}`}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
       </Popover>
     </div>
   );

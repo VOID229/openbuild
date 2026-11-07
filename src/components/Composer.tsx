@@ -19,7 +19,7 @@ import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
-import { EffortPicker, ModelPicker, PermissionPicker, SpeedPicker } from "./Pickers";
+import { EffortPicker, ModelPicker, PermissionPicker, RemoteControlPicker, SpeedPicker } from "./Pickers";
 import { IconButton } from "./primitives";
 import { DictationButton } from "./DictationButton";
 import { WorkspaceBelow, WorkspaceTop } from "./Workspace";
@@ -947,6 +947,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <EffortPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
           <SpeedPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
           <PermissionPicker dropUp={variant === "dock"} chatId={chatId} deviceId={mentionDevice} cwd={mentionCwd} />
+          <RemoteControlPicker dropUp={variant === "dock"} chatId={chatId} deviceId={mentionDevice} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>

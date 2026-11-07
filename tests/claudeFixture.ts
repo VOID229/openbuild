@@ -135,12 +135,15 @@ for await (const line of console) {
   if (m.type !== 'control_request') continue;
   const r = m.request, ok = response => out({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, ...(response ? { response } : {}) } });
   if (r.subtype === 'initialize' && r.appendSystemPrompt) log('question-instructions ' + r.appendSystemPrompt);
-  log('control ' + r.subtype + (r.subtype === 'set_model' ? ' ' + r.model : r.subtype === 'set_permission_mode' ? ' ' + r.mode : r.subtype === 'apply_flag_settings' ? ' ' + JSON.stringify(r.settings) : ''));
+  log('control ' + r.subtype + (r.subtype === 'set_model' ? ' ' + r.model : r.subtype === 'set_permission_mode' ? ' ' + r.mode : r.subtype === 'apply_flag_settings' ? ' ' + JSON.stringify(r.settings) : r.subtype === 'remote_control' ? ' ' + r.enabled : ''));
   if (r.subtype === 'initialize') ok({ commands: [], agents: [], output_style: 'default', available_output_styles: ['default'], models, account: { email: 'fixture@example.com', subscriptionType: 'Claude Pro', apiProvider: 'firstParty' }, pid: process.pid, claude_code_version: '2.1.311', current_permission_mode: state.mode, fast_mode_state: 'off', fast_mode_disabled_reason: 'sdk_opt_in_required' });
   else if (r.subtype === 'set_model') { state.model = r.model; ok({ model: r.model }); }
   else if (r.subtype === 'apply_flag_settings') { if ('fastMode' in r.settings) state.fast = r.settings.fastMode === true; if ('effortLevel' in r.settings) state.effort = r.settings.effortLevel; ok(); }
   else if (r.subtype === 'set_permission_mode') { state.mode = r.mode; ok({ mode: r.mode }); }
   else if (r.subtype === 'interrupt') { interrupted = true; ok({}); }
+  // As Claude Code 2.1.314 answers: claude.ai sign-ins get a session URL, others an error.
+  else if (r.subtype === 'remote_control' && process.env.FAKE_REMOTE_CONTROL_ERROR) out({ type: 'control_response', response: { subtype: 'error', request_id: m.request_id, error: process.env.FAKE_REMOTE_CONTROL_ERROR } });
+  else if (r.subtype === 'remote_control') ok(r.enabled ? { session_url: 'https://claude.ai/code/session_fixture', bridge_session_id: 'cse_fixture' } : undefined);
   else out({ type: 'control_response', response: { subtype: 'error', request_id: m.request_id, error: 'Unsupported fixture request ' + r.subtype } });
 }
 `;

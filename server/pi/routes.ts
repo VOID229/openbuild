@@ -270,6 +270,10 @@ export function piRoutes(api: Api) {
     "/api/codex/status": {
       GET: api(async () => Response.json(await codexInstall.status())),
     },
+    // Codex Remote Control is the machine's daemon, so it's reported with the install, not per thread.
+    "/api/codex/status/remote-control": {
+      GET: api(async () => Response.json(await codexInstall.daemonStatus())),
+    },
     "/api/codex/models": {
       GET: api(async (req) => {
         try {
