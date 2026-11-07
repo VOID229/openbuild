@@ -276,13 +276,14 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
 
 // ------------------------------------------------------------------ Pi section
 
-const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: string }> = {
-  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads from ~/.pi/agent/extensions." },
-  skill: { title: "Skills", one: "skill", help: "Instructions Pi's models can pull in when a task calls for them." },
-  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name in the composer." },
+// Extensions are listed, edited, removed and toggled here, but not created: no New button for them.
+const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: string; creatable: boolean }> = {
+  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads from ~/.pi/agent/extensions.", creatable: false },
+  skill: { title: "Skills", one: "skill", help: "Instructions Pi's models can pull in when a task calls for them.", creatable: true },
+  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name in the composer.", creatable: true },
 };
 
-function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }: { kind: ResourceKind; items: PiResource[]; deviceId?: string; onChanged: () => void; onEdit: (r: PiResource) => void; busy: boolean }) {
+export function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }: { kind: ResourceKind; items: PiResource[]; deviceId?: string; onChanged: () => void; onEdit: (r: PiResource) => void; busy: boolean }) {
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string>();
@@ -300,15 +301,17 @@ function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }: { kind
     <section className="pi-block">
       <SubHeading
         action={
-          <button type="button" className="link-btn" onClick={() => setAdding((a) => !a)}>
-            <Plus size={13} /> New {label.one}
-          </button>
+          label.creatable && (
+            <button type="button" className="link-btn" onClick={() => setAdding((a) => !a)}>
+              <Plus size={13} /> New {label.one}
+            </button>
+          )
         }
       >
         {label.title}
       </SubHeading>
       <p className="setting-desc">{label.help}</p>
-      {adding && (
+      {label.creatable && adding && (
         <form
           className="pi-inline-form"
           onSubmit={(e) => {
