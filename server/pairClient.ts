@@ -101,6 +101,15 @@ export async function probeAddress(typed: string, port: number, signal?: AbortSi
 
 export type ClaimResult = { device: Device } | { rejected: true };
 
+const isLoopback = (url: string) => {
+  try {
+    const host = new URL(url).hostname;
+    return host === "localhost" || host === "[::1]" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Trade the code for a token at one waiting host and keep it (devices.json). The token stays on
  * this server: the result carries the device without it.
@@ -116,7 +125,9 @@ export async function claimCandidate(candidate: PairCandidate, input: { code: st
   });
   const body = (await res.json().catch(() => null)) as any;
   if (!res.ok || typeof body?.token !== "string" || !body?.device) return { rejected: true };
-  const urls = [...new Set([candidate.base, ...(body.device.urls ?? [])].filter((u: unknown): u is string => typeof u === "string" && /^https?:\/\//.test(u)))];
+  // A loopback address the host advertises means its own computer, which from here is this one:
+  // saved, it would reach this server instead. Keep one only where the host was actually found.
+  const urls = [...new Set([candidate.base, ...(body.device.urls ?? [])].filter((u: unknown): u is string => typeof u === "string" && /^https?:\/\//.test(u) && (u === candidate.base || !isLoopback(u))))];
   const stored: devices.StoredDevice = {
     ...body.device,
     id: String(body.device.id),

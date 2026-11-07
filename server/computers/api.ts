@@ -18,7 +18,7 @@ import { bad, readJson } from "../handlers";
 import { capabilities, computer, computerExists } from "./index";
 
 /** The header every /api/computers answer carries: the server id of the machine that ran it. */
-export const SERVER_HEADER = "x-openbuild-server";
+export const SERVER_HEADER = devices.SERVER_HEADER;
 
 type Tool = "files" | "terminal" | "browser";
 const TOOL_LABEL: Record<Tool, string> = { files: "files", terminal: "the terminal", browser: "the browser" };

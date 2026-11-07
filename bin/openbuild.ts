@@ -52,6 +52,8 @@ function serviceNetwork(): ServiceNetwork | undefined {
   try { return JSON.parse(readFileSync(SERVICE_NETWORK, "utf8")); } catch { return undefined; }
 }
 const LOG = join(DATA, "server.log");
+/** The network mode paired devices last reached this computer by, so a start without one keeps it. */
+const NETWORK_MODE = join(DATA, "network-mode");
 const KEEPER = join(DATA, "keeper.json");
 const KEEPER_LOG = join(DATA, "keeper.log");
 /** The process that runs Durable turns, so a server restart doesn't interrupt them (`server/durable/worker.ts`). */
@@ -90,6 +92,31 @@ function running(): State | undefined {
   const s = readState();
   if (s && alive(s.pid)) return s;
   if (s) rmSync(STATE, { force: true });
+  return undefined;
+}
+
+/**
+ * The mode `openbuild start` (or a restart of a stopped server) uses when none is given. With no
+ * paired devices that is this computer only. Once a device uses this server, a bare start keeps the
+ * running mode, or the last tailnet/LAN one, so it never moves the server off the address that
+ * device saved: that would look like an unpair from the other side.
+ */
+function defaultMode(): Mode {
+  if (!devices.pairedClients().length) return "local";
+  const last = lastStateMode;
+  return running()?.mode ?? savedMode() ?? (last && last !== "local" ? last : "local");
+}
+
+/** Remember a tailnet/LAN mode the server runs in, for the next start without one. */
+function rememberMode(mode: Mode): void {
+  if (mode !== "local") writeFileSync(NETWORK_MODE, mode + "\n", { mode: 0o600 });
+}
+
+function savedMode(): "lan" | "tailscale" | undefined {
+  try {
+    const saved = readFileSync(NETWORK_MODE, "utf8").trim();
+    if (saved === "lan" || saved === "tailscale") return saved;
+  } catch {}
   return undefined;
 }
 
@@ -252,6 +279,9 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     if (!current) await stopKeeper();
     if (current) {
       if (current.mode === mode) {
+        // A server started before the mode was remembered gets remembered now, so a later stop
+        // and plain start come back the same way.
+        rememberMode(current.mode);
         console.log(`OpenBuild is already running (${current.mode}).`);
         for (const u of current.urls) console.log(`  ${bold(u)}`);
         ensureKeeper(current);
@@ -403,6 +433,10 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     writeFileSync(STATE, JSON.stringify(state, null, 2));
     ensureKeeper(state);
   }
+  rememberMode(mode);
+  const paired = devices.pairedClients().length;
+  if (mode === "local" && paired)
+    notes.push(`${paired === 1 ? "A paired device" : `${paired} paired devices`} can't reach this computer while it runs locally. The pairing is kept: \`openbuild start ${savedMode() ?? "tailscale"}\` brings it back.`);
   stage.print(`OpenBuild is running ${mode === "local" ? "on this computer" : mode === "lan" ? "on your network" : "on your tailnet"}:`);
   for (const u of urls) stage.print(`  ${bold(u)}`);
   for (const n of notes) stage.print(dim(`  ${n}`));
@@ -796,6 +830,9 @@ const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y" && a !== "--al
 if (stopAll && cmd !== "stop") fail("--all is only supported by openbuild stop.");
 // An installed user service owns its lifecycle, even while stopped. Never start a
 // competing detached server or kill its PID behind systemd's back.
+// Read before running() clears a stale state file: a server stopped from a paired device (its
+// keeper holding the port) still says how it ran, from before the mode was remembered.
+const lastStateMode = readState()?.mode;
 const serviceCommands = ["start", "stop", "restart", "status", "logs"];
 const service = cmd && serviceCommands.includes(cmd) && !running() ? systemdService(ROOT, run) : undefined;
 if (service) {
@@ -901,9 +938,10 @@ if (service) {
     break;
   }
   case "start": {
-    const mode = (arg ?? "local") as Mode;
+    const mode = (arg ?? defaultMode()) as Mode;
     if (!["local", "lan", "tailscale"].includes(mode)) fail(`unknown mode "${arg}". Use: openbuild start [lan|tailscale]`);
     await start(mode);
+    if (!arg && mode !== "local") console.log(dim(`  Kept ${mode} for the devices paired with this computer. \`openbuild start local\` serves only this computer.`));
     break;
   }
   case "pair": {
@@ -931,7 +969,7 @@ if (service) {
     const state = readState();
     const owned = !!state && alive(state.pid);
     const port = state?.port ?? PORT;
-    const mode = (arg as Mode | undefined) ?? state?.mode ?? "local";
+    const mode = (arg as Mode | undefined) ?? state?.mode ?? defaultMode();
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);

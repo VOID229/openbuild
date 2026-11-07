@@ -78,6 +78,9 @@ function writeJson(file: string, value: unknown): void {
   }
 }
 
+/** The header naming which server answered (its serverId), so an answer from another machine is never taken for this pairing's. */
+export const SERVER_HEADER = "x-openbuild-server";
+
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** This server's own id (its data), shared with /api/config and reply streams. */
@@ -352,8 +355,23 @@ interface RemoteAnswer {
   body?: { running?: boolean; keeper?: boolean; error?: string };
 }
 
-/** Call a paired host with its token, trying each saved address. Undefined when none answered. */
+/**
+ * Whether an answer came from some other OpenBuild than this paired device: an address that now
+ * reaches a different server (this one, on a loopback name, or a reassigned IP) doesn't speak for
+ * the pairing, whatever its status. An answer naming no server is from an older OpenBuild, and is
+ * taken as the device's own.
+ */
+export const answeredByOther = (res: Response, device: StoredDevice) => {
+  const answered = res.headers.get(SERVER_HEADER);
+  return !!answered && answered !== (device.serverId ?? device.id);
+};
+
+/**
+ * Call a paired host with its token, trying each saved address. Undefined when none answered as
+ * that host. Its refusal (401) stands only when no other address answers better.
+ */
 async function remoteCall(device: StoredDevice, path: string, method: "GET" | "POST", timeoutMs: number): Promise<RemoteAnswer | undefined> {
+  let refused: RemoteAnswer | undefined;
   for (const base of device.urls) {
     try {
       const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
@@ -361,10 +379,16 @@ async function remoteCall(device: StoredDevice, path: string, method: "GET" | "P
         headers: { authorization: `Bearer ${device.token}` },
         signal: AbortSignal.timeout(timeoutMs),
       });
-      return { status: res.status, body: await res.json().catch(() => undefined) };
+      if (answeredByOther(res, device)) {
+        void res.body?.cancel().catch(() => {});
+        continue;
+      }
+      const body = await res.json().catch(() => undefined);
+      if (res.status !== 401) return { status: res.status, body };
+      refused ??= { status: res.status, body };
     } catch {}
   }
-  return undefined;
+  return refused;
 }
 
 /**

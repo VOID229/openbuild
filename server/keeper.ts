@@ -47,7 +47,7 @@ function readState(): State | undefined {
   }
 }
 
-const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401 });
+const unauthorized = () => Response.json({ error: "Unauthorized" }, { status: 401, headers: { [devices.SERVER_HEADER]: devices.serverId() } });
 const unavailable = () => Response.json({ error: "OpenBuild is stopped" }, { status: 503 });
 
 let servers: Array<ReturnType<typeof Bun.serve>> = [];
