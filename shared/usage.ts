@@ -125,6 +125,10 @@ export interface UsageLimits {
   /** Banked resets this sign-in can spend. */
   resetCredits?: UsageResetCredits | number;
   error?: string;
+  /** Why the last check failed: the provider throttling usage checks (HTTP 429), a refused sign-in, or no answer. Not the plan running out, which shows in `windows`. */
+  errorKind?: "rateLimited" | "auth" | "network";
+  /** When a rate-limited account is asked again; nothing, not even Refresh, asks sooner. */
+  retryAt?: number;
 }
 
 /** Plan resets the provider lets this account spend now (Codex, Claude Code). */

@@ -524,7 +524,11 @@ function Chart({ data, metric, hidden }: { data: UsageReport; metric: "cost" | "
 
 // ------------------------------------------------------------------ limits
 
-function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string; loading: boolean }) {
+/** A failed check, with when a throttled one is asked again. */
+const limitProblem = (p: UsageLimits, now: number) =>
+  p.errorKind === "rateLimited" && p.retryAt && p.retryAt > now ? `${p.error} Next check in ${until(p.retryAt, now)}.` : p.error;
+
+function LimitsView({ data, error, refreshing }: { data?: UsageLimitsReport; error?: string; refreshing: boolean }) {
   const now = useNow(30_000);
   if (!data) return error ? <Problem lines={[error]} /> : <div className="ustats-loading"><Spinner size={18} /> Asking providers…</div>;
   const ok = data.providers.filter((p) => p.windows.length);
@@ -556,12 +560,13 @@ function LimitsView({ data, error }: { data?: UsageLimitsReport; error?: string;
         <Problem
           lines={[
             ...(data.machines ?? []).filter((m) => m.status === "error").map((m) => `${m.name}: ${m.error}`),
-            ...failed.map((p) => `${p.machine ? `${p.machine} · ` : ""}${USAGE_PROVIDER_NAMES[p.provider]}${p.account ? ` ${p.account}` : ""}${p.source ? ` (${p.source})` : ""}: ${p.error}`),
+            ...failed.map((p) => `${p.machine ? `${p.machine} · ` : ""}${USAGE_PROVIDER_NAMES[p.provider]}${p.account ? ` ${p.account}` : ""}${p.source ? ` (${p.source})` : ""}: ${limitProblem(p, now)}`),
           ]}
         />
       )}
       <p className="ustats-foot ustats-dim">
-        Checked {ago(data.checkedAt, now)}
+        {refreshing ? "Checking now…" : `Checked ${ago(data.checkedAt, now)}`}
+        {!refreshing && error && <span className="ustats-stale"> · couldn't refresh</span>}
       </p>
     </>
   );

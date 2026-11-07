@@ -73,7 +73,17 @@ function claudeResetCredits(block: any, now: number): UsageResetCredits | undefi
   const expiresAt = Number.isFinite(Date.parse(next.ends_at)) ? Date.parse(next.ends_at) : undefined;
   return available > 0 ? { available, ...(expiresAt ? { expiresAt } : {}), creditId: next.id } : undefined;
 }
-type Reading = Omit<UsageLimits, "provider" | "asOf" | "id"> & { asOf?: number };
+type Reading = Omit<UsageLimits, "provider" | "asOf" | "id"> & { asOf?: number; retryAfterMs?: number };
+
+/** A failed check, told apart: throttled checks, a refused sign-in, no answer, or anything else. */
+function failure(err: unknown, who: string): Pick<Reading, "error" | "errorKind" | "retryAfterMs"> {
+  if (err instanceof RateLimited) return { error: err.message, errorKind: "rateLimited", retryAfterMs: err.retryAfterMs };
+  if (err instanceof AuthRefused) return { error: err.message, errorKind: "auth" };
+  const name = (err as Error)?.name;
+  if (name === "TimeoutError") return { error: `${who} didn't answer in time.`, errorKind: "network" };
+  if (err instanceof TypeError && typeof (err as { code?: unknown }).code === "string") return { error: `${who} couldn't be reached.`, errorKind: "network" };
+  return { error: (err as Error)?.message || `${who} couldn't be read.` };
+}
 
 /** `/home/me/.claude-2` → `~/.claude-2`. */
 const tildePath = (p: string) => (p.startsWith(home() + "/") ? `~${p.slice(home().length)}` : p);
@@ -88,9 +98,29 @@ async function readJson(path: string): Promise<any> {
   return JSON.parse(text);
 }
 
+/** The provider is throttling usage checks (HTTP 429): not the plan running out. */
+class RateLimited extends Error {
+  readonly kind = "rateLimited";
+  constructor(who: string, readonly retryAfterMs: number | undefined) {
+    super(`${who} is limiting how often usage can be checked (HTTP 429).`);
+  }
+}
+
+class AuthRefused extends Error {
+  readonly kind = "auth";
+}
+
+/** `Retry-After` as seconds or an HTTP date, in ms from now. */
+export function retryAfterMs(header: string | null, now = Date.now()): number | undefined {
+  if (!header) return undefined;
+  const t = /^\d+$/.test(header.trim()) ? Number(header) * 1000 : Date.parse(header) - now;
+  return Number.isFinite(t) && t >= 0 ? t : undefined;
+}
+
 async function getJson(url: string, init: RequestInit, who: string): Promise<any> {
   const res = await fetch(url, { ...init, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
-  if (res.status === 401 || res.status === 403) throw new Error(`${who} turned down the saved sign-in. Run ${who === "Cursor" ? "cursor-agent" : who.toLowerCase()} to sign in again.`);
+  if (res.status === 401 || res.status === 403) throw new AuthRefused(`${who} turned down the saved sign-in. Run ${who === "Cursor" ? "cursor-agent" : who.toLowerCase()} to sign in again.`);
+  if (res.status === 429) throw new RateLimited(who, retryAfterMs(res.headers.get("retry-after")));
   if (!res.ok) throw new Error(`${who} answered HTTP ${res.status}.`);
   return res.json();
 }
@@ -395,7 +425,7 @@ async function codexLimits(token: string, accountId: string | undefined, dir?: s
   } catch (err) {
     // Offline or signed out: what the CLI's last session recorded, marked as such.
     const snap = dir ? await codexSnapshot(dir).catch(() => undefined) : undefined;
-    if (snap) return { ...snap, stale: true, error: (err as Error).message };
+    if (snap) return { ...snap, stale: true, ...failure(err, "Codex") };
     throw err;
   }
 }
@@ -507,7 +537,17 @@ const PROVIDERS: [UsageProvider, () => Promise<Account[]>][] = [
 /** Fresh enough to reuse; Refresh asks again once this has passed. */
 const TTL_MS = 60_000;
 const MIN_REFRESH_MS = 10_000;
+/** After a 429: the provider's Retry-After, or doubling from RATE_BACKOFF_MS; never under a minute nor over an hour. */
+const RATE_BACKOFF_MS = 2 * 60_000;
+const MIN_HOLD_MS = 60_000;
+const MAX_HOLD_MS = 60 * 60_000;
 const cache = new Map<UsageProvider, { at: number; value: Promise<UsageLimits[]>; snapshot?: UsageLimits[] }>();
+/** Accounts a provider asked us to stop checking for a while, by limits id. */
+const holds = new Map<string, { until: number; failures: number; error: string }>();
+
+export function holdDelay(failures: number, retryAfter: number | undefined) {
+  return Math.min(MAX_HOLD_MS, Math.max(MIN_HOLD_MS, retryAfter ?? RATE_BACKOFF_MS * 2 ** Math.max(0, failures - 1)));
+}
 
 async function readAccounts(provider: UsageProvider, list: () => Promise<Account[]>): Promise<UsageLimits[]> {
   const groups = new Map<string, Account[]>();
@@ -517,21 +557,36 @@ async function readAccounts(provider: UsageProvider, list: () => Promise<Account
     groups.set(account.key, group);
   }
   const results = await Promise.all([...groups.values()].map(async (accounts) => {
+    const id = `${provider}:${accounts[0]!.key}`;
+    const label = (a: Account) => ({ ...(groups.size > 1 ? { account: a.tag ?? "1" } : {}), source: a.source });
+    // Throttled: answer from the hold without asking, even for Refresh, until the provider's wait is over.
+    const held = holds.get(id);
+    if (held && Date.now() < held.until)
+      return { provider, id, asOf: Date.now(), windows: [], error: held.error, errorKind: "rateLimited", retryAt: held.until, ...label(accounts[0]!) } satisfies UsageLimits;
     let best: UsageLimits | undefined;
     for (const a of accounts) {
       let reading: UsageLimits;
       try {
-        reading = { provider, id: `${provider}:${a.key}`, asOf: Date.now(), ...await a.read() };
+        reading = { provider, id, asOf: Date.now(), ...await a.read() };
       } catch (err) {
         if (err instanceof Missing) continue;
-        const message = (err as Error)?.name === "TimeoutError" ? `${USAGE_PROVIDER_NAMES[provider]} didn't answer in time.` : (err as Error).message;
-        reading = { provider, id: `${provider}:${a.key}`, asOf: Date.now(), windows: [], error: message };
+        reading = { provider, id, asOf: Date.now(), windows: [], ...failure(err, USAGE_PROVIDER_NAMES[provider]) };
       }
-      reading = { ...reading, ...(groups.size > 1 ? { account: a.tag ?? "1" } : {}), source: a.source };
+      const { retryAfterMs, ...rest } = reading as UsageLimits & { retryAfterMs?: number };
+      reading = { ...rest, ...label(a) };
+      if (reading.errorKind === "rateLimited") {
+        const failures = (held?.failures ?? 0) + 1;
+        const until = Date.now() + holdDelay(failures, retryAfterMs);
+        holds.set(id, { until, failures, error: reading.error! });
+        reading.retryAt = until;
+      }
       if (!best || preferLimits(reading, best)) best = reading;
+      // The same account through another sign-in is throttled too; asking it would only add to the 429s.
+      if (reading.errorKind === "rateLimited") break;
       // Prefer the CLI when it works (it can redeem reset credits), but try Pi if it fails.
       if (reading.windows.length && !reading.stale && !reading.error) break;
     }
+    if (best && best.errorKind !== "rateLimited") holds.delete(id);
     return best;
   }));
   return results.filter((r): r is UsageLimits => !!r);
@@ -553,7 +608,7 @@ export async function limits(force = false): Promise<UsageLimits[]> {
         // A failed refresh must not erase the last reading or make old values look current.
         // Only retain accounts still discovered, and never retain redeemable reset grants.
         return reading.error && !reading.windows.length && saved?.windows.length
-          ? { ...saved, ...reading, windows: saved.windows, asOf: saved.asOf, stale: true, resetCredits: undefined }
+          ? { ...saved, errorKind: undefined, retryAt: undefined, ...reading, windows: saved.windows, asOf: saved.asOf, stale: true, resetCredits: undefined }
           : reading;
       });
       return slot.snapshot;

@@ -91,12 +91,13 @@ function useSlot<T>(key: string) {
     (l) => (listeners.add(l), () => listeners.delete(l)),
     () => {
       const s = slots.get(key);
-      return s ? `${s.at}:${s.loading}:${s.error ?? ""}` : "";
+      return s ? `${s.at}:${s.loading}:${!!s.forced}:${s.error ?? ""}` : "";
     },
   );
   void version;
   const s = slots.get(key) as Slot<T> | undefined;
-  return { data: s?.data, loading: !!s?.loading, error: s?.error, at: s?.at ?? 0 };
+  // `refreshing`: a fresh read was asked for (opening, Refresh), as opposed to a quiet background poll.
+  return { data: s?.data, loading: !!s?.loading, refreshing: !!s?.loading && !!s?.forced, error: s?.error, at: s?.at ?? 0 };
 }
 
 export function useUsageReport(range: UsageRange, machine: UsageScope) {

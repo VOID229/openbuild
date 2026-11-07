@@ -80,10 +80,10 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
       },
     ).finally(() => (c.running = undefined));
   }
-  // Limits return the completed refresh so the browser cannot cache an old reading as fresh.
+  // Limits wait a little for the refresh, never a sleeping device's whole timeout: past that the
+  // machine shows as pending (its old readings marked stale) and the page polls until it lands.
   // History reports still show cached numbers immediately.
-  if (c.running && key === "limits") await c.running;
-  else if (c.running && c.value === undefined) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
+  if (c.running && (key === "limits" || c.value === undefined)) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
   return { value: c.value, at: c.at, error: c.error, pending: !!c.running };
 }
 

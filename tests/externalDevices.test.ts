@@ -15,7 +15,8 @@ test("external devices, on a throwaway data directory", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
+  // One scenario waits out the few seconds a sleeping device is given before Limits answers.
+}, 20_000);
 
 test("the destructive scenario refuses a flag with the wrong data-directory variable", () => {
   const dir = mkdtempSync(join(tmpdir(), "openbuild-device-sentinel-"));
