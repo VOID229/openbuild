@@ -464,11 +464,8 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
     const ids = [...new Set(patch.botIds)].filter((b) => db.getBot(b));
     if (ids.length >= 1) {
       c.botIds = ids;
-      const follow = groupFollow.get(id);
-      if (follow) {
-        follow.ids = follow.ids.filter(botId => ids.includes(botId));
-        if (!follow.ids.length) groupFollow.delete(id);
-      }
+      const follow = db.groupFollow(id);
+      if (follow) db.setGroupFollow(id, { ...follow, ids: follow.ids.filter(botId => ids.includes(botId)) });
     }
   }
   db.putConversation(c);
@@ -481,7 +478,6 @@ export function deleteConversation(id: string) {
   const c = db.getConversation(id);
   if (!c) throw new BotsError("No such conversation.", 404);
   if (c.kind === "direct") throw new BotsError("Delete the bot to remove its chat.");
-  groupFollow.delete(id);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
 }
@@ -533,8 +529,10 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
 }
 
 export const GROUP_FOLLOW_MS = 20 * 60_000;
-// Who the user's last group request went to. Only user requests refresh the clock.
-const groupFollow = new Map<string, { ids: string[]; at: number }>();
+/** How far the clock may have stepped back (an NTP fix after a restart) and a follow still hold. */
+const CLOCK_SKEW_MS = 60_000;
+// Who the user's last group request went to is kept in the database (db.groupFollow), so a restart
+// mid-window doesn't hand the next message to the primary. Only user requests refresh the clock.
 
 /**
  * Who an untagged user message in a group goes to: whoever the last request went to, for 20 minutes
@@ -542,8 +540,8 @@ const groupFollow = new Map<string, { ids: string[]; at: number }>();
  */
 function groupRecipients(c: db.StoredConversation, message: BotMessage): string[] {
   const members = c.botIds.filter(id => db.getBot(id));
-  const follow = groupFollow.get(c.id);
-  if (follow && message.at >= follow.at && message.at - follow.at < GROUP_FOLLOW_MS) {
+  const follow = db.groupFollow(c.id);
+  if (follow && message.at >= follow.at - CLOCK_SKEW_MS && message.at - follow.at < GROUP_FOLLOW_MS) {
     const ids = follow.ids.filter(id => members.includes(id));
     if (ids.length) return ids;
   }
@@ -612,7 +610,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
       const groupRequest = message.author === "me" && c.kind === "group";
       if (groupRequest && !message.poll) {
         if (!targets.length) targets = groupRecipients(c, message);
-        if (targets.length) groupFollow.set(conversationId, { ids: targets, at: message.at });
+        db.setGroupFollow(conversationId, { ids: targets, at: message.at });
       }
       for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id] } : {}) });
     }
@@ -871,6 +869,7 @@ function quietNow(at: Date): boolean {
 export function tick(busy: (botId: string) => boolean) {
   const now = Date.now();
   reportPollChanges(now);
+  db.sweepGroupFollows(now, GROUP_FOLLOW_MS, CLOCK_SKEW_MS);
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;

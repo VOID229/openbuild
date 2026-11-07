@@ -29,6 +29,7 @@ function open(): Database {
     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(text, conversation_id UNINDEXED, content='', contentless_delete=1);
     CREATE TABLE IF NOT EXISTS cursors (bot_id TEXT NOT NULL, conversation_id TEXT NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (bot_id, conversation_id));
     CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS group_follows (conversation_id TEXT PRIMARY KEY, bot_ids TEXT NOT NULL, at INTEGER NOT NULL);
   `);
   return db;
 }
@@ -159,6 +160,7 @@ export function deleteConversation(id: string) {
     for (const { seq } of db.query<{ seq: number }, [string]>("SELECT seq FROM messages WHERE conversation_id = ?").all(id)) db.query("DELETE FROM messages_fts WHERE rowid = ?").run(seq);
     db.query("DELETE FROM messages WHERE conversation_id = ?").run(id);
     db.query("DELETE FROM cursors WHERE conversation_id = ?").run(id);
+    db.query("DELETE FROM group_follows WHERE conversation_id = ?").run(id);
     db.query("DELETE FROM conversations WHERE id = ?").run(id);
   })();
 }
@@ -249,7 +251,39 @@ export function setCursor(botId: string, conversationId: string, seq: number) {
   db.query("INSERT INTO cursors (bot_id, conversation_id, seq) VALUES (?1, ?2, ?3) ON CONFLICT(bot_id, conversation_id) DO UPDATE SET seq = MAX(seq, ?3)").run(botId, conversationId, seq);
 }
 
+// ------------------------------------------------------------------ group follows
+
+/** Who the user's last request in a group went to, and when. */
+export interface GroupFollow {
+  ids: string[];
+  at: number;
+}
+
+/** A group's follow; a row that doesn't read as one is dropped. */
+export function groupFollow(conversationId: string): GroupFollow | undefined {
+  const row = db.query<{ bot_ids: string; at: number }, [string]>("SELECT bot_ids, at FROM group_follows WHERE conversation_id = ?").get(conversationId);
+  if (!row) return undefined;
+  let ids: unknown;
+  try {
+    ids = JSON.parse(row.bot_ids);
+  } catch {}
+  if (Array.isArray(ids) && ids.length && ids.every((id) => typeof id === "string") && Number.isFinite(row.at)) return { ids, at: row.at };
+  deleteGroupFollow(conversationId);
+  return undefined;
+}
+export function setGroupFollow(conversationId: string, follow: GroupFollow) {
+  if (!follow.ids.length) return deleteGroupFollow(conversationId);
+  db.query("INSERT INTO group_follows (conversation_id, bot_ids, at) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET bot_ids = ?2, at = ?3").run(conversationId, JSON.stringify(follow.ids), follow.at);
+}
+export function deleteGroupFollow(conversationId: string) {
+  db.query("DELETE FROM group_follows WHERE conversation_id = ?").run(conversationId);
+}
+/** Drop follows that can't apply now: `ttl` old, or stamped more than `skew` ahead (the clock stepped back). */
+export function sweepGroupFollows(now: number, ttl: number, skew: number): number {
+  return db.query("DELETE FROM group_follows WHERE at <= ?1 OR at > ?2").run(now - ttl, now + skew).changes;
+}
+
 /** Everything, gone: for Reset. */
 export function wipe() {
-  db.exec("DELETE FROM bots; DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM routines; DELETE FROM conversations; DELETE FROM messages; DELETE FROM messages_fts; DELETE FROM cursors; DELETE FROM kv;");
+  db.exec("DELETE FROM bots; DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM routines; DELETE FROM conversations; DELETE FROM messages; DELETE FROM messages_fts; DELETE FROM cursors; DELETE FROM group_follows; DELETE FROM kv;");
 }
