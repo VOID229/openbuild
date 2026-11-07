@@ -1,11 +1,11 @@
-// Which OpenBots workspace this tab shows: this server's, or a paired host's that let this device
-// use it (server/bots/workspace.ts). Every workspace goes by its server's real id, this one's too
-// (from /api/config), never "local".
+// Which OpenBots workspace this tab shows: always this server's, the one the tab is connected to
+// (server/bots/workspace.ts). Every workspace goes by its server's real id, this one's too (from
+// /api/config), never "local".
 //
-// The choice is this tab's own: sessionStorage, and ?workspace=<id> in the address while it's
-// another device's. The server keeps no current host. A tab that comes back to an id its origin no
-// longer serves, or isn't paired with, says the workspace is no longer here; it never takes on the
-// server that answers there now.
+// There's no choosing another device's. A tab that still has ?workspace=<id> in its address, or an
+// id in its session, from when it could, opens this server's anyway and clears them. What that
+// workspace kept in this browser (its cached chats, layout and changes it never confirmed) stays
+// under its own id: it isn't moved, merged, deleted or sent here.
 import { create } from "zustand";
 import { config } from "../runtime";
 import { useStore } from "../store";
@@ -59,20 +59,7 @@ export const useWorkspaceName = (id: string | undefined) => {
   return workspaceName(id);
 };
 
-function read(fn: () => string | null | undefined): string | undefined {
-  try {
-    return fn() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/** The workspace this tab chose before: its address first, then its session. Undefined in a new tab. */
-export function chosenWorkspace(): string | undefined {
-  return read(() => new URL(location.href).searchParams.get(WORKSPACE_PARAM)) ?? read(() => sessionStorage.getItem(SESSION_KEY));
-}
-
-/** Remember this tab's workspace, in its session and, for another device's, its address. */
+/** Remember this tab's workspace in its session, and clear a stale one from its address. */
 export function rememberWorkspace(id: string) {
   try {
     sessionStorage.setItem(SESSION_KEY, id);

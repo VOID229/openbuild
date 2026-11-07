@@ -16,7 +16,7 @@ import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
 import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
-import { chosenWorkspace, isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
+import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
   text: string;
@@ -466,6 +466,27 @@ function saveUnconfirmed(id: string, change: (list: Unconfirmed[]) => Unconfirme
   if (session?.id === id) useBots.setState({ unconfirmed: next });
 }
 
+/**
+ * Changes this browser keeps for workspaces other than the one this tab is in: left from when a tab
+ * could open a paired host's. Only read here, to say they exist and to save a copy; never sent,
+ * moved or removed, since the workspace they were sent to is the only one that can settle them.
+ */
+export function keptElsewhere(): { workspace: string; entries: Unconfirmed[] }[] {
+  const current = useBots.getState().workspace;
+  const ids: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(UNCONFIRMED)) ids.push(key.slice(UNCONFIRMED.length));
+    }
+  } catch {}
+  return ids
+    .filter((id) => id && id !== current)
+    .sort()
+    .map((workspace) => ({ workspace, entries: readUnconfirmed(workspace) }))
+    .filter((k) => k.entries.length);
+}
+
 /** Whether a write shows in a workspace's conversations: true, false, or undefined when they can't tell. */
 function landed(check: WriteCheck, conversations: Conversation[]): boolean | undefined {
   const c = conversations.find((x) => x.id === check.conversationId);
@@ -727,15 +748,14 @@ function load(visit: Visit): Promise<void> {
  * connection for as long as the page is open, and browsers share six per host across all tabs: that
  * stays for pages that have actually opened OpenBots.
  *
- * A new tab opens on this server's workspace. One that chose another before (its session, or the
- * address) goes back to that one, and if it isn't here anymore, says so.
+ * Every tab opens on this server's workspace, whatever another device's it was on before (see
+ * workspace.ts): that one's cache and not-confirmed changes stay where they are, and nothing is sent there.
  */
 export async function preloadBots(): Promise<void> {
   const local = await localWorkspace();
   if (!session) {
-    const id = chosenWorkspace() ?? local.id;
-    if (!id) return;
-    enter(id);
+    if (!local.id) return;
+    enter(local.id);
   }
   return load(session!);
 }
