@@ -38,8 +38,8 @@ Register it under whichever account should own it:
 | Homepage URL | The OpenBuild repository |
 | Callback URL | Leave empty. Sign-in uses the device flow. |
 | Request user authorization (OAuth) during installation | Off |
-| Enable Device Flow | **On** |
-| Expire user authorization tokens | **On**, the default. Tokens last 8 hours, refresh tokens 6 months. |
+| Identifying and authorizing users → Enable Device Flow | **On**, then **Save changes** at the bottom of the page |
+| Optional Features → User-to-server token expiration | **On**, the default for new apps (the sidebar's **Optional Features**, not the General page). Tokens last 8 hours, refresh tokens 6 months. |
 | Webhook → Active | **Off** |
 | Repository permissions | Metadata: read (always). Contents: read & write. Issues: read & write. Pull requests: read & write. Actions: read. Checks: read. Commit statuses: read. |
 | Account and organization permissions | None |
@@ -123,7 +123,7 @@ installation) and `unsel` (not selected):
 | G1 | Remote MCP `initialize` and `tools/list` at `api.githubcopilot.com/mcp/` with the app's user token | The session starts and lists tools |
 | G2 | A harmless read of a file in private `sel` through an MCP tool | Returns the file |
 | G3 | The same read on private `unsel` | Denied (404 or 403), nothing leaks |
-| G4 | Refresh with the client ID only, on a device-flow token | New pair; the old access and refresh tokens are both refused |
+| G4 | Refresh with the client ID only, on a device-flow token | New pair; the old access token gets 401 and the old refresh token `incorrect_client_credentials` |
 | G5 | Read-only on, a bot calls a write tool | Refused by OpenBuild before any request reaches GitHub |
 | G6 | Disconnect with a PAT still saved, and during a refresh | No credential is used; nothing comes back |
 | G7 | Another browser or a paired device looks at or cancels the sign-in | 403; the device code never appears |
