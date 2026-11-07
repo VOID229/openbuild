@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { Window } from "happy-dom";
 
 // Settings → Providers manages Pi only: no runtime picker and no other runtime's accounts, and
@@ -13,11 +13,6 @@ g.matchMedia = g.window.matchMedia;
 g.IS_REACT_ACT_ENVIRONMENT = true;
 g.confirm = () => true;
 
-const { act, createElement } = await import("react");
-const { createRoot } = await import("react-dom/client");
-const { useStore } = await import("../src/lib/store");
-const { ProvidersSection } = await import("../src/components/PiSettings");
-
 const providers = [
   { id: "xai", name: "xAI", oauth: { name: "xai", subscription: false }, status: { configured: true }, stored: "oauth", models: 4 },
   { id: "openrouter", name: "OpenRouter", apiKey: { name: "OPENROUTER_API_KEY", canLogin: true }, status: { configured: true }, stored: "api_key", models: 1 },
@@ -25,17 +20,29 @@ const providers = [
 ];
 
 let calls: { url: string; method: string }[] = [];
+// Installed before the store loads: its saved-state read starts on import and retries, and a retry
+// landing mid-test would count as a request this page made.
+globalThis.fetch = (async (url: string, init?: RequestInit) => {
+  calls.push({ url: String(url), method: init?.method ?? "GET" });
+  if (String(url).endsWith("/api/pi/providers")) return Response.json({ providers });
+  if (String(url).includes("/api/pi/models")) return Response.json({ models: [] });
+  return Response.json({});
+}) as unknown as typeof fetch;
+
+const { act, createElement } = await import("react");
+const { createRoot } = await import("react-dom/client");
+const { useStore } = await import("../src/lib/store");
+const { ProvidersSection } = await import("../src/components/PiSettings");
+
 let host: HTMLElement;
 let root: ReturnType<typeof createRoot>;
 
+beforeAll(async () => {
+  if (!useStore.persist.hasHydrated()) await new Promise<void>((resolve) => useStore.persist.onFinishHydration(() => resolve()));
+});
+
 beforeEach(() => {
   calls = [];
-  globalThis.fetch = (async (url: string, init?: RequestInit) => {
-    calls.push({ url: String(url), method: init?.method ?? "GET" });
-    if (String(url).endsWith("/api/pi/providers")) return Response.json({ providers });
-    if (String(url).includes("/api/pi/models")) return Response.json({ models: [] });
-    return Response.json({});
-  }) as unknown as typeof fetch;
   useStore.setState({
     devices: [
       { id: "local", name: "imac", local: true },
