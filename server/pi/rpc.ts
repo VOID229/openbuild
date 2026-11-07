@@ -25,6 +25,7 @@ export function reportProblem(source: string, message: string) {
 }
 
 export class PiError extends Error {}
+export class PiTimeoutError extends PiError {}
 
 /** The longest a command waits on a compaction Pi reports, as long as a reply may take. */
 const COMPACTION_LIMIT_MS = 15 * 60 * 1000;
@@ -157,8 +158,10 @@ export class PiProcess {
       const settle = () => (clearTimeout(timer), resume && this.compacting?.delete(resume));
       const fail = () => {
         settle();
-        this.pending.delete(id);
-        reject(new PiError(`Pi didn't answer "${command.type}" in time`));
+        const err = new PiTimeoutError(`Pi didn't answer "${command.type}" in time`);
+        // Pi handles commands concurrently and doesn't cancel a slow one, so its answer can still come.
+        err.answered = new Promise((done) => this.pending.set(id, { resolve: done, reject: () => done(undefined) }));
+        reject(err);
       };
       // Pi answers a prompt that takes the session over its threshold only once it has compacted it,
       // and that's a model call: minutes on a long session. The deadline starts again once it's done.
