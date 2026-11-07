@@ -166,7 +166,18 @@ export function contextFor(botId: string): string {
     `You have a computer: a home folder, a terminal (bash), files (read, write, edit) and a browser. It stays around between chats. The time is ${new Date().toString()}.`,
   ];
   const ownChat = bot.primary ? svc.directId(botId) : undefined;
-  if (ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId)) {
+  const offered = !!ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId);
+  const developer = bot.primary ? svc.developerAnswer() : undefined;
+  if (developer?.kind === "no") {
+    lines.push("When you asked, the user said they don't really write code. The starter team is for people who code, so don't offer it or mention it again. Help them yourself, and offer to make bots for the things they do often.");
+  } else if (developer && !offered) {
+    lines.push(
+      developer.kind === "own"
+        ? `When you asked whether they write code, the user answered in their own words: “${developer.text}”. If that means they write code, ${svc.TEAM_OFFER} If it doesn't, the team isn't for them: don't offer or mention it, and say briefly what you can still help with on your own.`
+        : `When you asked whether they write code, the user said they write code. Now ${svc.TEAM_OFFER}`,
+    );
+  }
+  if (offered) {
     lines.push(
       "You offered the user a starter team in your chat. If they take it, the app makes Manager, Tracer and Researcher and a Team group with you in it by itself, so don't make them with manage_bot. Once they're there, say in a message or two how to put them to work. If the user would rather not, ask what they'd like to do, and offer to make bots for the things they do often.",
     );
@@ -268,9 +279,10 @@ export function askUser(botId: string, p: Record<string, unknown>) {
   const conversationId = conversationFor(botId, p.conversation);
   const title = String(p.title ?? p.question ?? "").trim().slice(0, 300);
   if (!title) throw new svc.BotsError("Write the question.");
-  // The starter team is the app's to make, so its offer has fixed choices: taking it is A.
-  const offer = p.offer === "team" && requireBot(botId).primary && conversationId === svc.directId(botId) ? "team" : undefined;
-  const options = offer ? ["Set up the team", "Not now"] : asStrings(p.options).slice(0, 8);
+  // The first-run questions are the app's to act on, so they have fixed choices: taking the team, or saying they code, is A.
+  const offer = (p.offer === "team" || p.offer === "developer") && requireBot(botId).primary && conversationId === svc.directId(botId) ? p.offer : undefined;
+  if (offer === "team" && svc.developerAnswer()?.kind === "no") throw new svc.BotsError("The user said they don't write code, so the starter team isn't for them. Don't offer it.");
+  const options = offer === "team" ? ["Set up the team", "Not now"] : offer === "developer" ? ["Yes, I write code", "No, not really"] : asStrings(p.options).slice(0, 8);
   const message: BotMessage = {
     id: crypto.randomUUID(),
     author: botId,
