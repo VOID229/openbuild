@@ -11,6 +11,9 @@ export async function requestUsage<T>(urls: string[], path: string, token: strin
   for (const base of urls) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
+    // This address was given the rest of the deadline, so its timeout ends the request. The timer can
+    // fire a hair before Date.now() reaches the deadline; that sliver mustn't start another address.
+    const lastChance = remaining <= addressTimeoutMs;
     try {
       const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
         ...init,
@@ -33,8 +36,9 @@ export async function requestUsage<T>(urls: string[], path: string, token: strin
     } catch (err) {
       if ((err as { final?: boolean }).final) throw err;
       if (!readOnly) throw new Error("Reset response unconfirmed. Retry only the same operation ID.");
-      last = (err as Error).name === "TimeoutError" || (err as Error).name === "AbortError"
-        ? "it didn't answer in time" : "it's unreachable";
+      const timedOut = (err as Error).name === "TimeoutError" || (err as Error).name === "AbortError";
+      last = timedOut ? "it didn't answer in time" : "it's unreachable";
+      if (timedOut && lastChance) break;
     }
   }
   throw new Error(last);

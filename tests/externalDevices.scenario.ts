@@ -81,6 +81,36 @@ describe("external devices", () => {
     expect(by("codex:theirs")?.account).toBeUndefined();
   });
 
+  test("a sleeping device holds limits up only briefly, then shows as pending until it answers", async () => {
+    devices.addDevice(device("laptop"));
+    let calls = 0;
+    let release: (() => void) | undefined;
+    const request = spyOn(remoteUsage, "requestUsage").mockImplementation((async () => {
+      calls++;
+      if (calls > 1) await new Promise<void>((resolve) => (release = resolve));
+      return { providers: [limit("claude", "claude:laptop")], checkedAt: Date.now() };
+    }) as never);
+    await machineLimits(false, async () => []);
+    const asOf = (await machineLimits(false, async () => [])).providers.find((p) => p.id === "claude:laptop")!.asOf;
+    // Opening Usage forces a refresh; the device doesn't answer.
+    const started = Date.now();
+    const open = await machineLimits(true, async () => [limit("codex", "codex:here")]);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(open.machines?.find((m) => m.id === "laptop")?.status).toBe("pending");
+    expect(open.providers.find((p) => p.id === "codex:here")).toBeDefined();
+    expect(open.providers.find((p) => p.id === "claude:laptop")).toMatchObject({ asOf });
+    // The page's pending polls coalesce on the one request already out.
+    await machineLimits(false, async () => []);
+    await machineLimits(true, async () => []);
+    expect(calls).toBe(2);
+    release!();
+    await Bun.sleep(0);
+    const landed = await machineLimits(false, async () => []);
+    request.mockRestore();
+    expect(landed.machines?.find((m) => m.id === "laptop")?.status).toBe("ok");
+    expect(calls).toBe(2);
+  }, 15_000);
+
   test("unpairing a device drops it, and its cached readings, from usage", async () => {
     devices.addDevice(device("laptop"));
     const request = spyOn(remoteUsage, "requestUsage").mockImplementation((async () => ({ providers: [limit("claude", "claude:laptop")], checkedAt: Date.now() })) as never);
