@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { botModelChain, castVote, findMentions, findTags, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -1192,16 +1192,46 @@ test("a bot falls back through its models in order, only before its reply has do
       await inherits.reply();
       a.equal(inherits.log[0], 'd/main');
 
-      // Its own fallbacks replace the default's; its own model keeps its own fallbacks, none included.
+      // Its own fallbacks replace the default's.
       const ownList = setup('Own list', undefined, ['f/own'], { 'd/main': 'error', 'f/own': 'ok' });
       a.deepEqual(modelChain(ownList.bot.id), ['d/main', 'f/own']);
       r = await ownList.reply();
       a.deepEqual(ownList.log, ['d/main', 'f/own']);
+      // A bot on a model of its own, with no list of its own, still falls back through the default's...
       const ownModel = setup('Own model', 'a/one', undefined, { 'a/one': 'error', 'e/backup': 'ok' });
-      a.deepEqual(modelChain(ownModel.bot.id), ['a/one']);
+      a.deepEqual(modelChain(ownModel.bot.id), ['a/one', 'e/backup', 'openai-codex-2/gpt-6.1-sol']);
       r = await ownModel.reply();
-      a.deepEqual(ownModel.log, ['a/one']);
+      a.deepEqual(ownModel.log, ['a/one', 'e/backup']);
+      a.deepEqual(r.texts, ['Hello from e/backup']);
+      // ...and goes back to its own model on the next reply.
+      ownModel.log.length = 0;
+      await ownModel.reply();
+      a.equal(ownModel.log[0], 'a/one');
+
+      // No fallback: neither the default's nor a list of its own, on its own model or on Default.
+      const none = setup('No fallback', 'a/one', ['f/own'], { 'a/one': 'error', 'f/own': 'ok', 'e/backup': 'ok' });
+      svc.updateBot(none.bot.id, { noFallbacks: true });
+      a.equal(db.getBot(none.bot.id).noFallbacks, true);
+      a.deepEqual(db.getBot(none.bot.id).fallbackModels, ['f/own']);
+      a.deepEqual(modelChain(none.bot.id), ['a/one']);
+      r = await none.reply();
+      a.deepEqual(none.log, ['a/one']);
+      a.equal(r.switches.length, 0);
       a.equal(r.errors[0].event.detail, 'a/one is over its limit');
+      svc.updateBot(none.bot.id, { model: '' });
+      a.deepEqual(modelChain(none.bot.id), ['d/main']);
+      // The choice survives a round trip through the API's JSON and the database.
+      a.equal(JSON.parse(JSON.stringify(svc.fullBot(none.bot.id))).noFallbacks, true);
+      // Back to its own list, then to the defaults; a legacy empty list stays "inherit".
+      svc.updateBot(none.bot.id, { noFallbacks: false });
+      a.equal(db.getBot(none.bot.id).noFallbacks, undefined);
+      a.deepEqual(modelChain(none.bot.id), ['d/main', 'f/own']);
+      svc.updateBot(none.bot.id, { noFallbacks: true });
+      svc.updateBot(none.bot.id, { fallbackModels: ['g/listed'] });
+      a.equal(db.getBot(none.bot.id).noFallbacks, undefined);
+      a.deepEqual(modelChain(none.bot.id), ['d/main', 'g/listed']);
+      svc.updateBot(none.bot.id, { noFallbacks: false, fallbackModels: [] });
+      a.deepEqual(modelChain(none.bot.id), ['d/main', 'e/backup', 'openai-codex-2/gpt-6.1-sol']);
 
       // A default-model reply that already wrote isn't redone on the default's fallbacks either.
       const halfway = setup('Halfway', undefined, undefined, { 'd/main': 'partial', 'e/backup': 'ok' });
@@ -1226,13 +1256,37 @@ test("a bot falls back through its models in order, only before its reply has do
   }
 }, 30_000);
 
-test("a bot's model chain: its own model and fallbacks, or the default's when it's on Default", () => {
+test("a bot's model chain: its model, then its own fallbacks, none, or the defaults whatever its model", () => {
   const settings = { defaultModel: "d/main", defaultFallbackModels: ["e/backup", "d/main", "f/third"] };
+  // Default, nothing of its own: the defaults, without repeating the primary.
   expect(botModelChain({}, settings)).toEqual(["d/main", "e/backup", "f/third"]);
   expect(botModelChain(undefined, settings)).toEqual(["d/main", "e/backup", "f/third"]);
+  // A custom primary with no list of its own keeps that primary and still takes the defaults.
+  expect(botModelChain({ model: "a/one" }, settings)).toEqual(["a/one", "e/backup", "d/main", "f/third"]);
+  expect(botModelChain({ model: "e/backup" }, settings)).toEqual(["e/backup", "d/main", "f/third"]);
+  // A legacy empty list is still "inherit".
+  expect(botModelChain({ model: "a/one", fallbackModels: [] }, settings)).toEqual(["a/one", "e/backup", "d/main", "f/third"]);
+  expect(botModelChain({ fallbackModels: [], noFallbacks: false }, settings)).toEqual(["d/main", "e/backup", "f/third"]);
+  // Its own list replaces the defaults, on Default or a custom primary, deduped in order.
   expect(botModelChain({ fallbackModels: ["g/own", "d/main"] }, settings)).toEqual(["d/main", "g/own"]);
-  expect(botModelChain({ model: "a/one" }, settings)).toEqual(["a/one"]);
-  expect(botModelChain({ model: "a/one", fallbackModels: ["a/one", "b/two"] }, settings)).toEqual(["a/one", "b/two"]);
+  expect(botModelChain({ model: "a/one", fallbackModels: ["a/one", "b/two", "b/two"] }, settings)).toEqual(["a/one", "b/two"]);
+  // A second account's model is its own entry, kept apart from the first account's.
+  expect(botModelChain({ model: "openai-codex/gpt", fallbackModels: ["openai-codex-2/gpt", "openai-codex/gpt"] }, settings)).toEqual(["openai-codex/gpt", "openai-codex-2/gpt"]);
+  expect(botModelChain({ model: "openai-codex/gpt" }, { defaultFallbackModels: ["openai-codex/gpt", "openai-codex-2/gpt"] })).toEqual(["openai-codex/gpt", "openai-codex-2/gpt"]);
+  // No fallback: just the primary, whatever is listed or set as defaults.
+  expect(botModelChain({ noFallbacks: true }, settings)).toEqual(["d/main"]);
+  expect(botModelChain({ model: "a/one", noFallbacks: true }, settings)).toEqual(["a/one"]);
+  expect(botModelChain({ model: "a/one", fallbackModels: ["b/two"], noFallbacks: true }, settings)).toEqual(["a/one"]);
+  expect(botModelChain({ noFallbacks: true }, {})).toEqual([undefined]);
+  // Without a default model the primary is Pi's own.
   expect(botModelChain({}, { defaultFallbackModels: ["e/backup"] })).toEqual([undefined, "e/backup"]);
   expect(botModelChain({}, {})).toEqual([undefined]);
+});
+
+test("a bot's fallback mode: the defaults unless it has a list or is set to none", () => {
+  expect(fallbackMode(undefined)).toBe("inherit");
+  expect(fallbackMode({})).toBe("inherit");
+  expect(fallbackMode({ fallbackModels: [] })).toBe("inherit");
+  expect(fallbackMode({ fallbackModels: ["a/one"] })).toBe("own");
+  expect(fallbackMode({ noFallbacks: true, fallbackModels: ["a/one"] })).toBe("none");
 });
