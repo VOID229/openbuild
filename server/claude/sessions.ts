@@ -75,6 +75,8 @@ interface Live {
   mode?: string;
   /** Remote Control is on: claude.ai/code can reach this process, so it isn't retired when idle. */
   remote?: boolean;
+  /** Remote Control failed to start on this process: don't retry (or repeat the notice) until a new one. */
+  remoteFailed?: boolean;
 }
 const hot = globalThis as typeof globalThis & { openbuildClaudeLive?: Map<string, Live>; openbuildClaudeReaper?: ReturnType<typeof setInterval> };
 const live = hot.openbuildClaudeLive ??= new Map<string, Live>();
@@ -303,13 +305,13 @@ export function runTurn(req: PiChatRequest, signal: AbortSignal): ReadableStream
           await withTimeout(proc.q.applyFlagSettings({ effortLevel: row.supportsEffort && req.effort !== "off" ? req.effort as never : null, fastMode: req.speed === FAST ? true : null }), 30_000, "the settings change");
           if (proc.mode !== mode) { await withTimeout(proc.q.setPermissionMode(mode), 30_000, "the permission change"); proc.mode = mode; }
           // The thread's opt-in, once per process. A failure is reported, not fatal: the turn still runs here.
-          if (!!req.remoteControl !== !!proc.remote) {
+          if (!!req.remoteControl !== !!proc.remote && !(req.remoteControl && proc.remoteFailed)) {
             try {
               const r = await withTimeout(remoteControl(proc.q, !!req.remoteControl), 30_000, "the Remote Control change");
               proc.remote = !!req.remoteControl;
               if (proc.remote) send({ t: "notice", message: `Remote Control is on: continue this thread at ${r?.session_url ?? "claude.ai/code"}` });
             } catch (e) {
-              if (req.remoteControl) send({ t: "notice", message: `Remote Control didn't start (${e instanceof Error ? e.message : String(e)}). It needs a claude.ai sign-in.` });
+              if (req.remoteControl) proc.remoteFailed = true, send({ t: "notice", message: `Remote Control didn't start (${e instanceof Error ? e.message : String(e)}). It needs a claude.ai sign-in.` });
             }
           }
           if (signal.aborted) { send({ t: "done", finish: "aborted" }); return; }

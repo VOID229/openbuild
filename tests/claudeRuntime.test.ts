@@ -125,6 +125,19 @@ test("a sign-in without Remote Control still runs the turn and says why", async 
     expect(events.find((e) => e.t === "notice")).toMatchObject({ message: expect.stringContaining("Remote Control didn't start (Remote Control requires a claude.ai subscription)") });
     expect(text(events)).toBe("reply 1 to api key");
     expect(events.find((e) => e.t === "done")).toMatchObject({ finish: "stop" });
+    // Latched for this process: later turns neither retry nor repeat the notice.
+    let from = protocol().length;
+    const again = await collect({ ...req, message: "again", prior: 1 });
+    expect(again.find((e) => e.t === "notice")).toBeUndefined();
+    expect(text(again)).toBe("reply 2 to again");
+    expect(protocol().slice(from)).not.toContain("remote_control");
+    // A new process tries again.
+    release(req.threadId);
+    delete process.env.FAKE_REMOTE_CONTROL_ERROR;
+    from = protocol().length;
+    const fresh = await collect({ ...req, message: "fresh", prior: 2 });
+    expect(fresh.find((e) => e.t === "notice")).toMatchObject({ message: expect.stringContaining("Remote Control is on") });
+    expect(protocol().slice(from)).toContain("control remote_control true");
     release(req.threadId);
   } finally { delete process.env.FAKE_REMOTE_CONTROL_ERROR; }
 });
