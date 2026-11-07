@@ -1009,8 +1009,6 @@
 }
 
 .bm-avatar {
-  position: sticky;
-  bottom: 6px;
   display: grid;
   flex: none;
   place-items: center;
@@ -1493,7 +1491,6 @@
 }
 
 .bm-working .bm-avatar {
-  position: static;
   margin-bottom: 0;
 }
 
