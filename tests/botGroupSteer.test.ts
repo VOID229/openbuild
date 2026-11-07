@@ -264,3 +264,49 @@ test('a steer an extension handled is done with, even when the model then fails 
   a.equal(of(alpha.bot).length, 2);
   a.ok(!commands.some(c => c.type === 'clear_queue'));
 `), 30_000);
+
+// The model fails before acting while a group steer still hasn't been answered, with another behind it.
+const boundary = (accepted: boolean) => `
+  svc.updateBot(alpha.bot.id, { model: 'one/primary', fallbackModels: ['two/fallback'] });
+  post(group.id, 'me', '@Alpha START');
+  await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
+  let answer;
+  pi.steer = () => new Promise((ok, no) => { answer = (yes) => yes ? ok({ disposition: 'queued' }) : no(new Error('Pi didn\\'t answer "steer" in time')); });
+  const pending = post(group.id, 'me', '@Alpha PENDING', { image: 'PPPP' });
+  await until(() => steers.length === 1 && answer);
+  const behind = post(group.id, 'me', '@Alpha BEHIND', { image: 'BBBB' });
+  await settle();
+  a.equal(steers.length, 1);
+  of(alpha.bot)[0].fail('overloaded');
+  await settle();
+  // The fallback doesn't start until the steer is answered, and nothing joins the turn meanwhile.
+  a.equal(of(alpha.bot).length, 1);
+  const later = post(group.id, 'me', '@Alpha LATER');
+  await settle();
+  a.equal(steers.length, 1);
+  answer(${accepted});
+  await until(() => of(alpha.bot).length === 2 && minds.get(alpha.bot.id).steerable);
+  const fallback = of(alpha.bot)[1];
+  // Pi has nothing left for the fallback to read: it was cleared, or never queued.
+  a.deepEqual(fallback.drained, []);
+  const alphaCommands = commands.filter(c => c.bot === alpha.bot.id).map(c => c.type);
+  a.equal(alphaCommands.includes('clear_queue'), ${accepted});
+  if (${accepted}) a.ok(alphaCommands.indexOf('clear_queue') < alphaCommands.lastIndexOf('prompt'), alphaCommands.join());
+  const assigned = (text) => of(alpha.bot).filter(p => lineFor(p.message, text)?.includes('[assigned request: answer this]'));
+  for (const text of ['@Alpha PENDING', '@Alpha BEHIND', '@Alpha LATER']) a.equal(assigned(text).length, 0, text);
+  fallback.finish('DONE');
+  await until(() => of(alpha.bot).length === 3 && minds.get(alpha.bot.id).steerable);
+  of(alpha.bot)[2].finish('DONE');
+  await until(() => !runner.busy(alpha.bot.id));
+  await settle();
+  // Each request once, in a turn of its own after the fallback's, each image once.
+  a.equal(of(alpha.bot).length, 3);
+  a.equal(steers.length, 1);
+  for (const text of ['@Alpha PENDING', '@Alpha BEHIND', '@Alpha LATER']) a.equal(assigned(text).length, 1, text);
+  a.deepEqual(of(alpha.bot)[2].images.sort(), ['BBBB', 'PPPP']);
+  a.deepEqual(of(alpha.bot)[2].drained, []);
+  for (const m of [pending, behind, later]) a.deepEqual(db.getMessage(m.id).message.seenBy, [alpha.bot.id]);
+`;
+
+test('a fallback waits for a group steer Pi answers late, then answers it and those behind it once', () => run('boundary-ack', boundary(true)), 30_000);
+test('a fallback waits for a group steer that times out, then answers it and those behind it once', () => run('boundary-timeout', boundary(false)), 30_000);

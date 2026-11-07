@@ -150,13 +150,14 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
     const took = await mind.proc.send<{ disposition?: string } | undefined>({ type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, 15_000);
     return took?.disposition ?? "queued";
   })().catch(() => undefined);
-  mind.steering = attempt.then((disposition) => !!disposition);
-  void attempt.then((disposition) => {
-    if (!disposition) return enqueue(botId, item);
+  // Recorded as part of the chain, so whoever waits on it sees where every steer ended up.
+  mind.steering = attempt.then((disposition) => {
+    if (!disposition) return void enqueue(botId, item), false;
     // A model that fails before acting hands the turn to the next one, whose prompt doesn't have these.
     // One an extension handled is done with.
     if (disposition !== "handled" && mind.shown === turn) (mind.steered ??= []).push(item);
     markSeen(botId, new Map(), new Set(ids));
+    return true;
   });
 }
 
@@ -558,9 +559,14 @@ async function run(botId: string, all: Wake[]) {
       m.draft = "";
       m.typing = false;
       m.activity = "Thinking";
+      if (index) {
+        // Between attempts nothing joins the turn, and every steer begun in the last one settles first:
+        // one Pi took late would otherwise land in this attempt unrecorded.
+        m.steerable = false;
+        await m.steering;
+      }
       // Steered into an attempt whose model failed before acting: answered in a turn of their own, not lost.
       if (m.steered?.length) {
-        await m.steering;
         // Pi keeps the steers it never read for the next prompt, which would answer them a second time.
         await m.proc.send({ type: "clear_queue" }, 30_000);
         for (const job of m.steered.splice(0)) enqueue(botId, job);
