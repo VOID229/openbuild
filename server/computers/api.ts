@@ -150,6 +150,14 @@ const stamp = (res: Response) => {
 /** /api/computers: for this server's bots service, and for the server this device is paired with. */
 export function computerRoutes(api: Api) {
   return {
+    // Who this is and what the asking server's bots may do here, without probing container engines
+    // (which can take seconds), so a caller can check it reached the right machine before every burst of tool calls.
+    "/api/computers/identity": {
+      GET: api((req: Request) => {
+        const who = devices.authenticateDevice(req);
+        return stamp(Response.json({ serverId: devices.serverId(), machine: devices.deviceName(), ...(who && { grants: who.botTools }) }));
+      }),
+    },
     "/api/computers/capabilities": {
       GET: api(async (req: Request) => {
         const who = devices.authenticateDevice(req);
@@ -247,7 +255,7 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
   for (const url of device.urls) {
     const base = url.replace(/\/$/, "");
     try {
-      const res = await fetch(`${base}/api/computers/capabilities`, { headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
+      const res = await fetch(`${base}/api/computers/identity`, { headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
       void res.body?.cancel().catch(() => {});
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         last = `it answered HTTP ${res.status}`;
@@ -344,9 +352,9 @@ export async function computerTargets(): Promise<ComputerTarget[]> {
   const remote = await Promise.all(
     devices.readDevices().map(async (d): Promise<ComputerTarget> => {
       try {
-        const caps = await computerApi(d.id).capabilities();
-        const g = caps.grants;
-        return { device: d.id, name: d.name, status: g && (g.files || g.terminal || g.browser) ? "ready" : "access", grants: g, engines: caps.engines };
+        const res = await deviceFetch(d.id, "/api/computers/identity");
+        const g = ((await res.json().catch(() => ({}))) as { grants?: BotToolGrants }).grants;
+        return { device: d.id, name: d.name, status: g && (g.files || g.terminal || g.browser) ? "ready" : "access", grants: g };
       } catch (err) {
         return { device: d.id, name: d.name, status: err instanceof TargetError ? (err.reason === "denied" ? "access" : err.reason) : "offline", message: (err as Error).message };
       }

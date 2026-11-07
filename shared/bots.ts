@@ -395,7 +395,7 @@ export interface ComputerTarget {
   status: "ready" | "access" | "offline" | "revoked" | "outdated" | "mismatch" | "unpaired";
   /** What it allows (everything, for this server). */
   grants?: BotToolGrants;
-  /** Container engines there, so Container can be offered only where it works. */
+  /** Container engines there (this server only: probing a device's takes seconds). */
   engines?: ("podman" | "docker")[];
   message?: string;
 }

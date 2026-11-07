@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -13,6 +13,14 @@ const workspaceData = join(directory, "workspace");
 mkdirSync(targetData, { recursive: true });
 mkdirSync(workspaceData, { recursive: true });
 writeFileSync(join(targetData, "device-name"), "Target Box\n");
+// Container engines that take ages to answer, as a cold CI runner's can: checking which machine
+// answered must not wait on them.
+const slowBin = join(directory, "bin");
+mkdirSync(slowBin);
+for (const engine of ["podman", "docker"]) {
+  writeFileSync(join(slowBin, engine), "#!/bin/sh\nsleep 30\n");
+  chmodSync(join(slowBin, engine), 0o755);
+}
 Object.assign(process.env, {
   OPENCHAT_DATA_DIR: workspaceData,
   OPENCHAT_SECRETS: "file",
@@ -43,7 +51,7 @@ async function until(check: () => Promise<boolean>, label: string) {
 
 async function launchTarget() {
   const child = Bun.spawn([process.execPath, resolve("server/index.ts")], {
-    env: { ...process.env, NODE_ENV: "production", PORT: String(port), HOST: "127.0.0.1", OPENCHAT_DATA_DIR: targetData, OPENCHAT_SECRETS_FILE: join(targetData, "secrets.json"), PI_CODING_AGENT_DIR: join(targetData, "pi"), CI: "1" },
+    env: { ...process.env, NODE_ENV: "production", PORT: String(port), HOST: "127.0.0.1", OPENCHAT_DATA_DIR: targetData, OPENCHAT_SECRETS_FILE: join(targetData, "secrets.json"), PI_CODING_AGENT_DIR: join(targetData, "pi"), PATH: `${slowBin}:${process.env.PATH}`, CI: "1" },
     stdout: "ignore",
     stderr: "ignore",
   });
@@ -118,10 +126,11 @@ test("pairing alone lets the workspace's bots do nothing on the target, and noth
 test("a paired device can't grant itself anything, and an unknown token is refused rather than taken for a browser", async () => {
   const self = await fetch(`${base()}/api/paired-clients/${clientId}`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ botTools: { terminal: true } }) });
   expect(self.status).toBe(403);
-  const stranger = await fetch(`${base()}/api/computers/capabilities`, { headers: { authorization: `Bearer ${"ab".repeat(32)}` } });
+  const stranger = await fetch(`${base()}/api/computers/identity`, { headers: { authorization: `Bearer ${"ab".repeat(32)}` } });
   expect(stranger.status).toBe(401);
-  const caps = (await (await fetch(`${base()}/api/computers/capabilities`, { headers: { authorization: `Bearer ${token}` } })).json()) as any;
-  expect(caps.grants.terminal).toBe(false);
+  const identity = await fetch(`${base()}/api/computers/identity`, { headers: { authorization: `Bearer ${token}` } });
+  expect(identity.headers.get("x-openbuild-server")).toBe(target);
+  expect(await identity.json()).toEqual({ serverId: target, machine: "Target Box", grants: { files: false, terminal: false, browser: false, unisolated: false } });
 });
 
 test("each grant opens only its own tools, and unisolated access is a grant of its own", async () => {
