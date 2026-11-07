@@ -3,14 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-test('mixed group wakes preserve assigned delivery and never steer pending user requests', async () => {
+test('mixed group wakes preserve assigned delivery and never steer requests assigned elsewhere', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-mixed-delivery-'));
   try {
     const child = Bun.spawn([process.execPath, '-e', `
       import { strict as a } from 'node:assert';
-      import { mock } from 'bun:test';
-      const decisions = [];
-      mock.module('./server/bots/router.ts', () => ({ routeGroup: () => new Promise(resolve => decisions.push(resolve)) }));
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
@@ -32,56 +29,56 @@ test('mixed group wakes preserve assigned delivery and never steer pending user 
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       const until = async check => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
       let now = Date.now();
-      const post = (where, author, text, image) => svc.postMessage(where, { id: crypto.randomUUID(), author, text, at: now, ...(image ? { images: ['data:image/png;base64,' + image] } : {}) });
+      const post = (where, author, text, image, replyTo) => svc.postMessage(where, { id: crypto.randomUUID(), author, text, at: now, replyTo, ...(image ? { images: ['data:image/png;base64,' + image] } : {}) });
+      const of = bot => prompts.filter(p => p.bot === bot.id);
       for (const unscopedFirst of [false, true]) {
         now += 21 * 60_000;
-        let index = prompts.length;
+        const index = of(alpha.bot).length, betaIndex = of(beta.bot).length;
         post(alpha.conversationId, 'me', 'BLOCK');
-        await until(() => prompts.length === index + 1 && minds.get(alpha.bot.id).steerable);
-        // Expired follow keeps this request pending while the explicit request runs.
-        const pending = post(group.id, 'me', 'PENDING', 'AAAA');
+        await until(() => of(alpha.bot).length === index + 1 && minds.get(alpha.bot.id).steerable);
+        // A reply to Beta is Beta's request alone, with its image, while Alpha works through the rest.
+        const said = post(group.id, beta.bot.id, 'beta said');
+        const pending = post(group.id, 'me', 'PENDING', 'AAAA', said.id);
+        await until(() => of(beta.bot).length === betaIndex + 1 && minds.get(beta.bot.id).steerable);
+        const betaPrompt = of(beta.bot)[betaIndex];
+        a.match(betaPrompt.message, /\\[assigned request: answer this\\][^\\n]*: PENDING/);
+        a.deepEqual(betaPrompt.images.map(i => i.data), ['AAAA']);
         const trigger = post(group.id, alpha.bot.id, 'react here');
         let explicit;
         if (!unscopedFirst) explicit = post(group.id, 'me', '@Alpha ASSIGNED', 'BBBB');
         svc.toggleReaction(group.id, trigger.id, '👍', 'me');
         post(group.id, beta.bot.id, '@Alpha BOT MENTION');
         if (unscopedFirst) explicit = post(group.id, 'me', '@Alpha ASSIGNED', 'BBBB');
-        prompts[index].finish('BLOCK DONE');
-        await until(() => prompts.length === index + 2 && minds.get(alpha.bot.id).steerable);
-        const first = prompts[index + 1];
+        of(alpha.bot)[index].finish('BLOCK DONE');
+        await until(() => of(alpha.bot).length === index + 2 && minds.get(alpha.bot.id).steerable);
+        const first = of(alpha.bot)[index + 1];
         // A group wake during a live turn must queue, never steer the unread transcript.
         post(group.id, beta.bot.id, '@Alpha LIVE MENTION');
         svc.toggleReaction(group.id, trigger.id, '✅', 'me');
         runner.wake(alpha.bot.id, { kind: 'note', conversationId: group.id, text: 'NOTE' });
         a.equal(steers.length, 0);
         first.finish('GROUP ONE');
-        await until(() => prompts.length === index + 3 && minds.get(alpha.bot.id).steerable);
-        prompts[index + 2].finish('GROUP TWO');
+        await until(() => of(alpha.bot).length === index + 3 && minds.get(alpha.bot.id).steerable);
+        of(alpha.bot)[index + 2].finish('GROUP TWO');
         // The live-turn note may batch with the remaining unscoped turn, or follow it.
-        await until(() => !runner.busy(alpha.bot.id) || prompts.length === index + 4);
-        if (prompts.length === index + 4) {
+        await until(() => !runner.busy(alpha.bot.id) || of(alpha.bot).length === index + 4);
+        if (of(alpha.bot).length === index + 4) {
           await until(() => minds.get(alpha.bot.id).steerable);
-          prompts[index + 3].finish('NOTE DONE');
+          of(alpha.bot)[index + 3].finish('NOTE DONE');
         }
         await until(() => !runner.busy(alpha.bot.id));
-        const groupPrompts = prompts.slice(index + 1);
+        const groupPrompts = of(alpha.bot).slice(index + 1);
         const assigned = groupPrompts.filter(p => p.message.includes('[assigned request: answer this]: @Alpha ASSIGNED'));
         a.equal(assigned.length, 1);
         a.deepEqual(assigned[0].images.map(i => i.data), ['BBBB']);
         for (const p of groupPrompts) {
-          a.ok(p.message.includes('[context only: do not answer]: PENDING'), p.message);
+          a.match(p.message, /\\[context only: do not answer\\][^\\n]*: PENDING/);
           if (p !== assigned[0]) a.equal((p.images ?? []).length, 0);
         }
-        a.equal(db.getMessage(pending.id).message.seenBy, undefined);
-        a.deepEqual(db.getMessage(explicit.id).message.seenBy, [alpha.bot.id]);
-        const before = prompts.length;
-        decisions.shift()([beta.bot.id]);
-        await until(() => prompts.length === before + 1 && minds.get(beta.bot.id).steerable);
-        a.ok(prompts[before].message.includes('[assigned request: answer this]: PENDING'));
-        a.deepEqual(prompts[before].images.map(i => i.data), ['AAAA']);
-        prompts[before].finish('PENDING DONE');
-        await until(() => !runner.busy(beta.bot.id));
         a.deepEqual(db.getMessage(pending.id).message.seenBy, [beta.bot.id]);
+        a.deepEqual(db.getMessage(explicit.id).message.seenBy, [alpha.bot.id]);
+        betaPrompt.finish('PENDING DONE');
+        await until(() => !runner.busy(beta.bot.id));
       }
       a.equal(steers.length, 0);
       a.equal(db.messages(group.id).filter(r => r.message.text === 'PENDING DONE').length, 2);

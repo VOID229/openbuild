@@ -71,7 +71,7 @@ export function wake(botId: string, item: Wake) {
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
   const conversationId = item.conversationId;
-  // Group wakes must queue: an unscoped steer could expose user requests still awaiting routing.
+  // Group wakes must queue: an unscoped steer could expose user requests assigned to other bots.
   if (db.getConversation(conversationId ?? "")?.kind !== "group" && !item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
     const shown = mind.shown;
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
@@ -116,7 +116,9 @@ export function waitingIn(botId: string): string[] {
 
 function setStatus(botId: string, next: BotStatus) {
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
-  svc.setStatus(botId, { ...next, waiting: waiting.length ? waiting : undefined });
+  // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
+  const owed = !!next.quiet && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
+  svc.setStatus(botId, { ...next, quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined });
 }
 
 async function pump(botId: string) {
@@ -583,7 +585,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   if (!c) return "";
   const cursor = db.cursor(botId, conversationId);
   const rows = db.messages(conversationId, 16);
-  // A delayed decision can target a message older than the history window or cursor.
+  // A wake that waited its turn can target a message older than the history window or cursor.
   for (const id of assigned ?? []) {
     const row = db.getMessage(id);
     if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
@@ -596,7 +598,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     const text = m.event && eventText(m.event);
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
     const body = m.event ? `(${text}${m.event.detail ? `${text!.endsWith(" in") ? " " : ": "}${m.event.detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
-    // Unscoped group wakes may react to bots/events, never adopt user requests awaiting routing.
+    // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
     const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
       : r.seq > cursor ? "" : " [already seen]";

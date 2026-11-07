@@ -92,38 +92,43 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
-test("untagged groups follow recipients until expiry without duplicate delivery", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-router-"));
+test("untagged groups follow the last recipients for 20 minutes, else the primary, with no routing model", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
-      import { mock } from 'bun:test';
-      let output = '[]', calls = 0, model;
-      mock.module('./server/bots/routingComplete.ts', () => ({ routingComplete: async (m) => { calls++; model = m; return output; } }));
+      const spawn = Bun.spawn;
+      let spawns = 0;
+      Bun.spawn = (...args) => (spawns++, spawn(...args));
       const svc = await import('./server/bots/service.ts');
-      const boss = svc.createBot({ name: 'Boss', model: 'provider/primary' }).bot.id;
-      svc.updateBot(boss, { model: 'provider/primary' });
+      const boss = svc.createBot({ name: 'Boss' }).bot.id;
       const helper = svc.createBot({ name: 'Helper' }).bot.id;
       const group = svc.createConversation({ kind: 'group', name: 'Group', botIds: [boss, helper] });
-      const woken = [];
-      svc.setHooks({ wake: id => woken.push(id), stop() {} });
+      const wakes = [];
+      svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
       let now = Date.now();
       const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: now });
-      const check = async (text, expected) => {
-        woken.length = 0; post(text); await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, expected);
+      // Woken before postMessage returns: nothing is decided in the background.
+      const check = (text, expected) => {
+        wakes.length = 0;
+        const m = post(text);
+        a.deepEqual(wakes.map(w => [w.id, w.messageIds]), expected.map(id => [id, [m.id]]), text);
+        return m;
       };
-      await check('@Helper hello', [helper]); a.equal(calls, 0);
-      await check('Keep going', [helper]); a.equal(calls, 0);
-      now += 20 * 60_000;
-      output = JSON.stringify([boss]); await check('A new topic', [boss]);
-      a.equal(model, 'provider/primary');
-      now += 20 * 60_000; output = JSON.stringify([helper, helper]); await check('Research this', [helper]);
-      now += 20 * 60_000; output = JSON.stringify(['outsider']); await check('Invalid', [boss]);
-      now += 20 * 60_000; output = 'not json'; await check('Broken', [boss]);
-      now += 20 * 60_000; output = JSON.stringify([helper]);
-      woken.length = 0; const message = post('Retry'); svc.postMessage(group.id, message);
-      await new Promise(r => setTimeout(r, 10)); a.deepEqual(woken, [helper]);
-      a.equal(svc.messagePage(group.id).messages.filter(m => m.author === 'me' && !m.event).length, 7);
+      check('A new topic', [boss]);
+      check('@Helper hello', [helper]);
+      now += svc.GROUP_FOLLOW_MS - 1; check('Keep going', [helper]);
+      // Each request restarts the clock, so the follow rolls on.
+      now += svc.GROUP_FOLLOW_MS - 1; check('Still here', [helper]);
+      now += svc.GROUP_FOLLOW_MS; check('Exactly 20 minutes later', [boss]);
+      check('@Boss @Helper both', [boss, helper]);
+      check('Continue both', [boss, helper]);
+      // A duplicate post is the same message, and wakes nobody again.
+      wakes.length = 0;
+      const message = post('Once');
+      svc.postMessage(group.id, message);
+      a.equal(wakes.length, 2);
+      a.equal(spawns, 0);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
@@ -136,8 +141,6 @@ test("group replies wake the quoted bot instead of falling back to the primary",
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
-      import { mock } from 'bun:test';
-      mock.module('./server/bots/routingComplete.ts', () => ({ routingComplete: async () => '[]' }));
       const svc = await import('./server/bots/service.ts');
       const primary = svc.createBot({ name: 'Boss' });
       const second = svc.createBot({ name: 'Helper' });
@@ -214,46 +217,34 @@ test("a message between bots shows as a linked activity line in each bot's own c
   }
 });
 
-test('group follow refreshes only on user requests and stale routes cannot switch it', async () => {
+test('group follow refreshes only on user requests and follows membership changes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-follow-'));
   try {
     const child = Bun.spawn([process.execPath, '-e', `
       import { strict as a } from 'node:assert';
-      import { mock } from 'bun:test';
-      const pending = [];
-      mock.module('./server/bots/router.ts', () => ({ routeGroup: () => new Promise(r => pending.push(r)) }));
       const svc = await import('./server/bots/service.ts');
       const boss = svc.createBot({ name: 'Boss' }).bot.id;
       const helper = svc.createBot({ name: 'Helper' }).bot.id;
-      const group = svc.createConversation({ kind: 'group', name: 'Follow', botIds: [boss, helper] });
+      const third = svc.createBot({ name: 'Third' }).bot.id;
+      const group = svc.createConversation({ kind: 'group', name: 'Follow', botIds: [boss, helper, third] });
       const wakes = [];
       svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
       let now = Date.now();
       const post = (text, author = 'me') => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text, at: now });
-      const tick = () => new Promise(r => setTimeout(r, 0));
-      const first = post('Route one');
-      const second = post('Route two');
-      pending[1]([helper]); await tick();
-      pending[0]([boss]); await tick();
-      a.deepEqual(wakes.map(w => [w.id, w.messageIds]), [[helper, [second.id]], [boss, [first.id]]]);
-      now += 19 * 60_000; post('Continue');
-      a.equal(wakes.at(-1).id, helper); a.equal(pending.length, 2);
-      now += 19 * 60_000; post('Still here');
-      a.equal(wakes.at(-1).id, helper); a.equal(pending.length, 2);
-      post('@Boss switch'); post('Continue boss'); a.equal(wakes.at(-1).id, boss);
-      post('@Boss @Helper both'); post('Continue both');
-      a.deepEqual(wakes.slice(-2).map(w => w.id), [boss, helper]);
-      svc.updateConversation(group.id, { botIds: [helper] });
-      post('Only remaining member'); a.equal(wakes.at(-1).id, helper);
+      const last = n => wakes.slice(-n).map(w => w.id);
+      post('@Helper @Third start'); a.deepEqual(last(2), [helper, third]);
+      // Bot chatter and reactions don't keep the follow alive.
       now += 19 * 60_000;
       const chatter = post('Bot chatter', helper);
       svc.toggleReaction(group.id, chatter.id, '👍', 'me');
-      now += 60_000; post('Expired'); a.equal(pending.length, 3);
-      post('@Helper newer explicit');
-      pending[2]([boss]); await tick(); // removed selection falls back to an eligible member
-      a.equal(wakes.at(-1).id, helper);
-      post('Follow explicit'); a.equal(pending.length, 3);
-      a.equal(wakes.at(-1).id, helper);
+      now += 60_000; post('Expired'); a.deepEqual(last(1), [boss]);
+      post('@Helper @Third again');
+      // A removed member drops out of the follow; the rest keep it.
+      svc.updateConversation(group.id, { botIds: [boss, helper] });
+      wakes.length = 0; post('Without third'); a.deepEqual(last(9), [helper]);
+      // With nobody left to follow, the primary takes it.
+      svc.updateConversation(group.id, { botIds: [boss] });
+      wakes.length = 0; post('Only boss'); a.deepEqual(last(9), [boss]);
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
