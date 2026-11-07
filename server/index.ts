@@ -175,15 +175,14 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
       const res = await fetch(target, { method: req.method, headers, body, signal: ctrl.signal });
       clearTimeout(deadline);
       req.signal.removeEventListener("abort", abort);
-      if (res.status === 502 || res.status === 503 || res.status === 504) {
-        lastError = `the device answered HTTP ${res.status}`;
+      // Another OpenBuild's answer, whatever its status, isn't this device's: try its other addresses.
+      if (devices.answeredByOther(res, device)) {
+        lastError = "another OpenBuild answered at a saved address";
         void res.body?.cancel().catch(() => {});
         continue;
       }
-      // Another OpenBuild refusing the token isn't this device's answer: try its other addresses.
-      const answered = res.headers.get(devices.SERVER_HEADER);
-      if (res.status === 401 && answered && answered !== (device.serverId ?? device.id)) {
-        lastError = "another OpenBuild answered at a saved address";
+      if (res.status === 502 || res.status === 503 || res.status === 504) {
+        lastError = `the device answered HTTP ${res.status}`;
         void res.body?.cancel().catch(() => {});
         continue;
       }

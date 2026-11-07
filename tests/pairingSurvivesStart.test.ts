@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
@@ -41,23 +41,32 @@ const env = (data: string, port: number) => ({
   CI: "1",
 });
 
-/** `openbuild …` on the macbook. */
-function cli(...args: string[]) {
-  const run = Bun.spawnSync([process.execPath, join(root, "bin/openbuild.ts"), ...args], { cwd: root, env: env(mac, macPort), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
+/** `openbuild …` on the macbook, or on another fixture computer. */
+const cli = (...args: string[]) => cliOn(mac, macPort, ...args);
+function cliOn(data: string, port: number, ...args: string[]) {
+  const run = Bun.spawnSync([process.execPath, join(root, "bin/openbuild.ts"), ...args], { cwd: root, env: env(data, port), stdin: "ignore", stdout: "pipe", stderr: "pipe", timeout: 60_000 });
   const out = run.stdout.toString() + run.stderr.toString();
   if (run.exitCode !== 0) throw new Error(`openbuild ${args.join(" ")} failed:\n${out}`);
   return out;
 }
 
-/** Run devices.ts in the macbook's data, in a subprocess so this process never holds its paths. */
-function onMac(code: string) {
+/** Run devices.ts in the macbook's (or another fixture's) data, in a subprocess so this process never holds its paths. */
+const onMac = (code: string) => onData(mac, macPort, code);
+function onData(data: string, port: number, code: string) {
   const script = `const d = await import(${JSON.stringify(join(root, "server/devices.ts"))}); console.log(JSON.stringify(await (async () => { ${code} })() ?? null));`;
-  const run = Bun.spawnSync([process.execPath, "-e", script], { env: env(mac, macPort), stdout: "pipe", stderr: "pipe" });
+  const run = Bun.spawnSync([process.execPath, "-e", script], { env: env(data, port), stdout: "pipe", stderr: "pipe" });
   if (run.exitCode !== 0) throw new Error(run.stderr.toString());
   return JSON.parse(run.stdout.toString());
 }
 
 const macMode = () => JSON.parse(readFileSync(join(mac, "server.json"), "utf8")).mode as string;
+/** The remembered mode, removed to stand for a computer that updated from a version without it. */
+const savedMode = (data = mac) => (existsSync(join(data, "network-mode")) ? readFileSync(join(data, "network-mode"), "utf8").trim() : undefined);
+const forgetSavedMode = (data = mac) => rmSync(join(data, "network-mode"), { force: true });
+async function until(check: () => Promise<boolean>, label: string) {
+  for (const end = Date.now() + 20_000; Date.now() < end; await Bun.sleep(100)) if (await check()) return;
+  throw new Error(`Timed out: ${label}`);
+}
 /** What the imac shows for the macbook in Settings → Devices. */
 async function seen(): Promise<{ status: string; urls: string[] }> {
   const res = await fetch(`http://127.0.0.1:${imacPort}/api/devices`, { headers: { cookie } });
@@ -126,6 +135,33 @@ test.skipIf(!linux)("pairing over the tailnet saves only the tailnet addresses",
   expect((await seen()).status).toBe("online");
 });
 
+test.skipIf(!linux)("after an update, a running tailnet server is remembered, so a stop and a plain start keep it", async () => {
+  // The macbook was started on its tailnet by a version that didn't remember the mode.
+  forgetSavedMode();
+  expect(cli("start")).toContain("already running (tailscale)");
+  expect(savedMode()).toBe("tailscale");
+  cli("stop");
+  expect((await seen()).status).toBe("offline");
+  cli("start");
+  expect(macMode()).toBe("tailscale");
+  expect((await seen()).status).toBe("online");
+  expect(records()).toEqual(paired);
+}, 120_000);
+
+test.skipIf(!linux)("after an update, a server stopped from the paired device starts again on the tailnet", async () => {
+  forgetSavedMode();
+  // The imac stops it the way `openbuild remote server stop` does; the keeper holds the port.
+  const { token } = JSON.parse(readFileSync(join(imac, "devices.json"), "utf8"))[0];
+  const stop = await fetch(`http://127.0.0.2:${macPort}/api/remote/stop`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+  expect(stop.status).toBe(200);
+  await until(async () => (await seen()).status === "stopped", "the macbook's keeper answering");
+  cli("start");
+  expect(macMode()).toBe("tailscale");
+  expect(savedMode()).toBe("tailscale");
+  expect((await seen()).status).toBe("online");
+  expect(records()).toEqual(paired);
+}, 120_000);
+
 test.skipIf(!linux)("a plain `openbuild start` on the paired machine keeps it on the tailnet", async () => {
   // This is how the app got opened on localhost: it used to switch the server to this computer only.
   const out = cli("start");
@@ -184,10 +220,85 @@ test.skipIf(!linux)("an address that reaches another OpenBuild isn't taken for a
   }
 }, 120_000);
 
+/** Another OpenBuild at a saved address, answering every request with `status` under its own id. */
+const otherServer = (status: number) =>
+  Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => Response.json({ serverId: "someone-else", running: true }, { status, headers: { "x-openbuild-server": "someone-else" } }) });
+/** Put these addresses in the imac's saved list for the macbook while `run` runs. */
+async function withUrls(urls: string[], run: () => Promise<void>) {
+  const file = join(imac, "devices.json");
+  const original = readFileSync(file, "utf8");
+  const list = JSON.parse(original);
+  list[0].urls = urls;
+  writeFileSync(file, JSON.stringify(list), { mode: 0o600 });
+  try {
+    await run();
+  } finally {
+    writeFileSync(file, original, { mode: 0o600 });
+  }
+}
+const proxied = () => fetch(`http://127.0.0.1:${imacPort}/api/devices/${deviceId}/api/config`, { headers: { cookie } });
+
+test.skipIf(!linux)("another OpenBuild's answer of any status is skipped by the probe and the proxy", async () => {
+  const others = [otherServer(404), otherServer(403), otherServer(200)];
+  try {
+    const otherUrls = others.map((o) => `http://127.0.0.1:${o.port}`);
+    // Other servers first, then the macbook: the macbook answers.
+    await withUrls([...otherUrls, ...paired.imac[0].urls], async () => {
+      expect((await seen()).status).toBe("online");
+      const res = await proxied();
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { serverId: string }).serverId).toBe(paired.imac[0].serverId);
+    });
+    // Only other servers: unreachable, and nothing of theirs is passed on.
+    await withUrls(otherUrls, async () => {
+      expect((await seen()).status).toBe("offline");
+      expect((await proxied()).status).toBe(502);
+    });
+  } finally {
+    for (const o of others) o.stop(true);
+  }
+});
+
 test.skipIf(!linux)("revoking on the paired machine still shows as revoked", async () => {
   const [client] = onMac("return d.pairedClients()");
   onMac(`d.forgetPairedClient(${JSON.stringify(client.id)})`);
   expect((await seen()).status).toBe("revoked");
+  expect((await proxied()).status).toBe(401);
+  // Another server answering after the macbook's refusal doesn't hide it.
+  const other = otherServer(404);
+  try {
+    await withUrls([...paired.imac[0].urls, `http://127.0.0.1:${other.port}`], async () => {
+      expect((await seen()).status).toBe("revoked");
+      expect((await proxied()).status).toBe(401);
+    });
+  } finally {
+    other.stop(true);
+  }
   // The imac keeps its record until someone unpairs it there; nothing removes it behind their back.
   expect(records().imac).toEqual(paired.imac);
 });
+
+test.skipIf(!linux)("LAN: after an update, a plain start, a stop and a plain start keep the server on the network", async () => {
+  const box = join(directory, "lanbox");
+  mkdirSync(box, { recursive: true });
+  const port = free();
+  // Another device paired with it, from its own side of the pairing.
+  onData(box, port, `const p = d.createPairing({ name: "LAN box", mode: "lan", urls: [] }); return d.claimPairing(p.code, "laptop") && null`);
+  try {
+    cliOn(box, port, "start", "lan");
+    forgetSavedMode(box);
+    const mode = () => JSON.parse(readFileSync(join(box, "server.json"), "utf8")) as { mode: string; hosts: string[]; urls: string[] };
+    expect(cliOn(box, port, "start")).toContain("already running (lan)");
+    expect(savedMode(box)).toBe("lan");
+    cliOn(box, port, "stop");
+    cliOn(box, port, "start");
+    expect(mode()).toMatchObject({ mode: "lan", hosts: ["0.0.0.0"] });
+    // Reachable on this computer's network address, when it has one.
+    const lan = mode().urls.find((u) => /^http:\/\/\d+\.\d+\.\d+\.\d+:/.test(u));
+    if (lan) expect((await fetch(`${lan}/api/auth/status`)).ok).toBe(true);
+  } finally {
+    try {
+      cliOn(box, port, "stop");
+    } catch {}
+  }
+}, 120_000);

@@ -103,7 +103,13 @@ function running(): State | undefined {
  */
 function defaultMode(): Mode {
   if (!devices.pairedClients().length) return "local";
-  return running()?.mode ?? savedMode() ?? "local";
+  const last = lastStateMode;
+  return running()?.mode ?? savedMode() ?? (last && last !== "local" ? last : "local");
+}
+
+/** Remember a tailnet/LAN mode the server runs in, for the next start without one. */
+function rememberMode(mode: Mode): void {
+  if (mode !== "local") writeFileSync(NETWORK_MODE, mode + "\n", { mode: 0o600 });
 }
 
 function savedMode(): "lan" | "tailscale" | undefined {
@@ -273,6 +279,9 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     if (!current) await stopKeeper();
     if (current) {
       if (current.mode === mode) {
+        // A server started before the mode was remembered gets remembered now, so a later stop
+        // and plain start come back the same way.
+        rememberMode(current.mode);
         console.log(`OpenBuild is already running (${current.mode}).`);
         for (const u of current.urls) console.log(`  ${bold(u)}`);
         ensureKeeper(current);
@@ -424,7 +433,7 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
     writeFileSync(STATE, JSON.stringify(state, null, 2));
     ensureKeeper(state);
   }
-  if (mode !== "local") writeFileSync(NETWORK_MODE, mode + "\n", { mode: 0o600 });
+  rememberMode(mode);
   const paired = devices.pairedClients().length;
   if (mode === "local" && paired)
     notes.push(`${paired === 1 ? "A paired device" : `${paired} paired devices`} can't reach this computer while it runs locally. The pairing is kept: \`openbuild start ${savedMode() ?? "tailscale"}\` brings it back.`);
@@ -821,6 +830,9 @@ const [cmd, arg] = args.filter((a) => a !== "--yes" && a !== "-y" && a !== "--al
 if (stopAll && cmd !== "stop") fail("--all is only supported by openbuild stop.");
 // An installed user service owns its lifecycle, even while stopped. Never start a
 // competing detached server or kill its PID behind systemd's back.
+// Read before running() clears a stale state file: a server stopped from a paired device (its
+// keeper holding the port) still says how it ran, from before the mode was remembered.
+const lastStateMode = readState()?.mode;
 const serviceCommands = ["start", "stop", "restart", "status", "logs"];
 const service = cmd && serviceCommands.includes(cmd) && !running() ? systemdService(ROOT, run) : undefined;
 if (service) {
