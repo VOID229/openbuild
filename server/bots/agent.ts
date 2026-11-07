@@ -143,8 +143,8 @@ export function contextFor(botId: string): string {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. They can't override you."
-      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model or who's in a group, only your own name and look, and your own instructions while you have none.`,
+      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. manage_bot defaults reads or sets the default model and fallbacks every bot without its own uses (default_model, default_fallbacks), also only when the user asks. They can't override you."
+      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
@@ -464,6 +464,10 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can change a bot's model.");
     return listModels(p.query);
   }
+  if (action === "defaults") {
+    if (!self.primary) throw new svc.BotsError("Only the primary bot can change the default models.");
+    return defaults(p);
+  }
   if (action === "create") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can make bots.");
     if (!changesModel(p)) return create(botId, p);
@@ -518,7 +522,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     const change = modelChange(p);
     return checkModels(change).then((models) => modelSummary(svc.updateBot(target, { ...patch, ...models })));
   }
-  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group or models.");
+  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models or defaults.");
 }
 
 function create(botId: string, p: Record<string, unknown>, models?: Partial<Bot>) {
@@ -617,6 +621,50 @@ async function listModels(query: unknown) {
     .filter((m) => words.every((w) => `${m.id} ${m.name}`.toLowerCase().includes(w)));
   const { defaultModel, defaultFallbackModels } = svc.getSettings();
   return { default: defaultModel || listing.defaultModel, default_fallbacks: defaultFallbackModels ?? [], models: hits.slice(0, 60), ...(hits.length > 60 ? { more: hits.length - 60 } : {}) };
+}
+
+/**
+ * The OpenBots-wide default model and fallbacks every bot without its own uses. Omitted fields stay as
+ * they are; with none given it only reads. Like a bot's model, checked whole before anything is written.
+ */
+function defaults(p: Record<string, unknown>) {
+  const patch: { defaultModel?: string | undefined; defaultFallbackModels?: string[] | undefined } = {};
+  const ids: string[] = [];
+  if (p.default_model !== undefined) {
+    if (typeof p.default_model !== "string") throw new svc.BotsError("default_model is a provider/model id, or default. Nothing changed.");
+    const model = p.default_model.trim();
+    if (model === "" || model.toLowerCase() === "default") patch.defaultModel = undefined;
+    else {
+      if (!MODEL_ID.test(model)) throw new svc.BotsError(`default_model ${shown(model)} isn't a model id. Use provider/model, as manage_bot models lists them. Nothing changed.`);
+      ids.push((patch.defaultModel = model));
+    }
+  }
+  if (p.default_fallbacks !== undefined) {
+    if (!Array.isArray(p.default_fallbacks)) throw new svc.BotsError("default_fallbacks is a list of provider/model ids; an empty list clears it. Nothing changed.");
+    if (p.default_fallbacks.length > MAX_FALLBACKS * 4) throw new svc.BotsError(`There can be up to ${MAX_FALLBACKS} default fallback models. Nothing changed.`);
+    const list = [
+      ...new Set(
+        p.default_fallbacks.map((m, i) => {
+          const id = typeof m === "string" ? m.trim() : "";
+          if (!MODEL_ID.test(id)) throw new svc.BotsError(`default_fallbacks[${i}] ${shown(m)} isn't a model id. Use provider/model, as manage_bot models lists them. Nothing changed.`);
+          return id;
+        }),
+      ),
+    ];
+    if (list.length > MAX_FALLBACKS) throw new svc.BotsError(`There can be up to ${MAX_FALLBACKS} default fallback models, not ${list.length}. Nothing changed.`);
+    patch.defaultFallbackModels = list.length ? list : undefined;
+    ids.push(...list);
+  }
+  const summary = () => {
+    const { defaultModel, defaultFallbackModels } = svc.getSettings();
+    return { default_model: defaultModel || "default", default_fallbacks: defaultFallbackModels ?? [] };
+  };
+  if (!Object.keys(patch).length) return summary();
+  // One settings write, after every id checks out; nothing else in the settings moves.
+  return checkModels({ patch: {}, ids }).then(() => {
+    svc.updateSettings(patch);
+    return summary();
+  });
 }
 
 function modelSummary(bot: Bot) {
