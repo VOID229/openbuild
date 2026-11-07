@@ -4,10 +4,10 @@
 // from GitHub's device flow, which needs only the public client ID. See docs/github.md.
 
 /**
- * The published app. Empty until it's registered: a server can set its own with
- * OPENBUILD_GITHUB_APP_CLIENT_ID and OPENBUILD_GITHUB_APP_SLUG.
+ * The published app, OpenBots Link (https://github.com/apps/openbots-link). Both values are public.
+ * A server can use another app with OPENBUILD_GITHUB_APP_CLIENT_ID and OPENBUILD_GITHUB_APP_SLUG.
  */
-export const GITHUB_APP = { clientId: "", slug: "" };
+export const GITHUB_APP = { clientId: "Iv23liTlFA2mugd9Lxpc", slug: "openbots-link" };
 
 /** Which credential OpenBuild's GitHub features use. Only one at a time, and never the other one as a fallback. */
 export type GithubMode = "app" | "pat" | "off";

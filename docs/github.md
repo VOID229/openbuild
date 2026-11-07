@@ -52,12 +52,13 @@ Adding a permission later makes every installation approve it again, so keep the
 
 ## Turning it on
 
-Put the app's **client ID** (not the app ID) and its **slug** (from
-`https://github.com/apps/<slug>`) in `GITHUB_APP` in `shared/github.ts`, so every install has them.
-A server can use another app instead by setting `OPENBUILD_GITHUB_APP_CLIENT_ID` and
-`OPENBUILD_GITHUB_APP_SLUG` and restarting. Both values are public.
+The published app is **OpenBots Link** (`https://github.com/apps/openbots-link`, client ID
+`Iv23liTlFA2mugd9Lxpc`). Its **client ID** (not the app ID) and **slug** are in `GITHUB_APP` in
+`shared/github.ts`, so every install has them. A server can use another app instead by setting
+`OPENBUILD_GITHUB_APP_CLIENT_ID` and `OPENBUILD_GITHUB_APP_SLUG` and restarting. Both values are
+public.
 
-Until a client ID is set, the GitHub app in Apps offers a personal access token only, as before.
+With no client ID, the GitHub app in Apps offers a personal access token only, as before.
 
 ## Connecting
 
