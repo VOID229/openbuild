@@ -6,6 +6,7 @@ import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
 import { conversationTitle, firstName, isSilent, mentionName, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { computerApi } from "../computers/api";
+import { deviceCredentials } from "../devices";
 import { capabilities } from "../computers/index";
 import { providerGuide, searchToolkit, toolName } from "../search";
 import * as apps from "./apps";
@@ -546,13 +547,14 @@ async function computerOf(botId: string) {
     cfg = { device: "local", kind: "container" };
     svc.updateBot(botId, { computer: cfg });
   }
+  // A paired device's computer runs there or not at all: computerApi refuses rather than fall back here.
   const api = computerApi(cfg.device);
   await api.call(botId, "ensure", { kind: cfg.kind });
-  return { api, id: botId };
+  return { api, id: botId, on: cfg.device === "local" ? undefined : (deviceCredentials(cfg.device)?.name ?? cfg.device) };
 }
 
 async function bash(botId: string, p: Record<string, unknown>) {
-  const { api, id } = await computerOf(botId);
+  const { api, id, on } = await computerOf(botId);
   const command = String(p.command ?? "");
   if (!command.trim()) throw new svc.BotsError("Give a command.");
   const chunks: Buffer[] = [];
@@ -563,7 +565,7 @@ async function bash(botId: string, p: Record<string, unknown>) {
     size += d.length;
   });
   const output = Buffer.concat(chunks).toString("utf8").slice(0, 100_000);
-  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000 };
+  return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000, ...(on && { ranOn: on }) };
 }
 
 async function read(botId: string, p: Record<string, unknown>) {
@@ -625,9 +627,12 @@ async function browser(botId: string, p: Record<string, unknown>) {
 }
 
 async function processTool(botId: string, p: Record<string, unknown>) {
-  const { api, id } = await computerOf(botId);
+  const { api, id, on } = await computerOf(botId);
   const op = String(p.action ?? "list");
-  return api.call(id, "proc", { op: op === "start" ? "start" : op, command: p.command, name: p.name, id: p.id, input: p.input, all: p.all, notify: true });
+  const result = await api.call(id, "proc", { op: op === "start" ? "start" : op, command: p.command, name: p.name, id: p.id, input: p.input, all: p.all, notify: true });
+  // Exits are told by the machine a process runs on, which only reaches bots on that machine.
+  if (on && op === "start") return { ...result, ranOn: on, note: `It runs on ${on}, which can't tell you when it exits. Check on it with read.` };
+  return result;
 }
 
 function asStrings(value: unknown): string[] {

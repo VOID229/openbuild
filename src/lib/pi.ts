@@ -1,7 +1,7 @@
 import { streamFetch } from "./streamTransport";
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
+import type { BotToolGrants, ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 import { fetchWithTimeout } from "./abort";
 
@@ -220,6 +220,8 @@ export async function pairDevice(input: { mode: "lan" | "tailscale"; code: strin
 /** Devices that use this server, and revoking one so its token stops working here. */
 export const listPairedClients = () => get<{ clients: PairedClient[] }>("/api/paired-clients").then((r) => r.clients);
 export const revokePairedClient = (id: string) => send(`/api/paired-clients/${encodeURIComponent(id)}`, "DELETE");
+/** What a device that uses this server may let its bots do here. Unset keys stay as they are. */
+export const setPairedClientBotTools = (id: string, botTools: Partial<BotToolGrants>) => send<{ botTools: BotToolGrants }>(`/api/paired-clients/${encodeURIComponent(id)}`, "PATCH", { botTools });
 
 // ------------------------------------------------------------------ projects and workspaces
 

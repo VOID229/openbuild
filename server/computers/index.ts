@@ -551,6 +551,11 @@ export class Computer {
 
 const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
+/** Whether a computer with this id has been made on this machine (its folder exists), without loading or making it. */
+export function computerExists(id: string): boolean {
+  return isComputerId(id) && existsSync(join(root(), id, "computer.json"));
+}
+
 /** A computer on this machine, loaded from disk or made with `kind`. */
 export function computer(id: string, kind?: "container" | "host"): Computer {
   if (!isComputerId(id)) throw Object.assign(new Error("Invalid computer id"), { status: 400 });

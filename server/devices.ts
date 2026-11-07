@@ -14,7 +14,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
-import type { Device } from "../shared/types";
+import type { BotToolGrants, Device } from "../shared/types";
 import { dataDir } from "./paths";
 import * as storage from "./storage";
 
@@ -38,6 +38,8 @@ interface PairedClient {
   tokenHash: string;
   createdAt: number;
   lastSeenAt?: number;
+  /** What that server's bots may do on this machine. Pairing alone grants none of it. */
+  botTools?: BotToolGrants;
 }
 
 export interface PendingPairing {
@@ -201,7 +203,7 @@ export function claimPairing(code: string, clientName: string): { token: string;
 }
 
 /** A paired device's token, checked for every proxied request. */
-export function authenticateDevice(req: Request): { id: string; name: string } | undefined {
+export function authenticateDevice(req: Request): { id: string; name: string; botTools: BotToolGrants } | undefined {
   const header = req.headers.get("authorization") ?? "";
   const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
   if (!match) return undefined;
@@ -216,11 +218,25 @@ export function authenticateDevice(req: Request): { id: string; name: string } |
       writeJson(PAIRED, list);
     } catch {}
   }
-  return { id: client.id, name: client.name };
+  return { id: client.id, name: client.name, botTools: grantsOf(client.botTools) };
+}
+
+const grantsOf = (g?: Partial<BotToolGrants>): BotToolGrants => ({ files: g?.files === true, terminal: g?.terminal === true, browser: g?.browser === true, unisolated: g?.unisolated === true });
+
+/** Allow or refuse a paired device's bots each kind of tool on this machine. False when it isn't paired. */
+export function setClientBotTools(id: string, patch: Partial<BotToolGrants>): BotToolGrants | undefined {
+  const list = readJson<PairedClient[]>(PAIRED, []);
+  const client = list.find((c) => c.id === id);
+  if (!client) return undefined;
+  const next = grantsOf(client.botTools);
+  for (const key of ["files", "terminal", "browser", "unisolated"] as const) if (typeof patch[key] === "boolean") next[key] = patch[key];
+  client.botTools = next;
+  writeJson(PAIRED, list);
+  return next;
 }
 
 export function pairedClients(): Omit<PairedClient, "tokenHash">[] {
-  return readJson<PairedClient[]>(PAIRED, []).map(({ tokenHash: _hash, ...rest }) => rest);
+  return readJson<PairedClient[]>(PAIRED, []).map(({ tokenHash: _hash, ...rest }) => ({ ...rest, botTools: grantsOf(rest.botTools) }));
 }
 
 export function forgetPairedClient(id: string): void {

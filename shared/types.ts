@@ -476,12 +476,25 @@ export interface Device {
   local?: boolean;
 }
 
+/**
+ * What a paired server's bots may do on this machine, chosen here. Pairing grants none of it:
+ * files, terminal (commands and processes) and browser each need switching on, and so does running
+ * them unisolated (in a folder as this machine's user) instead of in a container.
+ */
+export interface BotToolGrants {
+  files: boolean;
+  terminal: boolean;
+  browser: boolean;
+  unisolated: boolean;
+}
+
 /** A device that uses this server (it entered this server's pairing code). */
 export interface PairedClient {
   id: string;
   name: string;
   createdAt: number;
   lastSeenAt?: number;
+  botTools?: BotToolGrants;
 }
 
 export interface GitInfo {
