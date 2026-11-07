@@ -40,6 +40,8 @@ interface PairedClient {
   lastSeenAt?: number;
   /** What that server's bots may do on this machine. Pairing alone grants none of it. */
   botTools?: BotToolGrants;
+  /** Whether that device may open this server's OpenBots workspace (server/bots/workspace.ts). Off after pairing. */
+  workspace?: boolean;
 }
 
 export interface PendingPairing {
@@ -203,7 +205,7 @@ export function claimPairing(code: string, clientName: string): { token: string;
 }
 
 /** A paired device's token, checked for every proxied request. */
-export function authenticateDevice(req: Request): { id: string; name: string; botTools: BotToolGrants } | undefined {
+export function authenticateDevice(req: Request): { id: string; name: string; botTools: BotToolGrants; workspace: boolean } | undefined {
   const header = req.headers.get("authorization") ?? "";
   const match = /^Bearer ([a-f0-9]{64})$/.exec(header);
   if (!match) return undefined;
@@ -218,7 +220,34 @@ export function authenticateDevice(req: Request): { id: string; name: string; bo
       writeJson(PAIRED, list);
     } catch {}
   }
-  return { id: client.id, name: client.name, botTools: grantsOf(client.botTools) };
+  return { id: client.id, name: client.name, botTools: grantsOf(client.botTools), workspace: client.workspace === true };
+}
+
+/** Told the id of a paired device whose access was narrowed or revoked, so what it has open can close. */
+const accessListeners = new Set<(clientId: string) => void>();
+export function onAccessNarrowed(fn: (clientId: string) => void): () => void {
+  accessListeners.add(fn);
+  return () => accessListeners.delete(fn);
+}
+const narrowed = (clientId: string) => {
+  for (const fn of accessListeners) {
+    try {
+      fn(clientId);
+    } catch (err) {
+      console.error("[devices] access listener failed:", err);
+    }
+  }
+};
+
+/** Let a paired device use this server's OpenBots workspace, or stop it. Undefined when it isn't paired. */
+export function setClientWorkspace(id: string, workspace: boolean): boolean | undefined {
+  const list = readJson<PairedClient[]>(PAIRED, []);
+  const client = list.find((c) => c.id === id);
+  if (!client) return undefined;
+  client.workspace = workspace || undefined;
+  writeJson(PAIRED, list);
+  if (!workspace) narrowed(id);
+  return workspace;
 }
 
 const grantsOf = (g?: Partial<BotToolGrants>): BotToolGrants => ({ files: g?.files === true, terminal: g?.terminal === true, browser: g?.browser === true, unisolated: g?.unisolated === true });
@@ -236,11 +265,12 @@ export function setClientBotTools(id: string, patch: Partial<BotToolGrants>): Bo
 }
 
 export function pairedClients(): Omit<PairedClient, "tokenHash">[] {
-  return readJson<PairedClient[]>(PAIRED, []).map(({ tokenHash: _hash, ...rest }) => ({ ...rest, botTools: grantsOf(rest.botTools) }));
+  return readJson<PairedClient[]>(PAIRED, []).map(({ tokenHash: _hash, ...rest }) => ({ ...rest, botTools: grantsOf(rest.botTools), workspace: rest.workspace === true }));
 }
 
 export function forgetPairedClient(id: string): void {
   writeJson(PAIRED, readJson<PairedClient[]>(PAIRED, []).filter((c) => c.id !== id));
+  narrowed(id);
 }
 
 // ------------------------------------------------------------------ client side: paired hosts
@@ -272,7 +302,15 @@ export function removeDevice(id: string): boolean {
   const next = list.filter((d) => d.id !== id);
   if (next.length === list.length) return false;
   writeJson(DEVICES, next);
+  for (const fn of hostListeners) fn(id);
   return true;
+}
+
+/** Told the id of a paired host this server forgot, so what's open through it can close. */
+const hostListeners = new Set<(hostId: string) => void>();
+export function onHostRemoved(fn: (hostId: string) => void): () => void {
+  hostListeners.add(fn);
+  return () => hostListeners.delete(fn);
 }
 
 export function deviceCredentials(id: string): StoredDevice | undefined {

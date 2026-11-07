@@ -137,20 +137,26 @@ export async function applyDraftRecord(record: string, value: StoredDraft | Atta
 
 // ---------------------------------------------------------------- OpenBots
 
-// An OpenBots conversation's draft is kept the same way, under "bot:<conversation id>", with its
-// images (data URLs) as attachments. An image already in the draft keeps its attachment, so typing
-// never stores or uploads it again.
+// An OpenBots conversation's draft is kept the same way, under "bot:<workspace id>:<conversation
+// id>", with its images (data URLs) as attachments, so a workspace's unsent text stays with that
+// workspace. An image already in the draft keeps its attachment, so typing never stores or uploads
+// it again. Drafts from before workspaces ("bot:<conversation id>") were all this server's: its own
+// workspace still finds one there, and moves it on the next save.
 
-export const botDraftKey = (conversationId: string) => `bot:${conversationId}`;
+export const botDraftKey = (workspace: string, conversationId: string) => `bot:${workspace}:${conversationId}`;
+const olderBotDraftKey = (conversationId: string) => `bot:${conversationId}`;
 
-export function getBotDraft(conversationId: string): { text: string; images: string[] } | undefined {
-  const d = getDraft(botDraftKey(conversationId));
+/** `local`: the workspace is this server's own, the only one older drafts can belong to. */
+export function getBotDraft(workspace: string, conversationId: string, local = false): { text: string; images: string[] } | undefined {
+  const d = getDraft(botDraftKey(workspace, conversationId)) ?? (local ? getDraft(olderBotDraftKey(conversationId)) : undefined);
   return d && { text: d.text, images: d.files.map((f) => f.dataUrl) };
 }
 
-export function saveBotDraft(conversationId: string, text: string, images: string[]) {
-  const key = botDraftKey(conversationId);
-  const have = new Map((getDraft(key)?.files ?? []).map((f) => [f.dataUrl, f]));
+export function saveBotDraft(workspace: string, conversationId: string, text: string, images: string[], local = false) {
+  const key = botDraftKey(workspace, conversationId);
+  const older = local ? getDraft(olderBotDraftKey(conversationId)) : undefined;
+  const have = new Map([...(older?.files ?? []), ...(getDraft(key)?.files ?? [])].map((f) => [f.dataUrl, f]));
   const list = images.map((dataUrl) => have.get(dataUrl) ?? imageFiles([dataUrl])[0]!);
   saveDraft(key, text, list);
+  if (older) saveDraft(olderBotDraftKey(conversationId), "", []);
 }

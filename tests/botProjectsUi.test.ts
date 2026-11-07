@@ -14,7 +14,11 @@ g.IS_REACT_ACT_ENVIRONMENT = true;
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { useStore } = await import("../src/lib/store");
-const { useBots } = await import("../src/lib/bots/store");
+const { enterWorkspace, useBots } = await import("../src/lib/bots/store");
+const { useWorkspace } = await import("../src/lib/bots/workspace");
+// This server's own workspace, where bots are managed.
+useWorkspace.setState({ localId: "srv", localName: "Studio" });
+enterWorkspace("srv");
 const { BotAdvanced } = await import("../src/components/bots/BotAdvanced");
 const { BotThreads } = await import("../src/components/bots/BotThreads");
 type Bot = import("../src/lib/bots/types").Bot;
@@ -138,7 +142,7 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(document.activeElement).toBe(list[2]!);
     await press(list[2]!);
     expect(saved()).toMatchObject({ scope: "exclude", projects: ["alpha"], excluded: ["gamma"] });
-    expect(patches.at(-1)).toEqual({ path: "/api/bots/b1", body: { threads: saved() } });
+    expect(patches.at(-1)).toEqual({ path: "/api/workspace/to/srv/api/bots/b1", body: { threads: saved() } });
     expect(document.activeElement).toBe(trigger("Projects this bot can work in")!);
     // Each scope keeps its own list, so switching never loses or merges them.
     expect(trigger("Projects to exclude")!.textContent).toBe("Gamma");

@@ -222,6 +222,8 @@ export const listPairedClients = () => get<{ clients: PairedClient[] }>("/api/pa
 export const revokePairedClient = (id: string) => send(`/api/paired-clients/${encodeURIComponent(id)}`, "DELETE");
 /** What a device that uses this server may let its bots do here. Unset keys stay as they are. */
 export const setPairedClientBotTools = (id: string, botTools: Partial<BotToolGrants>) => send<{ botTools: BotToolGrants }>(`/api/paired-clients/${encodeURIComponent(id)}`, "PATCH", { botTools });
+/** Let a device that uses this one open its OpenBots workspace, or stop it (Settings → Devices → Using this device). */
+export const setPairedClientWorkspace = (id: string, workspace: boolean) => send<{ workspace: boolean }>(`/api/paired-clients/${encodeURIComponent(id)}`, "PATCH", { workspace });
 
 // ------------------------------------------------------------------ projects and workspaces
 

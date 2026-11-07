@@ -495,6 +495,8 @@ export interface PairedClient {
   createdAt: number;
   lastSeenAt?: number;
   botTools?: BotToolGrants;
+  /** It may open this server's OpenBots workspace and use its chats. */
+  workspace?: boolean;
 }
 
 export interface GitInfo {

@@ -365,6 +365,12 @@ export type BotsEvent =
   /** The connected apps changed: ask /api/bots/apps for them. */
   | { t: "apps" };
 
+/** The first line of every OpenBots stream: the workspace (its server's id) the rest comes from. */
+export interface BotsHello {
+  t: "hello";
+  workspace: string;
+}
+
 // ------------------------------------------------------------------ computers
 
 export interface ComputerCapabilities {

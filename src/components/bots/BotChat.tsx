@@ -7,7 +7,8 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "rea
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
-import { conversationName, directOf, useBots } from "../../lib/bots/store";
+import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
+import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
 import { eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
@@ -209,6 +210,24 @@ function useEventPull(event: NonNullable<BotMessage["event"]>, threadId: string 
  * link, to the pull request on GitHub, with the title after it opening the thread.
  */
 function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
+  const host = useRemoteWorkspace();
+  return host ? <RemoteEventThread event={event} host={host} /> : <LocalEventThread event={event} />;
+}
+
+/**
+ * Another device's activity: its thread is on that device, never looked up among this one's, so it
+ * says it can't be opened here. A merge's "#n" still links when the activity recorded its URL.
+ */
+function RemoteEventThread({ event, host }: { event: NonNullable<BotMessage["event"]>; host: string }) {
+  const detail = event.detail ?? "";
+  const ref = event.pullUrl ? /^#\d+ /.exec(detail)?.[0] : undefined;
+  const title = ref ? detail.slice(ref.length) : detail;
+  const thread = <span className="bm-unavailable" title={`This thread is on ${host}. Open it there.`}>{title} <span className="bm-unavailable-note">(on {host})</span></span>;
+  if (!ref) return thread;
+  return <><span onClick={(e) => e.stopPropagation()}><PullLink url={event.pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
+}
+
+function LocalEventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
   const id = useEventThread(event);
   const pullUrl = useEventPull(event, id);
   const detail = event.detail ?? "";
@@ -224,6 +243,12 @@ function EventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
  * a thread opened; ordinary hex text, and numbered labels like a model's "#2", stay text.
  */
 function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
+  // Another device's threads aren't this tab's to look up: ids and "#n" there stay text.
+  if (useRemoteWorkspace()) return <Linkify text={text} fileHref={fileHref} bare />;
+  return <LocalThreadReferences text={text} fileHref={fileHref} />;
+}
+
+function LocalThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
   const chats = useStore((s) => s.chats);
   const pulls = useMemo(() => chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])), [chats]);
   const parts: React.ReactNode[] = [];
@@ -266,7 +291,9 @@ function WithMentions({ text, bots, everyone, fileHref }: { text: string; bots: 
 
 /** Bold, inline code, [Markdown](https://links), bare links and @mentions (in the mentioned bot's colour). */
 const RichText = memo(function RichText({ text, bots, everyone, botId }: { text: string; bots: Bot[]; everyone: Bot[]; botId?: string }) {
-  const fileHref = botId ? (url: string) => `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}` : undefined;
+  // A bot's files are on its own workspace's computer, so they're fetched from that workspace.
+  const workspace = useBots((s) => s.workspace);
+  const fileHref = botId && workspace ? (url: string) => workspacePath(workspace, `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}`) : undefined;
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
@@ -1367,8 +1394,11 @@ const TYPING_PAUSE = 3000;
 
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
-  const [text, setText] = useState(() => getBotDraft(conversation.id)?.text ?? "");
-  const [images, setImages] = useState<string[]>(() => getBotDraft(conversation.id)?.images ?? []);
+  // Unsent text is the workspace's, like the conversation it's for.
+  const [workspace] = useState(() => useBots.getState().workspace ?? "");
+  const local = isLocalWorkspace(workspace);
+  const [text, setText] = useState(() => getBotDraft(workspace, conversation.id, local)?.text ?? "");
+  const [images, setImages] = useState<string[]>(() => getBotDraft(workspace, conversation.id, local)?.images ?? []);
   const lastTyped = useRef(0);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
@@ -1405,15 +1435,15 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   useEffect(() => {
     let live = true;
     void draftsReady.then(() => {
-      const d = getBotDraft(conversation.id);
+      const d = getBotDraft(workspace, conversation.id, local);
       if (!live || !d) return;
       setText((t) => t || d.text);
       setImages((i) => (i.length ? i : d.images));
     });
     // An edit from another device shows up here, unless you're typing in this box right now.
     const off = onRemoteDraft((key) => {
-      if (key !== botDraftKey(conversation.id) || Date.now() - lastTyped.current < TYPING_PAUSE) return;
-      const d = getBotDraft(conversation.id);
+      if (key !== botDraftKey(workspace, conversation.id) || Date.now() - lastTyped.current < TYPING_PAUSE) return;
+      const d = getBotDraft(workspace, conversation.id, local);
       setText(d?.text ?? "");
       setImages(d?.images ?? []);
     });
@@ -1425,7 +1455,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   // Save the draft as it changes (not on mount, which would stamp an untouched draft as fresh).
   const mounted = useRef(false);
   useEffect(() => {
-    if (mounted.current) saveBotDraft(conversation.id, text, images);
+    if (mounted.current) saveBotDraft(workspace, conversation.id, text, images, local);
     mounted.current = true;
   }, [text, images]);
 
@@ -1772,7 +1802,9 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
 
 export function BotChat({ conversation }: { conversation: Conversation }) {
   const bots = useBots((s) => s.bots);
-  const detailsOpen = useBots((s) => s.detailsOpen);
+  // The details panel is where a bot is set up, which another device's workspace keeps to itself.
+  const remote = !!useRemoteWorkspace();
+  const detailsOpen = useBots((s) => s.detailsOpen) && !remote;
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   // What the other side is up to, under the name on a phone, where there's a bar for it.
   const activity = useBots((s) => {
@@ -1813,7 +1845,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
             {unread > 0 && <span className="bots-head-unread">{unread}</span>}
           </IconButton>
         )}
-        <button type="button" className="bots-head-pill" aria-expanded={detailsOpen} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
+        <button type="button" className="bots-head-pill" aria-expanded={remote ? undefined : detailsOpen} disabled={remote} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
           <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={busy ? working : undefined} mood={typing ? "thinking" : undefined} badge={false} />
           <span className="bots-head-text">
             <span className="bots-head-name">{name}</span>

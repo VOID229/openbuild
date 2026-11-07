@@ -3,8 +3,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { computerApi, computerTargets } from "../computers/api";
+import * as devices from "../devices";
 import { modelListing } from "../pi/routes";
-import { getBot } from "./db";
+import { getBot, getMessage } from "./db";
 import { available, botModels } from "./extensions";
 import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
@@ -132,26 +133,7 @@ export function botRoutes(api: Api) {
       }),
     },
     "/api/bots/:id/file": {
-      GET: api(async (req: Bun.BunRequest<"/api/bots/:id/file">) => {
-        try {
-          const bot = getBot(req.params.id);
-          if (!bot?.computer) return bad("Bot computer not found", 404);
-          const url = new URL(new URL(req.url).searchParams.get("url") ?? "");
-          if (url.protocol !== "file:" || (url.hostname && url.hostname !== "localhost")) return bad("Invalid file URL", 400);
-          const path = decodeURIComponent(url.pathname);
-          if (path.includes("\0")) return bad("Invalid file path", 400);
-          const result = await computerApi(bot.computer.device).call(bot.id, "fs", { op: "read", path }) as { data: string };
-          const name = path.split("/").pop() || "download";
-          return new Response(Buffer.from(result.data, "base64"), { headers: {
-            "content-type": "application/octet-stream",
-            "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
-            "x-content-type-options": "nosniff",
-            "cache-control": "no-store",
-          } });
-        } catch (err) {
-          return fail(err);
-        }
-      }),
+      GET: api((req: Bun.BunRequest<"/api/bots/:id/file">) => botFile(req, req.params.id)),
     },
     // Where a bot's computer can run: this server, or a paired device that allowed it.
     "/api/bots/targets": {
@@ -159,42 +141,9 @@ export function botRoutes(api: Api) {
     },
     "/api/bots/stream": {
       GET: api((req: Request, server: Bun.Server<unknown>) => {
-        server.timeout(req, 0);
-        svc.ensureStarted();
-        const enc = new TextEncoder();
-        let unsub = () => {};
-        let ping: ReturnType<typeof setInterval> | undefined;
-        let stop = () => {};
-        const stream = new ReadableStream<Uint8Array>({
-          start(controller) {
-            const send = (value: unknown) => {
-              try {
-                controller.enqueue(enc.encode(JSON.stringify(value) + "\n"));
-              } catch {
-                stop();
-              }
-            };
-            stop = () => {
-              clearInterval(ping);
-              unsub();
-              req.signal.removeEventListener("abort", stop);
-              try {
-                controller.close();
-              } catch {}
-            };
-            if (req.signal.aborted) return stop();
-            send({ t: "snapshot", ...snapshot() });
-            unsub = subscribe(send);
-            ping = setInterval(() => send({ t: "ping" }), 20_000);
-            ping.unref?.();
-            req.signal.addEventListener("abort", stop, { once: true });
-            svc.greetOnFirstOpen();
-          },
-          cancel() {
-            stop();
-          },
-        });
-        return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" } });
+        const res = botsStream(req, server);
+        svc.greetOnFirstOpen();
+        return res;
       }),
     },
     "/api/bots": {
@@ -326,54 +275,151 @@ export function botRoutes(api: Api) {
       }),
     },
     "/api/bots/conversations/:id/read": {
-      POST: api((req: Bun.BunRequest<"/api/bots/conversations/:id/read">) => {
-        svc.markRead(req.params.id);
-        return json({ ok: true });
-      }),
+      POST: api((req: Bun.BunRequest<"/api/bots/conversations/:id/read">) => markRead(req.params.id)),
     },
     "/api/bots/conversations/:id/messages": {
-      GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => {
-        try {
-          const params = new URL(req.url).searchParams;
-          const before = Number(params.get("before")) || undefined;
-          return json(svc.messagePage(req.params.id, params.get("beforeId") || undefined, before));
-        } catch (err) {
-          return fail(err);
-        }
-      }),
-      POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => {
-        try {
-          const body = await readJson(req);
-          if (!isClientMessage(body) || body.author !== "me") return bad("Expected your message");
-          return json(svc.postMessage(req.params.id, { ...body, author: "me", at: Date.now() }));
-        } catch (err) {
-          return fail(err);
-        }
-      }),
+      GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => olderMessages(req, req.params.id)),
+      POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => postMine(req.params.id, await readJson(req))),
     },
     "/api/bots/conversations/:id/messages/:messageId": {
-      PATCH: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => {
-        try {
-          const body = await readJson(req);
-          if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(req.params.id, req.params.messageId, body.question.answer);
-          if (Array.isArray(body?.vote)) return json(svc.votePoll(req.params.id, req.params.messageId, "me", body.vote.filter((key: unknown): key is string => typeof key === "string")));
-          if (typeof body?.emoji === "string") return json(svc.toggleReaction(req.params.id, req.params.messageId, body.emoji, "me", typeof body.to === "string" ? body.to : undefined));
-          // Questions may live in a history page, outside the latest snapshot.
-          return json(svc.patchMessage(req.params.id, req.params.messageId, {}));
-        } catch (err) {
-          return fail(err);
-        }
-      }),
-      DELETE: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => {
-        try {
-          svc.removeMessage(req.params.id, req.params.messageId);
-          return json({ ok: true });
-        } catch (err) {
-          return fail(err);
-        }
-      }),
+      PATCH: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => patchMine(req.params.id, req.params.messageId, await readJson(req))),
+      DELETE: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => deleteMine(req.params.id, req.params.messageId)),
     },
   };
+}
+
+// ---------------------------------------------------------------- in existing conversations
+// What a tab does in the conversations a workspace already has. The plain routes above use these,
+// and so does the bound workspace route (workspace.ts), which is all a paired device can reach.
+// The writes take a body that's already parsed and run without awaiting anything, so the grant the
+// bound route checked after the body arrived is the one in force when the change is made.
+
+export const snapshotResponse = () => json(snapshot());
+
+/**
+ * The live view: a hello naming this workspace (its server id), the snapshot, then every change.
+ * `track` hears how to close it, so a paired device's streams end when its access does.
+ */
+export function botsStream(req: Request, server: Bun.Server<unknown>, track?: (close: () => void) => () => void): Response {
+  server.timeout(req, 0);
+  svc.ensureStarted();
+  const enc = new TextEncoder();
+  let unsub = () => {};
+  let untrack = () => {};
+  let ping: ReturnType<typeof setInterval> | undefined;
+  let stop = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = (value: unknown) => {
+        try {
+          controller.enqueue(enc.encode(JSON.stringify(value) + "\n"));
+        } catch {
+          stop();
+        }
+      };
+      stop = () => {
+        clearInterval(ping);
+        unsub();
+        untrack();
+        req.signal.removeEventListener("abort", stop);
+        try {
+          controller.close();
+        } catch {}
+      };
+      if (req.signal.aborted) return stop();
+      send({ t: "hello", workspace: devices.serverId() });
+      send({ t: "snapshot", ...snapshot() });
+      unsub = subscribe(send);
+      if (track) untrack = track(stop);
+      ping = setInterval(() => send({ t: "ping" }), 20_000);
+      ping.unref?.();
+      req.signal.addEventListener("abort", stop, { once: true });
+    },
+    cancel() {
+      stop();
+    },
+  });
+  return new Response(stream, { headers: { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform" } });
+}
+
+export function markRead(conversationId: string): Response {
+  svc.markRead(conversationId);
+  return json({ ok: true });
+}
+
+export function olderMessages(req: Request, conversationId: string): Response {
+  try {
+    const params = new URL(req.url).searchParams;
+    const before = Number(params.get("before")) || undefined;
+    return json(svc.messagePage(conversationId, params.get("beforeId") || undefined, before));
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export function postMine(conversationId: string, body: unknown): Response {
+  try {
+    if (!isClientMessage(body) || body.author !== "me") return bad("Expected your message");
+    return json(svc.postMessage(conversationId, { ...body, author: "me", at: Date.now() }));
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/**
+ * A question answered, a vote, or a reaction, on one of the user's or a bot's messages. A reaction
+ * with `on` sets it rather than toggling it, so sending it again (a retry whose first try may still
+ * land) leaves it as asked.
+ */
+export function patchMine(conversationId: string, messageId: string, body: any): Response {
+  try {
+    if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(conversationId, messageId, body.question.answer);
+    if (Array.isArray(body?.vote)) return json(svc.votePoll(conversationId, messageId, "me", body.vote.filter((key: unknown): key is string => typeof key === "string")));
+    if (typeof body?.emoji === "string") {
+      const to = typeof body.to === "string" ? body.to : undefined;
+      if (typeof body.on === "boolean") {
+        const row = getMessage(messageId);
+        if (!row || row.conversationId !== conversationId) return bad("No such message.", 404);
+        if (!!row.message.reactions?.some((r) => r.by === "me" && r.emoji === body.emoji && r.to === to) === body.on) return json(row.message);
+      }
+      return json(svc.toggleReaction(conversationId, messageId, body.emoji, "me", to));
+    }
+    // Questions may live in a history page, outside the latest snapshot.
+    return json(svc.patchMessage(conversationId, messageId, {}));
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+export function deleteMine(conversationId: string, messageId: string): Response {
+  try {
+    svc.removeMessage(conversationId, messageId);
+    return json({ ok: true });
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** A file a bot linked to in a message, read from its computer. */
+export async function botFile(req: Request, botId: string): Promise<Response> {
+  try {
+    const bot = getBot(botId);
+    if (!bot?.computer) return bad("Bot computer not found", 404);
+    const url = new URL(new URL(req.url).searchParams.get("url") ?? "");
+    if (url.protocol !== "file:" || (url.hostname && url.hostname !== "localhost")) return bad("Invalid file URL", 400);
+    const path = decodeURIComponent(url.pathname);
+    if (path.includes("\0")) return bad("Invalid file path", 400);
+    const result = await computerApi(bot.computer.device).call(bot.id, "fs", { op: "read", path }) as { data: string };
+    const name = path.split("/").pop() || "download";
+    return new Response(Buffer.from(result.data, "base64"), { headers: {
+      "content-type": "application/octet-stream",
+      "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      "x-content-type-options": "nosniff",
+      "cache-control": "no-store",
+    } });
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 function isClientMessage(m: unknown): m is BotMessage {

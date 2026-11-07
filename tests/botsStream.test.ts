@@ -23,7 +23,10 @@ test("a silent OpenBots stream reconnects by itself and brings back the bot's wo
     const tick = () => [...watchdogs].forEach((fn) => fn());
     const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-    const { useBots, STREAM_SILENCE } = await import(resolve("src/lib/bots/store.ts"));
+    const { useBots, STREAM_SILENCE, enterWorkspace } = await import(resolve("src/lib/bots/store.ts"));
+    const { useWorkspace } = await import(resolve("src/lib/bots/workspace.ts"));
+    useWorkspace.setState({ localId: "srv", localName: "Studio" });
+    enterWorkspace("srv");
     const question = { id: "q", author: "me", text: "can you check vercel?", at: 1 };
     const reply = { id: "r", author: "bot", text: "Vercel access works.", at: 2 };
     const chat = (messages) => ({ id: "chat", kind: "direct", botIds: ["bot"], createdAt: 1, updatedAt: 1, messages });
@@ -31,11 +34,12 @@ test("a silent OpenBots stream reconnects by itself and brings back the bot's wo
     const enc = new TextEncoder();
     const streams = [];
     globalThis.fetch = async (path, init) => {
-      if (path !== "/api/bots/stream") return Response.json({ ok: true });
+      if (path !== "/api/workspace/to/srv/api/bots/stream") return Response.json({ ok: true });
       let controller;
       const body = new ReadableStream({ start(c) { controller = c; } });
       const s = { signal: init?.signal, send: (e) => controller.enqueue(enc.encode(JSON.stringify(e) + "\\n")) };
       streams.push(s);
+      s.send({ t: "hello", workspace: "srv" });
       // A half-open connection: the abort doesn't reach the body either, so only the store's own bound ends it.
       s.send(streams.length === 1 ? snapshot() : streams.length === 2
         ? snapshot({ typing: { chat: ["bot"] }, status: { bot: { state: "working", conversationId: "chat", activity: "Using Vercel" } } })

@@ -14,7 +14,11 @@ g.IS_REACT_ACT_ENVIRONMENT = true;
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { useBots } = await import("../src/lib/bots/store");
+const { enterWorkspace, useBots } = await import("../src/lib/bots/store");
+const { useWorkspace } = await import("../src/lib/bots/workspace");
+// This server's own workspace, where bots are managed.
+useWorkspace.setState({ localId: "srv", localName: "Studio" });
+enterWorkspace("srv");
 const { BotAdvanced, BotComputer } = await import("../src/components/bots/BotAdvanced");
 const { BotAccess } = await import("../src/components/BotAccess");
 type Bot = import("../src/lib/bots/types").Bot;
@@ -83,7 +87,7 @@ for (const surface of ["settings", "advanced"] as const) {
     await mount(surface, { device: "local", kind: "host" });
     await click(trigger("Runs on"));
     await click(options("Runs on").find((o) => o.textContent === "Cloud VM")!);
-    expect(patches().at(-1)).toMatchObject({ path: "/api/bots/b1", body: { computer: { device: "vm", kind: "host" } } });
+    expect(patches().at(-1)).toMatchObject({ path: "/api/workspace/to/srv/api/bots/b1", body: { computer: { device: "vm", kind: "host" } } });
     expect(useBots.getState().bots[0]!.computer).toEqual({ device: "vm", kind: "host" });
     // The VM only allows a container, and says how to change that on the VM.
     expect(note()).toContain("Cloud VM only allows a container");

@@ -3553,3 +3553,133 @@ button.bots-details-name:hover {
 .bots-fallbacks-note {
   margin: 0 0 6px;
 }
+
+/* Whose OpenBots this tab shows (WorkspacePicker.tsx). */
+.bots-workspace {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0 0 8px;
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.bots-workspace:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.bots-workspace-remote {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.bots-workspace-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-workspace-menu {
+  min-width: 220px;
+}
+
+.bots-workspace-item {
+  align-items: flex-start;
+}
+
+.bots-workspace-check {
+  display: inline-flex;
+  width: 16px;
+  flex: none;
+  padding-top: 2px;
+}
+
+.bots-workspace-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.bots-workspace-note {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.bots-switch-body {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 22px 22px 6px;
+  font-size: 15px;
+}
+
+.bots-switch-hint {
+  margin: 0;
+  padding: 0 22px 8px 48px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+/* Changes a workspace didn't confirm, kept with it. */
+.bots-unconfirmed {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 13px;
+}
+
+.bots-unconfirmed h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.bots-unconfirmed ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bots-unconfirmed-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bots-unconfirmed-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.bots-unconfirmed-state {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+/* A reference that belongs to another device's workspace and can't be opened from here. */
+.bm-unavailable {
+  color: var(--text-2);
+  cursor: default;
+}
+
+.bm-unavailable-note {
+  font-size: 12px;
+}
+
+.bots-gone svg {
+  color: var(--text-2);
+}

@@ -1,10 +1,14 @@
 // OpenBots' connected apps as the app sees them. The catalog ships in shared/apps.ts; this holds what
 // the server says about the user's connections, refreshed when the bots stream says they changed.
 import { create } from "zustand";
+import { useWorkspace, workspacePath } from "./workspace";
 import { appById, appReturnOrigin, type AppsSnapshot, type AppView, type CatalogApp, type OAuthClientId } from "../../../shared/apps";
 
+/** Apps are this server's own, so they're asked of it by its id: an address now serving another server runs nothing. */
 async function request<T>(path: string, method: "GET" | "POST" | "DELETE" = "GET", body?: unknown): Promise<T> {
-  const res = await fetch(path, { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
+  const id = useWorkspace.getState().localId;
+  if (!id) throw new Error("This server hasn't said which it is yet. Try again in a moment.");
+  const res = await fetch(workspacePath(id, path), { method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }) });
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new Error(data.error || "Something went wrong");
   return data;
