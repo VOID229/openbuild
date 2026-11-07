@@ -167,6 +167,28 @@ test("each grant opens only its own tools, and unisolated access is a grant of i
   expect((await computerTargets()).find((t) => t.device === target)).toMatchObject({ status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true } });
 }, 30_000);
 
+test("a computer left under the bare bot id from before grants stops the bot visibly, and both stay as they were", async () => {
+  const legacy = svc.createBot({ name: "Veteran" }).bot.id;
+  svc.updateBot(legacy, { computer: { device: target, kind: "host" } });
+  // What an earlier build made on the target for this bot: its folder under the bot's own id.
+  const old = join(targetData, "computers", legacy);
+  mkdirSync(join(old, "home"), { recursive: true });
+  writeFileSync(join(old, "computer.json"), JSON.stringify({ id: legacy, kind: "host", createdAt: 1 }));
+  writeFileSync(join(old, "home", "keep.txt"), "years of work");
+  const before = targetComputers();
+  for (const [method, params] of [["bash", { command: "pwd" }], ["write", { path: "keep.txt", content: "overwritten" }], ["read", { path: "keep.txt" }]] as const) {
+    const run = await tool(legacy, method, params);
+    expect(run.error).toContain("Target Box has a computer under this bot's id from before bots needed permission here");
+    expect(run.error).toContain("nothing ran");
+  }
+  // The old files are untouched, and no empty computer took their place.
+  expect(await Bun.file(join(old, "home", "keep.txt")).text()).toBe("years of work");
+  expect(targetComputers()).toEqual(before);
+  expect(targetComputers()).not.toContain(guestComputerId(clientId, legacy));
+  expect(workspaceComputers()).toEqual([]);
+  expect(svc.fullBot(legacy)!.computer).toEqual({ device: target, kind: "host" });
+}, 30_000);
+
 test("a target that goes offline fails the tool without running it here, and works again once it's back", async () => {
   await stopTarget();
   const run = await tool(bot, "bash", { command: "pwd" });

@@ -15,7 +15,7 @@ import type { BotToolGrants } from "../../shared/types";
 import * as devices from "../devices";
 import type { StoredDevice } from "../devices";
 import { bad, readJson } from "../handlers";
-import { capabilities, computer } from "./index";
+import { capabilities, computer, computerExists } from "./index";
 
 /** The header every /api/computers answer carries: the server id of the machine that ran it. */
 export const SERVER_HEADER = "x-openbuild-server";
@@ -31,11 +31,7 @@ function needs(op: string): Tool | undefined {
   return undefined;
 }
 
-/**
- * A paired server's computer, apart from this machine's bots' and other paired servers'. Computers a
- * paired server made before grants are under the bare bot id, which can't be told apart from this
- * machine's own bots', so they're never reused or removed from here: they stay as they were.
- */
+/** A paired server's computer, apart from this machine's bots' and other paired servers'. */
 export const guestComputerId = (clientId: string, id: string) => "g" + createHash("sha256").update(`${clientId}\n${id}`).digest("hex").slice(0, 40);
 
 /** Why a paired server can't run `op` here, or undefined when it may. */
@@ -191,6 +187,16 @@ export function computerRoutes(api: Api) {
   };
 }
 
+/**
+ * A paired server's bots used to keep their computers here under the bare bot id. One with this
+ * bot's id may hold its files, but whose it is can't be told here (this machine's own bots use bare
+ * ids too, and so did every paired server), so it's neither taken over nor replaced with an empty
+ * one: the bot stops with this until this machine's owner decides. Both stay as they are.
+ */
+const legacyRefusal = () =>
+  `${devices.deviceName()} has a computer under this bot's id from before bots needed permission here. It wasn't used, changed or replaced, and nothing ran. ` +
+  `${devices.deviceName()}'s owner has to decide what becomes of it before this bot can have a computer there; until then, choose another computer in the bot's settings.`;
+
 /** A request that carries a device token. api() admits it only when the token is paired here, as a device, never as a browser. */
 const presentsDeviceToken = (req: Request) => /^Bearer /.test(req.headers.get("authorization") ?? "");
 
@@ -213,6 +219,7 @@ async function operate(req: Request, server: Bun.Server<unknown>, rawId: string,
       const c = computer(id, asked ?? "container");
       const why = refusal(who, op, op === "ensure" && asked ? asked : c.config.kind);
       if (why) return stamp(bad(why, 403));
+      if (!computerExists(id) && computerExists(rawId)) return stamp(Response.json({ error: legacyRefusal(), legacy: true }, { status: 409 }));
       body = { ...body, kind: asked ?? c.config.kind };
     } catch (err) {
       const e = err as Error & { status?: number };
