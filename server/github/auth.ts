@@ -174,7 +174,8 @@ async function refresh(record: GithubRecord): Promise<string | undefined> {
   }
   const tokens = tokensFrom(body);
   if (!tokens) {
-    if (body.error === "bad_refresh_token" || body.error === "invalid_grant" || body.error === "unauthorized") await signOut(record.generation);
+    // GitHub answers a refresh token it no longer takes (used, revoked) with incorrect_client_credentials.
+    if (body.error === "bad_refresh_token" || body.error === "incorrect_client_credentials" || body.error === "invalid_grant" || body.error === "unauthorized") await signOut(record.generation);
     return undefined;
   }
   // GitHub has already retired the old pair, so the new one is saved before anything uses it.

@@ -104,7 +104,8 @@ const server = Bun.serve({
       if (body.grant_type === "refresh_token") {
         state.refreshes++;
         if (state.refreshDelay) await Bun.sleep(state.refreshDelay);
-        if (!state.refresh.has(body.refresh_token ?? "")) return json({ error: "bad_refresh_token" });
+        // What GitHub answers for a used or revoked refresh token, even with the right client ID.
+        if (!state.refresh.has(body.refresh_token ?? "")) return json({ error: "incorrect_client_credentials" });
         // Rotation: the refresh token and the access token issued with it both stop working.
         state.refresh.delete(body.refresh_token!);
         state.access.delete(body.refresh_token!.replace("ghr_", "ghu_"));
