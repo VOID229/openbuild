@@ -362,7 +362,9 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       a.match(woken[0].wake.text, /Introduce yourself/);
       a.match(woken[0].wake.text, /offer "developer"/);
       a.match(woken[0].wake.text, /If they say they do, offer them a starter team .*offer "team"/);
-      a.match(woken[0].wake.text, /don't bring the team up again/);
+      a.match(woken[0].wake.text, /If they say they don't: There's no developer starter team to offer them.*don't offer it or bring it up again/);
+      a.match(woken[0].wake.text, /they can still make their own bots and teams whenever they like, or ask you to make them/);
+      a.match(woken[0].wake.text, /Never say they have no team/);
       a.equal(svc.getSettings().onboarding, 'done');
 
       // Opening it again is just opening it.
@@ -434,7 +436,10 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       svc.answerQuestion(chat, no.id, 'B');
       svc.answerQuestion(chat, no.id, 'A');
       const told = contextFor(again.id);
-      a.match(told, /don't really write code.*don't offer it or mention it again/);
+      a.match(told, /don't really write code. There's no developer starter team to offer them.*don't offer it or bring it up again/);
+      a.match(told, /what you can still help with yourself/);
+      a.match(told, /they can still make their own bots and teams whenever they like, or ask you to make them, which you can do with manage_bot/);
+      a.match(told, /Never say they have no team, or suggest teams aren't available/);
       a.doesNotMatch(told, /offer "team"/);
       a.throws(() => askUser(again.id, { title: 'Want a team?', offer: 'team' }), /isn't for them/);
       a.equal(db.messages(chat, 20).filter(r => r.message.question?.offer === 'team').length, 0);
@@ -447,7 +452,7 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       chat = svc.directId(again.id);
       setFocus(again.id, chat);
       svc.answerQuestion(chat, ask(again.id, chat, { title: 'Do you write code?', offer: 'developer' }).id, 'A bit of Python at work');
-      a.match(contextFor(again.id), /in their own words: “A bit of Python at work”. If that means they write code, offer them a starter team .*If it doesn't, the team isn't for them/);
+      a.match(contextFor(again.id), /in their own words: “A bit of Python at work”. If that means they write code, offer them a starter team .*If it doesn't: There's no developer starter team to offer them.*make their own bots and teams whenever they like/);
       const typed = ask(again.id, chat, { title: 'Want a team?', offer: 'team' });
       a.equal(typed.question.offer, 'team');
       svc.answerQuestion(chat, typed.id, 'A');

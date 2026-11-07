@@ -169,11 +169,11 @@ export function contextFor(botId: string): string {
   const offered = !!ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId);
   const developer = bot.primary ? svc.developerAnswer() : undefined;
   if (developer?.kind === "no") {
-    lines.push("When you asked, the user said they don't really write code. The starter team is for people who code, so don't offer it or mention it again. Help them yourself, and offer to make bots for the things they do often.");
+    lines.push(`When you asked, the user said they don't really write code. ${svc.NO_CODE_REPLY} Offer to make bots for the things they do often.`);
   } else if (developer && !offered) {
     lines.push(
       developer.kind === "own"
-        ? `When you asked whether they write code, the user answered in their own words: “${developer.text}”. If that means they write code, ${svc.TEAM_OFFER} If it doesn't, the team isn't for them: don't offer or mention it, and say briefly what you can still help with on your own.`
+        ? `When you asked whether they write code, the user answered in their own words: “${developer.text}”. If that means they write code, ${svc.TEAM_OFFER} If it doesn't: ${svc.NO_CODE_REPLY}`
         : `When you asked whether they write code, the user said they write code. Now ${svc.TEAM_OFFER}`,
     );
   }
