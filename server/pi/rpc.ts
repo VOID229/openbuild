@@ -26,6 +26,9 @@ export function reportProblem(source: string, message: string) {
 
 export class PiError extends Error {}
 
+/** The longest a command waits on a compaction Pi reports, as long as a reply may take. */
+const COMPACTION_LIMIT_MS = 15 * 60 * 1000;
+
 export class PiProcess {
   readonly cwd: string;
   private proc: Subprocess<"pipe", "pipe", "pipe">;
@@ -35,6 +38,9 @@ export class PiProcess {
   private closing = false;
   private terminateTimer?: ReturnType<typeof setTimeout>;
   private killTimer?: ReturnType<typeof setTimeout>;
+  /** Set while Pi compacts the session: what to run when it's done. */
+  private compacting?: Set<() => void>;
+  private compactedAt = 0;
   exited = false;
   exitCode?: number;
   lastUsed = Date.now();
@@ -53,6 +59,7 @@ export class PiProcess {
       clearTimeout(this.killTimer);
       const tail = this.stderrTail.slice(-6).join("\n");
       const err = new PiError(`Pi exited (code ${code})${tail ? `: ${tail}` : ""}`);
+      this.compacting = undefined;
       for (const p of this.pending.values()) p.reject(err);
       this.pending.clear();
       this.dispatch({ type: "process_exit", code, message: err.message });
@@ -106,6 +113,13 @@ export class PiProcess {
       p.resolve(record);
       return;
     }
+    if (record.type === "compaction_start") this.compacting ??= new Set();
+    if (record.type === "compaction_end") {
+      const waiting = this.compacting;
+      this.compacting = undefined;
+      this.compactedAt = Date.now();
+      for (const resume of waiting ?? []) resume();
+    }
     if (record.type === "extension_error") reportProblem(record.extensionPath ?? "extension", `${record.event ? `${record.event}: ` : ""}${record.error}`);
     for (const l of this.listeners) {
       try {
@@ -136,14 +150,35 @@ export class PiProcess {
     if (this.exited) throw new PiError(`Pi isn't running (exited with code ${this.exitCode})`);
     this.lastUsed = Date.now();
     const id = typeof command.id === "string" ? command.id : crypto.randomUUID();
+    const started = Date.now();
     const response = await new Promise<PiRecord>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout>;
+      let resume: (() => void) | undefined;
+      const settle = () => (clearTimeout(timer), resume && this.compacting?.delete(resume));
+      const fail = () => {
+        settle();
         this.pending.delete(id);
         reject(new PiError(`Pi didn't answer "${command.type}" in time`));
-      }, timeoutMs);
+      };
+      // Pi answers a prompt that takes the session over its threshold only once it has compacted it,
+      // and that's a model call: minutes on a long session. The deadline starts again once it's done.
+      const expire = () => {
+        const left = started + COMPACTION_LIMIT_MS - Date.now();
+        if (left <= 0) return fail();
+        if (this.compacting) {
+          resume = () => (clearTimeout(timer), (timer = setTimeout(expire, timeoutMs)));
+          this.compacting.add(resume);
+          timer = setTimeout(fail, left);
+          return;
+        }
+        const wait = Math.max(started, this.compactedAt) + timeoutMs - Date.now();
+        if (wait > 0) timer = setTimeout(expire, wait);
+        else fail();
+      };
+      timer = setTimeout(expire, timeoutMs);
       this.pending.set(id, {
-        resolve: (r) => (clearTimeout(timer), resolve(r)),
-        reject: (e) => (clearTimeout(timer), reject(e)),
+        resolve: (r) => (settle(), resolve(r)),
+        reject: (e) => (settle(), reject(e)),
       });
       this.write({ ...command, id });
     });

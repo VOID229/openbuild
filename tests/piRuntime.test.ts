@@ -212,3 +212,17 @@ test("Pi Stop bounds shutdown even when a tool ignores abort and SIGTERM", () =>
   assert(next.some((e) => e.t === "done" && e.finish === "handled"));
   assert.equal(log().filter((c) => c.type === "fixture_start").length, 2, "The next turn reused the dead process");
 `), 12_000);
+
+test("Pi RPC waits out a compaction before timing out the command that set it off", () => reproduce("compaction", `
+  const { PiProcess } = await import("./server/pi/rpc.ts");
+  const proc = new PiProcess(["--no-session"], req.cwd);
+  try {
+    // The compaction takes longer than the answer's deadline; the prompt is still answered.
+    const accepted = await proc.send({ type: "prompt", message: "Work" }, 150);
+    assert.equal(accepted.disposition, "started");
+    // Once the compaction is over the deadline runs again, so a Pi that never answers still fails.
+    const started = Date.now();
+    await assert.rejects(proc.send({ type: "prompt", message: "/compact-mute" }, 150), /didn't answer "prompt" in time/);
+    assert(Date.now() - started >= 500, "The deadline didn't wait for the compaction to finish");
+  } finally { proc.close(0); }
+`));
