@@ -92,6 +92,91 @@ test("the picker lists this device and each paired one, and choosing one moves t
   expect(new URL(location.href).searchParams.get("workspace")).toBeNull();
 });
 
+// The menu hangs from its trigger at the trigger's width: `.menu`'s right: 0 once stretched this
+// fixed popover to the window's edge, and a menu item's fixed height cut each two-line row short.
+test("the picker's menu is portaled, anchored under the trigger at its width, and bounded with its rows scrolling", async () => {
+  await act(async () => root.render(h(WorkspacePicker)));
+  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Workspace: Studio"]')!;
+  trigger.getBoundingClientRect = () => ({ left: 12, right: 262, top: 40, bottom: 70, width: 250, height: 30, x: 12, y: 40, toJSON() {} }) as DOMRect;
+  await click(trigger);
+  await frames();
+  const menu = document.querySelector<HTMLElement>('[role="menu"][aria-label="Workspaces"]')!;
+  expect(menu.parentElement).toBe(document.body);
+  expect(menu.classList.contains("popover-portal")).toBe(true);
+  expect(menu.style.position).toBe("fixed");
+  expect(menu.style.left).toBe("12px");
+  expect(menu.style.top).toBe("78px");
+  expect(menu.style.width).toBe("250px");
+  expect(menu.style.right).toBe("");
+  expect(Number.parseFloat(menu.style.maxHeight)).toBeGreaterThan(0);
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  // Each row: a check column, the name, then what the device is or why it can't be used.
+  const offline = byText('[role="menuitemradio"]', "Old Mini")!;
+  expect(offline.querySelector(".bots-workspace-title")!.textContent).toBe("Old Mini");
+  expect(offline.querySelector(".bots-workspace-note.bots-workspace-status")!.textContent).toBe("Offline");
+  const local = byText('[role="menuitemradio"]', "Studio")!;
+  expect(local.querySelector(".bots-workspace-check svg")).toBeTruthy();
+  expect(local.querySelector(".bots-workspace-note")!.classList.contains("bots-workspace-status")).toBe(false);
+  // Never narrower than its rows need, however narrow the trigger.
+  await click(trigger);
+  trigger.getBoundingClientRect = () => ({ left: 12, right: 92, top: 40, bottom: 70, width: 80, height: 30, x: 12, y: 40, toJSON() {} }) as DOMRect;
+  await click(trigger);
+  await frames();
+  expect(document.querySelector<HTMLElement>(".bots-workspace-menu")!.style.width).toBe("220px");
+});
+
+test("the picker's styles keep it a compact, scrolling menu, on a phone too", async () => {
+  const rule = (css: string, selector: string) => new RegExp(`(^|\\n)\\s*${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} \\{([^}]*)\\}`).exec(css)?.[2] ?? "";
+  const bots = await Bun.file("src/bots.css").text();
+  const mobile = await Bun.file("src/mobile.css").text();
+  const menu = rule(bots, ".bots-workspace-menu");
+  expect(menu).toContain("right: auto;");
+  expect(menu).toContain("overflow-y: auto;");
+  expect(menu).toContain("overscroll-behavior: contain;");
+  expect(rule(bots, ".bots-workspace-item")).toContain("height: auto;");
+  expect(rule(bots, ".bots-workspace-title,\n.bots-workspace-note")).toContain("text-overflow: ellipsis;");
+  // The phone's sheet gives menu items a fixed 50px; these rows grow past it instead.
+  const sheet = rule(mobile, ".popover-portal.menu .bots-workspace-item");
+  expect(sheet).toContain("height: auto;");
+  expect(sheet).toContain("min-height: 50px;");
+  expect(mobile.indexOf(".popover-portal.menu .bots-workspace-item")).toBeGreaterThan(mobile.indexOf(".popover-portal.menu .menu-item,"));
+});
+
+test("the picker works from the keyboard: arrows open it on the current workspace, Escape and Tab hand focus back", async () => {
+  const media = g.window.matchMedia;
+  g.window.matchMedia = (q: string) => ({ matches: q.includes("reduced-motion") || q.includes("pointer: fine"), addEventListener() {}, removeEventListener() {} });
+  try {
+    await act(async () => root.render(h(WorkspacePicker)));
+    const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Workspace: Studio"]')!;
+    const key = (target: Element, k: string) => act(async () => { target.dispatchEvent(new win.KeyboardEvent("keydown", { key: k, bubbles: true }) as any); });
+    trigger.focus();
+    await key(trigger, "ArrowDown");
+    await frames();
+    expect(document.activeElement?.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement?.textContent).toContain("Studio");
+    await key(document.activeElement!, "ArrowDown");
+    expect(document.activeElement?.textContent).toContain("Host Box");
+    await key(document.activeElement!, "End");
+    expect(document.activeElement?.textContent).toContain("Old Mini");
+    await key(document.activeElement!, "Home");
+    expect(document.activeElement?.textContent).toContain("Studio");
+    await key(document.activeElement!, "Escape");
+    await frames(200);
+    expect(document.querySelector(".bots-workspace-menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await key(trigger, "ArrowUp");
+    await frames();
+    await key(document.activeElement!, "Tab");
+    await frames(200);
+    expect(document.querySelector(".bots-workspace-menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // Opening and closing chose nothing.
+    expect(useBots.getState().workspace).toBe("srv");
+  } finally {
+    g.window.matchMedia = media;
+  }
+});
+
 test("a switch with a change on its way shows what it waits for, and Cancel stays put", async () => {
   await frames();
   let answer!: (r: Response) => void;
