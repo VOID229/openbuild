@@ -77,7 +77,7 @@ afterEach(() => {
 
 test("the sidebar has no workspace picker, even with paired devices online, and lists this server's chats", async () => {
   useStore.setState({ botsSidebarOpen: true } as any);
-  useBots.setState({ bots: [bot], conversations: [chat("local-chat")], loaded: true });
+  useBots.setState({ bots: [bot], conversations: [chat("local-chat")], loaded: true } as any);
   await act(async () => root.render(h(BotsSidebar)));
   await frames();
   expect(document.querySelector(".bots-workspace, .bots-workspace-menu, [aria-label^='Workspace:']")).toBeNull();
@@ -90,7 +90,7 @@ test("the sidebar has no workspace picker, even with paired devices online, and 
 });
 
 test("without the picker, a bot in this server's workspace still runs its tools on a paired device", async () => {
-  useBots.setState({ bots: [bot] });
+  useBots.setState({ bots: [bot] } as any);
   const View = () => h(BotComputer, { bot: useBots((s) => s.bots[0]!) });
   await act(async () => root.render(h(View)));
   await frames();
