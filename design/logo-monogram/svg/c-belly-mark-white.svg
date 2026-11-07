@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <g transform="translate(1 0)" fill="none" stroke="#fff" stroke-width="12">
+    <path stroke-linejoin="miter" d="M24 63V12H44a13 13 0 0 1 0 26H24"/>
+    <circle cx="49" cy="63" r="25"/>
+    <path d="M24 57V88H49"/>
+  </g>
+</svg>
