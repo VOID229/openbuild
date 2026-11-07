@@ -19,7 +19,6 @@ import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime } from "./common";
-import { WorkspacePicker } from "./WorkspacePicker";
 
 type Dialog =
   | { kind: "bot" }
@@ -573,7 +572,6 @@ export function BotsSidebar() {
               )}
               {!remote && <NewMenu onDialog={setDialog} />}
             </div>
-            <WorkspacePicker />
             {(searching || mobile) && (
               <label className="search bots-search">
                 <Search size={16} />

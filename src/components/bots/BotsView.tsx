@@ -10,7 +10,7 @@ import { BotChat } from "./BotChat";
 import { BotDetails } from "./BotDetails";
 import { openBotsDialog } from "./BotsSidebar";
 import { useSlow } from "./common";
-import { NotConfirmed, WorkspaceProblem, WorkspaceSwitchDialog, workspaceTrouble } from "./WorkspacePicker";
+import { NotConfirmed, WorkspaceProblem, WorkspaceSwitchDialog, workspaceTrouble } from "./WorkspaceStatus";
 
 function NoConversation() {
   const host = useRemoteWorkspace();

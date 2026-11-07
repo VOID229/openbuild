@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -81,39 +81,36 @@ async function tab(script: string, env: Record<string, string> = {}) {
   return stdout.trim();
 }
 
-test("two tabs on different workspaces keep everything apart, and each comes back to its own", async () => {
-  const storage = join(directory, "two-tabs.json");
-  const opened = `
+test("a tab left on another device's workspace opens this server's, clears the stale choice, and leaves the host's data alone", async () => {
+  const storage = join(directory, "stale-choice.json");
+  // What the host's workspace kept in this browser when tabs could still open it.
+  const hostLayout = JSON.stringify({ folded: ["hidden", "work-host"], activeId: "host-chat", detailsOpen: false });
+  const hostCache = JSON.stringify({ bots: [], conversations: [{ id: "host-chat", kind: "direct", botIds: ["bot"], createdAt: 1, updatedAt: 1, messages: [] }], sections: [] });
+  const hostUnconfirmed = JSON.stringify([{ id: "u1", workspace: "host", at: 1, label: "Message “still on the host”", method: "POST", path: "/api/bots/conversations/host-chat/messages", body: { id: "m-host", author: "me", text: "still on the host" }, check: { kind: "message", conversationId: "host-chat", messageId: "m-host" }, error: "Host Box is unreachable" }]);
+  const seeded = { "openbuild.bots.layout:host": hostLayout, "openchat-kv:openbuild-bots/cache:snapshot:host": hostCache, "openbuild.bots.unconfirmed:host": hostUnconfirmed };
+  writeFileSync(storage, JSON.stringify(seeded));
+  const out = JSON.parse(await tab(`
+    sessionStorage.setItem("openbuild.workspace", "host");
     await preloadBots();
     useBots.getState().ensureSeeded();
-    await wait(60);
-    const workspace = useBots.getState().workspace;
-    useBots.getState().toggleFolded("work-" + workspace);
-    useBots.getState().setDetailsOpen(workspace === "srv");
     await wait(1200);
-    const own = prefixes[workspace];
-    const others = calls.filter((c) => c.path !== "/api/config" && c.path !== "/api/bots/settings" && !c.path.startsWith(own + "/"));
-    console.log(JSON.stringify({ workspace, conversations: ids(), activeId: useBots.getState().activeId, others, href: location.href, session: sessionStorage.getItem("openbuild.workspace") }));
-  `;
-  const local = JSON.parse(await tab(opened, { STORAGE: storage, TAB_URL: "http://localhost/bots" }));
-  const remote = JSON.parse(await tab(opened, { STORAGE: storage, TAB_URL: "http://localhost/bots?workspace=host" }));
-  // A new tab opens on this server; the other one is on the host its address names.
-  expect(local).toMatchObject({ workspace: "srv", conversations: ["local-chat"], activeId: "local-chat", others: [], href: "http://localhost/bots", session: "srv" });
-  expect(remote).toMatchObject({ workspace: "host", conversations: ["host-chat"], activeId: "host-chat", others: [], href: "http://localhost/bots?workspace=host", session: "host" });
+    const s = useBots.getState();
+    console.log(JSON.stringify({ workspace: s.workspace, conversations: ids(), activeId: s.activeId, unconfirmed: s.unconfirmed, host: calls.filter((c) => c.path.includes("/host/")), href: location.href, session: sessionStorage.getItem("openbuild.workspace") }));
+  `, { STORAGE: storage, TAB_URL: "http://localhost/bots?workspace=host" }));
+  // This server's chats, with the stale ?workspace= and session choice cleared, and nothing asked of or sent to the host.
+  expect(out).toEqual({ workspace: "srv", conversations: ["local-chat"], activeId: "local-chat", unconfirmed: [], host: [], href: "http://localhost/bots", session: "srv" });
+  // The host's cache, layout and unconfirmed change are kept as they were, under its own id: not moved, merged or replayed here.
   const saved = JSON.parse(readFileSync(storage, "utf8")) as Record<string, string>;
-  // Layout and cached snapshots under each workspace's own id, never shared or merged.
-  expect(JSON.parse(saved["openbuild.bots.layout:srv"]!)).toEqual({ folded: ["hidden", "work-srv"], activeId: "local-chat", detailsOpen: true });
-  expect(JSON.parse(saved["openbuild.bots.layout:host"]!)).toEqual({ folded: ["hidden", "work-host"], activeId: "host-chat", detailsOpen: false });
+  for (const [key, value] of Object.entries(seeded)) expect(saved[key]).toBe(value);
   expect(JSON.parse(saved["openchat-kv:openbuild-bots/cache:snapshot:srv"]!).conversations.map((c: any) => c.id)).toEqual(["local-chat"]);
-  expect(JSON.parse(saved["openchat-kv:openbuild-bots/cache:snapshot:host"]!).conversations.map((c: any) => c.id)).toEqual(["host-chat"]);
-  expect(Object.keys(saved).filter((k) => k.includes("openbuild.bots") && !/:(srv|host)$/.test(k))).toEqual([]);
-  // Reopening the host's tab paints the host's cache, and nothing of this server's.
+  expect(saved["openbuild.bots.unconfirmed:srv"]).toBeUndefined();
+  // Reopened with the old address again, it still opens here.
   const reopened = await tab(`
     hold = () => new Promise(() => {});
     await preloadBots();
-    console.log(JSON.stringify({ workspace: useBots.getState().workspace, conversations: ids(), detailsOpen: useBots.getState().detailsOpen }));
+    console.log(JSON.stringify({ workspace: useBots.getState().workspace, conversations: ids(), host: calls.filter((c) => c.path.includes("/host/")).length }));
   `, { STORAGE: storage, TAB_URL: "http://localhost/bots?workspace=host" });
-  expect(JSON.parse(reopened)).toEqual({ workspace: "host", conversations: ["host-chat"], detailsOpen: false });
+  expect(JSON.parse(reopened)).toEqual({ workspace: "srv", conversations: ["local-chat"], host: 0 });
 }, 30_000);
 
 test("a switch waits for the workspace's changes, can be called off, and never cuts a write short", async () => {
@@ -171,6 +168,7 @@ test("a failed write stays with its workspace, is reconciled only against that w
   const storage = join(directory, "unconfirmed.json");
   const out = await tab(`
     await preloadBots();
+    await switchWorkspace("host");
     useBots.getState().ensureSeeded();
     await wait(60);
     assert.equal(useBots.getState().workspace, "host");
@@ -214,13 +212,14 @@ test("a failed write stays with its workspace, is reconciled only against that w
     // Nothing was ever sent to this server's conversations, from either workspace.
     assert.equal(calls.filter((c) => c.method !== "GET" && c.path.startsWith(prefixes.srv)).length, 0);
     console.log("ok");
-  `, { STORAGE: storage, TAB_URL: "http://localhost/?workspace=host" });
+  `, { STORAGE: storage });
   expect(out).toBe("ok");
 }, 30_000);
 
 test("a write that did land before its answer was lost is cleared by its workspace's snapshot", async () => {
   const out = await tab(`
     await preloadBots();
+    await switchWorkspace("host");
     useBots.getState().ensureSeeded();
     await wait(60);
     // The host takes the message, but the answer never makes it back.
@@ -234,7 +233,7 @@ test("a write that did land before its answer was lost is cleared by its workspa
     assert.deepEqual(useBots.getState().unconfirmed, []);
     assert.deepEqual(useBots.getState().conversations[0].messages.map((m) => m.text), ["landed after all"]);
     console.log("ok");
-  `, { TAB_URL: "http://localhost/?workspace=host", STORAGE: join(directory, "landed.json") });
+  `, { STORAGE: join(directory, "landed.json") });
   expect(out).toBe("ok");
 }, 30_000);
 
@@ -244,12 +243,16 @@ test("a tab whose workspace isn't here anymore says so and takes on nothing from
     hold = (path) => (path.startsWith("/api/workspace/via/old-srv/") ? Promise.resolve(Response.json({ error: "not paired", reason: "unpaired" }, { status: 404 })) : undefined);
     sessionStorage.setItem("openbuild.workspace", "old-srv");
     await preloadBots();
+    assert.equal(useBots.getState().workspace, "srv");
+    assert.equal(calls.filter((c) => c.path.includes("/old-srv/")).length, 0);
+    await switchWorkspace("old-srv");
+    const before = calls.length;
     useBots.getState().ensureSeeded();
     await wait(60);
     assert.equal(useBots.getState().workspace, "old-srv");
     assert.equal(useWorkspace.getState().problem.kind, "gone");
     assert.deepEqual(ids(), []);
-    assert.equal(calls.filter((c) => c.path.startsWith(prefixes.srv)).length, 0);
+    assert.equal(calls.slice(before).filter((c) => c.path.startsWith(prefixes.srv)).length, 0);
 
     // In this server's own workspace, a stream naming another server is refused the same way.
     await switchWorkspace("srv");
@@ -369,6 +372,7 @@ test("a delete of older history that wasn't confirmed stays unknown while the sn
     const older = { id: "old", author: "me", text: "from long ago", at: 1 };
     snapshots.host = snap([{ ...chat("host-chat", [latest]), more: true }]);
     await preloadBots();
+    await switchWorkspace("host");
     useBots.getState().ensureSeeded();
     await wait(60);
     // The older page is loaded, and the delete of one of its messages gets no answer.
@@ -401,6 +405,6 @@ test("a delete of older history that wasn't confirmed stays unknown while the sn
     await wait(80);
     assert.deepEqual(useBots.getState().unconfirmed, []);
     console.log("ok");
-  `, { TAB_URL: "http://localhost/?workspace=host", STORAGE: join(directory, "older-delete.json") });
+  `, { STORAGE: join(directory, "older-delete.json") });
   expect(out).toBe("ok");
 }, 30_000);

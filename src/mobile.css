@@ -1240,18 +1240,6 @@
     height: 20px;
   }
 
-  /* The workspace picker's rows have a second line under the name (src/bots.css). */
-  .popover-portal.menu .bots-workspace-item {
-    height: auto;
-    min-height: 50px;
-    padding-top: 8px;
-    padding-bottom: 8px;
-  }
-
-  .popover-portal.menu .bots-workspace-note {
-    font-size: 13px;
-  }
-
   /* A submenu opens in place, under its row, not off to the side of a sheet with no side. */
   .popover-portal.menu .filter-flyout,
   .context-menu .filter-flyout {

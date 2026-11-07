@@ -16,7 +16,7 @@ import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
 import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
-import { chosenWorkspace, isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
+import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
   text: string;
@@ -715,15 +715,14 @@ function load(visit: Visit): Promise<void> {
  * connection for as long as the page is open, and browsers share six per host across all tabs: that
  * stays for pages that have actually opened OpenBots.
  *
- * A new tab opens on this server's workspace. One that chose another before (its session, or the
- * address) goes back to that one, and if it isn't here anymore, says so.
+ * Every tab opens on this server's workspace, whatever another device's it was on before (see
+ * workspace.ts): that one's cache and not-confirmed changes stay where they are, and nothing is sent there.
  */
 export async function preloadBots(): Promise<void> {
   const local = await localWorkspace();
   if (!session) {
-    const id = chosenWorkspace() ?? local.id;
-    if (!id) return;
-    enter(id);
+    if (!local.id) return;
+    enter(local.id);
   }
   return load(session!);
 }
