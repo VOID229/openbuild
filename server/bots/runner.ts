@@ -42,6 +42,10 @@ interface Mind {
   steerable?: boolean;
   /** Per conversation, the last message this turn has put in front of the bot, images and all. */
   shown?: Map<string, number>;
+  /** The last scoped group steer on its way: resolves to whether Pi took it. */
+  steering?: Promise<boolean>;
+  /** Group requests steered into this turn's current attempt. */
+  steered?: Wake[];
   /** The model's last call failed (an expired sign-in, say): Pi ends the turn with no text, only this. */
   error?: string;
   /** This attempt ran a tool or wrote text, so trying it again on another model could repeat what it did. */
@@ -73,8 +77,14 @@ export function wake(botId: string, item: Wake) {
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
   const conversationId = item.conversationId;
-  // Group wakes must queue: an unscoped steer could expose user requests assigned to other bots.
-  if (db.getConversation(conversationId ?? "")?.kind !== "group" && !item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
+  const group = db.getConversation(conversationId ?? "")?.kind === "group";
+  // A user request routed to this bot in the group it's working in joins the turn, scoped to that request alone.
+  if (group && item.kind === "messages" && item.messageIds?.length && mind && steerableIn(botId, mind, conversationId!) && !waitsBehind(botId, conversationId!)) {
+    steerAssigned(botId, mind, item);
+    return;
+  }
+  // Other group wakes queue: an unscoped steer could expose user requests assigned to other bots.
+  if (!group && !item.messageIds && (item.kind === "messages" || item.kind === "reaction") && conversationId && conversationId === getFocus(botId) && pumping.has(botId) && mind?.steerable && mind.shown && !mind.proc.exited) {
     const shown = mind.shown;
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
@@ -97,6 +107,47 @@ export function wake(botId: string, item: Wake) {
     return;
   }
   enqueue(botId, item);
+}
+
+function steerableIn(botId: string, mind: Mind, conversationId: string): boolean {
+  return conversationId === getFocus(botId) && pumping.has(botId) && !!mind.steerable && !!mind.shown && !mind.proc.exited;
+}
+
+/** An earlier request for this group is still waiting its turn: a later one doesn't jump ahead of it. */
+function waitsBehind(botId: string, conversationId: string): boolean {
+  return (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === conversationId && j.messageIds);
+}
+
+/**
+ * Steers exactly the requests a wake assigns into the live turn: their lines and their images, nothing
+ * else from the transcript. Steers go one after another, so one that fails sends those behind it to the
+ * queue too, in order. Nothing moves the cursor: what the bot was shown is still the turn's start.
+ */
+function steerAssigned(botId: string, mind: Mind, item: Wake) {
+  const conversationId = item.conversationId!;
+  const ids = item.messageIds!;
+  const prior = mind.steering;
+  const turn = mind.shown;
+  const attempt = (async () => {
+    if (prior && !(await prior)) return false;
+    // The turn this was meant for may have ended while an earlier steer was on its way.
+    if (mind.shown !== turn || !steerableIn(botId, mind, conversationId)) return false;
+    const images = ids.flatMap((id) => {
+      const row = db.getMessage(id);
+      return row?.conversationId === conversationId ? imagesBetween(conversationId, row.seq - 1, row.seq) : [];
+    }).slice(-IMAGE_LIMIT);
+    mind.quiet = false;
+    show(botId, mind);
+    await mind.proc.send({ type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, 15_000);
+    return true;
+  })().catch(() => false);
+  mind.steering = attempt;
+  void attempt.then((ok) => {
+    if (!ok) return enqueue(botId, item);
+    // A model that fails before acting hands the turn to the next one, whose prompt doesn't have these.
+    if (mind.shown === turn) (mind.steered ??= []).push(item);
+    markSeen(botId, new Map(), new Set(ids));
+  });
 }
 
 function enqueue(botId: string, item: Wake) {
@@ -490,6 +541,8 @@ async function run(botId: string, all: Wake[]) {
       m.draft = "";
       m.typing = false;
       m.activity = "Thinking";
+      // Steered into an attempt whose model failed before acting: answered in a turn of their own, not lost.
+      for (const job of m.steered?.splice(0) ?? []) enqueue(botId, job);
       // Nothing has happened yet: a model Pi can't switch to, or that it refuses to start, is the next one's turn.
       const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent ? err : new ModelFailure(err instanceof Error ? err.message : String(err)));
       try {
@@ -554,6 +607,7 @@ async function run(botId: string, all: Wake[]) {
       mind.typing = false;
       mind.steerable = false;
       mind.shown = undefined;
+      mind.steered = undefined;
       mind.onCommit = undefined;
     }
     if (conversationId) {
@@ -601,7 +655,6 @@ function render(jobs: Wake[], botId: string): string {
 export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[]): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
-  const cursor = db.cursor(botId, conversationId);
   const rows = db.messages(conversationId, 16);
   // A wake that waited its turn can target a message older than the history window or cursor.
   for (const id of assigned ?? []) {
@@ -609,8 +662,27 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
   }
   rows.sort((a, b) => a.seq - b.seq);
+  const lines = rows.map(line(c, bots, user, botId, assigned));
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${conversationTitle(c, bots)}”):\n${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
+}
+
+/** A group request steered into a live turn: only its own lines, with a word on what to do with them. */
+export function steerNote(conversationId: string, botId: string, ids: string[]): string {
+  const c = db.getConversation(conversationId);
+  if (!c) return "";
+  const bots = db.listBots();
+  const rows = ids.flatMap((id) => {
+    const row = db.getMessage(id);
+    return row?.conversationId === conversationId ? [row] : [];
+  });
+  const lines = rows.sort((a, b) => a.seq - b.seq).map(line(c, bots, svc.getSettings().user?.name || "User", botId, ids, " [new, for you]"));
+  return `New in conversation ${conversationId.slice(0, 8)} (“${conversationTitle(c, bots)}”) while you were working:\n${lines.join("\n")}\nFold it into what you're doing. If a quick reply or reaction would help, send one; otherwise carry on.`;
+}
+
+function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]") {
+  const cursor = db.cursor(botId, c.id);
   const name = (author: string) => (author === "me" ? user : author === botId ? "you" : mentionName(bots.find((b) => b.id === author)?.name ?? "Bot"));
-  const lines = rows.map((r) => {
+  return (r: { seq: number; message: BotMessage }) => {
     const m = r.message;
     const who = m.author === "me" ? user : mentionName(bots.find((b) => b.id === m.author)?.name ?? "Bot");
     const text = m.event && eventText(m.event);
@@ -618,7 +690,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
     const body = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
-    const mark = assigned ? (assigned.includes(m.id) ? " [assigned request: answer this]" : " [context only: do not answer]")
+    const mark = assigned ? (assigned.includes(m.id) ? forYou : " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
       : r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
@@ -627,8 +699,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     const number = (id?: string) => list.findIndex((x) => reactionId(x) === id) + 1;
     const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${x.emoji} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
     return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
-  });
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${conversationTitle(c, bots)}”):\n${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
+  };
 }
 
 /** A poll in the transcript: its options, who picked what if this bot may know yet, and whether it still has to vote. */
