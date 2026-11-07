@@ -19,11 +19,11 @@ import { checkRelease, installRelease, releaseTrack, setReleaseTrack } from "../
 import { ask, confirm } from "./prompt";
 import { stage } from "./motion";
 import { describeUninstall, uninstallPlan, removeInstallation } from "./uninstall";
-import { discoverPairing, probePairing, type PairCandidate } from "./pairDiscovery";
 import { remoteRequest } from "./remoteRequest";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
+import * as pairing from "../server/pairClient";
 import { systemdService, systemdNetworkOverride, systemdNetworkOverridePath, UNIT } from "./systemd";
 
 type Mode = "local" | "lan" | "tailscale";
@@ -141,8 +141,7 @@ function run(cmd: string, args: string[]): { ok: boolean; out: string; err: stri
   return { ok: r.status === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? "").trim() || (r.error?.message ?? "") };
 }
 
-const tailscaleArgs = (args: string[]) => process.env.OPENBUILD_TAILSCALE_SOCKET ? [`--socket=${process.env.OPENBUILD_TAILSCALE_SOCKET}`, ...args] : args;
-const tailscaleBin = () => Bun.which("tailscale") ?? ["/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"].find(existsSync);
+const { tailscaleArgs, tailscaleBin } = pairing;
 
 /** This machine on the tailnet, from its Tailscale daemon; undefined when the daemon can't be reached. */
 function tailscaleSelf(bin: string): { name: string; ips: string[]; https: boolean } | undefined {
@@ -610,56 +609,6 @@ async function pairHost() {
   }
 }
 
-/** Probe a typed address with the given scheme, and the other one if that fails. */
-async function probeAddress(typed: string): Promise<PairCandidate | undefined> {
-  if (/^https?:\/\//.test(typed)) return probePairing(typed);
-  const host = typed.includes(":") ? typed : `${typed}:${PORT}`;
-  // Tailscale often has HTTPS on a nonstandard port; a LAN host is usually plain HTTP.
-  return (await probePairing(`https://${host}`)) ?? (await probePairing(`http://${host}`));
-}
-
-const isTailscaleIp = (ip: string) => /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip);
-
-/** Addresses on this computer's LAN subnets to probe. */
-function lanCandidates(): string[] {
-  const out = new Set<string>([`http://127.0.0.1:${PORT}`, `http://localhost:${PORT}`]);
-  for (const list of Object.values(networkInterfaces())) {
-    for (const a of list ?? []) {
-      if (a.family !== "IPv4" || a.internal || isTailscaleIp(a.address)) continue;
-      const parts = a.address.split(".");
-      const prefix = parts.slice(0, 3).join(".");
-      for (let n = 1; n <= 254; n++) out.add(`http://${prefix}.${n}:${PORT}`);
-    }
-  }
-  return [...out];
-}
-
-/** This machine and its tailnet peers, by address and MagicDNS name. */
-function tailscaleCandidates(): string[] {
-  const out = new Set<string>([`http://127.0.0.1:${PORT}`]);
-  const bin = tailscaleBin();
-  if (!bin) return [...out];
-  const r = run(bin, tailscaleArgs(["status", "--json"]));
-  if (!r.ok) return [...out];
-  let status: any;
-  try {
-    status = JSON.parse(r.out);
-  } catch {
-    return [...out];
-  }
-  const peers = [status.Self, ...Object.values(status.Peer ?? {})];
-  for (const peer of peers) {
-    for (const ip of peer?.TailscaleIPs ?? []) if (ip.includes(".")) out.add(`http://${ip}:${PORT}`);
-    const dns = String(peer?.DNSName ?? "").replace(/\.$/, "");
-    if (dns) {
-      out.add(`https://${dns}`);
-      out.add(`https://${dns}:${PORT}`);
-      out.add(`http://${dns}:${PORT}`);
-    }
-  }
-  return [...out];
-}
-
 /** Client: find the waiting host and claim its code. */
 async function pairClient() {
   const mode = await chooseTransport("Connect");
@@ -670,53 +619,23 @@ async function pairClient() {
   stage.update({ power: 1 });
   stage.print(dim(`${SEARCHING}…`));
   stage.discard();
-  async function* candidates(): AsyncGenerator<PairCandidate> {
-    let foundAny = false;
-    for await (const candidate of discoverPairing(mode === "lan" ? lanCandidates() : tailscaleCandidates())) {
-      foundAny = true;
-      yield candidate;
-    }
-    if (foundAny) return;
+  let outcome = await pairing.pairWithCode({ mode, code, port: PORT });
+  if (!outcome.ok && outcome.reason === "not-found") {
     stage.update({ power: 0 });
     stage.end();
     console.log(dim("No OpenBuild is waiting to pair here. If you know its address, enter it below."));
     const typed = await ask("Host address (host, host:port, or https://…, Enter to cancel): ");
     if (!typed) fail("nothing to pair with.");
-    const found = await probeAddress(typed);
-    if (!found) fail(`no OpenBuild is waiting to pair at ${typed}. Check that \`openbuild pair --host\` is running there.`);
-    yield found!;
+    if (!pairing.addressOrigins(typed, PORT)) fail(`${typed} isn't an address. Enter a host, host:port, or http(s)://host:port.`);
+    outcome = await pairing.pairWithCode({ mode, code, address: typed, port: PORT });
+    if (!outcome.ok && outcome.reason === "not-found") fail(`no OpenBuild is waiting to pair at ${typed}. Check that \`openbuild pair --host\` is running there.`);
   }
-
-  for await (const candidate of candidates()) {
-    try {
-      const res = await fetch(`${candidate.base}/api/pair/claim`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ code, name: hostname().replace(/\.local$/, "") }),
-        signal: AbortSignal.timeout(5000),
-      });
-      const body = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !body?.token || !body?.device) continue;
-      const urls = [...new Set([candidate.base, ...(body.device.urls ?? [])].filter((u: unknown): u is string => typeof u === "string" && /^https?:\/\//.test(u)))];
-      devices.addDevice({
-        ...body.device,
-        id: String(body.device.id),
-        name: String(body.device.name || candidate.name),
-        machine: body.device.machine || candidate.machine,
-        mode: body.device.mode === "lan" ? "lan" : mode,
-        urls,
-        token: String(body.token),
-        serverId: body.device.serverId || body.device.id,
-        pairedAt: Date.now(),
-      });
-      stage.end();
-      console.log(`\n  Paired with ${bold(String(body.device.name || candidate.name))}.`);
-      console.log(dim(`  Its projects now appear in Settings → Projects, under that device.`));
-      console.log(dim("  Refresh the OpenBuild app if it was already open."));
-      return;
-    } catch {
-      // Try the next host that has a pairing open.
-    }
+  if (outcome.ok) {
+    stage.end();
+    console.log(`\n  Paired with ${bold(outcome.device.name)}.`);
+    console.log(dim(`  Its projects now appear in Settings → Projects, under that device.`));
+    console.log(dim("  Refresh the OpenBuild app if it was already open."));
+    return;
   }
   fail("the code didn't match any device waiting to pair. Check it and run `openbuild pair --client` again.");
 }

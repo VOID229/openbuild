@@ -12,6 +12,7 @@ export async function probePairing(base: string, signal?: AbortSignal): Promise<
     try {
       const timeout = AbortSignal.timeout(900);
       const res = await fetch(`${url}/api/pair/info`, {
+        redirect: "error",
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
       if (res.ok) {
@@ -39,15 +40,20 @@ export async function probePairing(base: string, signal?: AbortSignal): Promise<
 type Probe = (base: string, signal: AbortSignal) => Promise<PairCandidate | undefined>;
 
 /** Yield responsive hosts immediately, without waiting for a batch or the whole subnet.
- * A rolling, bounded pool keeps sockets under control. Closing the iterator cancels probes.
+ * A rolling, bounded pool keeps sockets under control. Closing the iterator, or aborting `signal`,
+ * cancels probes.
  */
 export async function* discoverPairing(
   bases: string[],
   probe: Probe = probePairing,
   concurrency = 64,
+  signal?: AbortSignal,
 ): AsyncGenerator<PairCandidate> {
   const unique = [...new Set(bases)];
   const controller = new AbortController();
+  const stop = () => controller.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  const aborted = new Promise<undefined>((resolve) => controller.signal.addEventListener("abort", () => resolve(undefined), { once: true }));
   const pending = new Map<number, Promise<{ index: number; candidate?: PairCandidate }>>();
   const seen = new Set<string>();
   let next = 0;
@@ -59,9 +65,12 @@ export async function* discoverPairing(
     }
   };
   try {
+    if (signal?.aborted) return;
     fill();
     while (pending.size) {
-      const { index, candidate } = await Promise.race(pending.values());
+      const settled = await Promise.race([...pending.values(), aborted]);
+      if (!settled) return;
+      const { index, candidate } = settled;
       pending.delete(index);
       fill();
       if (!candidate) continue;
@@ -71,6 +80,7 @@ export async function* discoverPairing(
       yield candidate;
     }
   } finally {
+    signal?.removeEventListener("abort", stop);
     controller.abort();
   }
 }

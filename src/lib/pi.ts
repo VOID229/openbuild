@@ -201,6 +201,22 @@ export const removeDevice = (id: string) => send(`/api/devices/${encodeURICompon
 export const setDeviceExternal = (id: string, external: boolean) => send(`/api/devices/${encodeURIComponent(id)}`, "PATCH", { external });
 /** Restart a paired device's server (or start it while stopped); resolves once it answers again. */
 export const restartDevice = (id: string) => send(`/api/devices/${encodeURIComponent(id)}/restart`, "POST");
+/** Why a pairing from Settings failed: nobody waiting ("not-found"), a wrong code ("rejected"), … */
+export class PairError extends Error {
+  constructor(message: string, readonly reason?: string) {
+    super(message);
+  }
+}
+/**
+ * Pair with a device that is waiting with `openbuild pair --host`. This server finds it and keeps
+ * the token; only the device's public details come back. Aborting `signal` cancels the search.
+ */
+export async function pairDevice(input: { mode: "lan" | "tailscale"; code: string; address?: string }, signal?: AbortSignal): Promise<Device> {
+  const res = await fetch("/api/pair/connect", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input), signal });
+  const body = await res.json().catch(() => null);
+  if (!res.ok || !body?.device) throw new PairError(body?.error ?? `Pairing failed (HTTP ${res.status})`, body?.reason);
+  return body.device as Device;
+}
 /** Devices that use this server, and revoking one so its token stops working here. */
 export const listPairedClients = () => get<{ clients: PairedClient[] }>("/api/paired-clients").then((r) => r.clients);
 export const revokePairedClient = (id: string) => send(`/api/paired-clients/${encodeURIComponent(id)}`, "DELETE");

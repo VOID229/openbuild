@@ -45,6 +45,14 @@ describe("pairing discovery", () => {
     expect(found.map((candidate) => candidate.base)).toEqual(["a", "legacy"]);
   });
 
+  test("an outside signal ends the scan without waiting for hung probes", async () => {
+    const ctrl = new AbortController();
+    const discovery = discoverPairing(["hung"], (_base, signal) => new Promise(() => void signal), 64, ctrl.signal);
+    setTimeout(() => ctrl.abort(), 10);
+    expect((await discovery.next()).done).toBe(true);
+    expect((await discoverPairing(["a"], async (base) => ({ base, name: base }), 64, AbortSignal.abort()).next()).done).toBe(true);
+  });
+
   test("empty scans finish normally", async () => {
     expect((await discoverPairing([]).next()).done).toBe(true);
     expect((await discoverPairing(["missing"], async () => undefined).next()).done).toBe(true);
