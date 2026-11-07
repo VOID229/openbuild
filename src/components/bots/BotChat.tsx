@@ -1035,6 +1035,50 @@ function Typing({ conversation, botIds, bots }: { conversation: Conversation; bo
   );
 }
 
+/** A message the conversation is held by while scrolled up: where its top is from an edge of the view. */
+type Spot = { id: string; offset: number };
+/**
+ * Which edge: while the chat is open, the bottom, so the last line you could see stays put as the
+ * composer or keyboard changes the view. Opened again, the top, so it reads from where it was left
+ * even when the view is a different height now (a status bar above it, say).
+ */
+type Edge = "top" | "bottom";
+
+/**
+ * Where each chat was left in this tab, by workspace and conversation: at its latest message, or at
+ * the message the user had scrolled up to. Opening it again goes back there, and never to another
+ * chat's place, or to the place of a chat with the same id in another workspace.
+ */
+const places = new Map<string, { stick: boolean; top?: Spot }>();
+
+/** Where `row` starts in `scroller`'s content, from layout alone, so a bubble animating in doesn't throw it off. */
+function contentTop(row: HTMLElement, scroller: HTMLElement) {
+  const top = (el: HTMLElement | null) => {
+    let y = 0;
+    for (; el; el = el.offsetParent as HTMLElement | null) y += el.offsetTop;
+    return y;
+  };
+  return top(row) - top(scroller);
+}
+
+const edgeOf = (scroller: HTMLElement, edge: Edge) => scroller.scrollTop + (edge === "bottom" ? scroller.clientHeight : 0);
+
+/** The last message starting above the bottom of the view, or the first still showing at its top. */
+function spotIn(scroller: HTMLElement, edge: Edge): Spot | undefined {
+  const at = edgeOf(scroller, edge);
+  const rows = [...scroller.querySelectorAll<HTMLElement>(".bm-row[data-id], .bm-event[data-id]")];
+  const row = edge === "bottom" ? rows.findLast((r) => contentTop(r, scroller) < at) : rows.find((r) => contentTop(r, scroller) + r.offsetHeight > at);
+  return row && { id: row.dataset.id!, offset: contentTop(row, scroller) - at };
+}
+
+/** Scrolls the spot's message back to where it was from that edge. False when its message is gone. */
+function putBack(scroller: HTMLElement, spot: Spot | undefined, edge: Edge) {
+  const row = spot && scroller.querySelector<HTMLElement>(`[data-id="${CSS.escape(spot.id)}"]`);
+  if (!row) return false;
+  scroller.scrollTop = contentTop(row, scroller) - spot!.offset - (edge === "bottom" ? scroller.clientHeight : 0);
+  return true;
+}
+
 /** `since`: messages after it are new, and animate in. */
 function Messages({ conversation, since, onReply }: { conversation: Conversation; since: number; onReply: (id: string) => void }) {
   const bots = useBots((s) => s.bots);
@@ -1045,12 +1089,18 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
+  // The chat is keyed by its workspace too (see BotsView), so this one's is fixed for its life.
+  const [place] = useState(() => `${useBots.getState().workspace ?? ""}:${conversation.id}`);
+  const [left] = useState(() => places.get(place));
   /** Keep to the bottom as things arrive. Off once the user scrolls up, on again when they're back down. */
-  const stick = useRef(true);
+  const stick = useRef(left?.stick ?? true);
+  /** Off the bottom, the message the view keeps in place as content above or below it changes. */
+  const spot = useRef<Spot>(undefined);
+  /** And the one at the top of the view, for opening the chat here again. */
+  const top = useRef(left?.stick === false ? left.top : undefined);
   const userScrolled = useRef(0);
   const [away, setAway] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const prepend = useRef<{ height: number; top: number } | undefined>(undefined);
   const anchor = useRef<HTMLElement | null>(null);
   const [picker, setPicker] = useState<Picker>();
   const [showAll, setShowAll] = useState(false);
@@ -1060,23 +1110,42 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const group = conversation.kind !== "direct";
   const blocks = useMemo(() => blocksOf(conversation.messages), [conversation.messages]);
   const lastMine = conversation.messages.findLast((m) => m.author === "me" && !m.event);
+  const last = conversation.messages.at(-1);
+  const lastSeen = useRef(last?.id);
+
+  const restore = () => !!scroller.current && putBack(scroller.current, spot.current, "bottom");
+  const remember = () => {
+    const el = scroller.current;
+    // Hidden (behind a thread, say), there's no layout to read a place from.
+    if (!el?.clientHeight) return;
+    spot.current = spotIn(el, "bottom");
+    top.current = spotIn(el, "top");
+  };
+  useEffect(() => () => void places.set(place, { stick: stick.current, top: top.current }), [place]);
 
   // Follow new messages while at the bottom, and always after the user's own. New bubbles animate
-  // in, so the jump itself can be instant.
+  // in, so the jump itself can be instant. Scrolled up, what's in view stays there, whatever comes in
+  // above it (older messages, a snapshot from the server) or below. Opened again, it's where it was left.
   const count = conversation.messages.length + typing.length + draftCount + working.length;
+  const opened = useRef(false);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    if (prepend.current) {
-      el.scrollTop = prepend.current.top + el.scrollHeight - prepend.current.height;
-      prepend.current = undefined;
-      return;
-    }
-    if (conversation.messages.at(-1)?.author === "me") stick.current = true;
+    if (last?.author === "me" && last.id !== lastSeen.current) stick.current = true;
+    lastSeen.current = last?.id;
+    if (!opened.current) {
+      // Hidden from the start, it's opened once it's shown.
+      if (!el.clientHeight) return;
+      opened.current = true;
+      if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
+    } else if (!stick.current) restore();
     if (stick.current) el.scrollTop = el.scrollHeight;
+    // Held from here on by what's now in view, so the resize observer's first look doesn't undo it.
+    remember();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count]);
-  // Content that grows afterwards (a reaction, "Seen", the reply bar shrinking the view) keeps it there too.
+  }, [count, conversation.messages]);
+  // Content that changes afterwards (an image loading, a reaction, "Seen", the reply bar shrinking the
+  // view) keeps it there too.
   useEffect(() => {
     const el = scroller.current;
     if (!el || !inner.current) return;
@@ -1084,22 +1153,27 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     let height = el.clientHeight;
     let windowHeight = window.innerHeight;
     const observer = new ResizeObserver(() => {
-      const shrunk = height - el.clientHeight;
+      if (!el.clientHeight) return;
+      const changed = el.clientHeight !== height;
       const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
       windowHeight = window.innerHeight;
       if (stick.current) el.scrollTop = el.scrollHeight;
       // The keyboard coming up, or the composer growing and shrinking with the draft, keeps the last line
       // you could see above it, as it does in any messaging app. A desktop window resized keeps its top.
-      else if (shrunk && (coarse.matches || !resized)) el.scrollTop += shrunk;
+      else if (changed && resized && !coarse.matches) remember();
+      else restore();
     });
     observer.observe(inner.current);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
+  // A quote followed scrolls to its message once. Done with, so the chat opened again, or shown again
+  // from behind a thread, is where the user left it rather than back at the quote.
   useEffect(() => {
     if (!focus) return;
+    useBots.setState((s) => (s.focus?.key === focus.key ? { focus: undefined } : {}));
     const el = scroller.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(focus.messageId)}"]`);
     if (!el) return;
     stick.current = false;
@@ -1132,9 +1206,11 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       onKeyDown={() => (userScrolled.current = Date.now())}
       onScroll={(e) => {
         const el = e.currentTarget;
+        if (!el.clientHeight) return;
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
         if (gap < 60) stick.current = true;
         else if (Date.now() - userScrolled.current < 600) stick.current = false;
+        remember();
         setAway(gap > 400);
       }}
     >
@@ -1142,11 +1218,11 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         {conversation.more && <button type="button" className="btn bots-btn" disabled={loadingOlder} onClick={async () => {
           if (loadingOlder || !scroller.current) return;
           setLoadingOlder(true);
+          // What's in view stays there as the older messages come in above it.
           stick.current = false;
-          prepend.current = { height: scroller.current.scrollHeight, top: scroller.current.scrollTop };
+          remember();
           await useBots.getState().loadOlder(conversation.id);
           setLoadingOlder(false);
-          requestAnimationFrame(() => { prepend.current = undefined; });
         }}>{loadingOlder ? "Loading older messages…" : "Load older messages"}</button>}
         {blocks.map((b) => {
           if (b.kind === "divider")
