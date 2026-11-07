@@ -1080,6 +1080,61 @@ test("the primary sets bots' models and fallbacks with manage_bot, checked again
       a.equal(models.default, 'anthropic/claude-opus-5-5');
       a.doesNotMatch(JSON.stringify(models), /sk-should-not-show/);
 
+      // defaults reads and sets the global default model and fallbacks, primary only, checked whole first.
+      listing = { models: [
+        { provider: 'anthropic', id: 'claude-opus-5-5', name: 'Opus 5.5' },
+        { provider: 'openai-codex', id: 'gpt-6', name: 'GPT-6' },
+        { provider: 'openai-codex-2', id: 'gpt-6', name: 'GPT-6' },
+        { provider: 'google', id: 'gemini-4', name: 'Gemini 4', apiKey: 'sk-should-not-show' },
+      ], defaultModel: 'anthropic/claude-opus-5-5', checkedAt: 0 };
+      svc.updateSettings({ quietHours: { from: 22, to: 6 }, searxng: ['https://search.example'] });
+      const globals = () => { const s = svc.getSettings(); return { defaultModel: s.defaultModel, defaultFallbackModels: s.defaultFallbackModels }; };
+      const others = () => { const { defaultModel, defaultFallbackModels, ...rest } = svc.getSettings(); return rest; };
+      const otherSettings = others();
+      const bots = () => db.listBots().map((b) => fields(b.id));
+      const botsBefore = bots();
+      a.deepEqual(await manage(primary.id, { action: 'defaults' }), { default_model: 'default', default_fallbacks: [] });
+      const set = await manage(primary.id, { action: 'defaults', default_model: ' google/gemini-4 ', default_fallbacks: ['openai-codex/gpt-6', 'openai-codex-2/gpt-6', 'openai-codex/gpt-6'] });
+      a.deepEqual(set, { default_model: 'google/gemini-4', default_fallbacks: ['openai-codex/gpt-6', 'openai-codex-2/gpt-6'] });
+      a.deepEqual(globals(), { defaultModel: 'google/gemini-4', defaultFallbackModels: ['openai-codex/gpt-6', 'openai-codex-2/gpt-6'] });
+      a.doesNotMatch(JSON.stringify(set), /sk-should-not-show/);
+      // Omitted fields stay; an empty list and default clear.
+      a.deepEqual(await manage(primary.id, { action: 'defaults', default_fallbacks: ['anthropic/claude-opus-5-5'] }), { default_model: 'google/gemini-4', default_fallbacks: ['anthropic/claude-opus-5-5'] });
+      a.deepEqual(await manage(primary.id, { action: 'defaults', default_model: 'anthropic/claude-opus-5-5' }), { default_model: 'anthropic/claude-opus-5-5', default_fallbacks: ['anthropic/claude-opus-5-5'] });
+      a.deepEqual(await manage(primary.id, { action: 'defaults', default_fallbacks: [] }), { default_model: 'anthropic/claude-opus-5-5', default_fallbacks: [] });
+      a.equal(globals().defaultFallbackModels, undefined);
+      a.deepEqual(await manage(primary.id, { action: 'defaults', default_model: 'default', default_fallbacks: ['google/gemini-4'] }), { default_model: 'default', default_fallbacks: ['google/gemini-4'] });
+      a.equal(globals().defaultModel, undefined);
+      // Bad calls write nothing, not even their valid half.
+      await manage(primary.id, { action: 'defaults', default_model: 'google/gemini-4' });
+      const settledGlobals = globals();
+      const refuseDefaults = async (params, pattern) => {
+        await a.rejects(async () => manage(primary.id, { action: 'defaults', ...params }), pattern);
+        a.deepEqual(globals(), settledGlobals);
+      };
+      await refuseDefaults({ default_model: 'anthropic/claude-opus-5-5', default_fallbacks: ['google/gemini-9'] }, /Not available to bots: "google\\/gemini-9".*Nothing changed/);
+      await refuseDefaults({ default_model: 'google/gemini-9', default_fallbacks: ['anthropic/claude-opus-5-5'] }, /Not available to bots/);
+      await refuseDefaults({ default_model: 'gemini-4' }, /default_model .* isn't a model id/);
+      await refuseDefaults({ default_model: 42 }, /default_model is a provider\\/model id/);
+      await refuseDefaults({ default_model: 'anthropic/claude-opus-5-5', default_fallbacks: ['google/gemini-4', 'bad id/x'] }, /default_fallbacks\\[1\\] .* isn't a model id/);
+      await refuseDefaults({ default_fallbacks: 'google/gemini-4' }, /default_fallbacks is a list/);
+      await refuseDefaults({ default_fallbacks: nine }, /up to 8 default fallback models, not 9/);
+      await refuseDefaults({ default_fallbacks: Array(100).fill('google/gemini-4') }, /up to 8 default fallback models/);
+      listing = undefined;
+      await a.rejects(async () => manage(primary.id, { action: 'defaults', default_model: 'anthropic/claude-opus-5-5' }), (err) => /Couldn't check/.test(err.message) && !/secret-token/.test(err.message));
+      a.deepEqual(globals(), settledGlobals);
+      // Other bots can neither read nor set them, and never reach Pi.
+      const seenDefaults = asked;
+      a.throws(() => manage(helper.id, { action: 'defaults' }), /Only the primary bot can change the default models/);
+      a.throws(() => manage(helper.id, { action: 'defaults', default_model: 'default' }), /Only the primary bot/);
+      a.equal(asked, seenDefaults);
+      a.deepEqual(globals(), settledGlobals);
+      // No bot's own settings and no other setting moved.
+      a.deepEqual(bots(), botsBefore);
+      a.deepEqual(others(), otherSettings);
+      a.match(contextFor(primary.id), /manage_bot defaults/);
+      a.match(contextFor(helper.id), /the default models/);
+
       // The settings API keeps its own behaviour: a list there still clears No fallback.
       svc.updateBot(made.id, { noFallbacks: true });
       svc.updateBot(made.id, { fallbackModels: ['x/y'] });
