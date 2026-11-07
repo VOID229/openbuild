@@ -1,7 +1,7 @@
 import { streamFetch } from "./streamTransport";
 // Client side of the Pi and project APIs (server/pi/routes.ts).
 import { readEvents } from "../../shared/replies";
-import type { BotToolGrants, ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
+import type { BotToolGrants, ClaudeAccountModels, Device, Effort, GitInfo, PairedClient, ModelInfo, ModelScope, PermissionModes, PiCommand, Project, RuntimeAccount, RuntimeAvailability, RuntimeStatus, TextRuntime, ThreadRuntime, Workspace } from "../../shared/types";
 import { apiUrl, splitProjectId } from "./devices";
 import { fetchWithTimeout } from "./abort";
 
@@ -41,6 +41,10 @@ export interface PiStatus {
 
 export const piStatus = (fresh = false, deviceId?: DeviceId) => get<PiStatus>(apiUrl(deviceId, `/api/pi/status${fresh ? "?fresh=1" : ""}`));
 export const installPi = (deviceId?: DeviceId) => send<{ job: string }>(apiUrl(deviceId, "/api/pi/install"), "POST");
+
+/** Which thread runtimes are installed on a device: a quick look for each one's program, nothing spawned. */
+export const runtimeAvailability = (deviceId?: DeviceId) =>
+  get<{ runtimes: Record<ThreadRuntime, RuntimeAvailability> }>(apiUrl(deviceId, "/api/runtimes")).then((r) => r.runtimes);
 
 /** Every thread runtime's state on a device: installed, version, updates, sign-in, errors. */
 export const runtimeStatuses = (fresh = false, deviceId?: DeviceId) =>

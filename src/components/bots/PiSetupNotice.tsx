@@ -4,12 +4,13 @@
 import { RefreshCw, Settings as SettingsIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { checkSetup, useRemoteWorkspace } from "../../lib/bots/store";
+import { PI_SITE } from "../../lib/harnessSetup";
 import type { Bot, PiSetup } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { WebLink } from "../Linkify";
 import { BotAvatar } from "./BotAvatar";
 
-export const PI_SITE = "https://pi.dev";
+export { PI_SITE };
 
 /** What the notice says for each missing piece. Exported for its tests. */
 export function setupText(setup: PiSetup, botName: string, host?: string): { title: string; hint: string; action?: { label: string; section: "pi" | "keys" } } {

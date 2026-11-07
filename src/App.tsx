@@ -5,6 +5,7 @@ import { SyncLockScreen } from "./components/Account";
 import { ChatView } from "./components/ChatView";
 import { Composer } from "./components/Composer";
 import { Lightbox, useLightbox } from "./components/Lightbox";
+import { HarnessSetup } from "./components/HarnessSetup";
 import { Notices } from "./components/Notices";
 import { IconButton } from "./components/primitives";
 import { SettingsModal } from "./components/Settings";
@@ -27,6 +28,7 @@ import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChatHistory, loadChats } from "./lib/db";
 import { RELOAD_THREADS } from "./lib/pulls";
+import { useHarnessSetupOpen } from "./lib/harnessSetup";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
@@ -205,6 +207,8 @@ function Main() {
   const usageOpen = useStore((s) => s.usageOpen);
   const botsOpen = useStore((s) => s.botsOpen);
   const lightboxOpen = useLightbox((s) => s.open);
+  // The startup popup for a server without Pi (HarnessSetup) sits over the app the way Settings does.
+  const harnessSetupOpen = useHarnessSetupOpen((s) => s.open);
   const chatsLoaded = useStore((s) => s.chatsLoaded);
   const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
   const titling = useStore((s) => !!s.activeChatId && s.titling.has(s.activeChatId)) && !chat?.titleSource;
@@ -417,7 +421,7 @@ function Main() {
   return (
     <>
       <PluginSlot name="app:before" />
-      <div className={cx("app", settingsOpen && "app-behind-modal")} inert={settingsOpen || lightboxOpen}>
+      <div className={cx("app", (settingsOpen || harnessSetupOpen) && "app-behind-modal")} inert={settingsOpen || lightboxOpen || harnessSetupOpen}>
         {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
         <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
         <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
@@ -480,6 +484,7 @@ function Main() {
         </main>
       </div>
       <SettingsModal />
+      <HarnessSetup />
       <Notices />
       <Lightbox />
       <TooltipLayer />
