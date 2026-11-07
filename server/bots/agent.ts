@@ -415,7 +415,7 @@ export function routine(botId: string, p: Record<string, unknown>) {
       author: botId,
       at: Date.now(),
       text: "",
-      event: { kind: "routine", text: saved.followUp ? "Follow-up set" : "Routine", detail: `${saved.title} · ${saved.schedule}` },
+      event: { kind: "routine", text: saved.followUp ? "Set a follow-up" : "Set a routine", detail: `${saved.title} · ${saved.schedule}` },
     });
   }
   return { id: saved.id, next: saved.nextRunAt };

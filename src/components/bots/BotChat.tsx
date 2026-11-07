@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { authoredEventText, eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -70,11 +70,22 @@ function BotLink({ bot }: { bot: Bot }) {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const namedBots = (bots: Bot[]) => bots.filter((b) => b.name.trim()).sort((a, b) => b.name.length - a.name.length);
+
+/** Matches any of these bots' names as a whole word, longest first. */
+const botNames = (named: Bot[]) => new RegExp(`(?<![\\p{L}\\d])(?:${named.map((b) => escapeRegExp(b.name)).join("|")})(?![\\p{L}\\d])`, "gu");
+
+/** Whether the text already names one of these bots ("Juniper left"). */
+const namesBot = (text: string, bots: Bot[]) => {
+  const named = namedBots(bots);
+  return named.length > 0 && botNames(named).test(text);
+};
+
 /** Text with every bot it names linked. Longer names first, so "Sage Two" wins over "Sage". */
 function WithBotLinks({ text, bots }: { text: string; bots: Bot[] }) {
-  const named = bots.filter((b) => b.name.trim()).sort((a, b) => b.name.length - a.name.length);
+  const named = namedBots(bots);
   if (!named.length) return <>{text}</>;
-  const pattern = new RegExp(`(?<![\\p{L}\\d])(?:${named.map((b) => escapeRegExp(b.name)).join("|")})(?![\\p{L}\\d])`, "gu");
+  const pattern = botNames(named);
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(pattern)) {
@@ -1160,8 +1171,10 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
             // PR or thread title, not a mention, so a bot name inside it stays plain text.
             const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
-            // A start names the bot that did it, looked up by author so a rename shows up on old lines too.
-            const starter = m.event!.kind === "thread" && m.event!.text === "Started a thread" ? bots.find((x) => x.id === m.author) : undefined;
+            // A bot's own activity names it first, looked up by author so a rename shows up on old lines
+            // too. A line that already names a bot ("Juniper left", a message, a model switch) keeps its words.
+            const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);
+            const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;
             // A message between bots names the other bot by id, so a rename shows up on old lines too.
             const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
             // A change of model names the bot, the model it moved to ("fallback model …", "first priority model …") and, as the detail, that model's account.
@@ -1171,7 +1184,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {starter ? <><BotLink bot={starter} /> started a thread</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
                 {m.event!.kind === "model" && m.event!.detail ? (
                   <span className="bm-event-detail">from {accountName(m.event!.detail)}</span>

@@ -452,6 +452,27 @@ export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0
  */
 export const eventText = (event: { text: string }) => (event.text === "Wrote to a thread" || event.text === "Wrote a prompt" ? "Wrote a prompt in" : event.text);
 
+/** Activity texts that are nouns, as the verb they read as after a bot's name. Routines saved these before. */
+const AUTHORED_PHRASES: Record<string, string> = {
+  "New bot": "made a new bot",
+  "Follow-up set": "set a follow-up",
+  "Follow-up": "followed up",
+};
+
+/**
+ * What a bot-authored activity line says after the bot's name: "Closed a thread" → "closed a thread".
+ * Undefined when the line keeps its own wording: a message between bots or a model switch, which name
+ * a bot already, and a pause or a poll closing, which no one bot did.
+ */
+export function authoredEventText(event: { kind: string; text: string; detail?: string }): string | undefined {
+  if (event.kind === "message" || event.kind === "model" || event.kind === "poll" || event.text === "Paused") return;
+  // A routine being set and one running were both saved as "Routine" once; only setting one had a schedule.
+  if (event.text === "Routine") return event.detail?.includes(" · ") ? "set a routine" : "ran a routine";
+  const text = eventText(event);
+  // "Couldn't reply" → "couldn't reply", but an acronym ("PR …") keeps its capitals.
+  return AUTHORED_PHRASES[text] ?? (/^\p{Lu}\p{Lu}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1));
+}
+
 /** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 
