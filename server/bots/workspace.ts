@@ -34,7 +34,7 @@ const ALLOWED = [
     if (who) return botsStream(req, server, (close) => track(who.id, close));
     // This server's own tab: the first time OpenBots opens here, the primary bot says hello.
     const res = botsStream(req, server);
-    svc.greetOnFirstOpen();
+    void svc.greetOnFirstOpen();
     return res;
   }),
   route("GET", "/api/bots/conversations/:id/messages", (req, [id]) => olderMessages(req, id!)),

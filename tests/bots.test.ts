@@ -353,7 +353,7 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       a.equal(db.messages(conversationId, 10).length, 0);
 
       // Nothing is written for it: the bot is woken to write its own welcome.
-      svc.greetOnFirstOpen();
+      await svc.greetOnFirstOpen();
       a.equal(db.messages(conversationId, 10).length, 0);
       a.equal(woken.length, 1);
       a.equal(woken[0].botId, bot.id);
@@ -368,7 +368,7 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       a.equal(svc.getSettings().onboarding, 'done');
 
       // Opening it again is just opening it.
-      svc.greetOnFirstOpen();
+      await svc.greetOnFirstOpen();
       a.equal(woken.length, 1);
 
       // It asks whether the user codes first, with the app's choices, whatever it wrote.

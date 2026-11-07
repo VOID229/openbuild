@@ -3,7 +3,7 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
+import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
 import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { hasDevice } from "../devices";
@@ -38,6 +38,8 @@ type Hooks = {
   wake: (botId: string, wake: Wake) => void;
   stop: (botId: string) => void;
 };
+/** What Pi still needs before a bot can run on it, if anything. `fresh` asks Pi again rather than trusting a cached answer. */
+type PiCheck = (fresh: boolean) => Promise<PiSetup | undefined>;
 
 const mem = globalThis as {
   openbotsHooks?: Hooks;
@@ -49,11 +51,19 @@ const mem = globalThis as {
   openbotsChains?: Map<string, number>;
   openbotsChainWarned?: Set<string>;
   openbotsWaiters?: Waiter[];
+  openbotsPiCheck?: PiCheck;
+  openbotsSetup?: { value?: PiSetup };
 };
 let hooks: Hooks = (mem.openbotsHooks ??= { wake() {}, stop() {} });
 /** runner.ts registers these at startup. */
 export function setHooks(next: Hooks) {
   hooks = mem.openbotsHooks = next;
+}
+
+let piCheck: PiCheck = (mem.openbotsPiCheck ??= async () => undefined);
+/** runner.ts registers the real check. Without one, Pi counts as ready. */
+export function setPiCheck(next: PiCheck) {
+  piCheck = mem.openbotsPiCheck = next;
 }
 
 const listeners = (mem.openbotsListeners ??= new Set<(e: BotsEvent) => void>());
@@ -166,6 +176,7 @@ export function snapshot(): BotsSnapshot {
     status: Object.fromEntries(status),
     typing: { ...typing },
     drafts: [...drafts],
+    setup: setup.value,
   };
 }
 
@@ -280,9 +291,50 @@ export type DeveloperAnswer = { kind: "yes" | "no" } | { kind: "own"; text: stri
 const DEVELOPER = "developer";
 export const developerAnswer = () => db.getValue<DeveloperAnswer>(DEVELOPER);
 
-/** The first time OpenBots is opened, the primary bot is asked to introduce itself and find out whether the user codes, in its own words; only then is the starter team offered. */
-export function greetOnFirstOpen() {
-  if (settings().onboarding !== "active") return;
+/** What the welcome is waiting on, shown in the primary bot's chat until Pi is ready. */
+const setup = (mem.openbotsSetup ??= {});
+export const piSetup = () => setup.value;
+function setSetup(next: PiSetup | undefined) {
+  if (JSON.stringify(next) === JSON.stringify(setup.value)) return;
+  setup.value = next;
+  emit({ t: "setup", setup: next });
+}
+
+let checking: Promise<void> | undefined;
+let recheck = false;
+
+/**
+ * The first time OpenBots is opened, the primary bot is asked to introduce itself and find out
+ * whether the user codes, in its own words; only then is the starter team offered. Not before Pi can
+ * run it: until then the chat says what's missing, and this is asked again (when Pi's models change,
+ * every so often while a tab is open, or from the chat's own button) until it's there.
+ */
+export function greetOnFirstOpen(fresh = false): Promise<void> {
+  if (settings().onboarding !== "active") return Promise.resolve();
+  if (checking) {
+    recheck = true;
+    return checking;
+  }
+  checking = (async () => {
+    try {
+      let need: PiSetup | undefined;
+      // Something changed while Pi was being asked (a sign-in finished, say): ask again.
+      do {
+        recheck = false;
+        need = await piCheck(fresh).catch((err): PiSetup => ({ need: "unreachable", error: (err as Error).message || String(err) }));
+        fresh = true;
+      } while (recheck);
+      if (settings().onboarding !== "active") return setSetup(undefined);
+      setSetup(need);
+      if (!need) greet();
+    } finally {
+      checking = undefined;
+    }
+  })();
+  return checking;
+}
+
+function greet() {
   const bot = db.listBots().find((b) => b.primary);
   const conversationId = bot && directId(bot.id);
   if (!bot || !conversationId) return;
@@ -331,7 +383,7 @@ export async function resetAll() {
   drafts.length = 0;
   ensureStarted();
   emit({ t: "snapshot", ...snapshot() });
-  greetOnFirstOpen();
+  await greetOnFirstOpen();
 }
 
 // ------------------------------------------------------------------ bots and conversations
@@ -914,7 +966,11 @@ export function tick(busy: (botId: string) => boolean) {
     });
     hooks.wake(botId, { kind: "routine", conversationId, text });
   }
-  if (settings().onboarding === "active") return;
+  if (settings().onboarding === "active") {
+    // Waiting on Pi with a tab open: look again, in case it was set up from a terminal.
+    if (setup.value && listeners.size) void greetOnFirstOpen();
+    return;
+  }
   for (const bot of db.listBots()) {
     const every = { off: 0, low: 8, normal: 3, high: 1 }[bot.proactivity ?? "normal"];
     if (!every || busy(bot.id) || quietNow(new Date(now))) continue;

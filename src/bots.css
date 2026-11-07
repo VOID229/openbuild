@@ -3474,6 +3474,54 @@ a.bots-btn-primary {
   -webkit-line-clamp: 2;
 }
 
+/* The primary bot's chat while Pi isn't ready to run it. */
+.bm-setup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  width: min(440px, 100%);
+  margin: 32px auto 8px;
+  padding: 22px 22px 16px;
+  border: 1px solid var(--bm-them-border);
+  border-radius: 22px;
+  background: var(--bm-them);
+  text-align: center;
+}
+
+.bm-setup-title {
+  margin-top: 6px;
+  font-size: 15.5px;
+  font-weight: 650;
+}
+
+.bm-setup-hint {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.bm-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bm-setup-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.bm-setup-foot {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
 .bm-connect {
   display: flex;
   align-items: center;

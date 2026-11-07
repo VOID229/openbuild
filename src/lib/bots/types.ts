@@ -14,6 +14,7 @@ export type {
   Draft,
   EventKind,
   MemoryItem,
+  PiSetup,
   PlanStep,
   Poll,
   PollVote,

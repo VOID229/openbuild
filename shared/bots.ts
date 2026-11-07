@@ -342,6 +342,13 @@ export interface Draft {
   text: string;
 }
 
+/**
+ * What OpenBots still needs before the primary bot can say hello: Pi installed ("missing"), a
+ * provider connected so Pi has models ("no-provider"), or a Pi that answers ("unreachable", with
+ * its error). Undefined once Pi is ready, or when nobody is waiting on the welcome.
+ */
+export type PiSetup = { need: "missing" } | { need: "no-provider" } | { need: "unreachable"; error: string };
+
 export interface BotsSnapshot {
   bots: Bot[];
   conversations: Conversation[];
@@ -349,6 +356,7 @@ export interface BotsSnapshot {
   status: Record<string, BotStatus>;
   typing: Record<string, string[]>;
   drafts: Draft[];
+  setup?: PiSetup;
 }
 
 export type BotsEvent =
@@ -364,6 +372,7 @@ export type BotsEvent =
   | { t: "status"; botId: string; status: BotStatus }
   | { t: "pulse"; botId: string; mood?: string }
   | { t: "settings"; settings: BotsSettings }
+  | { t: "setup"; setup?: PiSetup }
   /** The connected apps changed: ask /api/bots/apps for them. */
   | { t: "apps" };
 

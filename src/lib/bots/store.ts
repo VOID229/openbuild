@@ -14,7 +14,7 @@ import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
-import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
+import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
 import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
 import { chosenWorkspace, isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
@@ -70,6 +70,8 @@ interface BotsState {
   connected: boolean;
   /** The server's state has arrived. Until then an empty list means "not known yet", not "no bots". */
   loaded: boolean;
+  /** What Pi still needs before the primary bot can say hello (the first-run notice). */
+  setup?: PiSetup;
   clearError: () => void;
   loadOlder: (conversationId: string) => Promise<void>;
   /** Sections the user made, in order. */
@@ -659,6 +661,15 @@ useBots.subscribe((s, prev) => {
   }, 1000);
 });
 
+/** Ask this server's Pi again whether the primary bot can say hello. The answer comes on the stream as well. */
+export async function checkSetup(): Promise<void> {
+  const visit = session;
+  if (!visit || !isLocalWorkspace(visit.id)) return;
+  const res = await fetch(workspacePath(visit.id, "/api/bots/setup/check"), { method: "POST" }).catch(() => undefined);
+  const body = (await res?.json().catch(() => undefined)) as { setup?: PiSetup | null } | undefined;
+  if (res?.ok && body && live(visit)) useBots.setState({ setup: body.setup ?? undefined });
+}
+
 // ------------------------------------------------------------------ choosing a workspace
 
 /** Show a workspace in this tab, from blank, without asking it for anything yet. */
@@ -680,6 +691,7 @@ function enter(id: string): Visit {
     error: undefined,
     loaded: false,
     connected: true,
+    setup: undefined,
     status: {},
     typing: {},
     drafts: [],
@@ -904,6 +916,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       typing: e.typing,
       drafts: e.drafts,
       status: e.status,
+      setup: e.setup,
       defaultModel: e.settings.defaultModel,
       defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS,
       searxng: e.settings.searxng ?? [],
@@ -915,6 +928,10 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
   }
   if (e.t === "status") {
     set((s) => ({ status: { ...s.status, [e.botId]: e.status } }));
+    return;
+  }
+  if (e.t === "setup") {
+    set({ setup: e.setup });
     return;
   }
   if (e.t === "bot") {

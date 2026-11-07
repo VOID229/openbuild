@@ -31,6 +31,7 @@ import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } fr
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
+import { PiSetupNotice } from "./PiSetupNotice";
 import { authorName, ConversationAvatar, dividerTime, messageLine, messageText } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -1098,6 +1099,9 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
   const working = useBots(useShallow((s) => showWorking(conversation.id, s.status, typing)));
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
+  // Until Pi can run it, the primary bot's chat says what's missing instead of the bot saying hello.
+  const setup = useBots((s) => s.setup);
+  const primary = setup && conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.primary) : undefined;
   const scroller = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   // The chat is keyed by its workspace too (see BotsView), so this one's is fixed for its life.
@@ -1329,6 +1333,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             </div>
           );
         })}
+        {setup && primary && <PiSetupNotice setup={setup} bot={primary} />}
         <Working conversationId={conversation.id} direct={conversation.kind === "direct"} botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
       </div>
