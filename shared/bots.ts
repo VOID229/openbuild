@@ -511,6 +511,12 @@ export function findTags<B extends Pick<Bot, "name">>(text: string, bots: B[]): 
   return [...named.filter((m) => !all.some((a) => a.start === m.start)), ...all].sort((a, b) => a.start - b.start);
 }
 
+/**
+ * Whether a new message leaves its conversation unread. Anything a bot writes does, except an activity
+ * line in a one-to-one chat: there it's history to look back on, not something to come back for.
+ */
+export const marksUnread = (c: Pick<Conversation, "kind">, m: Pick<BotMessage, "author" | "event">) => m.author !== "me" && !(c.kind === "direct" && m.event);
+
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";

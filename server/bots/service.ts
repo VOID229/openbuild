@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
-import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { hasDevice } from "../devices";
 import { isPermissionId } from "../../shared/types";
@@ -572,7 +572,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     message = { ...message, text: poll.question, poll };
   }
   const seq = db.addMessage(conversationId, message);
-  const unread = message.author !== "me" ? true : c.unread;
+  const unread = marksUnread(c, message) ? true : c.unread;
   const hidden = message.author !== "me" ? undefined : c.hidden;
   db.putConversation({ ...c, updatedAt: message.at, unread, hidden });
   emitConversation(conversationId);

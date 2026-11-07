@@ -15,7 +15,7 @@ import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, Routine } from "./types";
-import { castVote, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
+import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
 import { chosenWorkspace, isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
@@ -304,7 +304,7 @@ export const useBots = create<BotsState>()(
           messages: [...c.messages, full],
           updatedAt: full.at,
           // A bot writing in a conversation that isn't open leaves it unread; hidden ones come back.
-          unread: message.author !== "me" && s.activeId !== conversationId ? true : c.unread,
+          unread: marksUnread(c, message) && s.activeId !== conversationId ? true : c.unread,
           hidden: message.author !== "me" ? false : c.hidden,
         })),
       }));
@@ -971,7 +971,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
           ...c,
           messages,
           updatedAt: Math.max(c.updatedAt, e.message.at),
-          unread: fresh && e.message.author !== "me" && s.activeId !== c.id ? true : c.unread,
+          unread: fresh && marksUnread(c, e.message) && s.activeId !== c.id ? true : c.unread,
           hidden: e.message.author !== "me" ? false : c.hidden,
         };
       }),
