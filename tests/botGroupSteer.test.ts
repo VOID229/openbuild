@@ -19,7 +19,8 @@ async function run(name: string, body: string) {
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       svc.updateSettings({ onboarding: 'done' });
       const prompts = [], steers = [], commands = [];
-      // Pi's own steering queue: a prompt reads what's left in it first, and clear_queue empties it.
+      // Pi's own steering queue: a run that finishes has read it, one that errors leaves it for the
+      // next prompt to read first, and clear_queue empties it.
       const piQueues = new Map();
       const piQueue = (bot) => piQueues.get(bot.id) ?? piQueues.set(bot.id, []).get(bot.id);
       // steer(bot, cmd) decides what a steer does: resolve, throw, or wait on a promise.
@@ -38,7 +39,7 @@ async function run(name: string, body: string) {
               return out;
             } catch (err) { entry.ok = false; throw err; }
           }
-          if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), drained: piQueue(bot).splice(0), finish(text) { mind.draft = text; mind.onSettled?.(); }, fail(error) { runner.onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: error } }); mind.onSettled?.(); } });
+          if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), drained: piQueue(bot).splice(0), finish(text) { piQueue(bot).splice(0); mind.draft = text; mind.onSettled?.(); }, fail(error) { runner.onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: error } }); mind.onSettled?.(); } });
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
         minds.set(bot.id, mind);
