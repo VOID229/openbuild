@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { computerApi, computerTargets } from "../computers/api";
 import * as devices from "../devices";
 import { modelListing } from "../pi/routes";
-import { getBot } from "./db";
+import { getBot, getMessage } from "./db";
 import { available, botModels } from "./extensions";
 import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
@@ -279,10 +279,10 @@ export function botRoutes(api: Api) {
     },
     "/api/bots/conversations/:id/messages": {
       GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => olderMessages(req, req.params.id)),
-      POST: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => postMine(req, req.params.id)),
+      POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => postMine(req.params.id, await readJson(req))),
     },
     "/api/bots/conversations/:id/messages/:messageId": {
-      PATCH: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => patchMine(req, req.params.id, req.params.messageId)),
+      PATCH: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => patchMine(req.params.id, req.params.messageId, await readJson(req))),
       DELETE: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => deleteMine(req.params.id, req.params.messageId)),
     },
   };
@@ -291,6 +291,8 @@ export function botRoutes(api: Api) {
 // ---------------------------------------------------------------- in existing conversations
 // What a tab does in the conversations a workspace already has. The plain routes above use these,
 // and so does the bound workspace route (workspace.ts), which is all a paired device can reach.
+// The writes take a body that's already parsed and run without awaiting anything, so the grant the
+// bound route checked after the body arrived is the one in force when the change is made.
 
 export const snapshotResponse = () => json(snapshot());
 
@@ -355,9 +357,8 @@ export function olderMessages(req: Request, conversationId: string): Response {
   }
 }
 
-export async function postMine(req: Request, conversationId: string): Promise<Response> {
+export function postMine(conversationId: string, body: unknown): Response {
   try {
-    const body = await readJson(req);
     if (!isClientMessage(body) || body.author !== "me") return bad("Expected your message");
     return json(svc.postMessage(conversationId, { ...body, author: "me", at: Date.now() }));
   } catch (err) {
@@ -365,13 +366,24 @@ export async function postMine(req: Request, conversationId: string): Promise<Re
   }
 }
 
-/** A question answered, a vote, or a reaction, on one of the user's or a bot's messages. */
-export async function patchMine(req: Request, conversationId: string, messageId: string): Promise<Response> {
+/**
+ * A question answered, a vote, or a reaction, on one of the user's or a bot's messages. A reaction
+ * with `on` sets it rather than toggling it, so sending it again (a retry whose first try may still
+ * land) leaves it as asked.
+ */
+export function patchMine(conversationId: string, messageId: string, body: any): Response {
   try {
-    const body = await readJson(req);
     if (body?.question && typeof body.question.answer === "string") svc.answerQuestion(conversationId, messageId, body.question.answer);
     if (Array.isArray(body?.vote)) return json(svc.votePoll(conversationId, messageId, "me", body.vote.filter((key: unknown): key is string => typeof key === "string")));
-    if (typeof body?.emoji === "string") return json(svc.toggleReaction(conversationId, messageId, body.emoji, "me", typeof body.to === "string" ? body.to : undefined));
+    if (typeof body?.emoji === "string") {
+      const to = typeof body.to === "string" ? body.to : undefined;
+      if (typeof body.on === "boolean") {
+        const row = getMessage(messageId);
+        if (!row || row.conversationId !== conversationId) return bad("No such message.", 404);
+        if (!!row.message.reactions?.some((r) => r.by === "me" && r.emoji === body.emoji && r.to === to) === body.on) return json(row.message);
+      }
+      return json(svc.toggleReaction(conversationId, messageId, body.emoji, "me", to));
+    }
     // Questions may live in a history page, outside the latest snapshot.
     return json(svc.patchMessage(conversationId, messageId, {}));
   } catch (err) {

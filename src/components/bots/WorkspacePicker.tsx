@@ -89,7 +89,9 @@ function SwitchWaiting({ waiting, from, to }: { waiting: number; from?: string; 
 }
 
 function UnconfirmedRow({ entry, host }: { entry: Unconfirmed; host: string }) {
-  const state = entry.missing ? `Not on ${host}` : entry.unknown ? `${host} couldn't tell` : "Checking…";
+  // Refused: it didn't run. Otherwise it may still land, which is why every write here can be sent twice safely.
+  const how = entry.rejected ? `${host} refused it` : `No answer from ${host}`;
+  const state = entry.missing ? `${how}; not there yet` : entry.unknown ? `${how}; ${host} couldn't tell` : `${how}; checking…`;
   return (
     <li className="bots-unconfirmed-row">
       <span className="bots-unconfirmed-text">

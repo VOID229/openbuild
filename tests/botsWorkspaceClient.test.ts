@@ -271,3 +271,94 @@ test("a tab whose workspace isn't here anymore says so and takes on nothing from
   `);
   expect(out).toBe("ok");
 }, 30_000);
+
+test("a workspace that stalls, ignoring the abort, on headers or a body doesn't hold the queue or a switch, and nothing is replayed", async () => {
+  const out = await tab(`
+    bots.deadlines.write = 150;
+    bots.deadlines.read = 150;
+    await preloadBots();
+    useBots.getState().ensureSeeded();
+    await wait(60);
+    assert.equal(useBots.getState().workspace, "srv");
+    const never = new Promise(() => {});
+    // Headers that never come, whatever the signal says; then a refusal, and a snapshot, whose bodies never finish.
+    const stalled = (status) => Promise.resolve(new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("{")); } }), { status, headers: { "x-openbuild-server": "srv", "content-type": "application/json" } }));
+    let tries = 0;
+    hold = (path, method) => {
+      if (method === "POST" && path.endsWith("/messages")) return ++tries === 1 ? never : stalled(500);
+      if (path === prefixes.srv + "/api/bots") return stalled(200);
+      return undefined;
+    };
+    const started = Date.now();
+    const first = useBots.getState().post("local-chat", { author: "me", text: "stalled headers" });
+    const second = useBots.getState().post("local-chat", { author: "me", text: "stalled body" });
+    await wait();
+    const switching = switchWorkspace("host");
+    await wait();
+    assert.deepEqual(useWorkspace.getState().switching, { to: "host", waiting: 2 });
+    assert.equal(await first, undefined);
+    assert.equal(await second, undefined);
+    assert.ok(Date.now() - started < 3000);
+    const kept = JSON.parse(localStorage.getItem("openbuild.bots.unconfirmed:srv"));
+    assert.equal(kept.length, 2);
+    assert.ok(kept.every((e) => e.workspace === "srv" && !e.rejected));
+    assert.match(kept[0].error, /No answer/);
+    assert.equal(pendingWrites("srv"), 0);
+    hold = () => undefined;
+
+    // The switch was waiting on these; with them let go it goes ahead.
+    assert.equal(await switching, true);
+    await wait(60);
+    assert.equal(useBots.getState().workspace, "host");
+    assert.deepEqual(useBots.getState().unconfirmed, []);
+    assert.equal(JSON.parse(localStorage.getItem("openbuild.bots.unconfirmed:srv")).length, 2);
+    // Neither was sent anywhere else, or again.
+    const posts = calls.filter((c) => c.method === "POST" && c.path.endsWith("/messages"));
+    assert.deepEqual(posts.map((c) => [c.path.startsWith(prefixes.srv), c.body.text]), [[true, "stalled headers"], [true, "stalled body"]]);
+    console.log("ok");
+  `, { STORAGE: join(directory, "stalls.json") });
+  expect(out).toBe("ok");
+}, 30_000);
+
+test("this server's own management writes name it too, so an address now serving another server runs none of them", async () => {
+  const out = await tab(`
+    await preloadBots();
+    useBots.getState().ensureSeeded();
+    await wait(60);
+    await new Promise((r) => setTimeout(r, 50));
+    // Management goes to the bound route by this server's id, the profile sync included.
+    const profile = calls.find((c) => c.method === "PATCH" && c.path.endsWith("/api/bots/settings"));
+    assert.equal(profile.path, prefixes.srv + "/api/bots/settings");
+    // Now another server answers at this address: the bound route there refuses everything.
+    hold = (path) => (path.startsWith(prefixes.srv) ? Promise.resolve(Response.json({ error: "This is Intruder, not the workspace this was meant for. Nothing ran.", reason: "mismatch" }, { status: 409, headers: { "x-openbuild-server": "intruder" } })) : undefined);
+    const before = calls.length;
+    useBots.getState().createBot({ name: "Made here", look: { shape: "puff", color: "blue" } });
+    useBots.getState().setDefaultModel("x/y");
+    await wait(80);
+    const sent = calls.slice(before);
+    assert.ok(sent.length >= 1);
+    assert.ok(sent.every((c) => c.path.startsWith(prefixes.srv + "/")), JSON.stringify(sent));
+    assert.equal(calls.filter((c) => c.path.startsWith("/api/bots")).length, 0);
+    assert.equal(useWorkspace.getState().problem?.kind, "gone");
+    assert.ok(!useBots.getState().bots.some((b) => b.name === "Made here"));
+    console.log("ok");
+  `);
+  expect(out).toBe("ok");
+}, 30_000);
+
+test("a reaction is sent as the state it should end in, so a retry can't undo a late first try", async () => {
+  const out = await tab(`
+    snapshots.srv = snap([chat("local-chat", [{ id: "m1", author: "bot", text: "hi", at: 1 }])]);
+    await preloadBots();
+    useBots.getState().ensureSeeded();
+    await wait(60);
+    useBots.getState().toggleReaction("local-chat", "m1", "👍", "me");
+    await wait();
+    useBots.getState().toggleReaction("local-chat", "m1", "👍", "me");
+    await wait();
+    const sent = calls.filter((c) => c.method === "PATCH" && c.path.endsWith("/messages/m1")).map((c) => c.body);
+    assert.deepEqual(sent, [{ emoji: "👍", on: true }, { emoji: "👍", on: false }]);
+    console.log("ok");
+  `);
+  expect(out).toBe("ok");
+}, 30_000);

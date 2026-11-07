@@ -298,11 +298,63 @@ test("an address now held by another OpenBuild runs nothing, and an offline host
   }
   const snap = await via("/api/bots");
   expect(snap.status).toBe(502);
+
+  // The host's own tab, still open at that address, managing its bots: every write names the host,
+  // so the server there now runs none of them, and nothing about it changes.
+  const settingsBefore = await (await fetch(`${hostBase()}/api/bots`)).json() as any;
+  const managing: [string, string, unknown?][] = [
+    ["POST", "/api/bots", { name: "Made on the wrong server" }],
+    ["PATCH", "/api/bots/settings", { defaultModel: "wrong/server", user: { name: "Not me" } }],
+    ["PATCH", `/api/bots/${other.bots[0]!.id}`, { name: "Renamed on the wrong server" }],
+    ["POST", "/api/bots/reset"],
+    ["POST", `/api/bots/conversations/${otherConversation}/read`],
+  ];
+  for (const [method, path, body] of managing) {
+    const res = await fetch(`${hostBase()}/api/workspace/to/${hostId}${path}`, { method, ...(body ? json(body) : {}) });
+    expect({ path, status: res.status }).toEqual({ path, status: 409 });
+    expect(res.headers.get("x-openbuild-server")).not.toBe(hostId);
+  }
+  const settingsAfter = await (await fetch(`${hostBase()}/api/bots`)).json() as any;
+  expect(settingsAfter.bots).toEqual(settingsBefore.bots);
+  expect(settingsAfter.settings).toEqual(settingsBefore.settings);
+  expect(settingsAfter.conversations.map((c: any) => c.id)).toEqual(settingsBefore.conversations.map((c: any) => c.id));
   expect((await hostMessages()).some((m) => m.text === "meant for the host")).toBe(false);
   await stop(hostPort);
   await launch(hostPort, hostData);
   expect((await via("/api/bots")).status).toBe(200);
 }, 90_000);
+
+test("this server's own session manages its bots on the bound route; a device never can", async () => {
+  const own = await fetch(`${hostBase()}/api/workspace/to/${hostId}/api/bots/settings`, { method: "PATCH", ...json({ defaultModel: "owner/choice" }) });
+  expect(own.status).toBe(200);
+  expect(own.headers.get("x-openbuild-server")).toBe(hostId);
+  expect(((await hostSnapshot()) as any).settings.defaultModel).toBe("owner/choice");
+  const device = await fetch(`${hostBase()}/api/workspace/to/${hostId}/api/bots/settings`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ defaultModel: "device/choice" }) });
+  expect(device.status).toBe(403);
+  expect(((await hostSnapshot()) as any).settings.defaultModel).toBe("owner/choice");
+}, 20_000);
+
+test("a reaction sent again while its first try is still on its way ends as asked, once", async () => {
+  const message = myMessage("react to me");
+  expect((await via(`/api/bots/conversations/${conversation}/messages`, { method: "POST", ...json(message) })).status).toBe(200);
+  const path = `/api/workspace/to/${hostId}/api/bots/conversations/${conversation}/messages/${message.id}`;
+  // The first try's body is held up on the way; the tab, hearing nothing, sends it again.
+  const bytes = new TextEncoder().encode(JSON.stringify({ emoji: "🎉", on: true }));
+  let finish!: () => void;
+  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes.slice(0, 4)); finish = () => { c.enqueue(bytes.slice(4)); c.close(); }; } });
+  const first = fetch(`${hostBase()}${path}`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body } as RequestInit);
+  await Bun.sleep(200);
+  const retried = await via(`/api/bots/conversations/${conversation}/messages/${message.id}`, { method: "PATCH", ...json({ emoji: "🎉", on: true }) });
+  expect(retried.status).toBe(200);
+  // Then the first try lands after all.
+  finish();
+  expect((await first).status).toBe(200);
+  const reactions = (await hostMessages()).find((m) => m.id === message.id) as any;
+  expect(reactions.reactions.filter((r: any) => r.by === "me" && r.emoji === "🎉")).toHaveLength(1);
+  // And taking it back the same way is a set too.
+  for (let i = 0; i < 2; i++) expect((await via(`/api/bots/conversations/${conversation}/messages/${message.id}`, { method: "PATCH", ...json({ emoji: "🎉", on: false }) })).status).toBe(200);
+  expect(((await hostMessages()).find((m) => m.id === message.id) as any).reactions ?? []).toEqual([]);
+}, 20_000);
 
 test("forgetting the pairing closes the device's streams and fails a write in flight", async () => {
   const stream = lines(await via("/api/bots/stream"));

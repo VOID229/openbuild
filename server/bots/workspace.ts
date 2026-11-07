@@ -16,12 +16,13 @@
 // the pairing credentials only, never a current host.
 import { SERVER_HEADER } from "../computers/api";
 import * as devices from "../devices";
-import { botFile, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse } from "./routes";
+import { botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse } from "./routes";
 import * as svc from "./service";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 type Who = NonNullable<ReturnType<typeof devices.authenticateDevice>>;
-type Run = (req: Request, args: string[], server: Bun.Server<unknown>, who?: Who) => Response | Promise<Response>;
+/** `body` is parsed already: a write runs without awaiting anything once its grant was checked. */
+type Run = (req: Request, args: string[], body: any, server: Bun.Server<unknown>, who?: Who) => Response | Promise<Response>;
 
 const ID = "([^/]+)";
 const route = (method: string, path: string, run: Run) => ({ method, path: new RegExp(`^${path.replaceAll(":id", ID)}$`), run });
@@ -29,7 +30,7 @@ const route = (method: string, path: string, run: Run) => ({ method, path: new R
 /** Everything a paired device can do in this workspace. Anything not listed is refused. */
 const ALLOWED = [
   route("GET", "/api/bots", () => snapshotResponse()),
-  route("GET", "/api/bots/stream", (req, _, server, who) => {
+  route("GET", "/api/bots/stream", (req, _, __, server, who) => {
     if (who) return botsStream(req, server, (close) => track(who.id, close));
     // This server's own tab: the first time OpenBots opens here, the primary bot says hello.
     const res = botsStream(req, server);
@@ -37,8 +38,8 @@ const ALLOWED = [
     return res;
   }),
   route("GET", "/api/bots/conversations/:id/messages", (req, [id]) => olderMessages(req, id!)),
-  route("POST", "/api/bots/conversations/:id/messages", (req, [id]) => postMine(req, id!)),
-  route("PATCH", "/api/bots/conversations/:id/messages/:id", (req, [id, message]) => patchMine(req, id!, message!)),
+  route("POST", "/api/bots/conversations/:id/messages", (_, [id], body) => postMine(id!, body)),
+  route("PATCH", "/api/bots/conversations/:id/messages/:id", (_, [id, message], body) => patchMine(id!, message!, body)),
   route("DELETE", "/api/bots/conversations/:id/messages/:id", (_, [id, message]) => deleteMine(id!, message!)),
   route("POST", "/api/bots/conversations/:id/read", (_, [id]) => markRead(id!)),
   route("GET", "/api/bots/:id/file", (req, [id]) => botFile(req, id!)),
@@ -97,6 +98,35 @@ function deviceRefusal(who: Who | undefined): Response | undefined {
   return undefined;
 }
 
+/**
+ * Everything else this server's own session does with its bots (making them, settings, apps), on
+ * the same bound route, so a tab's management writes run only on the server it means. Never a
+ * paired device's: those reach ALLOWED only. The apps sign-in callback stays on its own public route.
+ */
+let owner: { method: string; path: RegExp; names: string[]; handle: (req: Request, server: Bun.Server<unknown>) => Response | Promise<Response> }[] | undefined;
+function ownerOperation(method: string, path: string) {
+  owner ??= Object.entries(botRoutes((handler) => handler) as unknown as Record<string, Record<string, (req: Request, server: Bun.Server<unknown>) => Response | Promise<Response>>>)
+    .filter(([pattern]) => pattern !== "/api/bots/apps/callback")
+    .flatMap(([pattern, methods]) => {
+      const names = [...pattern.matchAll(/:(\w+)/g)].map((m) => m[1]!);
+      const path = new RegExp(`^${pattern.replace(/:\w+/g, "([^/]+)")}$`);
+      return Object.entries(methods).map(([method, handle]) => ({ method, path, names, handle }));
+    })
+    // Literal paths before ones with parameters, as Bun's router picks them (/api/bots/settings before /api/bots/:id).
+    .sort((a, b) => a.names.length - b.names.length);
+  for (const r of owner) {
+    if (r.method !== method) continue;
+    const m = r.path.exec(path);
+    if (!m) continue;
+    try {
+      return { handle: r.handle, params: Object.fromEntries(r.names.map((name, i) => [name, decodeURIComponent(m[i + 1]!)])) };
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 async function bound(req: Bun.BunRequest<"/api/workspace/to/:target/*">, server: Bun.Server<unknown>): Promise<Response> {
   server.timeout(req, 0);
   const target = req.params.target;
@@ -110,17 +140,32 @@ async function bound(req: Bun.BunRequest<"/api/workspace/to/:target/*">, server:
   const url = new URL(req.url);
   const path = url.pathname.slice(`/api/workspace/to/${encodeURIComponent(target)}`.length);
   const op = allowedOperation(req.method, path);
-  if (!op) return refuse("That isn't something a workspace tab can do here. Bots and the workspace are managed in its own session.", 403, "refused");
-  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
-  // The grant as it is now that the body is here: one taken back meanwhile fails closed.
+  const managed = !op && !device ? ownerOperation(req.method, path) : undefined;
+  if (!op && !managed) return refuse("That isn't something a workspace tab can do here. Bots and the workspace are managed in its own session.", 403, "refused");
+  const raw = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+  if (managed) {
+    // This server's own session (api() checked it): its handler reads the body itself.
+    const inner = Object.assign(new Request(new URL(path + url.search, url.origin), { method: req.method, headers: req.headers, body: raw, signal: req.signal }), { params: managed.params });
+    return stamp(await managed.handle(inner, server));
+  }
+  let body: unknown;
+  if (raw?.byteLength) {
+    try {
+      body = JSON.parse(new TextDecoder().decode(raw));
+    } catch {
+      body = undefined;
+    }
+  }
+  // The grant as it is now that the body is here: one taken back meanwhile fails closed. Nothing is
+  // awaited from here until the change is made, so it can't be taken back in between either.
   let who: Who | undefined;
   if (device) {
     who = devices.authenticateDevice(req);
     const why = deviceRefusal(who);
     if (why) return why;
   }
-  const inner = new Request(new URL(path + url.search, url.origin), { method: req.method, headers: req.headers, body, signal: req.signal });
-  return stamp(await op.run(inner, op.args, server, who));
+  const inner = new Request(new URL(path + url.search, url.origin), { method: req.method, headers: req.headers, signal: req.signal });
+  return stamp(await op!.run(inner, op!.args, body, server, who));
 }
 
 // ------------------------------------------------------------------ viewer side

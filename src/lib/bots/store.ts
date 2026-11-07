@@ -46,7 +46,9 @@ export interface Unconfirmed {
   body?: unknown;
   check: WriteCheck;
   error: string;
-  /** That workspace's next snapshot showed it didn't land, so it can be sent again there. */
+  /** The workspace answered and refused it, so it didn't run. Otherwise it's uncertain: it may still land. */
+  rejected?: boolean;
+  /** That workspace's next snapshot showed it isn't there. Every write here is idempotent, so it can be sent again there. */
   missing?: boolean;
   /** That workspace's next snapshot couldn't tell (the message isn't among those it holds). */
   unknown?: boolean;
@@ -161,9 +163,12 @@ export const useBots = create<BotsState>()(
       const c = get().conversations.find((c) => c.id === id);
       if (!visit || !c?.more || !c.messages[0]) return;
       try {
-        const res = await fetch(workspacePath(visit.id, `/api/bots/conversations/${encodeURIComponent(id)}/messages?beforeId=${encodeURIComponent(c.messages[0].id)}`));
-        if (!res.ok) throw new Error(`Could not load older messages (${res.status})`);
-        const page = await res.json() as { messages: BotMessage[]; more: boolean };
+        const path = workspacePath(visit.id, `/api/bots/conversations/${encodeURIComponent(id)}/messages?beforeId=${encodeURIComponent(c.messages[0].id)}`);
+        const page = await bounded(deadlines.read, async (signal) => {
+          const res = await fetch(path, { signal });
+          if (!res.ok) throw new Error(`Could not load older messages (${res.status})`);
+          return await res.json() as { messages: BotMessage[]; more: boolean };
+        });
         if (!live(visit)) return;
         set((s) => ({ conversations: mapConversation(s.conversations, id, (current) => {
           const ids = new Set(current.messages.map((m) => m.id));
@@ -333,7 +338,8 @@ export const useBots = create<BotsState>()(
       const had = hasReaction(get().conversations, conversationId, messageId, emoji, to);
       get().patchMessage(conversationId, messageId, (m) => ({ reactions: toggleReactionIn(m.reactions ?? [], emoji, by, to).next }));
       if (by === "me")
-        void send("PATCH", messagePath(conversationId, messageId), { emoji, to }, { label: `${emoji} reaction${had ? " taken back" : ""}`, check: { kind: "reaction", conversationId, messageId, emoji, to, on: !had } });
+        // `on` makes it a set, not a toggle: sending it again, even while the first may still land, can't undo it.
+        void send("PATCH", messagePath(conversationId, messageId), { emoji, to, on: !had }, { label: `${emoji} reaction${had ? " taken back" : ""}`, check: { kind: "reaction", conversationId, messageId, emoji, to, on: !had } });
     },
     votePoll: (conversationId, messageId, keys) => {
       get().patchMessage(conversationId, messageId, (m) => (m.poll ? { poll: castVote(m.poll, "me", keys) } : {}));
@@ -483,7 +489,12 @@ function reconcile(id: string, conversations: Conversation[]) {
   );
 }
 
-/** Send a change that wasn't confirmed again, to its own workspace, once its snapshot shows it's missing there. */
+/**
+ * Send a change that wasn't confirmed again, to its own workspace, once its snapshot shows it's
+ * missing there. Missing doesn't mean the first try is over: it may still land. That's safe because
+ * every write here is idempotent: a message keeps its id, and a reaction, vote or answer is sent as
+ * the state it should end in, not a toggle.
+ */
 function retry(entryId: string) {
   const visit = session;
   const entry = useBots.getState().unconfirmed.find((e) => e.id === entryId);
@@ -495,6 +506,26 @@ function retry(entryId: string) {
 }
 
 // ------------------------------------------------------------------ writes
+
+/**
+ * How long a write, or a read the tab waits on, gets for its headers and body. A request that ignores
+ * its abort is let go anyway, so a stalled workspace can't hold the write queue (and a switch) forever.
+ */
+export const deadlines = { write: 20_000, read: 15_000 };
+
+/** `work` with a bound, whether or not what it awaits heeds the abort. */
+async function bounded<T>(ms: number, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException(`No answer in ${Math.round(ms / 1000)}s`, "TimeoutError")), ms);
+  try {
+    return await abortable(work(ctrl.signal), ctrl.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** A workspace that answered and refused a write: it didn't run. */
+class Refused extends Error {}
 
 interface Write {
   /** Shown in the not-confirmed list. */
@@ -513,8 +544,9 @@ const errorText = (detail: string) => {
 
 /**
  * Send a write to the workspace this tab is in, after the ones before it, so a failed write is
- * reconciled before the next is sent. `write` marks one in a conversation, which goes to that
- * workspace's bound route; without it, it's managing the workspace, which only this server's own does.
+ * reconciled before the next is sent. Every write goes to that workspace's bound route, so it runs
+ * only on the server it means. `write` marks one in a conversation; without it, it's managing the
+ * workspace, which only this server's own session does (and the receiver allows no one else).
  */
 function send(method: string, path: string, body?: unknown, write?: Write): Promise<Response | undefined> {
   const visit = session;
@@ -532,22 +564,29 @@ function send(method: string, path: string, body?: unknown, write?: Write): Prom
   queueChanged(id);
   const task = q.tail.then(async () => {
     try {
-      const res = await fetch(write ? workspacePath(id, path) : path, {
-        method,
-        headers: body === undefined ? undefined : { "content-type": "application/json" },
-        body: body === undefined ? undefined : JSON.stringify(body),
+      return await bounded(deadlines.write, async (signal) => {
+        const res = await fetch(workspacePath(id, path), {
+          method,
+          headers: body === undefined ? undefined : { "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal,
+        });
+        // Another server answered at this address (409 from the bound route): nothing ran, and the tab stops here.
+        if (res.status === 409 || (res.headers.get("x-openbuild-server") ?? id) !== id) gone(visit);
+        if (!res.ok) {
+          const detail = await res.text().catch(() => "");
+          const text = errorText(detail) || `Request failed (${res.status})`;
+          // Refused by the workspace itself. Anything from the way there (the viewer's 502s) leaves it uncertain.
+          throw res.status >= 400 && res.status < 500 && res.headers.get("x-openbuild-server") === id ? new Refused(text) : new Error(text);
+        }
+        return res;
       });
-      if (!res.ok) {
-        const detail = await res.text();
-        throw new Error(errorText(detail) || `Request failed (${res.status})`);
-      }
-      return res;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Network error";
-      // A network failure can happen after acceptance. Never claim success, and never send it
-      // anywhere else: it's kept with this workspace until its snapshot shows whether it landed.
+      // A network failure or a timeout can happen after acceptance. Never claim success, and never
+      // send it anywhere else: it's kept with this workspace until its snapshot shows whether it landed.
       if (write?.check) {
-        const entry: Unconfirmed = { id: uid(), workspace: id, at: Date.now(), label: write.label ?? "Change", method, path, body, check: write.check, error: message };
+        const entry: Unconfirmed = { id: uid(), workspace: id, at: Date.now(), label: write.label ?? "Change", method, path, body, check: write.check, error: message, rejected: error instanceof Refused || undefined };
         saveUnconfirmed(id, (list) => [...list, entry]);
       }
       if (live(visit)) {
@@ -569,23 +608,29 @@ function send(method: string, path: string, body?: unknown, write?: Write): Prom
 }
 
 /** A workspace's snapshot, from that workspace only: an answer naming another server is refused. */
-async function fetchSnapshot(visit: Visit): Promise<Omit<Extract<BotsEvent, { t: "snapshot" }>, "t"> | undefined> {
-  const res = await fetch(workspacePath(visit.id, "/api/bots"));
-  if (!live(visit)) return undefined;
-  if (!res.ok) {
-    useWorkspace.setState({ problem: problemFrom(visit.id, res.status, await res.json().catch(() => undefined)) });
-    return undefined;
-  }
-  if (res.headers.get("x-openbuild-server") !== visit.id) {
-    gone(visit);
-    return undefined;
-  }
-  return res.json();
+function fetchSnapshot(visit: Visit): Promise<Omit<Extract<BotsEvent, { t: "snapshot" }>, "t"> | undefined> {
+  return bounded(deadlines.read, async (signal) => {
+    const res = await fetch(workspacePath(visit.id, "/api/bots"), { signal });
+    if (!live(visit)) return undefined;
+    if (!res.ok) {
+      const problem = problemFrom(visit.id, res.status, await res.json().catch(() => undefined));
+      if (live(visit)) useWorkspace.setState({ problem });
+      return undefined;
+    }
+    if (res.headers.get("x-openbuild-server") !== visit.id) {
+      gone(visit);
+      return undefined;
+    }
+    const snap = await res.json();
+    return live(visit) ? snap : undefined;
+  });
 }
 
 /** The workspace answered as another server: say so, stop, and never take on what's there now. */
 function gone(visit: Visit) {
   if (!live(visit)) return;
+  // Nothing the tab did optimistically stays either: none of it ran.
+  useBots.setState(visit.confirmed);
   useWorkspace.setState({
     problem: isLocalWorkspace(visit.id) || !useWorkspace.getState().localId
       ? { workspace: visit.id, kind: "gone", message: "This workspace is no longer here." }
@@ -734,7 +779,7 @@ function connect() {
     const profile = useStore.getState().settings.profile;
     const context = [profile.bio, profile.location, profile.language].filter(Boolean).join("\n");
     // Not the user's edit, so no "Saving changes…" and nothing to reconcile if it fails.
-    void fetch("/api/bots/settings", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: { name: profile.name, context } }) }).catch(() => {});
+    void fetch(workspacePath(visit.id, "/api/bots/settings"), { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: { name: profile.name, context } }), signal: AbortSignal.timeout(deadlines.write) }).catch(() => {});
   }
   void stream(visit);
 }

@@ -142,7 +142,7 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(document.activeElement).toBe(list[2]!);
     await press(list[2]!);
     expect(saved()).toMatchObject({ scope: "exclude", projects: ["alpha"], excluded: ["gamma"] });
-    expect(patches.at(-1)).toEqual({ path: "/api/bots/b1", body: { threads: saved() } });
+    expect(patches.at(-1)).toEqual({ path: "/api/workspace/to/srv/api/bots/b1", body: { threads: saved() } });
     expect(document.activeElement).toBe(trigger("Projects this bot can work in")!);
     // Each scope keeps its own list, so switching never loses or merges them.
     expect(trigger("Projects to exclude")!.textContent).toBe("Gamma");
