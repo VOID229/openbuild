@@ -339,7 +339,11 @@ async function options(botId: string, p: Record<string, unknown>) {
     permissions,
     remote_control: !remote
       ? "This harness has no Remote Control in OpenBuild."
-      : { per_thread: remote.scope === "thread", note: remote.note, ...(runtime === "codex" ? { machine_daemon: await inAccount(runtime, account, () => codexInstall.daemonStatus()) } : {}) },
+      : { per_thread: remote.scope === "thread", note: remote.note, ...(runtime === "codex" ? {
+        openbuild_threads: "Remote Control off: each runs its own app-server, which reports it disabled.",
+        machine_daemon_process: await inAccount(runtime, account, () => codexInstall.daemonStatus()),
+        machine_remote_control: "Unknown: the daemon check only says whether the process runs, not whether Remote Control is on or paired.",
+      } : {}) },
   };
 }
 

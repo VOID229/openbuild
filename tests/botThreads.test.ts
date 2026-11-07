@@ -154,7 +154,7 @@ test("remote control is off unless asked, and only Claude Code takes it per thre
   await expect(call("start", { project: project.name, prompt: "Go", harness: "claude", remote_control: "yes" })).rejects.toThrow(/true or false/);
   expect(admitted).toEqual([]);
   expect((await call("options", { harness: "claude" })).remote_control).toMatchObject({ per_thread: true });
-  expect((await call("options", { harness: "codex" })).remote_control).toMatchObject({ per_thread: false, machine_daemon: { status: "running" } });
+  expect((await call("options", { harness: "codex" })).remote_control).toMatchObject({ per_thread: false, openbuild_threads: expect.stringContaining("disabled"), machine_daemon_process: { status: "running" }, machine_remote_control: expect.stringContaining("Unknown") });
   expect((await call("options", { harness: "cursor" })).remote_control).toMatchObject({ per_thread: false });
 });
 

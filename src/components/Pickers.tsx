@@ -781,6 +781,20 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
 type Daemon = Awaited<ReturnType<typeof codexDaemon>>;
 
 /**
+ * What OpenBuild knows about Codex Remote Control on a device. `daemon version` only says whether
+ * the daemon process runs, never whether its Remote Control is on or paired, so neither is implied.
+ */
+export function codexRemoteLines(daemon: Daemon | { error: string } | undefined): string[] {
+  const threads = "OpenBuild's Codex threads: Remote Control off. Each runs its own app-server, which reports it disabled.";
+  if (!daemon) return [threads, "Checking this machine's Codex daemon…"];
+  if (!("status" in daemon) || !daemon.status) return [threads, `Couldn't check the Codex daemon: ${daemon.error ?? "Codex isn't installed"}`];
+  return [
+    threads,
+    `Codex daemon process: ${daemon.status}${daemon.version ? ` (app-server ${daemon.version})` : ""}. That's all this check reports: not whether the daemon's Remote Control is on or paired.`,
+  ];
+}
+
+/**
  * Remote Control, as each vendor offers it. Claude Code opts in per session, so a new thread can
  * start with it on. Codex pairs a daemon for the whole machine and Cursor sets it in the account:
  * for those the pill explains where it's set (and, for Codex, how the daemon is doing) instead.
@@ -849,11 +863,11 @@ export function RemoteControlPicker({ dropUp, chatId, deviceId }: { dropUp: bool
             <span className="menu-item-label">
               {remote.scope === "machine" ? "Set for the whole machine" : `Set in your ${name} account`}
               <span className="speed-desc">{remote.note}</span>
-              {runtime === "codex" && (
-                <span className="speed-desc" role="status">
-                  {!daemon ? <><Spinner /> Checking this machine's Codex daemon…</> : "status" in daemon && daemon.status ? `This machine's Codex daemon: ${daemon.status}${daemon.version ? ` (app-server ${daemon.version})` : ""}` : `Couldn't check the Codex daemon: ${daemon.error ?? "Codex isn't installed"}`}
+              {runtime === "codex" && codexRemoteLines(daemon).map((line, i) => (
+                <span key={i} className="speed-desc" role={i ? "status" : undefined}>
+                  {i && !daemon ? <Spinner /> : null} {line}
                 </span>
-              )}
+              ))}
             </span>
           </div>
         )}

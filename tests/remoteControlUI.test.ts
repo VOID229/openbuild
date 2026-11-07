@@ -30,7 +30,7 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
   const { config } = await import("../src/lib/runtime");
   await config;
   const { useStore } = await import("../src/lib/store");
-  const { RemoteControlPicker } = await import("../src/components/Pickers");
+  const { RemoteControlPicker, codexRemoteLines } = await import("../src/components/Pickers");
   const { sendMessage } = await import("../src/lib/chat");
   const { codexDaemon } = await import("../src/lib/pi");
   const base = useStore.getState().settings;
@@ -141,6 +141,16 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     useStore.getState().setDraftRemoteControl(true);
     useStore.getState().newChat();
     expect(useStore.getState().draftRemoteControl).toBe(false);
+  });
+
+  test("the Codex pill says the daemon runs, never that Remote Control is on, and that threads are off", () => {
+    const [threads, running] = codexRemoteLines({ installed: true, status: "running", version: "0.163.0", checkedAt: 1 });
+    expect(threads).toContain("OpenBuild's Codex threads: Remote Control off");
+    expect(threads).toContain("reports it disabled");
+    expect(running).toBe("Codex daemon process: running (app-server 0.163.0). That's all this check reports: not whether the daemon's Remote Control is on or paired.");
+    expect(codexRemoteLines(undefined)[1]).toContain("Checking");
+    expect(codexRemoteLines({ error: "boom" })[1]).toBe("Couldn't check the Codex daemon: boom");
+    expect(codexRemoteLines({ installed: false, checkedAt: 1 })[1]).toContain("Codex isn't installed");
   });
 
   test("the Codex pill asks the device for its daemon, never a thread", async () => {
