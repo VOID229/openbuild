@@ -291,11 +291,13 @@ test("resetting says reset, and lively bots, pointer tracking and reactions are 
 
 test("computer settings require explicit host selection and explain isolation", async () => {
   const settings = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
-  expect(settings).toContain('label="Computer"');
-  expect(settings).toContain(': "local:container"}');
+  const targets = await Bun.file("src/lib/bots/targets.ts").text();
+  // Where it runs and how it's isolated are separate choices; unset means this server's container.
+  expect(settings).toContain('label="Runs on"');
+  expect(settings).toContain('label="Isolation"');
+  expect(targets).toContain('export const LOCAL: ComputerConfig = { device: "local", kind: "container" };');
   expect(settings).toContain('label: "Host (unisolated)"');
   expect(settings).toContain("Host access is unisolated");
-  expect(settings).toContain('kind: value === "local:host" ? "host" : "container"');
   expect(settings).not.toContain("<select");
 });
 

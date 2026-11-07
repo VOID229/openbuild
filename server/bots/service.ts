@@ -6,6 +6,7 @@ import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, Poll, Routine } from "../../shared/bots";
 import { castVote, DEFAULT_SETTINGS, findTags, firstName, isBotId, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
+import { hasDevice } from "../devices";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
@@ -353,6 +354,8 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
 export function updateBot(id: string, patch: Partial<Bot>): Bot {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
+  // Before anything changes: a computer only goes somewhere this server can reach as itself.
+  if (typeof patch.computer?.device === "string" && patch.computer.device !== "local" && !hasDevice(patch.computer.device)) throw new BotsError("That device isn't paired with this server.");
   if (typeof patch.name === "string") {
     const name = clip(patch.name, 80);
     if (!name) throw new BotsError("A bot needs a name.");

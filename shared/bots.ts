@@ -2,6 +2,7 @@
 // it: bots, the conversations they're in, their memory, routines and computers. The app gets a
 // snapshot and then a stream of changes (`BotsEvent`) from /api/bots/stream.
 import type { BotLook } from "../src/lib/bots/looks";
+import type { BotToolGrants } from "./types";
 
 export type { BotLook };
 
@@ -375,6 +376,28 @@ export interface ComputerCapabilities {
   /** The container image bots' computers use. */
   image: "missing" | "building" | "ready" | "failed";
   imageLog?: string;
+  /** The machine's server id and name, so a caller can tell it's the one it meant. */
+  serverId?: string;
+  machine?: string;
+  /** What this machine allows the asking server's bots. Only given to a paired server. */
+  grants?: BotToolGrants;
+}
+
+/** Somewhere a bot's computer can run, as the bot settings list it. */
+export interface ComputerTarget {
+  /** "local" (this server), or a paired device's id. */
+  device: string;
+  name: string;
+  /**
+   * ready: it allows at least one kind of tool. access: paired, but it hasn't allowed this server's
+   * bots anything yet. The rest say why nothing can run there now; nothing falls back elsewhere.
+   */
+  status: "ready" | "access" | "offline" | "revoked" | "outdated" | "mismatch" | "unpaired";
+  /** What it allows (everything, for this server). */
+  grants?: BotToolGrants;
+  /** Container engines there, so Container can be offered only where it works. */
+  engines?: ("podman" | "docker")[];
+  message?: string;
 }
 
 export interface ComputerInfo {

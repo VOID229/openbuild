@@ -2,10 +2,47 @@
 // machine; /api/computers/:id/:op exposes the same operations to the server this device is paired
 // with (so a bot on that server can have its computer here); `computerApi(device)` is what the bots
 // service uses: direct calls for "local", HTTP to the paired device otherwise.
-import type { ComputerCapabilities } from "../../shared/bots";
+//
+// A paired server only gets what this machine allowed it (Settings → Devices → Using this device):
+// files, terminal and browser are separate grants, all off after pairing, and so is running
+// unisolated instead of in a container. Its computers live apart from this machine's own bots', so
+// it can only reach the ones its own bots made. Every answer names this server, and the caller
+// refuses one from any other: a tool never runs on a machine the bot wasn't pointed at.
+import { createHash } from "node:crypto";
+import type { ComputerCapabilities, ComputerTarget } from "../../shared/bots";
+import type { BotToolGrants } from "../../shared/types";
 import * as devices from "../devices";
+import type { StoredDevice } from "../devices";
 import { bad, readJson } from "../handlers";
 import { capabilities, computer } from "./index";
+
+/** The header every /api/computers answer carries: the server id of the machine that ran it. */
+export const SERVER_HEADER = "x-openbuild-server";
+
+type Tool = "files" | "terminal" | "browser";
+const TOOL_LABEL: Record<Tool, string> = { files: "files", terminal: "the terminal", browser: "the browser" };
+
+/** The grant an operation needs. Undefined for looking after the computer itself, which any grant allows. */
+function needs(op: string): Tool | undefined {
+  if (op === "fs") return "files";
+  if (op === "exec" || op === "proc") return "terminal";
+  if (op === "browser") return "browser";
+  return undefined;
+}
+
+/** A paired server's computer, apart from this machine's bots' and other paired servers'. */
+export const guestComputerId = (clientId: string, id: string) => "g" + createHash("sha256").update(`${clientId}\n${id}`).digest("hex").slice(0, 40);
+
+/** Why a paired server can't run `op` here, or undefined when it may. */
+function refusal(who: { name: string; botTools: BotToolGrants }, op: string, kind: "container" | "host"): string | undefined {
+  const here = devices.deviceName();
+  const g = who.botTools;
+  const tool = needs(op);
+  if (tool && !g[tool]) return `${here} hasn't allowed ${TOOL_LABEL[tool]} for bots from ${who.name}. Allow it on ${here}: Settings → Devices → Using this device.`;
+  if (!g.files && !g.terminal && !g.browser) return `${here} hasn't allowed bots from ${who.name} to use it. Allow them on ${here}: Settings → Devices → Using this device.`;
+  if (kind === "host" && !g.unisolated) return `${here} only allows bots from ${who.name} a container, not unisolated access. Choose Container in the bot's settings, or allow unisolated access on ${here}.`;
+  return undefined;
+}
 
 type Body = Record<string, any>;
 
@@ -105,15 +142,42 @@ export async function dispatch(id: string, op: string, body: Body, signal?: Abor
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
 
+const stamp = (res: Response) => {
+  res.headers.set(SERVER_HEADER, devices.serverId());
+  return res;
+};
+
 /** /api/computers: for this server's bots service, and for the server this device is paired with. */
 export function computerRoutes(api: Api) {
   return {
-    "/api/computers/capabilities": { GET: api(async () => Response.json(await capabilities())) },
+    "/api/computers/capabilities": {
+      GET: api(async (req: Request) => {
+        const who = devices.authenticateDevice(req);
+        // A paired server also learns what it's allowed here, so its settings can say so before a bot tries.
+        return stamp(Response.json({ ...(await capabilities()), serverId: devices.serverId(), machine: devices.deviceName(), ...(who && { grants: who.botTools }) } satisfies ComputerCapabilities));
+      }),
+    },
     "/api/computers/:id/:op": {
       POST: api(async (req: Bun.BunRequest<"/api/computers/:id/:op">, server: Bun.Server<unknown>) => {
         server.timeout(req, 0);
-        const body = ((await readJson(req)) ?? {}) as Body;
-        const { id, op } = req.params;
+        let body = ((await readJson(req)) ?? {}) as Body;
+        let { id } = req.params;
+        const { op } = req.params;
+        const who = devices.authenticateDevice(req);
+        if (who) {
+          try {
+            id = guestComputerId(who.id, id);
+            // A new guest computer is a container unless it asks otherwise; an existing one keeps its kind.
+            const asked = body.kind === "host" || body.kind === "container" ? body.kind : undefined;
+            const c = computer(id, asked ?? "container");
+            const why = refusal(who, op, op === "ensure" && asked ? asked : c.config.kind);
+            if (why) return stamp(bad(why, 403));
+            body = { ...body, kind: asked ?? c.config.kind };
+          } catch (err) {
+            const e = err as Error & { status?: number };
+            return stamp(bad(e.message, e.status ?? 500));
+          }
+        }
         if (op === "exec") {
           const enc = new TextEncoder();
           const stream = new ReadableStream<Uint8Array>({
@@ -128,13 +192,13 @@ export function computerRoutes(api: Api) {
               controller.close();
             },
           });
-          return new Response(stream, { headers: { "content-type": "application/x-ndjson" } });
+          return stamp(new Response(stream, { headers: { "content-type": "application/x-ndjson" } }));
         }
         try {
-          return Response.json(await dispatch(id, op, body, req.signal));
+          return stamp(Response.json(await dispatch(id, op, body, req.signal)));
         } catch (err) {
           const e = err as Error & { status?: number };
-          return bad(e.message, e.status ?? 500);
+          return stamp(bad(e.message, e.status ?? 500));
         }
       }),
     },
@@ -155,26 +219,84 @@ const local: ComputerApi = {
   capabilities: () => capabilities(),
 };
 
-/** A request to a paired device's server, trying each of its addresses. */
-async function deviceFetch(deviceId: string, path: string, init: RequestInit = {}): Promise<Response> {
-  const device = devices.deviceCredentials(deviceId);
-  if (!device) throw new Error("That paired device isn't paired anymore.");
+/** Why a paired device's computer can't be used right now. A bot sees `message`; the settings show `reason`. */
+export class TargetError extends Error {
+  constructor(
+    readonly reason: "unpaired" | "offline" | "revoked" | "denied" | "outdated" | "mismatch",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Where each paired device was last found answering as itself, so a burst of tool calls checks once. */
+const verified = new Map<string, { base: string; at: number }>();
+const VERIFIED_FOR = 15_000;
+
+/**
+ * The address a paired device answers at as itself. Asked with a read-only request first, so an
+ * address that now belongs to another machine (or an older OpenBuild, which doesn't check grants)
+ * is found out before anything runs there.
+ */
+async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string> {
+  const known = verified.get(device.id);
+  if (known && Date.now() - known.at < VERIFIED_FOR && device.urls.includes(known.base)) return known.base;
+  verified.delete(device.id);
   let last = "it didn't answer";
-  for (const base of device.urls) {
+  let refused: TargetError | undefined;
+  for (const url of device.urls) {
+    const base = url.replace(/\/$/, "");
     try {
-      const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
+      const res = await fetch(`${base}/api/computers/capabilities`, { headers: { authorization: `Bearer ${device.token}` }, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(5000)]) : AbortSignal.timeout(5000) });
+      void res.body?.cancel().catch(() => {});
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         last = `it answered HTTP ${res.status}`;
         continue;
       }
-      devices.touchDevice(deviceId, true);
-      return res;
+      if (res.status === 401) throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Pair it again, or choose another computer in the bot's settings.`);
+      const answered = res.headers.get(SERVER_HEADER);
+      if (answered === device.id) {
+        devices.touchDevice(device.id, true);
+        verified.set(device.id, { base, at: Date.now() });
+        return base;
+      }
+      // Another address may still be the right machine.
+      refused ??= answered
+        ? new TargetError("mismatch", `${base} isn't ${device.name} anymore: another OpenBuild answered there. Nothing ran.`)
+        : new TargetError("outdated", `${device.name} needs a newer OpenBuild before bots can use it. Nothing ran.`);
     } catch (err) {
-      if (init.signal?.aborted) throw new Error("aborted");
+      if (err instanceof TargetError) throw err;
+      if (signal?.aborted) throw new Error("aborted");
       last = (err as Error).message;
     }
   }
-  throw new Error(`Couldn't reach ${device.name}: ${last}`);
+  throw refused ?? new TargetError("offline", `${device.name} is unreachable (${last}). Nothing ran; try again once it's online.`);
+}
+
+/** A request to a paired device's server, at the address it was just found answering as itself. */
+async function deviceFetch(deviceId: string, path: string, init: RequestInit = {}): Promise<Response> {
+  const device = devices.deviceCredentials(deviceId);
+  if (!device) throw new TargetError("unpaired", "This bot's computer is on a device that isn't paired anymore. Choose another computer in the bot's settings.");
+  const base = await reach(device, init.signal ?? undefined);
+  let res: Response;
+  try {
+    res = await fetch(`${base}${path}`, { ...init, headers: { ...(init.headers as Record<string, string>), authorization: `Bearer ${device.token}`, "content-type": "application/json" } });
+  } catch (err) {
+    verified.delete(deviceId);
+    if (init.signal?.aborted) throw new Error("aborted");
+    throw new TargetError("offline", `${device.name} stopped answering (${(err as Error).message}).`);
+  }
+  if (res.status === 401) {
+    verified.delete(deviceId);
+    throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Pair it again, or choose another computer in the bot's settings.`);
+  }
+  if (res.headers.get(SERVER_HEADER) !== device.id) {
+    verified.delete(deviceId);
+    void res.body?.cancel().catch(() => {});
+    throw new TargetError("mismatch", `${device.name}'s address answered as another machine.`);
+  }
+  if (res.status === 403) throw new TargetError("denied", ((await res.json().catch(() => ({}))) as { error?: string }).error ?? `${device.name} hasn't allowed this.`);
+  return res;
 }
 
 function remote(deviceId: string): ComputerApi {
@@ -203,7 +325,7 @@ function remote(deviceId: string): ComputerApi {
           else if (e.t === "error") throw new Error(e.message);
         }
       }
-      throw new Error(signal?.aborted ? "aborted" : "The device stopped answering");
+      throw new Error(signal?.aborted ? "aborted" : `${devices.deviceCredentials(deviceId)?.name ?? "The device"} stopped answering mid-command. It may have run partly.`);
     },
     async capabilities() {
       const res = await deviceFetch(deviceId, "/api/computers/capabilities");
@@ -214,3 +336,21 @@ function remote(deviceId: string): ComputerApi {
 }
 
 export const computerApi = (device: string): ComputerApi => (device === "local" ? local : remote(device));
+
+/** Every place a bot's computer could run, and whether it can right now. Asks each paired device. */
+export async function computerTargets(): Promise<ComputerTarget[]> {
+  const here = await capabilities();
+  const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: here.engines };
+  const remote = await Promise.all(
+    devices.readDevices().map(async (d): Promise<ComputerTarget> => {
+      try {
+        const caps = await computerApi(d.id).capabilities();
+        const g = caps.grants;
+        return { device: d.id, name: d.name, status: g && (g.files || g.terminal || g.browser) ? "ready" : "access", grants: g, engines: caps.engines };
+      } catch (err) {
+        return { device: d.id, name: d.name, status: err instanceof TargetError ? (err.reason === "denied" ? "access" : err.reason) : "offline", message: (err as Error).message };
+      }
+    }),
+  );
+  return [local, ...remote];
+}

@@ -7,6 +7,7 @@ import type { Device, PairedClient } from "../../shared/types";
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { ago, cx } from "../lib/ui";
+import { BotAccess } from "./BotAccess";
 import { PairDevice } from "./PairDevice";
 import { IconButton, SettingsHeading, Spinner } from "./primitives";
 
@@ -119,18 +120,21 @@ function ClientRow({ client, onChanged }: { client: PairedClient; onChanged: () 
     void revokePairedClient(client.id).then(onChanged, (err: Error) => alert(err.message));
   };
   return (
-    <li className="pi-row">
-      <div className="pi-row-text">
-        <span className="pi-row-name">{client.name}</span>
-        <span className="pi-row-desc">
-          {[`paired ${ago(client.createdAt)}`, client.lastSeenAt && `active ${ago(client.lastSeenAt)}`].filter(Boolean).join(" · ")}
+    <li className="pi-row pi-row-stack">
+      <div className="pi-row-line">
+        <div className="pi-row-text">
+          <span className="pi-row-name">{client.name}</span>
+          <span className="pi-row-desc">
+            {[`paired ${ago(client.createdAt)}`, client.lastSeenAt && `active ${ago(client.lastSeenAt)}`].filter(Boolean).join(" · ")}
+          </span>
+        </div>
+        <span className="pi-row-actions">
+          <IconButton label={`Revoke ${client.name}`} tooltip="Revoke access" tooltipSide="top" className="key-icon-btn key-remove" onClick={revoke}>
+            <Unlink size={14} />
+          </IconButton>
         </span>
       </div>
-      <span className="pi-row-actions">
-        <IconButton label={`Revoke ${client.name}`} tooltip="Revoke access" tooltipSide="top" className="key-icon-btn key-remove" onClick={revoke}>
-          <Unlink size={14} />
-        </IconButton>
-      </span>
+      <BotAccess client={client} />
     </li>
   );
 }

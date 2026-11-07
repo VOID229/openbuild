@@ -2,7 +2,7 @@
 // Bots themselves don't use these routes; their tools go through the socket in agent.ts.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { computerApi } from "../computers/api";
+import { computerApi, computerTargets } from "../computers/api";
 import { modelListing } from "../pi/routes";
 import { getBot } from "./db";
 import { available, botModels } from "./extensions";
@@ -152,6 +152,10 @@ export function botRoutes(api: Api) {
           return fail(err);
         }
       }),
+    },
+    // Where a bot's computer can run: this server, or a paired device that allowed it.
+    "/api/bots/targets": {
+      GET: api(async () => json({ targets: await computerTargets() })),
     },
     "/api/bots/stream": {
       GET: api((req: Request, server: Bun.Server<unknown>) => {

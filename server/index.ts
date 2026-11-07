@@ -120,6 +120,9 @@ const api =
       if (!devicePathAllowed(new URL(req.url).pathname)) return bad("Forbidden", 403);
       return handler(req, ...rest);
     }
+    // A device token this server doesn't know is refused, not taken for a browser: on a server
+    // without a password that would let a stale or reassigned address act for a pairing it never made.
+    if (/^Bearer [a-f0-9]{64}$/.test(req.headers.get("authorization") ?? "")) return bad("Unknown device token", 401);
     return localAuth.protect(req, () => handler(req, ...rest));
   };
 
@@ -364,6 +367,15 @@ function serve(port: number, hostname: string) {
         GET: api(() => Response.json({ clients: devices.pairedClients() })),
       },
       "/api/paired-clients/:id": {
+        // What that device's bots may do here. Only this machine's own session can change it: a
+        // paired device's token never reaches this route (see devicePathAllowed).
+        PATCH: api(async (req: Bun.BunRequest<"/api/paired-clients/:id">) => {
+          const body = await readJson(req);
+          const patch = body?.botTools;
+          if (!patch || typeof patch !== "object" || !Object.values(patch).every((v) => typeof v === "boolean")) return bad("Expected { botTools: { files?, terminal?, browser?, unisolated? } }");
+          const botTools = devices.setClientBotTools(req.params.id, patch);
+          return botTools ? Response.json({ botTools }) : bad("No such device", 404);
+        }),
         DELETE: api((req: Bun.BunRequest<"/api/paired-clients/:id">) => {
           devices.forgetPairedClient(req.params.id);
           return Response.json({ ok: true });
