@@ -78,6 +78,9 @@ function writeJson(file: string, value: unknown): void {
   }
 }
 
+/** The header naming which server answered (its serverId), so an answer from another machine is never taken for this pairing's. */
+export const SERVER_HEADER = "x-openbuild-server";
+
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 /** This server's own id (its data), shared with /api/config and reply streams. */
@@ -352,8 +355,14 @@ interface RemoteAnswer {
   body?: { running?: boolean; keeper?: boolean; error?: string };
 }
 
-/** Call a paired host with its token, trying each saved address. Undefined when none answered. */
+/**
+ * Call a paired host with its token, trying each saved address. Undefined when none answered.
+ * A refusal (401) is only the host's answer when no other address does better, and never when
+ * another OpenBuild sent it: an address that now reaches a different server (this one, on a
+ * loopback name, or a reassigned IP) doesn't speak for the pairing.
+ */
 async function remoteCall(device: StoredDevice, path: string, method: "GET" | "POST", timeoutMs: number): Promise<RemoteAnswer | undefined> {
+  let refused: RemoteAnswer | undefined;
   for (const base of device.urls) {
     try {
       const res = await fetch(`${base.replace(/\/$/, "")}${path}`, {
@@ -361,10 +370,13 @@ async function remoteCall(device: StoredDevice, path: string, method: "GET" | "P
         headers: { authorization: `Bearer ${device.token}` },
         signal: AbortSignal.timeout(timeoutMs),
       });
-      return { status: res.status, body: await res.json().catch(() => undefined) };
+      const body = await res.json().catch(() => undefined);
+      if (res.status !== 401) return { status: res.status, body };
+      const answered = res.headers.get(SERVER_HEADER);
+      if (!answered || answered === (device.serverId ?? device.id)) refused ??= { status: res.status, body };
     } catch {}
   }
-  return undefined;
+  return refused;
 }
 
 /**

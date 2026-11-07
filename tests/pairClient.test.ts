@@ -134,6 +134,15 @@ describe("pairing with a code", () => {
     expect(new Set(hits)).toEqual(new Set(["GET /api/pair/info", "POST /api/pair/claim"]));
   });
 
+  test("a host's loopback addresses aren't saved: from here they'd reach this server", async () => {
+    const { code } = devices.createPairing({ name: "host-box", mode: "tailscale", urls: ["http://localhost:3100", "http://127.0.0.1:3100", "http://100.101.102.103:3100", "https://host-box.tail.ts.net"] });
+    const outcome = await pairing.pairWithCode({ mode: "tailscale", code, port: 1, candidates: [base] });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    // The address it was found at stays, since it answered as that host.
+    expect(devices.deviceCredentials(outcome.device.id)!.urls).toEqual([base, "http://100.101.102.103:3100", "https://host-box.tail.ts.net"]);
+  });
+
   test("this server never pairs with itself", async () => {
     const { code } = open();
     const self = devices.serverId();

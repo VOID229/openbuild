@@ -128,7 +128,10 @@ const api =
     }
     // A device token this server doesn't know is refused, not taken for a browser: on a server
     // without a password that would let a stale or reassigned address act for a pairing it never made.
-    if (/^Bearer [a-f0-9]{64}$/.test(req.headers.get("authorization") ?? "")) return bad("Unknown device token", 401);
+    // It says which server refused, so the device that sent it can tell a revoked pairing from an
+    // address that reaches some other OpenBuild.
+    if (/^Bearer [a-f0-9]{64}$/.test(req.headers.get("authorization") ?? ""))
+      return Response.json({ error: "Unknown device token" }, { status: 401, headers: { [devices.SERVER_HEADER]: serverId } });
     return localAuth.protect(req, () => handler(req, ...rest));
   };
 
@@ -174,6 +177,13 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
       req.signal.removeEventListener("abort", abort);
       if (res.status === 502 || res.status === 503 || res.status === 504) {
         lastError = `the device answered HTTP ${res.status}`;
+        void res.body?.cancel().catch(() => {});
+        continue;
+      }
+      // Another OpenBuild refusing the token isn't this device's answer: try its other addresses.
+      const answered = res.headers.get(devices.SERVER_HEADER);
+      if (res.status === 401 && answered && answered !== (device.serverId ?? device.id)) {
+        lastError = "another OpenBuild answered at a saved address";
         void res.body?.cancel().catch(() => {});
         continue;
       }
