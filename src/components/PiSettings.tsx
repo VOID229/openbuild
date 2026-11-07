@@ -138,8 +138,10 @@ export function useJob(onDone: () => void, deviceId?: string) {
         jobId,
       );
       if (!ctrl.signal.aborted) setResult(r);
+      return r;
     } catch {
       // An aborted or dropped stream has no result; the status card says why nothing ran.
+      return undefined;
     } finally {
       if (!ctrl.signal.aborted) {
         setRunning(false);
