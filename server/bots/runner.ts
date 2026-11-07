@@ -147,14 +147,15 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
     }).slice(-IMAGE_LIMIT);
     mind.quiet = false;
     show(botId, mind);
-    await mind.proc.send({ type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, 15_000);
-    return true;
-  })().catch(() => false);
-  mind.steering = attempt;
-  void attempt.then((ok) => {
-    if (!ok) return enqueue(botId, item);
+    const took = await mind.proc.send<{ disposition?: string } | undefined>({ type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, 15_000);
+    return took?.disposition ?? "queued";
+  })().catch(() => undefined);
+  mind.steering = attempt.then((disposition) => !!disposition);
+  void attempt.then((disposition) => {
+    if (!disposition) return enqueue(botId, item);
     // A model that fails before acting hands the turn to the next one, whose prompt doesn't have these.
-    if (mind.shown === turn) (mind.steered ??= []).push(item);
+    // One an extension handled is done with.
+    if (disposition !== "handled" && mind.shown === turn) (mind.steered ??= []).push(item);
     markSeen(botId, new Map(), new Set(ids));
   });
 }
@@ -558,7 +559,12 @@ async function run(botId: string, all: Wake[]) {
       m.typing = false;
       m.activity = "Thinking";
       // Steered into an attempt whose model failed before acting: answered in a turn of their own, not lost.
-      for (const job of m.steered?.splice(0) ?? []) enqueue(botId, job);
+      if (m.steered?.length) {
+        await m.steering;
+        // Pi keeps the steers it never read for the next prompt, which would answer them a second time.
+        await m.proc.send({ type: "clear_queue" }, 30_000);
+        for (const job of m.steered.splice(0)) enqueue(botId, job);
+      }
       // Nothing has happened yet: a model Pi can't switch to, or that it refuses to start, is the next one's turn.
       const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent ? err : new ModelFailure(err instanceof Error ? err.message : String(err)));
       try {
