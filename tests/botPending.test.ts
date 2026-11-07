@@ -16,10 +16,11 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       const boss = svc.createBot({ name: 'Boss' });
       const helper = svc.createBot({ name: 'Helper' });
       const group = svc.createConversation({ kind: 'group', name: 'Pending', botIds: [boss.bot.id, helper.bot.id] });
-      const prompts = [];
+      const prompts = [], steers = [];
       for (const bot of [boss.bot, helper.bot]) {
         const mind = { token: 'test', loaded: JSON.stringify(piFlags()), busy: false, sent: false, draft: '', proc: { exited: false, lastUsed: Date.now(), close() {}, async send(cmd) {
           if (cmd.type === 'prompt') prompts.push({ ...cmd, bot: bot.id, mind, finish() { mind.onSettled?.(); } });
+          if (cmd.type === 'steer') steers.push({ ...cmd, bot: bot.id });
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
         minds.set(bot.id, mind);
@@ -53,13 +54,13 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       a.ok(holding(status(boss.bot.id), boss.conversationId));
       a.deepEqual(showWorking(boss.conversationId, svc.snapshot().status, svc.snapshot().typing[boss.conversationId] ?? []), [boss.bot.id]);
 
+      // The follow-up in the group was steered into the turn it's working on, not held for another.
+      a.equal(steers.length, 1);
+      a.ok(steers[0].message.includes('[new, for you]: One more thing'));
       prompts[0].finish();
       await until(() => prompts.length === 2 && minds.get(boss.bot.id).steerable);
-      a.ok(prompts[1].message.includes('[assigned request: answer this]: One more thing'));
-      prompts[1].finish();
-      await until(() => prompts.length === 3 && minds.get(boss.bot.id).steerable);
       a.equal(status(boss.bot.id).conversationId, boss.conversationId);
-      prompts[2].finish();
+      prompts[1].finish();
       await until(() => !runner.busy(boss.bot.id));
       a.equal(status(boss.bot.id)?.state ?? 'idle', 'idle');
       process.exit(0);
