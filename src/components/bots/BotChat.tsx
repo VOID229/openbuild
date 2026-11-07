@@ -31,7 +31,7 @@ import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } fr
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
 import { PollDialog } from "./BotDialogs";
-import { authorName, ConversationAvatar, dividerTime, messageText } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -659,7 +659,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
         <button type="button" className="bm-quote" onClick={() => useBots.getState().focusMessage(conversation.id, quoted.id)}>
           <CornerUpLeft size={12} />
           <span className="bm-quote-who">{authorName(quoted.author, bots).split(" ·")[0]}</span>
-          <span className="bm-quote-text">{messageText(quoted)}</span>
+          <span className="bm-quote-text">{messageLine(quoted)}</span>
         </button>
       )}
       <div className="bm-line">
@@ -1732,7 +1732,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <div className="bots-reply-bar">
             <CornerUpLeft size={14} />
             <span className="bots-reply-who">Replying to {authorName(quoted.author, bots).split(" ·")[0]}</span>
-            <span className="bots-reply-text">{messageText(quoted)}</span>
+            <span className="bots-reply-text">{messageLine(quoted)}</span>
             <IconButton label="Cancel reply" tooltip={false} className="bots-reply-x" onClick={() => onReply(undefined)}>
               <X size={14} />
             </IconButton>
