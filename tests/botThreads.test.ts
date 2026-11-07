@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
 import { execSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { accountCacheKey } from "../server/runtimeAccounts";
@@ -14,6 +14,10 @@ execSync("git init -q -b main && git -c user.name=t -c user.email=t@t commit -q 
 
 let discovered: any[] = [];
 mock.module("../server/claude/accounts", () => ({ detectAccounts: () => discovered }));
+// Codex discovery scans the home directory; keep it off the real one.
+const codexHome = mkdtempSync(join(tmpdir(), "openbuild-bot-codex-home-"));
+const { codexAccounts } = await import("../server/codex/accounts");
+mock.module("../server/codex/accounts", () => ({ codexAccounts: (saved: unknown) => codexAccounts(saved, codexHome) }));
 
 const admitted: any[] = [];
 const answers: any[] = [];
@@ -81,6 +85,7 @@ afterAll(() => {
   for (const run of runs.values()) run.end();
   rmSync(dir, { recursive: true, force: true });
   rmSync(repo, { recursive: true, force: true });
+  rmSync(codexHome, { recursive: true, force: true });
 });
 
 const ask = (over: object = {}) => ({ t: "ask" as const, id: "a1", method: "select" as const, title: "Which?", options: ["Red", "Blue"], ...over });
@@ -406,12 +411,28 @@ for (const runtime of ["codex", "cursor"]) {
     const options = await call("options", { harness: account.name });
     expect(options.models[0].name).toBe(account.configDir);
     expect(options.permissions.modes[0].id).toBe(account.configDir);
-    await call("start", { project: project.name, prompt: "Go", harness: account.id, permission: account.configDir, mode: "local" });
-    expect(admitted[0]).toMatchObject({ runtime, runtimeAccount: account, permission: account.configDir });
+    // Codex accounts take the id the model picker lists them under.
+    const listed = runtime === "codex" ? { ...account, id: "codex2" } : account;
+    await call("start", { project: project.name, prompt: "Go", harness: listed.id, permission: account.configDir, mode: "local" });
+    expect(admitted[0]).toMatchObject({ runtime, runtimeAccount: listed, permission: account.configDir });
     expect(accountCacheKey()).toBe("");
   });
 }
 
+
+test("a saved Codex login under the older numeric home spelling runs from the signed-in sibling", async () => {
+  const sibling = join(codexHome, ".codex-2");
+  mkdirSync(sibling, { recursive: true });
+  writeFileSync(join(sibling, "auth.json"), "{}");
+  try {
+    const account = { id: "old-uuid", name: "codex2", runtime: "codex", configDir: "~/.codex2" };
+    storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account] } } }));
+    expect((await call("options")).accounts).toEqual([{ id: "codex2", name: "codex2", harness: "codex" }]);
+    expect((await call("options", { harness: "codex2" })).models[0].name).toBe(sibling);
+    await call("start", { project: project.name, prompt: "Go", harness: "codex2", mode: "local" });
+    expect(admitted[0]).toMatchObject({ runtime: "codex", runtimeAccount: { id: "codex2", configDir: sibling } });
+  } finally { rmSync(sibling, { recursive: true, force: true }); }
+});
 
 test("UI-discovered Claude login is usable and saved configuration wins", async () => {
   const account = { id: "claude2", name: "claude2", runtime: "claude", configDir: "/tmp/bot-discovered-claude" };

@@ -12,6 +12,7 @@ import { withProfileContext } from "../../src/lib/profile";
 import type { Chat, Message, Profile } from "../../src/lib/types";
 import * as claudeInstall from "../claude/install";
 import { detectAccounts } from "../claude/accounts";
+import { codexAccounts } from "../codex/accounts";
 import * as codexInstall from "../codex/install";
 import * as cursorInstall from "../cursor/install";
 import { serverId } from "../devices";
@@ -285,9 +286,11 @@ function record(botId: string, text: string, detail: string, threadId?: string, 
   if (conversationId) svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "thread", text, detail: clip(detail, 200), ...(threadId ? { threadId } : {}), ...(pullUrl ? { pullUrl } : {}) } });
 }
 
-/** Use the UI's Claude discovery as well as accounts saved on this server. */
+/** Use the UI's Claude and Codex discovery as well as accounts saved on this server. */
 function localAccounts(): RuntimeAccount[] {
-  const saved = (appSettings().runtimeAccounts ?? []).filter((a) => (!a.deviceId || a.deviceId === serverId()) && ["claude", "codex", "cursor"].includes(a.runtime));
+  const local = (appSettings().runtimeAccounts ?? []).filter((a) => (!a.deviceId || a.deviceId === serverId()) && ["claude", "codex", "cursor"].includes(a.runtime));
+  // Codex logins resolve as the model picker lists them, including the older numeric home spelling.
+  const saved = [...local.filter((a) => a.runtime !== "codex"), ...codexAccounts(local.filter((a) => a.runtime === "codex"))];
   const detected = detectAccounts().filter((a) => !saved.some((s) => {
     if (s.runtime !== "claude") return false;
     if (s.id === a.id || s.name.toLowerCase() === a.name.toLowerCase()) return true;
