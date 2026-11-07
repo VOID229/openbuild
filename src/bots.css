@@ -2723,6 +2723,11 @@ button.bots-details-name:hover {
   color: var(--ink-fg);
 }
 
+/* An anchor too (Open GitHub): `a.btn`'s inherited colour would otherwise win over the pill's. */
+a.bots-btn-primary {
+  color: var(--ink-fg);
+}
+
 @media (hover: hover) {
   .bots-btn-primary:hover:not(:disabled) {
     background: var(--ink-hover);
@@ -3265,6 +3270,13 @@ button.bots-details-name:hover {
   text-decoration: none;
 }
 
+@media (hover: hover) {
+  .apps-link:hover:not(:disabled) {
+    color: var(--text);
+    text-decoration-thickness: 2px;
+  }
+}
+
 .apps-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3423,6 +3435,7 @@ button.bots-details-name:hover {
 .app-page-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
 }
 
