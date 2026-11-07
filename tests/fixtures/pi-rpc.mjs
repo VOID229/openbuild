@@ -55,6 +55,15 @@ rl.on("line", (line) => {
         if (mode === "branch" || mode === "image" || (mode === "ask" && prompts > 1)) setTimeout(settle, 5);
       };
       if (mode === "late-prompt") return setTimeout(start, 100);
+      // Pi 1.5 compacts a session over its threshold before answering the prompt that crossed it, and
+      // that compaction is a model call: minutes on a long session. "/compact-mute" never answers after.
+      if (mode === "compaction") {
+        out({ type: "compaction_start", reason: "threshold" });
+        return setTimeout(() => {
+          out({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false });
+          if (c.message !== "/compact-mute") start();
+        }, 400);
+      }
       return start();
     }
     case "steer": {
