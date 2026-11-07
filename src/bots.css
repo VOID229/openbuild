@@ -3587,30 +3587,75 @@ button.bots-details-name:hover {
   white-space: nowrap;
 }
 
-.bots-workspace-menu {
-  min-width: 220px;
+.bots-workspace-open {
+  background: var(--hover);
+  color: var(--text);
 }
 
+/* Hangs under its trigger, as wide as it (WorkspacePicker sets the width). `.menu`'s right: 0 would
+   stretch a fixed popover to the window's edge. Popover caps the height to the room below; the rows
+   scroll inside it and the page behind doesn't. */
+.bots-workspace-menu {
+  right: auto;
+  min-width: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.bots-workspace-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A row has a name and, below it, what the device is or why it can't be used: taller than a menu item. */
 .bots-workspace-item {
-  align-items: flex-start;
+  flex: none;
+  height: auto;
+  min-height: 34px;
+  padding-top: 6px;
+  padding-bottom: 6px;
 }
 
 .bots-workspace-check {
-  display: inline-flex;
+  display: inline-grid;
+  place-items: center;
   width: 16px;
   flex: none;
-  padding-top: 2px;
+  color: var(--text);
 }
 
 .bots-workspace-label {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
+  line-height: 1.3;
+}
+
+.bots-workspace-title,
+.bots-workspace-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bots-workspace-note {
-  color: var(--text-2);
-  font-size: 12px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+/* Offline, revoked, stopped, not paired anymore: a dot says it's a state, not a description. */
+.bots-workspace-status::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: 1px;
+  opacity: 0.7;
 }
 
 .bots-switch-body {
