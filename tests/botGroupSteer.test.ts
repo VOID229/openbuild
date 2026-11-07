@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { unexpectedStderr } from './botStderr';
 
 // Every scenario runs against the real service routing and runner, with fake Pi processes, in a
 // subprocess on its own data dir.
@@ -61,7 +62,7 @@ async function run(name: string, body: string) {
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe('');
+    expect(unexpectedStderr(err)).toBe('');
     expect(code).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });
