@@ -21,6 +21,7 @@ import { BotsView } from "./components/bots/BotsView";
 import { UsagePage } from "./components/UsagePage";
 import { adoptDiscoveredChats, resumeReplies } from "./lib/chat";
 import { preloadBots } from "./lib/bots/store";
+import { closeBotsThread, useBotsThreadEscape } from "./lib/botsThread";
 import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
@@ -212,6 +213,7 @@ function Main() {
   // Usage opened over it covers it, and closing Usage comes back to it.
   const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && !!chat;
   const botsChat = botsOpen && !botsThread;
+  useBotsThreadEscape(botsThread);
   const { setSidebarOpen, newChat } = useStore.getState();
   const folder = usePanel((s) => s.folder);
   const panelOpen = usePanel((s) => s.panel);
@@ -426,7 +428,7 @@ function Main() {
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
               <>
-                <IconButton label="Back to chat" tooltipSide="right" onClick={() => useStore.setState({ botsThread: false })}>
+                <IconButton label="Back to chat" tooltipSide="right" onClick={closeBotsThread}>
                   <ArrowLeft size={18} />
                 </IconButton>
                 <IconButton label="Open in OpenBuild" tooltipSide="right" onClick={expandBotsThread}>
