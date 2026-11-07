@@ -272,6 +272,9 @@ export function ensureStarted() {
 /** How the primary bot offers the starter team, in the first-run note and in its context once the user says they code. */
 export const TEAM_OFFER = `offer them a starter team with the question tool and offer "team": ${TEAM.map((m) => m.name).join(", ")}. In a few words, say what each does: Manager runs threads in their projects and merges their PRs, Tracer reviews and tests, Researcher looks things up, and they can change what each may do in its settings. The app makes the team itself if they take it.`;
 
+/** How the primary bot answers a user who doesn't code: only the developer starter team is skipped, never bots or teams in general. */
+export const NO_CODE_REPLY = `There's no developer starter team to offer them: it's for people who code, so don't offer it or bring it up again. Say briefly what you can still help with yourself, like looking things up, writing, planning and everyday tasks, and that they can still make their own bots and teams whenever they like, or ask you to make them, which you can do with manage_bot. Never say they have no team, or suggest teams aren't available to them.`;
+
 /** What the user said when the primary bot asked whether they write code: one of its two choices, or their own words. */
 export type DeveloperAnswer = { kind: "yes" | "no" } | { kind: "own"; text: string };
 const DEVELOPER = "developer";
@@ -289,7 +292,7 @@ export function greetOnFirstOpen() {
   hooks.wake(bot.id, {
     kind: "note",
     conversationId,
-    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then ask whether they write code, with the question tool and offer "developer": the app sets its choices, and they can type their own answer. Stop there and wait for it. If they say they do, ${TEAM_OFFER} If they say they don't, the starter team isn't for them: don't offer it, say briefly what you can still help with on your own, and don't bring the team up again.`,
+    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then ask whether they write code, with the question tool and offer "developer": the app sets its choices, and they can type their own answer. Stop there and wait for it. If they say they do, ${TEAM_OFFER} If they say they don't: ${NO_CODE_REPLY}`,
   });
 }
 
