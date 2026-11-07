@@ -1,0 +1,1 @@
+{"src":"design/brush-mark/source/reference/lockups.png","keep":"x < 294 && y < 224.5 && !(x >= 232 && x <= 250 && y >= 62)","crop":[30,8,275,220],"out":"design/brush-mark/source/tools/o2.out","turdSize":40}

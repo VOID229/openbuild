@@ -21,6 +21,7 @@ import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, Code
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
+import { Wordmark } from "./Wordmark";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
 function fitFlyout(el: HTMLElement | null) {
@@ -1499,7 +1500,7 @@ export function Sidebar() {
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
               <PanelLeft size={18} />
             </IconButton>
-            <span className="wordmark">OpenBuild</span>
+            <Wordmark brand="openbuild" />
             <FilterMenu />
           </div>
           <PluginSlot name="sidebar:header" />
