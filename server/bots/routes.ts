@@ -142,8 +142,15 @@ export function botRoutes(api: Api) {
     "/api/bots/stream": {
       GET: api((req: Request, server: Bun.Server<unknown>) => {
         const res = botsStream(req, server);
-        svc.greetOnFirstOpen();
+        void svc.greetOnFirstOpen();
         return res;
+      }),
+    },
+    // The first-run notice's "Check again": ask Pi afresh, and say hello if it's ready now.
+    "/api/bots/setup/check": {
+      POST: api(async () => {
+        await svc.greetOnFirstOpen(true);
+        return json({ setup: svc.piSetup() ?? null });
       }),
     },
     "/api/bots": {

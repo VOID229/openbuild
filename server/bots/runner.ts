@@ -9,6 +9,7 @@ import { botModelChain, conversationTitle, eventText, mentionName, reactionId, p
 import { procListeners } from "../computers/index";
 import { PiError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
+import { listModels, onModelsForgotten } from "../pi/sessions";
 import { piFlags } from "./extensions";
 import { botsDir } from "./db";
 import * as db from "./db";
@@ -16,7 +17,7 @@ import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus } f
 import * as svc from "./service";
 import { resumeWatches } from "./threads";
 import type { Wake } from "./service";
-import type { BotStatus } from "../../shared/bots";
+import type { BotStatus, PiSetup } from "../../shared/bots";
 
 const IDLE = 20 * 60 * 1000;
 
@@ -57,6 +58,7 @@ const hot = globalThis as {
   openbotsTimer?: ReturnType<typeof setInterval>;
   openbotsProc?: boolean;
   openbotsPumping?: Set<string>;
+  openbotsModelsWatch?: () => void;
 };
 const minds = (hot.openbotsMinds ??= new Map());
 const queue = (hot.openbotsQueue ??= new Map());
@@ -671,9 +673,22 @@ function markSeen(botId: string, shown: Map<string, number>, assigned?: Set<stri
   }
 }
 
+/** What Pi still needs before bots can run on it: to be installed, then a provider with models. */
+export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
+  if (!piBin()) return { need: "missing" };
+  const { models } = await listModels(fresh);
+  return models.length ? undefined : { need: "no-provider" };
+}
+
 export function startBots() {
   listen();
   svc.setHooks({ wake, stop });
+  svc.setPiCheck(piSetup);
+  // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
+  hot.openbotsModelsWatch?.();
+  hot.openbotsModelsWatch = onModelsForgotten(() => {
+    if (svc.piSetup()) void svc.greetOnFirstOpen();
+  });
   resumeWatches();
   if (!hot.openbotsProc) {
     hot.openbotsProc = true;

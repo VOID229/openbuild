@@ -660,7 +660,17 @@ export function listModels(fresh = false): Promise<PiModels> {
   return value;
 }
 
-export const forgetModels = () => (modelsCache = undefined);
+const modelWatchers = new Set<() => void>();
+/** Called whenever the cached listing is dropped: Pi was installed or updated, or a provider signed in or out. */
+export function onModelsForgotten(fn: () => void): () => void {
+  modelWatchers.add(fn);
+  return () => modelWatchers.delete(fn);
+}
+
+export const forgetModels = () => {
+  modelsCache = undefined;
+  for (const fn of modelWatchers) fn();
+};
 
 const commandsCache = new CommandCache<PiCommand[]>(60_000);
 
