@@ -31,6 +31,8 @@ let admit = async (req: any) => {
 const models = [{ id: "acme/one", name: "One", reasoning: { efforts: ["low", "high"] }, speeds: [{ id: "fast" }] }];
 const modes = { modes: [{ id: "safe", name: "Safe" }, { id: "yolo", name: "Yolo" }, { id: "banned", name: "Banned", allowed: false }], checkedAt: 0 };
 let view: any;
+/** Held open to keep a Claude model listing in flight. */
+let claudeListing: Promise<unknown> = Promise.resolve();
 const merged: any[] = [];
 
 mock.module("../server/pi/turn", () => ({ admitTurn: (req: any) => admit(req), isPiChat: () => true, validImages: () => true }));
@@ -44,7 +46,7 @@ mock.module("../server/pi/remote", () => ({
 mock.module("../server/pi/routes", () => ({ modelListing: async () => ({ models, defaultModel: "acme/one" }) }));
 mock.module("../server/pi/sessions", () => ({ listModels: async () => ({}), isThreadId: () => true }));
 mock.module("../server/runtimes", () => ({ runtimes: () => ({ pi: { installed: true }, claude: { installed: true }, codex: { installed: true }, cursor: { installed: true }, grok: { installed: true } }) }));
-mock.module("../server/claude/install", () => ({ listModels: async () => ({ models: [{ id: "claude/one", name: "Claude One" }, { id: "claude/two", name: "Claude Two", reasoning: { efforts: ["low", "high"] }, speeds: [{ id: "fast" }] }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
+mock.module("../server/claude/install", () => ({ listModels: async () => (await claudeListing, { models: [{ id: "claude/one", name: "Claude One" }, { id: "claude/two", name: "Claude Two", reasoning: { efforts: ["low", "high"] }, speeds: [{ id: "fast" }] }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
 for (const runtime of ["codex", "cursor"]) {
   mock.module(`../server/${runtime}/install`, () => ({
     listModels: async () => ({ models: [{ id: `${runtime}/one`, name: accountCacheKey() || "main" }], defaultModel: `${runtime}/one` }),
@@ -606,3 +608,57 @@ test("account threads take their models by either id, and keep the account", asy
   await expect(call("send", { thread: started.thread, text: "x", harness: "claude" })).rejects.toThrow(/claude3 account/);
 });
 
+/** Holds Claude's model listing until the returned function is called. */
+function holdListing() {
+  let release!: () => void;
+  claudeListing = new Promise<void>((resolve) => (release = resolve));
+  return () => {
+    release();
+    claudeListing = Promise.resolve();
+  };
+}
+
+test("a turn started while send checks its settings is refused without touching the thread", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
+  const { threadId } = admitted[0];
+  finish();
+  const release = holdListing();
+  const slow = call("send", { thread: started.thread, text: "Switch", model: "claude/two", permission: "yolo" });
+  slow.catch(() => {});
+  await settle();
+  // Another send takes the idle thread while the model is still being looked up.
+  await call("send", { thread: started.thread, text: "Quick" });
+  expect(admitted.length).toBe(2);
+  const after = JSON.stringify(storage.getChat(threadId));
+  release();
+  const err = await slow.then(() => undefined, (e) => e);
+  expect(err?.message).toMatch(/started another turn/);
+  expect(err?.status).toBe(409);
+  expect(admitted.length).toBe(2);
+  // No failed reply, no new mode: just the other send's turn.
+  const chat = storage.getChat(threadId) as any;
+  expect(JSON.stringify(chat)).toBe(after);
+  expect(chat.messages.some((m: any) => m.status === "error")).toBe(false);
+  expect(chat.permission).toBe("safe");
+});
+
+test("a turn the worker started elsewhere during the check is refused too", async () => {
+  grant({ choosePermission: true });
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude" });
+  const { threadId } = admitted[0];
+  finish();
+  // Reading brings the finished turn into the saved thread, as send's own refresh would.
+  await call("read", { thread: started.thread });
+  const before = JSON.stringify(storage.getChat(threadId));
+  const release = holdListing();
+  const slow = call("send", { thread: started.thread, text: "Switch", model: "claude/two" });
+  slow.catch(() => {});
+  await settle();
+  // Started from the app: the worker has the run, this server's copy of the thread doesn't yet.
+  snapshots.push({ id: crypto.randomUUID(), threadId, kind: "run", status: "pending", events: [], startedAt: Date.now() });
+  release();
+  await expect(slow).rejects.toThrow(/started another turn/);
+  expect(admitted.length).toBe(1);
+  expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
+});

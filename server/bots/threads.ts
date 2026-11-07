@@ -601,6 +601,11 @@ async function send(botId: string, p: Record<string, unknown>) {
   }
   const next = await nextTurnSettings(found, access, p);
   const chat = (await refresh(found.id)) ?? found;
+  // Checking the settings can take a while. If a turn started meanwhile, say so now, before
+  // anything's saved: the worker would only refuse it after its reply was written as failed.
+  const known = new Set(found.messages.map((m) => m.id));
+  const started = chat.messages.some((m) => m.role === "assistant" && m.status === "streaming" && !known.has(m.id));
+  if (started || (await pendingRuns(chat.id)).length) throw refuse("It started another turn while this was being checked. You'll be told when it finishes; send it then, or send without settings to add it to that turn.", 409);
   await startTurn(botId, chat, text, next.model, images, next.permission);
   record(botId, "Wrote a prompt in", chat.title, chat.id);
   const runtime = chat.runtime ?? "pi";
