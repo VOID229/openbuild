@@ -9,7 +9,6 @@ import { computerApi } from "../computers/api";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
-import { routeGroup } from "./router";
 
 const MESSAGE_LIMIT = 200;
 const CHAIN_LIMIT = 8;
@@ -475,7 +474,6 @@ export function deleteConversation(id: string) {
   if (!c) throw new BotsError("No such conversation.", 404);
   if (c.kind === "direct") throw new BotsError("Delete the bot to remove its chat.");
   groupFollow.delete(id);
-  groupUserSeq.delete(id);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
 }
@@ -516,8 +514,7 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
     const reply = message.replyTo ? db.getMessage(message.replyTo) : undefined;
     const replied = reply?.conversationId === c.id && members.includes(reply.message.author) ? [reply.message.author] : [];
     const addressed = [...new Set([...mentioned, ...replied])];
-    if (addressed.length) return addressed;
-    return []; // Untagged group messages take the private asynchronous router below.
+    return addressed; // Untagged group messages follow the last recipients, else the primary (see postMessage).
   }
   const others = members.filter((id) => id !== message.author);
   if (c.kind === "side") return others;
@@ -527,10 +524,24 @@ function wakeTargets(c: db.StoredConversation, message: BotMessage): string[] {
   return [...new Set([...mentioned, ...replied])];
 }
 
-const GROUP_FOLLOW_MS = 20 * 60_000;
-// Sequence guards decisions independently of completion order; only user requests refresh the clock.
+export const GROUP_FOLLOW_MS = 20 * 60_000;
+// Who the user's last group request went to. Only user requests refresh the clock.
 const groupFollow = new Map<string, { ids: string[]; at: number }>();
-const groupUserSeq = new Map<string, number>();
+
+/**
+ * Who an untagged user message in a group goes to: whoever the last request went to, for 20 minutes
+ * after it, or else the primary. Decided on the spot, so the recipients show as busy straight away.
+ */
+function groupRecipients(c: db.StoredConversation, message: BotMessage): string[] {
+  const members = c.botIds.filter(id => db.getBot(id));
+  const follow = groupFollow.get(c.id);
+  if (follow && message.at >= follow.at && message.at - follow.at < GROUP_FOLLOW_MS) {
+    const ids = follow.ids.filter(id => members.includes(id));
+    if (ids.length) return ids;
+  }
+  const primary = members.find(id => db.getBot(id)?.primary) ?? members[0];
+  return primary ? [primary] : [];
+}
 
 function mentionedBots(text: string, ids: string[]): string[] {
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
@@ -590,35 +601,12 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
       }
     } else {
       let targets = wakeTargets(c, message);
-      const groupRequest = message.author === "me" && c.kind === "group" && !message.poll;
-      if (groupRequest) {
-        groupUserSeq.set(conversationId, seq);
-        const follow = groupFollow.get(conversationId);
-        if (!targets.length && follow && message.at >= follow.at && message.at - follow.at < GROUP_FOLLOW_MS) {
-          targets = follow.ids.filter(id => c.botIds.includes(id) && db.getBot(id));
-        }
+      const groupRequest = message.author === "me" && c.kind === "group";
+      if (groupRequest && !message.poll) {
+        if (!targets.length) targets = groupRecipients(c, message);
         if (targets.length) groupFollow.set(conversationId, { ids: targets, at: message.at });
-        else groupFollow.delete(conversationId);
       }
-      if (message.author === "me" && c.kind === "group" && !message.poll && !targets.length) {
-        const members = c.botIds.flatMap(id => db.getBot(id) ?? []);
-        const primary = members.find(b => b.primary) ?? members[0];
-        if (primary) {
-          // Capture context through this message; later arrivals cannot change this decision.
-          const history = db.messages(conversationId, 20, seq + 1).map(row => row.message);
-          void routeGroup(primary, members, history, settings()).then(ids => {
-            const current = db.getConversation(conversationId);
-            if (!current) return;
-            const eligible = current.botIds.filter(id => db.getBot(id));
-            let selected = ids.filter(id => eligible.includes(id));
-            if (!selected.length) selected = [eligible.find(id => db.getBot(id)?.primary) ?? eligible[0]!].filter(Boolean);
-            if (groupUserSeq.get(conversationId) === seq && selected.length) {
-              groupFollow.set(conversationId, { ids: selected, at: message.at });
-            }
-            for (const id of selected) if (!skip.has(id)) hooks.wake(id, { kind: "messages", conversationId, messageIds: [message.id] });
-          });
-        }
-      } else for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(message.author === "me" && c.kind === "group" ? { messageIds: [message.id] } : {}) });
+      for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id] } : {}) });
     }
   }
   return message;
