@@ -244,6 +244,9 @@ interface State {
   activeChatId?: string;
   /** Pick a permission mode for a thread (or the draft). Ignored for runtimes without permission modes. */
   setPermission: (id: string | undefined, chatId?: string) => void;
+  /** Remote Control for the thread about to start (Claude Code only). Off for every new thread; not persisted. */
+  draftRemoteControl: boolean;
+  setDraftRemoteControl: (on: boolean) => void;
   /** Permission modes each native runtime reports, by `permissionKey`. Not persisted. */
   permissionModes: Record<string, PermissionListing>;
   loadPermissionModes: (runtime: PermissionRuntime, deviceId?: string, cwd?: string, fresh?: boolean) => Promise<void>;
@@ -371,6 +374,8 @@ export const useStore = create<State>()(
         }
         s.updateSettings({ runtimePermissions: { ...get().settings.runtimePermissions, [runtime]: id ?? "" } });
       },
+      draftRemoteControl: false,
+      setDraftRemoteControl: (on) => set({ draftRemoteControl: on }),
       permissionModes: {},
       loadPermissionModes: async (runtime, deviceId, cwd, fresh = false) => {
         const key = permissionKey(runtime, deviceId, cwd);
@@ -794,6 +799,7 @@ export const useStore = create<State>()(
       },
       newChat: () => set((s) => ({
         activeChatId: undefined,
+        draftRemoteControl: false,
         usageOpen: false,
         botsOpen: false,
         botsThread: false,

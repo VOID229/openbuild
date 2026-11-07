@@ -32,6 +32,10 @@ Use **`openbuild stop --all`** when you explicitly want to stop the detached wor
 
 New threads use a feature-versioned lane when the shared worker lacks required features, without interrupting other agents. Idle existing threads move to a compatible lane on their next turn; see [worker feature lanes](runtime-questions.md#worker-feature-lanes).
 
+## Remote Control
+
+Codex Remote Control belongs to the machine's app-server daemon (`codex remote-control start`, `codex app-server daemon enable-remote-control`), not to a thread. OpenBuild's Codex threads each run their own `codex app-server` over stdio, and that server reports remote control `disabled`. So pairing the daemon doesn't make a running OpenBuild thread remote-controllable, and OpenBuild has no per-thread switch for it. The composer's **Remote · machine** pill and the bots' `openbuild options` say that OpenBuild's threads have Remote Control off, and whether the device's daemon process is running. They read the daemon with `codex app-server daemon version`, which never starts, pairs or changes it. That command only reports the process (status, socket and versions), not whether the daemon's Remote Control is on or paired, so OpenBuild shows that as unknown. OpenBuild's own device pairing is separate and unaffected.
+
 ## Limits
 
 - Codex threads do not load Pi extensions or Pi slash commands. Shell shortcuts and manual compaction are not native Codex controls.

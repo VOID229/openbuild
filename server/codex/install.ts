@@ -35,6 +35,23 @@ export async function status(): Promise<CodexStatus> {
     finally { proc.close(); }
   } finally { clearTimeout(timer); }
 }
+/** The machine's Codex app-server daemon, which owns Codex Remote Control; OpenBuild's threads don't run on it. */
+export interface CodexDaemon { installed: boolean; status?: string; version?: string; error?: string; checkedAt: number }
+/** Read-only: `daemon version` reports the daemon without starting it. */
+export async function daemonStatus(): Promise<CodexDaemon> {
+  const bin = codexBin(), checkedAt = Date.now();
+  if (!bin) return { installed: false, checkedAt };
+  const p = Bun.spawn([bin, "app-server", "daemon", "version"], { stdout: "pipe", stderr: "pipe", env: codexEnv() });
+  const timer = setTimeout(() => p.kill(), 10000);
+  try {
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    if (code !== 0) return { installed: true, error: err.trim().slice(-500) || `codex app-server daemon version exited ${code}`, checkedAt };
+    const r = JSON.parse(out);
+    return { installed: true, status: typeof r.status === "string" ? r.status : undefined, version: typeof r.appServerVersion === "string" ? r.appServerVersion : undefined, checkedAt };
+  } catch (e) {
+    return { installed: true, error: e instanceof Error ? e.message : String(e), checkedAt };
+  } finally { clearTimeout(timer); }
+}
 export interface CodexModels { models: ModelInfo[]; defaultModel?: string; checkedAt: number }
 const accountCaches = new Map<string, { at: number; value: Promise<CodexModels> }>();
 export function listModels(fresh = false): Promise<CodexModels> {

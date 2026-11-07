@@ -49,6 +49,7 @@ for (const runtime of ["codex", "cursor"]) {
   mock.module(`../server/${runtime}/install`, () => ({
     listModels: async () => ({ models: [{ id: `${runtime}/one`, name: accountCacheKey() || "main" }], defaultModel: `${runtime}/one` }),
     listPermissions: async () => ({ modes: [{ id: accountCacheKey(), name: "Account mode" }], checkedAt: 0 }),
+    daemonStatus: async () => ({ installed: true, status: "running", checkedAt: 0 }),
   }));
 }
 mock.module("../server/pullRequestView", () => ({ view: async () => view, merge: async (...args: any[]) => void merged.push(args) }));
@@ -130,6 +131,31 @@ test("with the choice, a bot's pick wins but must be a mode the harness offers",
   expect(admitted[0].permission).toBe("yolo");
   await expect(call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "banned" })).rejects.toThrow(/doesn't offer/);
   await expect(call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "nope" })).rejects.toThrow(/doesn't offer/);
+});
+
+test("remote control is off unless asked, and only Claude Code takes it per thread", async () => {
+  await call("start", { project: project.name, prompt: "Go", harness: "claude" });
+  expect(admitted[0].remoteControl).toBeUndefined();
+  expect((storage.getChat(admitted[0].threadId) as any).remoteControl).toBeUndefined();
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", remote_control: true });
+  expect(started.remote_control).toContain("claude.ai/code");
+  expect(admitted[1].remoteControl).toBe(true);
+  const chat = storage.getChat(admitted[1].threadId) as any;
+  expect(chat.remoteControl).toBe(true);
+  expect((await call("read", { thread: started.thread })).remote_control).toBe(true);
+  // Kept on the thread: a follow-up still asks for it.
+  await call("send", { thread: started.thread, text: "More" });
+  expect(admitted.at(-1)).toMatchObject({ threadId: chat.id, remoteControl: true });
+  // Codex pairs a machine daemon and Cursor its account: refused with the reason, never dropped.
+  admitted.length = 0;
+  await expect(call("start", { project: project.name, prompt: "Go", harness: "codex", remote_control: true })).rejects.toThrow(/codex remote-control start/);
+  await expect(call("start", { project: project.name, prompt: "Go", harness: "cursor", remote_control: true })).rejects.toThrow(/Cursor account and team settings/);
+  await expect(call("start", { project: project.name, prompt: "Go", remote_control: true })).rejects.toThrow(/no Remote Control/);
+  await expect(call("start", { project: project.name, prompt: "Go", harness: "claude", remote_control: "yes" })).rejects.toThrow(/true or false/);
+  expect(admitted).toEqual([]);
+  expect((await call("options", { harness: "claude" })).remote_control).toMatchObject({ per_thread: true });
+  expect((await call("options", { harness: "codex" })).remote_control).toMatchObject({ per_thread: false, openbuild_threads: expect.stringContaining("disabled"), machine_daemon_process: { status: "running" }, machine_remote_control: expect.stringContaining("Unknown") });
+  expect((await call("options", { harness: "cursor" })).remote_control).toMatchObject({ per_thread: false });
 });
 
 test("permission resolution never falls back past a mode that's gone", async () => {

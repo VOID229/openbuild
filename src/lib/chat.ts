@@ -1,4 +1,5 @@
 import { EXTERNAL_VIA, newStreamKey, type ReplyStream } from "../../shared/replies";
+import { remoteControlPerThread } from "../../shared/remoteControl";
 import { nearestEffort, SEARCH_PROVIDERS, type Attachment, type Effort, type ModelInfo, type PiChatRequest, type SearchCredentials, type SearchDigestModel, type SearchProviderId, type Usage, type WireMessage, type Workspace } from "../../shared/types";
 import { stopReply, streamChat } from "./api";
 import { saveChatBeforeRun } from "./db";
@@ -291,14 +292,16 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   const account = runtimeOf(st, chatId) === "claude" && !existing?.messages.length ? claudeModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : runtimeOf(st, chatId) === "codex" && !existing?.messages.length ? codexModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : undefined;
   const chat: Chat = existing
     ? { ...existing, runtime: existing.runtime ?? "pi", runtimeAccount: account ?? existing.runtimeAccount, updatedAt: now, messages: [...existing.messages, user, assistant] }
-    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", runtimeAccount: ["claude", "codex"].includes(st.settings.threadRuntime ?? "") ? account : st.settings.runtimeAccounts?.find((a) => a.id === st.settings.threadAccountId && a.runtime === st.settings.threadRuntime && (a.deviceId ?? "") === (threadDevice(st) ?? "")), permission: permissionOf(st), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
+    : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", runtimeAccount: ["claude", "codex"].includes(st.settings.threadRuntime ?? "") ? account : st.settings.runtimeAccounts?.find((a) => a.id === st.settings.threadAccountId && a.runtime === st.settings.threadRuntime && (a.deviceId ?? "") === (threadDevice(st) ?? "")), permission: permissionOf(st), ...(st.draftRemoteControl && remoteControlPerThread(st.settings.threadRuntime) ? { remoteControl: true } : {}), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   if (!existing) pinWorkspace(chat.id);
   st.upsertChat(chat);
   // Name the thread from its first prompt, without waiting for the reply.
   if (chat.messages.filter((m) => m.role === "user").length === 1) void autoName(chat.id);
   // The reply now records the model, so a pick made in this chat isn't needed anymore.
   const { [chat.id]: _, ...selections } = useStore.getState().selections;
-  useStore.setState(!background && chatId === st.activeChatId ? { activeChatId: chat.id, selections } : { selections });
+  // The opt-in went to this thread; the next one starts with it off again.
+  const draft = existing ? {} : { draftRemoteControl: false };
+  useStore.setState(!background && chatId === st.activeChatId ? { activeChatId: chat.id, selections, ...draft } : { selections, ...draft });
   void generate(chat.id, assistant.id);
   return true;
 }
@@ -431,6 +434,7 @@ function piRequest(chat: Chat, index: number, model: ModelInfo, effort: Effort, 
     runtime: chat.runtime ?? "pi",
     runtimeAccount: chat.runtimeAccount,
     ...(permission ? { permission } : {}),
+    ...(chat.remoteControl && remoteControlPerThread(chat.runtime) ? { remoteControl: true } : {}),
     cwd: workspace.cwd,
     // The account travels separately; native runtimes receive their usual model prefix.
     model: chat.runtime === "claude" || chat.runtime === "codex" ? model.id.replace(/^[^/]+/, chat.runtime) : model.id,

@@ -6,6 +6,7 @@
 // Only this server's own threads, and not Durable ones: their turns are admitted differently.
 import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
+import { REMOTE_CONTROL, remoteControlPerThread } from "../../shared/remoteControl";
 import { readEvents } from "../../shared/replies";
 import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime, type RuntimeAccount } from "../../shared/types";
 import { withProfileContext } from "../../src/lib/profile";
@@ -330,12 +331,29 @@ async function options(botId: string, p: Record<string, unknown>) {
   const query = typeof p.query === "string" ? p.query.toLowerCase() : "";
   const matching = models.filter((m) => !query || m.id.toLowerCase().includes(query) || m.name.toLowerCase().includes(query));
   const permissions = !isPermissionHarness(runtime) ? "This harness has no permission modes in OpenBuild: it follows its own configuration." : access.choosePermission ? await inAccount(runtime, account, () => permissionModes(runtime)) : { fixed: settings?.permissions?.[runtime] ?? "the harness's own default" };
+  const remote = REMOTE_CONTROL[runtime];
   return {
     default_model: defaultModel,
     models: matching.slice(0, 40).map((m) => ({ id: m.id, name: m.name, efforts: m.reasoning?.efforts, speeds: m.speeds?.map((s) => s.id) })),
     ...(matching.length > 40 ? { more: `${matching.length - 40} more. Narrow it with query.` } : {}),
     permissions,
+    remote_control: !remote
+      ? "This harness has no Remote Control in OpenBuild."
+      : { per_thread: remote.scope === "thread", note: remote.note, ...(runtime === "codex" ? {
+        openbuild_threads: "Remote Control off: each runs its own app-server, which reports it disabled.",
+        machine_daemon_process: await inAccount(runtime, account, () => codexInstall.daemonStatus()),
+        machine_remote_control: "Unknown: the daemon check only says whether the process runs, not whether Remote Control is on or paired.",
+      } : {}) },
   };
+}
+
+/** A bot's remote_control: only a harness with a per-thread switch takes it; elsewhere it's refused, not dropped. */
+function pickRemoteControl(runtime: ThreadRuntime, asked: unknown): boolean {
+  if (asked === undefined || asked === null || asked === false) return false;
+  if (asked !== true) throw refuse("remote_control is true or false.");
+  if (remoteControlPerThread(runtime)) return true;
+  const remote = REMOTE_CONTROL[runtime];
+  throw refuse(remote ? `${runtime} has no per-thread Remote Control. ${remote.note}` : `${runtime} has no Remote Control in OpenBuild.`);
 }
 
 async function pickModel(runtime: ThreadRuntime, asked: unknown): Promise<ModelInfo> {
@@ -404,6 +422,7 @@ async function startTurn(botId: string, base: Chat, text: string, model: { id: s
     threadId: chat.id,
     runtime: chat.runtime ?? "pi",
     ...(permission ? { permission } : {}),
+    ...(chat.remoteControl && remoteControlPerThread(chat.runtime) ? { remoteControl: true } : {}),
     ...(chat.runtimeAccount ? { runtimeAccount: chat.runtimeAccount } : {}),
     cwd: chat.workspace!.cwd,
     model: chat.runtime === "claude" || chat.runtime === "codex" ? model.id.replace(/^[^/]+/, chat.runtime) : model.id,
@@ -435,6 +454,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   const model = await inAccount(runtime, account, () => pickModel(runtime, p.model));
   const effort = pickEffort(model, p.effort);
   const speed = pickSpeed(model, p.speed);
+  const remoteControl = pickRemoteControl(runtime, p.remote_control);
   const permission = await resolvePermission(runtime, p.permission, access, svc.getSettings().harnesses?.permissions, (r) => inAccount(runtime, account, () => permissionModes(r, project.path)));
   const workspace = await projects.prepareWorkspace(project.id, p.mode === "local" || !project.git ? "local" : "worktree", typeof p.branch === "string" && p.branch ? p.branch : undefined).catch((err) => {
     throw refuse((err as Error).message);
@@ -444,7 +464,7 @@ async function start(botId: string, p: Record<string, unknown>) {
   }
   const now = Date.now();
   const title = clip((typeof p.title === "string" && p.title.trim()) || prompt.split("\n")[0]!, 80);
-  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
+  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), ...(remoteControl ? { remoteControl } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
   await startTurn(botId, chat, prompt, { id: model.id, name: model.name, effort, speed }, images);
   record(botId, "Started a thread", `${title} · ${runtime}`, chat.id);
   return {
@@ -457,6 +477,7 @@ async function start(botId: string, p: Record<string, unknown>) {
     effort,
     speed,
     permission: !isPermissionHarness(runtime) ? "its own configuration" : (permission ?? "its own default"),
+    ...(remoteControl ? { remote_control: "on: the user can continue it from claude.ai/code or the Claude app" } : {}),
     ...(typeof p.permission === "string" && p.permission && !access.choosePermission ? { note: "You can't choose permissions, so this thread uses the user's default." } : {}),
     next: "You'll be told when it asks something or finishes. No need to check on it.",
   };
@@ -531,6 +552,7 @@ async function read(botId: string, p: Record<string, unknown>) {
     ...(chat.runtimeAccount ? { account: chat.runtimeAccount.id } : {}),
     yours: startedBy(chat, botId),
     permission: chat.permission,
+    ...(chat.remoteControl ? { remote_control: true } : {}),
     working: running.length > 0,
     closed: !!chat.archived,
     waiting_on: running.flatMap((run) => waitingAsks(run.events)).map((ask) => askView(ask, access)),
