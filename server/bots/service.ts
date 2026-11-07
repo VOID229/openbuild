@@ -269,7 +269,15 @@ export function ensureStarted() {
   updateSettings({ onboarding: "active" });
 }
 
-/** The first time OpenBots is opened, the primary bot is asked to introduce itself and offer the starter team, in its own words. */
+/** How the primary bot offers the starter team, in the first-run note and in its context once the user says they code. */
+export const TEAM_OFFER = `offer them a starter team with the question tool and offer "team": ${TEAM.map((m) => m.name).join(", ")}. In a few words, say what each does: Manager runs threads in their projects and merges their PRs, Tracer reviews and tests, Researcher looks things up, and they can change what each may do in its settings. The app makes the team itself if they take it.`;
+
+/** What the user said when the primary bot asked whether they write code: one of its two choices, or their own words. */
+export type DeveloperAnswer = { kind: "yes" | "no" } | { kind: "own"; text: string };
+const DEVELOPER = "developer";
+export const developerAnswer = () => db.getValue<DeveloperAnswer>(DEVELOPER);
+
+/** The first time OpenBots is opened, the primary bot is asked to introduce itself and find out whether the user codes, in its own words; only then is the starter team offered. */
 export function greetOnFirstOpen() {
   if (settings().onboarding !== "active") return;
   const bot = db.listBots().find((b) => b.primary);
@@ -281,7 +289,7 @@ export function greetOnFirstOpen() {
   hooks.wake(bot.id, {
     kind: "note",
     conversationId,
-    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then offer them a starter team with the question tool and offer "team": ${TEAM.map((m) => m.name).join(", ")}. In a few words, say what each does: Manager runs threads in their projects and merges their PRs, Tracer reviews and tests, Researcher looks things up, and they can change what each may do in its settings. The app makes the team itself if they take it.`,
+    text: `The user just opened OpenBots for the first time, and this chat is empty. Introduce yourself in a couple of short messages: who you are and that you're their primary bot, who makes the other bots, hands out the work and keeps everyone pointed the same way. Then ask whether they write code, with the question tool and offer "developer": the app sets its choices, and they can type their own answer. Stop there and wait for it. If they say they do, ${TEAM_OFFER} If they say they don't, the starter team isn't for them: don't offer it, say briefly what you can still help with on your own, and don't bring the team up again.`,
   });
 }
 
@@ -703,8 +711,10 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
-  // The first-run offer is the app's, not the bot's: taking it makes the team here, once.
-  if (question.offer === "team" && !question.answer && key === "A" && db.getBot(row.message.author)?.primary) createTeam(row.message.author);
+  // The first-run offers are the app's, not the bot's: taking the team makes it here, once, and whether they code is kept for the bot's context.
+  const primary = !question.answer && !!db.getBot(row.message.author)?.primary;
+  if (primary && question.offer === "team" && key === "A") createTeam(row.message.author);
+  if (primary && question.offer === "developer") db.setValue(DEVELOPER, key === "A" ? { kind: "yes" } : key === "B" ? { kind: "no" } : { kind: "own", text: key.slice(0, 300) });
   return patched;
 }
 

@@ -332,7 +332,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
   }
 });
 
-test("Dr Eggbot is asked to introduce itself on first open and offer the starter team", async () => {
+test("Dr Eggbot introduces itself on first open, asks whether the user codes, and offers the starter team only to developers", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
@@ -360,21 +360,35 @@ test("Dr Eggbot is asked to introduce itself on first open and offer the starter
       a.equal(woken[0].wake.kind, 'note');
       a.equal(woken[0].wake.conversationId, conversationId);
       a.match(woken[0].wake.text, /Introduce yourself/);
-      a.match(woken[0].wake.text, /offer "team"/);
+      a.match(woken[0].wake.text, /offer "developer"/);
+      a.match(woken[0].wake.text, /If they say they do, offer them a starter team .*offer "team"/);
+      a.match(woken[0].wake.text, /don't bring the team up again/);
       a.equal(svc.getSettings().onboarding, 'done');
 
       // Opening it again is just opening it.
       svc.greetOnFirstOpen();
       a.equal(woken.length, 1);
 
-      // The bot's offer gets the app's choices, whatever it wrote.
+      // It asks whether the user codes first, with the app's choices, whatever it wrote.
       setFocus(bot.id, conversationId);
-      askUser(bot.id, { title: 'Want a team?', options: ['Sure', 'Maybe', 'No'], offer: 'team' });
-      const offer = db.messages(conversationId, 10).map(r => r.message).find(m => m.question);
+      const ask = (id, chat, p) => { askUser(id, p); return db.messages(chat, 20).map(r => r.message).filter(m => m.question).at(-1); };
+      const dev = ask(bot.id, conversationId, { title: 'Do you write code?', options: ['Sure', 'Nope'], offer: 'developer' });
+      a.equal(dev.question.offer, 'developer');
+      a.deepEqual(dev.question.options.map(o => o.label), ['Yes, I write code', 'No, not really']);
+      a.doesNotMatch(contextFor(bot.id), /starter team/, 'no team before they answer');
+
+      // Yes: the bot is told to offer the team, with what each does.
+      svc.answerQuestion(conversationId, dev.id, 'A');
+      a.equal(db.listBots().length, 1, 'saying yes makes nothing by itself');
+      a.match(contextFor(bot.id), /they write code. Now offer them a starter team .*offer "team": Manager, Tracer, Researcher.*Tracer reviews and tests/);
+
+      // The bot's offer gets the app's choices, whatever it wrote.
+      const offer = ask(bot.id, conversationId, { title: 'Want a team?', options: ['Sure', 'Maybe', 'No'], offer: 'team' });
       a.equal(offer.author, bot.id);
       a.equal(offer.question.offer, 'team');
       a.deepEqual(offer.question.options.map(o => o.label), ['Set up the team', 'Not now']);
-      a.match(contextFor(bot.id), /starter team/);
+      a.match(contextFor(bot.id), /You offered the user a starter team/);
+      a.doesNotMatch(contextFor(bot.id), /Now offer them/, 'offered once');
       woken.length = 0;
 
       // Taking the offer makes the team, with a group, once.
@@ -400,16 +414,44 @@ test("Dr Eggbot is asked to introduce itself on first open and offer the starter
       a.equal(db.messages(conversationId, 20).filter(r => r.message.event?.kind === 'created').length, 3);
       a.equal(woken.length, 0, 'the new bots wait to be spoken to');
 
-      // Saying no makes nothing.
+      // Saying no to the team makes nothing.
       await svc.resetAll();
-      const again = db.listBots()[0];
-      const chat = svc.directId(again.id);
+      let again = db.listBots()[0];
+      let chat = svc.directId(again.id);
       a.equal(woken.at(-1).botId, again.id, 'a reset welcomes again');
+      a.match(woken.at(-1).wake.text, /offer "developer"/);
       setFocus(again.id, chat);
-      askUser(again.id, { title: 'Want a team?', offer: 'team' });
-      const card = db.messages(chat, 10).map(r => r.message).find(m => m.question);
-      svc.answerQuestion(chat, card.id, 'B');
+      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Code?', offer: 'developer' }).id, 'A');
+      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Want a team?', offer: 'team' }).id, 'B');
       a.equal(db.listBots().length, 1);
+
+      // Not a developer: no team offer, now or later, and no team.
+      await svc.resetAll();
+      again = db.listBots()[0];
+      chat = svc.directId(again.id);
+      setFocus(again.id, chat);
+      const no = ask(again.id, chat, { title: 'Do you write code?', offer: 'developer' });
+      svc.answerQuestion(chat, no.id, 'B');
+      svc.answerQuestion(chat, no.id, 'A');
+      const told = contextFor(again.id);
+      a.match(told, /don't really write code.*don't offer it or mention it again/);
+      a.doesNotMatch(told, /offer "team"/);
+      a.throws(() => askUser(again.id, { title: 'Want a team?', offer: 'team' }), /isn't for them/);
+      a.equal(db.messages(chat, 20).filter(r => r.message.question?.offer === 'team').length, 0);
+      a.equal(db.listBots().length, 1);
+      a.equal(db.listConversations().filter(c => c.kind === 'group').length, 0);
+
+      // Their own words: the bot judges them, and may still offer the team.
+      await svc.resetAll();
+      again = db.listBots()[0];
+      chat = svc.directId(again.id);
+      setFocus(again.id, chat);
+      svc.answerQuestion(chat, ask(again.id, chat, { title: 'Do you write code?', offer: 'developer' }).id, 'A bit of Python at work');
+      a.match(contextFor(again.id), /in their own words: “A bit of Python at work”. If that means they write code, offer them a starter team .*If it doesn't, the team isn't for them/);
+      const typed = ask(again.id, chat, { title: 'Want a team?', offer: 'team' });
+      a.equal(typed.question.offer, 'team');
+      svc.answerQuestion(chat, typed.id, 'A');
+      a.equal(db.listBots().length, 4);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

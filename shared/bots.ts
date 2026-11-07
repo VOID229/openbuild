@@ -182,8 +182,8 @@ export interface Question {
   options: { key: string; label: string }[];
   /** The key of the option the user picked, or what they typed instead. */
   answer?: string;
-  /** A first-run offer the server acts on itself when the user takes it: "team" makes the starter team. */
-  offer?: "team";
+  /** A first-run question the server sets the choices of and acts on itself: "developer" asks whether the user writes code, "team" makes the starter team when taken. */
+  offer?: "team" | "developer";
 }
 
 /** Up to A–J. */
