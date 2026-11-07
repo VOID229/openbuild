@@ -1,13 +1,13 @@
 // A bot's model and computer for Settings → Bots, and the Advanced tab of the OpenBots details panel,
 // which puts them on one line each beside what the bot may do in OpenBuild.
 import { ArrowUp, Check, ChevronDown, CircleAlert, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { botModels, type PiModels } from "../../lib/pi";
 import { providerName, providerOf } from "../../lib/models";
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
 import { LOCAL, loadTargets, targetLabel, targetNote, targetOptions } from "../../lib/bots/targets";
-import type { ComputerTarget } from "../../../shared/bots";
+import { fallbackMode, type ComputerTarget, type FallbackMode } from "../../../shared/bots";
 import { cx } from "../../lib/ui";
 import { ModelMenu, OptionSelect } from "../ModelSelect";
 import { BrandIcon, IconButton, Popover } from "../primitives";
@@ -85,28 +85,59 @@ export function BotModel({ bot }: { bot: Bot }) {
         </div>
         <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
       </div>
-      <div className="setting-row setting-row-top">
-        <div className="setting-text">
-          <div className="setting-label">Fallback models</div>
-          <p className="setting-desc">{FALLBACKS_DESC}</p>
-        </div>
-      </div>
-      <BotFallbacks bot={bot} />
+      <BotFallbacks
+        bot={bot}
+        header={(select) => (
+          <div className="setting-row setting-row-top">
+            <div className="setting-text">
+              <div className="setting-label">Fallback models</div>
+              <p className="setting-desc">{FALLBACKS_DESC}</p>
+            </div>
+            {select}
+          </div>
+        )}
+      />
     </>
   );
 }
 
+const FALLBACK_MODES: { value: FallbackMode; label: string }[] = [
+  { value: "inherit", label: "Default fallbacks" },
+  { value: "own", label: "Its own list" },
+  { value: "none", label: "No fallback" },
+];
+
 /**
  * Models the bot tries, top to bottom, when its own fails before replying. Each is one provider's
- * model, so a second account's ("openai-codex-2/…") is an entry of its own. A bot on Default with
- * none of its own follows the default's, until it lists some.
+ * model, so a second account's ("openai-codex-2/…") is an entry of its own. A bot follows the default
+ * fallbacks, whatever its model, until it lists its own or is set to none. Picking "Its own list" shows
+ * an empty list that only saves once it has a model, so until then the bot still follows the defaults.
  */
-export function BotFallbacks({ bot }: { bot: Bot }) {
-  const inherited = useBots((s) => (bot.model || bot.fallbackModels?.length ? 0 : s.defaultFallbackModels.length));
+export function BotFallbacks({ bot, header }: { bot: Bot; header: (select: ReactNode) => ReactNode }) {
+  const defaults = useBots((s) => s.defaultFallbackModels.length);
+  const saved = fallbackMode(bot);
+  const [drafting, setDrafting] = useState(false);
+  const mode = saved === "inherit" && drafting ? "own" : saved;
+  const { updateBot } = useBots.getState();
+  const choose = (next: FallbackMode) => {
+    setDrafting(next === "own");
+    if (next === mode) return;
+    if (next === "none") updateBot(bot.id, { noFallbacks: true });
+    else if (next === "inherit") updateBot(bot.id, { noFallbacks: false, fallbackModels: [] });
+    else if (saved === "none") updateBot(bot.id, { noFallbacks: false });
+  };
+  const following = defaults ? `the ${defaults === 1 ? "fallback" : `${defaults} fallbacks`} of the default model in Settings → Bots` : "the default fallbacks in Settings → Bots, none so far";
+  const note =
+    mode === "inherit"
+      ? `Following ${following}.`
+      : mode === "none"
+        ? "Never switches models: when its model fails, the chat shows the error."
+        : !bot.fallbackModels?.length && `Until this lists one, the bot follows ${following}.`;
   return (
     <>
-      {inherited > 0 && <p className="setting-desc bots-fallbacks-note">Following the {inherited === 1 ? "fallback" : `${inherited} fallbacks`} of the default model in Settings → Bots. Adding one here gives this bot its own list instead.</p>}
-      <FallbackList list={bot.fallbackModels ?? []} onChange={(fallbackModels) => useBots.getState().updateBot(bot.id, { fallbackModels })} />
+      {header(<OptionSelect label="Fallback models" className="select-grow" value={mode} options={FALLBACK_MODES} onChange={choose} />)}
+      {note && <p className="setting-desc bots-fallbacks-note">{note}</p>}
+      {mode === "own" && <FallbackList list={bot.fallbackModels ?? []} onChange={(fallbackModels) => (setDrafting(true), updateBot(bot.id, { fallbackModels }))} />}
     </>
   );
 }
@@ -143,7 +174,7 @@ export function FallbackList({ list, onChange: set }: { list: string[]; onChange
 
 const FALLBACKS_DESC = "Tried in order when the model fails before the bot has said or done anything. A reply that's under way isn't retried on another model. The chat notes each switch.";
 
-/** Settings → Bots: the fallbacks of the default model, for every bot on Default without fallbacks of its own. */
+/** Settings → Bots: the default fallbacks, for every bot without a list of its own or set to none, whatever its model. */
 export function DefaultFallbacks() {
   const list = useBots((s) => s.defaultFallbackModels);
   return (
@@ -151,7 +182,7 @@ export function DefaultFallbacks() {
       <div className="setting-row setting-row-top">
         <div className="setting-text">
           <div className="setting-label">Default fallback models</div>
-          <p className="setting-desc">{FALLBACKS_DESC} Bots set to Default use these unless they list their own; a bot with its own model keeps its own fallbacks.</p>
+          <p className="setting-desc">{FALLBACKS_DESC} Every bot uses these, on Default or on a model of its own, unless it lists its own or is set to No fallback.</p>
         </div>
       </div>
       <FallbackList list={list} onChange={useBots.getState().setDefaultFallbackModels} />
@@ -269,12 +300,17 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
         </div>
         <KindSelect bot={bot} className="select-grow" />
       </div>
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip={FALLBACKS_DESC} data-tooltip-side="left">
-          Fallback models
-        </div>
-      </div>
-      <BotFallbacks bot={bot} />
+      <BotFallbacks
+        bot={bot}
+        header={(select) => (
+          <div className="setting-row">
+            <div className="setting-label" data-tooltip={FALLBACKS_DESC} data-tooltip-side="left">
+              Fallback models
+            </div>
+            {select}
+          </div>
+        )}
+      />
       <BotThreads bot={bot} compact />
     </div>
   );

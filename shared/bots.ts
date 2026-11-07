@@ -124,6 +124,8 @@ export interface Bot {
   model?: string;
   /** "provider/model"s to try in order when the model fails before replying. A provider can be one account of several ("openai-codex-2"). */
   fallbackModels?: string[];
+  /** No fallbacks at all: neither its own list nor the defaults'. Without it, and with no list of its own, it follows the defaults'. */
+  noFallbacks?: boolean;
   effort?: string;
   proactivity?: Proactivity;
   computer?: ComputerConfig;
@@ -294,7 +296,7 @@ export interface Conversation {
 export interface BotsSettings {
   /** "provider/model" for bots without their own. Pi's default when unset. */
   defaultModel?: string;
-  /** "provider/model"s a bot set to Default tries in order when the default fails, unless it lists fallbacks of its own. */
+  /** "provider/model"s every bot tries in order when its model fails, unless it lists fallbacks of its own or has none. */
   defaultFallbackModels?: string[];
   /** Bots don't look in on their own between these hours (24h clock, server time). */
   quietHours: { from: number; to: number };
@@ -495,14 +497,21 @@ export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botId
   return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");
 }
 
+/** Where a bot's fallbacks come from: the defaults in Settings → Bots, its own list, or none at all. */
+export type FallbackMode = "inherit" | "own" | "none";
+export function fallbackMode(bot: Pick<Bot, "fallbackModels" | "noFallbacks"> | undefined): FallbackMode {
+  return bot?.noFallbacks ? "none" : bot?.fallbackModels?.length ? "own" : "inherit";
+}
+
 /**
- * The models a bot tries, in order: its own (undefined: the default, or Pi's), then its fallbacks. A bot
- * on Default without fallbacks of its own takes the default's; a bot with its own model or its own list
- * keeps to it. A fallback that repeats one already in the list is skipped.
+ * The models a bot tries, in order: its own (undefined: the default, or Pi's), then its fallbacks. Every
+ * bot, on Default or on a model of its own, takes the default fallbacks unless it lists its own (which
+ * replace them) or is set to none. A fallback that repeats one already in the list is skipped.
  */
-export function botModelChain(bot: Pick<Bot, "model" | "fallbackModels"> | undefined, settings: Pick<BotsSettings, "defaultModel" | "defaultFallbackModels">): (string | undefined)[] {
+export function botModelChain(bot: Pick<Bot, "model" | "fallbackModels" | "noFallbacks"> | undefined, settings: Pick<BotsSettings, "defaultModel" | "defaultFallbackModels">): (string | undefined)[] {
   const primary = bot?.model || settings.defaultModel || undefined;
-  const fallbacks = bot?.fallbackModels?.length ? bot.fallbackModels : bot?.model ? [] : (settings.defaultFallbackModels ?? []);
+  const mode = fallbackMode(bot);
+  const fallbacks = mode === "none" ? [] : mode === "own" ? bot!.fallbackModels! : (settings.defaultFallbackModels ?? []);
   const seen = new Set(primary ? [primary] : []);
   return [primary, ...fallbacks.filter((m) => m.includes("/") && !seen.has(m) && (seen.add(m), true))];
 }

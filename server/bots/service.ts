@@ -369,6 +369,11 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   else if (typeof patch.model === "string") bot.model = patch.model.slice(0, 200);
   if (patch.fallbackModels === null || Array.isArray(patch.fallbackModels)) {
     bot.fallbackModels = modelList(patch.fallbackModels);
+    // Listing some is choosing a list of its own, unless the same patch says none.
+    if (bot.fallbackModels && !("noFallbacks" in patch)) bot.noFallbacks = undefined;
+  }
+  if (typeof patch.noFallbacks === "boolean" || patch.noFallbacks === null) {
+    bot.noFallbacks = patch.noFallbacks || undefined;
   }
   if (typeof patch.effort === "string") bot.effort = patch.effort.slice(0, 40);
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {

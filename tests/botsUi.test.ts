@@ -390,18 +390,28 @@ test("a fallback switch names the bot, its model and the model's account", async
 
 test("a bot's fallback models are listed in order in both settings layouts, each tagged with its account", async () => {
   const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
-  expect(advanced.match(/<BotFallbacks bot=\{bot\} \/>/g)?.length).toBe(2);
+  expect(advanced.match(/<BotFallbacks\n\s*bot=\{bot\}\n\s*header=/g)?.length).toBe(2);
   expect(advanced).toContain('<BotModelSelect label={`Fallback model ${i + 1}`} value={model} account');
   expect(advanced).toContain('label="Try earlier"');
   expect(advanced).toContain("providerName(account ? (m.provider ?? m.id.split(\"/\")[0]!) : providerOf(m))");
 });
 
-test("Settings → Bots lists the default model's fallbacks, which bots on Default follow until they list their own", async () => {
+test("Settings → Bots lists the default fallbacks, which every bot follows until it lists its own or has none", async () => {
   const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
   const settings = await Bun.file("src/components/bots/BotSettings.tsx").text();
   expect(settings).toMatch(/label="Default model"[^\n]*\n\s*<\/div>\n\s*<DefaultFallbacks \/>/);
   expect(advanced).toContain("<FallbackList list={list} onChange={useBots.getState().setDefaultFallbackModels} />");
-  expect(advanced).toContain("bot.model || bot.fallbackModels?.length ? 0 : s.defaultFallbackModels.length");
+  // Three states per bot, read back from what's saved: the defaults (also a legacy empty list), its own list, or none.
+  expect(advanced).toContain('{ value: "inherit", label: "Default fallbacks" }');
+  expect(advanced).toContain('{ value: "own", label: "Its own list" }');
+  expect(advanced).toContain('{ value: "none", label: "No fallback" }');
+  expect(advanced).toContain("const saved = fallbackMode(bot);");
+  expect(advanced).toContain('if (next === "none") updateBot(bot.id, { noFallbacks: true });');
+  expect(advanced).toContain('else if (next === "inherit") updateBot(bot.id, { noFallbacks: false, fallbackModels: [] });');
+  // No wording left that says a bot with its own model skips the defaults.
+  expect(advanced).not.toContain("keeps its own fallbacks");
+  expect(advanced).not.toMatch(/bot\.model \|\| bot\.fallbackModels/);
+  expect(advanced).toContain("Every bot uses these, on Default or on a model of its own, unless it lists its own or is set to No fallback.");
   const store = await Bun.file("src/lib/bots/store.ts").text();
   expect(store).toContain('void send("PATCH", "/api/bots/settings", { defaultFallbackModels });');
 });
