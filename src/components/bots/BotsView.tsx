@@ -10,7 +10,7 @@ import { BotChat } from "./BotChat";
 import { BotDetails } from "./BotDetails";
 import { openBotsDialog } from "./BotsSidebar";
 import { useSlow } from "./common";
-import { NotConfirmed, WorkspaceProblem, WorkspaceSwitchDialog, workspaceTrouble } from "./WorkspaceStatus";
+import { KeptElsewhere, NotConfirmed, WorkspaceProblem, WorkspaceSwitchDialog, workspaceTrouble } from "./WorkspaceStatus";
 
 function NoConversation() {
   const host = useRemoteWorkspace();
@@ -80,6 +80,7 @@ export function BotsView() {
         {error && <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>}
       </div>}
       {!isGone && <NotConfirmed />}
+      {!isGone && <KeptElsewhere />}
       <div className="bots-view-content">
         {isGone ? <WorkspaceProblem /> : conversation ? <BotChat key={`${workspace}:${conversation.id}`} conversation={conversation} /> : loaded && <NoConversation />}
         {!isGone && conversation && !remote && <BotDetails conversation={conversation} open={detailsOpen} />}

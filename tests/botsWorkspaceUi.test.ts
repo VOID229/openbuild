@@ -32,7 +32,9 @@ globalThis.fetch = (async (input: string, init: RequestInit = {}) => {
     if (m[2] === "/api/bots/stream") return new Response(new ReadableStream(), { headers });
     return Response.json({ ok: true }, { headers });
   }
-  if (path.startsWith("/api/paired-clients/")) return Response.json({ workspace: requests.at(-1)!.body.workspace });
+  if (path === "/api/devices") return Response.json({ devices });
+  if (path === "/api/paired-clients") return Response.json({ clients: [{ id: "c1", name: "Laptop", createdAt: 1, workspace: true }] });
+  if (path.startsWith("/api/paired-clients/")) return Response.json({ botTools: { ...all, ...requests.at(-1)!.body.botTools } });
   if (path === "/api/bots/targets") return Response.json({ targets: [{ device: "local", name: "Studio", status: "ready", grants: all }, { device: "host", name: "Host Box", status: "ready", grants: all }] });
   return Response.json({});
 }) as unknown as typeof fetch;
@@ -44,7 +46,7 @@ const { enterWorkspace, switchWorkspace, useBots } = await import("../src/lib/bo
 const { useWorkspace } = await import("../src/lib/bots/workspace");
 const { BotsSidebar } = await import("../src/components/bots/BotsSidebar");
 const { BotsView } = await import("../src/components/bots/BotsView");
-const { WorkspaceAccess } = await import("../src/components/BotAccess");
+const { DevicesSection } = await import("../src/components/DeviceSettings");
 const { BotComputer } = await import("../src/components/bots/BotAdvanced");
 
 const devices = [
@@ -73,6 +75,7 @@ beforeEach(async () => {
 afterEach(() => {
   act(() => root.unmount());
   document.body.innerHTML = "";
+  localStorage.clear();
 });
 
 test("the sidebar has no workspace picker, even with paired devices online, and lists this server's chats", async () => {
@@ -158,19 +161,64 @@ test("a workspace that isn't here anymore shows nothing of its own or this serve
   expect(useBots.getState().workspace).toBe("srv");
 });
 
-test("the host's grant is off until its own session turns it on, and says bots act with all their permissions", async () => {
-  let asked = "";
-  g.confirm = (q: string) => ((asked = q), true);
-  await act(async () => root.render(h(WorkspaceAccess, { client: { id: "c1", name: "Laptop", createdAt: 1 } })));
-  const toggle = document.querySelector<HTMLElement>('[aria-label="Let Laptop use OpenBots workspace"]')!;
-  expect(toggle.getAttribute("aria-checked")).toBe("false");
-  const text = el.textContent!;
-  expect(text).toContain("Use OpenBots workspace");
-  expect(text).toContain("all their permissions here");
-  expect(text.toLowerCase()).not.toContain("read-only");
-  await click(toggle);
+test("Settings → Devices has no OpenBots workspace switch for a device using this one, and keeps its bot tool grants", async () => {
+  await act(async () => root.render(h(DevicesSection)));
   await frames();
-  expect(asked).toContain("all the access they have here");
-  expect(requests.at(-1)).toEqual({ method: "PATCH", path: "/api/paired-clients/c1", body: { workspace: true } });
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
+  expect(el.textContent).toContain("Laptop");
+  expect(el.textContent).not.toContain("Use OpenBots workspace");
+  expect(document.querySelector('[aria-label="Let Laptop use OpenBots workspace"]')).toBeNull();
+  // The bot tool grants stay, each its own switch, and saving one doesn't touch the workspace grant.
+  const terminal = [...document.querySelectorAll<HTMLElement>("[role='switch'], button[aria-checked]")].find((t) => /terminal/i.test(t.getAttribute("aria-label") ?? ""))!;
+  expect(terminal).toBeTruthy();
+  g.confirm = () => true;
+  await click(terminal);
+  await frames();
+  const patch = requests.filter((r) => r.method === "PATCH").at(-1)!;
+  expect(patch.path).toBe("/api/paired-clients/c1");
+  expect(patch.body).toEqual({ botTools: { terminal: true } });
+});
+
+// What a tab left in this browser for the host's workspace, from when it could open it.
+const kept = [
+  { id: "u1", workspace: "host", at: 1_700_000_000_000, label: "Message “ship the fix”", method: "POST", path: "/api/bots/conversations/host-chat/messages", body: { id: "m-host", author: "me", text: "ship the fix" }, check: { kind: "message", conversationId: "host-chat", messageId: "m-host" }, error: "Host Box is unreachable" },
+  { id: "u2", workspace: "host", at: 1_700_000_100_000, label: "Reaction 👍", method: "PATCH", path: "/api/bots/conversations/host-chat/messages/m1", body: { emoji: "👍", on: true }, check: { kind: "reaction", conversationId: "host-chat", messageId: "m1", emoji: "👍", on: true }, error: "No answer" },
+];
+
+test("changes kept for another device's workspace stay discoverable here, named for their owner, and are never sent here or there", async () => {
+  localStorage.setItem("openbuild.bots.unconfirmed:host", JSON.stringify(kept));
+  const stored = localStorage.getItem("openbuild.bots.unconfirmed:host");
+  useBots.setState({ conversations: [chat("local-chat")], loaded: true, activeId: "local-chat" } as any);
+  await act(async () => root.render(h(BotsView)));
+  await frames();
+  const notice = document.querySelector<HTMLElement>('[aria-label="Kept for Host Box"]')!;
+  expect(notice).toBeTruthy();
+  expect(notice.textContent).toContain("2 changes kept for Host Box");
+  expect(notice.textContent).toContain("they aren't sent to this server");
+  expect(notice.textContent).toContain("ship the fix");
+  expect(notice.textContent).toContain("Reaction 👍");
+  // This workspace's own not-confirmed list doesn't take them on, and nothing offers a retry.
+  expect(useBots.getState().unconfirmed).toEqual([]);
+  expect(notice.querySelector("button[aria-label^='Dismiss']")).toBeNull();
+  expect(byText("button", "Retry")).toBeUndefined();
+  // A copy can be saved, as a download in this browser only.
+  let saved: Blob | undefined;
+  const create = URL.createObjectURL;
+  URL.createObjectURL = (b: Blob) => ((saved = b), "blob:kept");
+  try {
+    await click(byText("button", "Save a copy")!);
+  } finally {
+    URL.createObjectURL = create;
+  }
+  expect(JSON.parse(await saved!.text())).toEqual({ workspace: "host", name: "Host Box", entries: kept });
+  // Nothing went to the host or to this server's conversations, and what's kept is as it was.
+  expect(requests.filter((r) => r.path.includes("/host/") || (r.method !== "GET" && r.path.includes("/conversations/")))).toEqual([]);
+  expect(localStorage.getItem("openbuild.bots.unconfirmed:host")).toBe(stored);
+});
+
+test("this workspace's own not-confirmed changes aren't listed as kept for another device", async () => {
+  localStorage.setItem("openbuild.bots.unconfirmed:srv", JSON.stringify([{ ...kept[0], workspace: "srv" }]));
+  useBots.setState({ conversations: [chat("local-chat")], loaded: true } as any);
+  await act(async () => root.render(h(BotsView)));
+  await frames();
+  expect(document.querySelector(".bots-kept")).toBeNull();
 });

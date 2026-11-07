@@ -464,6 +464,27 @@ function saveUnconfirmed(id: string, change: (list: Unconfirmed[]) => Unconfirme
   if (session?.id === id) useBots.setState({ unconfirmed: next });
 }
 
+/**
+ * Changes this browser keeps for workspaces other than the one this tab is in: left from when a tab
+ * could open a paired host's. Only read here, to say they exist and to save a copy; never sent,
+ * moved or removed, since the workspace they were sent to is the only one that can settle them.
+ */
+export function keptElsewhere(): { workspace: string; entries: Unconfirmed[] }[] {
+  const current = useBots.getState().workspace;
+  const ids: string[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(UNCONFIRMED)) ids.push(key.slice(UNCONFIRMED.length));
+    }
+  } catch {}
+  return ids
+    .filter((id) => id && id !== current)
+    .sort()
+    .map((workspace) => ({ workspace, entries: readUnconfirmed(workspace) }))
+    .filter((k) => k.entries.length);
+}
+
 /** Whether a write shows in a workspace's conversations: true, false, or undefined when they can't tell. */
 function landed(check: WriteCheck, conversations: Conversation[]): boolean | undefined {
   const c = conversations.find((x) => x.id === check.conversationId);

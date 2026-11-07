@@ -3630,6 +3630,24 @@ a.bots-btn-primary {
   font-size: 12px;
 }
 
+/* Changes kept for another device's workspace: its name, a copy to save, and the list folded away. */
+.bots-kept-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bots-kept details {
+  margin-top: 4px;
+}
+
+.bots-kept summary {
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 /* A reference that belongs to another device's workspace and can't be opened from here. */
 .bm-unavailable {
   color: var(--text-2);

@@ -25,6 +25,8 @@ const PRELUDE = `
     getItem: (k) => disk()[k] ?? null,
     setItem: (k, v) => { const d = disk(); d[k] = String(v); save(d); },
     removeItem: (k) => { const d = disk(); delete d[k]; save(d); },
+    get length() { return Object.keys(disk()).length; },
+    key: (i) => Object.keys(disk())[i] ?? null,
   };
   const session = new Map();
   globalThis.sessionStorage = { getItem: (k) => session.get(k) ?? null, setItem: (k, v) => session.set(k, String(v)), removeItem: (k) => session.delete(k) };
@@ -95,10 +97,12 @@ test("a tab left on another device's workspace opens this server's, clears the s
     useBots.getState().ensureSeeded();
     await wait(1200);
     const s = useBots.getState();
-    console.log(JSON.stringify({ workspace: s.workspace, conversations: ids(), activeId: s.activeId, unconfirmed: s.unconfirmed, host: calls.filter((c) => c.path.includes("/host/")), href: location.href, session: sessionStorage.getItem("openbuild.workspace") }));
+    // Still discoverable, read only: the host's change is listed for it, and listing it sends nothing.
+    const kept = bots.keptElsewhere().map((k) => ({ workspace: k.workspace, ids: k.entries.map((e) => e.id) }));
+    console.log(JSON.stringify({ kept, workspace: s.workspace, conversations: ids(), activeId: s.activeId, unconfirmed: s.unconfirmed, host: calls.filter((c) => c.path.includes("/host/")), href: location.href, session: sessionStorage.getItem("openbuild.workspace") }));
   `, { STORAGE: storage, TAB_URL: "http://localhost/bots?workspace=host" }));
   // This server's chats, with the stale ?workspace= and session choice cleared, and nothing asked of or sent to the host.
-  expect(out).toEqual({ workspace: "srv", conversations: ["local-chat"], activeId: "local-chat", unconfirmed: [], host: [], href: "http://localhost/bots", session: "srv" });
+  expect(out).toEqual({ kept: [{ workspace: "host", ids: ["u1"] }], workspace: "srv", conversations: ["local-chat"], activeId: "local-chat", unconfirmed: [], host: [], href: "http://localhost/bots", session: "srv" });
   // The host's cache, layout and unconfirmed change are kept as they were, under its own id: not moved, merged or replayed here.
   const saved = JSON.parse(readFileSync(storage, "utf8")) as Record<string, string>;
   for (const [key, value] of Object.entries(seeded)) expect(saved[key]).toBe(value);

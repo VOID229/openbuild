@@ -1,11 +1,10 @@
-// Settings → Devices → Using this device: what a paired server's bots may do on this machine, and
-// whether that device may use this machine's OpenBots workspace. Pairing grants none of it. Each is
-// switched on here, on the machine it concerns, and the server checks it on every request
-// (server/computers/api.ts, server/bots/workspace.ts).
+// Settings → Devices → Using this device: what a paired server's bots may do on this machine.
+// Pairing grants none of it. Each is switched on here, on the machine it concerns, and the server
+// checks it on every request (server/computers/api.ts).
 import { CircleAlert } from "lucide-react";
 import { useState } from "react";
 import type { BotToolGrants, PairedClient } from "../../shared/types";
-import { setPairedClientBotTools, setPairedClientWorkspace } from "../lib/pi";
+import { setPairedClientBotTools } from "../lib/pi";
 import { Spinner, Toggle } from "./primitives";
 
 export const NO_GRANTS: BotToolGrants = { files: false, terminal: false, browser: false, unisolated: false };
@@ -49,51 +48,6 @@ export function BotAccess({ client }: { client: PairedClient }) {
           <Toggle label={`${row.label} for bots from ${client.name}`} checked={grants[row.key]} disabled={!!busy} onChange={(v) => void change(row.key, v)} />
         </div>
       ))}
-      {error && (
-        <span className="pi-error device-error" role="alert">
-          <CircleAlert size={13} /> {error}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/**
- * Whether a device that uses this one may open this machine's OpenBots and carry on its chats. One
- * switch, because messaging a bot is the whole of it: whatever that message asks, the bot does
- * with everything it's allowed here.
- */
-export function WorkspaceAccess({ client }: { client: PairedClient }) {
-  const [on, setOn] = useState(client.workspace === true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-
-  const change = async (value: boolean) => {
-    if (value && !confirm(`Let ${client.name} use this device's OpenBots workspace? Bots act on what it sends with all the access they have here.`)) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      setOn((await setPairedClientWorkspace(client.id, value)).workspace);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="bot-access" role="group" aria-label={`Whether ${client.name} may use this device's OpenBots workspace`}>
-      <div className="bot-access-row">
-        <div className="pi-row-text">
-          <span className="pi-row-name">Use OpenBots workspace</span>
-          <span className="pi-row-desc">
-            {client.name} can open this device's OpenBots and carry on its existing chats: read them, send messages, react, vote and answer questions. Bots act on those messages with
-            all their permissions here, so their tools, computers and connected apps run just as they would for you. New bots and chats, settings and apps stay managed on this device.
-          </span>
-        </div>
-        {busy ? <Spinner size={14} /> : null}
-        <Toggle label={`Let ${client.name} use OpenBots workspace`} checked={on} disabled={busy} onChange={(v) => void change(v)} />
-      </div>
       {error && (
         <span className="pi-error device-error" role="alert">
           <CircleAlert size={13} /> {error}

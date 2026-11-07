@@ -1,9 +1,11 @@
 // The state of the OpenBots workspace this tab shows, which is the connected server's own
 // (src/lib/bots/workspace.ts). There's no picker for another device's: what didn't get confirmed
 // stays listed with the workspace it was sent to, never sent anywhere else.
-import { CircleAlert, RotateCw, X } from "lucide-react";
-import { cancelSwitch, switchWorkspace, useBots, type Unconfirmed } from "../../lib/bots/store";
+import { CircleAlert, Download, RotateCw, X } from "lucide-react";
+import { useMemo } from "react";
+import { cancelSwitch, keptElsewhere, switchWorkspace, useBots, type Unconfirmed } from "../../lib/bots/store";
 import { useWorkspace, useWorkspaceName, workspaceName } from "../../lib/bots/workspace";
+import { useStore } from "../../lib/store";
 import { Spinner } from "../primitives";
 import { useModal } from "./BotDialogs";
 
@@ -78,6 +80,65 @@ export function NotConfirmed() {
       </ul>
     </section>
   );
+}
+
+/**
+ * Changes this browser still keeps for another device's workspace, from when a tab could open it.
+ * They're that workspace's: shown so they aren't lost, with a copy to save, but never sent here,
+ * moved or removed.
+ */
+export function KeptElsewhere() {
+  const workspace = useBots((s) => s.workspace);
+  const unconfirmed = useBots((s) => s.unconfirmed);
+  useStore((s) => s.devices);
+  const kept = useMemo(() => keptElsewhere(), [workspace, unconfirmed]);
+  if (!kept.length) return null;
+  return (
+    <>
+      {kept.map(({ workspace: owner, entries }) => {
+        const name = workspaceName(owner);
+        const count = `${entries.length} ${entries.length === 1 ? "change" : "changes"}`;
+        return (
+          <section key={owner} className="bots-unconfirmed bots-kept" aria-label={`Kept for ${name}`}>
+            <div className="bots-kept-head">
+              <h3>
+                {count} kept for {name}
+              </h3>
+              <button type="button" className="btn btn-sm" onClick={() => saveCopy(owner, name, entries)}>
+                <Download size={13} /> Save a copy
+              </button>
+            </div>
+            <p className="bots-unconfirmed-state">
+              Sent to {name}'s OpenBots from this browser earlier and never confirmed there. Kept here as they were; they aren't sent to this server. Check {name}'s chats on {name} itself.
+            </p>
+            <details>
+              <summary>Show {count}</summary>
+              <ul>
+                {entries.map((e) => (
+                  <li key={e.id} className="bots-unconfirmed-text">
+                    <span className="bots-unconfirmed-label">{e.label}</span>
+                    <span className="bots-unconfirmed-state">
+                      {new Date(e.at).toLocaleString()} · {e.error}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </section>
+        );
+      })}
+    </>
+  );
+}
+
+/** A JSON file of what's kept, named for its owner. Nothing leaves this browser but the download. */
+function saveCopy(owner: string, name: string, entries: Unconfirmed[]) {
+  const url = URL.createObjectURL(new Blob([JSON.stringify({ workspace: owner, name, entries }, null, 2)], { type: "application/json" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `openbots-unconfirmed-${name.replace(/[^\w.-]+/g, "-")}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** Why the workspace can't be used right now. A workspace that's gone isn't swapped for what's there now. */
