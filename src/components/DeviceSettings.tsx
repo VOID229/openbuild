@@ -1,11 +1,13 @@
 // Settings → Devices: the devices this OpenBuild is paired with, where their servers stand, and
-// unpairing or restarting them. Also the devices that use this one, so their access can be revoked.
-import { Check, CircleAlert, Play, RefreshCw, RotateCw, Unlink, UserRoundCheck, UserRoundX } from "lucide-react";
+// unpairing or restarting them, and pairing another (PairDevice.tsx). Also the devices that use this
+// one, so their access can be revoked.
+import { Check, CircleAlert, Link2, Play, RefreshCw, RotateCw, Unlink, UserRoundCheck, UserRoundX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Device, PairedClient } from "../../shared/types";
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { ago, cx } from "../lib/ui";
+import { PairDevice } from "./PairDevice";
 import { IconButton, SettingsHeading, Spinner } from "./primitives";
 
 const STATUS: Record<NonNullable<Device["status"]>, { label: string; dot?: string }> = {
@@ -141,6 +143,9 @@ export function DevicesSection() {
   // "checking" only for a manual click; the on-open probe runs silently in the background.
   const [check, setCheck] = useState<"idle" | "checking" | "done">("idle");
   const doneTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [pairing, setPairing] = useState(false);
+  const [paired, setPaired] = useState<string>();
+  const pairButton = useRef<HTMLButtonElement>(null);
   const local = devices.find((d) => d.local);
   const remote = devices.filter((d) => !d.local);
 
@@ -165,6 +170,17 @@ export function DevicesSection() {
     void loadProjects();
   };
 
+  const closePairing = () => {
+    setPairing(false);
+    // A search stopped just as it succeeded still pairs, so look again.
+    void changed();
+    requestAnimationFrame(() => pairButton.current?.focus());
+  };
+  const onPaired = async (device: Device) => {
+    setPaired(device.name);
+    closePairing();
+  };
+
   return (
     <>
       <SettingsHeading>Devices</SettingsHeading>
@@ -185,6 +201,19 @@ export function DevicesSection() {
         <div className="pi-subhead">
           <h3>Paired devices</h3>
           <span className="device-check">
+            {!pairing && (
+              <button
+                ref={pairButton}
+                type="button"
+                className="btn btn-sm pair-open"
+                onClick={() => {
+                  setPaired(undefined);
+                  setPairing(true);
+                }}
+              >
+                <Link2 size={14} aria-hidden /> Pair device
+              </button>
+            )}
             <span className={cx("device-check-note", check !== "idle" && "is-shown")} aria-live="polite">
               {check === "checking" ? "Checking…" : check === "done" ? "Up to date" : ""}
             </span>
@@ -193,13 +222,20 @@ export function DevicesSection() {
             </IconButton>
           </span>
         </div>
+        {pairing && <PairDevice onPaired={onPaired} onClose={closePairing} />}
+        {paired && (
+          <p className="pair-done" role="status">
+            <Check size={14} className="device-check-ok" aria-hidden /> Paired with {paired}. Its projects are under Settings → Projects.
+          </p>
+        )}
         <ul className="pi-list">
           {remote.map((d) => (
             <PairedDeviceRow key={d.id} device={d} onChanged={changed} />
           ))}
           {!remote.length && (
             <li className="pi-empty">
-              None yet. Run <code>openbuild pair --host</code> on the other device, then <code>openbuild pair --client</code> here.
+              None yet. Run <code>openbuild pair --host</code> on the other device, then choose Pair device here (or run{" "}
+              <code>openbuild pair --client</code>).
             </li>
           )}
         </ul>

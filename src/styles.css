@@ -6586,6 +6586,119 @@ p.key-status svg {
   margin-top: 1px;
 }
 
+/* Settings → Devices → Pair device. */
+.pair-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pair-form {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 8px 0 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+
+.pair-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.pair-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.pair-field .input {
+  max-width: 320px;
+}
+
+.pair-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.pair-help,
+.pair-hint {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.pair-link {
+  align-self: flex-start;
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.pair-link:disabled {
+  opacity: 0.5;
+}
+
+.pair-error {
+  margin: 0;
+}
+
+.pair-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+/* Kept in the page while idle (visually hidden), so screen readers announce the search starting. */
+.pair-status:not(.is-shown) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.pair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pair-done {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+@media (max-width: 480px) {
+  .pair-form {
+    padding: 12px;
+  }
+
+  .pair-field .input {
+    max-width: none;
+  }
+
+  .pair-actions .btn {
+    flex: 1;
+  }
+}
+
 .pi-row-text {
   display: flex;
   flex: 1;

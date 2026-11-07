@@ -32,6 +32,7 @@ import * as piWorker from "./pi/remote";
 import { projectChat, projectStoredChats } from "./pi/projection";
 import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
+import * as pairing from "./pairClient";
 import * as folderPicker from "./folderPicker";
 import * as sessionImport from "./sessionImport";
 import { computerRoutes } from "./computers/api";
@@ -60,6 +61,8 @@ const STATE_KEY = "client-state";
 const serverId = devices.serverId();
 /** This device's name (chosen when pairing, else the computer name), read per request so a rename shows up. */
 const machine = () => devices.deviceName();
+/** The port other OpenBuild servers listen on, as `openbuild pair --client` assumes. */
+const PAIR_PORT = Number(process.env.PORT ?? 3100);
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
@@ -270,6 +273,38 @@ function serve(port: number, hostname: string) {
           const claimed = devices.claimPairing(body.code, typeof body.name === "string" ? body.name : "");
           return claimed ? Response.json(claimed) : bad("That pairing code isn't valid anymore. Run `openbuild pair --host` again on the other device.", 403);
         },
+      },
+
+      // Pairing from Settings → Devices: what `openbuild pair --client` does, run by this server for
+      // its signed-in browser. Paired devices can't call it (devicePathAllowed), and the token is
+      // kept here like the CLI keeps it; the browser only gets the device's public details.
+      "/api/pair/connect": {
+        POST: api(async (req: Request) => {
+          const body = await readJson(req);
+          const mode = body?.mode;
+          if (mode !== "lan" && mode !== "tailscale") return bad("Choose Tailscale or LAN");
+          const code = typeof body?.code === "string" ? pairing.normalizeCode(body.code) : "";
+          if (!/^[A-Z0-9-]{4,40}$/.test(code)) return bad("Enter the pairing code shown on the other device, like ABCD-2345");
+          const address = typeof body?.address === "string" && body.address.trim() ? body.address.trim() : undefined;
+          if (address && !pairing.addressOrigins(address, PAIR_PORT))
+            return bad("That isn't an address. Enter a host name or IP, optionally with :port, or an http(s):// address with no path");
+          const slot = pairing.beginAttempt();
+          if ("busy" in slot) return bad("A pairing is already in progress. Wait for it, or cancel it, first", 409);
+          if ("limited" in slot)
+            return Response.json({ error: `Too many pairing attempts. Try again in ${slot.retryAfter}s` }, { status: 429, headers: { "retry-after": String(slot.retryAfter) } });
+          try {
+            const outcome = await pairing.pairWithCode({ mode, code, address, port: PAIR_PORT, selfId: serverId, signal: AbortSignal.any([req.signal, AbortSignal.timeout(60_000)]) });
+            if (outcome.ok) return Response.json({ device: outcome.device });
+            const where = address ? `at ${address}` : mode === "lan" ? "on your network" : "on your tailnet";
+            if (outcome.reason === "not-found")
+              return Response.json({ error: `No OpenBuild is waiting to pair ${where}. Check that \`openbuild pair --host\` is running there${address ? "" : ", or enter its address"}`, reason: "not-found" }, { status: 404 });
+            if (outcome.reason === "rejected")
+              return Response.json({ error: "The code didn't match. Check it, or run `openbuild pair --host` again for a new one", reason: "rejected" }, { status: 403 });
+            return Response.json({ error: "Pairing was cancelled or took too long", reason: "cancelled" }, { status: 408 });
+          } finally {
+            slot.end();
+          }
+        }),
       },
 
       // Controlling this server from a paired device. While the server is stopped, the keeper
