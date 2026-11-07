@@ -25,7 +25,10 @@ export function reportProblem(source: string, message: string) {
 }
 
 export class PiError extends Error {}
-export class PiTimeoutError extends PiError {}
+export class PiTimeoutError extends PiError {
+  /** Pi may still act on a command it was slow to answer: this settles with its late answer, or undefined once Pi exits. */
+  answered?: Promise<PiRecord | undefined>;
+}
 
 /** The longest a command waits on a compaction Pi reports, as long as a reply may take. */
 const COMPACTION_LIMIT_MS = 15 * 60 * 1000;
@@ -44,6 +47,8 @@ export class PiProcess {
   private compactedAt = 0;
   exited = false;
   exitCode?: number;
+  /** Settles once the process has exited. */
+  readonly ended: Promise<void>;
   lastUsed = Date.now();
 
   constructor(args: string[], cwd: string, env?: Record<string, string>) {
@@ -53,7 +58,7 @@ export class PiProcess {
     this.proc = Bun.spawn([bin, "--mode", "rpc", ...args], { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe", env: { ...piEnv(), ...env } });
     void this.readStdout();
     void this.readStderr();
-    void this.proc.exited.then((code) => {
+    this.ended = this.proc.exited.then((code) => {
       this.exited = true;
       this.exitCode = code;
       clearTimeout(this.terminateTimer);

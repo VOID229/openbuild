@@ -29,6 +29,13 @@ interface Mind {
   busy: boolean;
   /** A previous deadline expired; no new work until abort confirms idle. */
   needsRecovery?: boolean;
+  /** Prompts and steers Pi didn't answer in time. Until it does, each can still start a run or queue a message. */
+  overdue?: Set<Promise<unknown>>;
+  /** Steers on their way into this turn: the turn holds on to Pi until each is answered. */
+  pendingSteers?: Set<Promise<void>>;
+  /** Steers Pi queued this turn, in order, and how many queued ones were cleared unread. */
+  queuedSteers?: { item: Wake; conversationId: string; from: number }[];
+  dropped?: number;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
   draft: string;
@@ -88,14 +95,14 @@ export function wake(botId: string, item: Wake) {
       mind.quiet = false;
       show(botId, mind);
     }
-    void mind.proc
-      // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
-      .send({ type: "steer", message: text, ...(images.length ? { images } : {}) }, 15_000)
-      .catch(() => {
-        // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
-        shown.set(conversationId, Math.min(shown.get(conversationId) ?? from, from));
-        enqueue(botId, item);
-      });
+    // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
+    steerSafely(mind, { type: "steer", message: text, ...(images.length ? { images } : {}) }, (disposition) => {
+      if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from });
+      if (disposition) return;
+      // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
+      shown.set(conversationId, Math.min(shown.get(conversationId) ?? from, from));
+      enqueue(botId, item);
+    });
     return;
   }
   enqueue(botId, item);
@@ -168,8 +175,12 @@ function workDir(botId: string) {
 }
 
 async function ensureMind(botId: string): Promise<Mind> {
-  const existing = minds.get(botId);
-  if (existing?.needsRecovery && !existing.proc.exited) await recoverPrompt(existing);
+  let existing = minds.get(botId);
+  // A Pi that can't be shown idle may still act on an old message: start over on a new one, which picks the session up.
+  if (existing?.needsRecovery && !existing.proc.exited && !(await recoverPrompt(existing).then(() => true, () => false))) {
+    await retire(botId, existing);
+    existing = undefined;
+  }
   // The user changed which extensions bots load. Only ever reached between turns, and the session carries on.
   if (existing && !existing.proc.exited && existing.loaded !== JSON.stringify(piFlags())) {
     revokeToken(existing.token);
@@ -532,6 +543,7 @@ async function run(botId: string, all: Wake[]) {
         if (m.error) throw new ProviderError(m.error);
       }
     });
+    await release(botId, m);
     if (handled) return;
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
@@ -555,6 +567,8 @@ async function run(botId: string, all: Wake[]) {
       minds.delete(botId);
     }
   } finally {
+    // Already done once the reply went through; after a failure it's what keeps late work out of the next turn.
+    if (mind) await release(botId, mind).catch((err) => console.error("[bots] couldn't release Pi:", err));
     if (mind) {
       mind.typing = false;
       mind.steerable = false;
@@ -575,24 +589,110 @@ function stillReacted({ messageId, emoji, by, to }: NonNullable<Wake["reaction"]
   return !!db.getMessage(messageId)?.message.reactions?.some((r) => r.by === by && r.emoji === emoji && r.to === to);
 }
 
-/** Abort is an idle barrier in Pi RPC. Keep the session and host queue intact on failure. */
-export async function recoverPrompt(mind: { proc: Pick<PiProcess, "send">; needsRecovery?: boolean; steerable?: boolean }) {
+type Recoverable = Pick<Mind, "needsRecovery" | "steerable" | "overdue" | "pendingSteers" | "dropped"> & { proc: Pick<PiProcess, "send"> };
+
+/** How long recovery waits for Pi's late answer to a prompt or steer before giving up on the process. */
+export const OVERDUE = 30_000;
+
+function within<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([promise, new Promise<undefined>((r) => (timer = setTimeout(() => r(undefined), ms)))]).finally(() => clearTimeout(timer));
+}
+
+/** A command Pi didn't answer in time is still Pi's: it may start a run or queue a message once its preflight finishes. */
+function noteOverdue(mind: Recoverable, err: unknown) {
+  if (!(err instanceof PiTimeoutError) || !err.answered) return;
+  const overdue = (mind.overdue ??= new Set());
+  const answered: Promise<unknown> = err.answered.finally(() => overdue.delete(answered));
+  overdue.add(answered);
+  mind.needsRecovery = true;
+}
+
+/**
+ * Abort is an idle barrier in Pi RPC, but not for a prompt or steer still in its (async) preflight:
+ * abort returns idle and the prompt starts a run afterwards. So those are waited out first, and Pi's
+ * queue is cleared before abort, which would otherwise carry on with it. Keep the session and host
+ * queue intact on failure.
+ */
+export async function recoverPrompt(mind: Recoverable, overdueMs = OVERDUE) {
   mind.steerable = false;
   mind.needsRecovery = true;
+  if (mind.overdue?.size && !(await within(Promise.all(mind.overdue).then(() => true), overdueMs))) {
+    throw new PiTimeoutError("Pi still hasn't answered an earlier message.");
+  }
+  const cleared = await mind.proc.send<{ steering?: string[] } | undefined>({ type: "clear_queue" }, 30_000);
+  mind.dropped = (mind.dropped ?? 0) + (cleared?.steering?.length ?? 0);
   await mind.proc.send({ type: "abort" }, 30_000);
   mind.needsRecovery = false;
 }
 
+/**
+ * Steer a message into the turn. A steer Pi is slow to answer is waited out, not sent to the queue at
+ * once: Pi may still take it, and the bot would read it twice. `done` hears how Pi took it ("queued",
+ * "handled"), or undefined when it didn't.
+ */
+export function steerSafely(mind: Recoverable, command: PiRecord, done: (disposition?: string) => void, timeoutMs = 15_000) {
+  const steering = (async () => {
+    try {
+      return (await mind.proc.send<{ disposition?: string } | undefined>(command, timeoutMs))?.disposition ?? "queued";
+    } catch (err) {
+      if (!(err instanceof PiTimeoutError) || !err.answered) return undefined;
+      noteOverdue(mind, err);
+      const late = await within(err.answered, OVERDUE);
+      return late?.success ? ((late.data as { disposition?: string } | undefined)?.disposition ?? "queued") : undefined;
+    }
+  })().then(done);
+  const pending = (mind.pendingSteers ??= new Set());
+  const tracked: Promise<void> = steering.catch(() => {}).finally(() => pending.delete(tracked));
+  pending.add(tracked);
+}
+
+/**
+ * What a turn does before it lets go of Pi: no steer still on its way, nothing it queued left for the
+ * next turn to read, nothing it started still running. A Pi that can't be brought there is retired.
+ */
+async function release(botId: string, mind: Mind) {
+  mind.steerable = false;
+  await Promise.all(mind.pendingSteers ?? []);
+  // Retired already, it can't take anything up again.
+  if (minds.get(botId) === mind) {
+    try {
+      if (mind.needsRecovery) await recoverPrompt(mind);
+      // Pi's input handlers can queue a steer after the turn settled: it would turn up in the next one.
+      else if (mind.queuedSteers?.length) {
+        const cleared = await mind.proc.send<{ steering?: string[] } | undefined>({ type: "clear_queue" }, 30_000);
+        mind.dropped = (mind.dropped ?? 0) + (cleared?.steering?.length ?? 0);
+      }
+    } catch {
+      await retire(botId, mind);
+    }
+  }
+  // Pi reads steers in order, so those it never read are the last ones it queued. They get a turn of their own.
+  const queued = (mind.queuedSteers ?? []).splice(0);
+  // A deleted bot's leftovers have nowhere to go.
+  const unread = mind.dropped && db.getBot(botId) ? queued.slice(-mind.dropped) : [];
+  mind.dropped = 0;
+  for (const { item, conversationId, from } of unread) {
+    mind.shown?.set(conversationId, Math.min(mind.shown.get(conversationId) ?? from, from));
+    enqueue(botId, item);
+  }
+}
+
+/** Stop a Pi whose work can't be shown to be over, so nothing it does reaches the chat. Its session carries on in the next one. */
+async function retire(botId: string, mind: Mind) {
+  revokeToken(mind.token);
+  mind.proc.close();
+  await within(mind.proc.ended, 10_000);
+  if (minds.get(botId) === mind) minds.delete(botId);
+}
+
 /** A lost acknowledgement is ambiguous: stop safely, but never replay this attempt on a fallback. */
-export async function promptSafely(
-  mind: { proc: Pick<PiProcess, "send">; needsRecovery?: boolean; steerable?: boolean },
-  command: PiRecord,
-  timeoutMs = 60_000,
-) {
+export async function promptSafely(mind: Recoverable, command: PiRecord, timeoutMs = 60_000) {
   try {
     return await mind.proc.send(command, timeoutMs);
   } catch (err) {
     if (err instanceof PiTimeoutError || /Agent is already processing/.test(String((err as Error)?.message))) {
+      noteOverdue(mind, err);
       await recoverPrompt(mind);
       // A busy rejection can be residue from an older ambiguous attempt; never replay it.
       throw err instanceof PiTimeoutError ? err : new PiTimeoutError(String((err as Error)?.message));
