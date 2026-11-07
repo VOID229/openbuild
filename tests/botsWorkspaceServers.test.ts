@@ -225,6 +225,9 @@ test("a request for another server id is refused with 409 before its body is rea
     headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
     // A body that never finishes: the answer can't have waited for it.
     body: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode("{")); } }),
+    // Its connection is left mid-body, so it mustn't go back to the pool: the next request on it
+    // would be read as the rest of this body and fail to parse (Bun 1.3 reuses it otherwise).
+    keepalive: false,
   } as RequestInit);
   expect(res.status).toBe(409);
   expect(res.headers.get("x-openbuild-server")).toBe(hostId);
