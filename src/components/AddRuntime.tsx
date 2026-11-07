@@ -1,5 +1,5 @@
 // Settings → Runtimes → Add runtime: another login of a runtime on one device, in three steps.
-// It saves the same account entry Providers & accounts lists; Claude's become model picker providers.
+// It saves a runtime account entry on that device; Claude's become model picker providers.
 import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
