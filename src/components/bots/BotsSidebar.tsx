@@ -14,7 +14,6 @@ import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
 import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
-import { Wordmark } from "../Wordmark";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime } from "./common";
 
@@ -540,7 +539,7 @@ export function BotsSidebar() {
                   <PanelLeft size={18} />
                 </IconButton>
               )}
-              <Wordmark brand="openbots" className="bots-wordmark" />
+              <span className="wordmark bots-wordmark">OpenBots</span>
               {!mobile && (
                 <IconButton
                   label="Search"

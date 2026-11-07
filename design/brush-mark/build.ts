@@ -1,13 +1,12 @@
-// Composes the brush mark and the OpenBuild/OpenBots lockups from source/glyphs.json.
+// Composes the brush mark, the favicon, the GitHub App icon and the OpenBuild/OpenBots lockups from source/glyphs.json.
 // Run: bun design/brush-mark/build.ts && design/brush-mark/render.sh
 // source/glyphs.json comes from source/tools (potrace traces of Outis's references + Oswald outlines).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const out = import.meta.dir;
-const app = join(out, "../../src/assets/brand");
+const indexHtml = join(out, "../../src/index.html");
 mkdirSync(join(out, "svg"), { recursive: true });
-mkdirSync(app, { recursive: true });
 const g = await Bun.file(join(out, "source/glyphs.json")).json();
 
 // Bounding box of every coordinate pair in absolute path data (control points included, so it errs wide).
@@ -63,7 +62,25 @@ for (const [name, l] of Object.entries(lockups)) {
     writeFileSync(join(out, "svg", `${name}-wordmark-${v}-black.svg`), svg(vb, l[v], "#000", [w, h]));
     writeFileSync(join(out, "svg", `${name}-wordmark-${v}-white.svg`), svg(vb, l[v], "#fff", [w, h]));
   }
-  // The app inlines the UI version and colours it with the header text colour.
-  writeFileSync(join(app, `${name}-wordmark.svg`), svg(vb, l.ui, "currentColor"));
 }
 console.log("lockup viewBoxes", sizes);
+
+// ---- favicon and GitHub App icon: the small mark in the reference's ivory on its near-black ----
+// Sampled from source/reference/mark.png: the ring body and the field around it.
+const IVORY = "#ece5d5";
+const NEAR_BLACK = "#1f201d";
+// Centres the mark on a `tile` px square with its ring `ring` px across.
+const onTile = (tile: number, rx: number, ring: number) => {
+  const k = ring / 388;
+  const [x, y] = [tile / 2 - 515.5 * k, tile / 2 - 264 * k];
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${tile} ${tile}"><rect width="${tile}" height="${tile}"${rx ? ` rx="${rx}"` : ""} fill="${NEAR_BLACK}"/><g fill="${IVORY}" fill-rule="evenodd" transform="translate(${+x.toFixed(3)} ${+y.toFixed(3)}) scale(${+k.toFixed(5)})">${marks.small.map((d) => `<path d="${d}"/>`).join("")}</g></svg>`;
+};
+// Same 32px tile as the old favicon; the ring fills 26px so it stays a clean O with a B at 16px.
+const favicon = onTile(32, 8, 26);
+writeFileSync(join(out, "svg", "favicon.svg"), favicon + "\n");
+// GitHub rounds the avatar itself, so the App icon is a full-bleed square.
+writeFileSync(join(out, "svg", "github-app-icon.svg"), onTile(512, 0, 380) + "\n");
+
+const dataUri = `data:image/svg+xml,${favicon.replace(/"/g, "'").replace(/[%#<>]/g, encodeURIComponent)}`;
+const html = await Bun.file(indexHtml).text();
+writeFileSync(indexHtml, html.replace(/(rel="icon"\s+href=")[^"]*"/, `$1${dataUri}"`));

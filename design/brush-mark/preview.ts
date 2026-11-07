@@ -12,7 +12,7 @@ body{margin:0;padding:20px;background:#d9d9d9;display:inline-flex;flex-direction
 .dark{background:#141414}.light{background:#fff}
 </style></head><body>
 <div class="row">${both((i) => `mark-full-${i}.svg`, 'width="200" height="200"')}${both((i) => `mark-small-${i}.svg`, 'width="200" height="200"')}</div>
-<div class="row"><div class="dark">${fav("white")}</div><div class="light">${fav("black")}</div></div>
+<div class="row"><div class="dark">${fav("white")}</div><div class="light">${fav("black")}</div><div class="light">${[64, 32, 16].map((s) => `<img src="${svg("favicon.svg")}" width="${s}" height="${s}" alt="">`).join("")}</div><div class="light"><img src="${svg("github-app-icon.svg")}" width="96" height="96" style="border-radius:16px" alt=""></div></div>
 <div class="row">${both((i) => `openbuild-wordmark-full-${i}.svg`, 'height="96"')}</div>
 <div class="row">${both((i) => `openbots-wordmark-full-${i}.svg`, 'height="96"')}</div>
 <div class="row">${both((i) => `openbuild-wordmark-ui-${i}.svg`, 'height="22"')}${both((i) => `openbots-wordmark-ui-${i}.svg`, 'height="22"')}</div>
