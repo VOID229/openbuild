@@ -334,4 +334,6 @@ export interface Chat {
   autoCloseOptOut?: boolean;
   /** A Pi session another agent started (a subagent), not the user. Hidden from the sidebar by default. */
   subagent?: boolean;
+  /** Discovered from a native runtime's session (server/sessionImport.ts): the server files it under Closed once that runtime finishes. */
+  imported?: boolean;
 }

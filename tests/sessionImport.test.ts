@@ -141,15 +141,53 @@ test("classifies from live activity: a busy process shows working, stale registr
     const old = storage.getChat(threadOf(stale));
     assert.equal(old.archived, true);
     assert.notEqual(old.messages.at(-1).status, "streaming");
-    // The turn ends: the thread stops working (and, unpinned and not done, reads as closed in the sidebar).
+    assert.equal(working.imported, true);
+    // The turn ends: the thread stops working and is filed under Closed.
     await appendFile(join(dir, native + ".jsonl"), jsonl([rec("r2", "a5", "user", [{ type: "tool_result", tool_use_id: "t2", content: "ok" }]), rec("a6", "r2", "assistant", [{ type: "text", text: "Green." }])]));
     await registry(native, "idle");
     await mod.discover();
     const finished = storage.getChat(threadOf(native));
+    assert.equal(finished.archived, true);
     assert.equal(finished.messages.at(-1).status, "done");
     assert.equal(finished.messages.at(-1).stream, undefined);
     assert.equal(finished.messages.at(-1).content, "Green.");
+    // Back at work: it opens again by itself, as it was never touched by hand.
+    await appendFile(join(dir, native + ".jsonl"), jsonl([rec("u4", "a6", "user", "Ship it")]));
+    await registry(native, "busy");
+    await mod.discover();
+    assert.equal(storage.getChat(threadOf(native)).archived, false);
     assert.equal(storage.listChats().length, 2);
+  `);
+});
+
+test("closing or reopening a discovered thread by hand sticks through later work and finishing", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-user-"));
+  await run(dir, `${claudeFixture}
+    import { strict as assert } from "node:assert";
+    import { appendFile } from "node:fs/promises";
+    const mod = await import("./server/sessionImport.ts");
+    const id = threadOf(native);
+    const turn = async (u, a, parent, status) => {
+      await appendFile(join(dir, native + ".jsonl"), jsonl([rec(u, parent, "user", "Prompt " + u), ...(status === "idle" ? [rec(a, u, "assistant", [{ type: "text", text: "Reply " + a }])] : [])]));
+      await registry(native, status);
+      await mod.discover();
+      return storage.getChat(id);
+    };
+    await registry(native, "busy");
+    await appendFile(join(dir, native + ".jsonl"), jsonl([rec("u3", "a4", "user", "Working")]));
+    await mod.discover();
+    assert.equal(storage.getChat(id).archived, false);
+    // Closed by hand while it works (Sidebar's closePatch): it stays closed while working and after.
+    storage.putChat({ ...storage.getChat(id), archived: true, done: false });
+    assert.equal((await turn("u4", "a5", "u3", "busy")).archived, true);
+    const done = await turn("u5", "a6", "u4", "idle");
+    assert.equal(done.archived, true);
+    assert.equal(done.messages.at(-1).status, "done");
+    // Reopened by hand (archived: false, done: true): finishing again doesn't close it.
+    storage.putChat({ ...storage.getChat(id), archived: false, done: true });
+    assert.equal((await turn("u6", "a7", "a6", "busy")).archived, false);
+    const after = await turn("u7", "a8", "u6", "idle");
+    assert.deepEqual([after.archived, after.done, after.messages.at(-1).status], [false, true, "done"]);
   `);
 });
 
@@ -369,6 +407,15 @@ test("discovers every signed-in account, and continues each thread on the accoun
     assert.equal(fromSecond.runtimeAccount.runtime, "claude");
     assert.equal(storage.getChat(threadOf(native)).runtimeAccount, undefined);
     assert.equal(storage.listChats().length, 2);
+    // Saved accounts count when they're this server's (no device, or this server's id), not a paired device's.
+    const { serverId } = await import("./server/devices.ts");
+    const account = (name, deviceId) => ({ id: name, name, runtime: "codex", configDir: join(process.env.HOME, "." + name), ...(deviceId ? { deviceId } : {}) });
+    for (const name of ["work", "here", "elsewhere"]) await mkdir(join(process.env.HOME, "." + name), { recursive: true });
+    storage.setValue("client-state", JSON.stringify({ state: { settings: { runtimeAccounts: [account("work"), account("here", serverId()), account("elsewhere", "another-device")] } } }));
+    const keys = mod.sources().map((s) => s.key);
+    assert.ok(keys.includes("codex:" + join(process.env.HOME, ".work")));
+    assert.ok(keys.includes("codex:" + join(process.env.HOME, ".here")));
+    assert.ok(!keys.some((k) => k.endsWith(".elsewhere")));
   `);
 });
 
@@ -380,7 +427,7 @@ test("Codex is only asked again when its files change; its sessions follow each 
     const { mkdir, writeFile } = await import("node:fs/promises");
     const { join } = await import("node:path");
     const homes = [];
-    let threads = [{ id: "native-codex", cwd: "/tmp", updatedAt: Math.floor(Date.now() / 1000), status: { type: "active" } }];
+    let threads = ["native-codex", "kept-open"].map((id) => ({ id, cwd: "/tmp", updatedAt: Math.floor(Date.now() / 1000), status: { type: "active" } }));
     mock.module("./server/codex/install.ts", () => ({ codexBin: () => "/fake/codex", codexEnv: () => ({ CODEX_HOME: process.env.CODEX_HOME }) }));
     mock.module("./server/codex/rpc.ts", () => ({ CodexProcess: class {
       async initialize() { homes.push(process.env.CODEX_HOME); } close() {}
@@ -396,9 +443,13 @@ test("Codex is only asked again when its files change; its sessions follow each 
     const mod = await import("./server/sessionImport.ts");
     await mod.discover();
     a.equal(homes.length, 1);
-    const [chat] = storage.listChats();
+    const { threadId } = mod;
+    const chat = storage.getChat(threadId("codex", "native-codex"));
     a.equal(chat.archived, false);
     a.equal(chat.messages.at(-1).status, "streaming");
+    // The user closed and reopened this one by hand while it worked.
+    const kept = threadId("codex", "kept-open");
+    storage.putChat({ ...storage.getChat(kept), archived: false, done: true });
     await mod.discover();
     a.equal(homes.length, 1);
     // Codex writes to the rollout: listed again. The thread is gone from the listing: it isn't running anymore.
@@ -408,7 +459,15 @@ test("Codex is only asked again when its files change; its sessions follow each 
     a.equal(homes.length, 2);
     const settled = storage.getChat(chat.id);
     a.equal(settled.messages.at(-1).status, "stopped");
-    a.equal(storage.listChats().length, 1);
+    a.equal(settled.archived, true);
+    const reopened = storage.getChat(kept);
+    a.deepEqual([reopened.messages.at(-1).status, reopened.archived], ["stopped", false]);
+    a.equal(storage.listChats().length, 2);
+    // Settled once: later passes leave both alone.
+    const versions = JSON.stringify(storage.chatIndex());
+    await writeFile(join(process.env.CODEX_HOME, "sessions", "rollout.jsonl"), "{}\\n{}\\n{}\\n");
+    await mod.discover();
+    a.equal(JSON.stringify(storage.chatIndex()), versions);
   `);
 });
 

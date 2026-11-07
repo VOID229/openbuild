@@ -22,6 +22,7 @@ import { EXTERNAL_VIA } from "../shared/replies";
 import * as storage from "./storage";
 import { listProjects } from "./projects";
 import { claimRuntime } from "./threadRuntime";
+import { serverId } from "./devices";
 import { accountPath, withRuntimeAccount } from "./runtimeAccounts";
 import { claudeAccounts } from "./claude/accounts";
 import { claudeEnv } from "./claude/install";
@@ -168,6 +169,7 @@ class Thread {
 const chatOf = (runtime: ImportRuntime, nativeId: string, t: Thread, working: boolean, o: { title?: string; named?: boolean; createdAt: number; updatedAt: number; cwd: string }): Chat => ({
   id: threadId(runtime, nativeId),
   runtime,
+  imported: true,
   // Finished sessions arrive closed; one the runtime is on shows with the working threads.
   archived: !working,
   title: (o.title || t.messages.find((m) => m.role === "user")?.content || "Imported thread").trim().slice(0, 100),
@@ -702,8 +704,8 @@ const track = (id: string, t: Tracked) => storage.setValue(trackedKey(id), JSON.
 function savedAccounts(): RuntimeAccount[] {
   try {
     const accounts = JSON.parse(storage.getValue("client-state") ?? "{}")?.state?.settings?.runtimeAccounts;
-    // Accounts on paired devices keep their sessions on those devices.
-    return Array.isArray(accounts) ? accounts.filter((a) => a && typeof a === "object" && !a.deviceId) : [];
+    // Accounts on paired devices keep their sessions on those devices; this server's are local.
+    return Array.isArray(accounts) ? accounts.filter((a) => a && typeof a === "object" && (!a.deviceId || a.deviceId === serverId())) : [];
   } catch { return []; }
 }
 
@@ -799,15 +801,21 @@ function create(source: Source, f: Found, { chat, mapping, working }: Projected)
   });
 }
 
+/**
+ * Whether the thread is closed: discovery's call (open while the runtime works on it, closed once
+ * it's finished) until the user opens or closes it themselves; from then on it's theirs.
+ */
+const closedState = (old: Chat, was: Pick<Tracked, "archived">, working: boolean) =>
+  // Reopening by hand also marks it done (Sidebar's closePatch); discovery never does.
+  !!old.archived === !!was.archived && !old.done ? !working : old.archived;
+
 /** History comes from the native session; what the user did with the thread stays theirs. */
 export function merged(old: Chat, next: Chat, was: Pick<Tracked, "archived">, working: boolean): Chat {
   const keepTitle = old.titleSource === "user" || (old.titleSource === "auto" && !next.titleSource);
-  // Closed by discovery and not reopened or closed by the user since: it opens again once the runtime is back on it.
-  const reopen = working && old.archived && old.archived === was.archived;
   return {
     ...old, messages: next.messages, updatedAt: Math.max(old.updatedAt, next.updatedAt),
     ...(keepTitle ? {} : { title: next.title, titleSource: next.titleSource }),
-    ...(reopen ? { archived: false } : {}),
+    archived: closedState(old, was, working),
   };
 }
 
@@ -836,11 +844,13 @@ function settle(source: Source, listed: Set<string>) {
       const chat = storage.getChat(id) as Chat | undefined;
       if (!chat || storage.getValue(`${source.runtime}-session:${id}`) !== was.mapping) { track(id, { ...was, left: true }); return; }
       const reply = chat.messages.findLast((m) => m.role === "assistant");
-      if (reply?.status === "streaming" && reply.stream?.via === EXTERNAL_VIA) {
-        const { stream: _, ...ended } = reply;
-        storage.putChat({ ...chat, messages: chat.messages.map((m) => m === reply ? { ...ended, status: "stopped" as const } : m) } as unknown as storage.StoredChat);
+      const running = reply?.status === "streaming" && reply.stream?.via === EXTERNAL_VIA;
+      const archived = closedState(chat, was, false);
+      if (running || archived !== chat.archived) {
+        const ended = running ? chat.messages.map((m) => { if (m !== reply) return m; const { stream: _, ...rest } = m; return { ...rest, status: "stopped" as const }; }) : chat.messages;
+        storage.putChat({ ...chat, messages: ended, archived } as unknown as storage.StoredChat);
       }
-      track(id, { ...was, working: false });
+      track(id, { ...was, working: false, archived });
     });
   }
 }
