@@ -14,7 +14,8 @@ export interface PairState {
   mode: PairMode;
   code: string;
   address: string;
-  /** The address field shows once nothing was found, or when asked for. */
+  /** The address field takes the code field's place once nothing was found, or when asked for. Both
+   *  values are kept across the switch: the address only says where to look, the code is always needed. */
   showAddress: boolean;
   pairing: boolean;
   error?: string;
@@ -25,6 +26,8 @@ export type PairAction =
   | { type: "code"; code: string }
   | { type: "address"; address: string }
   | { type: "show-address" }
+  | { type: "show-code" }
+  | { type: "need-code" }
   | { type: "start" }
   | { type: "cancelled" }
   | { type: "failed"; error: string; reason?: string };
@@ -43,19 +46,28 @@ export function pairReducer(state: PairState, action: PairAction): PairState {
       return { ...state, address: action.address.slice(0, 255), error: undefined };
     case "show-address":
       return { ...state, showAddress: true };
+    case "show-code":
+      return { ...state, showAddress: false };
+    case "need-code":
+      return { ...state, showAddress: false, error: "Enter the pairing code from the other device too." };
     case "start":
       return { ...state, pairing: true, error: undefined };
     case "cancelled":
       return { ...state, pairing: false, error: undefined };
     case "failed":
-      return { ...state, pairing: false, error: action.error, showAddress: state.showAddress || action.reason === "not-found" };
+      // Nobody there: offer the address. A wrong code: back to the code.
+      return { ...state, pairing: false, error: action.error, showAddress: action.reason === "not-found" || (state.showAddress && action.reason !== "rejected") };
   }
 }
 
 const NETWORK: Record<PairMode, string> = { tailscale: "tailnet", lan: "network" };
 
 export const searchingLabel = (state: PairState) =>
-  state.showAddress && state.address.trim() ? `Looking for it at ${state.address.trim()}…` : `Looking for a device on your ${NETWORK[state.mode]}…`;
+  state.address.trim() ? `Looking for it at ${state.address.trim()}…` : `Looking for a device on your ${NETWORK[state.mode]}…`;
+
+/** What Pair sends, or nothing while the code is missing: an address never stands in for it. */
+export const pairRequest = (state: PairState) =>
+  state.code.trim() ? { mode: state.mode, code: state.code.trim(), address: state.address.trim() || undefined } : undefined;
 
 interface ViewProps {
   state: PairState;
@@ -67,13 +79,14 @@ interface ViewProps {
 /** The form itself, without effects, so every state renders the same in tests. */
 export function PairDeviceView({ state, dispatch, onSubmit, onCancel }: ViewProps) {
   const id = useId();
-  const address = useRef<HTMLInputElement>(null);
+  const field = useRef<HTMLInputElement>(null);
   const shownAddress = useRef(state.showAddress);
-  // Move to the address when it appears because nothing was found.
+  // Move to whichever field just took the other's place.
   useEffect(() => {
-    if (state.showAddress && !shownAddress.current) address.current?.focus();
+    if (state.showAddress !== shownAddress.current) field.current?.focus();
     shownAddress.current = state.showAddress;
   }, [state.showAddress]);
+  const needsCode = !state.code.trim();
 
   const modes: PairMode[] = ["tailscale", "lan"];
   const onModeKey = (e: KeyboardEvent<HTMLButtonElement>) => {
@@ -134,31 +147,11 @@ export function PairDeviceView({ state, dispatch, onSubmit, onCancel }: ViewProp
         It shows a code like <code>ABCD-2345</code>, valid for 15 minutes and for one device. Both devices need to be on the same{" "}
         {NETWORK[state.mode]}.
       </p>
-      <label className="pair-field" htmlFor={`${id}-code`}>
-        <span className="pair-label">Pairing code</span>
-        <input
-          id={`${id}-code`}
-          className="input input-code"
-          value={state.code}
-          placeholder="ABCD-2345"
-          aria-describedby={`${id}-help`}
-          aria-invalid={!!state.error && !state.showAddress}
-          autoFocus
-          autoComplete="off"
-          autoCapitalize="characters"
-          autoCorrect="off"
-          spellCheck={false}
-          enterKeyHint="go"
-          maxLength={40}
-          readOnly={state.pairing}
-          onChange={(e) => dispatch({ type: "code", code: e.target.value })}
-        />
-      </label>
       {state.showAddress ? (
-        <label className="pair-field" htmlFor={`${id}-address`}>
+        <label key="address" className="pair-field" htmlFor={`${id}-address`}>
           <span className="pair-label">Its address</span>
           <input
-            ref={address}
+            ref={field}
             id={`${id}-address`}
             className="input"
             value={state.address}
@@ -179,10 +172,36 @@ export function PairDeviceView({ state, dispatch, onSubmit, onCancel }: ViewProp
           </span>
         </label>
       ) : (
-        <button type="button" className="pair-link" disabled={state.pairing} onClick={() => dispatch({ type: "show-address" })}>
-          Enter its address instead
-        </button>
+        <label key="code" className="pair-field" htmlFor={`${id}-code`}>
+          <span className="pair-label">Pairing code</span>
+          <input
+            ref={field}
+            id={`${id}-code`}
+            className="input input-code"
+            value={state.code}
+            placeholder="ABCD-2345"
+            aria-describedby={state.address.trim() ? `${id}-help ${id}-code-at` : `${id}-help`}
+            aria-invalid={!!state.error}
+            autoFocus
+            autoComplete="off"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            enterKeyHint="go"
+            maxLength={40}
+            readOnly={state.pairing}
+            onChange={(e) => dispatch({ type: "code", code: e.target.value })}
+          />
+          {state.address.trim() && (
+            <span className="pair-hint" id={`${id}-code-at`}>
+              It looks for the device at <code>{state.address.trim()}</code>.
+            </span>
+          )}
+        </label>
       )}
+      <button type="button" className="pair-link" disabled={state.pairing} onClick={() => dispatch({ type: state.showAddress ? "show-code" : "show-address" })}>
+        {state.showAddress ? "Enter code" : "Enter its address instead"}
+      </button>
       {state.error && (
         <p className="pi-error pair-error" role="alert">
           <CircleAlert size={13} /> {state.error}
@@ -199,8 +218,8 @@ export function PairDeviceView({ state, dispatch, onSubmit, onCancel }: ViewProp
         <button type="button" className="btn btn-sm" onClick={onCancel}>
           {state.pairing ? "Stop" : "Cancel"}
         </button>
-        <button type="submit" className="btn btn-sm btn-primary" disabled={state.pairing || !state.code.trim()}>
-          {state.pairing ? "Pairing…" : state.error ? "Try again" : "Pair"}
+        <button type="submit" className="btn btn-sm btn-primary" disabled={state.pairing || (needsCode && !state.showAddress)}>
+          {state.pairing ? "Pairing…" : needsCode ? (state.showAddress ? "Next" : "Pair") : state.error ? "Try again" : "Pair"}
         </button>
       </div>
     </form>
@@ -214,12 +233,15 @@ export function PairDevice({ onPaired, onClose }: { onPaired: (device: Device) =
   useEffect(() => () => search.current?.abort(), []);
 
   const submit = async () => {
-    if (state.pairing || !state.code.trim()) return;
+    if (state.pairing) return;
+    const request = pairRequest(state);
+    // From the address, Pair without a code goes to the code first.
+    if (!request) return dispatch({ type: "need-code" });
     const ctrl = new AbortController();
     search.current = ctrl;
     dispatch({ type: "start" });
     try {
-      const device = await pairDevice({ mode: state.mode, code: state.code.trim(), address: (state.showAddress && state.address.trim()) || undefined }, ctrl.signal);
+      const device = await pairDevice(request, ctrl.signal);
       // Paired, even if Stop came too late: the device is saved on the server either way.
       await onPaired(device);
     } catch (err) {
