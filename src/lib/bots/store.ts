@@ -3,6 +3,7 @@
 // layout (which chat is open, folded sections) stays in this browser.
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { abortable } from "../abort";
 import { uid } from "../id";
 import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
@@ -434,20 +435,41 @@ function connect(get: StoreGet, set: StoreSet) {
   void stream(get, set);
 }
 
+/**
+ * The server pings every 20s. Quiet this long, the connection is dead even if the browser hasn't
+ * noticed (a network change, a phone or tab waking from sleep): without this bound the reader
+ * waits forever, and typing, status and replies only show after a reload.
+ */
+export const STREAM_SILENCE = 45_000;
+
 async function stream(get: StoreGet, set: StoreSet) {
   let delay = 400;
   for (;;) {
+    const ctrl = new AbortController();
+    let heard = Date.now();
+    // Wall-clock, so a timer that was frozen with the tab still sees how long it's been.
+    const check = () => {
+      if (Date.now() - heard > STREAM_SILENCE) ctrl.abort(new DOMException("The OpenBots stream went quiet", "TimeoutError"));
+    };
+    const onVisible = () => document.visibilityState === "visible" && check();
+    const watchdog = setInterval(check, 5_000);
+    globalThis.addEventListener?.("online", check);
+    globalThis.addEventListener?.("pageshow", check);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     try {
-      const res = await fetch("/api/bots/stream");
+      const res = await abortable(fetch("/api/bots/stream", { signal: ctrl.signal }), ctrl.signal);
       if (!res.ok || !res.body) throw new Error(String(res.status));
+      heard = Date.now();
       delay = 400;
       set({ connected: true });
-      const reader = res.body.getReader();
+      reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
       for (;;) {
-        const { value, done } = await reader.read();
+        const { value, done } = await abortable(reader.read(), ctrl.signal);
         if (done) break;
+        heard = Date.now();
         buf += dec.decode(value, { stream: true });
         let nl: number;
         while ((nl = buf.indexOf("\n")) >= 0) {
@@ -463,7 +485,16 @@ async function stream(get: StoreGet, set: StoreSet) {
         }
       }
     } catch {
-      // The server is restarting, or it isn't up yet.
+      // The server is restarting, it isn't up yet, or the connection went quiet. The next
+      // connection's snapshot brings back whatever was missed.
+    } finally {
+      clearInterval(watchdog);
+      globalThis.removeEventListener?.("online", check);
+      globalThis.removeEventListener?.("pageshow", check);
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+      // Close the dead connection too: browsers share six per host across all tabs.
+      ctrl.abort();
+      void reader?.cancel().catch(() => {});
     }
     set({ connected: false });
     await new Promise((r) => setTimeout(r, delay));
