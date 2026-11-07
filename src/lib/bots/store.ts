@@ -470,7 +470,8 @@ function landed(check: WriteCheck, conversations: Conversation[]): boolean | und
   if (!c) return check.kind === "delete" ? true : undefined;
   const m = c.messages.find((x) => x.id === check.messageId);
   if (check.kind === "post") return m ? true : c.more ? undefined : false;
-  if (check.kind === "delete") return m ? false : true;
+  // Absent from a page that holds only the latest messages proves nothing: it may be further back.
+  if (check.kind === "delete") return m ? false : c.more ? undefined : true;
   if (!m) return undefined;
   if (check.kind === "reaction") return !!m.reactions?.some((r) => r.by === "me" && r.emoji === check.emoji && r.to === check.to) === check.on;
   if (check.kind === "answer") return m.question?.answer === check.answer;

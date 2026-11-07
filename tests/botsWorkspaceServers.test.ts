@@ -230,32 +230,49 @@ test("a request for another server id is refused with 409 before its body is rea
   expect(res.headers.get("x-openbuild-server")).toBe(hostId);
 }, 15_000);
 
-/** A device's write whose body arrives only after `meanwhile` ran. */
-async function slowPost(text: string, meanwhile: () => Promise<void>) {
-  let finish!: () => void;
-  const message = myMessage(text);
-  const bytes = new TextEncoder().encode(JSON.stringify(message));
-  const body = new ReadableStream<Uint8Array>({
-    start(c) {
-      c.enqueue(bytes.slice(0, 5));
-      finish = () => {
-        c.enqueue(bytes.slice(5));
-        c.close();
-      };
+/**
+ * A request over a raw socket whose body arrives in two parts, with `meanwhile` run between them.
+ * A fetch body stream isn't held back the same way by every Bun, so the bytes are sent by hand.
+ */
+async function slowRequest(method: string, path: string, body: string, meanwhile: () => Promise<void>, headers: Record<string, string> = { authorization: `Bearer ${token}` }) {
+  const bytes = new TextEncoder().encode(body);
+  let answer = "";
+  let done!: () => void;
+  const ended = new Promise<void>((r) => (done = r));
+  const socket = await Bun.connect({
+    hostname: "127.0.0.1",
+    port: hostPort,
+    socket: {
+      data(_, chunk) {
+        answer += new TextDecoder().decode(chunk);
+        if (/\r\n\r\n/.test(answer)) done();
+      },
+      close() {
+        done();
+      },
     },
   });
-  const pending = fetch(`${hostBase()}/api/workspace/to/${hostId}/api/bots/conversations/${conversation}/messages`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body } as RequestInit);
+  const head = [`${method} ${path} HTTP/1.1`, `host: 127.0.0.1:${hostPort}`, "content-type: application/json", `content-length: ${bytes.length}`, "connection: close", ...Object.entries(headers).map(([k, v]) => `${k}: ${v}`), "", ""].join("\r\n");
+  socket.write(head);
+  socket.write(bytes.slice(0, 5));
   await Bun.sleep(300);
   await meanwhile();
-  finish();
-  const res = await pending;
-  return { res, message };
+  socket.write(bytes.slice(5));
+  await ended;
+  socket.end();
+  return Number(/^HTTP\/1\.1 (\d+)/.exec(answer)?.[1]);
+}
+
+/** A device's write whose body arrives only after `meanwhile` ran. */
+async function slowPost(text: string, meanwhile: () => Promise<void>) {
+  const message = myMessage(text);
+  const status = await slowRequest("POST", `/api/workspace/to/${hostId}/api/bots/conversations/${conversation}/messages`, JSON.stringify(message), meanwhile);
+  return { status, message };
 }
 
 test("a grant taken back while a write's body was on its way fails it closed", async () => {
-  const { res, message } = await slowPost("sent as the grant went", () => allowWorkspace(false));
-  expect(res.status).toBe(403);
-  expect(res.headers.get("x-openbuild-server")).toBe(hostId);
+  const { status, message } = await slowPost("sent as the grant went", () => allowWorkspace(false));
+  expect(status).toBe(403);
   expect((await hostMessages()).some((m) => m.id === message.id)).toBe(false);
   await allowWorkspace(true);
 }, 20_000);
@@ -338,17 +355,13 @@ test("a reaction sent again while its first try is still on its way ends as aske
   const message = myMessage("react to me");
   expect((await via(`/api/bots/conversations/${conversation}/messages`, { method: "POST", ...json(message) })).status).toBe(200);
   const path = `/api/workspace/to/${hostId}/api/bots/conversations/${conversation}/messages/${message.id}`;
-  // The first try's body is held up on the way; the tab, hearing nothing, sends it again.
-  const bytes = new TextEncoder().encode(JSON.stringify({ emoji: "🎉", on: true }));
-  let finish!: () => void;
-  const body = new ReadableStream<Uint8Array>({ start(c) { c.enqueue(bytes.slice(0, 4)); finish = () => { c.enqueue(bytes.slice(4)); c.close(); }; } });
-  const first = fetch(`${hostBase()}${path}`, { method: "PATCH", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body } as RequestInit);
-  await Bun.sleep(200);
-  const retried = await via(`/api/bots/conversations/${conversation}/messages/${message.id}`, { method: "PATCH", ...json({ emoji: "🎉", on: true }) });
-  expect(retried.status).toBe(200);
-  // Then the first try lands after all.
-  finish();
-  expect((await first).status).toBe(200);
+  // The first try's body is held up on the way; the tab, hearing nothing, sends it again, and then
+  // the first try lands after all.
+  const first = await slowRequest("PATCH", path, JSON.stringify({ emoji: "🎉", on: true }), async () => {
+    const retried = await via(`/api/bots/conversations/${conversation}/messages/${message.id}`, { method: "PATCH", ...json({ emoji: "🎉", on: true }) });
+    expect(retried.status).toBe(200);
+  });
+  expect(first).toBe(200);
   const reactions = (await hostMessages()).find((m) => m.id === message.id) as any;
   expect(reactions.reactions.filter((r: any) => r.by === "me" && r.emoji === "🎉")).toHaveLength(1);
   // And taking it back the same way is a set too.
@@ -359,10 +372,10 @@ test("a reaction sent again while its first try is still on its way ends as aske
 test("forgetting the pairing closes the device's streams and fails a write in flight", async () => {
   const stream = lines(await via("/api/bots/stream"));
   expect((await stream.next()).t).toBe("hello");
-  const { res, message } = await slowPost("sent as the pairing went", async () => {
+  const { status, message } = await slowPost("sent as the pairing went", async () => {
     expect((await fetch(`${hostBase()}/api/paired-clients/${clientId}`, { method: "DELETE" })).status).toBe(200);
   });
-  expect(res.status).toBe(401);
+  expect(status).toBe(401);
   expect(await stream.ended()).toBe(true);
   expect((await hostMessages()).some((m) => m.id === message.id)).toBe(false);
   const after = await via("/api/bots");

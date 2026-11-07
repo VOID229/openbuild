@@ -362,3 +362,45 @@ test("a reaction is sent as the state it should end in, so a retry can't undo a 
   `);
   expect(out).toBe("ok");
 }, 30_000);
+
+test("a delete of older history that wasn't confirmed stays unknown while the snapshot only holds the latest page", async () => {
+  const out = await tab(`
+    const latest = { id: "new", author: "bot", text: "latest", at: 50 };
+    const older = { id: "old", author: "me", text: "from long ago", at: 1 };
+    snapshots.host = snap([{ ...chat("host-chat", [latest]), more: true }]);
+    await preloadBots();
+    useBots.getState().ensureSeeded();
+    await wait(60);
+    // The older page is loaded, and the delete of one of its messages gets no answer.
+    hold = (path, method) => {
+      if (path.includes("beforeId=")) return Promise.resolve(Response.json({ messages: [older], more: false }, { headers: { "x-openbuild-server": "host" } }));
+      if (method === "DELETE") return Promise.resolve(Response.json({ error: "unreachable", reason: "offline" }, { status: 502 }));
+      return undefined;
+    };
+    await useBots.getState().loadOlder("host-chat");
+    assert.deepEqual(ids(), ["host-chat"]);
+    assert.deepEqual(useBots.getState().conversations[0].messages.map((m) => m.id), ["old", "new"]);
+    useBots.getState().deleteMessage("host-chat", "old");
+    await wait(80);
+    hold = () => undefined;
+    // The host's snapshot (its latest page only) doesn't have it, which says nothing about the old one.
+    const [entry] = useBots.getState().unconfirmed;
+    assert.equal(entry.check.kind, "delete");
+    assert.equal(entry.unknown, true);
+    assert.equal(entry.missing, false);
+    // A later snapshot of the same page leaves it as it is: still kept, not offered for a retry.
+    await switchWorkspace("srv");
+    await switchWorkspace("host");
+    await wait(80);
+    assert.equal(useBots.getState().unconfirmed.length, 1);
+    assert.equal(useBots.getState().unconfirmed[0].unknown, true);
+    // Only a full history, where it's truly absent, settles it.
+    snapshots.host = snap([chat("host-chat", [latest])]);
+    await switchWorkspace("srv");
+    await switchWorkspace("host");
+    await wait(80);
+    assert.deepEqual(useBots.getState().unconfirmed, []);
+    console.log("ok");
+  `, { TAB_URL: "http://localhost/?workspace=host", STORAGE: join(directory, "older-delete.json") });
+  expect(out).toBe("ok");
+}, 30_000);
