@@ -1,6 +1,6 @@
 // Pieces the OpenBots sidebar, chat and details panel share.
 import { Star } from "lucide-react";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -45,7 +45,7 @@ export function dividerTime(t: number) {
 
 /** A message as one line of text: for previews, reply quotes and copying. */
 export function messageText(m: BotMessage): string {
-  if (m.question) return `❓ ${m.question.title}`;
+  if (m.question) return `? ${m.question.title}`;
   if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
   if (m.event) return [eventText(m.event), m.event.detail].filter(Boolean).join(" ");
@@ -54,17 +54,27 @@ export function messageText(m: BotMessage): string {
   return m.images?.length ? (m.images.length === 1 ? "📷 Photo" : `📷 ${m.images.length} photos`) : "";
 }
 
+/** {@link messageText} for display: a question's "?" in muted gray, since a red mark reads as an error. */
+export function messageLine(m: BotMessage): ReactNode {
+  if (!m.question) return messageText(m);
+  return (
+    <>
+      <span className="bots-question-mark" aria-hidden>?</span> {m.question.title}
+    </>
+  );
+}
+
 export function authorName(author: string, bots: Bot[]) {
   return author === "me" ? "You" : (bots.find((b) => b.id === author)?.name ?? "Deleted bot");
 }
 
 /** The sidebar's second line: the latest message, with who said it where that isn't obvious. */
-export function previewOf(c: Conversation, bots: Bot[]): string {
+export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
   const last = c.messages.findLast((m) => !m.event) ?? c.messages.at(-1);
   if (!last) return "Say hi";
-  const text = messageText(last);
-  if (last.author === "me") return `You: ${text}`;
-  if (c.kind !== "direct") return `${authorName(last.author, bots).split(" ·")[0]}: ${text}`;
+  const text = messageLine(last);
+  if (last.author === "me") return <>You: {text}</>;
+  if (c.kind !== "direct") return <>{authorName(last.author, bots).split(" ·")[0]}: {text}</>;
   return text;
 }
 

@@ -2024,6 +2024,12 @@
   white-space: nowrap;
 }
 
+/* A question's mark in previews and reply quotes: muted, not the red emoji that reads as an error. */
+.bots-question-mark {
+  font-weight: 700;
+  color: var(--text-3);
+}
+
 .bots-reply-x {
   width: 24px;
   height: 24px;
