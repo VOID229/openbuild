@@ -38,6 +38,8 @@ import * as sessionImport from "./sessionImport";
 import { computerRoutes } from "./computers/api";
 import { botRoutes } from "./bots/routes";
 import { workspaceRoutes } from "./bots/workspace";
+import { githubToken } from "./github/auth";
+import { githubRoutes } from "./github/routes";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -489,8 +491,9 @@ function serve(port: number, hostname: string) {
           // Long generations shouldn't be cut off by the idle timeout.
           server.timeout(req, 0);
           const body = (await readJson(req)) as ChatRequest | undefined;
-          if (!isStreamRef(body?.stream)) return handleChat(req.signal, body, (scope) => vault.secrets(scope));
-          const run = localRun(body.stream.id, () => startRun((signal) => handleChat(signal, body, (scope) => vault.secrets(scope))));
+          const chatOpts = { githubToken: async () => (await githubToken("reader"))?.token };
+          if (!isStreamRef(body?.stream)) return handleChat(req.signal, body, (scope) => vault.secrets(scope), chatOpts);
+          const run = localRun(body.stream.id, () => startRun((signal) => handleChat(signal, body, (scope) => vault.secrets(scope), chatOpts)));
           return new Response(run.stream(), { headers: runHeaders });
         }),
       },
@@ -612,6 +615,7 @@ function serve(port: number, hostname: string) {
       ...computerRoutes(api),
 
       ...botRoutes(api),
+      ...githubRoutes(api),
 
       ...workspaceRoutes(api),
 

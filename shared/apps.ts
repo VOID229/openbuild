@@ -136,9 +136,25 @@ export interface CatalogApp {
   skills?: SkillSource[];
   /** Shown under Recommended until it's connected. */
   recommended?: boolean;
+  /**
+   * Signs in through OpenBuild's GitHub credential (server/github/auth.ts): the GitHub App, or a
+   * personal access token the user chose. Its `access` field is OpenBuild's read-only rule.
+   */
+  githubAuth?: boolean;
 }
 
 const google = (scopes: string[], enable: string[]) => ({ client: "google" as const, scopes: scopes.map((s) => (s.startsWith("https://") ? s : `https://www.googleapis.com/auth/${s}`)), enable });
+
+/** What bots may do on GitHub. OpenBuild enforces it whatever GitHub granted; reading is the default. */
+export const GITHUB_ACCESS_FIELD: AppField = {
+  id: "access",
+  label: "What bots may do",
+  options: [
+    { value: "read", label: "Read only" },
+    { value: "write", label: "Read and write" },
+  ],
+  help: "OpenBuild's own rule, checked before every tool call. What GitHub lets the app or token do is set on GitHub, and can be more.",
+};
 
 export const APP_CATALOG: CatalogApp[] = [
   // ------------------------------------------------------------ password managers
@@ -431,8 +447,9 @@ export const APP_CATALOG: CatalogApp[] = [
     description: "Manage repos, issues, pull requests and Actions.",
     category: "code",
     docs: "https://github.com/github/github-mcp-server",
-    connection: { kind: "token", url: "https://api.githubcopilot.com/mcp/", headers: { Authorization: "Bearer {token}" } },
-    fields: [{ id: "token", label: "Personal access token", secret: true, placeholder: "github_pat_…", link: "https://github.com/settings/personal-access-tokens/new", help: "A fine-grained or classic token, with the access you want bots to have." }],
+    connection: { kind: "token", url: "https://api.githubcopilot.com/mcp/", headers: { Authorization: "Bearer {token}", "X-MCP-Readonly": "{readonly}" } },
+    fields: [GITHUB_ACCESS_FIELD, { id: "token", label: "Personal access token", secret: true, placeholder: "github_pat_…", link: "https://github.com/settings/personal-access-tokens/new", help: "A fine-grained or classic token, with the access you want bots to have." }],
+    githubAuth: true,
     recommended: true,
   },
   {

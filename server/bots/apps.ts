@@ -3,7 +3,9 @@
 // `use_app` to call a tool. State is in the bots database under "apps" (it outlasts a reset, like
 // the keys do); sign-ins are in the vault (see mcp.ts); skills are files (see skills.ts).
 import { APP_CALLBACK_PATH, APP_CATALOG, appById, appReturnOrigin, OAUTH_CLIENTS, type AppStatus, type AppsSnapshot, type AppView, type CatalogApp, type OAuthClientId } from "../../shared/apps";
+import { isReadTool } from "../../shared/github";
 import { GITHUB_SCOPE } from "../../shared/types";
+import { choosePat, githubToken } from "../github/auth";
 import * as vault from "../vault";
 import * as db from "./db";
 import { beginSignIn, callTool, close, finishSignIn, getOwnClient, getSecrets, listTools, NeedsSignIn, saveOwnClient, saveSecrets, type OwnClient, type ToolInfo, type ToolOutput } from "./mcp";
@@ -180,13 +182,14 @@ export async function connect(id: string, input: ConnectInput): Promise<{ author
   if (c.kind === "token") {
     const existing = (await getSecrets(id)).fields ?? {};
     const keys = { ...existing, ...secrets };
-    const missing = (app.fields ?? []).filter((f) => f.secret && !keys[f.id]);
-    // GitHub can use the key OpenBuild already has for its own GitHub features.
-    if (missing.length && app.id === "github") {
-      const [saved] = await vault.secrets(GITHUB_SCOPE).catch(() => [] as string[]);
-      if (saved) keys.token = saved, missing.length = 0;
+    if (app.githubAuth) {
+      // GitHub signs in with the credential OpenBuild's GitHub features use. Pasting a token here picks it.
+      if (secrets.token) await choosePat();
+      if (!(await githubToken("mcp", { pasted: keys.token }))) throw new svc.BotsError("Connect with GitHub, or paste a personal access token.");
+    } else {
+      const missing = (app.fields ?? []).filter((f) => f.secret && !keys[f.id]);
+      if (missing.length) throw new svc.BotsError(`Paste your ${missing[0]!.label}.`);
     }
-    if (missing.length) throw new svc.BotsError(`Paste your ${missing[0]!.label}.`);
     await saveSecrets(id, (s) => ({ ...s, fields: keys }));
   }
   update(id, { status: "connecting", error: undefined, fields: values });
@@ -239,7 +242,25 @@ export async function finishPasted(id: string, pasted: unknown): Promise<AppView
 async function target(app: CatalogApp) {
   const s = storedApps()[app.id];
   const c = app.connection;
-  return { app, values: s?.fields ?? {}, secrets: await getSecrets(app.id), own: c.kind === "client" ? await clientFor(c.client) : undefined };
+  let values = s?.fields ?? {};
+  let secrets = await getSecrets(app.id);
+  if (app.githubAuth) {
+    // A fresh token each time (the app's last eight hours); a new one makes a new connection.
+    const credential = await githubToken("mcp", { pasted: secrets.fields?.token });
+    if (!credential) throw new NeedsSignIn(`${app.name} isn't signed in to GitHub. Connect it again in Apps.`);
+    secrets = { ...secrets, fields: { ...secrets.fields, token: credential.token } };
+    values = { ...values, readonly: values.access === "write" ? "false" : "true" };
+  }
+  return { app, values, secrets, own: c.kind === "client" ? await clientFor(c.client) : undefined };
+}
+
+/** OpenBuild's GitHub credential changed (connected, disconnected, another one picked): reconnect the apps that use it. */
+export async function githubChanged() {
+  for (const [id, s] of Object.entries(storedApps())) {
+    if (!catalogApp(id)?.githubAuth) continue;
+    await close(id);
+    if (s.status === "connected" || s.status === "needs-auth" || s.status === "error") await check(id);
+  }
 }
 
 const message = (err: unknown) => (err instanceof Error ? err.message : String(err)).slice(0, 500);
@@ -316,7 +337,8 @@ export function contextNote(): string {
             }
             list += (i ? ", " : "") + name;
           }
-          return `- ${app.name} (${app.id}), ${names.length} tools: ${list || "none listed"}`;
+          const readOnly = app.githubAuth && s.fields?.access !== "write" ? " Read-only: OpenBuild refuses tools that change anything." : "";
+          return `- ${app.name} (${app.id}), ${names.length} tools: ${list || "none listed"}${readOnly}`;
         })
         .join("\n")}`,
     );
@@ -386,9 +408,13 @@ export async function appsTool(p: Record<string, unknown>): Promise<unknown> {
 
 /** Call one of an app's tools for a bot. */
 export async function useApp(p: Record<string, unknown>): Promise<ToolOutput> {
-  const { app } = connectedApp(p.app);
+  const { app, s } = connectedApp(p.app);
   const tool = String(p.tool ?? "").trim();
   if (!tool) throw new svc.BotsError("Say which tool.");
+  // OpenBuild's read-only rule, enforced here whatever the token could do on GitHub.
+  if (app.githubAuth && s.fields?.access !== "write" && !isReadTool(tool, s.tools?.find((t) => t.name === tool))) {
+    throw new svc.BotsError(`${app.name} is read-only in OpenBuild, so ${tool} wasn't run. The user can allow writing in Apps → ${app.name}.`, 403);
+  }
   let args: unknown = p.arguments ?? p.args ?? {};
   if (typeof args === "string") {
     try {

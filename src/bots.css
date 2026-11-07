@@ -3381,6 +3381,11 @@ button.bots-details-name:hover {
   text-underline-offset: 2px;
 }
 
+/* Links styled as buttons (Open GitHub, Install on…) keep the button look. */
+.app-guide a.btn {
+  text-decoration: none;
+}
+
 .app-guide {
   display: flex;
   flex-direction: column;
