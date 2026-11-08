@@ -942,10 +942,10 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
       : r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
-    const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${untrustedData(quoted.message.text.slice(0, 200))}”)` : "";
+    const reply = quoted ? ` (replying to [${quoted.message.id.slice(0, 8)}] ${name(quoted.message.author)}: “${c.friend || parseFriendAuthor(quoted.message.author) ? untrustedData(quoted.message.text.slice(0, 200)) : quoted.message.text.slice(0, 200)}”)` : "";
     const list = m.reactions ?? [];
     const number = (id?: string) => list.findIndex((x) => reactionId(x) === id) + 1;
-    const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${untrustedData(x.emoji)} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
+    const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${c.friend || parseFriendAuthor(x.by) ? untrustedData(x.emoji) : x.emoji} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
     return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
   };
 }
