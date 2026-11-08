@@ -1,3 +1,4 @@
+import { memoryContext } from "./sessionPolicy";
 import { untrustedData } from "./transcriptData";
 // What a bot's Pi extension can do. The extension talks to a unix socket (see listen()); every
 // request is one bot, identified by the token minted for its process, so a bot can't act as another.
@@ -215,7 +216,7 @@ export function contextFor(botId: string): string {
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
-    bot.memory.length ? `Things you remember:\n${bot.memory.slice(0, 40).map((m) => `- [${m.id.slice(0, 8)}] ${m.text}`).join("\n")}` : "You haven't written any memories yet.",
+    bot.memory.length ? `Things you remember:\n${memoryContext(bot.memory)}` : "You haven't written any memories yet.",
     bot.routines.length
       ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
       : "",

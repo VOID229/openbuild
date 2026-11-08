@@ -181,6 +181,8 @@ test("a steer Pi queues after the turn settled is cleared and gets a turn of its
       const svc = await import('./server/bots/service.ts');
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       const boss = svc.createBot({ name: 'Boss' });
       const prompts = [], commands = [], queue = [];
       const mind = { token: 'test', loaded: JSON.stringify(piFlags()), busy: false, sent: false, draft: '', proc: { exited: false, lastUsed: Date.now(), close() {}, async send(cmd) {
@@ -197,7 +199,8 @@ test("a steer Pi queues after the turn settled is cleared and gets a turn of its
         if (cmd.type === 'clear_queue') return { steering: queue.splice(0), followUp: [] };
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      minds.set(boss.bot.id, mind);
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(boss.bot.id) });
+        minds.set(boss.bot.id, mind);
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       const until = async check => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
       const post = text => svc.postMessage(boss.conversationId, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
