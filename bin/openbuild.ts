@@ -1001,6 +1001,9 @@ if (service) {
     // No state file means something else runs it (systemd, `bun dev`): there is no pid here to stop.
     if (!owned && (await serving(port)))
       fail(`OpenBuild answers on port ${port}, but it wasn't started by \`openbuild start\` (no ${STATE}), so this command has no pid to stop. Restart it where it runs (systemd: systemctl --user restart openbuild), or stop that process and use \`openbuild start\`.`);
+    // Keep the detached server on its saved address, including an accepted alternative.
+    // An explicit PORT still selects the replacement server’s address.
+    if (process.env.PORT === undefined && state) PORT = state.port;
     // Agent turns carry on in detached workers; the new server reattaches.
     // --yes/-y remain accepted for compatibility; no destructive confirmation is needed.
     const opened = owned && stage.open({ scene: "lifecycle", steps: [STOP_STEP, "Preparing the network", "Starting the server", ...(mode === "tailscale" ? ["Publishing on Tailscale"] : [])] });
