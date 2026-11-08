@@ -77,7 +77,7 @@ test("chat preload and retry share a request, failures retry, later polls reques
     fail = false;
     assert.deepEqual(await loadChats(), []);
     assert.deepEqual(await loadChats(), []);
-    assert.deepEqual(urls, ["/api/chats?summaries&startup", "/api/chats?summaries&startup", "/api/chats?summaries"]);
+    assert.deepEqual(urls, ["/api/chats?summaries&startup&all", "/api/chats?summaries&startup&all", "/api/chats?summaries"]);
   `;
   const child = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
   const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

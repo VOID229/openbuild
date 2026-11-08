@@ -542,6 +542,14 @@ function serve(port: number, hostname: string) {
           // Refreshes show the saved list promptly even if Pi is cold or transcripts are large.
           // Discovery continues in the background; subsequent polls await its fresh result.
           await refreshChats(params.has("startup") ? 100 : undefined);
+          if (params.has("summaries") && params.has("all")) {
+            // A page load, with nothing cached: every summary along with the index, as stored.
+            const index = storage.chatIndex();
+            const rows = await storage.chatSummaryRows();
+            return new Response(`{"summaryIndex":${JSON.stringify(index)},"summaries":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+              headers: { "content-type": "application/json" },
+            });
+          }
           if (params.has("summaries")) return Response.json({ summaryIndex: storage.chatIndex() });
           if (params.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });

@@ -1,9 +1,9 @@
-import { loadChatHistory } from "../lib/db";
+import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { isHosted } from "../lib/runtime";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { stopGeneration } from "../lib/chat";
+import { adoptHistory, stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
 import { harnessSession, removeWorktree } from "../lib/pi";
 import { runtimeName } from "../lib/runtimes";
@@ -284,6 +284,15 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
   const input = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
+  // Pointing at a row (or pressing it) starts loading its history, so the click doesn't wait for it.
+  // A brief pause first, so a pointer passing over the list doesn't fetch every thread on its way.
+  const intent = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const prefetch = () => !active && prefetchHistory(chat);
+  const soon = () => {
+    clearTimeout(intent.current);
+    intent.current = setTimeout(prefetch, 80);
+  };
+  useEffect(() => () => clearTimeout(intent.current), []);
 
   useLayoutEffect(() => {
     const motion = landing.get(chat.id);
@@ -345,7 +354,17 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         } else onMenu(chat.id, e.clientX, e.clientY);
       }}
     >
-      <button type="button" className="history-title" onClick={() => onSelect(chat, hit)} aria-current={active ? "page" : undefined} title={titling ? undefined : chat.title}>
+      <button
+        type="button"
+        className="history-title"
+        onClick={() => onSelect(chat, hit)}
+        onPointerEnter={soon}
+        onPointerLeave={() => clearTimeout(intent.current)}
+        onPointerDown={prefetch}
+        onFocus={soon}
+        aria-current={active ? "page" : undefined}
+        title={titling ? undefined : chat.title}
+      >
         <span className="history-title-line">
           <span className="history-icon" title={model?.name}>
             {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
@@ -1513,6 +1532,9 @@ export function Sidebar() {
   const onSelect = useCallback(
     (c: Chat, hit?: SearchHit) => {
       const open = () => {
+        // Prefetched while the row was pointed at: it opens with its messages, not "Loading thread…".
+        const full = historyAtHand(c);
+        if (full) adoptHistory(c, full);
         selectChat(c.id);
         if (hit?.snippet) setSearchFocus({ chatId: c.id, messageId: hit.snippet.messageId, words: hit.words });
       };

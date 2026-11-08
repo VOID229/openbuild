@@ -19,14 +19,14 @@ import { expandBotsThread, Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
 import { UsagePage } from "./components/UsagePage";
-import { adoptDiscoveredChats, resumeReplies } from "./lib/chat";
+import { adoptDiscoveredChats, adoptHistory, resumeReplies } from "./lib/chat";
 import { preloadBots } from "./lib/bots/store";
 import { closeBotsThread, useBotsThreadEscape } from "./lib/botsThread";
 import { queuesReady } from "./lib/queue";
 import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
-import { loadChatHistory, loadChats } from "./lib/db";
+import { loadChatHistory, loadChats, prefetchHistory } from "./lib/db";
 import { watchDiscoveredTitles } from "./lib/naming";
 import { RELOAD_THREADS } from "./lib/pulls";
 import { SERVER_BACK } from "./lib/serverOutage";
@@ -97,6 +97,9 @@ let preloadingProjects: Promise<void> | undefined;
  * Past the deadline, whatever's missing fills in when it arrives.
  */
 export async function preloadApp() {
+  // The thread in the address loads alongside the list rather than after it.
+  const routed = readRoute(location.pathname, location.hash).threadId;
+  if (routed) prefetchHistory({ id: routed, title: "", createdAt: 0, updatedAt: 0, messages: [], historyDeferred: true });
   // First, so it isn't queued behind the slower requests below for one of the browser's connections.
   const bots = preloadBots();
   prefetchUsage();
@@ -125,15 +128,6 @@ export async function preloadApp() {
     }
   }).catch(() => {}).finally(() => { preloadingProjects = undefined; });
   await Promise.race([Promise.all([hydrated, chats, bots]), new Promise((r) => setTimeout(r, 3000))]);
-}
-
-/** Swap a deferred thread for its loaded history, unless that already happened. */
-function adoptHistory(chat: Chat, full: Chat) {
-  const current = useStore.getState().chats.find(c => c.id === chat.id);
-  if (!current?.historyDeferred) return;
-  const { historyDeferred: _, ...metadata } = current;
-  useStore.getState().upsertChat({ ...full, ...metadata, messages: full.messages }, false);
-  resumeReplies(chat.id);
 }
 
 /** So a reload paints the thread in the URL, rather than Home and then "Loading thread…". */

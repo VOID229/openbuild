@@ -186,6 +186,15 @@ export function stopAllGenerations() {
  * Pick back up replies still running on the server (after a reload, or ones another device started),
  * in every chat or just `chatId`.
  */
+/** Swap a deferred thread for its loaded history, unless that already happened. */
+export function adoptHistory(chat: Chat, full: Chat) {
+  const current = useStore.getState().chats.find(c => c.id === chat.id);
+  if (!current?.historyDeferred) return;
+  const { historyDeferred: _, ...metadata } = current;
+  useStore.getState().upsertChat({ ...full, ...metadata, messages: full.messages }, false);
+  resumeReplies(chat.id);
+}
+
 export function resumeReplies(chatId?: string) {
   if (!queuesLoaded()) {
     void queuesReady.then(() => resumeReplies(chatId));
