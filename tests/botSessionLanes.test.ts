@@ -255,8 +255,12 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
         a.ok(!/\\[(already seen|context only)/.test(marked(fakePrompts[2], 'A2')), 'A2 not lost');
         a.ok(readDeliveries(fixed).has(id(direct, 'A2')) && existsSync(join(fixed, 'settled')));
         // Settled: this turn rotates, which replaces the fixed mind with a Pi in a new generation.
+        // A rename waiting when the session rotates still reaches the new one, after the handoff, once.
+        svc.updateBot(bot.id, { name: 'Renamed ' + cap }, { by: 'me' });
         const p4 = await say(direct, 'A4');
         a.equal(fake.closed, true, cap + ': fixed mind replaced on rotation');
+        a.ok(p4.indexOf('Previous session retained at ') < p4.indexOf('You were renamed from Fixed ' + cap + ' to Renamed ' + cap), p4);
+        a.deepEqual(svc.pendingRenameNotes(bot.id), []);
         a.equal(fakePrompts.length, 3);
         const rotated = starts().at(-1);
         a.equal(dirname(rotated.dir), dirname(fixed));
