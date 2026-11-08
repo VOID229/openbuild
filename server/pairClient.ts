@@ -37,7 +37,7 @@ export const tailscaleArgs = (args: string[]) => (process.env.OPENBUILD_TAILSCAL
 export const tailscaleBin = () => Bun.which("tailscale") ?? ["/usr/local/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"].find(existsSync);
 
 /** `tailscale status --json`, or undefined when Tailscale isn't installed or answering. */
-async function tailscaleStatus(signal?: AbortSignal): Promise<any> {
+export async function tailscaleStatus(signal?: AbortSignal): Promise<any> {
   const bin = tailscaleBin();
   if (!bin) return undefined;
   try {

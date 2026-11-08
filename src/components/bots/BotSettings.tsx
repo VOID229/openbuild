@@ -14,6 +14,7 @@ import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
 import { BotExtensions } from "./BotExtensions";
+import { BotFriends } from "./BotFriends";
 import { BotLoop } from "./BotLoop";
 import { BotHarnesses, BotThreads } from "./BotThreads";
 import { BotWebSearch } from "./BotWebSearch";
@@ -397,6 +398,10 @@ export function BotsSettingsSection() {
 
       <section className="pi-block">
         <BotLoop />
+      </section>
+
+      <section className="pi-block">
+        <BotFriends />
       </section>
 
       <section className="pi-block">
