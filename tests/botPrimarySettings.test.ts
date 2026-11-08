@@ -190,10 +190,10 @@ test("what the user changes in a bot's settings reaches the primary once, on its
     const shown = svc.pendingChangeNotes(primary.id);
     await Bun.sleep(2);
     await patch(manager.id, { model: 'openai/gpt-6' });
-    svc.settleChangeNotes(shown);
+    svc.settleChangeNotes(primary.id, shown);
     a.equal(text().split('\\n')[1], "- Outis changed Manager's model from google/gemini-4 to openai/gpt-6.");
     a.equal(text().split('\\n').length, 3);
-    svc.settleChangeNotes(svc.pendingChangeNotes(primary.id));
+    svc.settleChangeNotes(primary.id, svc.pendingChangeNotes(primary.id));
     a.equal(text(), '');
     process.exit(0);
   `);
@@ -242,6 +242,63 @@ test("the primary's next turn opens with the note, and the turn after doesn't re
     a.doesNotMatch(prompts[2].message, /Since your last turn/);
     prompts[2].finish('[silent]');
     await until(() => !runner.busy(primary.bot.id));
+    process.exit(0);
+  `);
+});
+
+test("a change the user takes back while the primary's turn is under way is corrected on its next turn", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    const minds = globalThis.openbotsMinds = new Map();
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const { piFlags } = await import('./server/bots/extensions.ts');
+    const primary = svc.createBot({ name: 'Boss' });
+    const helper = svc.createBot({ name: 'Helper' });
+    svc.updateSettings({ user: { name: 'Outis' } });
+    const prompts = [];
+    for (const bot of [primary.bot, helper.bot]) {
+      const mind = { token: 'test', loaded: JSON.stringify(piFlags()), busy: false, sent: false, draft: '', proc: { exited: false, lastUsed: Date.now(), close() {}, async send(cmd) {
+        if (cmd.type === 'prompt') prompts.push({ ...cmd, bot: bot.id, finish(text) { mind.draft = text; mind.onSettled?.(); } });
+        return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
+      } } };
+      minds.set(bot.id, mind);
+    }
+    svc.setHooks({ wake: runner.wake, stop: runner.stop });
+    const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
+    const post = (where, text) => svc.postMessage(where, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
+    const turn = async (where, bot, text) => {
+      const n = prompts.length;
+      post(where, text);
+      await until(() => prompts.length === n + 1);
+      return prompts[n];
+    };
+    const end = async (prompt) => { prompt.finish('[silent]'); await until(() => !runner.busy(prompt.bot)); };
+
+    // The primary takes default → high into a turn; the user puts it back to default before the turn ends,
+    // and another bot's turn ends meanwhile too.
+    svc.updateBot(helper.bot.id, { effort: 'high' }, { by: 'me' });
+    const first = await turn(primary.conversationId, primary.bot, 'one');
+    a.match(first.message, /Helper's effort from default to high\\./);
+    svc.updateBot(helper.bot.id, { effort: '' }, { by: 'me' });
+    a.equal(svc.changeNoteText(primary.bot.id, svc.pendingChangeNotes(primary.bot.id)), '');
+    await end(await turn(helper.conversationId, helper.bot, 'meanwhile'));
+    await end(first);
+    // It last heard high, so it hears it's back to default, once.
+    const second = await turn(primary.conversationId, primary.bot, 'two');
+    a.match(second.message, /- Outis changed Helper's effort from high to default\\./);
+    await end(second);
+    const third = await turn(primary.conversationId, primary.bot, 'three');
+    a.doesNotMatch(third.message, /Since your last turn/);
+    await end(third);
+
+    // Taken back before the primary ever saw it: nothing to say, then or later.
+    svc.updateBot(helper.bot.id, { model: 'google/gemini-4' }, { by: 'me' });
+    svc.updateBot(helper.bot.id, { model: '' }, { by: 'me' });
+    const fourth = await turn(primary.conversationId, primary.bot, 'four');
+    a.doesNotMatch(fourth.message, /Since your last turn/);
+    await end(fourth);
+    a.deepEqual(svc.pendingChangeNotes(primary.bot.id), []);
     process.exit(0);
   `);
 });

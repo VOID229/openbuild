@@ -648,7 +648,7 @@ async function run(botId: string, all: Wake[]) {
     });
     await release(botId, m);
     if (handled) return;
-    svc.settleChangeNotes(notes);
+    svc.settleChangeNotes(botId, notes);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     setStatus(botId, { state: "idle" });

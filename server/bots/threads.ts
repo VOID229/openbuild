@@ -792,12 +792,15 @@ async function addProject(botId: string, p: Record<string, unknown>) {
   if (!raw) throw refuse("Say where the project is: path, a folder on this server (~/code/app). With url, where to clone it.");
   if (!raw.startsWith("/") && !raw.startsWith("~")) throw refuse("path is a full path on this server, like ~/code/app or /srv/app.");
   const path = resolve(raw.replace(/^~(?=$|\/)/, homedir()));
-  if (path === "/" || path === homedir()) throw refuse("That's a whole drive or home folder, not a project. Name the project's own folder.");
-  const inside = (dir: string) => path === dir || path.startsWith(dir + sep);
-  if (inside(resolve(storage.dataDir()))) throw refuse("That's inside OpenBuild's own data folder. Name the project's own folder.");
   const name = typeof p.name === "string" ? p.name.slice(0, 80) : undefined;
   const known = new Set(projects.listProjects().map((x) => x.id));
-  const project = await (typeof p.url === "string" && p.url.trim() ? projects.cloneProject(p.url, path, name) : projects.addProject(path, { name, create: p.create === true })).catch((err) => {
+  // Checked on the root projects.ts actually lands on and saves, links and repository top included, not on what was typed.
+  const allow = (root: string) => {
+    if (root === "/" || root === projects.canonicalPath(homedir())) throw refuse("That's a whole drive or home folder, not a project. Name the project's own folder.");
+    const data = projects.canonicalPath(storage.dataDir());
+    if (root === data || root.startsWith(data + sep)) throw refuse("That's inside OpenBuild's own data folder. Name the project's own folder.");
+  };
+  const project = await (typeof p.url === "string" && p.url.trim() ? projects.cloneProject(p.url, path, name, allow) : projects.addProject(path, { name, create: p.create === true, allow })).catch((err) => {
     throw refuse(err instanceof Error ? err.message : String(err));
   });
   const added = !known.has(project.id);

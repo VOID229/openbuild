@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, expect, mock, test } from "bun:test";
 import { execSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { accountCacheKey } from "../server/runtimeAccounts";
@@ -734,5 +734,48 @@ test("the primary adds a project and starts a thread in it; other bots and stray
     for (const p of projects.listProjects()) if (p.id !== project.id) projects.removeProject(p.id);
     rmSync(folder, { recursive: true, force: true });
     rmSync(fresh, { recursive: true, force: true });
+  }
+});
+
+test("add_project checks where a path really lands: links, linked parents and the repository top can't reach OpenBuild's data", async () => {
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), "openbuild-bot-links-")));
+  const inData = join(dir, "inside-repo");
+  mkdirSync(join(inData, "sub"), { recursive: true });
+  execSync("git init -q -b main", { cwd: inData });
+  try {
+    // A link to the data folder itself, one to a folder in a repository there (which would be promoted to
+    // the repository's top), and a linked parent a new folder or a clone would be made under.
+    symlinkSync(dir, join(outside, "data"));
+    symlinkSync(join(inData, "sub"), join(outside, "sub"));
+    symlinkSync(join(outside, "nowhere"), join(outside, "broken"));
+    const before = projects.listProjects().map((p) => p.id);
+    const grants = svc.fullBot(bot.id)!.threads;
+    const cases: [object, RegExp][] = [
+      [{ path: join(outside, "data") }, /OpenBuild's own data folder/],
+      [{ path: join(outside, "sub") }, /OpenBuild's own data folder/],
+      [{ path: join(outside, "data", "made"), create: true }, /OpenBuild's own data folder/],
+      [{ path: join(outside, "data", "cloned"), url: "https://example.invalid/repo.git" }, /OpenBuild's own data folder/],
+      [{ path: join(outside, "broken", "app"), create: true }, /isn't there/],
+    ];
+    for (const [params, error] of cases) await expect(call("add_project", params)).rejects.toThrow(error);
+    // Nothing saved, granted or made.
+    expect(projects.listProjects().map((p) => p.id)).toEqual(before);
+    expect(svc.fullBot(bot.id)!.threads).toEqual(grants);
+    expect(existsSync(join(dir, "made"))).toBe(false);
+    expect(existsSync(join(dir, "cloned"))).toBe(false);
+    expect(existsSync(join(outside, "nowhere"))).toBe(false);
+    // The same guard lets an ordinary linked project through, saved at its real root.
+    const real = realpathSync(mkdtempSync(join(tmpdir(), "openbuild-bot-real-")));
+    symlinkSync(real, join(outside, "real"));
+    try {
+      expect((await call("add_project", { path: join(outside, "real") })).project.path).toBe(real);
+    } finally {
+      rmSync(real, { recursive: true, force: true });
+    }
+  } finally {
+    for (const p of projects.listProjects()) if (p.id !== project.id) projects.removeProject(p.id);
+    grant();
+    rmSync(outside, { recursive: true, force: true });
+    rmSync(inData, { recursive: true, force: true });
   }
 });

@@ -471,8 +471,11 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } =
 /**
  * A bot setting the user changed in the app that the primary hasn't been told of yet. One per bot and
  * setting: `from` is what the primary last knew, `to` what it is now, so a run of changes reads as one,
- * and changing it back drops it. Changes the primary makes itself (manage_bot) aren't noted, and one
- * made after the user's replaces that note: what it set is what it knows.
+ * and changing it back leaves nothing to say. Changes the primary makes itself (manage_bot) aren't
+ * noted, and one made after the user's replaces that note: what it set is what it knows.
+ *
+ * A note changed back is kept, saying nothing, until the primary's next turn ends: the turn before it
+ * may have been shown the change, and then it's owed the correction (see settleChangeNotes).
  */
 export interface ChangeNote {
   botId: string;
@@ -520,8 +523,7 @@ function noteChanges(before: db.StoredBot, after: db.StoredBot, user: boolean) {
       continue;
     }
     const from = i >= 0 ? list[i]!.from : describe(before, field);
-    const rest = list.filter((_, j) => j !== i);
-    list = from === to ? rest : [...rest, { botId: after.id, field, from, to, at }];
+    list = [...list.filter((_, j) => j !== i), { botId: after.id, field, from, to, at }];
   }
   db.setValue(CHANGE_NOTES, list);
 }
@@ -529,7 +531,7 @@ function noteChanges(before: db.StoredBot, after: db.StoredBot, user: boolean) {
 /** What the user changed since the primary last heard, for its next turn. Only the primary's. */
 export function pendingChangeNotes(botId: string): ChangeNote[] {
   if (!db.getBot(botId)?.primary) return [];
-  return changeNotes().filter((n) => db.getBot(n.botId));
+  return changeNotes().filter((n) => n.from !== n.to && db.getBot(n.botId));
 }
 
 export function changeNoteText(botId: string, notes: ChangeNote[]): string {
@@ -544,11 +546,13 @@ export function changeNoteText(botId: string, notes: ChangeNote[]): string {
 }
 
 /** The primary was shown these: they're done, unless one changed again meanwhile, which then starts from what it saw. */
-export function settleChangeNotes(shown: ChangeNote[]) {
-  if (!shown.length) return;
+export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
+  // Only the primary's turn settles them: another bot's ending says nothing about what the primary heard.
+  if (!db.getBot(botId)?.primary) return;
   const list = changeNotes().flatMap((n) => {
     const seen = shown.find((s) => s.botId === n.botId && s.field === n.field);
-    if (!seen) return [n];
+    // Never shown, and back where the primary knew it: nothing to say.
+    if (!seen) return n.from === n.to ? [] : [n];
     if (seen.at === n.at) return [];
     return seen.to === n.to ? [] : [{ ...n, from: seen.to }];
   });
