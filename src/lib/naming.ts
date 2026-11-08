@@ -180,6 +180,61 @@ export async function autoName(chatId: string) {
   }
 }
 
+/** Begun outside OpenBuild, found in a runtime's own sessions (server/sessionImport.ts, server/pi/discovery.ts). */
+const foundElsewhere = (chat: Chat) => !!chat.imported || !!chat.discovered;
+const lastReply = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant");
+
+/**
+ * Found threads that still go by their opening prompt, as auto-naming would name them: the ones
+ * working now, and the one open. Each is tried once per page load; the rest of the archive waits
+ * until it's opened, rather than spending a model call on every old session.
+ */
+export function discoveredToName(chats: Chat[], activeChatId: string | undefined, tried: ReadonlySet<string>): string[] {
+  return chats.filter((c) => foundElsewhere(c) && !c.titleSource && !tried.has(c.id) && c.messages.some((m) => m.role === "user")
+    && (c.id === activeChatId || lastReply(c)?.status === "streaming")).map((c) => c.id);
+}
+
+/**
+ * Name a found thread from its transcript: its opening prompt can be a reply like "1" that says
+ * nothing. The title counts as automatic, so a name the session gets in its own runtime later
+ * replaces it, and one the user types is never touched.
+ */
+export async function autoNameDiscovered(chatId: string) {
+  const saved = useStore.getState().chats.find((c) => c.id === chatId);
+  if (!useStore.getState().settings.naming.enabled || !saved || saved.titleSource) return;
+  setTitling(chatId, true);
+  try {
+    const chat = await loadChatHistory(saved).catch(() => undefined);
+    const transcript = chat && threadTranscript(chat);
+    if (!transcript) return;
+    const images = promptImages(chat.messages.find((m) => m.role === "user"));
+    const title = await generateText({ system: REGENERATE_SYSTEM, content: `Transcript to title:\n\n${transcript}`, images, sessionId: `${chatId}-title`, chat, clean: cleanTitle });
+    // The user may have renamed it, or its runtime named it, while we were waiting.
+    const latest = useStore.getState().chats.find((c) => c.id === chatId);
+    if (title && latest && !latest.titleSource && latest.title === saved.title) useStore.getState().updateChat(chatId, { title, titleSource: "auto" });
+  } finally {
+    setTitling(chatId, false);
+  }
+}
+
+/** Names found threads one at a time as they start working or are opened, while auto-naming is on. Returns the unsubscribe. */
+export function watchDiscoveredTitles(): () => void {
+  const tried = new Set<string>();
+  let queue = Promise.resolve();
+  const check = () => {
+    const { settings, chats, activeChatId } = useStore.getState();
+    if (!settings.naming.enabled) return;
+    for (const id of discoveredToName(chats, activeChatId, tried)) {
+      tried.add(id);
+      queue = queue.then(() => autoNameDiscovered(id)).catch(() => {});
+    }
+  };
+  check();
+  return useStore.subscribe((s, prev) => {
+    if (s.chats !== prev.chats || s.activeChatId !== prev.activeChatId || s.settings.naming.enabled !== prev.settings.naming.enabled) check();
+  });
+}
+
 /** Runs once after provisioning, alongside the first turn. No later title edit renames Git state. */
 export async function autoNameWorktree(chatId: string) {
   const chat = useStore.getState().chats.find((c) => c.id === chatId);

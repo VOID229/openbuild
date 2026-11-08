@@ -338,4 +338,6 @@ export interface Chat {
   subagent?: boolean;
   /** Discovered from a native runtime's session (server/sessionImport.ts): the server files it under Closed once that runtime finishes. */
   imported?: boolean;
+  /** Found in Pi's own sessions (server/pi/discovery.ts) rather than started here. */
+  discovered?: boolean;
 }
