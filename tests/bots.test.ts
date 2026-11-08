@@ -224,23 +224,28 @@ test("computer tools never silently fall back to unrestricted host access", asyn
       import { mock } from 'bun:test';
       let engines = [];
       const calls = [];
-      mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines }), procListeners: new Set() }));
+      mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines }), engines: async () => engines, procListeners: new Set() }));
       mock.module('./server/computers/api.ts', () => ({ computerApi: (device) => ({ call: async (id, op, body) => { calls.push({ device, id, op, body }); return {}; } }), computerTargets: async () => [] }));
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
       const { sendMessage, setFocus } = await import('./server/bots/agent.ts');
       const { bot, conversationId } = svc.createBot({ name: 'Sandbox' });
       setFocus(bot.id, conversationId);
-      await a.rejects(sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true }), /Choose a computer explicitly/);
+      // This server's isolation is a container until the user chooses otherwise; with no engine, nothing runs.
+      await a.rejects(sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true }), /no container engine .* choose Host for .* in Settings → Devices. Nothing ran/);
       a.equal(calls.length, 0);
-      a.equal(db.getBot(bot.id).computer, undefined);
       engines = ['podman'];
       await sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true });
-      a.deepEqual(db.getBot(bot.id).computer, { device: 'local', kind: 'container' });
-      a.equal(calls[0].body.kind, 'container');
+      a.deepEqual([calls[0].device, calls[0].op, calls[0].body.kind], ['local', 'ensure', 'container']);
+      // A host computer saved for the bot by an earlier build is kept, and changes nothing.
+      db.putBot({ ...db.getBot(bot.id), computer: { device: 'local', kind: 'host' } });
       engines = [];
-      svc.updateBot(bot.id, { computer: { device: 'local', kind: 'host' } });
       calls.length = 0;
+      await a.rejects(sendMessage(bot.id, { text: 'Screenshot', attach_screenshot: true }), /no container engine/);
+      a.equal(calls.length, 0);
+      a.deepEqual(db.getBot(bot.id).computer, { device: 'local', kind: 'host' });
+      // Host on this server is the user's choice for the machine, in Settings → Devices.
+      svc.updateSettings({ isolation: { local: 'host' } });
       await sendMessage(bot.id, { text: 'Explicit host screenshot', attach_screenshot: true });
       a.equal(calls[0].body.kind, 'host');
       process.exit(0);
@@ -259,7 +264,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
-      mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), procListeners: new Set() }));
+      mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
       mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }), computerTargets: async () => [] }));
       const svc = await import('./server/bots/service.ts');
       const vault = await import('./server/vault.ts');

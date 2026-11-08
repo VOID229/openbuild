@@ -47,7 +47,7 @@ const { useWorkspace } = await import("../src/lib/bots/workspace");
 const { BotsSidebar } = await import("../src/components/bots/BotsSidebar");
 const { BotsView } = await import("../src/components/bots/BotsView");
 const { DevicesSection } = await import("../src/components/DeviceSettings");
-const { BotComputer } = await import("../src/components/bots/BotAdvanced");
+const { BotMachines } = await import("../src/components/bots/BotAdvanced");
 
 const devices = [
   { id: "srv", serverId: "srv", name: "Studio", local: true, mode: "lan", urls: [], online: true },
@@ -92,18 +92,15 @@ test("the sidebar has no workspace picker, even with paired devices online, and 
   expect(requests.filter((r) => r.path.startsWith("/api/workspace/via/"))).toEqual([]);
 });
 
-test("without the picker, a bot in this server's workspace still runs its tools on a paired device", async () => {
+test("without the picker, a bot in this server's workspace lists this server's machines, a paired device among them", async () => {
   useBots.setState({ bots: [bot] } as any);
-  const View = () => h(BotComputer, { bot: useBots((s) => s.bots[0]!) });
-  await act(async () => root.render(h(View)));
+  await act(async () => root.render(h(BotMachines)));
   await frames();
-  await click(document.querySelector('button[aria-label="Runs on"]')!);
-  const host = [...document.querySelectorAll('[role="listbox"][aria-label="Runs on"] [role="option"]')].find((o) => o.textContent === "Host Box")!;
-  await click(host);
-  await frames();
-  // Saved on this server, through its own bound route, not through the host's workspace.
-  expect(requests.filter((r) => r.method === "PATCH").at(-1)).toMatchObject({ path: "/api/workspace/to/srv/api/bots/bot", body: { computer: { device: "host", kind: "container" } } });
-  expect(useBots.getState().bots[0]!.computer).toEqual({ device: "host", kind: "container" });
+  // Read from this server, not through a host's workspace, and nothing to choose or save.
+  expect([...document.querySelectorAll(".bot-machine .pi-row-name")].map((e) => e.firstChild?.textContent)).toEqual(["Studio", "Host Box"]);
+  expect(requests.some((r) => r.path === "/api/bots/targets")).toBe(true);
+  expect(requests.filter((r) => r.method === "PATCH")).toEqual([]);
+  expect(requests.filter((r) => r.path.startsWith("/api/workspace/via/"))).toEqual([]);
   expect(useBots.getState().workspace).toBe("srv");
 });
 

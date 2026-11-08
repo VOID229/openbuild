@@ -1,12 +1,12 @@
-// Bots' computers. Each bot has one: a home folder with a terminal and a headless browser, kept on
-// this machine as either
+// Bots' computers. Each bot has one on every machine it reaches: a home folder with a terminal and a
+// headless browser, kept on that machine as either
 //   - a container (rootless Podman, else Docker) from OpenBots' image: Debian with Chromium, Node,
 //     Python, git and the usual tools. The home folder is a folder here bind-mounted at /home/bot,
 //     so files survive the container being rebuilt; or
 //   - a plain folder on this machine, with no isolation: commands run as the user who runs
 //     OpenBuild. For machines without a container engine.
-// A computer can live on a paired device instead: that device's server runs it, and this one
-// reaches it through /api/computers there (client.ts).
+// A paired device's server runs the computers there, and this one reaches them through
+// /api/computers there (api.ts).
 //
 // Everything a bot does on its computer comes through here: commands (`exec`), files (`fs`), the
 // browser and long-running processes (`proc`).

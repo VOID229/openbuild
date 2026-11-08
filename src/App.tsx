@@ -2,7 +2,7 @@ import { prefetchUsage } from "./lib/usageStats";
 import { ArrowLeft, KeyRound, Maximize2, PanelLeft, SquarePen } from "lucide-react";
 import { Activity, useCallback, useEffect, useState } from "react";
 import { SyncLockScreen } from "./components/Account";
-import { ChatView } from "./components/ChatView";
+import { LoadedChat } from "./components/LoadedChat";
 import { Composer } from "./components/Composer";
 import { Lightbox, useLightbox } from "./components/Lightbox";
 import { HarnessSetup } from "./components/HarnessSetup";
@@ -37,7 +37,6 @@ import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
 import { cx, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
-import type { Chat } from "./lib/types";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
 
@@ -169,25 +168,6 @@ export function App() {
     ) : null;
   }
   return <Main />;
-}
-
-function LoadedChat({ chat }: { chat: Chat }) {
-  const [error, setError] = useState<string>();
-  const [attempt, retry] = useState(0);
-  useEffect(() => {
-    if (!chat.historyDeferred) return;
-    let live = true;
-    setError(undefined);
-    void loadChatHistory(chat, true).then(full => {
-      if (live) adoptHistory(chat, full);
-    }, err => { if (live) setError((err as Error).message); });
-    return () => { live = false; };
-  }, [chat, attempt]);
-  if (!chat.historyDeferred) return <ChatView chat={chat} />;
-  return <div className="home"><div className="home-center" role="status">
-    <p>{error || "Loading thread…"}</p>
-    {error && <button className="btn" onClick={() => retry(n => n + 1)}>Retry</button>}
-  </div></div>;
 }
 
 function Main() {

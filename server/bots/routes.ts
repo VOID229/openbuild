@@ -2,7 +2,7 @@
 // Bots themselves don't use these routes; their tools go through the socket in agent.ts.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { computerApi, computerTargets } from "../computers/api";
+import { computerApi } from "../computers/api";
 import * as devices from "../devices";
 import { modelListing } from "../pi/routes";
 import { getBot, getMessage } from "./db";
@@ -11,6 +11,7 @@ import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/b
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
 import * as apps from "./apps";
+import { machines, setIsolation } from "./machines";
 import { startBots } from "./runner";
 import { BotsError, snapshot, subscribe } from "./service";
 import * as svc from "./service";
@@ -135,9 +136,22 @@ export function botRoutes(api: Api) {
     "/api/bots/:id/file": {
       GET: api((req: Bun.BunRequest<"/api/bots/:id/file">) => botFile(req, req.params.id)),
     },
-    // Where a bot's computer can run: this server, or a paired device that allowed it.
+    // The machines bots reach: this server and every paired device, with what each allows them and
+    // how they're isolated there.
     "/api/bots/targets": {
-      GET: api(async () => json({ targets: await computerTargets() })),
+      GET: api(async () => json({ targets: await machines() })),
+    },
+    // Settings → Devices: a container or the host for bots on one machine. Only this server's own
+    // session gets here (a paired device's workspace can't, see workspace.ts).
+    "/api/bots/targets/:device": {
+      PATCH: api(async (req: Bun.BunRequest<"/api/bots/targets/:device">) => {
+        try {
+          const body = (await readJson(req)) as { isolation?: unknown } | undefined;
+          return json({ device: req.params.device, isolation: setIsolation(req.params.device, body?.isolation) });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
     },
     "/api/bots/stream": {
       GET: api((req: Request, server: Bun.Server<unknown>) => {
@@ -188,7 +202,9 @@ export function botRoutes(api: Api) {
         try {
           const body = (await readJson(req)) as Partial<BotsSettings> | undefined;
           if (!body || typeof body !== "object") return bad("Expected settings");
-          return json(svc.updateSettings(body));
+          // Each machine's isolation is set on its own, for a machine that's paired (above).
+          const { isolation: _, ...rest } = body;
+          return json(svc.updateSettings(rest));
         } catch (err) {
           return fail(err);
         }
@@ -408,16 +424,21 @@ export function deleteMine(conversationId: string, messageId: string): Response 
   }
 }
 
-/** A file a bot linked to in a message, read from its computer. */
+/**
+ * A file a bot linked to in a message, read from its computer on this server, or on a paired device
+ * when the link's host is that device's id (file://<machine id>/path).
+ */
 export async function botFile(req: Request, botId: string): Promise<Response> {
   try {
     const bot = getBot(botId);
-    if (!bot?.computer) return bad("Bot computer not found", 404);
+    if (!bot) return bad("Bot not found", 404);
     const url = new URL(new URL(req.url).searchParams.get("url") ?? "");
-    if (url.protocol !== "file:" || (url.hostname && url.hostname !== "localhost")) return bad("Invalid file URL", 400);
+    if (url.protocol !== "file:") return bad("Invalid file URL", 400);
+    const device = !url.hostname || url.hostname === "localhost" ? "local" : url.hostname;
+    if (device !== "local" && !devices.hasDevice(device)) return bad("That file is on a machine that isn't paired with this server", 404);
     const path = decodeURIComponent(url.pathname);
     if (path.includes("\0")) return bad("Invalid file path", 400);
-    const result = await computerApi(bot.computer.device).call(bot.id, "fs", { op: "read", path }) as { data: string };
+    const result = await computerApi(device).call(bot.id, "fs", { op: "read", path }) as { data: string };
     const name = path.split("/").pop() || "download";
     return new Response(Buffer.from(result.data, "base64"), { headers: {
       "content-type": "application/octet-stream",

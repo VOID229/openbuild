@@ -3,10 +3,10 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, wri
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-// A bot whose computer is on another machine, end to end over loopback: a real OpenBuild server on
-// a throwaway data directory plays the paired machine ("Target Box"), and this process is the
-// workspace server where the bot lives. The bot's tool calls go through the same agent socket its
-// Pi would use, then over HTTP to the target. No real pairing, server or container is touched.
+// A bot using another machine, end to end over loopback: a real OpenBuild server on a throwaway data
+// directory plays the paired machine ("Target Box"), and this process is the workspace server where
+// the bot lives. The bot names the machine on each tool call; the calls go through the same agent
+// socket its Pi would use, then over HTTP to the target. No real pairing, server or container is touched.
 const directory = mkdtempSync(join(tmpdir(), "openbuild-bot-targets-"));
 const targetData = join(directory, "target");
 const workspaceData = join(directory, "workspace");
@@ -32,6 +32,7 @@ const devices = await import("../server/devices");
 const svc = await import("../server/bots/service");
 const agent = await import("../server/bots/agent");
 const { computerTargets, guestComputerId } = await import("../server/computers/api");
+const { setIsolation } = await import("../server/bots/machines");
 
 let port = 0;
 let server: ReturnType<typeof Bun.spawn> | undefined;
@@ -74,8 +75,9 @@ async function grant(botTools: Record<string, boolean>) {
   expect(res.status).toBe(200);
 }
 
-/** A tool call the way the bot's Pi makes it: over the agent socket with the bot's token. */
-async function tool(botId: string, method: string, params: Record<string, unknown>) {
+/** A tool call the way the bot's Pi makes it: over the agent socket with the bot's token. On the target unless it names another machine, or none (null). */
+async function tool(botId: string, method: string, params: Record<string, unknown>, machine: string | null = "Target Box") {
+  if (machine !== null) params = { machine, ...params };
   const res = await fetch("http://agent/", { unix: agent.agentSocketPath(), method: "POST", headers: { authorization: `Bearer ${agent.mintToken(botId)}` }, body: JSON.stringify({ method, params }) } as RequestInit);
   return (await res.json()) as { result?: any; error?: string };
 }
@@ -109,16 +111,16 @@ afterAll(async () => {
 });
 
 test("pairing alone lets the workspace's bots do nothing on the target, and nothing runs here instead", async () => {
-  svc.updateBot(bot, { computer: { device: target, kind: "container" } });
   const run = await tool(bot, "bash", { command: "echo hi" });
   expect(run.error).toContain("Target Box hasn't allowed bots from Workspace Box to use it");
   for (const [method, params] of [["read", { path: "x" }], ["browser", { action: "tabs" }], ["process", { action: "list" }]] as const) {
     expect((await tool(bot, method, params)).error).toContain("hasn't allowed bots from Workspace Box to use it");
   }
-  // Nothing was made on either side, and the bot keeps its choice.
+  // Nothing was made on either side, by name or by id, and the bot was never pinned to a machine.
+  expect((await tool(bot, "bash", { command: "echo hi" }, target)).error).toContain("hasn't allowed bots from Workspace Box to use it");
   expect(targetComputers()).toEqual([]);
   expect(workspaceComputers()).toEqual([]);
-  expect(svc.fullBot(bot)!.computer).toEqual({ device: target, kind: "container" });
+  expect(svc.fullBot(bot)!.computer).toBeUndefined();
   const listed = (await computerTargets()).find((t) => t.device === target)!;
   expect(listed).toMatchObject({ name: "Target Box", status: "access", grants: { files: false, terminal: false, browser: false, unisolated: false } });
 }, 30_000);
@@ -135,8 +137,10 @@ test("a paired device can't grant itself anything, and an unknown token is refus
 
 test("each grant opens only its own tools, and unisolated access is a grant of its own", async () => {
   await grant({ terminal: true });
-  svc.updateBot(bot, { computer: { device: target, kind: "host" } });
+  // Host on the target is this server's choice for that machine, and the target's Unisolated grant still decides.
+  setIsolation(target, "host");
   expect((await tool(bot, "bash", { command: "pwd" })).error).toContain("only allows bots from Workspace Box a container");
+  expect((await computerTargets()).find((t) => t.device === target)!.grants).toMatchObject({ terminal: true, unisolated: false });
   await grant({ unisolated: true });
   const run = await tool(bot, "bash", { command: "pwd" });
   expect(run.error).toBeUndefined();
@@ -151,6 +155,8 @@ test("each grant opens only its own tools, and unisolated access is a grant of i
   const started = await tool(bot, "process", { action: "start", command: "true", name: "quick" });
   expect(started.result.ranOn).toBe("Target Box");
   expect(started.result.note).toContain("can't tell you when it exits");
+  // Processes belong to their machine.
+  expect((await tool(bot, "process", { action: "list" })).result.procs.map((p: any) => p.id)).toContain(started.result.id);
 
   expect((await tool(bot, "write", { path: "note.txt", content: "remote" })).error).toContain("hasn't allowed files");
   expect((await tool(bot, "browser", { action: "quit" })).error).toContain("hasn't allowed the browser");
@@ -169,7 +175,6 @@ test("each grant opens only its own tools, and unisolated access is a grant of i
 
 test("a computer left under the bare bot id from before grants stops the bot visibly, and both stay as they were", async () => {
   const legacy = svc.createBot({ name: "Veteran" }).bot.id;
-  svc.updateBot(legacy, { computer: { device: target, kind: "host" } });
   // What an earlier build made on the target for this bot: its folder under the bot's own id.
   const old = join(targetData, "computers", legacy);
   mkdirSync(join(old, "home"), { recursive: true });
@@ -186,7 +191,6 @@ test("a computer left under the bare bot id from before grants stops the bot vis
   expect(targetComputers()).toEqual(before);
   expect(targetComputers()).not.toContain(guestComputerId(clientId, legacy));
   expect(workspaceComputers()).toEqual([]);
-  expect(svc.fullBot(legacy)!.computer).toEqual({ device: target, kind: "host" });
 }, 30_000);
 
 test("a target that goes offline fails the tool without running it here, and works again once it's back", async () => {
@@ -197,7 +201,6 @@ test("a target that goes offline fails the tool without running it here, and wor
   // Whatever was remembered about the address has been dropped: the next attempt checks again.
   expect((await tool(bot, "bash", { command: "pwd" })).error).toContain("Target Box is unreachable");
   expect((await computerTargets()).find((t) => t.device === target)!.status).toBe("offline");
-  expect(svc.fullBot(bot)!.computer).toEqual({ device: target, kind: "host" });
 
   await launchTarget();
   const back = await tool(bot, "bash", { command: "cat note.txt" });
@@ -318,17 +321,20 @@ test("an address that answers as another machine, or as an OpenBuild without gra
     const id = `fake-${header ?? "old"}`;
     devices.addDevice({ id, name: "Moved Box", mode: "lan", urls: [`http://127.0.0.1:${fake.port}`], token: "cd".repeat(32) });
     const other = svc.createBot({ name: `Elsewhere ${id}` }).bot.id;
-    svc.updateBot(other, { computer: { device: id, kind: "host" } });
-    expect((await tool(other, "bash", { command: "echo should-not-run" })).error).toContain(expected);
+    expect((await tool(other, "bash", { command: "echo should-not-run" }, id)).error).toContain(expected);
     fake.stop(true);
   }
   expect(posts).toBe(0);
   expect(workspaceComputers()).toEqual([]);
 }, 30_000);
 
-test("a device that isn't paired can't be chosen, and a revoked pairing says so", async () => {
-  expect(() => svc.updateBot(bot, { computer: { device: "never-paired", kind: "container" } })).toThrow("isn't paired");
-  expect(svc.fullBot(bot)!.computer).toEqual({ device: target, kind: "host" });
+test("a machine that isn't paired can't be named, and a revoked pairing says so", async () => {
+  for (const machine of ["never-paired", "Mainframe"]) {
+    const run = await tool(bot, "bash", { command: "pwd" }, machine);
+    expect(run.error).toContain(`"${machine}" isn't this server or a machine paired with it. Machines: `);
+    expect(run.error).toContain(`Target Box (${target})`);
+    expect(run.error).toContain("Nothing ran.");
+  }
 
   const revoked = await fetch(`${base()}/api/paired-clients/${clientId}`, { method: "DELETE" });
   expect(revoked.ok).toBe(true);
@@ -336,6 +342,55 @@ test("a device that isn't paired can't be chosen, and a revoked pairing says so"
   expect((await computerTargets()).find((t) => t.device === target)!.status).toBe("revoked");
 
   devices.removeDevice(target);
-  expect((await tool(bot, "bash", { command: "pwd" })).error).toContain("isn't paired anymore");
+  // Unpaired, by name or id: never sent anywhere, and never run here instead.
+  expect((await tool(bot, "bash", { command: "pwd" })).error).toContain(`"Target Box" isn't this server or a machine paired with it`);
+  expect((await tool(bot, "bash", { command: "pwd" }, target)).error).toContain("isn't this server or a machine paired with it");
   expect(workspaceComputers()).toEqual([]);
 }, 30_000);
+
+test("with no machine named a tool runs on this server, each machine keeps its own files, and a refusal there never runs here", async () => {
+  // Paired again, with everything allowed: the bot reaches both machines at once.
+  const again = await pairAnother("Workspace Box");
+  devices.addDevice({ id: target, name: "Target Box", mode: "lan", urls: [base()], token: again.token });
+  clientId = again.id;
+  await grant({ files: true, terminal: true, browser: true, unisolated: true });
+  // No container engine is assumed here: this server's own isolation is the host for this test.
+  setIsolation("local", "host");
+  const here = await tool(bot, "bash", { command: "pwd" }, null);
+  expect(here.error).toBeUndefined();
+  expect(here.result.output.trim()).toBe(join(workspaceData, "computers", bot, "home"));
+  expect(here.result.ranOn).toBeUndefined();
+  for (const name of ["this server", "local"]) expect((await tool(bot, "bash", { command: "pwd" }, name)).result.output.trim()).toBe(join(workspaceData, "computers", bot, "home"));
+
+  // The same path holds different files on each machine.
+  expect((await tool(bot, "write", { path: "where.txt", content: "here" }, null)).result).toEqual({ ok: true, bytes: 4 });
+  expect((await tool(bot, "write", { path: "where.txt", content: "there" })).result).toEqual({ ok: true, bytes: 5 });
+  expect((await tool(bot, "read", { path: "where.txt" }, null)).result).toBe("here");
+  expect((await tool(bot, "read", { path: "where.txt" })).result).toBe("there");
+  expect((await tool(bot, "read", { path: "where.txt" }, target)).result).toBe("there");
+  expect((await tool(bot, "edit", { path: "where.txt", old: "there", new: "over there" })).result).toEqual({ ok: true });
+  expect((await tool(bot, "read", { path: "where.txt" }, null)).result).toBe("here");
+  // A file linked in a message comes from this server, or from the machine its link names.
+  const { botFile } = await import("../server/bots/routes");
+  const link = async (url: string) => {
+    const res = await botFile(new Request(`http://x/api/bots/${bot}/file?url=${encodeURIComponent(url)}`), bot);
+    return [res.status, await res.text()];
+  };
+  expect(await link(`file://${join(workspaceData, "computers", bot, "home", "where.txt")}`)).toEqual([200, "here"]);
+  expect(await link(`file://${target}${join(targetData, "computers", guestComputerId(clientId, bot), "home", "where.txt")}`)).toEqual([200, "over there"]);
+  expect((await link("file://never-paired/etc/hostname"))[0]).toBe(404);
+
+  // The target takes the terminal back: its calls fail, and none of them runs here instead.
+  await grant({ terminal: false });
+  const marker = join(workspaceData, "computers", bot, "home", "fell-back");
+  const refused = await tool(bot, "bash", { command: `touch ${marker}` });
+  expect(refused.error).toContain("hasn't allowed the terminal");
+  expect(existsSync(marker)).toBe(false);
+  expect((await tool(bot, "bash", { command: "pwd" }, null)).error).toBeUndefined();
+  // And offline: the same.
+  await stopTarget();
+  expect((await tool(bot, "bash", { command: `touch ${marker}` })).error).toMatch(/Target Box (is unreachable|stopped answering)/);
+  expect(existsSync(marker)).toBe(false);
+  expect(svc.fullBot(bot)!.computer).toBeUndefined();
+  await launchTarget();
+}, 60_000);

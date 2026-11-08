@@ -114,6 +114,26 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
+  test("the eyes ease onto the pointer on hover-in as calmly as they ease back on hover-out", async () => {
+    const page = await open();
+    const find = item("row", "Manager");
+    // Record each transform transition the eyes start, as it starts: it may be over by the time we look.
+    await page.eval(`window.runs = []; (${find}).querySelector('.bot-look').addEventListener('transitionrun', (e) => {
+      if (e.propertyName === 'transform') window.runs.push(e.target.getAnimations().find((a) => a.transitionProperty === 'transform' && a.effect.target === e.target)?.effect.getTiming() ?? null);
+    })`);
+    const [cx, cy] = await page.eval<[number, number]>(`(() => { const r = (${find}).querySelector('.bot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    for (let i = 1; i <= 4; i++) await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx + 5 * i, y: cy + i });
+    await page.until("window.runs.length >= 1");
+    await page.settle();
+    const hoverIn = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
+    await page.eval("window.runs = []");
+    await away(page);
+    await page.until("window.runs.length >= 1");
+    const hoverOut = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
+    expect(hoverIn).toEqual(hoverOut);
+    expect(hoverIn!.duration).toBeGreaterThanOrEqual(300);
+  });
+
   test("with reduced motion, nothing follows the pointer", async () => {
     const page = await open();
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
