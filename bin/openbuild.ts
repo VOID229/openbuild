@@ -18,6 +18,7 @@ import { hostname, networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { checkRelease, installRelease, releaseTrack, setReleaseTrack } from "../server/releases";
 import { ask, confirm } from "./prompt";
+import { chooseStartPort } from "./startPort";
 import { stage } from "./motion";
 import { describeUninstall, uninstallPlan, removeInstallation } from "./uninstall";
 import { remoteRequest } from "./remoteRequest";
@@ -292,13 +293,15 @@ async function start(mode: Mode, managed?: { active: boolean; restart: boolean }
       owned = opened(true);
       stage.print(dim(`Switching from ${current.mode} to ${mode}…`));
       await stop(true, true);
-    } else if (await serving(PORT)) {
-      // Two servers on one port split requests between them (especially with Tailscale): some API
-      // calls hit the old code, with no pairing routes. Never start a duplicate.
-      fail(
-        `something else is already answering on port ${PORT}, but it wasn't started by \`openbuild start\` (no ${STATE}).\n` +
-          "It may be an older OpenBuild or one managed by systemd. Stop or restart it where it runs, then try again.",
-      );
+    }
+    try {
+      PORT = await chooseStartPort(PORT, {
+        explicit: process.env.PORT !== undefined,
+        interactive: !!process.stdin.isTTY && !!process.stdout.isTTY,
+        confirm,
+      });
+    } catch (error) {
+      fail(error instanceof Error ? error.message : String(error));
     }
   }
 
