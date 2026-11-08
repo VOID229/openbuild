@@ -1,5 +1,6 @@
 import { warmStartup } from "./startupWarmup";
-import { keepPullRequestFields, startPullRequestSweep } from "./pullRequests";
+import { startPullRequestSweep } from "./pullRequests";
+import { writeChat as saveChat } from "./chatWrite";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
@@ -10,6 +11,8 @@ import { checkRelease, restartStatus } from "./releases";
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
 // the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
 import index from "../src/index.html";
+import { productionClient } from "./client";
+import { compressJson } from "./compress";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
@@ -26,10 +29,10 @@ import { findRun, localRun, startRun } from "./runs";
 import { requestRunStop } from "./runStops";
 import * as storage from "./storage";
 import * as vault from "./vault";
-import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
+import { threadRuntime } from "./threadRuntime";
 import * as durable from "./durable";
 import * as piWorker from "./pi/remote";
-import { projectChat, projectStoredChats } from "./pi/projection";
+import { projectStoredChats } from "./pi/projection";
 import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as pairing from "./pairClient";
@@ -68,6 +71,8 @@ const machine = () => devices.deviceName();
 /** The port other OpenBuild servers listen on, as `openbuild pair --client` assumes. */
 const PAIR_PORT = Number(process.env.PORT ?? 3100);
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
+/** Production builds the app itself (server/client.ts); development keeps Bun's HTML route, with hot reloading. */
+const client = process.env.NODE_ENV === "production" ? productionClient() : undefined;
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
 // and the local password session. Only status/login/logout omit the session check
@@ -117,15 +122,19 @@ const devicePathAllowed = (path: string) =>
   // a wider grant: it's the same power through a settings page instead of a prompt.
   /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
 
-/** Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser session. */
+/**
+ * Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser
+ * session. Large JSON answers are gzipped for clients across a network (compress.ts).
+ */
 const api =
   <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) =>
   (req: R, ...rest: A) => {
     const denied = forbidden(req);
     if (denied) return denied;
+    const respond = async (res: Response | Promise<Response>) => compressJson(req, await res);
     if (devices.authenticateDevice(req)) {
       if (!devicePathAllowed(new URL(req.url).pathname)) return bad("Forbidden", 403);
-      return handler(req, ...rest);
+      return respond(handler(req, ...rest));
     }
     // A device token this server doesn't know is refused, not taken for a browser: on a server
     // without a password that would let a stale or reassigned address act for a pairing it never made.
@@ -133,8 +142,14 @@ const api =
     // address that reaches some other OpenBuild.
     if (/^Bearer [a-f0-9]{64}$/.test(req.headers.get("authorization") ?? ""))
       return Response.json({ error: "Unknown device token" }, { status: 401, headers: { [devices.SERVER_HEADER]: serverId } });
-    return localAuth.protect(req, () => handler(req, ...rest));
+    return localAuth.protect(req, () => respond(handler(req, ...rest)));
   };
+
+/** Save a chat as a browser sent it (see chatWrite.ts). */
+async function writeChat(chat: storage.StoredChat, onto?: (stored: Chat) => storage.StoredChat): Promise<{ v: string; chat: Chat } | { error: Response }> {
+  const written = await saveChat(chat, (id) => piWorker.snapshots(id), onto);
+  return "error" in written ? { error: bad(written.error, written.status) } : written;
+}
 
 /** Headers from a proxied remote response that are safe to pass back to the browser. */
 const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after"];
@@ -230,11 +245,11 @@ function serve(port: number, hostname: string) {
         if (server.upgrade(req, { data })) return;
         return bad("WebSocket upgrade failed", 400);
       },
-      "/*": index,
+      "/*": client ? client.serve : index,
       // The bundle's own files are exact routes and win over this. A script or stylesheet that
       // isn't one of them is from an older build (a tab left open across an update): answer 404
       // instead of the page, so it fails plainly. Anything else here (/thread-<id>) is the page.
-      "/:file": (req, server: Bun.Server<unknown>) =>
+      "/:file": client ? client.serve : (req, server: Bun.Server<unknown>) =>
         /\.(?:js|css|map)$/.test(req.params.file) ? new Response("Not found", { status: 404 }) : fetch(new URL("/", server.url)),
 
       // Only these authentication routes are public; never allow first-time password setup over the network.
@@ -534,6 +549,14 @@ function serve(port: number, hostname: string) {
           // Refreshes show the saved list promptly even if Pi is cold or transcripts are large.
           // Discovery continues in the background; subsequent polls await its fresh result.
           await refreshChats(params.has("startup") ? 100 : undefined);
+          if (params.has("summaries") && params.has("all")) {
+            // A page load, with nothing cached: every summary along with the index, as stored.
+            const index = storage.chatIndex();
+            const rows = await storage.chatSummaryRows();
+            return new Response(`{"summaryIndex":${JSON.stringify(index)},"summaries":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+              headers: { "content-type": "application/json" },
+            });
+          }
           if (params.has("summaries")) return Response.json({ summaryIndex: storage.chatIndex() });
           if (params.has("index")) return Response.json({ index: storage.chatIndex() });
           return Response.json({ chats: storage.listChats() });
@@ -557,7 +580,10 @@ function serve(port: number, hostname: string) {
         POST: api(async (req) => {
           const body = await readJson(req);
           if (!Array.isArray(body?.ids) || !body.ids.every((id: unknown) => typeof id === "string")) return bad("Expected { ids: string[] }");
-          return Response.json({ summaries: await storage.chatSummaries(body.ids) });
+          const rows = await storage.chatSummaryRows(body.ids);
+          return new Response(`{"summaries":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+            headers: { "content-type": "application/json" },
+          });
         }),
       },
       "/api/chats/search": {
@@ -587,13 +613,28 @@ function serve(port: number, hostname: string) {
         PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.historyDeferred || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
-          if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
-          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
-          const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
-          const stored = storage.getChat(chat.id) as Chat | undefined;
-          const projected = keepPullRequestFields(projectChat(chat as unknown as Chat, snapshots, stored), stored);
-          const v = storage.putChat({ ...projected });
-          return v ? Response.json({ ok: true, v, chat: projected }) : bad("Chat was deleted", 410);
+          const written = await writeChat(chat);
+          return "error" in written ? written.error : Response.json({ ok: true, v: written.v, chat: written.chat });
+        }),
+        // A thread's sidebar edits (marked read, pinned, closed, renamed) while the browser has only its
+        // summary: the metadata, merged here into the stored history, as a PUT of that history with these
+        // fields would. The browser doesn't download the history to send it back whole, and messages
+        // written meanwhile can't be lost. Answers with the summary.
+        PATCH: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
+          const metadata = await readJson(req);
+          if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || metadata.id !== req.params.id || "messages" in metadata) {
+            return bad("Expected a chat's metadata, without messages, whose id matches the URL");
+          }
+          const stored = storage.getChat(req.params.id) as Chat | undefined;
+          if (!stored) return storage.chatExists(req.params.id) ? bad("Chat was deleted", 410) : bad("No such chat", 404);
+          const { historyDeferred: _, ...fields } = metadata;
+          // Merged again into the history as it is once the save is ready: a reply's message written
+          // meanwhile stays.
+          const onto = (latest: Chat) => ({ ...latest, ...fields, id: latest.id, messages: latest.messages });
+          const chat = onto(stored);
+          if (!isChat(chat)) return bad("Expected a chat's metadata");
+          const written = await writeChat(chat, onto);
+          return "error" in written ? written.error : Response.json({ ok: true, v: written.v, chat: chatSummary(written.chat) });
         }),
         DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           if (threadRuntime(req.params.id) === "durable") await durable.stopThread(req.params.id);

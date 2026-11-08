@@ -15,6 +15,7 @@ import { Component, type ComponentType, type ErrorInfo, type ReactNode } from "r
 import { create } from "zustand";
 import { PLUGIN_API_VERSION, type PluginInfo, type PluginSettingsSection, type PluginsResponse } from "../../shared/plugins";
 import { useStore } from "./store";
+import { suspectOutage } from "./serverOutage";
 import { addProviderOrder, clearProviderOverrides, setProviderOverrides, snapshotProviderOverrides, type ProviderOverride } from "./pluginOverrides";
 import type { ToolPart } from "./types";
 
@@ -453,6 +454,8 @@ export function initPlugins() {
   void usePlugins.getState().refresh();
   try {
     const events = new EventSource("/api/plugins/events");
+    // It stays open while the server is up, so it dropping is the first sign of a restart.
+    events.onerror = () => suspectOutage();
     events.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as { type?: string };

@@ -120,18 +120,19 @@ function PeekCard({ peek }: { peek?: PeekState }) {
 
 /**
  * A sidebar avatar that keeps still unless its bots are at work (then they fidget; in a group, only
- * the members at work). Hovering its row, tile or rail button makes the eyes follow the pointer, and
- * nothing more.
+ * the members at work). Hovering a bot's row, tile or rail button makes its eyes follow the pointer,
+ * and nothing more: no hop or smile, no spin when pressed. A group's huddle doesn't react at all.
  */
-function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
+function SidebarAvatar({ conversation, size }: { conversation: Conversation; size: number }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
+  const watches = conversation.kind === "direct";
   useEffect(() => {
     const host = ref.current?.closest("button");
-    if (!host) return;
+    if (!host || !watches) return setHover(false);
     const enter = (e: PointerEvent) => e.pointerType !== "touch" && setHover(true);
     const leave = () => setHover(false);
     host.addEventListener("pointerenter", enter);
@@ -140,10 +141,10 @@ function SidebarAvatar({ conversation, size, playful }: { conversation: Conversa
       host.removeEventListener("pointerenter", enter);
       host.removeEventListener("pointerleave", leave);
     };
-  }, []);
+  }, [watches]);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover} playful={playful} mood={typing ? "thinking" : undefined} />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} />
     </span>
   );
 }
@@ -215,7 +216,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       }}
     >
       <span className="bots-tile-avatar">
-        <SidebarAvatar conversation={conversation} size={64} playful={conversation.kind === "direct"} />
+        <SidebarAvatar conversation={conversation} size={64} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>

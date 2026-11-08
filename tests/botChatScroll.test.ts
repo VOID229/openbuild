@@ -2,10 +2,10 @@
 // message again on the way back, whatever arrives late, and one the user scrolled up in is where they
 // left it, never another chat's place.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { browser, launchChrome, Page } from "./chromePage";
+import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 /** A tiny PNG, sent only once the test lets it go: an image that loads after the chat has opened. */
 const PNG = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="), (c) => c.charCodeAt(0));
@@ -16,33 +16,27 @@ let olderHeld = Promise.resolve();
 
 beforeAll(async () => {
   if (!browser) return;
-  const page = (await import("./fixtures/botScroll/index.html")).default;
-  server = Bun.serve({
-    port: 0,
-    development: false,
-    routes: {
-      "/": page,
+  server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`, {
       "/slow.png": async () => {
         await imagesHeld;
         return new Response(PNG, { headers: { "content-type": "image/png", "cache-control": "no-store" } });
       },
       // A page of older messages, sent only once the test lets it go.
-      "/older/:id": async (req) => {
+      "/older/*": async (req) => {
         await olderHeld;
+        const id = new URL(req.url).pathname.split("/").pop();
         const at = Date.now() - 7_200_000;
-        const messages = Array.from({ length: 20 }, (_, i) => ({ id: `${req.params.id}-old-${i}`, author: i % 2 ? "manager" : "me", at: at + i * 1000, text: `Older ${i}. `.repeat(30) }));
+        const messages = Array.from({ length: 20 }, (_, i) => ({ id: `${id}-old-${i}`, author: i % 2 ? "manager" : "me", at: at + i * 1000, text: `Older ${i}. `.repeat(30) }));
         return Response.json({ messages, more: false });
       },
-      // What the chat sends (marking it read) has nowhere to go here, and needn't.
-      "/api/*": () => Response.json({}),
-    },
+      // What the chat sends (marking it read) has nowhere to go here, and needn't: /api/* answers {}.
   });
   chrome = await launchChrome();
 }, 60_000);
 
 afterAll(async () => {
   await chrome?.close();
-  server?.stop(true);
+  await server?.stop();
 });
 
 const open = async (width = 1000, height = 700) => {

@@ -91,7 +91,6 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   alive = true,
   lively,
   track,
-  playful,
   busy,
   working,
   mood,
@@ -102,7 +101,6 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   alive?: boolean;
   lively?: boolean;
   track?: boolean;
-  playful?: boolean;
   busy?: boolean;
   /** The bots at work, so a group animates just those members rather than all of them. */
   working?: string[];
@@ -116,7 +114,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} playful={playful} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import { ArrowRight, LockKeyhole } from "lucide-react";
-import { useServerOutage } from "../lib/serverOutage";
+import { SERVER_BACK, setOutageProbe, useServerOutage } from "../lib/serverOutage";
 
 /**
  * Nothing behind this gate is mounted until the server accepts this browser. With no local
@@ -27,18 +27,22 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
       if (checking) return;
       checking = true;
       clearTimeout(retry);
+      let back = false;
       try {
         const res = await fetch("/api/auth/status", { cache: "no-store" });
         if (!res.ok) throw new Error();
         const next = await res.json();
         if (typeof next.configured !== "boolean" || typeof next.authenticated !== "boolean") throw new Error();
+        back = failures > 0 && next.authenticated;
         failures = 0;
         if (active) { setStatus(next); setOffline(false); }
       } catch {
-        // Keep the last known status so a restart doesn't tear down the open app; retry quickly.
+        // Keep the last known status so a restart doesn't tear down the open app. A restart is over
+        // in a second or two, so look often at first, then settle down for a server that stays away.
         failures++;
-        if (active) { setOffline(true); retry = setTimeout(check, Math.min(1000 * failures, 5000)); }
+        if (active) { setOffline(true); retry = setTimeout(check, failures <= 30 ? 300 : failures <= 60 ? 2000 : 5000); }
       } finally { checking = false; }
+      if (back && active) window.dispatchEvent(new Event(SERVER_BACK));
     };
     // Catch expired/revoked sessions on every API path, not only the status poll.
     const original = window.fetch;
@@ -58,10 +62,11 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
       return res;
     }, { preconnect: original.preconnect });
     window.fetch = guarded;
+    setOutageProbe(() => void check());
     void check();
     const timer = setInterval(check, 15_000);
     window.addEventListener("focus", check);
-    return () => { active = false; clearInterval(timer); clearTimeout(retry); window.removeEventListener("focus", check); if (window.fetch === guarded) window.fetch = original; };
+    return () => { active = false; clearInterval(timer); clearTimeout(retry); window.removeEventListener("focus", check); setOutageProbe(undefined); if (window.fetch === guarded) window.fetch = original; };
   }, []);
 
   useEffect(() => {

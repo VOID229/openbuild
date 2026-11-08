@@ -2652,10 +2652,16 @@ select.input {
   gap: 28px;
 }
 
+/* Opening a thread brings every message in at once, so the entrance stays brief: it never holds the
+   thread back from being read. */
 .msg {
   display: flex;
   flex-direction: column;
-  animation: rise 260ms var(--ease) both;
+  animation: rise 180ms var(--ease) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .msg { animation: none; }
 }
 
 /* Messages out of view skip style, layout and paint, so a long thread costs what's on screen: coming

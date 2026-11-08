@@ -1,21 +1,20 @@
 // Going between OpenBots chats with drafts in them, in a real Chrome: each chat's draft comes back with
 // the caret, selection and scroll it was left with, and a touch screen isn't handed the keyboard for it.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { browser, launchChrome, Page } from "./chromePage";
+import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 beforeAll(async () => {
   if (!browser) return;
-  const page = (await import("./fixtures/botScroll/index.html")).default;
-  server = Bun.serve({ port: 0, development: false, routes: { "/": page, "/api/*": () => Response.json({}) } });
+  server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`);
   chrome = await launchChrome();
 }, 60_000);
 
 afterAll(async () => {
   await chrome?.close();
-  server?.stop(true);
+  await server?.stop();
 });
 
 const FIELD = "document.querySelector('.bots-composer-textarea')";

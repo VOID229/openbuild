@@ -7,6 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { findBrowser } from "../server/pi/extensions/html-render";
+import { serveFixture } from "./chromePage";
 
 const browser = findBrowser();
 
@@ -57,13 +58,12 @@ class Page {
 
 let chrome: ChildProcess | undefined;
 let ws: WebSocket;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 let profile = "";
 
 beforeAll(async () => {
   if (!browser) return;
-  const page = (await import("./fixtures/githubSignIn/index.html")).default;
-  server = Bun.serve({ port: 0, development: false, routes: { "/": page } });
+  server = await serveFixture(`${import.meta.dir}/fixtures/githubSignIn/index.html`);
   profile = await mkdtemp(join(tmpdir(), "openbuild-github-signin-"));
   const env = { ...process.env };
   // See html-render.ts: current Chrome can't parse the runner's `disabled:` bus address.
@@ -91,7 +91,7 @@ beforeAll(async () => {
 afterAll(async () => {
   ws?.close();
   if (chrome?.pid) try { process.kill(-chrome.pid, "SIGKILL"); } catch { /* already gone */ }
-  server?.stop(true);
+  await server?.stop();
   if (profile) await rm(profile, { recursive: true, force: true }).catch(() => {});
 });
 

@@ -54,6 +54,9 @@ function open(): Database {
     const setVersion = db.query("UPDATE chats SET version = ?2 WHERE id = ?1");
     db.transaction(() => { for (const row of unversioned) setVersion.run(row.id, versionOf(row.data)); })();
   }
+  // The listing columns are stored after `data`, so reading them from the table walks each chat's
+  // overflow pages: every transcript on every 5 s poll. This index answers the listing on its own.
+  db.run("CREATE INDEX IF NOT EXISTS chats_listing ON chats(deleted_at, updated_at, id, version)");
   db.run(`CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
@@ -94,9 +97,15 @@ export function chatIndex(): { id: string; v: string }[] {
     .map((r) => ({ id: r.id, v: r.version }));
 }
 
-/** Migrate old histories one at a time, yielding between rows rather than holding all JSON in memory. */
+/** Summaries as parsed chats (see chatSummaryRows). */
 export async function chatSummaries(ids?: string[]): Promise<{ v: string; chat: Chat }[]> {
-  const out: { v: string; chat: Chat }[] = [];
+  return (await chatSummaryRows(ids)).map((row) => ({ v: row.v, chat: JSON.parse(row.data) }));
+}
+
+/** Summaries as stored JSON, to be spliced into a response. Migrates old histories one at a time,
+ *  yielding between rows rather than holding all JSON in memory. */
+export async function chatSummaryRows(ids?: string[]): Promise<{ v: string; data: string }[]> {
+  const out: { v: string; data: string }[] = [];
   const selected = ids ? new Set(ids) : undefined;
   let migratedBytes = 0;
   for (const entry of chatIndex()) {
@@ -112,7 +121,7 @@ export async function chatSummaries(ids?: string[]): Promise<{ v: string; chat: 
       // Large old archives can outpace JSC's GC heuristic even though each row is discarded.
       if (migratedBytes >= 32 * 1024 * 1024) { Bun.gc(true); migratedBytes = 0; }
     }
-    out.push({ v: entry.v, chat: JSON.parse(row.data) });
+    out.push({ v: entry.v, data: row.data });
   }
   return out;
 }
@@ -137,10 +146,14 @@ export function* eachChat(): Generator<Chat> {
   }
 }
 
-/** Every current Durable thread's id and version (for usage, which reads only those). */
+/** Every current Durable thread's id and version (for usage, which reads only those). Asked of the
+ *  summaries, which keep the runtime: parsing every transcript for it blocked the server for as
+ *  long as that takes. A chat whose summary isn't written yet is read itself. */
 export function durableChatIndex(): { id: string; v: string }[] {
-  return db.query<{ id: string; version: string }, []>("SELECT id, version FROM chats WHERE deleted_at IS NULL AND json_extract(data, '$.runtime') = 'durable'").all()
-    .map((r) => ({ id: r.id, v: r.version }));
+  return db.query<{ id: string; version: string }, []>(
+    `SELECT c.id, c.version FROM chats c LEFT JOIN chat_summaries s ON s.id = c.id AND s.version = c.version
+     WHERE c.deleted_at IS NULL AND (CASE WHEN s.id IS NULL THEN json_extract(c.data, '$.runtime') ELSE json_extract(s.data, '$.runtime') END) = 'durable'`,
+  ).all().map((r) => ({ id: r.id, v: r.version }));
 }
 
 /** The stored JSON of the given current chats, with their versions. */

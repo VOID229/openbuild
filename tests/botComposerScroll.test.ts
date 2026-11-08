@@ -1,7 +1,7 @@
 // The OpenBots composer growing and shrinking as a draft is typed, in a real Chrome: the conversation
 // stays at the bottom when it was there, and stays where the user scrolled it when it wasn't.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { browser, launchChrome, Page } from "./chromePage";
+import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 /** The composer's field, to type into, delete from and measure. */
 class ComposerPage extends Page {
@@ -38,18 +38,17 @@ class ComposerPage extends Page {
 }
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 beforeAll(async () => {
   if (!browser) return;
-  const page = (await import("./fixtures/botComposer/index.html")).default;
-  server = Bun.serve({ port: 0, development: false, routes: { "/": page } });
+  server = await serveFixture(`${import.meta.dir}/fixtures/botComposer/index.html`);
   chrome = await launchChrome();
 }, 60_000);
 
 afterAll(async () => {
   await chrome?.close();
-  server?.stop(true);
+  await server?.stop();
 });
 
 const LINE = 22;

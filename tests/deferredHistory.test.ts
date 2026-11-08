@@ -9,6 +9,7 @@ let version = "v1";
 let full: Chat = { id: "a", title: "History", createdAt: 1, updatedAt: 1, messages: [{ id: "m", role: "user", content: "preserve me", createdAt: 1 }] };
 const calls: string[] = [];
 let written: Chat | undefined;
+let patched: Partial<Chat> | undefined;
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = String(input);
   calls.push(`${init?.method ?? "GET"} ${url}`);
@@ -25,6 +26,13 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     version = "v2";
     return Response.json({ ok: true, v: version, chat: full });
   }
+  // A thread's metadata, merged into the history the server has (as server/index.ts does).
+  if (url === "/api/chats/a" && init?.method === "PATCH") {
+    patched = JSON.parse(String(init.body));
+    full = { ...full, ...patched, messages: full.messages };
+    version = "v2";
+    return Response.json({ ok: true, v: version, chat: chatSummary(full) });
+  }
   throw new Error(`Unexpected request ${url}`);
 }) as typeof fetch;
 const { loadChats, loadChatHistory, saveChat } = await import("../src/lib/db");
@@ -36,12 +44,17 @@ test("startup and unchanged polls avoid full transcripts; metadata saves and ope
   const count = calls.length;
   await loadChats();
   expect(calls.slice(count)).toEqual(["GET /api/chats?summaries"]);
+  const before = calls.length;
   await saveChat({ ...summary!, pinned: true });
-  // The durable outbox sends in the background.
-  for (let n = 0; n < 100 && !written; n++) await Bun.sleep(5);
-  expect(written?.messages[0]?.content).toBe("preserve me");
-  expect(written?.pinned).toBe(true);
-  expect(written?.historyDeferred).toBeUndefined();
+  // The durable outbox sends in the background: the metadata alone, merged into the server's history.
+  for (let n = 0; n < 100 && !patched; n++) await Bun.sleep(5);
+  expect(patched?.pinned).toBe(true);
+  expect(patched && "messages" in patched).toBe(false);
+  expect(patched?.historyDeferred).toBeUndefined();
+  expect(calls.slice(before)).toEqual(["PATCH /api/chats/a"]);
+  expect(full.messages[0]?.content).toBe("preserve me");
+  expect(full.pinned).toBe(true);
+  expect(written).toBeUndefined();
   const [next] = await loadChats();
   expect(next?.historyDeferred).toBe(true);
   const opened = await loadChatHistory(next!, true);

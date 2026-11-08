@@ -1,21 +1,20 @@
 // A bot's mascot in a group chat, in a real Chrome: it sits beside the message it sent and scrolls
 // with it, never held at the bottom of the view while a long message goes past.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { browser, launchChrome, Page } from "./chromePage";
+import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
-let server: ReturnType<typeof Bun.serve> | undefined;
+let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 beforeAll(async () => {
   if (!browser) return;
-  const page = (await import("./fixtures/botScroll/index.html")).default;
-  server = Bun.serve({ port: 0, development: false, routes: { "/": page, "/api/*": () => Response.json({}) } });
+  server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`);
   chrome = await launchChrome();
 }, 60_000);
 
 afterAll(async () => {
   await chrome?.close();
-  server?.stop(true);
+  await server?.stop();
 });
 
 const LONG = "The investigation keeps running on its own, so it can carry on while the other session is stuck. ".repeat(40);
