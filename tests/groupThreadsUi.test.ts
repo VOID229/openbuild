@@ -1,7 +1,7 @@
 // A group's Threads tab in the details panel, in a real Chrome with the whole app on a fake server
 // (fixtures/groupThreads): it lists the coding threads the group's bots started from it while they
-// work, follows the thread list as threads start and finish, opens one in place of the chat the way
-// an activity link does, and Back returns to the tab. Set OPENBUILD_SCREENSHOTS to a folder to keep
+// work, follows the thread list as threads start and finish, opens one inside the panel itself (not over
+// OpenBots), and Back returns to the list. Set OPENBUILD_SCREENSHOTS to a folder to keep
 // a picture of each state.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
@@ -116,48 +116,64 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     await shoot(page, "threads-empty");
   }, 60_000);
 
-  test("opens a thread in place of the chat like an activity link, Back returns to the tab, and it can be opened out", async () => {
+  test("opens a thread inside the details panel, not over OpenBots, and Back returns to the list", async () => {
     const page = await open();
+    const rect = (sel: string) => page.eval<{ l: number; r: number; t: number; b: number } | null>(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; })()`);
+    await page.eval(`document.querySelector('.bots-view textarea, .bots-view [contenteditable]')?.focus()`);
     await clickRow(page, "Trace the slow");
-    await page.until(`store.getState().botsThread && !!document.querySelector('[aria-label="Back to chat"]')`);
-    expect(await page.eval<unknown>("location.pathname")).toBe("/bots/thread-t-trace");
-    expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-trace");
-    // The same embedded thread as an activity link: OpenBots' sidebar stays, with Back and Open in OpenBuild.
-    expect(await page.eval<unknown>("!!document.querySelector('.floating-tools-bots [aria-label=\"Open in OpenBuild\"]')")).toBe(true);
-    await page.until(`document.body.innerText.includes("Looking into it")`);
-    await Bun.sleep(300);
-    await shoot(page, "thread-open");
-
-    await page.click('[aria-label="Back to chat"]');
-    await page.until("!store.getState().botsThread");
+    await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
+    await page.until(`document.querySelector('.bots-details-threadpane').innerText.includes("Looking into it")`);
+    await Bun.sleep(450);
+    // Routing and OpenBots are untouched: still the bot chat, the thread is just the panel's content.
     expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
-    // Back where it was: the group, its details open on Threads.
-    await page.until("!!document.querySelector('.bots-details-open')");
-    expect(await page.eval<unknown>("bots.getState().activeId")).toBe("dev");
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    expect(await page.eval<unknown>("store.getState().botsOpen")).toBe(true);
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')")).toBe(true);
+    expect(await page.eval<unknown>("!!document.querySelector('.floating-tools-bots')")).toBe(false);
+    // Contained: the thread sits within the panel, beside the chat, not over it.
+    const panel = (await rect(".bots-details"))!;
+    const thread = (await rect(".bots-details-threadpane .chat"))!;
+    const chatPane = (await rect(".bots-view .bots-messages"))!;
+    expect(thread.l).toBeGreaterThanOrEqual(panel.l - 1);
+    expect(thread.r).toBeLessThanOrEqual(panel.r + 1);
+    expect(thread.b).toBeLessThanOrEqual(panel.b + 1);
+    expect(chatPane.r).toBeLessThanOrEqual(panel.l + 1);
+    expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    await shoot(page, "thread-in-panel");
+
+    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+    await page.until("!document.querySelector('.bots-details-threadpane')");
     expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
     expect((await rows(page)).length).toBe(2);
+    expect(await page.eval<unknown>("bots.getState().activeId")).toBe("dev");
     await shoot(page, "back-to-tab");
 
-    // Opened out: the full OpenBuild thread.
+    // Opening out to OpenBuild is only ever by choice.
     await clickRow(page, "Fix the flaky");
-    await page.until(`!!document.querySelector('[aria-label="Open in OpenBuild"]')`);
-    await page.click('[aria-label="Open in OpenBuild"]');
+    await page.until(`!!document.querySelector('.bots-details-threadpane [aria-label="Open in OpenBuild"]')`);
+    expect(await page.eval<unknown>("store.getState().botsOpen")).toBe(true);
+    await page.click('.bots-details-threadpane [aria-label="Open in OpenBuild"]');
     await page.until("!store.getState().botsOpen");
     expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-flaky");
     expect(await page.eval<unknown>("location.pathname")).toBe("/thread-t-flaky");
-    await Bun.sleep(300);
-    await shoot(page, "opened-out");
   }, 60_000);
 
-  test("on a phone, Back from a thread opened from the tab returns to the details on Threads", async () => {
+  test("on a phone, the thread fills the details screen only, and Back returns to the list", async () => {
     const page = await open(390, 800);
     await clickRow(page, "Fix the flaky");
-    await page.until(`store.getState().botsThread && !!document.querySelector('[aria-label="Back to chat"]')`);
-    await page.click('[aria-label="Back to chat"]');
-    await page.until("!store.getState().botsThread");
-    await page.until("!!document.querySelector('.bots-details-open')");
+    await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
+    await Bun.sleep(450);
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
+    const fit = await page.eval<number[]>(`(() => { const p = document.querySelector('.bots-details').getBoundingClientRect(); const t = document.querySelector('.bots-details-threadpane .chat').getBoundingClientRect(); return [t.left - p.left, p.right - t.right, p.bottom - t.bottom]; })()`);
+    expect(fit.every((d) => d >= -1)).toBe(true);
+    expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    await shoot(page, "phone-thread-in-panel");
+    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+    await page.until("!document.querySelector('.bots-details-threadpane')");
     expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
-    await Bun.sleep(350);
+    expect((await rows(page)).length).toBe(2);
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-details-open')")).toBe(true);
     await shoot(page, "phone-back-to-tab");
   }, 60_000);
 });
