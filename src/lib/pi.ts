@@ -110,8 +110,23 @@ export const codexDaemon = (deviceId?: DeviceId) => get<{ installed: boolean; st
 export const fxModels = (fresh = false, deviceId?: DeviceId) => get<{ models: ModelInfo[]; defaultModel?: string; checkedAt: number }>(apiUrl(deviceId, `/api/fx/models${fresh ? "?fresh=1" : ""}`));
 export const piModels = (fresh = false, deviceId?: DeviceId) => get<PiModels>(apiUrl(deviceId, `/api/pi/models${fresh ? "?fresh=1" : ""}`));
 
-/** What bots can run on: only what the extensions they load provide. Rejects if Pi can't start with those. */
-export const botModels = (fresh = false) => get<PiModels>(`/api/bots/models${fresh ? "?fresh=1" : ""}`);
+const botModelWatchers = new Set<(listing: Promise<PiModels>) => void>();
+
+/**
+ * What bots can run on: only what the extensions they load provide. Rejects if Pi can't start with those.
+ * A fresh listing (asked for once the extensions change) goes to every onBotModels watcher too.
+ */
+export const botModels = (fresh = false) => {
+  const listing = get<PiModels>(`/api/bots/models${fresh ? "?fresh=1" : ""}`);
+  if (fresh) for (const fn of botModelWatchers) fn(listing);
+  return listing;
+};
+
+/** Hears of each fresh bot listing, so a picker that's open shows what an extension brought or took away. */
+export function onBotModels(fn: (listing: Promise<PiModels>) => void): () => void {
+  botModelWatchers.add(fn);
+  return () => void botModelWatchers.delete(fn);
+}
 
 /** Prices for models Pi no longer lists, by "<provider>/<model id>". */
 export const piModelPrices = (ids: string[]) =>

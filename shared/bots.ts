@@ -472,6 +472,10 @@ const LEGACY_SWITCH = /^Switched to (?:fallback model|\S+ priority model) /;
 /** What a lapsed sign-in says in the chat: the fix, without the provider's error. */
 export const MODEL_SIGN_IN = "The sign-in for this model has expired. Sign in again in Settings → Providers.";
 
+/** What the chat says of a bot's model that Pi, with the extensions bots load, doesn't have: switched off with its extension, say. */
+export const modelUnavailable = (model: string) => `${model} isn't available to bots. Its extension may be switched off in Settings → Bots.`;
+const MODEL_UNAVAILABLE = /[\w.:@-]+\/[\w.:@/-]+ isn't available to bots\. Its extension may be switched off in Settings → Bots\./;
+
 /**
  * OpenBuild's own reasons a reply failed, which say what happened (and what to do) without anything a
  * provider sent. Anything else, "rate limited" and "insufficient credits" included, may carry the
@@ -493,6 +497,9 @@ const SAFE_REPLY_ERRORS = [
 export function shownReplyError(detail: string | undefined, provider?: boolean): string | undefined {
   if (!detail) return;
   if (detail.includes(MODEL_SIGN_IN)) return MODEL_SIGN_IN;
+  // The model's id is the bot's own setting, not anything a provider said, so it's shown wherever it's found, the first of a chain's.
+  const unavailable = detail.match(MODEL_UNAVAILABLE);
+  if (unavailable) return unavailable[0];
   if (provider) return;
   const line = detail.trim();
   return SAFE_REPLY_ERRORS.some((safe) => safe.test(line)) ? line : undefined;
@@ -597,4 +604,25 @@ export function botModelChain(bot: Pick<Bot, "model" | "fallbackModels" | "noFal
   const fallbacks = mode === "none" ? [] : mode === "own" ? bot!.fallbackModels! : (settings.defaultFallbackModels ?? []);
   const seen = new Set(primary ? [primary] : []);
   return [primary, ...fallbacks.filter((m) => m.includes("/") && !seen.has(m) && (seen.add(m), true))];
+}
+
+/**
+ * The models bots are set to that aren't among `known` (what bots can use now, as "provider/model"),
+ * each with who uses it: a bot's name, "default" or "default fallbacks", or "<name> fallbacks".
+ * A model that came from an extension that's since been switched off shows up here.
+ */
+export function unavailableModels(bots: Pick<Bot, "name" | "model" | "fallbackModels" | "noFallbacks">[], settings: Pick<BotsSettings, "defaultModel" | "defaultFallbackModels">, known: ReadonlySet<string>): { model: string; usedBy: string[] }[] {
+  const users = new Map<string, string[]>();
+  const note = (model: string | undefined, who: string) => {
+    if (!model || known.has(model)) return;
+    const list = users.get(model) ?? [];
+    if (!list.includes(who)) users.set(model, [...list, who]);
+  };
+  note(settings.defaultModel, "default");
+  for (const model of settings.defaultFallbackModels ?? []) note(model, "default fallbacks");
+  for (const bot of bots) {
+    note(bot.model, bot.name);
+    if (fallbackMode(bot) === "own") for (const model of bot.fallbackModels!) note(model, `${bot.name} fallbacks`);
+  }
+  return [...users].map(([model, usedBy]) => ({ model, usedBy }));
 }

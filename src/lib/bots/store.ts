@@ -13,6 +13,7 @@ import { uid } from "../id";
 import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
+import { botModels } from "../pi";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
 import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
@@ -1038,6 +1039,10 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     return;
   }
   if (e.t === "settings") {
+    // Extensions switched elsewhere (another tab or device) change what bots can run on. A change made
+    // here is already in the store by now, and BotExtensions asks for the fresh listing itself.
+    const extensions = e.settings.customExtensions ?? NO_EXTENSIONS;
+    if (!authoritativeOnly && JSON.stringify(extensions) !== JSON.stringify(get().customExtensions)) void botModels(true).catch(() => {});
     set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
   }
 }

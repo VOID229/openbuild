@@ -551,6 +551,11 @@ test("send_message, models and check-ins against a real bots database", async ()
       // A model Pi refuses fails the run rather than falling back quietly.
       svc.updateBot(bot.id, { model: 'anthropic/gone' });
       await a.rejects(applyModel({ send: async (cmd) => { if (cmd.type === 'set_model') throw new Error('Model not found'); return {}; } }, bot.id), /Model not found/);
+      // One Pi doesn't list at all, its extension switched off say, says so rather than Pi's bare refusal.
+      const refusing = (models) => ({ send: async (cmd) => { if (cmd.type === 'set_model') throw new Error('Model not found'); return cmd.type === 'get_available_models' ? { models } : {}; } });
+      await a.rejects(applyModel(refusing([{ provider: 'mock', id: 'm' }]), bot.id), /anthropic\\/gone isn't available to bots\\. Its extension may be switched off in Settings → Bots\\.$/);
+      // Listed but refused (no key, say) keeps Pi's reason.
+      await a.rejects(applyModel(refusing([{ provider: 'anthropic', id: 'gone' }]), bot.id), /Model not found/);
 
       // Effort uses Pi's supported levels, after the model has been selected.
       svc.updateBot(bot.id, { effort: 'high' });
@@ -1126,6 +1131,8 @@ test("the primary sets bots' models and fallbacks with manage_bot, checked again
       a.ok(models.models[0].efforts.includes('high'));
       a.equal(models.default, 'anthropic/claude-opus-5-5');
       a.doesNotMatch(JSON.stringify(models), /sk-should-not-show/);
+      // Models bots are set to that the listing lacks, an extension's switched off say, are named with who's on them.
+      a.deepEqual(models.unavailable, [{ id: 'openai-codex-2/gpt-6', used_by: ['Boss'] }]);
 
       // defaults reads and sets the global default model and fallbacks, primary only, checked whole first.
       listing = { models: [

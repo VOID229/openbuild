@@ -198,4 +198,23 @@ test("a plain provider error saved on an older line stays hidden in the chat, th
   for (const safe of ["Pi isn't installed. Install it in Settings → Pi.", "The reply took too long and was stopped.", 'Pi didn\'t answer "prompt" in time', "Pi isn't running (exited with code 1)", "Pi exited (code 137)"]) expect(shownReplyError(safe)).toBe(safe);
   for (const unsafe of PLAIN_PROVIDER_ERRORS) expect(shownReplyError(unsafe)).toBeUndefined();
   expect(shownReplyError("Pi isn't installed. Install it in Settings → Pi.", true)).toBeUndefined();
+  // A bot's model that's gone with its extension says so, even inside a provider error or a chain's failures.
+  const { modelUnavailable } = await import("../shared/bots");
+  const gone = modelUnavailable("bridge/claude-x");
+  expect(shownReplyError(gone, true)).toBe(gone);
+  expect(shownReplyError(`Every model failed.\nbridge/claude-x: ${gone}\nb/two: b/two is over its limit sk-live-1`, true)).toBe(gone);
+});
+
+test("models bots are set to that bots can't use are named with who uses them", async () => {
+  const { unavailableModels } = await import("../shared/bots");
+  const bots = [
+    { name: "Alpha", model: "bridge/x", fallbackModels: ["bridge/x", "mock/m"] },
+    { name: "Beta", fallbackModels: ["bridge/y"], noFallbacks: true },
+    { name: "Gamma", model: "mock/m" },
+  ];
+  expect(unavailableModels(bots, { defaultModel: "bridge/y", defaultFallbackModels: ["bridge/x"] }, new Set(["mock/m"]))).toEqual([
+    { model: "bridge/y", usedBy: ["default"] },
+    { model: "bridge/x", usedBy: ["default fallbacks", "Alpha", "Alpha fallbacks"] },
+  ]);
+  expect(unavailableModels(bots, {}, new Set(["mock/m", "bridge/x", "bridge/y"]))).toEqual([]);
 });
