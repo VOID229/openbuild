@@ -144,6 +144,17 @@ const api =
     return localAuth.protect(req, () => respond(handler(req, ...rest)));
   };
 
+/** Save a whole chat as a browser sent it: projected over its replies' runs, keeping server-owned fields. */
+async function writeChat(chat: storage.StoredChat): Promise<{ v: string; chat: Chat } | { error: Response }> {
+  if (!runtimeChangeAllowed(chat)) return { error: bad("A thread's runtime cannot change after it starts.") };
+  const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
+  const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
+  const stored = storage.getChat(chat.id) as Chat | undefined;
+  const projected = keepPullRequestFields(projectChat(chat as unknown as Chat, snapshots, stored), stored);
+  const v = storage.putChat({ ...projected });
+  return v ? { v, chat: projected } : { error: bad("Chat was deleted", 410) };
+}
+
 /** Headers from a proxied remote response that are safe to pass back to the browser. */
 const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after"];
 /**
@@ -606,13 +617,25 @@ function serve(port: number, hostname: string) {
         PUT: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           const chat = await readJson(req);
           if (!isChat(chat) || chat.historyDeferred || chat.id !== req.params.id) return bad("Expected a chat whose id matches the URL");
-          if (!runtimeChangeAllowed(chat)) return bad("A thread's runtime cannot change after it starts.");
-          const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
-          const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
-          const stored = storage.getChat(chat.id) as Chat | undefined;
-          const projected = keepPullRequestFields(projectChat(chat as unknown as Chat, snapshots, stored), stored);
-          const v = storage.putChat({ ...projected });
-          return v ? Response.json({ ok: true, v, chat: projected }) : bad("Chat was deleted", 410);
+          const written = await writeChat(chat);
+          return "error" in written ? written.error : Response.json({ ok: true, v: written.v, chat: written.chat });
+        }),
+        // A thread's sidebar edits (marked read, pinned, closed, renamed) while the browser has only its
+        // summary: the metadata, merged here into the stored history, as a PUT of that history with these
+        // fields would. The browser doesn't download the history to send it back whole, and messages
+        // written meanwhile can't be lost. Answers with the summary.
+        PATCH: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
+          const metadata = await readJson(req);
+          if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || metadata.id !== req.params.id || "messages" in metadata) {
+            return bad("Expected a chat's metadata, without messages, whose id matches the URL");
+          }
+          const stored = storage.getChat(req.params.id) as Chat | undefined;
+          if (!stored) return storage.chatExists(req.params.id) ? bad("Chat was deleted", 410) : bad("No such chat", 404);
+          const { historyDeferred: _, ...fields } = metadata;
+          const chat = { ...stored, ...fields, id: stored.id, messages: stored.messages };
+          if (!isChat(chat)) return bad("Expected a chat's metadata");
+          const written = await writeChat(chat);
+          return "error" in written ? written.error : Response.json({ ok: true, v: written.v, chat: chatSummary(written.chat) });
         }),
         DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
           if (threadRuntime(req.params.id) === "durable") await durable.stopThread(req.params.id);

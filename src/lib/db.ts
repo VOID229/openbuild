@@ -144,16 +144,21 @@ class Retry extends Error {}
 /** The outbox in the order it applies: "delete all" first, since anything else queued came after it. */
 const queued = async () => (await entries<string, Op>(outbox)).sort(([a], [b]) => (a === CLEAR ? -1 : b === CLEAR ? 1 : 0));
 
+const putChat = (id: string, chat: Chat) =>
+  fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(chat) });
+
 async function send(id: string, op: Op) {
   let res: Response;
   try {
-    if (op.op === "put") {
-      const chat = await loadChatHistory(op.chat);
-      res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(chat),
-      });
+    if (op.op === "put" && op.chat.historyDeferred) {
+      // Edits to a thread whose history isn't here (marked read, pinned, closed): only its metadata,
+      // for the server to merge into the history it has, rather than downloading it to send back whole.
+      const { messages: _, historyDeferred: __, ...metadata } = op.chat;
+      res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
+      // A server from before that (404, or 405): the whole history, as it used to be sent.
+      if (res.status === 404 || res.status === 405) res = await putChat(id, await loadChatHistory(op.chat));
+    } else if (op.op === "put") {
+      res = await putChat(id, op.chat);
     } else {
       res = await fetchWithTimeout(op.op === "clear" ? "/api/chats" : `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     }
