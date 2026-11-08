@@ -78,6 +78,7 @@ export function botModels(fresh = false): Promise<PiModels> {
     const proc = new PiProcess(["--no-session", ...flags], homedir());
     try {
       const [models, state, scope] = await Promise.all([settledModels(proc, memory), proc.send<{ model?: any }>({ type: "get_state" }), modelScope()]);
+      svc.rememberModelNames(models);
       return { models, defaultModel: state.model ? `${state.model.provider}/${state.model.id}` : undefined, scope, checkedAt: Date.now() };
     } finally {
       proc.close();

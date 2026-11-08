@@ -216,7 +216,7 @@ test("a bot's activity line names the bot that did it, by author id; the user's 
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);');
   expect(chat).toContain("const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;");
-  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
   const { authoredEventText } = await import("../shared/bots");
   expect(authoredEventText({ kind: "thread", text: "Merged a pull request" })).toBe("merged a pull request");
   expect(authoredEventText({ kind: "thread", text: "Wrote a prompt" })).toBe("wrote a prompt in");

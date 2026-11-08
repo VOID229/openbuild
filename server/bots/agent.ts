@@ -547,7 +547,8 @@ function settingsSummary(bot: Bot, p: Record<string, unknown>) {
 
 function create(botId: string, p: Record<string, unknown>, settings?: Partial<Bot>) {
   const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
-  const bot = settings ? svc.updateBot(created.bot.id, settings) : created.bot;
+  // Its first settings, not a change: the "New bot" line says it's here.
+  const bot = settings ? svc.updateBot(created.bot.id, settings, { quiet: true }) : created.bot;
   svc.postMessage(svc.directId(botId) || created.conversationId, {
     id: crypto.randomUUID(),
     author: botId,

@@ -12,7 +12,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
       import * as svc from './server/bots/service.ts';
       const first = svc.createBot({ name: 'First' });
       const second = svc.createBot({ name: 'Second' });
-      for (const { bot } of [first, second]) svc.updateBot(bot.id, { proactivity: 'off' });
+      for (const { bot } of [first, second]) svc.updateBot(bot.id, { proactivity: 'off' }, { quiet: true });
       const collisionId = crypto.randomUUID();
       a.throws(() => svc.createBot({ id: collisionId, name: 'Collision', conversationId: first.conversationId }), /conversation already exists/);
       a.equal(db.getBot(collisionId), undefined);

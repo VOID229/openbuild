@@ -78,6 +78,12 @@ const namedBots = (bots: Bot[]) => bots.filter((b) => b.name.trim()).sort((a, b)
 const botNames = (named: Bot[]) => new RegExp(`(?<![\\p{L}\\d])(?:${named.map((b) => escapeRegExp(b.name)).join("|")})(?![\\p{L}\\d])`, "gu");
 
 /** Whether the text already names one of these bots ("Juniper left"). */
+/** What a settings line says after the bot's name: the "'s " just before its first setting ends the name. */
+function settingsChange(text: string): string | undefined {
+  const at = text.lastIndexOf("'s ", text.indexOf(": "));
+  return at > 0 ? text.slice(at + 3) : undefined;
+}
+
 const namesBot = (text: string, bots: Bot[]) => {
   const named = namedBots(bots);
   return named.length > 0 && botNames(named).test(text);
@@ -1262,11 +1268,13 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
             const detail = eventDetail(m.event!);
             const switchedTo = eventText(m.event!).replace(/^Switched to /, "") + (m.event!.kind === "model" && detail ? ` (${accountName(detail)})` : "");
+            // A change of settings ("Juniper's model: A → B") names its bot by id too, so a rename shows up on old lines.
+            const changed = m.event!.kind === "changed" && eventBot ? settingsChange(m.event!.text) : undefined;
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
                 {m.event!.kind !== "model" && detail && (
                   <span className="bm-event-detail">

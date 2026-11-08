@@ -143,6 +143,20 @@ test("a model switch links its bot and names the model, with the account only to
   }
 });
 
+test("a change of settings links its bot by id, so a rename shows up, and keeps old and new values", async () => {
+  await show([
+    event("e1", "scout", { kind: "changed", text: "Scout's model: Grok 4.7 → GPT 6.1 Sol", bot: "scout" }),
+    event("e2", "scout", { kind: "changed", text: "Scout's effort: default → high; OpenBuild: off → on", bot: "scout" }),
+  ], [{ ...scout, name: "Ranger" }, juniper]);
+  expect(lead("e1").textContent).toBe("Ranger's model: Grok 4.7 → GPT 6.1 Sol");
+  expect(lead("e2").textContent).toBe("Ranger's effort: default → high; OpenBuild: off → on");
+  for (const id of ["e1", "e2"]) {
+    expect(lead(id).querySelector("a, button")?.textContent).toBe("Ranger");
+    expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+  }
+  expect(document.body.textContent).not.toContain("Scout");
+});
+
 test("a failed reply says so, without the provider's error, on old lines as on new", async () => {
   await show([
     // Saved before: every fallback's error, a provider's JSON, an HTTP status.
