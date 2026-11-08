@@ -3,12 +3,13 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
+import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
 import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
 import { hasDevice, readDevices } from "../devices";
+import { findProject } from "../projects";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
@@ -38,6 +39,7 @@ export interface Wake {
 type Hooks = {
   wake: (botId: string, wake: Wake) => void;
   stop: (botId: string) => void;
+  pendingAssignments?: (botId: string) => { conversationId: string; messageIds: string[] }[];
 };
 /** What the friends module (server/friends/) hears about shared chats, so this file never imports it either. */
 type FriendHooks = {
@@ -60,6 +62,7 @@ const mem = globalThis as {
   openbotsTypingSince?: Map<string, number>;
   openbotsDrafts?: Draft[];
   openbotsStatus?: Map<string, BotStatus>;
+  openbotsActivityTimes?: Map<string, { turnStartedAt: number | null; lastActivityAt: number }>;
   openbotsChains?: Map<string, number>;
   openbotsChainWarned?: Set<string>;
   openbotsWaiters?: Waiter[];
@@ -216,7 +219,33 @@ export function snapshot(): BotsSnapshot {
 export function getStatus(botId: string): BotStatus | undefined {
   return status.get(botId);
 }
+const activityTimes = (mem.openbotsActivityTimes ??= new Map<string, { turnStartedAt: number | null; lastActivityAt: number }>());
+
+/** Primary-only metadata projection. Never includes prompts, activity text or credentials. */
+export function botWorkStatus(requester: string) {
+  if (!db.getBot(requester)?.primary) throw new BotsError("Only the primary bot can read all bots' status.", 403);
+  return { bots: db.listBots().map((bot) => {
+    const current = getStatus(bot.id);
+    const times = activityTimes.get(bot.id);
+    return {
+      id: bot.id, name: bot.name,
+      state: current?.state === "working" ? "working" : "idle",
+      runnerState: current?.state ?? "idle",
+      turnStartedAt: current?.state === "working" ? times?.turnStartedAt ?? null : null,
+      conversationId: current?.state === "working" ? current.conversationId ?? null : null,
+      lastActivityAt: times?.lastActivityAt ?? null,
+      pendingAssignments: hooks.pendingAssignments?.(bot.id) ?? [],
+    };
+  }), pendingMeaning: "Exact assigned user-message deliveries still queued or in the current turn; delivery is not proof of an unanswered request.", handoffs: "not_tracked" };
+}
+
 export function setStatus(botId: string, next: BotStatus) {
+  const previous = getStatus(botId);
+  const now = Date.now();
+  activityTimes.set(botId, {
+    turnStartedAt: next.state === "working" ? (previous?.state === "working" ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
+    lastActivityAt: now,
+  });
   if (next.state === "idle") status.delete(botId);
   else status.set(botId, next);
   emit({ t: "status", botId, status: next });
@@ -387,7 +416,7 @@ export function createTeam(primaryId: string) {
   const ids: string[] = [];
   for (const member of TEAM) {
     const { bot } = createBot({ name: member.name, look: member.look, instructions: member.instructions, by: primaryId });
-    if (member.threads) updateBot(bot.id, { threads: member.threads });
+    if (member.threads) updateBot(bot.id, { threads: member.threads }, { quiet: true });
     ids.push(bot.id);
     if (primaryChat) postMessage(primaryChat, { id: crypto.randomUUID(), author: primaryId, at: Date.now(), text: "", event: { kind: "created", text: "New bot", detail: bot.name, bot: bot.id } });
   }
@@ -449,8 +478,12 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
   return { bot: fullBot(id)!, conversationId };
 }
 
-/** `by: "me"` is the user, in the app: the primary hears what changed on its next turn (see noteChanges). */
-export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } = {}): Bot {
+/**
+ * `by: "me"` is the user, in the app: the primary hears what changed on its next turn (see noteChanges).
+ * Whoever changed it, the bot's chat gets a line saying what did (see announceChanges), unless `quiet`:
+ * a bot just made, getting its first settings.
+ */
+export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; quiet?: boolean } = {}): Bot {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
   const before = { ...bot };
@@ -491,10 +524,102 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } =
   }
   db.putBot(bot);
   noteChanges(before, bot, opts.by === "me");
+  // A reply on the new model isn't a fallback coming back: the line below already says it changed.
+  if (bot.model !== before.model) db.setValue(`ran:${id}`, null);
   if (newPace) touchHeartbeat(id);
   for (const other of db.listBots()) if (other.id !== id && patch.primary) emitBot(other.id);
   emitBot(id);
+  if (!opts.quiet) announceChanges(before, bot);
   return fullBot(id)!;
+}
+
+// ------------------------------------------------------------------ a bot's settings, in its chat
+
+/** Model names as Pi lists them, for the lines below: ids alone read worse ("gpt-6.1-sol"). extensions.ts fills it. */
+const modelNames = new Map<string, string>();
+export function rememberModelNames(models: { provider: string; id: string; name?: string }[]) {
+  for (const m of models) if (m.name) modelNames.set(`${m.provider}/${m.id}`, String(m.name));
+}
+
+/** Fields read whole by settingChanges, and ones that aren't settings worth a line (or are said elsewhere). */
+const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary"]);
+const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look"]);
+const CHECK_INS: Record<string, string> = { off: "off", low: "every 8 hours", normal: "every 3 hours", high: "every hour" };
+const THREAD_FLAGS = [
+  ["others", "control others' threads"],
+  ["choosePermission", "choose permissions"],
+  ["approve", "answer permission prompts"],
+  ["merge", "merge pull requests"],
+] as const;
+
+/**
+ * What changed between two saves of a bot, as "model: Grok 4.7 → GPT 6.1 Sol", one per setting that
+ * did. Values are what Settings shows: names over ids, "default" for unset. A setting this list doesn't
+ * know yet still gets a line, with its value only when that's short and plain.
+ */
+export function settingChanges(before: db.StoredBot, after: db.StoredBot): string[] {
+  const out: string[] = [];
+  const line = (what: string, from: string, to: string) => from !== to && out.push(`${what}: ${from} → ${to}`);
+  const model = (id: string | undefined, other: string | undefined) => {
+    if (!id) return "default";
+    const name = modelNames.get(id) ?? id.slice(id.indexOf("/") + 1);
+    // Two accounts' copies of one model: their ids tell them apart.
+    return other && other !== id && (modelNames.get(other) ?? other.slice(other.indexOf("/") + 1)) === name ? id : name;
+  };
+  const fallbacks = (bot: db.StoredBot) => {
+    const mode = fallbackMode(bot);
+    return mode === "none" ? "none" : mode === "inherit" ? "the defaults" : bot.fallbackModels!.map((m) => modelNames.get(m) ?? m).join(", ");
+  };
+  const computer = (bot: db.StoredBot) => {
+    // Unset runs as a container here, which is what Settings shows.
+    const { device, kind } = bot.computer ?? { device: "local", kind: "container" };
+    const where = device === "local" ? "this server" : (readDevices().find((d) => d.id === device)?.name ?? "a device that's no longer paired");
+    return `${where}, ${kind === "host" ? "unisolated" : "container"}`;
+  };
+  const project = (id: string) => findProject(id)?.name ?? "a removed project";
+  const projectsOf = (t: BotThreadAccess) =>
+    t.scope === "all" ? "all" : t.scope === "exclude" ? (t.excluded?.length ? `all but ${t.excluded.map(project).join(", ")}` : "all") : t.projects.length ? t.projects.map(project).join(", ") : "none";
+  const onOff = (on: unknown) => (on ? "on" : "off");
+
+  line("name", before.name, after.name);
+  line("primary", before.primary ? "yes" : "no", after.primary ? "yes" : "no");
+  line("model", model(before.model, after.model), model(after.model, before.model));
+  line("effort", before.effort || "default", after.effort || "default");
+  line("fallbacks", fallbacks(before), fallbacks(after));
+  line("check-ins", CHECK_INS[before.proactivity ?? "normal"] ?? "every 3 hours", CHECK_INS[after.proactivity ?? "normal"] ?? "every 3 hours");
+  line("computer", computer(before), computer(after));
+  const was = before.threads ?? { enabled: false, projects: [] };
+  const now = after.threads ?? { enabled: false, projects: [] };
+  line("OpenBuild", onOff(was.enabled), onOff(now.enabled));
+  // While it's off, the rest isn't used, and Settings hides it.
+  if (was.enabled || now.enabled) {
+    line("OpenBuild projects", projectsOf(was), projectsOf(now));
+    for (const [key, label] of THREAD_FLAGS) line(label, onOff(was[key]), onOff(now[key]));
+  }
+  const plain = (v: unknown) => (v === undefined ? "unset" : typeof v === "boolean" ? onOff(v) : (typeof v === "string" && v.length <= 60) || typeof v === "number" ? String(v) : undefined);
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    if (HANDLED.has(key) || UNANNOUNCED.has(key)) continue;
+    const from = (before as Record<string, unknown>)[key];
+    const to = (after as Record<string, unknown>)[key];
+    if (JSON.stringify(from) === JSON.stringify(to)) continue;
+    const a = plain(from);
+    const b = plain(to);
+    if (a !== undefined && b !== undefined) line(key, a, b);
+    else out.push(`${key}: changed`);
+  }
+  return out;
+}
+
+/**
+ * One activity line in the bot's own chat for a save that changed something, however it was made: the
+ * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol; effort: high → max".
+ * A save that changed nothing says nothing.
+ */
+function announceChanges(before: db.StoredBot, after: db.StoredBot) {
+  const changes = settingChanges(before, after);
+  const where = directId(after.id);
+  if (!changes.length || !where) return;
+  postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join("; ")}`, bot: after.id } });
 }
 
 // ------------------------------------------------------------------ what the user changed

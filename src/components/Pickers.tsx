@@ -1,5 +1,5 @@
-import { Check, KeyRound, MonitorSmartphone, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   EFFORTS,
   nearestEffort,
@@ -17,9 +17,8 @@ import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
 import { RUNTIME_LABEL, RuntimeIcon, useRuntimeOptions } from "./Workspace";
 import { runtimeName } from "../lib/runtimes";
-import { codexDaemon } from "../lib/pi";
 import { REMOTE_CONTROL } from "../../shared/remoteControl";
-import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner } from "./primitives";
+import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner, Toggle } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
   off: "off",
@@ -778,100 +777,30 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   );
 }
 
-type Daemon = Awaited<ReturnType<typeof codexDaemon>>;
-
 /**
- * What OpenBuild knows about Codex Remote Control on a device. `daemon version` only says whether
- * the daemon process runs, never whether its Remote Control is on or paired, so neither is implied.
+ * Remote Control, as each vendor offers it, on a row of its own under the composer. Claude Code opts
+ * in per session, so a new thread can start with it on. Codex pairs a daemon for the whole machine
+ * and Cursor sets it in the account: for those the switch is off and disabled, with one line saying where it's set.
  */
-export function codexRemoteLines(daemon: Daemon | { error: string } | undefined): string[] {
-  const threads = "OpenBuild's Codex threads: Remote Control off. Each runs its own app-server, which reports it disabled.";
-  if (!daemon) return [threads, "Checking this machine's Codex daemon…"];
-  if (!("status" in daemon) || !daemon.status) return [threads, `Couldn't check the Codex daemon: ${daemon.error ?? "Codex isn't installed"}`];
-  return [
-    threads,
-    `Codex daemon process: ${daemon.status}${daemon.version ? ` (app-server ${daemon.version})` : ""}. That's all this check reports: not whether the daemon's Remote Control is on or paired.`,
-  ];
-}
-
-/**
- * Remote Control, as each vendor offers it. Claude Code opts in per session, so a new thread can
- * start with it on. Codex pairs a daemon for the whole machine and Cursor sets it in the account:
- * for those the pill explains where it's set (and, for Codex, how the daemon is doing) instead.
- */
-export function RemoteControlPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; chatId?: string; deviceId?: string }) {
-  const [open, setOpen] = useState(false);
-  const [daemon, setDaemon] = useState<Daemon | { error: string } | undefined>();
-  const anchor = useRef<HTMLButtonElement>(null);
+export function RemoteControlToggle({ chatId }: { chatId?: string }) {
+  const id = useId();
   const runtime = useStore((s) => runtimeOf(s, chatId));
   const chatOn = useStore((s) => (chatId ? !!s.chats.find((c) => c.id === chatId)?.remoteControl : false));
   const draftOn = useStore((s) => s.draftRemoteControl);
   const setDraft = useStore((s) => s.setDraftRemoteControl);
   const remote = REMOTE_CONTROL[runtime];
-  useEffect(() => {
-    if (!open || runtime !== "codex") return;
-    let live = true;
-    setDaemon(undefined);
-    codexDaemon(deviceId).then((d) => live && setDaemon(d), (err: Error) => live && setDaemon({ error: err.message }));
-    return () => { live = false; };
-  }, [open, runtime, deviceId]);
   if (!remote) return null;
-  const name = RUNTIME_NAME[runtime];
   // A thread keeps what it started with: only Claude Code threads that opted in show it afterwards.
-  if (chatId) {
-    if (!chatOn || remote.scope !== "thread") return null;
-    return (
-      <span className="pill pill-plain permission-pill" data-tooltip="Remote Control is on for this thread: continue it from claude.ai/code or the Claude app." data-tooltip-side={dropUp ? "top" : "bottom"}>
-        <MonitorSmartphone size={14} aria-hidden />
-        Remote on
-      </span>
-    );
-  }
-  const label = remote.scope === "thread" ? (draftOn ? "Remote on" : "Remote off") : remote.scope === "machine" ? "Remote · machine" : "Remote · account";
+  if (chatId && (!chatOn || remote.scope !== "thread")) return null;
+  const perThread = remote.scope === "thread";
+  const note = !perThread
+    ? remote.scope === "machine" ? "Set per machine, not per thread" : `Set in your ${RUNTIME_NAME[runtime]} account`
+    : chatId ? "On since this thread started" : "Needs a claude.ai sign-in";
   return (
-    <div className="picker">
-      <button
-        ref={anchor}
-        type="button"
-        className={cx("pill pill-plain permission-pill", open && "pill-open")}
-        aria-haspopup={remote.scope === "thread" ? "listbox" : "dialog"}
-        aria-expanded={open}
-        aria-label={`Remote Control: ${label}`}
-        data-tooltip={open ? undefined : `${name} Remote Control`}
-        data-tooltip-side={dropUp ? "top" : "bottom"}
-        onClick={() => setOpen((o) => !o)}
-      >
-        <MonitorSmartphone size={14} aria-hidden />
-        {label}
-      </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu effort-menu speed-menu" role={remote.scope === "thread" ? "listbox" : "dialog"} label="Remote Control" fixed={dropUp ? "up" : "auto"}>
-        <div className="menu-label">{name} Remote Control</div>
-        {remote.scope === "thread" ? (
-          <div onKeyDown={(e) => arrowNav(e)}>
-            {[false, true].map((on) => (
-              <button key={String(on)} type="button" role="option" aria-selected={draftOn === on} className="menu-item" onClick={() => { setDraft(on); setOpen(false); }}>
-                <span className="menu-item-label">
-                  {on ? "On for this thread" : "Off"}
-                  {on && <span className="speed-desc">{remote.note}</span>}
-                </span>
-                {draftOn === on && <Check size={15} className="menu-check" />}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="menu-item remote-control-info" aria-disabled>
-            <span className="menu-item-label">
-              {remote.scope === "machine" ? "Set for the whole machine" : `Set in your ${name} account`}
-              <span className="speed-desc">{remote.note}</span>
-              {runtime === "codex" && codexRemoteLines(daemon).map((line, i) => (
-                <span key={i} className="speed-desc" role={i ? "status" : undefined}>
-                  {i && !daemon ? <Spinner /> : null} {line}
-                </span>
-              ))}
-            </span>
-          </div>
-        )}
-      </Popover>
+    <div className="remote-control-row" data-runtime={runtime}>
+      <label htmlFor={id} className="remote-control-label">Remote control</label>
+      <Toggle id={id} className="toggle-sm" checked={perThread && (chatId ? chatOn : draftOn)} disabled={!perThread || !!chatId} onChange={setDraft} label="Remote control" describedBy={`${id}-note`} />
+      <span id={`${id}-note`} className="remote-control-note">{note}</span>
     </div>
   );
 }

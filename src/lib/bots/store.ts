@@ -67,6 +67,8 @@ interface BotsState {
   conversations: Conversation[];
   error?: string;
   pending: number;
+  /** The user's messages shown before their workspace has confirmed them, by id. */
+  sending: string[];
   status: Record<string, Extract<BotsEvent, { t: "status" }>["status"]>;
   /** The stream hasn't been lost. Only a failed connection clears it, so opening OpenBots doesn't flash "Reconnecting". */
   connected: boolean;
@@ -129,8 +131,11 @@ interface BotsState {
   addSection: (name: string) => void;
   toggleFolded: (name: string) => void;
 
-  /** Add a message (the user's or a bot's) and bump the conversation. */
-  post: (conversationId: string, message: Omit<BotMessage, "id" | "at"> & { at?: number }) => Promise<BotMessage | undefined>;
+  /**
+   * Add a message (the user's or a bot's) and bump the conversation. It shows at once; the promise
+   * settles when the workspace has it. Sending one again with its `id` can't make a second.
+   */
+  post: (conversationId: string, message: Omit<BotMessage, "id" | "at"> & { id?: string; at?: number }) => Promise<BotMessage | undefined>;
   patchMessage: (conversationId: string, messageId: string, patch: (m: BotMessage) => Partial<BotMessage>) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
   /** Add or take back a reaction. */
@@ -163,6 +168,7 @@ export const useBots = create<BotsState>()(
     bots: [],
     conversations: [],
     pending: 0,
+    sending: [],
     status: {},
     connected: true,
     loaded: false,
@@ -312,11 +318,12 @@ export const useBots = create<BotsState>()(
     toggleFolded: (name) => set((s) => ({ folded: s.folded.includes(name) ? s.folded.filter((f) => f !== name) : [...s.folded, name] })),
 
     post: async (conversationId, message) => {
-      const full: BotMessage = { ...message, id: uid(), at: message.at ?? Date.now() };
+      const full: BotMessage = { ...message, id: message.id ?? uid(), at: message.at ?? Date.now() };
       set((s) => ({
+        sending: [...s.sending, full.id],
         conversations: mapConversation(s.conversations, conversationId, (c) => ({
           ...c,
-          messages: [...c.messages, full],
+          messages: c.messages.some((m) => m.id === full.id) ? c.messages : [...c.messages, full],
           updatedAt: full.at,
           // A bot writing in a conversation that isn't open leaves it unread; hidden ones come back.
           unread: marksUnread(c, message) && s.activeId !== conversationId ? true : c.unread,
@@ -327,6 +334,7 @@ export const useBots = create<BotsState>()(
         label: full.text.trim() ? `Message “${full.text.trim().slice(0, 60)}${full.text.trim().length > 60 ? "…" : ""}”` : "Message",
         check: { kind: "post", conversationId, messageId: full.id },
       });
+      set((s) => ({ sending: s.sending.filter((id) => id !== full.id) }));
       return acknowledged ? full : undefined;
     },
     patchMessage: (conversationId, messageId, patch) => {

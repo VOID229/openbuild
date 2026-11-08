@@ -1,0 +1,64 @@
+import { expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+test("primary work status uses runner state and exact assignments, with authenticated tool denial", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "bot-work-status-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import * as svc from './server/bots/service';
+      import * as agent from './server/bots/agent';
+      import { pendingAssignments } from './server/bots/runner';
+      import extension from './server/bots/extension';
+      const p = svc.createBot({name:'Primary'});
+      const b = svc.createBot({name:'Worker'});
+      svc.setHooks({wake(){}, stop(){}, pendingAssignments});
+      const row = () => svc.botWorkStatus(p.bot.id).bots.find(x => x.id === b.bot.id);
+      a.equal(row().state, 'idle');
+      a.equal(row().turnStartedAt, null);
+      a.equal(row().lastActivityAt, null);
+      svc.setStatus(b.bot.id, {state:'working', conversationId:b.conversationId, since:1, activity:'SECRET'});
+      const started = row().turnStartedAt;
+      a.equal(row().state, 'working');
+      a.equal(row().conversationId, b.conversationId);
+      await new Promise(r => setTimeout(r, 5));
+      svc.setStatus(b.bot.id, {state:'working', conversationId:b.conversationId, since:2});
+      a.equal(row().turnStartedAt, started);
+      a.ok(row().lastActivityAt >= started);
+      globalThis.openbotsQueue.set(b.bot.id, [{kind:'messages',conversationId:b.conversationId,messageIds:['exact-id'],text:'SECRET'}, {kind:'note',text:'SECRET handoff'}]);
+      a.deepEqual(row().pendingAssignments, [{conversationId:b.conversationId,messageIds:['exact-id']}]);
+      a.equal(svc.botWorkStatus(p.bot.id).handoffs, 'not_tracked');
+      a.ok(!JSON.stringify(svc.botWorkStatus(p.bot.id)).includes('SECRET'));
+      globalThis.openbotsQueue.delete(b.bot.id);
+      svc.setStatus(b.bot.id, {state:'idle'});
+      a.equal(row().state, 'idle');
+      a.equal(row().turnStartedAt, null);
+      a.equal(row().conversationId, null);
+      a.deepEqual(row().pendingAssignments, []);
+      svc.setStatus(b.bot.id, {state:'error',error:'SECRET'});
+      a.equal(row().state, 'idle');
+      a.equal(row().runnerState, 'error');
+      a.throws(() => svc.botWorkStatus(b.bot.id), /Only the primary/);
+      a.throws(() => agent.manage(b.bot.id, {action:'status'}), /Only the primary/);
+      const tools = [];
+      extension({on(){}, registerTool(t){tools.push(t)}});
+      const tool = tools.find(t => t.name === 'manage_bot');
+      agent.listen();
+      process.env.OPENBOTS_SOCKET = agent.agentSocketPath();
+      process.env.OPENBOTS_TOKEN = agent.mintToken(p.bot.id);
+      const call = () => tool.execute('test', {action:'status', status:'Checking status'});
+      a.equal((await call()).isError, undefined);
+      process.env.OPENBOTS_TOKEN = agent.mintToken(b.bot.id);
+      a.equal((await call()).isError, true);
+      process.env.OPENBOTS_TOKEN = agent.mintToken(p.bot.id);
+      svc.updateBot(b.bot.id, {primary:true});
+      a.equal((await call()).isError, true);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+}, 30_000);

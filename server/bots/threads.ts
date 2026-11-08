@@ -482,7 +482,9 @@ async function start(botId: string, p: Record<string, unknown>) {
   }
   const now = Date.now();
   const title = clip((typeof p.title === "string" && p.title.trim()) || prompt.split("\n")[0]!, 80);
-  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), ...(remoteControl ? { remoteControl } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
+  // Which bot started it and where, so that conversation can list it while it works (BotDetails).
+  const conversation = getFocus(botId) ?? svc.directId(botId);
+  const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", ...(conversation ? { startedBy: { bot: botId, conversation } } : {}), runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), ...(remoteControl ? { remoteControl } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
   await startTurn(botId, chat, prompt, { id: model.id, name: model.name, effort, speed }, images);
   record(botId, "Started a thread", `${title} · ${runtime}`, chat.id);
   return {
