@@ -132,7 +132,15 @@ export function loadChatHistory(chat: Chat, retain = false): Promise<Chat> {
     const held = cached.get(chat.id)?.chat;
     if (held && !held.historyDeferred) return Promise.resolve(materialize(chat, held));
   }
-  return fetchHistory(chat).then(({ chat: full }) => materialize(chat, full));
+  return currentHistory(chat).then((full) => materialize(chat, full));
+}
+/** A history no thread list applied since it was asked for knows to be older: an answer a newer list
+ *  overtook (a prefetch still on its way when the list moved on) is asked for again. */
+async function currentHistory(chat: Chat): Promise<Chat> {
+  for (let attempt = 1; ; attempt++) {
+    const { chat: full, current } = await fetchHistory(chat);
+    if (current || attempt === 3) return full;
+  }
 }
 function materialize(summary: Chat, full: Chat): Chat {
   const { historyDeferred: _, ...metadata } = summary;

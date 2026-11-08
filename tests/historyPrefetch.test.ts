@@ -109,3 +109,20 @@ test("a prefetch answered after a newer thread list is neither kept nor opened",
   // The next poll still has e2: the late e1 didn't take its place.
   expect(byId(await loadChats(), "e").messages[0]!.content).toBe("newer");
 });
+
+test("opening a thread while an overtaken prefetch is on its way opens the list's version", async () => {
+  put("f", "f1", "older");
+  const f = byId(await loadChats(), "f");
+  let release!: () => void;
+  hold = new Promise((r) => (release = r));
+  prefetchHistory(f);
+  await until(() => fetches.includes("f"));
+  // A reply lands and the list says so; the thread is clicked before the prefetch's answer (f1) is back.
+  put("f", "f2", "newer");
+  hold = undefined;
+  const newer = byId(await loadChats(), "f");
+  const opening = loadChatHistory(newer, true);
+  release();
+  expect((await opening).messages[0]!.content).toBe("newer");
+  expect(fetches.filter((id) => id === "f")).toEqual(["f", "f"]);
+});
