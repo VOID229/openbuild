@@ -683,3 +683,56 @@ test("a turn the worker started elsewhere during the check is refused too", asyn
   expect(admitted.length).toBe(1);
   expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
 });
+
+test("the primary adds a project and starts a thread in it; other bots and stray paths are refused", async () => {
+  expect(svc.fullBot(bot.id)!.primary).toBe(true);
+  const folder = realpathSync(mkdtempSync(join(tmpdir(), "openbuild-bot-added-")));
+  execSync("git init -q -b main && git -c user.name=t -c user.email=t@t commit -q --allow-empty -m init", { cwd: folder });
+  const fresh = join(realpathSync(tmpdir()), `openbuild-bot-new-${crypto.randomUUID().slice(0, 8)}`);
+  const events: any[] = [];
+  const off = svc.subscribe((e) => events.push(e));
+  try {
+    // Chosen projects only: the one it adds becomes its own, so it can start a thread there straight away.
+    const added = await call("add_project", { path: folder, name: "Added" });
+    expect(added.project).toMatchObject({ name: "Added", path: folder, git: true });
+    expect(added.note).toBeUndefined();
+    expect(projects.findProject(added.project.id)?.path).toBe(folder);
+    expect(svc.fullBot(bot.id)!.threads?.projects).toEqual([project.id, added.project.id]);
+    expect(events.some((e) => e.t === "projects")).toBe(true);
+    expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ kind: "thread", text: "Added a project", detail: "Added" });
+    expect((await call("options")).projects.map((p: any) => p.name)).toContain("Added");
+    await call("start", { project: "Added", prompt: "Look around", title: "Look" });
+    expect((storage.getChat(admitted[0].threadId) as any).workspace.projectId).toBe(added.project.id);
+
+    // A new, empty folder, with create.
+    await expect(call("add_project", { path: fresh })).rejects.toThrow(/No folder/);
+    expect((await call("add_project", { path: fresh, create: true })).project.git).toBe(false);
+
+    // A project the user kept from it stays kept, even when it names the folder again.
+    grant();
+    const again = await call("add_project", { path: folder });
+    expect(again.note).toMatch(/hasn't given you it/);
+    expect(svc.fullBot(bot.id)!.threads?.projects).toEqual([project.id]);
+
+    // Not a drive, a home folder, a relative path or OpenBuild's own data.
+    const before = projects.listProjects().length;
+    for (const path of ["/", "~", "relative/app", join(dir, "worktrees")]) await expect(call("add_project", { path, create: true })).rejects.toThrow();
+    await expect(call("add_project", {})).rejects.toThrow(/Say where/);
+    expect(projects.listProjects().length).toBe(before);
+
+    // Primary only, and only with OpenBuild access.
+    const other = svc.createBot({ name: "Helper" }).bot;
+    svc.updateBot(other.id, { threads: { enabled: true, scope: "all", projects: [] } });
+    await expect(handle(other.id, { action: "add_project", path: folder })).rejects.toThrow(/Only the primary/);
+    svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
+    await expect(call("add_project", { path: folder })).rejects.toThrow(/hasn't given you access/);
+    await svc.deleteBot(other.id);
+    expect(guide({ threads: { enabled: true, scope: "all", projects: [] }, primary: true })).toContain("add_project");
+    expect(guide({ threads: { enabled: true, scope: "all", projects: [] } })).not.toContain("add_project");
+  } finally {
+    off();
+    for (const p of projects.listProjects()) if (p.id !== project.id) projects.removeProject(p.id);
+    rmSync(folder, { recursive: true, force: true });
+    rmSync(fresh, { recursive: true, force: true });
+  }
+});

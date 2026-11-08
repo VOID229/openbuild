@@ -1,4 +1,4 @@
-// A bot's model and computer for Settings → Bots, and the Advanced tab of the OpenBots details panel,
+// A bot's model, effort and computer for Settings → Bots, and the Advanced tab of the OpenBots details panel,
 // which puts them on one line each beside what the bot may do in OpenBuild.
 import { ArrowUp, Check, ChevronDown, CircleAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -63,6 +63,38 @@ export function BotModelSelect({ label, value, unset, inherited, placeholder, ac
   );
 }
 
+const EFFORT_LABELS: Record<string, string> = { off: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "XHigh", max: "Max" };
+
+/**
+ * The bot's reasoning effort: Default leaves it to Pi, otherwise one of the levels the model it runs on
+ * takes (its own, or the default model). One it doesn't take, kept from another model, says it runs at
+ * the nearest level instead.
+ */
+export function BotEffortSelect({ bot, className }: { bot: Bot; className?: string }) {
+  const defaultModel = useBots((s) => s.defaultModel);
+  const { listing } = useBotModels();
+  const modelId = bot.model || defaultModel || listing?.defaultModel;
+  const model = listing?.models?.find((m) => m.id === modelId);
+  const efforts: string[] = model?.reasoning.efforts ?? [];
+  const value = bot.effort ?? "";
+  const options = [{ value: "", label: "Default" }, ...efforts.map((e) => ({ value: e, label: EFFORT_LABELS[e] ?? e }))];
+  if (value && !efforts.includes(value)) options.push({ value, label: `${EFFORT_LABELS[value] ?? value}${listing ? " · uses nearest" : ""}` });
+  return (
+    <OptionSelect
+      label="Effort"
+      className={className}
+      value={value}
+      options={options}
+      // A model without reasoning levels has nothing to choose, unless there's an old level to clear.
+      disabled={!!listing && !efforts.length && !value}
+      // Empty, not left out, so the server clears it.
+      onChange={(effort) => useBots.getState().updateBot(bot.id, { effort })}
+    />
+  );
+}
+
+const EFFORT_DESC = "How hard the model thinks. Default is Pi's own level; only the levels its model takes are listed. Changes apply from the bot's next reply.";
+
 /** The bot's model, falling back to the default in Settings → Bots. */
 export function BotModel({ bot }: { bot: Bot }) {
   const defaultModel = useBots((s) => s.defaultModel);
@@ -74,6 +106,13 @@ export function BotModel({ bot }: { bot: Bot }) {
           <p className="setting-desc">Default follows the default model in Settings → Bots. Changes apply from the bot's next reply.</p>
         </div>
         <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
+      </div>
+      <div className="setting-row">
+        <div className="setting-text">
+          <div className="setting-label">Effort</div>
+          <p className="setting-desc">{EFFORT_DESC}</p>
+        </div>
+        <BotEffortSelect bot={bot} />
       </div>
       <BotFallbacks
         bot={bot}
@@ -276,6 +315,12 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
           Model
         </div>
         <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
+      </div>
+      <div className="setting-row">
+        <div className="setting-label" data-tooltip={EFFORT_DESC} data-tooltip-side="left">
+          Effort
+        </div>
+        <BotEffortSelect bot={bot} className="select-grow" />
       </div>
       <div className="setting-row">
         <div className="setting-label" data-tooltip="The machine its terminal, files and browser use. A paired device has to allow this server's bots first. Applies to the next request, without moving files." data-tooltip-side="left">

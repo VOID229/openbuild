@@ -376,7 +376,9 @@ export type BotsEvent =
   | { t: "settings"; settings: BotsSettings }
   | { t: "setup"; setup?: PiSetup }
   /** The connected apps changed: ask /api/bots/apps for them. */
-  | { t: "apps" };
+  | { t: "apps" }
+  /** A bot added a project: ask /api/projects for them. */
+  | { t: "projects" };
 
 /** The first line of every OpenBots stream: the workspace (its server's id) the rest comes from. */
 export interface BotsHello {
@@ -586,6 +588,10 @@ export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botId
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
   return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");
 }
+
+/** The thinking levels a bot's effort can be, as Pi names them. Unset is Pi's own default. */
+export const BOT_EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const isBotEffort = (value: unknown): value is (typeof BOT_EFFORTS)[number] => BOT_EFFORTS.includes(value as (typeof BOT_EFFORTS)[number]);
 
 /** Where a bot's fallbacks come from: the defaults in Settings → Bots, its own list, or none at all. */
 export type FallbackMode = "inherit" | "own" | "none";
