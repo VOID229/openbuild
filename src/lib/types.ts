@@ -340,4 +340,6 @@ export interface Chat {
   imported?: boolean;
   /** Found in Pi's own sessions (server/pi/discovery.ts) rather than started here. */
   discovered?: boolean;
+  /** Started by a bot (server/bots/threads.ts): which one, and the OpenBots conversation it was in. */
+  startedBy?: { bot: string; conversation: string };
 }
