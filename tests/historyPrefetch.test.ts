@@ -24,8 +24,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url === "/api/chats/fetch") {
     const id = JSON.parse(String(init?.body)).ids[0];
     fetches.push(id);
-    await hold;
+    // The answer is what the server had when asked, however late it arrives.
     const t = threads.get(id)!;
+    await hold;
     return Response.json({ chats: [{ v: t.v, chat: t.chat }] });
   }
   throw new Error(`Unexpected request ${url}`);
@@ -88,4 +89,23 @@ test("opening a thread whose prefetch is still on its way waits for it rather th
   expect((await opening).messages[0]!.content).toBe("slow");
   expect(fetches.filter((id) => id === "c")).toEqual(["c"]);
   hold = undefined;
+});
+
+test("a prefetch answered after a newer thread list is neither kept nor opened", async () => {
+  put("e", "e1", "older");
+  const e = byId(await loadChats(), "e");
+  let release!: () => void;
+  hold = new Promise((r) => (release = r));
+  prefetchHistory(e);
+  await until(() => fetches.includes("e"));
+  // A reply lands, and the list says so, while the prefetch's answer (e1) is still on its way.
+  put("e", "e2", "newer");
+  hold = undefined;
+  const newer = byId(await loadChats(), "e");
+  release();
+  await Bun.sleep(10);
+  expect(historyAtHand(newer)).toBeUndefined();
+  expect((await loadChatHistory(newer, true)).messages[0]!.content).toBe("newer");
+  // The next poll still has e2: the late e1 didn't take its place.
+  expect(byId(await loadChats(), "e").messages[0]!.content).toBe("newer");
 });
