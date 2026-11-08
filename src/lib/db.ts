@@ -17,6 +17,7 @@ import { clear, createStore, del, delIf, entries, set } from "./kv";
 import { fetchWithTimeout } from "./abort";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { canResume, config, isHosted } from "./runtime";
+import { SERVER_BACK } from "./serverOutage";
 import type { Chat } from "./types";
 
 const browserChats = createStore("openchat-chats", "chats");
@@ -164,6 +165,7 @@ function schedule() {
 
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => void flush());
+  window.addEventListener(SERVER_BACK, () => void flush());
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && void flush());
 }
 

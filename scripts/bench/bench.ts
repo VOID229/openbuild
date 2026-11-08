@@ -209,7 +209,12 @@ try {
       const t = await tab(browser);
       await t.load(`${box.url}/thread-${LANDING.id}`, LOAD_CHECKS);
       await Bun.sleep(3000);
-      const live: number[] = [], fresh: number[] = [], listen: number[] = [];
+      // OpenBots opened once keeps its stream for the page's life: one more thing to get back.
+      await t.interact(() => t.clickWhere(VISIBLE_TOGGLE), "!!document.querySelector('.bots-messages .bm-row')?.checkVisibility()");
+      await Bun.sleep(1000);
+      await t.interact(() => t.clickWhere(VISIBLE_TOGGLE), "!document.querySelector('.bots-messages')?.checkVisibility()");
+      await Bun.sleep(1000);
+      const live: number[] = [], fresh: number[] = [], listen: number[] = [], botsBack: number[] = [];
       for (let i = 0; i < Math.min(RUNS, 3); i++) {
         await box.stop();
         await Bun.sleep(1500);
@@ -221,6 +226,9 @@ try {
         // The thread list read again from the restarted server.
         await t.until(`window.__apiOk.some(([at, p]) => at > ${t0} && p.startsWith('/api/chats?summaries'))`, 60_000);
         fresh.push(Math.round((await t.eval<number>(`window.__apiOk.find(([at, p]) => at > ${t0} && p.startsWith('/api/chats?summaries'))[0]`)) - t0));
+        // OpenBots' live stream connected again.
+        await t.until(`window.__apiOk.some(([at, p]) => at > ${t0} && p.endsWith('/api/bots/stream'))`, 60_000);
+        botsBack.push(Math.round((await t.eval<number>(`window.__apiOk.find(([at, p]) => at > ${t0} && p.endsWith('/api/bots/stream'))[0]`)) - t0));
         await Bun.sleep(2000);
       }
       // A reload straight after a restart: the server's caches are cold and its warm-up is running.
@@ -232,7 +240,7 @@ try {
         await Bun.sleep(1000);
       }
       results.restart = {
-        serverListening: summary(listen.map(Math.round)), backOnline: summary(live), threadListFresh: summary(fresh),
+        serverListening: summary(listen.map(Math.round)), backOnline: summary(live), threadListFresh: summary(fresh), botsStream: summary(botsBack),
         reloadAfterRestart: { shell: summary(reload.map((r) => r.shell!)), thread: summary(reload.map((r) => r.thread!)) },
       };
       console.log("restart", JSON.stringify(results.restart));

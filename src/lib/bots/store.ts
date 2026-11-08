@@ -9,6 +9,7 @@
 // the host's own session; another device's tab only uses the conversations that are there.
 import { create } from "zustand";
 import { abortable } from "../abort";
+import { suspectOutage, waitForServer } from "../serverOutage";
 import { uid } from "../id";
 import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
@@ -902,6 +903,7 @@ async function stream(visit: Visit) {
     } catch {
       // The server is restarting, it isn't up yet, or the connection went quiet. The next
       // connection's snapshot brings back whatever was missed.
+      if (live(visit) && isLocalWorkspace(visit.id)) suspectOutage();
     } finally {
       clearInterval(watchdog);
       visit.ctrl.signal.removeEventListener("abort", leave);
@@ -914,7 +916,8 @@ async function stream(visit: Visit) {
     }
     if (!live(visit)) break;
     useBots.setState({ connected: false });
-    await new Promise((r) => setTimeout(r, slow ? 5000 : delay));
+    // Back at once when a restart is over, rather than at the next retry.
+    await (slow ? new Promise((r) => setTimeout(r, 5000)) : waitForServer(delay, visit.ctrl.signal));
     delay = Math.min(delay * 2, 2000);
   }
   visit.streaming = false;

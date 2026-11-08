@@ -29,6 +29,7 @@ import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChatHistory, loadChats } from "./lib/db";
 import { watchDiscoveredTitles } from "./lib/naming";
 import { RELOAD_THREADS } from "./lib/pulls";
+import { SERVER_BACK } from "./lib/serverOutage";
 import { useHarnessSetupOpen } from "./lib/harnessSetup";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
@@ -311,12 +312,14 @@ function Main() {
     const timer = setInterval(() => void refresh(), 5000);
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("online", refresh);
+    window.addEventListener(SERVER_BACK, refresh);
     window.addEventListener(RELOAD_THREADS, refresh);
     return () => {
       disposed = true;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("online", refresh);
+      window.removeEventListener(SERVER_BACK, refresh);
       window.removeEventListener(RELOAD_THREADS, refresh);
     };
   }, [chatsLoaded]);
