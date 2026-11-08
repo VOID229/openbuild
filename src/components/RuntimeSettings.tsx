@@ -1,8 +1,8 @@
 // Settings → Runtimes: every thread runtime on a device (installed, version, updates, sign-in,
 // errors), and a switch that hides a runtime from the new-thread picker on that device.
-import { CircleAlert, Plus, RefreshCw } from "lucide-react";
+import { CircleAlert, Plus, RefreshCw, RotateCw } from "lucide-react";
 import { AddRuntime } from "./AddRuntime";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
 import { deviceName, findDevice } from "../lib/devices";
 import { updateRuntime } from "../lib/pi";
@@ -10,27 +10,46 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { RUNTIMES, runtimeEnabled, setRuntimeEnabled } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
-import { DeviceRow, deviceRefusal, JobLog, useJob, usePiDevice } from "./PiSettings";
+import { DeviceRow, deviceRefusal, useJob, usePiDevice } from "./PiSettings";
 import { SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 import { RuntimeIcon } from "./Workspace";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
-function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate }: {
+/** Why a runtime's last update failed: the job's output, or the refusal that kept it from starting. */
+export interface UpdateFailure {
+  message: string;
+  lines: string[];
+}
+
+export function StatusBadges({ status, name, updating, failure, failureShown, updateDisabled, quiet, onUpdate, onToggleFailure }: {
   status?: RuntimeStatus;
   name: string;
   updating: boolean;
+  failure?: UpdateFailure;
+  failureShown?: boolean;
   updateDisabled: boolean;
   /** An external device: updating stays possible, but nothing asks for it. */
   quiet?: boolean;
   onUpdate: () => void;
+  onToggleFailure?: () => void;
 }) {
   if (!status) return null;
   if (!status.installed) return <span className="badge">not installed</span>;
   return (
     <>
       {status.version && <span className="badge">v{status.version}</span>}
-      {status.updateAvailable || updating ? (
+      {failure && !updating ? (
+        <button
+          type="button"
+          className="badge badge-bad rt-update-failed"
+          aria-expanded={!!failureShown}
+          aria-label={`${name} update failed: ${failureShown ? "hide" : "show"} the error`}
+          onClick={onToggleFailure}
+        >
+          <CircleAlert size={10} aria-hidden="true" /> update failed
+        </button>
+      ) : status.updateAvailable || updating ? (
         <button
           type="button"
           className={quiet ? "badge rt-update" : "badge badge-accent rt-update"}
@@ -58,7 +77,7 @@ function StatusBadges({ status, name, updating, updateDisabled, quiet, onUpdate 
   );
 }
 
-function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, updating, updateDisabled, quiet, onUpdate }: {
+function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, updating, failure, updateDisabled, quiet, onUpdate }: {
   runtime: ThreadRuntime;
   label: string;
   desc: string;
@@ -67,11 +86,16 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
   lastOn: boolean;
   onToggle: (on: boolean) => void;
   updating: boolean;
+  failure?: UpdateFailure;
   updateDisabled: boolean;
   quiet?: boolean;
   onUpdate: () => void;
 }) {
   const name = runtime === "pi" ? "Pi" : label;
+  const [failureShown, setFailureShown] = useState(false);
+  const log = useRef<HTMLPreElement>(null);
+  useEffect(() => { if (!failure) setFailureShown(false); }, [failure]);
+  useEffect(() => { log.current?.scrollTo({ top: log.current.scrollHeight }); }, [failureShown]);
   return (
     <li className={cx("rt-row", !enabled && "pi-row-off")}>
       <div className="pi-row">
@@ -82,7 +106,17 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
           <span className="pi-row-name">
             {name}
             <span className="rt-badges">
-              <StatusBadges status={status} name={name} updating={updating} updateDisabled={updateDisabled} quiet={quiet} onUpdate={onUpdate} />
+              <StatusBadges
+                status={status}
+                name={name}
+                updating={updating}
+                failure={failure}
+                failureShown={failureShown}
+                updateDisabled={updateDisabled}
+                quiet={quiet}
+                onUpdate={onUpdate}
+                onToggleFailure={() => setFailureShown((v) => !v)}
+              />
             </span>
           </span>
           <span className="pi-row-desc">{status?.bin ? `${desc} · ${tilde(status.bin)}` : desc}</span>
@@ -98,6 +132,17 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
         <p className="pi-error rt-detail" role="alert">
           <CircleAlert size={14} /> <span className="rt-error">{status.error}</span>
         </p>
+      )}
+      {failure && failureShown && !updating && (
+        <div className="rt-detail rt-failure">
+          <div className="rt-failure-head">
+            <span className="rt-error">{failure.message}</span>
+            <button type="button" className="btn btn-sm" disabled={updateDisabled} onClick={onUpdate}>
+              <RotateCw size={12} /> Retry
+            </button>
+          </div>
+          {failure.lines.length > 0 && <pre ref={log} className="pi-job-log">{failure.lines.join("\n")}</pre>}
+        </div>
       )}
     </li>
   );
@@ -120,6 +165,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
   const key = deviceId ?? "";
   const [statuses, setStatuses] = useState(() => cachedRuntimeStatuses(deviceId));
   const [updating, setUpdating] = useState<ThreadRuntime>();
+  const [failures, setFailures] = useState<Partial<Record<ThreadRuntime, UpdateFailure>>>({});
   const [error, setError] = useState<string>();
   const [checking, setChecking] = useState(false);
   const [adding, setAdding] = useState(false);
@@ -150,15 +196,27 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
 
   useEffect(() => subscribeRuntimeStatuses((next, device) => { if (device === deviceId) setStatuses(next); }), [deviceId]);
 
-  const job = useJob(() => { void load(true); }, deviceId);
+  // The update shows only on its runtime's pill: spinning while it runs, then the refreshed
+  // status ("up to date"), or "update failed" with the job's output behind it.
+  const job = useJob(() => {}, deviceId);
+  const fail = (runtime: ThreadRuntime, failure?: UpdateFailure) =>
+    setFailures(({ [runtime]: _, ...rest }) => (failure ? { ...rest, [runtime]: failure } : rest));
   const startUpdate = async (runtime: ThreadRuntime) => {
     setUpdating(runtime);
-    setError(undefined);
+    fail(runtime);
     try {
       const { job: id } = await updateRuntime(runtime, deviceId);
-      await job.follow(id);
+      const r = await job.follow(id);
+      if (r?.code !== 0) {
+        fail(runtime, {
+          message: r ? `The update exited with code ${r.code ?? "?"}.` : "Lost track of the update before it finished.",
+          lines: r?.lines ?? [],
+        });
+      }
+      // Keep the pill spinning until the fresh status replaces it, so it never flashes back to "available".
+      await loadRuntimeStatuses(true, deviceId).then(setStatuses, (err: Error) => setError(deviceRefusal(err, where)));
     } catch (err) {
-      setError(deviceRefusal(err as Error, where));
+      fail(runtime, { message: deviceRefusal(err as Error, where), lines: [] });
     } finally {
       setUpdating(undefined);
     }
@@ -203,6 +261,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
               lastOn={enabledCount <= 1}
               onToggle={(on) => toggle(r.runtime, on)}
               updating={updating === r.runtime}
+              failure={failures[r.runtime]}
               updateDisabled={checking || !!updating || job.running}
               quiet={findDevice(deviceId)?.external}
               onUpdate={() => void startUpdate(r.runtime)}
@@ -213,7 +272,6 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
       <div className="rt-add">
         <button type="button" className="btn btn-sm" onClick={() => setAdding(true)}><Plus size={14} /> Add runtime</button>
       </div>
-      <JobLog job={job} />
     </>
   );
 }

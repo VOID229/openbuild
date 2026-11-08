@@ -129,16 +129,21 @@ export function useJob(onDone: () => void, deviceId?: string) {
     const ctrl = (live.current = new AbortController());
     setLines([]);
     setResult(undefined);
+    // The caller gets this job's own output with its result, untouched by a later job's stream.
+    const own: string[] = [];
     try {
       const r = await followJob(
-        (line) => setLines((l) => [...l.slice(-400), line]),
+        (line) => {
+          own.push(line);
+          setLines((l) => [...l.slice(-400), line]);
+        },
         ctrl.signal,
         () => setRunning(true),
         deviceId,
         jobId,
       );
       if (!ctrl.signal.aborted) setResult(r);
-      return r;
+      return r && { ...r, lines: own.slice(-400) };
     } catch {
       // An aborted or dropped stream has no result; the status card says why nothing ran.
       return undefined;

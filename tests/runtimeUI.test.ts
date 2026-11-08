@@ -97,6 +97,29 @@ test("runtime settings immediately render cached versions and update buttons, no
   } finally { globalThis.fetch = originalFetch; reset(); }
 });
 
+test("a runtime update reports only on its own pill: spinner while running, a failure pill with the error after", async () => {
+  const { StatusBadges, RuntimesSection } = await import("../src/components/RuntimeSettings");
+  const status = { installed: true, version: "1.0.0", latest: "2.0.0", updateAvailable: true } as never;
+  const base = { status, name: "Codex", updateDisabled: true, onUpdate: () => {} };
+  const running = markup(createElement(StatusBadges, { ...base, updating: true }));
+  expect(running).toContain('aria-label="Updating Codex"');
+  expect(running).toContain("Updating…");
+  expect(running).toContain('class="spinner');
+  const failed = markup(createElement(StatusBadges, { ...base, updating: false, failure: { message: "exit 1", lines: ["boom"] } }));
+  expect(failed).toContain('class="badge badge-bad rt-update-failed"');
+  expect(failed).toContain("update failed");
+  expect(failed).toContain('aria-label="Codex update failed: show the error"');
+  expect(failed).toContain('aria-expanded="false"');
+  // A retry takes the pill back to its spinner.
+  expect(markup(createElement(StatusBadges, { ...base, updating: true, failure: { message: "exit 1", lines: [] } }))).not.toContain("rt-update-failed");
+  // No page-level job panel under the list any more.
+  reset();
+  const page = markup(createElement(RuntimesSection));
+  expect(page).not.toContain("pi-job");
+  expect(page).not.toContain("Working…");
+  reset();
+});
+
 test("files and terminals keep the folder's device instead of inheriting the scratch-device preference", async () => {
   const { terminalFolder, refreshTerminal, useTerminal, useSideTerminal } = await import("../src/lib/terminal");
   const { usePanel } = await import("../src/lib/panel");

@@ -9746,6 +9746,32 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: 8px; }
   margin: 0;
   padding: 0 12px 10px 42px;
 }
+.rt-update-failed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+:where([data-keyboard-nav]) .rt-update-failed:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 3px;
+}
+.rt-failure {
+  flex-direction: column;
+  align-items: stretch;
+}
+.rt-failure-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.rt-failure .pi-job-log {
+  max-height: 180px;
+}
 .rt-error {
   display: -webkit-box;
   -webkit-line-clamp: 3;
