@@ -165,6 +165,23 @@ export async function setSystemEnabled(enabled: boolean): Promise<void> {
   broadcast("reload");
 }
 
+/** Saved choices and effective availability, for bot controls. Never implies code is sandboxed. */
+export function pluginControlInfo() {
+  const info = pluginInfo();
+  const state = storedState();
+  return {
+    dir: info.dir,
+    configuredEnabled: state.system,
+    effectiveEnabled: info.enabled,
+    safe: info.safe,
+    plugins: info.plugins.map((plugin) => {
+      const configuredEnabled = state.enabled.includes(plugin.id) || (!state.disabled.includes(plugin.id) && loaded.find((p) => p.info.id === plugin.id)?.manifest.defaultEnabled !== false);
+      const blockedByConfig = config.disabledPlugins?.includes(plugin.id) === true;
+      return { ...plugin, configuredEnabled, blockedByConfig, effectiveEnabled: info.enabled && !isDisabled(plugin.id) && !plugin.error };
+    }),
+  };
+}
+
 /** All known plugins, including ones with a broken manifest. */
 export function pluginInfo(): PluginsResponse {
   return {

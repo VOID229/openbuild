@@ -12,7 +12,7 @@ import { modelScope, settledModels, type PiModels } from "../pi/sessions";
 import * as svc from "./service";
 
 const OWN = join(import.meta.dir, "extension.ts");
-const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "remember", "forget", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "manage_bot", "openbuild"].join(",");
+const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "remember", "forget", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "manage_bot", "openbuild", "plugins"].join(",");
 const PACKAGE = "package:";
 
 const isLocal = (source: string) => !/^[a-z+]+:/i.test(source);

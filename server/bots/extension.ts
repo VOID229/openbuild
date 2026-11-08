@@ -223,6 +223,8 @@ export default function openbots(pi: any) {
     ),
   );
 
+  pi.registerTool(tool("plugins", "Plugins", "OpenBuild plugins: guide gives the existing coding-thread authoring workflow to bots with this installation's project access. Primary only: list status, set a plugin's saved switch (id, enabled), or system master switch (enabled). Trusted code can run immediately when enabled. No install, delete or file access.", { type: "object", properties: { action: str("guide, list, set or system."), id: str("set: plugin id from list."), enabled: { type: "boolean" } }, required: ["action"] }, (p) => call("plugins", p)));
+
   pi.registerTool(
     tool(
       "manage_bot",
