@@ -6,13 +6,15 @@
 //     [--cpu 1] [--latency 0] [--kbps 0] [--only cold,warm] [--out result.json] [--repo <checkout>]
 //
 // --cpu slows the page's CPU (4 ≈ a mid-range laptop on battery), --latency/--kbps the network
-// (e.g. 40 ms and 20000 for a phone on Tailscale). Every run starts from a fresh copy of the golden
-// data, so earlier runs can't warm anything.
+// (e.g. 40 ms and 20000 for a phone on Tailscale), and --remote has the browser reach the server by
+// a name that isn't this machine's, as one on another device does (so it gets what such a browser
+// gets, compressed API answers included). Every run starts from a fresh copy of the golden data, so
+// earlier runs can't warm anything.
 import { Database } from "bun:sqlite";
 import { cpSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Browser } from "./cdp";
-import { sandbox } from "./sandbox";
+import { REMOTE_HOST, sandbox } from "./sandbox";
 
 const flag = (name: string, fallback?: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -27,6 +29,7 @@ const LATENCY = Number(flag("latency", "0"));
 const KBPS = Number(flag("kbps", "0"));
 const PORT = Number(flag("port", "3987"));
 const only = flag("only")?.split(",");
+const REMOTE = process.argv.includes("--remote");
 // Another checkout's server, e.g. an export of the base commit (`git archive`), for before/after.
 if (flag("repo")) process.env.OPENBUILD_BENCH_REPO = flag("repo");
 const want = (name: string) => !only || only.includes(name);
@@ -70,7 +73,7 @@ async function withServer<T>(work: (box: ReturnType<typeof sandbox>) => Promise<
   const root = join(golden, "..", `run-${process.pid}-${runIndex++}`);
   rmSync(root, { recursive: true, force: true });
   cpSync(golden, root, { recursive: true });
-  const box = sandbox(root, PORT);
+  const box = sandbox(root, PORT, REMOTE);
   try {
     await box.start();
     return await work(box);
@@ -101,11 +104,11 @@ const LOAD_CHECKS = {
 
 const results: Record<string, unknown> = {
   when: new Date().toISOString(),
-  conditions: { cpu: CPU, latency: LATENCY, kbps: KBPS, runs: RUNS, viewport: "1440x900", chrome, repo: process.env.OPENBUILD_BENCH_REPO ?? "this checkout" },
+  conditions: { cpu: CPU, latency: LATENCY, kbps: KBPS, remote: REMOTE, runs: RUNS, viewport: "1440x900", chrome, repo: process.env.OPENBUILD_BENCH_REPO ?? "this checkout" },
   landing: LANDING,
 };
 
-const browser = await Browser.launch(chrome);
+const browser = await Browser.launch(chrome, REMOTE ? [`--host-resolver-rules=MAP ${REMOTE_HOST} 127.0.0.1`] : []);
 try {
   // ------------------------------------------------------------------ cold and warm loads
   if (want("cold") || want("warm")) {

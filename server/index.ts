@@ -11,6 +11,7 @@ import { checkRelease, restartStatus } from "./releases";
 // the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
 import index from "../src/index.html";
 import { productionClient } from "./client";
+import { compressJson } from "./compress";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
@@ -120,15 +121,19 @@ const devicePathAllowed = (path: string) =>
   // a wider grant: it's the same power through a settings page instead of a prompt.
   /^\/api\/pi\/(install|update|job|resources|packages|providers|login)(\/|$)/.test(path);
 
-/** Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser session. */
+/**
+ * Wrap an API handler with the request check. Paired devices use a bearer token instead of a browser
+ * session. Large JSON answers are gzipped for clients across a network (compress.ts).
+ */
 const api =
   <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) =>
   (req: R, ...rest: A) => {
     const denied = forbidden(req);
     if (denied) return denied;
+    const respond = async (res: Response | Promise<Response>) => compressJson(req, await res);
     if (devices.authenticateDevice(req)) {
       if (!devicePathAllowed(new URL(req.url).pathname)) return bad("Forbidden", 403);
-      return handler(req, ...rest);
+      return respond(handler(req, ...rest));
     }
     // A device token this server doesn't know is refused, not taken for a browser: on a server
     // without a password that would let a stale or reassigned address act for a pairing it never made.
@@ -136,7 +141,7 @@ const api =
     // address that reaches some other OpenBuild.
     if (/^Bearer [a-f0-9]{64}$/.test(req.headers.get("authorization") ?? ""))
       return Response.json({ error: "Unknown device token" }, { status: 401, headers: { [devices.SERVER_HEADER]: serverId } });
-    return localAuth.protect(req, () => handler(req, ...rest));
+    return localAuth.protect(req, () => respond(handler(req, ...rest)));
   };
 
 /** Headers from a proxied remote response that are safe to pass back to the browser. */

@@ -45,6 +45,36 @@ async function record(tab: Tab, work: () => Promise<unknown>): Promise<any[]> {
   return events;
 }
 
+/** A sampled CPU profile of `work`: saved for DevTools, and its heaviest functions by self and total time. */
+async function profile(tab: Tab, label: string, work: () => Promise<unknown>) {
+  await tab.send("Profiler.enable");
+  await tab.send("Profiler.setSamplingInterval", { interval: 100 });
+  await tab.send("Profiler.start");
+  await work();
+  const { profile } = await tab.send("Profiler.stop");
+  writeFileSync(join(out, `${label}.cpuprofile`), JSON.stringify(profile));
+  const nodes = new Map<number, any>(profile.nodes.map((n: any) => [n.id, n]));
+  const parent = new Map<number, number>();
+  for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+  const self = new Map<number, number>();
+  profile.samples.forEach((id: number, i: number) => self.set(id, (self.get(id) ?? 0) + (profile.timeDeltas[i] ?? 0)));
+  const key = (n: any) => `${n.callFrame.functionName || "(anonymous)"} ${n.callFrame.url.split("/").pop()}:${n.callFrame.lineNumber}`;
+  const bySelf = new Map<string, number>(), byTotal = new Map<string, number>();
+  for (const [id, us] of self) {
+    bySelf.set(key(nodes.get(id)), (bySelf.get(key(nodes.get(id))) ?? 0) + us);
+    // Total: once per function on the sample's stack.
+    const seen = new Set<string>();
+    for (let at: number | undefined = id; at !== undefined; at = parent.get(at)) {
+      const k = key(nodes.get(at));
+      if (seen.has(k)) continue;
+      seen.add(k);
+      byTotal.set(k, (byTotal.get(k) ?? 0) + us);
+    }
+  }
+  const top = (m: Map<string, number>) => [...m].filter(([k]) => !/^\((root|program|idle)\)/.test(k)).sort((a, b) => b[1] - a[1]).slice(0, 25).map(([k, us]) => `    ${(us / 1000).toFixed(1).padStart(7)} ms  ${k}`).join("\n");
+  console.log(`\n== ${label} CPU profile, self:\n${top(bySelf)}\n  total:\n${top(byTotal)}`);
+}
+
 /** Main-thread time by top-level event name, and the requests, from `from` (µs) on. */
 function summarize(events: any[], label: string) {
   const main = events.find((e) => e.name === "TracingStartedInBrowser")?.args?.data?.frames?.[0]?.processId;
@@ -100,6 +130,24 @@ try {
   });
   writeFileSync(join(out, "switch-big.trace.json"), JSON.stringify({ traceEvents: sw }));
   summarize(sw, "switch to the largest open thread");
+  if (process.argv.includes("--profile")) {
+    await tab.load(`${box.url}/thread-${landing.id}`, checks);
+    await Bun.sleep(1500);
+    await profile(tab, "reload", async () => { await tab.load("reload", checks); await Bun.sleep(1000); });
+    await Bun.sleep(1000);
+    const mid = pickAt(0.6);
+    await profile(tab, "switch-first", () => tab.interact(() => tab.click(`.history-row[data-thread="${mid.id}"] .history-title`), `!!document.querySelector('.messages-inner [data-message-id="${mid.last}"]')?.checkVisibility()`));
+    await Bun.sleep(800);
+    await profile(tab, "switch-back", () => tab.interact(() => tab.click(`.history-row[data-thread="${landing.id}"] .history-title`), checks.thread));
+    await Bun.sleep(800);
+    await profile(tab, "switch-again", () => tab.interact(() => tab.click(`.history-row[data-thread="${mid.id}"] .history-title`), `!!document.querySelector('.messages-inner [data-message-id="${mid.last}"]')?.checkVisibility()`));
+    await Bun.sleep(800);
+    const toggle = "[...document.querySelectorAll('.bots-toggle')].find((b) => b.checkVisibility())";
+    await profile(tab, "into-bots", () => tab.interact(() => tab.clickWhere(toggle), "!!document.querySelector('.bots-messages .bm-row')?.checkVisibility()"));
+    await Bun.sleep(800);
+    await profile(tab, "back-from-bots", () => tab.interact(() => tab.clickWhere(toggle), "!document.querySelector('.bots-messages')?.checkVisibility()"));
+    await Bun.sleep(800);
+  }
   const bots = await record(tab, async () => {
     const r = await tab.interact(() => tab.clickWhere("[...document.querySelectorAll('.bots-toggle')].find((b) => b.checkVisibility())"), "!!document.querySelector('.bots-messages .bm-row')?.checkVisibility()");
     console.log("\ninto OpenBots:", r);

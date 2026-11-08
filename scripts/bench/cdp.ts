@@ -25,7 +25,7 @@ export class Browser {
       for (const fn of this.listeners) fn(msg);
     });
   }
-  static async launch(executable: string): Promise<Browser> {
+  static async launch(executable: string, extra: string[] = []): Promise<Browser> {
     const profile = await mkdtemp(join(tmpdir(), "ob-bench-chrome-"));
     const env = { ...process.env };
     delete env.DBUS_SESSION_BUS_ADDRESS;
@@ -34,7 +34,7 @@ export class Browser {
       "--headless=new", "--disable-gpu", "--use-gl=swiftshader", "--disable-dev-shm-usage", "--no-first-run", "--no-default-browser-check",
       "--disable-extensions", "--disable-background-networking", "--disable-component-update", "--disable-sync",
       "--disable-background-timer-throttling", "--disable-renderer-backgrounding", "--disable-backgrounding-occluded-windows",
-      `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-sandbox",
+      `--user-data-dir=${profile}`, "--remote-debugging-port=0", "--no-sandbox", ...extra,
     ], { detached: true, stdio: ["ignore", "ignore", "pipe"], env });
     const url = await new Promise<string>((resolve, reject) => {
       let err = "";

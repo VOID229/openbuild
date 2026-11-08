@@ -22,7 +22,10 @@ export interface Sandbox {
   log: string[];
 }
 
-export function sandbox(root: string, port: number): Sandbox {
+/** The name `--remote` benchmarks reach the sandbox by, as a browser on another machine would (bench.ts). */
+export const REMOTE_HOST = "openbuild-bench.test";
+
+export function sandbox(root: string, port: number, remote = false): Sandbox {
   root = resolve(root);
   if (!root.startsWith("/tmp/")) throw new Error("A benchmark sandbox lives under /tmp");
   const home = join(root, "home");
@@ -45,11 +48,12 @@ export function sandbox(root: string, port: number): Sandbox {
     NODE_ENV: "production",
     HOST: "127.0.0.1",
     PORT: String(port),
+    ...(remote ? { OPENCHAT_ALLOWED_HOSTS: REMOTE_HOST } : {}),
   });
   let child: ChildProcess | undefined;
   const log: string[] = [];
   const box: Sandbox = {
-    root, port, url: `http://127.0.0.1:${port}`, env, log,
+    root, port, url: `http://${remote ? REMOTE_HOST : "127.0.0.1"}:${port}`, env, log,
     async start() {
       const began = performance.now();
       child = spawn(process.execPath, ["server/index.ts"], { cwd: repo(), env, stdio: ["ignore", "pipe", "pipe"] });
@@ -60,7 +64,7 @@ export function sandbox(root: string, port: number): Sandbox {
       for (;;) {
         if (child.exitCode !== null) throw new Error(`Sandbox server exited:\n${log.join("\n")}`);
         try {
-          const res = await fetch(`${box.url}/api/auth/status`, { signal: AbortSignal.timeout(500) });
+          const res = await fetch(`http://127.0.0.1:${port}/api/auth/status`, { headers: remote ? { host: `${REMOTE_HOST}:${port}` } : {}, signal: AbortSignal.timeout(500) });
           if (res.ok) return performance.now() - began;
         } catch {}
         await Bun.sleep(10);
