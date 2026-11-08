@@ -77,7 +77,8 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(locked).not.toContain("No Pi extensions");
     expect(locked).not.toContain("lucide-lock-keyhole");
     expect(locked).not.toContain('aria-haspopup="listbox"');
-    useStore.setState((s) => ({ view: { ...s.view, runtime: "cursor" } }));
+    // The thread is under "Closed", whose rows exist only while it's open.
+    useStore.setState((s) => ({ view: { ...s.view, runtime: "cursor" }, sections: { ...s.sections, closed: true } }));
     expect(markup(createElement(Sidebar))).toContain('title="Native Cursor runtime"');
   });
 

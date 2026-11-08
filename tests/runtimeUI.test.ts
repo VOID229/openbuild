@@ -342,7 +342,8 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   const titles = (html: string) => [...html.matchAll(/<span class="history-title-text">([^<]*)<\/span>/g)].map((m) => m[1]);
   reset({}, [chat("pi-thread", "pi"), chat("durable-thread", "durable"), chat("legacy-thread")]);
 
-  useStore.setState((s) => ({ view: { ...s.view, runtime: "all" } }));
+  // They're under "Closed", whose rows exist only while it's open.
+  useStore.setState((s) => ({ view: { ...s.view, runtime: "all" }, sections: { ...s.sections, closed: true } }));
   let html = markup(createElement(Sidebar));
   expect(titles(html)).toEqual(["pi-thread", "durable-thread", "legacy-thread"]);
   expect(html).toContain('title="Pi runtime"');
@@ -391,7 +392,8 @@ test("a thread closed elsewhere while OpenBots is open leaves OpenBots in front"
 
 test("OpenCode sidebar identity and runtime filter use the shared controls", () => {
   reset({}, [{ ...thread("opencode"), title: "OpenCode thread" }, { ...thread("pi"), id: "pi-only", title: "pi-only" }]);
-  useStore.setState((s) => ({ view: { ...s.view, runtime: "opencode" } }));
+  // They're under "Closed", whose rows exist only while it's open.
+  useStore.setState((s) => ({ view: { ...s.view, runtime: "opencode" }, sections: { ...s.sections, closed: true } }));
   const html = markup(createElement(Sidebar));
   expect(html).toContain('title="Native OpenCode runtime"');
   expect(html).toContain('history-title-text">OpenCode thread');
