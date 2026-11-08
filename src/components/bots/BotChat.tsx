@@ -3,7 +3,7 @@
 // chats name each bot over its messages; side chats between bots are read-only.
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
@@ -25,6 +25,7 @@ import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
 import { IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
+import { uid } from "../../lib/id";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
@@ -78,6 +79,12 @@ const namedBots = (bots: Bot[]) => bots.filter((b) => b.name.trim()).sort((a, b)
 const botNames = (named: Bot[]) => new RegExp(`(?<![\\p{L}\\d])(?:${named.map((b) => escapeRegExp(b.name)).join("|")})(?![\\p{L}\\d])`, "gu");
 
 /** Whether the text already names one of these bots ("Juniper left"). */
+/** What a settings line says after the bot's name: the "'s " just before its first setting ends the name. */
+function settingsChange(text: string): string | undefined {
+  const at = text.lastIndexOf("'s ", text.indexOf(": "));
+  return at > 0 ? text.slice(at + 3) : undefined;
+}
+
 const namesBot = (text: string, bots: Bot[]) => {
   const named = namedBots(bots);
   return named.length > 0 && botNames(named).test(text);
@@ -625,9 +632,23 @@ interface RowProps {
   /** Touch screens: this message's actions, by holding its bubble. */
   onHold: (id: string, bubble: HTMLElement) => void;
   seen?: React.ReactNode;
+  /** Shown, but not confirmed by the workspace yet. */
+  sending?: boolean;
 }
 
-const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen }: RowProps) {
+/**
+ * A row reads only the conversation's id, kind and bots, and the message it quotes. Each new message
+ * is a new conversation, and comparing that whole would draw every row again on every send.
+ */
+const sameRow = (a: RowProps, b: RowProps) => {
+  for (const k of Object.keys(a) as (keyof RowProps)[]) if (k !== "conversation" && a[k] !== b[k]) return false;
+  const c = a.conversation, d = b.conversation;
+  if (c.id !== d.id || c.kind !== d.kind || c.botIds !== d.botIds) return false;
+  const quoted = a.message.replyTo;
+  return !quoted || c.messages.find((x) => x.id === quoted) === d.messages.find((x) => x.id === quoted);
+};
+
+const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
   const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
@@ -651,7 +672,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
         },
   });
   return (
-    <div className={cx("bm-row", fresh && (mine ? "bm-send" : "bm-recv"))} data-pos={pos} data-id={m.id} {...fingers}>
+    <div className={cx("bm-row", fresh && (mine ? "bm-send" : "bm-recv"), sending && "bm-sending")} data-pos={pos} data-id={m.id} aria-busy={sending || undefined} {...fingers}>
       {!readonly && (
         <span className="bm-swipe-icon" aria-hidden>
           <CornerUpLeft size={18} />
@@ -711,7 +732,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       {seen}
     </div>
   );
-});
+}, sameRow);
 
 /** The computed styles a bubble gets from where it sits in the conversation, which its lifted copy has to carry along. */
 const LIFTED_STYLES = [
@@ -1121,6 +1142,14 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const [picker, setPicker] = useState<Picker>();
   const [showAll, setShowAll] = useState(false);
   const [held, setHeld] = useState<{ id: string; bubble: HTMLElement }>();
+  // The same functions every render, so a row that hasn't changed isn't drawn again.
+  const onHold = useCallback((id: string, bubble: HTMLElement) => setHeld({ id, bubble }), []);
+  const onPicker = useCallback((p: Picker, el: HTMLElement) => {
+    anchor.current = el;
+    setShowAll(false);
+    setPicker((cur) => (cur?.messageId === p.messageId && cur.what === p.what ? undefined : p));
+  }, []);
+  const sending = useBots((s) => s.sending);
   const touchY = useRef(0);
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
@@ -1262,11 +1291,13 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
             const detail = eventDetail(m.event!);
             const switchedTo = eventText(m.event!).replace(/^Switched to /, "") + (m.event!.kind === "model" && detail ? ` (${accountName(detail)})` : "");
+            // A change of settings ("Juniper's model: A → B") names its bot by id too, so a rename shows up on old lines.
+            const changed = m.event!.kind === "changed" && eventBot ? settingsChange(m.event!.text) : undefined;
             return (
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
                 {m.event!.kind !== "model" && detail && (
                   <span className="bm-event-detail">
@@ -1302,12 +1333,9 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                         fresh={m.at > since}
                         readonly={readonly}
                         onReply={onReply}
-                        onHold={(id, bubble) => setHeld({ id, bubble })}
-                        onPicker={(p, el) => {
-                          anchor.current = el;
-                          setShowAll(false);
-                          setPicker((cur) => (cur?.messageId === p.messageId && cur.what === p.what ? undefined : p));
-                        }}
+                        onHold={onHold}
+                        onPicker={onPicker}
+                        sending={mine && sending.includes(m.id)}
                         seen={
                           seenBy && (
                             <div className="bm-seen">
@@ -1489,6 +1517,26 @@ const TYPING_PAUSE = 3000;
 /** How far each chat's draft was scrolled, for the text it was scrolled in. Local to this page, as the caret is. */
 const draftScrolls = new Map<string, { text: string; top: number }>();
 
+type Unsent = { text: string; images: string[] };
+/** A message that didn't go, put back in front of what's been typed since. */
+const withUnsent = (sent: Unsent, now: Unsent): Unsent => ({
+  text: !sent.text.trim() ? now.text : !now.text.trim() ? sent.text : `${sent.text}\n${now.text}`,
+  images: [...sent.images, ...now.images.filter((src) => !sent.images.includes(src))],
+});
+/** The other way round: a draft saved with a message in it, once the message has gone. */
+const withoutSent = (draft: Unsent, sent: Unsent): Unsent => {
+  const at = draft.text === sent.text ? 0 : sent.text.trim() ? draft.text.indexOf(`${sent.text}\n`) : -1;
+  const text = at < 0 ? draft.text : draft.text.slice(0, at) + draft.text.slice(at + sent.text.length + 1);
+  return { text: draft.text === sent.text ? "" : text, images: draft.images.filter((src) => !sent.images.includes(src)) };
+};
+const sameImages = (a: string[], b: string[]) => a.length === b.length && a.every((src, i) => src === b[i]);
+/**
+ * Messages that didn't reach the workspace and went back to their composer, by draft key. Sent again
+ * as they were, each keeps its id, and the workspace takes a message only once, so a retry of one that
+ * did land after all (or of one also retried from the not-confirmed list) can't make a second.
+ */
+const unsent = new Map<string, (Unsent & { id: string })[]>();
+
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
   // Unsent text is the workspace's, like the conversation it's for.
@@ -1498,8 +1546,19 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const [text, setText] = useState(() => getBotDraft(workspace, conversation.id, local)?.text ?? "");
   const [images, setImages] = useState<string[]>(() => getBotDraft(workspace, conversation.id, local)?.images ?? []);
   const lastTyped = useRef(0);
-  const [sending, setSending] = useState(false);
-  const sendingRef = useRef(false);
+  /** Sent and cleared from the box, not confirmed yet. Kept in the saved draft until then, so a reload can't lose one. */
+  const flying = useRef<Unsent[]>([]);
+  const [landed, setLanded] = useState(0);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => void (alive.current = false);
+  }, []);
+  const replyRef = useRef(replyTo);
+  replyRef.current = replyTo;
+  /** What's in the box. A send empties it here at once, so a second Enter before the next render sends nothing. */
+  const box = useRef<Unsent>({ text, images });
+  box.current = { text, images };
   const [mention, setMention] = useState<{ query: string; index: number }>();
   const [notice, setNotice] = useState<string>();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -1553,9 +1612,12 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   // Save the draft as it changes (not on mount, which would stamp an untouched draft as fresh).
   const mounted = useRef(false);
   useEffect(() => {
-    if (mounted.current) saveBotDraft(workspace, conversation.id, text, images, local);
+    if (mounted.current) {
+      const d = flying.current.reduceRight((now, sent) => withUnsent(sent, now), { text, images });
+      saveBotDraft(workspace, conversation.id, d.text, d.images, local);
+    }
     mounted.current = true;
-  }, [text, images]);
+  }, [text, images, landed]);
 
   // Measuring lays out the whole page, and coming back to OpenBots runs this again: skipped when the text is the same.
   const sized = useRef<{ el: HTMLTextAreaElement; text: string }>(undefined);
@@ -1602,24 +1664,62 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     return () => clearTimeout(t);
   }, [notice]);
 
-  const send = async () => {
-    const body = text.trim();
-    if (sendingRef.current || (!body && !images.length)) return;
+  /**
+   * The message shows in the conversation and the box empties at once, in the same frame. If the
+   * workspace doesn't take it, it comes back to the box, ahead of anything typed since.
+   */
+  const send = () => {
+    const sent = box.current;
+    const { images } = sent;
+    const body = sent.text.trim();
+    if (!body && !images.length) return;
+    box.current = { text: "", images: [] };
     dictation.cancel();
-    sendingRef.current = true;
-    setSending(true);
-    try {
-      const m = await useBots.getState().post(conversation.id, { author: "me", text: body, images: images.length ? images : undefined, replyTo });
-      if (!m) return; // Keep the entire draft until the server acknowledges it.
-      setText((current) => current === text ? "" : current);
-      setImages((current) => current.filter((src) => !images.includes(src)));
-      setMention(undefined);
-      onReply(undefined);
-      respond(conversation.id, m);
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
+    const conversationId = conversation.id;
+    const key = draftKey;
+    const quoting = replyTo;
+    const again = unsent.get(key)?.find((u) => u.text === body && sameImages(u.images, images));
+    if (again) unsent.set(key, unsent.get(key)!.filter((u) => u !== again));
+    const id = again?.id ?? uid();
+    flying.current = [...flying.current, sent];
+    setText("");
+    setImages([]);
+    setMention(undefined);
+    onReply(undefined);
+    void useBots.getState().post(conversationId, { id, author: "me", text: body, images: images.length ? images : undefined, replyTo: quoting }).then((acknowledged) => {
+      flying.current = flying.current.filter((f) => f !== sent);
+      // Not confirmed, but the workspace's own snapshot shows it arrived after all.
+      const m = acknowledged ?? useBots.getState().conversations.find((c) => c.id === conversationId)?.messages.find((x) => x.id === id);
+      if (m) {
+        if (alive.current) setLanded((n) => n + 1);
+        else {
+          // Its chat was left meanwhile, with the message still in the saved draft.
+          const d = getBotDraft(workspace, conversationId, local);
+          const next = d && withoutSent(d, sent);
+          if (d && next && (next.text !== d.text || next.images.length !== d.images.length)) saveBotDraft(workspace, conversationId, next.text, next.images, local);
+        }
+        respond(conversationId, m);
+        return;
+      }
+      unsent.set(key, [...(unsent.get(key) ?? []), { id, text: body, images }]);
+      // A chat that was left keeps the message in its saved draft already.
+      if (!alive.current) return;
+      const el = input.current;
+      const caret = el && document.activeElement === el ? { el, start: el.selectionStart, end: el.selectionEnd } : undefined;
+      let shift = 0;
+      setText((now) => {
+        const next = withUnsent(sent, { text: now, images: [] }).text;
+        shift = next.length - now.length;
+        return next;
+      });
+      setImages((now) => withUnsent({ text: "", images }, { text: "", images: now }).images);
+      if (quoting && !replyRef.current) onReply(quoting);
+      setNotice("Not sent. It's back in the box to send again.");
+      // The caret stays in what was being typed, or goes to the end of the message put back.
+      requestAnimationFrame(() => {
+        if (caret && document.activeElement === caret.el) caret.el.setSelectionRange(caret.start + shift, caret.end + shift);
+      });
+    });
   };
   const pasteStashed = (item: Stashed) => {
     dictation.cancel();
@@ -1642,7 +1742,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   };
   /** The stash shortcut, while OpenBots is showing. */
   const onStashShortcut = () => {
-    if (sendingRef.current) return;
     const action = stashAction(!!text.trim() || images.length > 0, stashed.length);
     if (action === "stash") {
       dictation.cancel();
@@ -1727,7 +1826,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
-          if (sending) return;
           const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
           if (!files.length) return;
           e.preventDefault();
@@ -1770,7 +1868,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
                 <button type="button" className="bots-composer-image-open" aria-label="Preview image" onClick={() => openLightbox(images.map((src, j) => ({ id: `draft-${j}`, name: "Image", dataUrl: src })), `draft-${i}`)}>
                   <img src={src} alt="" />
                 </button>
-                <button type="button" className="bots-composer-image-remove" aria-label="Remove image" disabled={sending} onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
+                <button type="button" className="bots-composer-image-remove" aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
                   <X size={12} />
                 </button>
               </span>
@@ -1784,18 +1882,17 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               label={conversation.kind === "group" ? "Add to message" : "Add images"}
               tooltip={false}
               className="bots-composer-btn bots-composer-add"
-              disabled={sending}
               onClick={() => (conversation.kind === "group" ? setAdding(true) : file.current?.click())}
             >
               <Plus size={22} />
             </IconButton>
           ) : (
             <>
-              <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => file.current?.click()}>
+              <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" onClick={() => file.current?.click()}>
                 <ImagePlus size={18} />
               </IconButton>
               {conversation.kind === "group" && (
-                <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" disabled={sending} onClick={() => setPolling(true)}>
+                <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" onClick={() => setPolling(true)}>
                   <ListChecks size={18} />
                 </IconButton>
               )}
@@ -1817,9 +1914,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <DraftBackdrop text={text} bots={bots} everyone={everyone} scroll={backdrop} />
           <textarea
             ref={input}
-            // A disabled field gives up focus, which on a touch screen closes the keyboard on every send.
-            disabled={sending && !touch}
-            readOnly={sending}
             className="bots-composer-input bots-composer-textarea"
             rows={1}
             value={text}
@@ -1843,7 +1937,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               if (e.currentTarget.offsetParent) keepPlace(e.currentTarget);
             }}
             onPaste={(e) => {
-              if (sending) return;
               const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
               if (!files.length) return;
               e.preventDefault();
@@ -1904,8 +1997,8 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <button
             type="submit"
             className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")}
-            aria-label={sending ? "Sending…" : "Send"}
-            disabled={sending || (!text.trim() && !images.length)}
+            aria-label="Send"
+            disabled={!text.trim() && !images.length}
             // Keep focus (and the keyboard) in the field, ready for the next message.
             onMouseDown={(e) => e.preventDefault()}
           >

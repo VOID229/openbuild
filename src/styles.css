@@ -7431,6 +7431,35 @@ a.btn-primary {
 .permission-pill svg { flex-shrink: 0; opacity: 0.75; }
 .permission-risky { color: var(--danger); }
 
+/* Under the composer: Remote Control, outside the option row. Claude Code switches it per thread;
+   other harnesses show it disabled with where it's set. */
+
+.remote-control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  min-height: 26px;
+  padding: 6px 8px 0;
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+
+.remote-control-label {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.remote-control-row .toggle-sm[aria-checked="true"] .toggle-knob {
+  transform: translateX(14px);
+}
+
+/* Too narrow for one row, the line goes under the switch whole rather than breaking mid-sentence. */
+.remote-control-note {
+  min-width: 0;
+  white-space: nowrap;
+}
+
 /* In a thread, under the composer: where it works, and how full the context is */
 
 .ws-bottom {

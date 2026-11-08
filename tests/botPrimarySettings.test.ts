@@ -170,7 +170,8 @@ test("what the user changes in a bot's settings reaches the primary once, on its
     const manager = svc.createBot({ name: 'Manager' }).bot;
     const gone = svc.createBot({ name: 'Gone' }).bot;
     svc.updateSettings({ user: { name: 'Outis' } });
-    const chats = () => [primary, manager].map((b) => db.messages(svc.directId(b.id), 500).length).join();
+    // Bubbles only: each change's activity line in the bot's own chat is tested in botSettingLines.
+    const chats = () => [primary, manager].map((b) => db.messages(svc.directId(b.id), 500).filter((r) => !r.message.event).length).join();
     const before = chats();
     const text = () => svc.changeNoteText(primary.id, svc.pendingChangeNotes(primary.id));
 
@@ -206,7 +207,7 @@ test("what the user changes in a bot's settings reaches the primary once, on its
       '- Outis changed your fallback models from the default fallbacks to no fallback.',
       "That's just so you know; it needs no reply, and don't change it back unless asked.",
     ].join('\\n'));
-    // No chat message, no wake-up, and only the primary hears.
+    // No chat bubble, no wake-up, and only the primary hears.
     a.equal(chats(), before);
     a.equal(wakes.filter(([, w]) => w.kind !== 'messages').length, 0);
     a.deepEqual(svc.pendingChangeNotes(manager.id), []);

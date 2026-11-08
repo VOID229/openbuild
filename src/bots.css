@@ -1058,7 +1058,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   outline: none;
-  transition: box-shadow var(--fast) var(--ease);
+  transition: box-shadow var(--fast) var(--ease), opacity 160ms var(--ease);
 }
 
 .bm-mine .bm-bubble {
@@ -1451,6 +1451,12 @@
 .bm-recv {
   animation: bm-recv 320ms var(--ease) both;
   transform-origin: 0 100%;
+}
+
+/* Not confirmed by the workspace yet: dimmed only once that takes a moment, so a quick send doesn't flicker. */
+.bm-sending .bm-bubble {
+  opacity: 0.6;
+  transition-delay: 300ms;
 }
 
 @keyframes bm-send {

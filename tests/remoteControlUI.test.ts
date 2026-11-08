@@ -30,9 +30,8 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
   const { config } = await import("../src/lib/runtime");
   await config;
   const { useStore } = await import("../src/lib/store");
-  const { RemoteControlPicker, codexRemoteLines } = await import("../src/components/Pickers");
+  const { RemoteControlToggle } = await import("../src/components/Pickers");
   const { sendMessage } = await import("../src/lib/chat");
-  const { codexDaemon } = await import("../src/lib/pi");
   const base = useStore.getState().settings;
   const model = (runtime: string): ModelInfo => ({ id: `${runtime}/one`, name: "One", protocol: "chat", input: ["text"], reasoning: { efforts: ["low", "high"], mode: "effort", toggle: false } });
   const listing = (plan: "claude" | "cursor") => ({ "": { plan, status: "valid" as const, models: [model(plan)], defaultModel: `${plan}/one`, checkedAt: Date.now() } });
@@ -46,7 +45,7 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     try { return renderToStaticMarkup(element); }
     finally { Object.assign(initial, saved); }
   }
-  const pill = (chatId?: string) => markup(createElement(RemoteControlPicker, { dropUp: false, chatId }));
+  const row = (chatId?: string) => markup(createElement(RemoteControlToggle, { chatId }));
   const ndjson = (...events: unknown[]) => new Response(events.map((ev) => JSON.stringify(ev)).join("\n") + "\n", { headers: { "content-type": "application/x-ndjson", "x-openchat-run": "1" } });
   async function settled() {
     for (let i = 0; i < 100; i++) {
@@ -56,32 +55,36 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     throw new Error("reply never settled");
   }
 
-  test("each harness gets its own Remote Control control, not one generic toggle", () => {
+  test("each harness gets its own Remote Control switch: Claude Code's works, the others are disabled with where it's set", () => {
     reset();
-    expect(pill()).toContain("Remote off");
+    expect(row()).toContain(">Remote control</label>");
+    expect(row()).toMatch(/role="switch" aria-checked="false" aria-label="Remote control"/);
+    expect(row()).not.toContain("disabled");
+    expect(row()).toContain("Needs a claude.ai sign-in");
     useStore.getState().setDraftRemoteControl(true);
-    expect(pill()).toContain("Remote on");
-    // Codex and Cursor can't be switched per thread: the pill says where it's set instead.
+    expect(row()).toContain('aria-checked="true"');
+    // Codex and Cursor can't be switched per thread: off, disabled, and one line on where it's set.
     useStore.getState().updateSettings({ threadRuntime: "codex" });
-    expect(pill()).toContain("Remote · machine");
-    expect(pill()).toContain('aria-haspopup="dialog"');
+    expect(row()).toMatch(/aria-checked="false"[^>]*disabled=""/);
+    expect(row()).toContain("Set per machine, not per thread");
     useStore.getState().updateSettings({ threadRuntime: "cursor" });
-    expect(pill()).toContain("Remote · account");
+    expect(row()).toMatch(/aria-checked="false"[^>]*disabled=""/);
+    expect(row()).toContain("Set in your Cursor account");
     for (const runtime of ["pi", "durable", "fx", "opencode"] as const) {
       useStore.getState().updateSettings({ threadRuntime: runtime });
-      expect(pill()).toBe("");
+      expect(row()).toBe("");
     }
-    // An existing thread shows only a Claude Code opt-in it started with.
+    // An existing thread shows only a Claude Code opt-in it started with, and can't change it.
     const chats: Chat[] = [
       { id: "on", title: "On", runtime: "claude", remoteControl: true, createdAt: 0, updatedAt: 0, messages: [] },
       { id: "off", title: "Off", runtime: "claude", createdAt: 0, updatedAt: 0, messages: [] },
       { id: "codex", title: "Codex", runtime: "codex", createdAt: 0, updatedAt: 0, messages: [] },
     ];
     reset({}, chats);
-    expect(pill("on")).toContain("Remote on");
-    expect(pill("on")).not.toContain("<button");
-    expect(pill("off")).toBe("");
-    expect(pill("codex")).toBe("");
+    expect(row("on")).toMatch(/aria-checked="true"[^>]*disabled=""/);
+    expect(row("on")).toContain("On since this thread started");
+    expect(row("off")).toBe("");
+    expect(row("codex")).toBe("");
   });
 
   test("the opt-in is saved on the thread it started, sent every turn, and off for the next thread", async () => {
@@ -141,22 +144,5 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     useStore.getState().setDraftRemoteControl(true);
     useStore.getState().newChat();
     expect(useStore.getState().draftRemoteControl).toBe(false);
-  });
-
-  test("the Codex pill says the daemon runs, never that Remote Control is on, and that threads are off", () => {
-    const [threads, running] = codexRemoteLines({ installed: true, status: "running", version: "0.163.0", checkedAt: 1 });
-    expect(threads).toContain("OpenBuild's Codex threads: Remote Control off");
-    expect(threads).toContain("reports it disabled");
-    expect(running).toBe("Codex daemon process: running (app-server 0.163.0). That's all this check reports: not whether the daemon's Remote Control is on or paired.");
-    expect(codexRemoteLines(undefined)[1]).toContain("Checking");
-    expect(codexRemoteLines({ error: "boom" })[1]).toBe("Couldn't check the Codex daemon: boom");
-    expect(codexRemoteLines({ installed: false, checkedAt: 1 })[1]).toContain("Codex isn't installed");
-  });
-
-  test("the Codex pill asks the device for its daemon, never a thread", async () => {
-    const urls: string[] = [];
-    globalThis.fetch = (async (url: any) => { urls.push(String(url)); return Response.json({ installed: true, status: "running", checkedAt: 1 }); }) as typeof fetch;
-    expect(await codexDaemon()).toMatchObject({ status: "running" });
-    expect(urls).toEqual(["/api/codex/status/remote-control"]);
   });
 }
