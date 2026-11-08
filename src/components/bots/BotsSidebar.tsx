@@ -1,7 +1,7 @@
 // OpenBots' sidebar: pinned bots and groups as big tiles, then every other conversation as a row
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
 // a rail of avatars instead of going away.
-import { Bell, BellDot, Blocks, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Trash, UsersRound, X } from "lucide-react";
+import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useShallow } from "zustand/react/shallow";
@@ -471,8 +471,8 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       <div className="bots-rail-foot">
         {!remote && <NewMenu onDialog={onDialog} rail />}
         {!remote && (
-          <IconButton label="Apps" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
-            <Blocks size={18} />
+          <IconButton label="Marketplace" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
+            <Store size={18} />
           </IconButton>
         )}
         <BotsToggle />
@@ -637,10 +637,10 @@ export function BotsSidebar() {
                 <Avatar src={avatar} name={profileName} size={26} />
                 <span className="bots-me-name">Settings</span>
               </button>
-              {/* The way into the apps sits beside the way out, as it does in the rail. */}
+              {/* The way into the marketplace sits beside the way out, as it does in the rail. */}
               {!remote && (
-                <IconButton label="Apps" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
-                  <Blocks size={19} />
+                <IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
+                  <Store size={19} />
                 </IconButton>
               )}
               <BotsToggle />

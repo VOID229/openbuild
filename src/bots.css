@@ -375,7 +375,7 @@
   }
 }
 
-/* Apps, in the footer beside the toggle, at the toggle's size. */
+/* Marketplace, in the footer beside the toggle, at the toggle's size. */
 .bots-apps-btn {
   width: 36px;
   height: 36px;
@@ -3150,7 +3150,7 @@ a.bots-btn-primary {
   }
 }
 
-/* Connect Apps: the catalog, an app's own page, and the card a bot posts to offer one. */
+/* Marketplace: the catalog, an app's own page, and the card a bot posts to offer one. */
 .apps-dialog {
   width: min(720px, calc(100vw - 24px));
   max-height: min(680px, calc(100dvh - 48px));

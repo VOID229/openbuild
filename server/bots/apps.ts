@@ -247,7 +247,7 @@ async function target(app: CatalogApp) {
   if (app.githubAuth) {
     // A fresh token each time (the app's last eight hours); a new one makes a new connection.
     const credential = await githubToken("mcp", { pasted: secrets.fields?.token });
-    if (!credential) throw new NeedsSignIn(`${app.name} isn't signed in to GitHub. Connect it again in Apps.`);
+    if (!credential) throw new NeedsSignIn(`${app.name} isn't signed in to GitHub. Connect it again in Marketplace.`);
     secrets = { ...secrets, fields: { ...secrets.fields, token: credential.token } };
     values = { ...values, readonly: values.access === "write" ? "false" : "true" };
   }
@@ -327,7 +327,7 @@ export function contextNote(): string {
     lines.push(
       `Connected:\n${on
         .map(({ app, s }) => {
-          if (s.status === "needs-auth") return `- ${app.name} (${app.id}): signed out. Ask the user to reconnect it in Apps.`;
+          if (s.status === "needs-auth") return `- ${app.name} (${app.id}): signed out. Ask the user to reconnect it in Marketplace.`;
           const names = (s.tools ?? []).map((t) => t.name);
           let list = "";
           for (const [i, name] of names.entries()) {
@@ -355,7 +355,7 @@ export function contextNote(): string {
     }
   } else lines.push("No apps are connected yet.");
   lines.push(
-    `Not connected: ${off.join(", ")}. If one would help, apps with action connect shows the user a card to connect it. Until they do, it isn't connected, so don't say it is. Users connect apps from Apps in the OpenBots sidebar too.`,
+    `Not connected: ${off.join(", ")}. If one would help, apps with action connect shows the user a card to connect it. Until they do, it isn't connected, so don't say it is. Users connect apps from Marketplace in the OpenBots sidebar too.`,
   );
   return lines.join("\n\n");
 }
@@ -367,8 +367,8 @@ function connectedApp(id: unknown): { app: CatalogApp; s: StoredApp } {
   if (!app) throw new svc.BotsError(`There's no app called ${key}. Your context lists them.`);
   const s = storedApps()[app.id];
   if (!s || s.status === "off" || s.status === "connecting") throw new svc.BotsError(`${app.name} isn't connected. Offer it to the user with apps (action connect).`);
-  if (s.status === "needs-auth") throw new svc.BotsError(`${app.name} is signed out. Ask the user to reconnect it in Apps.`);
-  if (s.status === "error" && !s.tools?.length) throw new svc.BotsError(`${app.name} couldn't be reached: ${s.error ?? "unknown error"}. The user can check it in Apps.`);
+  if (s.status === "needs-auth") throw new svc.BotsError(`${app.name} is signed out. Ask the user to reconnect it in Marketplace.`);
+  if (s.status === "error" && !s.tools?.length) throw new svc.BotsError(`${app.name} couldn't be reached: ${s.error ?? "unknown error"}. The user can check it in Marketplace.`);
   return { app, s };
 }
 
@@ -413,7 +413,7 @@ export async function useApp(p: Record<string, unknown>): Promise<ToolOutput> {
   if (!tool) throw new svc.BotsError("Say which tool.");
   // OpenBuild's read-only rule, enforced here whatever the token could do on GitHub.
   if (app.githubAuth && s.fields?.access !== "write" && !isReadTool(tool, s.tools?.find((t) => t.name === tool))) {
-    throw new svc.BotsError(`${app.name} is read-only in OpenBuild, so ${tool} wasn't run. The user can allow writing in Apps → ${app.name}.`, 403);
+    throw new svc.BotsError(`${app.name} is read-only in OpenBuild, so ${tool} wasn't run. The user can allow writing in Marketplace → ${app.name}.`, 403);
   }
   let args: unknown = p.arguments ?? p.args ?? {};
   if (typeof args === "string") {
@@ -429,7 +429,7 @@ export async function useApp(p: Record<string, unknown>): Promise<ToolOutput> {
   } catch (err) {
     if (err instanceof NeedsSignIn) {
       update(app.id, { status: "needs-auth", error: err.message });
-      throw new svc.BotsError(`${app.name} is signed out. Ask the user to reconnect it in Apps.`);
+      throw new svc.BotsError(`${app.name} is signed out. Ask the user to reconnect it in Marketplace.`);
     }
     throw new svc.BotsError(`${app.name}: ${message(err)}`, 502);
   }

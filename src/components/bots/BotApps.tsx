@@ -1,4 +1,4 @@
-// OpenBots' Connect Apps: a catalog of official MCP servers and skills to search and browse, a page
+// OpenBots' Marketplace: a catalog of official MCP servers and skills to search and browse, a page
 // for each app with whatever it takes to connect it, and the card a bot posts to offer one in a chat.
 import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -382,8 +382,8 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
   const extraPicked = extras.find((c) => c.id === filter);
 
   return (
-    <dialog {...modal} className="bots-dialog apps-dialog" aria-label="Connect Apps">
-      <DialogHead title="Connect Apps" onClose={onClose} />
+    <dialog {...modal} className="bots-dialog apps-dialog" aria-label="Marketplace">
+      <DialogHead title="Marketplace" onClose={onClose} />
       {page ? (
         <AppPage key={page.id} app={page} onBack={() => setOpen(undefined)} />
       ) : (
