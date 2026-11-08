@@ -3435,6 +3435,11 @@ a.bots-btn-primary {
   font-size: 12.5px;
 }
 
+.app-copy-status {
+  color: var(--ok);
+  font-size: 12px;
+}
+
 .app-page-actions {
   display: flex;
   flex-wrap: wrap;
