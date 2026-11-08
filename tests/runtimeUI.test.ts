@@ -120,6 +120,58 @@ test("a runtime update reports only on its own pill: spinner while running, a fa
   reset();
 });
 
+test("runtime settings list user-added runtimes under Custom, with edit and delete", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({ runtimes: {} })) as unknown as typeof fetch;
+  const { RuntimesSection } = await import("../src/components/RuntimeSettings");
+  try {
+    reset();
+    expect(markup(createElement(RuntimesSection))).toContain("None yet.");
+    reset({ runtimeAccounts: [
+      { id: "codex2", name: "codex2", runtime: "codex", configDir: "~/.codex2" },
+      { id: "work", name: "claude2", runtime: "claude", configDir: "/home/me/.claude-2", binPath: "/opt/claude" },
+      { id: "elsewhere", name: "cursor2", runtime: "cursor", configDir: "~/.cursor2", deviceId: "cachyos" },
+    ] });
+    const html = markup(createElement(RuntimesSection));
+    const custom = html.slice(html.indexOf("<h3>Custom</h3>"));
+    expect(custom).toContain("CODEX_HOME=~/.codex2");
+    expect(custom).toContain("CLAUDE_CONFIG_DIR=~/.claude-2 · /opt/claude");
+    expect(custom).toContain('aria-label="Edit codex2"');
+    expect(custom).toContain('aria-label="Delete codex2"');
+    expect(custom).toContain('aria-label="Edit claude2"');
+    // Another device's accounts are listed only when that device is picked.
+    expect(custom).not.toContain("cursor2");
+    expect(custom).not.toContain("None yet.");
+  } finally { globalThis.fetch = originalFetch; reset(); }
+});
+
+test("editing a custom runtime checks it against the others but not itself", async () => {
+  const { accountProblem, accountOnDevice } = await import("../src/components/AddRuntime");
+  const codex2 = { id: "codex2", name: "codex2", runtime: "codex" as const, configDir: "~/.codex2" };
+  const codex3 = { id: "codex3", name: "codex3", runtime: "codex" as const, configDir: "~/.codex3" };
+  const remote = { ...codex3, id: "remote", deviceId: "cachyos" };
+  const saved = [codex2, codex3, remote];
+  // Saving an entry unchanged, or repointing it at a new folder, is fine.
+  expect(accountProblem(codex2, saved, undefined)).toBe("");
+  expect(accountProblem({ ...codex2, configDir: "~/.codex-personal" }, saved, undefined)).toBe("");
+  expect(accountProblem({ ...codex2, name: "Personal" }, saved, undefined)).toBe("");
+  // Clashing with another entry on the same device is not.
+  expect(accountProblem({ ...codex2, name: "CODEX3" }, saved, undefined)).toBe("This label is already in use.");
+  expect(accountProblem({ ...codex2, name: "codex" }, saved, undefined)).toBe("This label is already in use.");
+  expect(accountProblem({ ...codex2, configDir: "~/.codex3" }, saved, undefined)).toBe("This directory is already listed.");
+  expect(accountProblem({ ...codex2, configDir: "relative" }, saved, undefined)).toMatch(/absolute directory/);
+  expect(accountProblem({ ...codex2, runtime: "claude", name: "claude2" }, saved, undefined, ["claude2"])).toBe("This label is already in use.");
+  expect(accountProblem({ ...codex2, runtime: "claude", autoCompactWindow: 5 }, saved, undefined)).toMatch(/Auto-compact/);
+  // The same label on another device doesn't clash.
+  expect(accountProblem({ ...remote, id: "new", configDir: "~/.other" }, saved, "cachyos")).toBe("This label is already in use.");
+  expect(accountProblem({ ...codex3, id: "new", name: "codex3", configDir: "~/.other" }, [remote], undefined)).toBe("");
+  expect(accountOnDevice(codex2, undefined)).toBe(true);
+  expect(accountOnDevice({ ...codex2, deviceId: "" }, undefined)).toBe(true);
+  expect(accountOnDevice(remote, undefined)).toBe(false);
+  expect(accountOnDevice(remote, "cachyos")).toBe(true);
+  expect(accountOnDevice(codex2, "cachyos")).toBe(false);
+});
+
 test("files and terminals keep the folder's device instead of inheriting the scratch-device preference", async () => {
   const { terminalFolder, refreshTerminal, useTerminal, useSideTerminal } = await import("../src/lib/terminal");
   const { usePanel } = await import("../src/lib/panel");

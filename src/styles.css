@@ -9800,6 +9800,7 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: 8px; }
 }
 
 /* Settings → Runtimes → Add runtime */
+.rt-custom { margin-top: 22px; }
 .rt-add { margin-top: 10px; }
 .ar-root { z-index: 110; }
 .ar { width: min(560px, 100%); height: auto; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; padding: 0; }

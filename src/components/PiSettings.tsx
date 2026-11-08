@@ -52,7 +52,7 @@ import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primi
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
-function SubHeading({ children, action }: { children: ReactNode; action?: ReactNode }) {
+export function SubHeading({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
     <div className="pi-subhead">
       <h3>{children}</h3>
