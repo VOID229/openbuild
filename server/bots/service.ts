@@ -37,6 +37,7 @@ export interface Wake {
 type Hooks = {
   wake: (botId: string, wake: Wake) => void;
   stop: (botId: string) => void;
+  pendingAssignments?: (botId: string) => { conversationId: string; messageIds: string[] }[];
 };
 /** What Pi still needs before a bot can run on it, if anything. `fresh` asks Pi again rather than trusting a cached answer. */
 type PiCheck = (fresh: boolean) => Promise<PiSetup | undefined>;
@@ -48,6 +49,7 @@ const mem = globalThis as {
   openbotsTypingSince?: Map<string, number>;
   openbotsDrafts?: Draft[];
   openbotsStatus?: Map<string, BotStatus>;
+  openbotsActivityTimes?: Map<string, { turnStartedAt: number | null; lastActivityAt: number }>;
   openbotsChains?: Map<string, number>;
   openbotsChainWarned?: Set<string>;
   openbotsWaiters?: Waiter[];
@@ -192,7 +194,33 @@ export function snapshot(): BotsSnapshot {
 export function getStatus(botId: string): BotStatus | undefined {
   return status.get(botId);
 }
+const activityTimes = (mem.openbotsActivityTimes ??= new Map<string, { turnStartedAt: number | null; lastActivityAt: number }>());
+
+/** Primary-only metadata projection. Never includes prompts, activity text or credentials. */
+export function botWorkStatus(requester: string) {
+  if (!db.getBot(requester)?.primary) throw new BotsError("Only the primary bot can read all bots' status.", 403);
+  return { bots: db.listBots().map((bot) => {
+    const current = getStatus(bot.id);
+    const times = activityTimes.get(bot.id);
+    return {
+      id: bot.id, name: bot.name,
+      state: current?.state === "working" ? "working" : "idle",
+      runnerState: current?.state ?? "idle",
+      turnStartedAt: current?.state === "working" ? times?.turnStartedAt ?? null : null,
+      conversationId: current?.state === "working" ? current.conversationId ?? null : null,
+      lastActivityAt: times?.lastActivityAt ?? null,
+      pendingAssignments: hooks.pendingAssignments?.(bot.id) ?? [],
+    };
+  }), pendingMeaning: "Exact assigned user-message deliveries still queued or in the current turn; delivery is not proof of an unanswered request.", handoffs: "not_tracked" };
+}
+
 export function setStatus(botId: string, next: BotStatus) {
+  const previous = getStatus(botId);
+  const now = Date.now();
+  activityTimes.set(botId, {
+    turnStartedAt: next.state === "working" ? (previous?.state === "working" ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
+    lastActivityAt: now,
+  });
   if (next.state === "idle") status.delete(botId);
   else status.set(botId, next);
   emit({ t: "status", botId, status: next });
