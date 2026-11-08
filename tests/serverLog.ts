@@ -4,10 +4,25 @@
 const MAX_LINES = 60;
 const MAX_LINE = 300;
 
+const KEYS = "api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|token|secret|password|passwd|authorization|cookie|session";
+/** A header's whole value is one secret, however many parts it has: Cookie: a=1; session=2. */
+const HEADER = /\b((?:set-)?cookie|(?:proxy-)?authorization)(\\?["']?\s*[:=]\s*)[^\n]*/gi;
+const SEP = String.raw`\\?["']?\s*[:=]\s*`;
+// A quoted value is taken whole, spaces and escaped quotes included. A line that ends inside one
+// (a long line cut short) has the rest of it taken, since the closing quote may never have arrived.
+const QUOTED = [
+  new RegExp(String.raw`\b((?:${KEYS})${SEP})"(?:\\.|[^"\\])*(?:"|$)`, "gi"),
+  new RegExp(String.raw`\b((?:${KEYS})${SEP})'(?:\\.|[^'\\])*(?:'|$)`, "gi"),
+  // The same inside a JSON string, where the quotes themselves are escaped.
+  new RegExp(String.raw`\b((?:${KEYS})${SEP})\\"(?:(?!\\").)*(?:\\"|$)`, "gi"),
+];
+
 export function redactLine(text: string): string {
-  return text
+  let out = text.replace(HEADER, "$1$2[redacted]");
+  out = out.replace(QUOTED[0]!, '$1"[redacted]"').replace(QUOTED[1]!, "$1'[redacted]'").replace(QUOTED[2]!, '$1\\"[redacted]\\"');
+  return out
     .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, "$1 [redacted]")
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization|cookie)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
+    .replace(new RegExp(String.raw`\b((?:${KEYS})${SEP})[^\s"',}]+`, "gi"), "$1[redacted]")
     .replace(/\b(?:sk|pk|rk|xai|gsk|ghp|gho|ghs|github_pat)[-_][\w-]{8,}/g, "[redacted]")
     .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]")
     .replace(/\b[0-9a-f]{32,}\b/gi, "[redacted]");
