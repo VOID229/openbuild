@@ -596,8 +596,7 @@ test("Codex and OpenCode listings read histories only for sessions that need imp
         throw new Error(method);
       }
     } }));
-    mock.module("./server/opencode-agent/connection.ts", () => ({ opencodeBin: () => "/fake/opencode", connect: async () => ({
-      async close() {},
+    mock.module("./server/opencode-agent/connection.ts", () => ({ opencodeBin: () => "/fake/opencode", withConnection: async (use) => use({
       async request(path) {
         calls.push(path);
         if (path.startsWith("/api/session?")) return { data: [{ id: "native-opencode", location: { directory: "/tmp" }, time: { updated: 1 } }, { id: "child", parentID: "native-opencode", location: { directory: "/tmp" }, time: { updated: 1 } }] };

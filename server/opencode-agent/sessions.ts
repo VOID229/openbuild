@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
-import { workerConnection, locationQuery, type Connection, type NativeEvent } from "./connection";
+import { workerConnection, locationQuery, withConnection, type Connection, type NativeEvent } from "./connection";
 import { toolEvent, type NativeTool } from "./tools";
 interface Saved { id: string; cwd: string; turns: number; pending?: boolean }
 const key = (id: string) => `opencode-session:${id}`;
@@ -96,8 +96,11 @@ async function handleForm(c: Connection, l: Live, form: any, signal: AbortSignal
   await c.request(path + "/reply", "POST", { answer });
 }
 /** A one-off answer in a session of its own, which is deleted afterwards. */
-export async function complete(r: { model: string; effort?: Effort; system: string; prompt: string; images?: PiChatRequest["images"]; cwd: string }, signal: AbortSignal): Promise<string> {
-  const c = await workerConnection();
+export function complete(r: { model: string; effort?: Effort; system: string; prompt: string; images?: PiChatRequest["images"]; cwd: string }, signal: AbortSignal): Promise<string> {
+  // The web server's shared server, not a turn worker's: it closes once idle instead of living on.
+  return withConnection((c) => answerIn(c, r, signal));
+}
+async function answerIn(c: Connection, r: Parameters<typeof complete>[0], signal: AbortSignal): Promise<string> {
   const model = await selectedModel(c, { model: r.model, effort: r.effort ?? "off", cwd: r.cwd } as PiChatRequest);
   const created = await c.request("/api/session", "POST", { location: { directory: resolve(r.cwd) }, model }, signal);
   const id: string | undefined = created.data?.id;

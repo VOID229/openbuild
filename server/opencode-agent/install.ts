@@ -1,20 +1,19 @@
 import { homedir } from "node:os";
 import { EFFORTS, type Effort, type ModelInfo } from "../../shared/types";
-import { connect, locationQuery, opencodeBin } from "./connection";
+import { locationQuery, opencodeBin, retireConnection, withConnection } from "./connection";
 export { opencodeBin } from "./connection";
 export const OPENCODE_INSTALL = "npm install -g @opencode/cli";
 export interface OpenCodeStatus { installed: boolean; bin?: string; version?: string; provider?: string; connected?: string[]; install: string; error?: string }
 export async function status(): Promise<OpenCodeStatus> {
   const bin = opencodeBin();
   if (!bin && !process.env.OPENCODE_SERVER_URL) return { installed: false, install: OPENCODE_INSTALL };
-  let c;
   try {
-    c = await connect();
-    const models = await c.request(`/api/model?${locationQuery(homedir())}`);
-    if (!Array.isArray(models?.data)) throw new Error("Invalid OpenCode 2 model list");
-    return { installed: true, bin, version: c.version, provider: "opencode", connected: [...new Set<string>(models.data.filter((m: any) => m.enabled).map((m: any) => m.providerID))], install: OPENCODE_INSTALL };
+    return await withConnection(async (c) => {
+      const models = await c.request(`/api/model?${locationQuery(homedir())}`);
+      if (!Array.isArray(models?.data)) throw new Error("Invalid OpenCode 2 model list");
+      return { installed: true, bin, version: c.version, provider: "opencode", connected: [...new Set<string>(models.data.filter((m: any) => m.enabled).map((m: any) => m.providerID))], install: OPENCODE_INSTALL };
+    });
   } catch (e) { return { installed: !!bin, bin, install: OPENCODE_INSTALL, error: String(e) }; }
-  finally { await c?.close(); }
 }
 export const modelId = (m: any) => `opencode/${m.providerID}/${m.id}`;
 export function modelRow(m: any): ModelInfo {
@@ -25,17 +24,17 @@ export interface OpenCodeModels { models: ModelInfo[]; defaultModel?: string; ch
 let cache: { at: number; value: Promise<OpenCodeModels> } | undefined;
 export function listModels(fresh = false): Promise<OpenCodeModels> {
   if (!fresh && cache && Date.now() - cache.at < 60_000) return cache.value;
-  const value = (async () => {
-    const c = await connect();
-    try {
-      const q = locationQuery(homedir());
-      const [r, d] = await Promise.all([c.request(`/api/model?${q}`), c.request(`/api/model/default?${q}`)]);
-      if (!Array.isArray(r?.data)) throw new Error("Invalid OpenCode 2 model list");
-      return { models: r.data.filter((m: any) => m.enabled).map(modelRow), defaultModel: d?.data ? modelId(d.data) : undefined, checkedAt: Date.now() };
-    } finally { await c.close(); }
-  })();
+  // A fresh list comes from a fresh server: a running one may predate a sign-in.
+  if (fresh) retireConnection();
+  const value = withConnection(async (c) => {
+    const q = locationQuery(homedir());
+    const [r, d] = await Promise.all([c.request(`/api/model?${q}`), c.request(`/api/model/default?${q}`)]);
+    if (!Array.isArray(r?.data)) throw new Error("Invalid OpenCode 2 model list");
+    return { models: r.data.filter((m: any) => m.enabled).map(modelRow), defaultModel: d?.data ? modelId(d.data) : undefined, checkedAt: Date.now() };
+  });
   cache = { at: Date.now(), value };
   value.catch(() => { if (cache?.value === value) cache = undefined; });
   return value;
 }
-export function forgetModels() { cache = undefined; }
+/** After an update or sign-in: drop the list and the server that produced it (it may be the old binary). */
+export function forgetModels() { cache = undefined; retireConnection(); }

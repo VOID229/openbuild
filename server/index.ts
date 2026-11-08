@@ -35,6 +35,7 @@ import * as devices from "./devices";
 import * as pairing from "./pairClient";
 import * as folderPicker from "./folderPicker";
 import * as sessionImport from "./sessionImport";
+import { reapOrphans as reapOpencodeOrphans } from "./opencode-agent/connection";
 import { computerRoutes } from "./computers/api";
 import { botRoutes } from "./bots/routes";
 import { workspaceRoutes } from "./bots/workspace";
@@ -673,6 +674,9 @@ void durable.recover().catch((err) => console.error("[durable] Startup recovery 
 void piWorker.recover().catch((err) => console.error("[pi-worker] Startup reconnect failed:", err));
 // Behind the open port: a tab refreshed during a restart waits for the server instead of being refused.
 void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Warm-up failed:", (err as Error).message));
+// OpenCode servers a previous run started and couldn't stop (SIGKILL, out of memory): only ours, by token.
+const reaped = reapOpencodeOrphans();
+if (reaped.length) console.warn(`[opencode] Stopped ${reaped.length} orphaned server(s) from an earlier run`);
 // Native runtimes' sessions show up as threads by themselves, in the background (sessionImport.ts).
 sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));
