@@ -12,9 +12,17 @@ export async function ask(question: string): Promise<string> {
     process.exit(130);
   };
   rl.once("SIGINT", cancel);
+  let onClose: () => void;
   try {
-    return (await rl.question(question)).trim();
+    // EOF closes readline without settling question() on some supported runtimes.
+    // It must not look like Enter accepting a confirmation's default.
+    const closed = new Promise<never>((_, reject) => {
+      onClose = () => reject(new Error("Input closed before an answer was entered."));
+      rl.once("close", onClose);
+    });
+    return (await Promise.race([rl.question(question), closed])).trim();
   } finally {
+    rl.removeListener("close", onClose!);
     rl.removeListener("SIGINT", cancel);
     rl.close();
     process.stdin.pause();
