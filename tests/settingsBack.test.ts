@@ -41,7 +41,9 @@ const open = async (section: string, width = 1000, height = 700) => {
   const page = await Page.open(chrome!.ws, server!.url.href, width, height, "!!window.store");
   await page.eval(`store.getState().openSettings(${JSON.stringify(section)})`);
   await page.until("!!document.querySelector('.modal-root[data-state=\"open\"] .settings-content .md-h1')");
-  await Bun.sleep(300);
+  // Until the dialog has finished sliding in, so what's measured is where it comes to rest.
+  // (Spinners turn forever, so only the animations that end.)
+  await page.until("document.getAnimations().every((a) => a.playState !== 'running' || a.effect?.getComputedTiming().endTime === Infinity)");
   await page.settle();
   return page;
 };
@@ -188,3 +190,87 @@ describe.skipIf(!browser)("the back arrow on pages inside Settings", () => {
     expect(await box(page, ".settings-nav")).toEqual(tabs);
   }, 60_000);
 });
+
+/** Scrolls the page inside the section far down, then reports how far it went. */
+const scrollToEnd = (page: Page) =>
+  page.eval<number>("(() => { const el = document.querySelector('.settings-content'); el.scrollTop = el.scrollHeight; return el.scrollTop; })()");
+
+/** Where the section's page is scrolled to, and how far it could scroll at most. */
+const scroll = (page: Page) =>
+  page.eval<{ top: number; max: number }>("(() => { const el = document.querySelector('.settings-content'); return { top: el.scrollTop, max: el.scrollHeight - el.clientHeight }; })()");
+
+/** Back from a page scrolled far down: the section opens at its top, with focus still in the dialog. */
+async function backOpensAtTop(page: Page, back: () => Promise<unknown>, heading: string) {
+  await page.until("!!document.querySelector('.modal-back')");
+  await page.settle();
+  // All the way to its end, as far as it goes.
+  const end = await scrollToEnd(page);
+  expect(end).toBeGreaterThan(40);
+  expect(end).toBe((await scroll(page)).max);
+  await back();
+  await page.until("!document.querySelector('.modal-back')");
+  await page.settle();
+  expect(await page.eval<string>("document.querySelector('.settings-content').textContent")).toContain(heading);
+  const { top, max } = await scroll(page);
+  // The section is taller than the dialog, so it could have kept the page's offset.
+  expect(max).toBeGreaterThan(0);
+  expect(top).toBe(0);
+  expect(await page.eval<boolean>("document.querySelector('.modal').contains(document.activeElement)")).toBe(true);
+}
+
+for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 640]] as const) {
+  describe.skipIf(!browser)(`going back on a ${device} opens the section at its top`, () => {
+    test("from a bot's page, with the arrow", async () => {
+      const page = await open("bots", width, height);
+      await press(page, "Edit");
+      await backOpensAtTop(page, () => page.click(".modal-back"), "Your bots");
+    }, 60_000);
+
+    test("from a group's page, with Enter on the arrow", async () => {
+      const page = await open("bots", width, height);
+      await page.eval(`(() => { [...document.querySelectorAll('.bots-set-row-main')].find((b) => b.textContent.includes('Crew')).click(); return true; })()`);
+      await backOpensAtTop(page, async () => {
+        await page.eval("document.querySelector('.modal-back').focus()");
+        await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" });
+        await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
+      }, "Groups");
+    }, 60_000);
+
+    test("from a Pi file's page, once unsaved changes are discarded", async () => {
+      // Short enough that the editor scrolls well past its top.
+      const page = await open("pi", width, 300);
+      await page.until("!!document.querySelector('[aria-label=\"Edit release\"]')");
+      await press(page, "Edit release");
+      await page.until("!!document.querySelector('.pi-code')");
+      await page.eval("document.querySelector('.pi-code').focus()");
+      await page.send("Input.insertText", { text: "edited " });
+      await page.until("!!document.querySelector('.pi-editor-head .badge')");
+      await page.eval("(window.asked = 0, window.confirm = () => (window.asked++, false), true)");
+      // Keeping the changes keeps the page where it was scrolled to.
+      const kept = await scrollToEnd(page);
+      await page.click(".modal-back");
+      expect(await page.eval<number>("window.asked")).toBe(1);
+      expect((await scroll(page)).top).toBe(kept);
+      await page.eval("(window.confirm = () => (window.asked++, true), true)");
+      await backOpensAtTop(page, () => page.click(".modal-back"), "Pi agent");
+      expect(await page.eval<number>("window.asked")).toBe(2);
+    }, 60_000);
+
+    test("the arrow and close stay pinned through it, and Esc still closes Settings", async () => {
+      const page = await open("bots", width, height);
+      const close = await box(page, ".modal-close");
+      await press(page, "Edit");
+      await backOpensAtTop(page, () => page.click(".modal-back"), "Your bots");
+      expect(await box(page, ".modal-close")).toEqual(close);
+      // And into a page again: it starts at its top as well, arrow in place.
+      await press(page, "Edit");
+      await page.until("!!document.querySelector('.modal-back')");
+      await page.settle();
+      expect((await scroll(page)).top).toBe(0);
+      await staysPinned(page);
+      await page.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await page.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await page.until("store.getState().settingsOpen === false");
+    }, 60_000);
+  });
+}
