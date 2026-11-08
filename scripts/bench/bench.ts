@@ -52,6 +52,8 @@ const toTarget = (r: { id: string; b: number; data: string }): Target => {
 const at = (q: number) => toTarget(open[Math.min(open.length - 1, Math.floor(q * (open.length - 1)))]!);
 const LANDING = at(0.5);
 const SWITCHES = [at(0.3), at(0.6), at(0.9), at(0.97), at(1), at(0.45)];
+/** Others, opened the way a hand does: pointed at for a moment, then clicked. */
+const HOVERED = [at(0.33), at(0.63), at(0.88), at(0.95), at(0.99), at(0.48)].filter((t) => t.id !== LANDING.id && !SWITCHES.some((s) => s.id === t.id));
 db.close();
 const bots = new Database(join(golden, "data/bots/bots.sqlite"), { readonly: true });
 const botNames = new Map(bots.query<{ id: string; data: string }, []>("SELECT id, data FROM bots").all().map((b) => [b.id, JSON.parse(b.data).name as string]));
@@ -163,10 +165,17 @@ try {
             await Bun.sleep(400);
           }
         }
+        // First visits again, to threads not opened yet, pointed at for a quarter second before the click.
+        const hovered: Record<string, number>[] = [];
+        for (const target of HOVERED) {
+          const r = await t.interact(() => t.click(rowFor(target.id)), threadShown(target), 30_000, async () => { await t.hover(rowFor(target.id)); await Bun.sleep(250); });
+          hovered.push({ ...r, kb: Math.round(target.bytes / 1024), messages: target.messages });
+          await Bun.sleep(400);
+        }
         results.switch = {
-          first: summary(passes.first.map((r) => r.ms!)), again: summary(passes.again.map((r) => r.ms!)),
+          first: summary(passes.first.map((r) => r.ms!)), again: summary(passes.again.map((r) => r.ms!)), firstAfterHover: summary(hovered.map((r) => r.ms!)),
           blockedFirst: summary(passes.first.map((r) => r.blocked!)), blockedAgain: summary(passes.again.map((r) => r.blocked!)),
-          detail: passes,
+          detail: { ...passes, hovered },
         };
         console.log("switch", JSON.stringify(results.switch));
       }

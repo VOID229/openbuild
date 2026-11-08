@@ -178,7 +178,9 @@ export class Tab {
    * Time an interaction: `act` runs (a click, a key), then `ready` is checked every frame. Returns
    * ms from just before the input to the first frame where `ready` held, plus long tasks meanwhile.
    */
-  async interact(act: () => Promise<unknown>, ready: string, timeout = 30_000): Promise<{ ms: number; blocked: number }> {
+  async interact(act: () => Promise<unknown>, ready: string, timeout = 30_000, before?: () => Promise<unknown>): Promise<{ ms: number; blocked: number }> {
+    // Whatever leads up to the input (pointing at it first) happens before the clock starts.
+    await before?.();
     await this.eval(`window.__t0 = performance.now(); window.__bench.longtasks.length = 0; window.__done = undefined;
       (() => { const tick = () => { let ok = false; try { ok = !!(0, eval)(${JSON.stringify(ready)}); } catch {} if (ok) window.__done = performance.now(); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); })(); true`);
     await act();
@@ -187,6 +189,12 @@ export class Tab {
       "({ ms: window.__done - window.__t0, blocked: window.__bench.longtasks.filter(([s]) => s >= window.__t0 - 1).reduce((a, [, d]) => a + Math.max(0, d - 50), 0) })",
     );
     return { ms: Math.round(ms), blocked: Math.round(blocked) };
+  }
+  /** The pointer over the middle of `selector`, as a hand moving there. */
+  async hover(selector: string) {
+    const box = await this.eval<[number, number] | null>(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (!el) return null; el.scrollIntoView({ block: "center", behavior: "instant" }); return new Promise((done) => requestAnimationFrame(() => { const r = el.getBoundingClientRect(); done([r.x + r.width / 2, r.y + r.height / 2]); })); })()`);
+    if (!box) throw new Error(`nothing matches ${selector}`);
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: box[0], y: box[1] });
   }
   click(selector: string) {
     return this.clickWhere(`document.querySelector(${JSON.stringify(selector)})`);
