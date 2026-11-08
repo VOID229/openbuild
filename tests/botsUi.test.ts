@@ -194,12 +194,10 @@ test("bots paint from the cache, then the server's snapshot replaces it and is c
   expect(stdout.trim()).toBe("ok");
 });
 
-test("composer clears only after ack and routine/memory actions do not fabricate bot events", async () => {
+// The composer clearing at once, and a failed send coming back, are tested in a real Chrome (botComposerSend.test.ts).
+test("routine/memory actions do not fabricate bot events", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   const details = await Bun.file("src/components/bots/BotDetails.tsx").text();
-  expect(chat).toContain("const m = await useBots.getState().post");
-  expect(chat.indexOf("if (!m) return;")).toBeLessThan(chat.indexOf('setText((current) =>'));
-  expect(chat).toContain("sendingRef.current ||");
   // The overflow menu is gone, so the "ask it to remember" shortcut went with it.
   expect(chat).not.toContain("Please remember this:");
   expect(chat).not.toContain('author: directBot.id, text: "", event:');
