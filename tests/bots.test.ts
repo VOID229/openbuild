@@ -1629,3 +1629,23 @@ test("reply diagnostics preserve the reason while redacting credentials and boun
   for (const secret of ['abcdefghijklmnop', 'sk-live-abcdef1234567890', 'privatevalue']) expect(shown).not.toContain(secret);
   expect(shownReplyError('x'.repeat(5000))!.length).toBe(4000);
 });
+
+
+test("reply diagnostics redact spaced credential labels and Google API keys", async () => {
+  const { shownReplyError, redactSecrets, eventDetail } = await import("../shared/bots");
+  const googleKey = "AIza" + "A".repeat(34) + "-";
+  for (const detail of [
+    "Invalid API key: private-provider-key",
+    'Invalid API key: "private-provider-key"',
+    "access token=private-provider-key",
+    "refresh token: private-provider-key",
+    `Google rejected ${googleKey}`,
+  ]) {
+    for (const result of [redactSecrets(detail), shownReplyError(detail, true), shownReplyError(detail), eventDetail({ kind: "error", text: "Couldn't reply", detail })]) {
+      expect(result).toContain("[redacted]");
+      expect(result).not.toContain("private-provider-key");
+      expect(result).not.toContain(googleKey);
+    }
+  }
+  expect(shownReplyError("Invalid API key: private-provider-key", true)).toBe("Invalid API key: [redacted]");
+});

@@ -525,7 +525,8 @@ export const modelUnavailable = (model: string) => `${model} isn't available to 
 export function redactSecrets(text: string): string {
   return text
     .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, "$1 [redacted]")
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
+    .replace(/((?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
+    .replace(/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g, "[redacted]")
     .replace(/\b(?:sk|pk|rk|xai|gsk|ghp|gho|ghs|github_pat)[-_][\w-]{8,}/g, "[redacted]")
     .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
 }
