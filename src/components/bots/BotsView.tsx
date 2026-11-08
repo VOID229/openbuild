@@ -1,7 +1,7 @@
 // OpenBots' main pane: the open conversation, and its details panel beside it.
 import { Plus } from "lucide-react";
 import { shownReplyError } from "../../../shared/bots";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
 import { useStore } from "../../lib/store";
@@ -52,9 +52,12 @@ export function BotsView() {
   const mobile = useMediaQuery("(max-width: 768px)");
   const slow = useSlow(!connected) && !trouble;
   useEffect(() => useBots.getState().ensureSeeded(), []);
-  // On a phone the details cover the chat, so they start closed.
+  // On a phone the details cover the chat, so they start closed. Only on reaching a phone's width: coming
+  // back from a thread opened from them (App's Activity runs this again) finds them as they were.
+  const wasMobile = useRef<boolean>(undefined);
   useEffect(() => {
-    if (mobile) useBots.getState().setDetailsOpen(false);
+    if (mobile && wasMobile.current !== mobile) useBots.getState().setDetailsOpen(false);
+    wasMobile.current = mobile;
   }, [mobile]);
   // With nothing to show, the way back to the list would be missing with the chat it's in.
   const nothingOpen = mobile && loaded && !conversation;

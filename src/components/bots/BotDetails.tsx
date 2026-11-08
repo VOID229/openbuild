@@ -1,11 +1,14 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
-// model, computer and OpenBuild permissions under an Advanced tab; a group's members and goal; who's in a side chat.
+// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal and working threads;
+// who's in a side chat.
 import { ChevronLeft, Minus, Pencil, Plus, Trash, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation } from "../../lib/bots/types";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
+import { useStore } from "../../lib/store";
+import type { Chat } from "../../lib/types";
 import { cx, useMediaQuery, usePresence } from "../../lib/ui";
 import { IconButton, Toggle } from "../primitives";
 import { BotAdvanced } from "./BotAdvanced";
@@ -174,6 +177,51 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   );
 }
 
+/** A thread whose latest reply is still coming. */
+const isWorking = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant")?.status === "streaming";
+
+/**
+ * The coding threads this group's bots started from it that are working now, with the bot that
+ * started each. Threads started before chats recorded it are found by the group's "Started a thread"
+ * activity, while it's still loaded.
+ */
+function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string }[] {
+  const chats = useStore((s) => s.chats);
+  return useMemo(() => {
+    const started = new Map<string, string>();
+    for (const m of conversation.messages) if (m.event?.kind === "thread" && m.event.text === "Started a thread" && m.event.threadId) started.set(m.event.threadId, m.author);
+    return chats.flatMap((chat) => {
+      const bot = chat.startedBy ? (chat.startedBy.conversation === conversation.id ? chat.startedBy.bot : undefined) : started.get(chat.id);
+      return bot && isWorking(chat) ? [{ chat, bot }] : [];
+    });
+  }, [chats, conversation.id, conversation.messages]);
+}
+
+/** Opens like a thread from an activity link: in place of the chat, with Back returning to this tab. */
+function Threads({ threads, bots }: { threads: { chat: Chat; bot: string }[]; bots: Bot[] }) {
+  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads working right now. When a bot here starts one, it shows up until it finishes.</p></div>;
+  return (
+    <div className="bots-pane">
+      <ul className="bots-cards">
+        {threads.map(({ chat, bot: id }) => {
+          const bot = bots.find((b) => b.id === id);
+          return (
+            <li key={chat.id} className="bots-card-row bots-member">
+              <button type="button" className="bots-member-main" onClick={() => useStore.getState().openThreadInBots(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
+                {bot && <BotAvatar look={bot.look} size={28} mood="thinking" />}
+                <span className="bots-card-text">
+                  <span className="bots-routine-title">{chat.title}</span>
+                  <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName].filter(Boolean).join(" · ")}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function LookEditor({ bot, onDone }: { bot: Bot; onDone: () => void }) {
   const before = useRef<BotLook>(bot.look);
   const ref = useRef<HTMLDivElement>(null);
@@ -219,10 +267,17 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
+  const threads = useGroupThreads(conversation);
   const st = useBots.getState();
-  useEffect(() => setTab(conversation.kind === "direct" ? "instructions" : "members"), [conversation.id, conversation.kind]);
+  // Only when the conversation changes: effects run again when OpenBots comes back from a thread
+  // opened over it (App's Activity), and that should find the tab it was left on.
+  const [tabFor, setTabFor] = useState(conversation.id);
+  if (tabFor !== conversation.id) {
+    setTabFor(conversation.id);
+    setTab(conversation.kind === "direct" ? "instructions" : "members");
+  }
   useEffect(() => setEditingLook(false), [conversation.id]);
   if (!mounted) return null;
   const name = conversationName(conversation, bots);
@@ -303,11 +358,13 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["members", `Members ${conversation.botIds.length}`],
                   ["goal", "Goal"],
+                  ["threads", `Threads${threads.length ? ` ${threads.length}` : ""}`],
                 ]}
                 value={tab}
                 onChange={setTab}
               />
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
+              {tab === "threads" && <Threads threads={threads} bots={bots} />}
               {tab === "goal" && (
                 <Instructions
                   value={conversation.instructions ?? ""}

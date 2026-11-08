@@ -102,6 +102,21 @@ test("a bot has no access until the user gives it some, and can't give itself an
   expect(svc.fullBot(bot.id)!.threads?.enabled).toBe(false);
 });
 
+test("a thread started while a bot works in a group is recorded as that group's", async () => {
+  const { bot: other } = svc.createBot({ name: "Sorrel" });
+  const group = svc.createConversation({ kind: "group", name: "Crew", botIds: [bot.id, other.id] });
+  const { setFocus } = await import("../server/bots/agent");
+  setFocus(bot.id, group.id);
+  try {
+    await call("start", { project: project.name, prompt: "Tidy up" });
+  } finally {
+    setFocus(bot.id, undefined);
+  }
+  const chat = storage.getChat(admitted[0].threadId) as any;
+  expect(chat.startedBy).toEqual({ bot: bot.id, conversation: group.id });
+  expect(svc.conversationView(group.id)!.messages.findLast((m) => m.event?.text === "Started a thread")?.event?.threadId).toBe(chat.id);
+});
+
 test("a thread starts with the harness, model, effort, speed and branch asked for", async () => {
   const started = await call("start", { project: project.name, prompt: "Fix it", model: "acme/one", effort: "low", speed: "fast", title: "Fix it", branch_name: "fix-it" });
   expect(started).toMatchObject({ harness: "pi", model: "acme/one", effort: "low", speed: "fast", branch: "openbuild/fix-it" });
@@ -112,6 +127,8 @@ test("a thread starts with the harness, model, effort, speed and branch asked fo
   expect(chat.messages.map((m: any) => m.role)).toEqual(["user", "assistant"]);
   expect(chat.messages[0].sentBy).toBe("Juniper");
   expect(chat.messages[0].sentByBot).toBe(bot.id);
+  // Which bot started it and from where, for that conversation's Threads tab.
+  expect(chat.startedBy).toEqual({ bot: bot.id, conversation: svc.directId(bot.id) });
   const activity = svc.conversationView(svc.directId(bot.id)!)!.messages.findLast((m) => m.event?.text === "Started a thread");
   expect(activity?.event).toMatchObject({ kind: "thread", threadId: chat.id, detail: "Fix it · pi" });
   expect(chat.messages[1].stream.id).toBe(admitted[0].stream.id);
