@@ -1,7 +1,6 @@
 // Settings → Pi (install, version, updates, problems, extensions, skills, prompt templates and
 // packages), Settings → Providers (sign in through Pi), and Settings → Projects.
 import {
-  ArrowLeft,
   Check,
   CircleAlert,
   ExternalLink,
@@ -48,7 +47,7 @@ import { cx } from "../lib/ui";
 import { OptionSelect } from "./ModelSelect";
 import { projectsDir } from "./NewProject";
 import { PathField } from "./PathField";
-import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { IconButton, SettingsBack, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
@@ -222,10 +221,8 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
   };
   return (
     <div className="pi-editor">
+      <SettingsBack label="Back to Pi agent" onBack={leave} />
       <div className="pi-editor-head">
-        <IconButton label="Back" tooltipSide="right" onClick={leave}>
-          <ArrowLeft size={17} />
-        </IconButton>
         <span className="pi-editor-title">{resource.name}</span>
         {dirty && <span className="badge">unsaved</span>}
         <button type="button" className="btn btn-sm" disabled={!dirty || saving} onClick={save}>

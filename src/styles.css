@@ -3558,6 +3558,16 @@ svg {
   z-index: 3;
 }
 
+/* A page inside a Settings section (a bot's editor, say) goes back with an arrow that mirrors the
+   close button: at the content's top left, outside the scroller so it stays put as the page scrolls. */
+.modal-back {
+  position: absolute;
+  top: 12px;
+  /* Past the 150px section list. */
+  left: 162px;
+  z-index: 3;
+}
+
 .settings-nav {
   display: flex;
   flex-direction: column;
@@ -3608,6 +3618,11 @@ svg {
   -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
   mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
   animation: fade 200ms var(--ease) both;
+}
+
+/* The back arrow gets a lane of its own on the left, the same as the close button's. */
+.settings.has-back .settings-content {
+  padding-left: 60px;
 }
 
 @keyframes fade {
@@ -4752,6 +4767,32 @@ p.key-status svg {
     background: var(--hover);
   }
 
+  /* Back sits at the header's start, before the tabs, as close sits at its end. */
+  .modal.has-back {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .modal.has-back .settings-nav {
+    grid-column: 2;
+    padding-left: 4px;
+  }
+
+  .modal.has-back .modal-close {
+    grid-column: 3;
+  }
+
+  .modal .modal-back {
+    position: static;
+    grid-row: 1;
+    grid-column: 1;
+    align-self: center;
+    width: 40px;
+    height: 40px;
+    margin-left: max(8px, env(safe-area-inset-left));
+    border-radius: 50%;
+    background: var(--hover);
+  }
+
   .settings-content {
     grid-row: 2;
     grid-column: 1 / -1;
@@ -4761,6 +4802,10 @@ p.key-status svg {
     /* Rows already end cleanly at the border line here. */
     -webkit-mask-image: none;
     mask-image: none;
+  }
+
+  .settings.has-back .settings-content {
+    padding-left: max(20px, env(safe-area-inset-left));
   }
 
   .md-h1 {

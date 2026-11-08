@@ -1,5 +1,5 @@
-import { ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
+import { ArrowLeft, ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type TextRuntime, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget } from "../lib/models";
@@ -13,7 +13,7 @@ import { DevicesSection } from "./DeviceSettings";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
-import { Avatar, IconButton, SettingsHeading, Toggle } from "./primitives";
+import { Avatar, IconButton, SettingsBackContext, SettingsHeading, Toggle, type SettingsBackTarget } from "./primitives";
 import { ShortcutsSection } from "./ShortcutSettings";
 import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
 import { PluginsSection } from "./PluginSettings";
@@ -564,6 +564,8 @@ export function SettingsModal() {
   const { mounted, visible } = usePresence(open, 220);
   const dialog = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
+  // Set by the page inside a section that is open, if any (see SettingsBack).
+  const [back, setBack] = useState<SettingsBackTarget>();
 
   useEffect(() => {
     if (!open) return;
@@ -595,11 +597,16 @@ export function SettingsModal() {
     if (open && mounted) dialog.current?.focus({ preventScroll: true });
   }, [open, mounted]);
 
+  // Going back removes the arrow that had focus: keep focus in the dialog rather than lose it to the page.
+  useLayoutEffect(() => {
+    if (!back && open && document.activeElement === document.body) dialog.current?.focus({ preventScroll: true });
+  }, [back, open]);
+
   if (!mounted) return null;
   return (
     <div className="modal-root" data-state={visible ? "open" : "closed"}>
       <div className="modal-backdrop" onClick={close} aria-hidden />
-      <div ref={dialog} className="modal settings" role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
+      <div ref={dialog} className={cx("modal settings", back && "has-back")} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
         <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>
           {sections.map((s) => (
             <button
@@ -616,33 +623,40 @@ export function SettingsModal() {
             </button>
           ))}
         </nav>
-        <div className="settings-content" key={section}>
-          {section === "profile" && <ProfileSection />}
-          {section === "security" && <SecuritySection />}
-          {hasCloud && section === "account" && (
-            <>
-              <Heading>Account</Heading>
-              <AccountSection />
-            </>
-          )}
-          {section === "general" && <GeneralSection />}
-          {section === "bots" && <BotsSettingsSection />}
-          {section === "shortcuts" && <ShortcutsSection />}
-          {section === "pi" && <PiSection />}
-          {section === "keys" && <ProvidersSection />}
-          {section === "runtimes" && <RuntimesSection />}
-          {section === "projects" && <ProjectsSection />}
-          {section === "devices" && <DevicesSection />}
-          {section === "appearance" && (
-            <>
-              <AppearanceSection />
-              <PluginSlot name="settings:appearance:after" />
-            </>
-          )}
-          {section === "notifications" && <NotificationsSection />}
-          {section === "plugins" && <PluginsSection />}
-          {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
-        </div>
+        {back && (
+          <IconButton label={back.label} tooltip={false} className="modal-back" onClick={back.onBack}>
+            <ArrowLeft size={18} />
+          </IconButton>
+        )}
+        <SettingsBackContext.Provider value={setBack}>
+          <div className="settings-content" key={section}>
+            {section === "profile" && <ProfileSection />}
+            {section === "security" && <SecuritySection />}
+            {hasCloud && section === "account" && (
+              <>
+                <Heading>Account</Heading>
+                <AccountSection />
+              </>
+            )}
+            {section === "general" && <GeneralSection />}
+            {section === "bots" && <BotsSettingsSection />}
+            {section === "shortcuts" && <ShortcutsSection />}
+            {section === "pi" && <PiSection />}
+            {section === "keys" && <ProvidersSection />}
+            {section === "runtimes" && <RuntimesSection />}
+            {section === "projects" && <ProjectsSection />}
+            {section === "devices" && <DevicesSection />}
+            {section === "appearance" && (
+              <>
+                <AppearanceSection />
+                <PluginSlot name="settings:appearance:after" />
+              </>
+            )}
+            {section === "notifications" && <NotificationsSection />}
+            {section === "plugins" && <PluginsSection />}
+            {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
+          </div>
+        </SettingsBackContext.Provider>
         <IconButton label="Close settings" tooltip={false} className="modal-close" onClick={close}>
           <X size={18} />
         </IconButton>

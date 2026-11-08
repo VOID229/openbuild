@@ -2960,11 +2960,6 @@ button.bots-details-name:hover {
   animation: fade 200ms var(--ease) both;
 }
 
-.bots-set-back {
-  margin: -4px 0 14px;
-  text-decoration: none;
-}
-
 .bots-set-hero {
   display: flex;
   align-items: center;
