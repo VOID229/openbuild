@@ -33,7 +33,7 @@ import { CodexProcess } from "./codex/rpc";
 import { toolEvent as codexTool } from "./codex/tools";
 import { sessionDir as cursorDir, fingerprint as cursorFingerprint } from "./cursor/sessions";
 import { QUESTION_PREFIX as CURSOR_PREFIX } from "./cursor/questions";
-import { connect as opencodeConnect, opencodeBin } from "./opencode-agent/connection";
+import { opencodeBin, withConnection as withOpencode, type Connection as OpencodeConnection } from "./opencode-agent/connection";
 import { toolEvent as opencodeTool } from "./opencode-agent/tools";
 
 export const IMPORT_RUNTIMES = ["claude", "codex", "cursor", "opencode"] as const;
@@ -630,7 +630,7 @@ export async function projectCursor(id: string, cwd: string, meta: any, file: st
 
 const OPENCODE_OWN = "<openbuild-question-instructions>";
 
-async function pages(c: Awaited<ReturnType<typeof opencodeConnect>>, path: string): Promise<any[]> {
+async function pages(c: OpencodeConnection, path: string): Promise<any[]> {
   const out: any[] = [];
   const seen = new Set<string>();
   let cursor: string | undefined;
@@ -643,11 +643,6 @@ async function pages(c: Awaited<ReturnType<typeof opencodeConnect>>, path: strin
     if (cursor) seen.add(cursor);
   } while (cursor);
   return out;
-}
-
-async function withOpencode<T>(use: (c: Awaited<ReturnType<typeof opencodeConnect>>) => Promise<T>): Promise<T> {
-  const c = await opencodeConnect();
-  try { return await use(c); } finally { await c.close().catch(() => {}); }
 }
 
 /** Where OpenCode keeps its sessions on this computer (its database), when it's local. */
