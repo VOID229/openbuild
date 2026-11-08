@@ -20,7 +20,7 @@ A user's token reaches only what all three allow: the app's permissions, the use
 the repositories of installations they can use.
 
 **OpenBuild doesn't choose between installations.** One token reaches every installation the user
-can use, all at once. Apps → GitHub lists them, but that list doesn't limit anything. What limits bots
+can use, all at once. Marketplace → GitHub lists them, but that list doesn't limit anything. What limits bots
 is GitHub's: each installation's repository selection and the user's own access. To keep bots out of
 an account or a repository, uninstall the app there or take the repository out of its selection on
 GitHub. Within what's reachable, OpenBuild's only rule is read-only (below).
@@ -58,14 +58,14 @@ The published app is **OpenBots Link** (`https://github.com/apps/openbots-link`,
 `OPENBUILD_GITHUB_APP_CLIENT_ID` and `OPENBUILD_GITHUB_APP_SLUG` and restarting. Both values are
 public.
 
-With no client ID, the GitHub app in Apps offers a personal access token only, as before.
+With no client ID, the GitHub app in Marketplace offers a personal access token only, as before.
 
 ## Connecting
 
-1. Apps → GitHub → **Connect with GitHub**. OpenBuild shows a code. Enter it at GitHub's device
+1. Marketplace → GitHub → **Connect with GitHub**. OpenBuild shows a code. Enter it at GitHub's device
    page and approve OpenBuild there. The OpenBuild page carries on by itself.
 2. **Install on my account** or **Install on an organization**, and pick the repositories on GitHub.
-   Apps → GitHub lists every installation the user can reach (personal account or organization),
+   Marketplace → GitHub lists every installation the user can reach (personal account or organization),
    with its repositories and a link to change them or uninstall it.
 3. **What bots may do** starts at **Read only**. Choose **Read and write** and **Save** to let bots
    change things.
