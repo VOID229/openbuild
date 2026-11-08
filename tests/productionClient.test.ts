@@ -1,13 +1,36 @@
-import { expect, test } from "bun:test";
+import { afterAll, expect, test } from "bun:test";
+import { join } from "node:path";
 import { gunzipSync, brotliDecompressSync } from "node:zlib";
-import { productionClient } from "../server/client";
 
-// The app as production serves it (server/client.ts): built here, in this process, from src/.
-const client = productionClient();
-const get = (path: string, headers: Record<string, string> = {}) => client.serve(new Request(`http://localhost${path}`, { headers }));
-const built = await client.built;
-const stylesheet = [...built.assets.keys()].find((p) => p.endsWith(".css"))!;
-const script = [...built.assets.keys()].find((p) => p.endsWith(".js"))!;
+// The app as production serves it (server/client.ts), built from src/ by a process of its own as the
+// server builds it. Now and then Bun 1.3.8's bundler never finishes a build, spinning instead (here
+// or in `bun test`, and Bun's HTML route alike): a build takes about a second, so give up on one that
+// hasn't after a few and start again, as serveFixture does.
+async function serve() {
+  for (let attempt = 1; ; attempt++) {
+    const app = Bun.spawn([process.execPath, join(import.meta.dir, "fixtures/productionClient.ts")], { stdin: "pipe", stdout: "pipe", stderr: "inherit" });
+    const listening = (async () => {
+      let out = "";
+      for await (const chunk of app.stdout.pipeThrough(new TextDecoderStream())) if ((out += chunk).includes("\n")) return out.trim();
+    })();
+    const url = await Promise.race([listening, Bun.sleep(10_000).then(() => "stuck" as const)]);
+    if (url === "stuck") {
+      app.kill("SIGKILL");
+      if (attempt === 3) throw new Error("The production app didn't build in three tries of 10 s");
+      continue;
+    }
+    if (!url) throw new Error(`The production app exited (${await app.exited}) before serving`);
+    return { app, url };
+  }
+}
+const { app, url: base } = await serve();
+afterAll(() => app.kill());
+// Every answer as sent: no encoding unless the request asks for one, nothing decompressed on the way.
+const get = (path: string, headers: Record<string, string> = {}) =>
+  fetch(new URL(path, base), { headers: { "accept-encoding": "identity", ...headers }, decompress: false });
+const page = await (await get("/")).text();
+const stylesheet = /href="(\/[^"]+\.css)"/.exec(page)![1]!;
+const script = /src="(\/[^"]+\.js)"/.exec(page)![1]!;
 
 test("fonts are files of their own, not inlined into the stylesheet the first paint waits for", async () => {
   const css = await (await get(stylesheet)).text();
@@ -32,7 +55,9 @@ test("the page preloads the font it's set to paint with, before the stylesheet",
 });
 
 test("text files are sent compressed when the browser takes it, and each encoding has its own tag", async () => {
-  for (let i = 0; i < 200 && !built.assets.get(script)!.gzip; i++) await Bun.sleep(25);
+  // Compressed copies are made in the background after the build.
+  const compressed = async () => { const res = await get(script, { "accept-encoding": "gzip" }); await res.arrayBuffer(); return res.headers.has("content-encoding"); };
+  for (let i = 0; i < 200 && !(await compressed()); i++) await Bun.sleep(25);
   const plain = new Uint8Array(await (await get(script)).arrayBuffer());
   const gz = await get(script, { "accept-encoding": "gzip, deflate" });
   expect(gz.headers.get("content-encoding")).toBe("gzip");
