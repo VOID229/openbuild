@@ -17,6 +17,7 @@ import { addStash, pasteStash, removeStash, stashAction, useStash, type Stashed 
 import { StashTray } from "./StashTray";
 import { threadDevice, useStore } from "../lib/store";
 import { PluginSlot } from "../lib/plugins";
+import { RUNTIMES } from "../lib/runtimes";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
 import { EffortPicker, ModelPicker, PermissionPicker, RemoteControlPicker, SpeedPicker } from "./Pickers";
@@ -464,6 +465,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   // "/" at the start (and no space yet) lists commands. Legacy threads always use Pi.
   const runtime = useStore((s) => chatId ? s.chats.find((c) => c.id === chatId)?.runtime ?? "pi" : s.settings.threadRuntime ?? "pi");
+  // Whose session an external reply belongs to: Durable threads run Pi sessions too.
+  const externalName = runtime === "pi" || runtime === "durable" ? "Pi" : RUNTIMES.find((r) => r.runtime === runtime)?.label ?? runtime;
   const workspace = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId)?.workspace : undefined));
   const homeProject = useStore((s) => (chatId ? undefined : s.projects.find((p) => p.id === s.settings.workspace.projectId)));
   // The device new threads start on (their project's, or the one picked without a project): a chat without a workspace yet starts there.
@@ -952,7 +955,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           {notice ? (
             <span className="composer-notice">{notice}</span>
           ) : external && streaming ? (
-            <span className="composer-mode" role="status">External Pi · control it in its terminal</span>
+            <span className="composer-mode" role="status">{`External ${externalName} · control it in its terminal`}</span>
           ) : (
             shellMode && (
               <span className="composer-mode">
@@ -964,7 +967,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <div className="composer-controls">
             <DictationButton dictation={dictation} className="round-btn round-btn-mic" size={17} tooltipSide={variant === "dock" ? "top" : "bottom"} />
             {queueing && !hasContent && !editing ? (
-              <button type="button" className="round-btn" aria-label={external ? "External Pi session (read-only)" : "Stop generating"} disabled={external} data-tooltip={external ? "Stop or steer this Pi session in its terminal" : "Stop"} data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
+              <button type="button" className="round-btn" aria-label={external ? `External ${externalName} session (read-only)` : "Stop generating"} disabled={external} data-tooltip={external ? `Stop or steer this ${externalName} session in its terminal` : "Stop"} data-tooltip-side="top" onClick={() => stopGeneration(chatId)}>
                 {external ? <SquareTerminal size={17} /> : <Square size={13} fill="currentColor" />}
               </button>
             ) : (

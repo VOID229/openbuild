@@ -172,6 +172,15 @@ test("external Pi observation never advertises a working Stop or steering contro
   expect(markup(createElement(Composer, { chatId: external.id, variant: "dock", streaming: true }))).toContain('aria-label="Stop generating"');
 });
 
+test("an imported native session's external reply names its own runtime, not Pi", () => {
+  const external = { ...thread("claude"), imported: true, messages: [{ id: "external-reply", role: "assistant" as const, content: "", status: "streaming" as const, createdAt: 0, stream: { id: "", via: "external" } }] };
+  reset({}, [external]);
+  const html = markup(createElement(Composer, { chatId: external.id, variant: "dock", streaming: true }));
+  expect(html).toContain("External Claude Code · control it in its terminal");
+  expect(html).toContain('aria-label="External Claude Code session (read-only)" disabled=""');
+  expect(html).not.toContain("External Pi");
+});
+
 test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", async () => {
   reset({ threadRuntime: undefined });
   const html = markup(createElement(WorkspaceTop));
