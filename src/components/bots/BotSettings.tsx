@@ -1,14 +1,14 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
 // routines, model, how often it checks in; a group's members and goal), making and deleting
 // them, the default model and web search providers they share, and how lively bots are.
-import { ArrowLeft, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
+import { MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
-import { SettingsHeading } from "../primitives";
+import { SettingsBack, SettingsHeading } from "../primitives";
 import { BotComputer, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
@@ -59,9 +59,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
   };
   return (
     <div className="bots-set-editor">
-      <button type="button" className="link-btn bots-set-back" onClick={onBack}>
-        <ArrowLeft size={14} /> All bots
-      </button>
+      <SettingsBack label="Back to all bots" onBack={onBack} />
       <div className="bots-set-hero">
         <BotAvatar look={bot.look} size={96} lively track playful pulse={pulses[bot.id]} />
         <div className="bots-set-hero-text">
@@ -165,9 +163,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
   };
   return (
     <div className="bots-set-editor">
-      <button type="button" className="link-btn bots-set-back" onClick={onBack}>
-        <ArrowLeft size={14} /> All bots
-      </button>
+      <SettingsBack label="Back to all bots" onBack={onBack} />
       <div className="bots-set-hero">
         <BotHuddle looks={looks} size={96} extra={looks.length > 4 ? looks.length - 4 : undefined} />
         <div className="bots-set-hero-text">

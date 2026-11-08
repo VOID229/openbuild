@@ -1,6 +1,6 @@
 import hermesLogo from "../assets/brands/hermes.svg" with { type: "text" };
 import { Boxes, CircleUserRound } from "lucide-react";
-import { forwardRef, memo, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { createContext, forwardRef, memo, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
 import { pluginBrandSvg, pluginIconsReady, pluginProviderSvg, usePlugins } from "../lib/plugins";
@@ -12,6 +12,26 @@ export const SettingsHeading = ({ children }: { children: ReactNode }) => (
     <span className="md-hash">#</span> {children}
   </h2>
 );
+
+/** The way back out of a page inside a Settings section, which the Settings dialog shows. */
+export type SettingsBackTarget = { label: string; onBack: () => void };
+export const SettingsBackContext = createContext<(back: SettingsBackTarget | undefined) => void>(() => {});
+
+/**
+ * A page inside a Settings section (a bot's editor, say) renders this instead of a back link: the
+ * dialog shows an arrow at its top left, opposite the close button and pinned like it while the page
+ * scrolls. `label` names where it goes ("Back to all bots").
+ */
+export function SettingsBack({ label, onBack }: SettingsBackTarget) {
+  const setBack = useContext(SettingsBackContext);
+  const latest = useRef(onBack);
+  latest.current = onBack;
+  useLayoutEffect(() => {
+    setBack({ label, onBack: () => latest.current() });
+    return () => setBack(undefined);
+  }, [setBack, label]);
+  return null;
+}
 
 export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
   return (
