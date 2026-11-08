@@ -464,6 +464,7 @@ function resolveBot(prefix: string): string {
 export function manage(botId: string, p: Record<string, unknown>) {
   const self = requireBot(botId);
   const action = String(p.action ?? "");
+  if (action === "status") return svc.botWorkStatus(botId);
   if (action === "models") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can change a bot's model.");
     return listModels(p.query);

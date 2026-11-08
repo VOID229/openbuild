@@ -555,7 +555,28 @@ export function activityFor(tool: string, args: unknown): string {
   return "Thinking";
 }
 
+const activeAssignments = new Map<string, Wake[]>();
+
+/** Exact delivery references only; text and routine payloads stay private. */
+export function pendingAssignments(botId: string) {
+  const jobs = [...(queue.get(botId) ?? []), ...(activeAssignments.get(botId) ?? []), ...(minds.get(botId)?.steered ?? [])];
+  const byConversation = new Map<string, Set<string>>();
+  for (const job of jobs) {
+    if (!job.conversationId || !job.messageIds?.length) continue;
+    const ids = byConversation.get(job.conversationId) ?? new Set<string>();
+    for (const id of job.messageIds) ids.add(id);
+    byConversation.set(job.conversationId, ids);
+  }
+  return [...byConversation].map(([conversationId, ids]) => ({ conversationId, messageIds: [...ids] }));
+}
+
 async function run(botId: string, all: Wake[]) {
+  activeAssignments.set(botId, all);
+  try { await runTurn(botId, all); }
+  finally { activeAssignments.delete(botId); }
+}
+
+async function runTurn(botId: string, all: Wake[]) {
   const jobs = all.filter((j) => !j.reaction || stillReacted(j.reaction));
   if (!jobs.length) return;
   const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
@@ -960,7 +981,7 @@ export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
 
 export function startBots() {
   listen();
-  svc.setHooks({ wake, stop });
+  svc.setHooks({ wake, stop, pendingAssignments });
   svc.setPiCheck(piSetup);
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();
