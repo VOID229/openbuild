@@ -3,7 +3,7 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, unavailableModels, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { computerApi } from "../computers/api";
 import { deviceCredentials } from "../devices";
@@ -619,8 +619,11 @@ async function listModels(query: unknown) {
   const hits = listing.models
     .map((m) => ({ id: `${m.provider}/${m.id}`, name: String(m.name || m.id), efforts: modelEfforts(m) }))
     .filter((m) => words.every((w) => `${m.id} ${m.name}`.toLowerCase().includes(w)));
-  const { defaultModel, defaultFallbackModels } = svc.getSettings();
-  return { default: defaultModel || listing.defaultModel, default_fallbacks: defaultFallbackModels ?? [], models: hits.slice(0, 60), ...(hits.length > 60 ? { more: hits.length - 60 } : {}) };
+  const settings = svc.getSettings();
+  const { defaultModel, defaultFallbackModels } = settings;
+  // What bots are set to but can't use now, an extension's model once it's switched off say, so it's seen rather than found failing.
+  const unavailable = unavailableModels(db.listBots(), settings, new Set(listing.models.map((m) => `${m.provider}/${m.id}`))).map((u) => ({ id: u.model, used_by: u.usedBy }));
+  return { default: defaultModel || listing.defaultModel, default_fallbacks: defaultFallbackModels ?? [], models: hits.slice(0, 60), ...(hits.length > 60 ? { more: hits.length - 60 } : {}), ...(unavailable.length ? { unavailable } : {}) };
 }
 
 /**

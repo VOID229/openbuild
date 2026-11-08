@@ -183,14 +183,28 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       await talk('three');
       a.ok(!tools.includes('picked_tool'));
 
+      // On and off again, the bots' listing follows without being asked for afresh.
+      const offered = async () => (await botModels()).models.some((m) => m.provider === 'pickedprovider');
+      svc.updateSettings({ customExtensions: { enabled: true, ids: ['extensions/picked.ts'] } });
+      a.ok(await offered());
+      // A bot left on that extension's model once it's off says why it can't reply, rather than only that it couldn't.
+      svc.updateBot(bot.id, { model: 'pickedprovider/extra' });
+      svc.updateSettings({ customExtensions: { enabled: false, ids: ['extensions/picked.ts'] } });
+      a.ok(!(await offered()));
+      await talk('four');
+      const failed = db.messages(conversationId, 50).at(-1).message;
+      a.equal(failed.event?.kind, 'error');
+      a.equal(failed.event.detail, "pickedprovider/extra isn't available to bots. Its extension may be switched off in Settings → Bots.");
+      svc.updateBot(bot.id, { model: '' });
+
       // A clash is reported with the reason, rather than found in a chat.
       svc.updateSettings({ customExtensions: { enabled: true, ids: ['extensions/clash.ts'] } });
       await a.rejects(botModels(true), /conflicts/);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    // A temp Pi has no install folder to read a model scope from, which is allowed for.
-    expect(err.replace(/\[pi\] model scope unavailable.*\n/g, "")).toBe("");
+    // A temp Pi has no install folder to read a model scope from, which is allowed for, and the reply that couldn't run is logged.
+    expect(err.replace(/\[pi\] model scope unavailable.*\n/g, "").replace(/\[bots\] \S+ couldn't reply: pickedprovider\/extra isn't available to bots\..*\n/, "")).toBe("");
     expect(code).toBe(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { botModelChain, conversationTitle, eventDetail, eventText, MODEL_SIGN_IN, mentionName, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
+import { botModelChain, conversationTitle, eventDetail, eventText, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -298,7 +298,10 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
       break;
     } catch (err) {
       // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so the next candidate, or Pi's own pick, will do.
-      if (chosen) throw err;
+      if (!chosen) continue;
+      // One picked for it that Pi doesn't list at all came from an extension that's off now, most likely: said so, rather than as Pi's bare refusal.
+      if (await unlisted(proc, model)) throw new PiError(modelUnavailable(model));
+      throw err;
     }
   }
   if (fallback) db.setValue(`fallback:${botId}`, fallback);
@@ -308,6 +311,16 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
     if (!chosen && current) db.setValue(`primary:${botId}`, current);
   }
   return { model: current, name };
+}
+
+/** Pi lists no such model, with the extensions it was started with. False when it can't say. */
+async function unlisted(proc: Pick<PiProcess, "send">, model: string): Promise<boolean> {
+  try {
+    const { models } = await proc.send<{ models?: { provider: string; id: string }[] }>({ type: "get_available_models" });
+    return Array.isArray(models) && !models.some((m) => `${m.provider}/${m.id}` === model);
+  } catch {
+    return false;
+  }
 }
 
 /** The models a reply tries, in order: see botModelChain. */

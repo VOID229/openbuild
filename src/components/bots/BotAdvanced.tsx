@@ -2,8 +2,8 @@
 // which puts them on one line each beside what the bot may do in OpenBuild.
 import { ArrowUp, Check, ChevronDown, CircleAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { botModels, type PiModels } from "../../lib/pi";
 import { providerName, providerOf } from "../../lib/models";
+import { useBotModels } from "../../lib/bots/models";
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
 import { LOCAL, loadTargets, targetLabel, targetNote, targetOptions } from "../../lib/bots/targets";
@@ -20,20 +20,10 @@ import { BotThreads } from "./BotThreads";
  */
 export function BotModelSelect({ label, value, unset, inherited, placeholder, account, onChange }: { label: string; value?: string; unset?: string; inherited?: string; placeholder?: string; account?: boolean; onChange: (model: string) => void }) {
   const [open, setOpen] = useState(false);
-  const [listing, setListing] = useState<PiModels>();
-  const [failed, setFailed] = useState(false);
+  const { listing, failed } = useBotModels();
   const anchor = useRef<HTMLButtonElement>(null);
   const models = listing?.models;
   const fallback = unset ? inherited || listing?.defaultModel : undefined;
-  useEffect(() => {
-    let live = true;
-    void botModels()
-      .then((r) => live && setListing(r))
-      .catch(() => live && setFailed(true));
-    return () => {
-      live = false;
-    };
-  }, []);
   const nameOf = (id?: string) => models?.find((m) => m.id === id)?.name ?? id;
   const current = models?.find((m) => m.id === value);
   const pick = (model: string) => {
