@@ -117,3 +117,27 @@ export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Prom
     },
   };
 }
+
+/**
+ * Serves a fixture page built ahead by `bun build`, in a process of its own: an HTML import route,
+ * or Bun.build inside `bun test`, can fail to resolve imports of a large page at random on some
+ * machines. `/api/*` answers `{}`; `routes` adds or overrides others. `stop` removes the build.
+ */
+export async function serveFixture(html: string, routes: Record<string, (req: Request) => Response | Promise<Response>> = {}) {
+  const out = await mkdtemp(join(tmpdir(), "openbuild-fixture-"));
+  const build = Bun.spawn([process.execPath, "build", html, "--outdir", out, "--target", "browser", "--public-path", "/"], { stdout: "ignore", stderr: "pipe" });
+  const [code, err] = await Promise.all([build.exited, new Response(build.stderr).text()]);
+  if (code !== 0) throw new Error(`Couldn't build ${html}:\n${err}`);
+  const server = Bun.serve({
+    port: 0,
+    fetch: async (req) => {
+      const path = new URL(req.url).pathname;
+      const route = Object.entries(routes).find(([p]) => p === path || (p.endsWith("*") && path.startsWith(p.slice(0, -1))));
+      if (route) return route[1](req);
+      if (path.startsWith("/api/")) return Response.json({});
+      const file = Bun.file(join(out, path === "/" ? "index.html" : path.slice(1)));
+      return (await file.exists()) && !path.includes("..") ? new Response(file) : new Response("Not found", { status: 404 });
+    },
+  });
+  return { url: server.url, stop: async () => { server.stop(true); await rm(out, { recursive: true, force: true }); } };
+}
