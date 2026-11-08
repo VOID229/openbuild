@@ -302,3 +302,39 @@ test("a change the user takes back while the primary's turn is under way is corr
     process.exit(0);
   `);
 });
+
+test("a settings correction survives edits in the same millisecond as the note the primary saw", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    const svc = await import('./server/bots/service.ts');
+    svc.setHooks({ wake() {}, stop() {} });
+    const primary = svc.createBot({ name: 'Boss' }).bot;
+    const helper = svc.createBot({ name: 'Helper' }).bot;
+    Date.now = () => 1_800_000_000_000;
+
+    svc.updateBot(helper.id, { effort: 'high' }, { by: 'me' });
+    const shown = svc.pendingChangeNotes(primary.id);
+    a.equal(shown.length, 1);
+    a.equal(shown[0].to, 'high');
+    // The user takes it back after the primary read it, without the clock advancing.
+    svc.updateBot(helper.id, { effort: '' }, { by: 'me' });
+    svc.settleChangeNotes(primary.id, shown);
+    const correction = svc.pendingChangeNotes(primary.id);
+    a.equal(correction.length, 1, 'the primary still needs the correction');
+    a.equal(correction[0].at, shown[0].at);
+    a.deepEqual([correction[0].from, correction[0].to], ['high', 'default']);
+    a.match(svc.changeNoteText(primary.id, correction), /Helper's effort from high to default/);
+    // Once the correction is shown, it is consumed even though its timestamp is unchanged.
+    svc.settleChangeNotes(primary.id, correction);
+    a.deepEqual(svc.pendingChangeNotes(primary.id), []);
+
+    // Edits ending at the value it already saw need no correction.
+    svc.updateBot(helper.id, { effort: 'high' }, { by: 'me' });
+    const same = svc.pendingChangeNotes(primary.id);
+    svc.updateBot(helper.id, { effort: 'low' }, { by: 'me' });
+    svc.updateBot(helper.id, { effort: 'high' }, { by: 'me' });
+    svc.settleChangeNotes(primary.id, same);
+    a.deepEqual(svc.pendingChangeNotes(primary.id), []);
+    process.exit(0);
+  `);
+});

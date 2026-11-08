@@ -557,7 +557,7 @@ export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
     const seen = shown.find((s) => s.botId === n.botId && s.field === n.field);
     // Never shown, and back where the primary knew it: nothing to say.
     if (!seen) return n.from === n.to ? [] : [n];
-    if (seen.at === n.at) return [];
+    // The value it saw is what it knows: timestamps can match across different edits.
     return seen.to === n.to ? [] : [{ ...n, from: seen.to }];
   });
   db.setValue(CHANGE_NOTES, list);
