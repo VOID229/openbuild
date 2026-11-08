@@ -50,7 +50,11 @@ export function memoryContext(items: { id: string; text: string }[], budget = 60
 }
 
 export function deliveryIdentity(conversation: string, message: unknown): string {
-  return createHash("sha256").update(JSON.stringify([conversation, message])).digest("hex");
+  // Read receipts are delivery metadata, never part of the rendered transcript. markSeen()
+  // updates them after rendering; hashing them would reinject an otherwise unchanged row.
+  const content = message && typeof message === "object"
+    ? Object.fromEntries(Object.entries(message).filter(([key]) => key !== "seenBy")) : message;
+  return createHash("sha256").update(JSON.stringify([conversation, content])).digest("hex");
 }
 export function readDeliveries(path: string): Set<string> {
   try { return new Set(JSON.parse(readFileSync(join(path, "deliveries.json"), "utf8"))); } catch { return new Set(); }

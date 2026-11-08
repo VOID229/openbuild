@@ -40,6 +40,7 @@ test("memory byte budget handles unicode and oversized notes without truncating 
 test("delivery identity uses full ids and content including edits and reactions", () => {
   const base = { id: "12345678-a", text: "hello" };
   const key = deliveryIdentity("c", base);
+  expect(key).toBe(deliveryIdentity("c", { ...base, seenBy: ["bot"] }));
   expect(key).not.toBe(deliveryIdentity("c", { ...base, id: "12345678-b" }));
   expect(key).not.toBe(deliveryIdentity("c", { ...base, reactions: [{ by: "me", emoji: "❤️" }] }));
   expect(key).not.toBe(deliveryIdentity("other", base));
