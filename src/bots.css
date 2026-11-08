@@ -1726,16 +1726,23 @@
 .bm-react-pop {
   padding: 5px;
   border-radius: 24px;
+  overflow-y: auto;
+  /* Wide enough for 8 a row, fewer on a narrow screen. */
+  width: max-content;
+  max-width: min(calc(8 * 37px + 10px), calc(100vw - 24px));
 }
 
 .bm-react-quick {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
   gap: 1px;
 }
 
 .bm-react-grid {
   display: grid;
-  grid-template-columns: repeat(8, 36px);
+  grid-template-columns: repeat(auto-fill, 36px);
+  justify-content: center;
   gap: 1px;
   margin-top: 4px;
   padding-top: 4px;

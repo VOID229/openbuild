@@ -81,12 +81,15 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const width = ref.current?.offsetWidth ?? 0;
+      // Measured every time the popover changes size, so one that grows (a longer list) stays on screen.
+      const width = Math.min(ref.current?.offsetWidth ?? 0, window.innerWidth - 24);
       const left = Math.max(12, Math.min(align === "end" ? r.right - width : r.left, window.innerWidth - width - 12));
       const below = window.innerHeight - r.bottom - 20;
       const above = r.top - 20;
-      const up = fixed === "up" || (fixed === "auto" && below < 320 && above > below);
-      const maxHeight = fixed === "auto" ? Math.min(420, up ? above : below) : undefined;
+      // "up"/"down" still flip when the anchor leaves no room on that side and there's more on the other.
+      const up = fixed === "up" ? !(above < 120 && below > above) : fixed === "down" ? above > below && below < 120 : below < 320 && above > below;
+      const room = Math.max(120, up ? above : below);
+      const maxHeight = fixed === "auto" ? Math.min(420, room) : room;
       setPos(
         up
           ? { position: "fixed", left, bottom: window.innerHeight - r.top + 8, maxHeight }
@@ -102,9 +105,12 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
       else place();
     };
     place();
+    const size = ref.current && typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : undefined;
+    if (ref.current) size?.observe(ref.current);
     window.addEventListener("resize", place);
     window.addEventListener("scroll", onScroll, true);
     return () => {
+      size?.disconnect();
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", onScroll, true);
     };
