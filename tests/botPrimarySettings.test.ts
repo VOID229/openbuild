@@ -17,65 +17,95 @@ async function run(script: string, setup: (dir: string) => Promise<void> = async
   }
 }
 
-test("the primary chooses where any bot's computer runs, among the places that allow it", async () => {
+test("manage_bot computers lists every machine for any bot, and runs_on or isolation are refused whole", async () => {
   await run(`
     import { strict as a } from 'node:assert';
     import { mock } from 'bun:test';
     let targets = [
       { device: 'local', name: 'Studio', status: 'ready', grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: ['podman'] },
       { device: 'dev1', name: 'Laptop', status: 'ready', grants: { files: true, terminal: true, browser: false, unisolated: false } },
-      { device: 'dev2', name: 'Tower', status: 'offline', message: 'no answer' },
+      { device: 'dev2', name: 'Tower', status: 'offline', message: 'Tower is unreachable (no answer). Nothing ran.' },
+      { device: 'dev3', name: 'MacBook', status: 'access', grants: { files: false, terminal: false, browser: false, unisolated: false } },
     ];
     mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }), computerTargets: async () => targets }));
     const devices = await import('./server/devices.ts');
-    for (const [id, name] of [['dev1', 'Laptop'], ['dev2', 'Tower']]) devices.addDevice({ id, name, mode: 'lan', urls: ['http://x'], token: 't' });
+    for (const [id, name] of [['dev1', 'Laptop'], ['dev2', 'Tower'], ['dev3', 'MacBook']]) devices.addDevice({ id, name, mode: 'lan', urls: ['http://x'], token: 't' });
     const db = await import('./server/bots/db.ts');
     const svc = await import('./server/bots/service.ts');
     const { manage, contextFor } = await import('./server/bots/agent.ts');
+    const { machinesNote, setIsolation } = await import('./server/bots/machines.ts');
     svc.setHooks({ wake() {}, stop() {} });
     const primary = svc.createBot({ name: 'Boss' }).bot;
     const helper = svc.createBot({ name: 'Helper' }).bot;
-    const computer = (id) => db.getBot(id).computer;
-    a.match(contextFor(primary.id), /manage_bot computers lists the places/);
+    a.match(contextFor(primary.id), /manage_bot computers lists them/);
+    a.match(contextFor(primary.id), /set per machine by the user, in Settings → Devices/);
+    a.doesNotMatch(contextFor(primary.id), /runs_on/);
 
-    // The places, with what each allows, and where each bot's computer is.
-    const listed = await manage(primary.id, { action: 'computers' });
-    a.deepEqual(listed.computers.map((c) => [c.id, c.status, c.isolation]), [['local', 'ready', ['container', 'host']], ['dev1', 'ready', ['container']], ['dev2', 'offline', []]]);
-    a.deepEqual(listed.computers[1].tools, ['files', 'terminal']);
-    a.match(listed.bots.find((b) => b.name === 'Helper').runs_on, /not chosen yet/);
+    // Every machine with its status, tools and isolation: no single choice, and any bot may look.
+    setIsolation('dev1', 'host');
+    for (const who of [primary.id, helper.id]) {
+      const listed = await manage(who, { action: 'computers' });
+      a.deepEqual(listed.computers.map((c) => [c.id, c.name, c.status, c.tools, c.isolation]), [
+        ['local', 'Studio (this server)', 'ready', ['files', 'terminal', 'browser'], 'container'],
+        ['dev1', 'Laptop', 'ready', ['files', 'terminal'], 'host'],
+        ['dev2', 'Tower', 'offline', [], 'container'],
+        ['dev3', 'MacBook', 'access', [], 'container'],
+      ]);
+      a.match(listed.computers[2].message, /unreachable/);
+      a.equal('bots' in listed, false);
+      a.match(listed.note, /Every bot reaches every ready machine/);
+    }
 
-    // Another bot, by device name; then isolation alone keeps the device.
-    a.deepEqual(await manage(primary.id, { action: 'update', bot: 'Helper', runs_on: 'laptop' }), { id: helper.id, name: 'Helper', runs_on: 'Laptop', isolation: 'container' });
-    a.deepEqual(computer(helper.id), { device: 'dev1', kind: 'container' });
-    // Itself, onto this server's host, with a model change in the same write.
-    const self = await manage(primary.id, { action: 'update', runs_on: 'this server', isolation: 'host', effort: 'high' });
-    a.deepEqual([self.runs_on, self.isolation, self.effort], ['this server', 'host', 'high']);
-    a.deepEqual(computer(primary.id), { device: 'local', kind: 'host' });
-    // A new bot can start somewhere other than the default.
-    const made = await manage(primary.id, { action: 'create', name: 'Scout', runs_on: 'dev1' });
-    a.deepEqual(computer(made.id), { device: 'dev1', kind: 'container' });
+    // Each bot's context lists them, with what's wrong where and how the owner allows it.
+    const note = await machinesNote();
+    a.match(note, /run on this server unless you pass machine/);
+    a.match(note, /- Studio \\(this server, used when you don't name one\\): files, terminal, browser; container\\./);
+    a.match(note, /- Laptop \\(machine id dev1\\): files, terminal \\(not browser\\); host chosen, but it only allows a container, so its tools fail\\./);
+    a.match(note, /- Tower \\(machine id dev2\\): unreachable right now/);
+    a.match(note, /- MacBook \\(machine id dev3\\): hasn't allowed this server's bots anything. Its owner allows them on MacBook, in Settings → Devices → Using this device → /);
+    a.match(note, /never runs somewhere else instead/);
 
-    // Refused, writing nothing: a device that doesn't allow host, one that's down, an unknown one, bad isolation.
-    const refuse = async (params, pattern) => {
-      const before = JSON.stringify(db.listBots());
-      await a.rejects(async () => manage(primary.id, { action: 'update', bot: 'Helper', name: 'Renamed', ...params }), pattern);
-      a.equal(JSON.stringify(db.listBots()), before);
-    };
-    await refuse({ isolation: 'host' }, /only allows a container/);
-    await refuse({ runs_on: 'Tower' }, /can't run a bot's computer right now \\(offline/);
-    await refuse({ runs_on: 'Mainframe' }, /No computer called "Mainframe". Choose from: Studio \\(local\\), Laptop/);
-    await refuse({ isolation: 'vm' }, /isolation is container or host/);
-    await refuse({ runs_on: '' }, /runs_on is a computer's name/);
-    targets = [{ ...targets[0], engines: [] }, ...targets.slice(1)];
-    await refuse({ runs_on: 'local', isolation: 'container' }, /no container engine/);
-    a.equal(db.listBots().filter((b) => b.name === 'Scout').length, 1);
-    await a.rejects(async () => manage(primary.id, { action: 'create', name: 'Ghost', runs_on: 'Tower' }), /offline/);
-    a.equal(db.listBots().some((b) => b.name === 'Ghost'), false);
+    // runs_on and isolation chose one computer: refused whole, for create and update, primary or not, writing nothing.
+    const refused = /Bots don't have one computer to choose anymore: every bot reaches every machine.*Nothing changed/;
+    const before = JSON.stringify(db.listBots());
+    for (const params of [{ runs_on: 'Laptop' }, { isolation: 'host' }, { runs_on: 'local', isolation: 'container', effort: 'high' }]) {
+      a.throws(() => manage(primary.id, { action: 'update', bot: 'Helper', name: 'Renamed', ...params }), refused);
+      a.throws(() => manage(helper.id, { action: 'update', ...params }), refused);
+    }
+    a.throws(() => manage(primary.id, { action: 'create', name: 'Scout', runs_on: 'dev1' }), refused);
+    a.equal(JSON.stringify(db.listBots()), before);
+    process.exit(0);
+  `);
+});
 
-    // Primary only, its own computer included.
-    a.throws(() => manage(helper.id, { action: 'update', runs_on: 'local' }), /Only the primary bot can choose where/);
-    a.throws(() => manage(helper.id, { action: 'computers' }), /Only the primary bot/);
-    a.deepEqual(computer(helper.id), { device: 'dev1', kind: 'container' });
+test("a computer saved by an earlier build stays as it was and doesn't steer any tool", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    import { mock } from 'bun:test';
+    const calls = [];
+    mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: ['podman'] }), engines: async () => ['podman'], procListeners: new Set() }));
+    mock.module('./server/computers/api.ts', () => ({ computerApi: (device) => ({ call: async (id, op, body) => (calls.push([device, op, body.kind]), {}), exec: async () => ({ exitCode: 0 }) }), computerTargets: async () => [] }));
+    const devices = await import('./server/devices.ts');
+    devices.addDevice({ id: 'dev1', name: 'Laptop', mode: 'lan', urls: ['http://x'], token: 't' });
+    const db = await import('./server/bots/db.ts');
+    const svc = await import('./server/bots/service.ts');
+    const { manage } = await import('./server/bots/agent.ts');
+    const { computerOn } = await import('./server/bots/machines.ts');
+    svc.setHooks({ wake() {}, stop() {} });
+    const primary = svc.createBot({ name: 'Boss' }).bot;
+    db.putBot({ ...db.getBot(primary.id), computer: { device: 'dev1', kind: 'host' } });
+    // The default is this server, in its container, not the saved device or kind.
+    await computerOn(primary.id, undefined);
+    a.deepEqual(calls.at(-1), ['local', 'ensure', 'container']);
+    // The app can't change it either: a computer in a patch is ignored.
+    svc.updateBot(primary.id, { computer: { device: 'local', kind: 'container' }, name: 'Boss' }, { by: 'me' });
+    a.deepEqual(db.getBot(primary.id).computer, { device: 'dev1', kind: 'host' });
+    a.deepEqual(svc.pendingChangeNotes(primary.id), []);
+    // A note about it from before is dropped, and nothing else about the bot is lost.
+    db.setValue('change-notes', [{ botId: primary.id, field: 'computer', from: 'not chosen yet', to: 'Laptop, container', at: 1 }]);
+    a.deepEqual(svc.pendingChangeNotes(primary.id), []);
+    a.equal(db.getBot(primary.id).name, 'Boss');
+    a.equal((await manage(primary.id, { action: 'computers' })).computers.length, 0);
     process.exit(0);
   `);
 });
@@ -156,7 +186,9 @@ test("what the user changes in a bot's settings reaches the primary once, on its
     await patch(manager.id, { effort: 'medium' });
     await patch(manager.id, { effort: 'high' });
     await patch(manager.id, { model: 'google/gemini-4', instructions: 'Run the threads.' });
+    // A computer from the app, as an older tab sends it, is ignored and not noted.
     await patch(manager.id, { computer: { device: 'local', kind: 'host' } });
+    a.equal(db.getBot(manager.id).computer, undefined);
     await patch(manager.id, { fallbackModels: ['openai/gpt-6'] });
     await patch(primary.id, { noFallbacks: true });
     // Not noted: settings outside the list, and a change put back.
@@ -170,7 +202,6 @@ test("what the user changes in a bot's settings reaches the primary once, on its
       "- Outis changed Manager's effort from default to high.",
       "- Outis changed Manager's model from default to google/gemini-4.",
       "- Outis changed Manager's instructions.",
-      "- Outis changed Manager's computer from not chosen yet to this server, host (unisolated).",
       "- Outis changed Manager's fallback models from the default fallbacks to openai/gpt-6.",
       '- Outis changed your fallback models from the default fallbacks to no fallback.',
       "That's just so you know; it needs no reply, and don't change it back unless asked.",
@@ -181,7 +212,7 @@ test("what the user changes in a bot's settings reaches the primary once, on its
     a.deepEqual(svc.pendingChangeNotes(manager.id), []);
 
     // What the primary does itself isn't noted, and replaces the user's note on that setting: it knows what it set.
-    await manage(primary.id, { action: 'update', bot: 'Manager', effort: 'low', instructions: 'Mine now.', runs_on: 'local', isolation: 'container' });
+    await manage(primary.id, { action: 'update', bot: 'Manager', effort: 'low', instructions: 'Mine now.' });
     a.deepEqual(svc.pendingChangeNotes(primary.id).map((n) => n.field), ['model', 'fallbacks', 'fallbacks']);
     await patch(manager.id, { effort: 'xhigh' });
     a.match(text(), /Manager's effort from low to xhigh/);

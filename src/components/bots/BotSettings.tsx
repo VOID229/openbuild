@@ -9,7 +9,7 @@ import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
 import { SettingsBack, SettingsHeading } from "../primitives";
-import { BotComputer, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
+import { BotMachines, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
@@ -116,8 +116,8 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
         <Routines bot={bot} />
       </section>
       <section className="bots-set-block">
-        <Label>Computer</Label>
-        <BotComputer bot={bot} />
+        <Label>Machines</Label>
+        <BotMachines />
       </section>
       <section className="bots-set-block">
         <Label>OpenBuild</Label>

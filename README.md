@@ -28,7 +28,7 @@ It will ask for device name, LAN or Tailscale, then show a code.
 Put that code in the client pair after choosing the same connection type.
 Instead of `ob pair --client`, you can also open Settings → Devices → Pair device in the app, choose the same connection type and enter the code there.
 
-OpenBots shows the chats of the OpenBuild server you're connected to. Each server keeps its own OpenBots chats; pairing doesn't sync them. To use a host's chats, open that host's OpenBuild. Its bots can still work on a paired device's computer when you give them access to it.
+OpenBots shows the chats of the OpenBuild server you're connected to. Each server keeps its own OpenBots chats; pairing doesn't sync them. To use a host's chats, open that host's OpenBuild. Its bots reach every paired device whose owner allows them, all at once, and pick one per tool call (see [docs/bot-machines.md](docs/bot-machines.md)).
 
 OpenBuild works with your existing coding agents like [Pi](https://pi.dev), [Codex](https://developers.openai.com/codex), [Claude Code](https://code.claude.com), [Cursor](https://cursor.com), [OpenCode](https://opencode.ai), [Grok Build](https://x.ai/cli), and [Fx](https://fx.sh) with your paid Subs or connected API keys.
 

@@ -6,7 +6,7 @@ import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
 import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
-import { hasDevice, readDevices } from "../devices";
+import { readDevices } from "../devices";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
@@ -138,6 +138,10 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
       blocked: strings(patch.harnesses.blocked, 20).filter(validRuntime),
       permissions: Object.fromEntries(PERMISSION_HARNESSES.flatMap((h) => (isPermissionId(permissions[h]) ? [[h, permissions[h]]] : []))),
     };
+  }
+  if ("isolation" in patch) {
+    const kinds = Object.entries(patch.isolation && typeof patch.isolation === "object" ? patch.isolation : {}).filter(([device, kind]) => device.length <= 80 && kind === "host");
+    next.isolation = kinds.length ? Object.fromEntries(kinds.slice(0, 200)) : undefined;
   }
   db.setValue("settings", next);
   emit({ t: "settings", settings: next });
@@ -371,17 +375,19 @@ export function createTeam(primaryId: string) {
   return { botIds: ids, conversationId: group.id };
 }
 
+/** A bot's computers on every machine: this server's and each paired device's. One that can't be reached keeps its own. */
+async function destroyComputers(botId: string) {
+  await Promise.allSettled(["local", ...readDevices().map((d) => d.id)].map((device) => computerApi(device).call(botId, "destroy", {})));
+}
+
 export async function resetAll() {
   for (const bot of db.listBots()) hooks.stop(bot.id);
-  for (const bot of db.listBots()) {
-    const device = bot.computer?.device ?? "local";
-    await computerApi(device).call(bot.id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
-  }
-  // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions they load and the apps they connected aren't those, and the keys stay too.
-  const { defaultModel, defaultFallbackModels, searxng, customExtensions } = settings();
+  for (const bot of db.listBots()) await destroyComputers(bot.id);
+  // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions they load, each machine's isolation and the apps they connected aren't those, and the keys stay too.
+  const { defaultModel, defaultFallbackModels, searxng, customExtensions, isolation } = settings();
   const apps = db.getValue("apps");
   db.wipe();
-  if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions });
+  if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions || isolation) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions, isolation });
   if (apps) db.setValue("apps", apps);
   status.clear();
   chains.clear();
@@ -427,8 +433,6 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } =
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
   const before = { ...bot };
-  // Before anything changes: a computer only goes somewhere this server can reach as itself.
-  if (typeof patch.computer?.device === "string" && patch.computer.device !== "local" && !hasDevice(patch.computer.device)) throw new BotsError("That device isn't paired with this server.");
   if (typeof patch.name === "string") {
     const name = clip(patch.name, 80);
     if (!name) throw new BotsError("A bot needs a name.");
@@ -453,9 +457,6 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } =
     // Pi refuses a level it doesn't know, and the bot couldn't reply at all.
     if (!isBotEffort(patch.effort)) throw new BotsError(`Effort is ${BOT_EFFORTS.join(", ")}, or empty for the default.`);
     bot.effort = patch.effort;
-  }
-  if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
-    bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
   }
   if (patch.threads) bot.threads = { enabled: patch.threads.enabled === true, scope: patch.threads.scope === "all" || patch.threads.scope === "exclude" ? patch.threads.scope : "choose", projects: strings(patch.threads.projects, 200), excluded: strings(patch.threads.excluded, 200), choosePermission: patch.threads.choosePermission === true, approve: patch.threads.approve === true, merge: patch.threads.merge === true, others: patch.threads.others === true };
   if (patch.primary) {
@@ -488,9 +489,9 @@ export interface ChangeNote {
   to: string;
   at: number;
 }
-type NoteField = "model" | "effort" | "fallbacks" | "instructions" | "computer";
+type NoteField = "model" | "effort" | "fallbacks" | "instructions";
 const CHANGE_NOTES = "change-notes";
-const NOTE_FIELDS: NoteField[] = ["model", "effort", "fallbacks", "instructions", "computer"];
+const NOTE_FIELDS: NoteField[] = ["model", "effort", "fallbacks", "instructions"];
 
 const changeNotes = () => db.getValue<ChangeNote[]>(CHANGE_NOTES) ?? [];
 
@@ -506,12 +507,6 @@ function describe(bot: db.StoredBot, field: NoteField): string {
     }
     case "instructions":
       return bot.instructions;
-    case "computer": {
-      if (!bot.computer) return "not chosen yet";
-      const { device, kind } = bot.computer;
-      const where = device === "local" ? "this server" : (readDevices().find((d) => d.id === device)?.name ?? "a device that's no longer paired");
-      return `${where}, ${kind === "host" ? "host (unisolated)" : "container"}`;
-    }
   }
 }
 
@@ -535,7 +530,8 @@ function noteChanges(before: db.StoredBot, after: db.StoredBot, user: boolean) {
 /** What the user changed since the primary last heard, for its next turn. Only the primary's. */
 export function pendingChangeNotes(botId: string): ChangeNote[] {
   if (!db.getBot(botId)?.primary) return [];
-  return changeNotes().filter((n) => n.from !== n.to && db.getBot(n.botId));
+  // A note on a bot's computer, from before bots reached every machine, has nothing left to say.
+  return changeNotes().filter((n) => n.from !== n.to && NOTE_FIELDS.includes(n.field) && db.getBot(n.botId));
 }
 
 export function changeNoteText(botId: string, notes: ChangeNote[]): string {
@@ -568,8 +564,7 @@ export async function deleteBot(id: string) {
   if (!bot) throw new BotsError("No such bot.", 404);
   if (bot.primary) throw new BotsError("The primary bot can't be deleted. Make another one primary first.");
   hooks.stop(id);
-  const device = bot.computer?.device ?? "local";
-  await computerApi(device).call(id, "destroy", { kind: bot.computer?.kind }).catch(() => {});
+  await destroyComputers(id);
   for (const c of db.listConversations()) {
     if (!c.botIds.includes(id)) continue;
     if (c.kind === "direct" || c.kind === "side") {

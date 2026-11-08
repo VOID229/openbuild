@@ -46,7 +46,11 @@ export const PROACTIVITY: Record<Proactivity, { label: string; hours: number }> 
   high: { label: "About hourly", hours: 1 },
 };
 
-/** Where a bot's computer runs and how it's kept apart from the rest of the machine. */
+/**
+ * Where a bot's one computer ran, from before bots reached every machine at once. Saved bots may
+ * still carry it; it's kept as it was and never read. Each machine's isolation is set per machine
+ * now (`BotsSettings.isolation`), and a tool call names its machine.
+ */
 export interface ComputerConfig {
   /** "local" (this server), or a paired device's id. */
   device: string;
@@ -130,6 +134,7 @@ export interface Bot {
   noFallbacks?: boolean;
   effort?: string;
   proactivity?: Proactivity;
+  /** @deprecated Kept from before bots reached every machine; not used. */
   computer?: ComputerConfig;
   /** Off when unset. */
   threads?: BotThreadAccess;
@@ -316,7 +321,16 @@ export interface BotsSettings {
   harnesses?: BotHarnessSettings;
   /** Pausing a chat after this many bot messages in a row, so bots can't reply to each other forever. */
   botLoop?: BotLoopSettings;
+  /**
+   * How bots' computers are kept apart on each machine, by device id ("local" for this server), set
+   * in Settings → Devices. A container where unset. Host on a paired device also needs that device's
+   * own Unisolated grant.
+   */
+  isolation?: Record<string, Isolation>;
 }
+
+/** A container (Podman or Docker), or a folder on the machine with no isolation. */
+export type Isolation = "container" | "host";
 
 export interface BotLoopSettings {
   enabled: boolean;
@@ -424,7 +438,7 @@ export interface ComputerCapabilities {
   grants?: BotToolGrants;
 }
 
-/** Somewhere a bot's computer can run, as the bot settings list it. */
+/** A machine bots can reach (this server or a paired device), with what it allows them now. */
 export interface ComputerTarget {
   /** "local" (this server), or a paired device's id. */
   device: string;
@@ -439,6 +453,8 @@ export interface ComputerTarget {
   /** Container engines there (this server only: probing a device's takes seconds). */
   engines?: ("podman" | "docker")[];
   message?: string;
+  /** How this server's bots are kept apart there (Settings → Devices). */
+  isolation?: Isolation;
 }
 
 export interface ComputerInfo {
