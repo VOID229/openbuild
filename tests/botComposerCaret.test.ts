@@ -182,4 +182,24 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
     expect([f.start, f.end]).toEqual([f.value.length, f.value.length]);
     expect(await page.eval<number>("document.querySelectorAll('.bots-mentions').length")).toBe(0);
   }, 60_000);
+
+  test("@all and @every pick the broadcast over bots that merely contain them", async () => {
+    const page = await open();
+    await page.eval(`bots.setState((s) => ({
+      bots: [...s.bots, ...["Wallace", "Marshall", "Neverly"].map((name) => ({ id: name.toLowerCase(), name, look: { shape: "ghost", color: "green" }, instructions: "", memory: [], routines: [], createdAt: 1 }))],
+      conversations: [...s.conversations, { id: "e", kind: "group", name: "Collide", botIds: ["wallace", "marshall", "neverly"], createdAt: 1, updatedAt: 1, messages: messages("e", 2) }],
+    }))`);
+    await page.select("e");
+    for (const [typed, first, inserted] of [["@all", "All bots", "@all "], ["@every", "All bots", "@all "]] as const) {
+      await page.focusField();
+      await page.eval(`(() => { const el = ${FIELD}; el.select(); document.execCommand("delete"); })()`);
+      await page.type(typed);
+      const labels = await page.eval<string[]>("[...document.querySelectorAll('.bots-mentions .menu-item-label')].map((e) => e.textContent)");
+      expect(labels[0]).toBe(first);
+      await page.press("Enter");
+      const f = await page.field();
+      expect(f.value).toBe(inserted);
+      expect(f.start).toBe(f.value.length);
+    }
+  }, 60_000);
 });

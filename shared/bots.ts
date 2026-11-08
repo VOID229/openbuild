@@ -597,6 +597,20 @@ export function matchMentionBots<B extends Pick<Bot, "name">>(bots: B[], query: 
 }
 
 /**
+ * Where "All bots" goes among the ranked bot suggestions, as a count of bots ahead of it; -1 when the
+ * query isn't toward @all or @everyone. A bot named for the query (exact or prefix) still comes first,
+ * but a bot that merely contains it ("Wallace" for "@all") never outranks the broadcast. A bare "@"
+ * puts everyone last, so Enter still picks one bot.
+ */
+export function mentionBroadcastAt<B extends Pick<Bot, "name">>(ranked: B[], query: string): number {
+  const q = query.toLowerCase();
+  if (!["all", "everyone"].some((w) => w.startsWith(q))) return -1;
+  if (!q) return ranked.length;
+  const lead = ranked.findIndex((b) => mentionRank(b.name, q) > 1);
+  return lead === -1 ? ranked.length : lead;
+}
+
+/**
  * Where each @mention of a bot sits in some text. A bot is mentioned by its whole name, spaces and all
  * ("@Dr Eggbot"); "@Dr" alone isn't Dr Eggbot, so a half-typed name never tags it.
  */

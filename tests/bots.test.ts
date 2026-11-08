@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, mentionBroadcastAt, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -1572,4 +1572,23 @@ test("@mention suggestions rank exact, prefix, word, substring, then tight fuzzy
   expect(names([{ name: "b" }, { name: "a" }], "")).toEqual(["b", "a"]);
   // Duplicates stay as separate suggestions.
   expect(names([{ name: "ob-manager" }, { name: "ob-manager" }], "manager")).toEqual(["ob-manager", "ob-manager"]);
+});
+
+test("the broadcast keywords keep their place among colliding bot names", () => {
+  const order = (bots: { name: string }[], q: string) => {
+    const ranked = matchMentionBots(bots, q).map((b) => b.name);
+    const at = mentionBroadcastAt(matchMentionBots(bots, q), q);
+    if (at >= 0) ranked.splice(at, 0, "All bots");
+    return ranked;
+  };
+  const bots = [{ name: "Wallace" }, { name: "Marshall" }, { name: "Neverly" }, { name: "ob-manager" }];
+  // @all is the broadcast, not Wallace or Marshall; @every is, not Neverly.
+  expect(order(bots, "all")).toEqual(["All bots", "Wallace", "Marshall"]);
+  expect(order(bots, "every")).toEqual(["All bots", "Neverly"]);
+  expect(order(bots, "everyone")).toEqual(["All bots"]);
+  // A bot actually named for it still comes first.
+  expect(order([...bots, { name: "All Stars" }], "all")).toEqual(["All Stars", "All bots", "Wallace", "Marshall"]);
+  // Bare @ keeps the given order with everyone last; other queries have no broadcast.
+  expect(order(bots, "")).toEqual(["Wallace", "Marshall", "Neverly", "ob-manager", "All bots"]);
+  expect(order(bots, "manager")).toEqual(["ob-manager"]);
 });
