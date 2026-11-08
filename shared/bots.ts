@@ -570,6 +570,55 @@ export function authoredEventText(event: { kind: string; text: string; detail?: 
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 
 /**
+ * How well a typed @query fits a bot's mention name, lower being better; -1 when it doesn't fit.
+ * Exact, then prefix, then a word start ("manager" in "ob-manager"), then a substring, then a tight
+ * subsequence ("obmgr"), which needs three letters so a stray pair never drags in everyone.
+ */
+export function mentionRank(name: string, query: string): number {
+  const hay = mentionName(name).toLowerCase();
+  const q = query.toLowerCase();
+  if (!q) return 1;
+  if (hay === q) return 0;
+  if (hay.startsWith(q)) return 1;
+  const at = hay.indexOf(q);
+  if (at > 0) return /[\s_\-.·/]/.test(hay[at - 1]!) ? 2 : 3;
+  if (q.length < 3) return -1;
+  let last = -1;
+  let first = -1;
+  for (const ch of q) {
+    last = hay.indexOf(ch, last + 1);
+    if (last === -1) return -1;
+    if (first === -1) first = last;
+  }
+  return last - first + 1 <= q.length * 2 ? 4 : -1;
+}
+
+/** The bots a typed @query could mean, best match first. Ties go to the shorter name, then A to Z, then the order given. */
+export function matchMentionBots<B extends Pick<Bot, "name">>(bots: B[], query: string): B[] {
+  // A bare "@" lists everyone in the order given.
+  if (!query) return [...bots];
+  return bots
+    .map((bot, i) => ({ bot, i, rank: mentionRank(bot.name, query), name: mentionName(bot.name).toLowerCase() }))
+    .filter((m) => m.rank >= 0)
+    .sort((a, b) => a.rank - b.rank || a.name.length - b.name.length || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) || a.i - b.i)
+    .map((m) => m.bot);
+}
+
+/**
+ * Where "All bots" goes among the ranked bot suggestions, as a count of bots ahead of it; -1 when the
+ * query isn't toward @all or @everyone. A bot named for the query (exact or prefix) still comes first,
+ * but a bot that merely contains it ("Wallace" for "@all") never outranks the broadcast. A bare "@"
+ * puts everyone last, so Enter still picks one bot.
+ */
+export function mentionBroadcastAt<B extends Pick<Bot, "name">>(ranked: B[], query: string): number {
+  const q = query.toLowerCase();
+  if (!["all", "everyone"].some((w) => w.startsWith(q))) return -1;
+  if (!q) return ranked.length;
+  const lead = ranked.findIndex((b) => mentionRank(b.name, q) > 1);
+  return lead === -1 ? ranked.length : lead;
+}
+
+/**
  * Where each @mention of a bot sits in some text. A bot is mentioned by its whole name, spaces and all
  * ("@Dr Eggbot"); "@Dr" alone isn't Dr Eggbot, so a half-typed name never tags it.
  */

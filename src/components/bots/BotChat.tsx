@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { authoredEventText, eventDetail, eventText, findTags, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -1592,13 +1592,10 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const everyone = everyoneIn(conversation, bots);
   const query = mention?.query.toLowerCase();
   // The whole group comes last, so a bare "@" and Enter still picks one bot rather than waking them all.
-  const matches =
-    query === undefined || conversation.kind !== "group"
-      ? []
-      : [
-          ...members.filter((b) => mentionName(b.name).toLowerCase().startsWith(query)).map((b) => ({ id: b.id, tag: mentionName(b.name), label: b.name, bots: [b] })),
-          ...(members.length > 1 && ["all", "everyone"].some((w) => w.startsWith(query)) ? [{ id: "all", tag: "all", label: "All bots", bots: members }] : []),
-        ];
+  const ranked = query === undefined || conversation.kind !== "group" ? [] : matchMentionBots(members, query);
+  const everyoneAt = query !== undefined && conversation.kind === "group" && members.length > 1 ? mentionBroadcastAt(ranked, query) : -1;
+  const matches = ranked.map((b) => ({ id: b.id, tag: mentionName(b.name), label: b.name, bots: [b] }));
+  if (everyoneAt >= 0) matches.splice(everyoneAt, 0, { id: "all", tag: "all", label: "All bots", bots: members });
   const stash = botStashOf(useStore((s) => s.settings.crossStash));
   const stashed = stash.use((s) => s.items);
   const [stashOpen, setStashOpen] = useState(false);
@@ -1789,7 +1786,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     // The query can run over spaces ("@Dr Eg") for as long as it still starts someone's name.
     const m = /(?:^|\s)@([^@\n]*)$/u.exec(value.slice(0, caret));
     const query = m?.[1];
-    const open = query !== undefined && (/^[\p{L}\d_-]*$/u.test(query) || members.some((b) => mentionName(b.name).toLowerCase().startsWith(query.toLowerCase())));
+    const open = query !== undefined && (/^[\p{L}\d_-]*$/u.test(query) || matchMentionBots(members, query).length > 0);
     setMention(open ? { query, index: 0 } : undefined);
   };
   const insertMention = (tag: string) => {
