@@ -10,6 +10,7 @@ import { checkRelease, restartStatus } from "./releases";
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
 // the app in. The older Opencode proxy (/api/chat) is still served for API-key-only setups.
 import index from "../src/index.html";
+import { productionClient } from "./client";
 import { CLOUD_URL } from "../shared/cloud";
 import { isStreamId, isStreamRef } from "../shared/replies";
 import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } from "../shared/types";
@@ -68,6 +69,8 @@ const machine = () => devices.deviceName();
 /** The port other OpenBuild servers listen on, as `openbuild pair --client` assumes. */
 const PAIR_PORT = Number(process.env.PORT ?? 3100);
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
+/** Production builds the app itself (server/client.ts); development keeps Bun's HTML route, with hot reloading. */
+const client = process.env.NODE_ENV === "production" ? productionClient() : undefined;
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
 // and the local password session. Only status/login/logout omit the session check
@@ -230,11 +233,11 @@ function serve(port: number, hostname: string) {
         if (server.upgrade(req, { data })) return;
         return bad("WebSocket upgrade failed", 400);
       },
-      "/*": index,
+      "/*": client ? client.serve : index,
       // The bundle's own files are exact routes and win over this. A script or stylesheet that
       // isn't one of them is from an older build (a tab left open across an update): answer 404
       // instead of the page, so it fails plainly. Anything else here (/thread-<id>) is the page.
-      "/:file": (req, server: Bun.Server<unknown>) =>
+      "/:file": client ? client.serve : (req, server: Bun.Server<unknown>) =>
         /\.(?:js|css|map)$/.test(req.params.file) ? new Response("Not found", { status: 404 }) : fetch(new URL("/", server.url)),
 
       // Only these authentication routes are public; never allow first-time password setup over the network.
