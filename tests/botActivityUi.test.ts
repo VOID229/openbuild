@@ -157,7 +157,7 @@ test("a change of settings links its bot by id, so a rename shows up, and keeps 
   expect(document.body.textContent).not.toContain("Scout");
 });
 
-test("a failed reply says so, without the provider's error, on old lines as on new", async () => {
+test("failed replies show provider diagnostics on old and new lines", async () => {
   await show([
     // Saved before: every fallback's error, a provider's JSON, an HTTP status.
     event("e1", "scout", { kind: "error", text: "Couldn't reply", detail: "Every model failed.\nanthropic/opus: 429 rate_limit_error\nopenai-codex/gpt-6.1-sol: over its limit" }),
@@ -170,16 +170,17 @@ test("a failed reply says so, without the provider's error, on old lines as on n
     event("e6", "scout", { kind: "error", text: "Couldn't reply", detail: "The reply took too long and was stopped." }),
   ]);
   for (const id of ["e1", "e2", "e3", "e4", "e5", "e6"]) expect(lead(id).textContent).toBe("Scout couldn't reply");
-  for (const id of ["e1", "e2", "e3", "e4"]) expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+  expect(line("e4").querySelector(".bm-event-detail")).toBeNull();
+  for (const id of ["e1", "e2", "e3"]) expect(line(id).querySelector(".bm-event-detail")).not.toBeNull();
   expect(line("e5").querySelector(".bm-event-detail")!.textContent).toBe("The sign-in for this model has expired. Sign in again in Settings → Providers.");
   expect(line("e6").querySelector(".bm-event-detail")!.textContent).toBe("The reply took too long and was stopped.");
-  expect(document.body.textContent).not.toMatch(/Every model failed|rate_limit|overloaded|503|invalid_grant/);
+  expect(document.body.textContent).not.toMatch(/invalid_grant/);
 });
 
-test("the bar over the chat gives a failed reply's gist, not the provider's error it keeps", async () => {
+test("the status bar shows redacted provider diagnostics", async () => {
   const failed = { state: "error", conversationId: "chat", provider: true, error: "Every model failed.\nanthropic/opus: 429 rate_limit_error" };
   await show([], undefined, { scout: failed });
-  expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Bot could not complete the request.");
+  expect(document.querySelector(".bots-sync-status")!.textContent).toBe(failed.error);
   const set = (status: Record<string, unknown>) => act(async () => void useBots.setState({ status } as any));
   await set({ scout: { ...failed, error: "The sign-in for this model has expired. Sign in again in Settings → Providers.\ninvalid_grant" } });
   expect(document.querySelector(".bots-sync-status")!.textContent).toBe("The sign-in for this model has expired. Sign in again in Settings → Providers.");
@@ -188,35 +189,35 @@ test("the bar over the chat gives a failed reply's gist, not the provider's erro
   // A status saved without the provider mark still shows a plain provider error only as the gist.
   for (const error of PLAIN_PROVIDER_ERRORS) {
     await set({ scout: { state: "error", conversationId: "chat", error } });
-    expect(document.querySelector(".bots-sync-status")!.textContent).toBe("Bot could not complete the request.");
+    expect(document.querySelector(".bots-sync-status")!.textContent).toBe((await import("../shared/bots")).shownReplyError(error)!);
   }
 });
 
 // Plain one-line provider errors, as older lines saved them: no JSON, no HTTP status, maybe a key.
 const PLAIN_PROVIDER_ERRORS = ["rate limited", "insufficient credits", "Invalid API key: sk-live-abcdef1234567890", "a/one is over its limit", "Pi exited (code 1): No API key found for anthropic"];
 
-test("a plain provider error saved on an older line stays hidden in the chat, the preview and a copy", async () => {
+test("legacy provider errors appear redacted in chat, preview and copy", async () => {
   const { messageText } = await import("../src/components/bots/common");
   const lines = PLAIN_PROVIDER_ERRORS.map((detail, i) => event(`e${i + 1}`, "scout", { kind: "error", text: "Couldn't reply", detail }));
   await show(lines);
-  lines.forEach((m) => {
+  lines.forEach((m, i) => {
     expect(lead(m.id).textContent).toBe("Scout couldn't reply");
-    expect(line(m.id).querySelector(".bm-event-detail")).toBeNull();
+    expect(line(m.id).querySelector(".bm-event-detail")!.textContent).toBe(PLAIN_PROVIDER_ERRORS[i]!.replace("sk-live-abcdef1234567890", "[redacted]"));
     // The preview, a reply quote and a copy all read the line through messageText.
-    expect(messageText(m as any)).toBe("Couldn't reply");
+    expect(messageText(m as any)).toContain(PLAIN_PROVIDER_ERRORS[i]!.replace("sk-live-abcdef1234567890", "[redacted]"));
   });
-  expect(document.body.textContent).not.toMatch(/rate limited|insufficient|sk-live|over its limit|No API key/);
+  expect(document.body.textContent).not.toMatch(/sk-live/);
   // The sidebar preview of a chat whose last word is one of them.
   expect(document.body.textContent).not.toContain("sk-live");
   const { shownReplyError } = await import("../shared/bots");
   for (const safe of ["Pi isn't installed. Install it in Settings → Pi.", "The reply took too long and was stopped.", 'Pi didn\'t answer "prompt" in time', "Pi isn't running (exited with code 1)", "Pi exited (code 137)"]) expect(shownReplyError(safe)).toBe(safe);
-  for (const unsafe of PLAIN_PROVIDER_ERRORS) expect(shownReplyError(unsafe)).toBeUndefined();
-  expect(shownReplyError("Pi isn't installed. Install it in Settings → Pi.", true)).toBeUndefined();
+  for (const unsafe of PLAIN_PROVIDER_ERRORS) expect(shownReplyError(unsafe)).toBe(unsafe.replace("sk-live-abcdef1234567890", "[redacted]"));
+  expect(shownReplyError("Pi isn't installed. Install it in Settings → Pi.", true)).toBe("Pi isn't installed. Install it in Settings → Pi.");
   // A bot's model that's gone with its extension says so, even inside a provider error or a chain's failures.
   const { modelUnavailable } = await import("../shared/bots");
   const gone = modelUnavailable("bridge/claude-x");
   expect(shownReplyError(gone, true)).toBe(gone);
-  expect(shownReplyError(`Every model failed.\nbridge/claude-x: ${gone}\nb/two: b/two is over its limit sk-live-1`, true)).toBe(gone);
+  expect(shownReplyError(`Every model failed.\nbridge/claude-x: ${gone}\nb/two: b/two is over its limit sk-live-1`, true)).toContain(gone);
 });
 
 test("models bots are set to that bots can't use are named with who uses them", async () => {

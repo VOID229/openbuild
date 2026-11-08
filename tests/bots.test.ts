@@ -1248,6 +1248,7 @@ test("a bot falls back through its models in order, only before its reply has do
             current = id;
             return { provider: cmd.provider, id: cmd.modelId, name: names[id] };
           }
+          if (cmd.type === 'get_available_thinking_levels' && turns[current] === 'effort-error') throw new Error('Could not read thinking levels');
           if (cmd.type === 'prompt') {
             const turn = turns[current];
             if (turn === 'reject') throw new Error('No API key found for ' + current);
@@ -1313,12 +1314,18 @@ test("a bot falls back through its models in order, only before its reply has do
         a.equal(r.switches.length, 0, turn);
         a.equal(r.errors.length, 1, turn);
         // The chat says it couldn't reply; the provider's error is the log's.
-        a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" }, turn);
+        a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: (await import("./shared/bots")).shownReplyError(svc.getStatus(r.errors[0].author).error) }, turn);
         a.equal(svc.getStatus(bot.bot.id).state, 'error', turn);
         a.equal(svc.getStatus(bot.bot.id).provider, true, turn);
         a.match(svc.getStatus(bot.bot.id).error, /a\\/one is over its limit/, turn);
         a.doesNotMatch(svc.getStatus(bot.bot.id).error, /Every model failed/, turn);
       }
+
+      const config = setup('Config refusal', 'a/one', ['b/two'], { 'a/one': 'effort-error', 'b/two': 'ok' });
+      const configReply = await config.reply();
+      a.deepEqual(config.log, ['a/one']);
+      a.equal(configReply.switches.length, 0);
+      a.match(configReply.errors[0].event.detail, /Could not read thinking levels/);
 
       // Every model failing says so, with each one's reason. A fallback that failed too was never switched to.
       const doomedTurns = { 'a/one': 'error', 'b/two': 'error', 'c/three': 'refuse' };
@@ -1327,14 +1334,14 @@ test("a bot falls back through its models in order, only before its reply has do
       a.deepEqual(doomed.log, ['a/one', 'b/two', 'c/three']);
       a.equal(r.switches.length, 0);
       a.equal(r.errors.length, 1);
-      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: (await import("./shared/bots")).shownReplyError(svc.getStatus(r.errors[0].author).error) });
       a.deepEqual(r.texts, []);
       // How each one failed is kept for diagnostics, not posted.
       const status = svc.getStatus(doomed.bot.id);
       a.equal(status.state, 'error');
       a.match(status.error, /^Every model failed/);
       for (const reason of ['a/one: a/one is over its limit', 'b/two: b/two is over its limit', 'c/three: Model not found: c/three']) a.ok(status.error.includes(reason), status.error);
-      a.doesNotMatch(JSON.stringify(r), /over its limit|Every model failed|Model not found/);
+      a.match(JSON.stringify(r), /Every model failed/);
       // The bot isn't left stuck: the next reply tries the primary again, and replies once it can.
       doomed.log.length = 0;
       db.setValue('told:' + doomed.bot.id, 0);
@@ -1438,7 +1445,7 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await single.reply();
       a.deepEqual(single.log, ['a/one']);
       a.equal(r.switches.length, 0);
-      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: (await import("./shared/bots")).shownReplyError(svc.getStatus(r.errors[0].author).error) });
       // A lapsed sign-in still says how to fix it, and only that.
       const lapsed = setup('Lapsed', 'a/one', ['b/two'], { 'a/one': 'expired', 'b/two': 'expired' });
       r = await lapsed.reply();
@@ -1486,7 +1493,7 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await none.reply();
       a.deepEqual(none.log, ['a/one']);
       a.equal(r.switches.length, 0);
-      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: (await import("./shared/bots")).shownReplyError(svc.getStatus(r.errors[0].author).error) });
       svc.updateBot(none.bot.id, { model: '' });
       a.deepEqual(modelChain(none.bot.id), ['d/main']);
       // The choice survives a round trip through the API's JSON and the database.
@@ -1507,7 +1514,7 @@ test("a bot falls back through its models in order, only before its reply has do
       r = await halfway.reply();
       a.deepEqual(halfway.log, ['d/main']);
       a.equal(r.switches.length, 0);
-      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply" });
+      a.deepEqual(r.errors[0].event, { kind: 'error', text: "Couldn't reply", detail: (await import("./shared/bots")).shownReplyError(svc.getStatus(r.errors[0].author).error) });
       a.doesNotMatch(svc.getStatus(halfway.bot.id).error, /Every model failed/);
 
       // With no default model, Pi's default leads the chain and the default's fallbacks follow it.
@@ -1520,7 +1527,7 @@ test("a bot falls back through its models in order, only before its reply has do
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
     // Each failed reply is in the server log, with the provider's reasons and without the key.
-    expect(err).toMatch(/^\[bots\] \S+ couldn't reply: /);
+    expect(err).toMatch(/\[bots\] \S+ couldn't reply: /);
     expect(err).toMatch(/\[bots\] \S+ couldn't reply: Every model failed\.\na\/one: a\/one is over its limit\nb\/two: b\/two is over its limit\nc\/three: Model not found: c\/three\n/);
     expect(err).toContain("invalid_grant");
     expect(err).not.toContain("sk-live-abcdef1234567890");
@@ -1605,4 +1612,20 @@ test("the broadcast keywords keep their place among colliding bot names", () => 
   // Bare @ keeps the given order with everyone last; other queries have no broadcast.
   expect(order(bots, "")).toEqual(["Wallace", "Marshall", "Neverly", "ob-manager", "All bots"]);
   expect(order(bots, "manager")).toEqual(["ob-manager"]);
+});
+
+test("fallback requires an explicit model refusal, never a configuration or ambiguous RPC failure", async () => {
+  const { modelStartFailure, ModelFailure } = await import("../server/bots/runner");
+  const { PiTimeoutError } = await import("../server/pi/rpc");
+  for (const message of ["Model not found: a/b", "No API key found for anthropic"]) expect(modelStartFailure(new Error(message))).toBeInstanceOf(ModelFailure);
+  for (const error of [new Error("already processing a prompt"), new Error("get_state failed"), new PiTimeoutError("set_model timed out")]) expect(modelStartFailure(error)).toBe(error);
+});
+
+test("reply diagnostics preserve the reason while redacting credentials and bounding legacy data", async () => {
+  const { shownReplyError } = await import("../shared/bots");
+  const error = 'HTTP 400: cache_control limit. Authorization: Bearer abcdefghijklmnop api_key=sk-live-abcdef1234567890 refresh_token=privatevalue';
+  const shown = shownReplyError(error, true)!;
+  expect(shown).toContain('HTTP 400: cache_control limit.');
+  for (const secret of ['abcdefghijklmnop', 'sk-live-abcdef1234567890', 'privatevalue']) expect(shown).not.toContain(secret);
+  expect(shownReplyError('x'.repeat(5000))!.length).toBe(4000);
 });

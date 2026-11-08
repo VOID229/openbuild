@@ -262,7 +262,7 @@ test.skipIf(!pi)("group messages reach their bots with no routing model call: ex
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, 'data'), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: '1' }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe('');
+    expect(err).toMatch(/fallback missing\/model → account\/m: missing\/model isn't available to bots/);
     expect(code).toBe(0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }, 60_000);
