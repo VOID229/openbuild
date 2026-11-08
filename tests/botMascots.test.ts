@@ -71,6 +71,19 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     expect(await page.eval<null>(`[...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Dr Eggbot')).querySelector('.bot-lid')`)).toBeNull();
   });
 
+  test("a member at work in a big group is shown, never one of the count", async () => {
+    const page = await open();
+    const everyone = `[...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Everyone'))`;
+    const colors = () => page.eval<string[]>(`[...(${everyone}).querySelectorAll('.bot')].map((b) => b.dataset.color)`);
+    expect(await colors()).toEqual(["white", "green", "amber", "blue"]);
+    expect(await page.eval<string>(`(${everyone}).querySelector('.bot-huddle-more').textContent`)).toBe("+2");
+    // Spark (teal), the fifth, starts work: it takes the last dozing member's place, awake.
+    await setWorking(page, ["moss", "spark"]);
+    await page.settle();
+    expect(await colors()).toEqual(["white", "green", "amber", "teal"]);
+    expect(await page.eval<boolean>(`'busy' in (${everyone}).querySelector('.bot[data-color="teal"]').dataset`)).toBe(true);
+  });
+
   test("a bot wakes when it starts work and dozes off when it stops, eased both ways", async () => {
     const page = await open();
     // Boo (amber) starts work: awake at once, with a stretch, its eyes opening and head coming up.

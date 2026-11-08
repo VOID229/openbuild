@@ -352,15 +352,20 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
  * member is awake and `alive` and `busy` go for all of them.
  */
 export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, extra, me }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; extra?: number; me?: React.ReactNode }) {
-  const members = looks.map((_, i) => i).slice(0, me ? 3 : 4);
+  // Who sits in it: those at work first, so a busy member is never one of the count, and then in the
+  // group's own order, so they keep their places.
+  const room = me ? 3 : 4;
+  const order = looks.map((_, i) => i);
+  const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
   const count = members.length + (me ? 1 : 0);
-  // Where each member sits, as fractions of the box (centre x, centre y, size).
+  // Where each member sits, as fractions of the box (centre x, centre y, size): a 2×2 grid filled as
+  // far as the shapes allow, three as two over one, a pair on the diagonal.
   const spots: [number, number, number][][] = [
     [],
     [[0.5, 0.5, 0.9]],
-    [[0.33, 0.36, 0.6], [0.66, 0.64, 0.6]],
-    [[0.32, 0.3, 0.52], [0.7, 0.4, 0.52], [0.4, 0.72, 0.52]],
-    [[0.3, 0.28, 0.48], [0.7, 0.28, 0.48], [0.3, 0.72, 0.48], [0.72, 0.7, 0.48]],
+    [[0.32, 0.35, 0.6], [0.68, 0.65, 0.6]],
+    [[0.28, 0.29, 0.5], [0.72, 0.29, 0.5], [0.5, 0.72, 0.5]],
+    [[0.28, 0.28, 0.5], [0.72, 0.28, 0.5], [0.28, 0.72, 0.5], [0.72, 0.72, 0.5]],
   ];
   const layout = spots[Math.min(count, 4)] ?? [];
   const items: [React.Key, React.ReactNode][] = [];

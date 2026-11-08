@@ -562,6 +562,18 @@
   height: 64px;
 }
 
+/* A group's huddle is bigger than the box (see Tile), spilling into the tile's padding, a little more
+   above than below, so the tile and its name stay where they were. */
+.bots-tile-avatar .bot-huddle {
+  margin: -9px -8px -7px;
+}
+
+/* The count of the rest sits beside the last member, in the tile's spare width, clear of the name. */
+.bots-tile-avatar .bot-huddle-more {
+  right: -15px;
+  bottom: 7px;
+}
+
 .bots-tile-dot {
   position: absolute;
   top: 0;

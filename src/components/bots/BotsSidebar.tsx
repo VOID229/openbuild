@@ -217,7 +217,8 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       }}
     >
       <span className="bots-tile-avatar">
-        <SidebarAvatar conversation={conversation} size={64} />
+        {/* A group's huddle is drawn bigger than the box, into the tile's padding, so its members read at a glance. */}
+        <SidebarAvatar conversation={conversation} size={conversation.kind === "direct" ? 64 : 80} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>

@@ -29,3 +29,13 @@ test("without `active` a huddle animates every member together, and none doze", 
   expect(html).not.toContain("data-asleep");
   expect(html).not.toContain("bot-lid");
 });
+
+test("a member at work is never one of the count: it takes the last dozing member's place", () => {
+  const six = ["blue", "green", "pink", "amber", "teal", "purple"].map((color) => ({ shape: "orb", color }));
+  const shown = (active?: boolean[]) =>
+    [...renderToStaticMarkup(createElement(BotHuddle, { looks: six, size: 80, active, extra: 2 })).matchAll(/data-color="(\w+)"/g)].map((m) => m[1]);
+  expect(shown([false, false, false, false, false, false])).toEqual(["blue", "green", "pink", "amber"]);
+  expect(shown([false, false, false, false, true, false])).toEqual(["blue", "green", "pink", "teal"]);
+  expect(shown([false, true, false, false, false, true])).toEqual(["blue", "green", "pink", "purple"]);
+  expect(shown()).toEqual(["blue", "green", "pink", "amber"]);
+});
