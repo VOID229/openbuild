@@ -15,6 +15,11 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231e1e1e'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E"
     />
     <script>
+      // The title of the world a reload lands in, before the app has loaded.
+      if (/^\/bots\/?$/.test(location.pathname)) document.title = "OpenBots · OpenBuild";
+      else if (/^\/(bots\/)?usage\/?$/.test(location.pathname)) document.title = "Usage · OpenBuild";
+    </script>
+    <script>
       // Apply the saved theme before first paint to avoid a light/dark flash.
       (function () {
         var theme = "system";
