@@ -12,6 +12,8 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       const svc = await import('./server/bots/service.ts');
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       const { holding, showWorking } = await import('./src/lib/bots/activity.ts');
       const boss = svc.createBot({ name: 'Boss' });
       const helper = svc.createBot({ name: 'Helper' });
@@ -23,6 +25,7 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
           if (cmd.type === 'steer') steers.push({ ...cmd, bot: bot.id });
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
+        Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
         minds.set(bot.id, mind);
       }
       svc.setHooks({ wake: runner.wake, stop: runner.stop });

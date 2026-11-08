@@ -17,6 +17,7 @@ async function run(name: string, body: string) {
       const runner = await import('./server/bots/runner.ts');
       const { PiTimeoutError } = await import('./server/pi/rpc.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       svc.updateSettings({ onboarding: 'done' });
       const prompts = [], steers = [], commands = [], piQueue = [];
@@ -43,6 +44,8 @@ async function run(name: string, body: string) {
         }
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
+      // This reusable fake exercises recovery, not on-disk Pi session loading.
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', alpha.bot.id, globalThis.openbotsFocus?.get(alpha.bot.id) ?? alpha.conversationId)) });
       minds.set(alpha.bot.id, mind);
       const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
       const settle = () => Bun.sleep(40);

@@ -4,14 +4,14 @@ import { untrustedData } from "./transcriptData";
 // and runs when the bot is free. The process loads server/bots/extension.ts, which calls back over
 // the unix socket in agent.ts.
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
 import { BOT_EFFORTS, botModelChain, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
-import { listModels, onModelsForgotten } from "../pi/sessions";
+import { listModels, onModelsForgotten, settledModels } from "../pi/sessions";
 import { friendFlags, piFlags } from "./extensions";
 import { allowsTools } from "../friends/store";
 import { botsDir } from "./db";
@@ -23,10 +23,15 @@ import type { Wake } from "./service";
 import type { BotStatus, PiSetup } from "../../shared/bots";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 
+import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
+
 const IDLE = 20 * 60 * 1000;
 
 interface Mind {
   proc: PiProcess;
+  sessionPath?: string;
+  usage?: Record<string, number>;
+  contextKeys?: Set<string>;
   token: string;
   /** The extensions it started with. */
   loaded: string;
@@ -38,7 +43,7 @@ interface Mind {
   /** Steers on their way into this turn: the turn holds on to Pi until each is answered. */
   pendingSteers?: Set<Promise<void>>;
   /** Steers Pi queued this turn, in order, and how many queued ones were cleared unread. */
-  queuedSteers?: { item: Wake; conversationId: string; from: number }[];
+  queuedSteers?: { item: Wake; conversationId: string; from: number; keys?: Set<string> }[];
   dropped?: number;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
@@ -128,7 +133,8 @@ export function wake(botId: string, item: Wake) {
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
     const through = db.latestSeq(conversationId);
-    const text = render([item], botId);
+    const keys = new Set<string>();
+    const text = render([item], botId, mind.contextKeys, keys);
     const images = imagesBetween(conversationId, from, through);
     shown.set(conversationId, through);
     if (item.kind === "messages") {
@@ -137,7 +143,7 @@ export function wake(botId: string, item: Wake) {
     }
     // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
     steerSafely(mind, { type: "steer", message: text, ...(images.length ? { images } : {}) }, (disposition) => {
-      if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from });
+      if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from, keys });
       if (disposition) return;
       // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
       shown.set(conversationId, Math.min(shown.get(conversationId) ?? from, from));
@@ -264,6 +270,22 @@ function workDir(botId: string, lane = "main") {
   return dir;
 }
 
+/** Each model's context window, for compaction settings. Cached per extension set, so a fresh mind
+ * (one per conversation switch) doesn't cost a second Pi start; dropped when Pi forgets its models. */
+const windows = new Map<string, { at: number; models: Promise<{ provider: string; id: string; contextWindow?: number }[]> }>();
+function windowsFor(flags: string[], cwd: string) {
+  const key = JSON.stringify(flags);
+  const cached = windows.get(key);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.models;
+  const probe = new PiProcess(["--no-session", ...flags], cwd);
+  // A model it couldn't list keeps the bot-wide defaults, and a failed listing is asked again next time.
+  const models: Promise<{ provider: string; id: string; contextWindow?: number }[]> = settledModels(probe)
+    .catch(() => { if (windows.get(key)?.models === models) windows.delete(key); return []; })
+    .finally(() => probe.close());
+  windows.set(key, { at: Date.now(), models });
+  return models;
+}
+
 async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   const key = mindKey(botId, lane);
   let existing = minds.get(key);
@@ -272,9 +294,10 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     await retire(key, existing);
     existing = undefined;
   }
+  const path = sessionGeneration(laneDirectory(sessionDir(), botId, getFocus(botId) ?? svc.directId(botId) ?? "default", lane));
   const flags = flagsFor(lane);
   // The user changed which extensions bots load, or what a friend's chats allow. Only ever reached between turns, and the session carries on.
-  if (existing && !existing.proc.exited && existing.loaded !== JSON.stringify(flags)) {
+  if (existing && !existing.proc.exited && (existing.loaded !== JSON.stringify(flags) || existing.sessionPath !== path)) {
     revokeToken(existing.token);
     existing.proc.close();
     minds.delete(key);
@@ -282,13 +305,18 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     return existing;
   }
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
+  const models = await windowsFor(flags, workDir(botId, lane));
+
+  // Bot-only project settings; shared auth and extension discovery remain unchanged.
+  mkdirSync(join(workDir(botId, lane), ".pi"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models) }), { mode: 0o600 });
   const token = mintToken(botId, lane);
   const proc = new PiProcess(
-    ["--session-dir", sessionDir(), "--session-id", sessionId(botId, lane), ...flags],
+    ["--approve", "--session-dir", path, "--session-id", sessionId(botId, lane), ...flags],
     workDir(botId, lane),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId },
   );
-  const mind: Mind = { proc, token, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
+  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(key, mind);
   return mind;
@@ -487,6 +515,13 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
+  if (ended?.role === "assistant" && mind.usage && ended.usage) {
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+      const value = ended.usage[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) mind.usage[key] = (mind.usage[key] ?? 0) + value;
+    }
+    mind.usage.calls = (mind.usage.calls ?? 0) + 1;
+  }
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
@@ -592,7 +627,7 @@ const activeAssignments = new Map<string, Wake[]>();
 
 /** Exact delivery references only; text and routine payloads stay private. */
 export function pendingAssignments(botId: string) {
-  const jobs = [...(queue.get(botId) ?? []), ...(activeAssignments.get(botId) ?? []), ...(minds.get(botId)?.steered ?? [])];
+  const jobs = [...(queue.get(botId) ?? []), ...(activeAssignments.get(botId) ?? []), ...[...minds].filter(([key]) => key === botId || key.startsWith(`${botId}~`)).flatMap(([, mind]) => mind.steered ?? [])];
   const byConversation = new Map<string, Set<string>>();
   for (const job of jobs) {
     if (!job.conversationId || !job.messageIds?.length) continue;
@@ -623,19 +658,25 @@ async function runTurn(botId: string, all: Wake[]) {
   try {
     mind = await ensureMind(botId, lane);
     mind.busy = true;
+    mind.usage = {};
+    rmSync(join(mind.sessionPath!, "settled"), { force: true });
     mind.quiet = quiet && "reaction";
     // The transcript is read now, so anything later is the next steer's or turn's to show.
     const shown = new Map<string, number>();
     for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));
     mind.shown = shown;
-    const rendered = render(jobs, botId);
+    const delivered = readDeliveries(mind.sessionPath!);
+    const candidates = new Set<string>();
+    const rendered = render(jobs, botId, delivered, candidates);
+    mind.contextKeys = new Set([...delivered, ...candidates]);
     if (!rendered.trim()) return;
-    // Settings the user changed in the app, for the primary: shown once, in whatever turn of its own comes next.
-    // They're the user's business, so a turn in a chat shared with a friend leaves them for later.
+    // Settings the user changed in the app, for the primary: shown once, in whatever turn comes next.
     const notes = lane === "main" ? svc.pendingChangeNotes(botId) : [];
+    let handoff = "";
+    if (!delivered.size) { try { handoff = readFileSync(join(mind.sessionPath!, "handoff.txt"), "utf8"); } catch {} }
     // A new name is told to its bot in any chat: it's how everyone there will call it.
     const renames = svc.pendingRenameNotes(botId);
-    const message = [svc.renameNoteText(renames), svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
+    const message = [handoff, svc.renameNoteText(renames), svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -707,10 +748,15 @@ async function runTurn(botId: string, all: Wake[]) {
     });
     await release(botId, m, key);
     if (handled) return;
+    // Only settled successful prompts advance this optimization. Failed/ambiguous deliveries
+    // are deliberately replayable; assignments always remain explicit even when context was seen.
+    try { if (minds.get(key) === m && !m.needsRecovery && !m.proc.exited) saveDeliveries(m.sessionPath!, new Set([...delivered, ...candidates, ...(m.contextKeys ?? [])])); }
+    catch { /* A lost optimization must never fail an otherwise completed assignment. */ }
     svc.settleChangeNotes(botId, notes);
     svc.settleRenameNotes(renames);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
+    if (minds.get(key) === m && !m.needsRecovery && !m.proc.exited) writeFileSync(join(m.sessionPath!, "settled"), "", { mode: 0o600 });
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -731,6 +777,10 @@ async function runTurn(botId: string, all: Wake[]) {
       if (minds.get(key) === mind) minds.delete(key);
     }
   } finally {
+    if (mind?.usage) {
+      try { appendFileSync(join(botsDir(), "usage.jsonl"), JSON.stringify({ bot: botId, turn: crypto.randomUUID(), at: Date.now(), source: "assistant-message-usage", measured: !!mind.usage.calls, excludesCompactionUsage: true, ...mind.usage }) + "\n", { mode: 0o600 }); } catch { /* Telemetry must not disrupt delivery. */ }
+      mind.usage = undefined;
+    }
     // Already done once the reply went through; after a failure it's what keeps late work out of the next turn.
     if (mind) await release(botId, mind, key).catch((err) => console.error("[bots] couldn't release Pi:", err));
     if (mind) {
@@ -738,6 +788,7 @@ async function runTurn(botId: string, all: Wake[]) {
       mind.steerable = false;
       mind.shown = undefined;
       mind.steered = undefined;
+      mind.contextKeys = undefined;
       mind.onCommit = undefined;
       mind.onSettled = undefined;
       mind.onExit = undefined;
@@ -836,6 +887,7 @@ async function release(botId: string, mind: Mind, key = botId) {
   const queued = (mind.queuedSteers ?? []).splice(0);
   // A deleted bot's leftovers have nowhere to go.
   const unread = mind.dropped && db.getBot(botId) ? queued.slice(-mind.dropped) : [];
+  for (const entry of queued) if (!unread.includes(entry)) for (const key of entry.keys ?? []) mind.contextKeys?.add(key);
   mind.dropped = 0;
   for (const { item, conversationId, from } of unread) {
     mind.shown?.set(conversationId, Math.min(mind.shown.get(conversationId) ?? from, from));
@@ -884,7 +936,7 @@ function waitSettled(mind: Mind): Promise<void> {
   });
 }
 
-function render(jobs: Wake[], botId: string): string {
+function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>): string {
   const bots = db.listBots();
   const user = svc.getSettings().user?.name || "User";
   const parts: string[] = [];
@@ -894,7 +946,7 @@ function render(jobs: Wake[], botId: string): string {
       seen.add(job.conversationId);
       const scoped = jobs.filter(j => j.conversationId === job.conversationId);
       const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
-      parts.push(transcript(job.conversationId, bots, user, botId, assigned));
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
@@ -902,7 +954,7 @@ function render(jobs: Wake[], botId: string): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[]): string {
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const rows = db.messages(conversationId, 16);
@@ -912,8 +964,13 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
   }
   rows.sort((a, b) => a.seq - b.seq);
-  const lines = rows.map(line(c, bots, user, botId, assigned));
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
+  const pending = new Set(bots.flatMap(bot => pendingAssignments(bot.id).filter(a => a.conversationId === conversationId).flatMap(a => a.messageIds)));
+  const lines = rows.filter(r => {
+    const key = deliveryIdentity(conversationId, r.message);
+    candidates?.add(key);
+    return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
+  }).map(line(c, bots, user, botId, assigned));
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
 }
 
 /** What a shared chat's transcript says first: who else is in it, and that they aren't the user. */
@@ -1047,6 +1104,7 @@ export function startBots() {
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();
   hot.openbotsModelsWatch = onModelsForgotten(() => {
+    windows.clear();
     if (svc.piSetup()) void svc.greetOnFirstOpen();
   });
   resumeWatches();
