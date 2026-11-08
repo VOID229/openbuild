@@ -1,5 +1,6 @@
 import { warmStartup } from "./startupWarmup";
-import { keepPullRequestFields, startPullRequestSweep } from "./pullRequests";
+import { startPullRequestSweep } from "./pullRequests";
+import { writeChat as saveChat } from "./chatWrite";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
@@ -28,10 +29,10 @@ import { findRun, localRun, startRun } from "./runs";
 import { requestRunStop } from "./runStops";
 import * as storage from "./storage";
 import * as vault from "./vault";
-import { runtimeChangeAllowed, threadRuntime } from "./threadRuntime";
+import { threadRuntime } from "./threadRuntime";
 import * as durable from "./durable";
 import * as piWorker from "./pi/remote";
-import { projectChat, projectStoredChats } from "./pi/projection";
+import { projectStoredChats } from "./pi/projection";
 import type { Chat } from "../src/lib/types";
 import * as devices from "./devices";
 import * as pairing from "./pairClient";
@@ -144,15 +145,10 @@ const api =
     return localAuth.protect(req, () => respond(handler(req, ...rest)));
   };
 
-/** Save a whole chat as a browser sent it: projected over its replies' runs, keeping server-owned fields. */
-async function writeChat(chat: storage.StoredChat): Promise<{ v: string; chat: Chat } | { error: Response }> {
-  if (!runtimeChangeAllowed(chat)) return { error: bad("A thread's runtime cannot change after it starts.") };
-  const needsPi = chat.runtime !== "durable" && (chat as unknown as Chat).messages.some(message => message.model?.plan === "pi" || message.model?.plan === "fx" || message.model?.plan === "codex" || message.model?.plan === "cursor" || message.model?.plan === "claude" || message.model?.plan === "opencode" || message.model?.plan === "grok" || message.model?.plan === "hermes" || message.shell);
-  const snapshots = needsPi ? await piWorker.snapshots(chat.id) : [];
-  const stored = storage.getChat(chat.id) as Chat | undefined;
-  const projected = keepPullRequestFields(projectChat(chat as unknown as Chat, snapshots, stored), stored);
-  const v = storage.putChat({ ...projected });
-  return v ? { v, chat: projected } : { error: bad("Chat was deleted", 410) };
+/** Save a chat as a browser sent it (see chatWrite.ts). */
+async function writeChat(chat: storage.StoredChat, onto?: (stored: Chat) => storage.StoredChat): Promise<{ v: string; chat: Chat } | { error: Response }> {
+  const written = await saveChat(chat, (id) => piWorker.snapshots(id), onto);
+  return "error" in written ? { error: bad(written.error, written.status) } : written;
 }
 
 /** Headers from a proxied remote response that are safe to pass back to the browser. */
@@ -632,9 +628,12 @@ function serve(port: number, hostname: string) {
           const stored = storage.getChat(req.params.id) as Chat | undefined;
           if (!stored) return storage.chatExists(req.params.id) ? bad("Chat was deleted", 410) : bad("No such chat", 404);
           const { historyDeferred: _, ...fields } = metadata;
-          const chat = { ...stored, ...fields, id: stored.id, messages: stored.messages };
+          // Merged again into the history as it is once the save is ready: a reply's message written
+          // meanwhile stays.
+          const onto = (latest: Chat) => ({ ...latest, ...fields, id: latest.id, messages: latest.messages });
+          const chat = onto(stored);
           if (!isChat(chat)) return bad("Expected a chat's metadata");
-          const written = await writeChat(chat);
+          const written = await writeChat(chat, onto);
           return "error" in written ? written.error : Response.json({ ok: true, v: written.v, chat: chatSummary(written.chat) });
         }),
         DELETE: api(async (req: Bun.BunRequest<"/api/chats/:id">) => {
