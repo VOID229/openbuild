@@ -1,0 +1,174 @@
+import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+// Runner-level: real ensureMind and process replacement against a fake Pi binary that keeps its
+// session the way Pi 1.5's --session-dir/--session-id does (resumed by exact id, created otherwise).
+const FAKE_PI = `#!${process.execPath}
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+const args = process.argv.slice(2);
+const arg = (name) => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1]; };
+const dir = arg("--session-dir"), id = arg("--session-id");
+const file = dir && id ? dir + "/" + id + ".jsonl" : undefined;
+const resumed = file && existsSync(file) ? readFileSync(file, "utf8").split("\\n").filter(Boolean).length : 0;
+const log = (entry) => appendFileSync(process.env.FAKE_LOG, JSON.stringify({ pid: process.pid, ...entry }) + "\\n");
+if (file) log({ type: "start", dir, id, resumed, approve: args.includes("--approve") });
+const send = (record) => console.log(JSON.stringify(record));
+const reply = (c, data) => send({ type: "response", id: c.id, success: true, data });
+for await (const line of console) {
+  const c = JSON.parse(line);
+  if (c.type === "get_available_models") reply(c, { models: [{ provider: "fake", id: "big", contextWindow: 1000000 }] });
+  else if (c.type === "get_available_thinking_levels") reply(c, { levels: [] });
+  else if (c.type === "clear_queue") reply(c, { steering: [], followUp: [] });
+  else if (c.type === "prompt") {
+    const mode = existsSync(process.env.FAKE_MODE) ? readFileSync(process.env.FAKE_MODE, "utf8").trim() : "";
+    // Pi took the prompt into its session either way: that's what makes the failure ambiguous.
+    appendFileSync(file, JSON.stringify({ type: "message", message: { role: "user", content: [{ type: "text", text: c.message }] } }) + "\\n");
+    if (mode.includes("big")) appendFileSync(file, JSON.stringify({ type: "padding", data: "x".repeat(9 * 1024 * 1024) }) + "\\n");
+    log({ type: "prompt", dir, message: c.message, mode });
+    if (mode.includes("ambiguous")) { send({ type: "response", id: c.id, success: false, error: "Agent is already processing. Specify streamingBehavior" }); continue; }
+    appendFileSync(file, JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "noted " + c.message.length }] } }) + "\\n");
+    reply(c, { disposition: "started" });
+    setTimeout(() => send({ type: "agent_settled" }), 10);
+  } else reply(c, c.type === "get_state" ? {} : undefined);
+}
+`;
+
+test("a bot's conversations resume their own Pi session A→B→A, and rotation waits out an ambiguous prompt", async () => {
+  const root = mkdtempSync(join(tmpdir(), "bot-lanes-"));
+  try {
+    writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+      import { dirname, join } from 'node:path';
+      const realNow = Date.now.bind(Date);
+      let skew = 0;
+      Date.now = () => realNow() + skew;
+      const db = await import('./server/bots/db.ts');
+      const svc = await import('./server/bots/service.ts');
+      const runner = await import('./server/bots/runner.ts');
+      const { deliveryIdentity, readDeliveries, SESSION_MAX_BYTES } = await import('./server/bots/sessionPolicy.ts');
+      svc.setHooks({ wake: runner.wake, stop: runner.stop });
+      svc.updateSettings({ onboarding: 'done' });
+      const { bot, conversationId: direct } = svc.createBot({ name: 'Alpha' });
+      const other = svc.createBot({ name: 'Beta' }).bot;
+      const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [bot.id, other.id] });
+      const events = () => existsSync(process.env.FAKE_LOG) ? readFileSync(process.env.FAKE_LOG, 'utf8').split('\\n').filter(Boolean).map(l => JSON.parse(l)) : [];
+      const prompts = () => events().filter(e => e.type === 'prompt');
+      const starts = () => events().filter(e => e.type === 'start');
+      const until = async (ok, what) => { for (let i = 0; i < 1000 && !ok(); i++) await Bun.sleep(10); a.ok(ok(), what); };
+      const alive = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      const mode = m => writeFileSync(process.env.FAKE_MODE, m);
+      const posted = new Map();
+      const say = async (where, text) => {
+        const before = prompts().length;
+        const message = { id: crypto.randomUUID(), author: 'me', text, at: Date.now() };
+        posted.set(text, message.id);
+        svc.postMessage(where, message);
+        await until(() => prompts().length === before + 1 && !runner.busy(bot.id), 'turn for ' + text);
+        return prompts().at(-1);
+      };
+      const identity = (where, text) => deliveryIdentity(where, db.getMessage(posted.get(text)).message);
+      const has = (message, text) => message.includes(': ' + text);
+      const marked = (message, text) => message.split('\\n').find(l => l.endsWith(': ' + text));
+
+      // A, then B: each conversation gets its own session; switching retires the other Pi first.
+      const a1 = await say(direct, 'A1');
+      const [startA] = starts();
+      a.equal(startA.resumed, 0);
+      a.ok(startA.approve);
+      a.equal(a1.dir, startA.dir);
+      const compaction = JSON.parse(readFileSync(join(db.botsDir(), 'minds', bot.id, '.pi', 'settings.json'), 'utf8')).compaction;
+      a.deepEqual(compaction.modelOverrides['fake/big'], { reserveTokens: 1000000 - 131072, keepRecentTokens: 8000 });
+      const b1 = await say(group.id, '@Alpha B1');
+      const startB = starts().at(-1);
+      a.notEqual(startB.pid, startA.pid);
+      a.notEqual(startB.dir, startA.dir);
+      a.equal(startB.resumed, 0);
+      a.ok(!has(b1.message, 'A1'), 'A1 leaked into B');
+      a.match(marked(b1.message, '@Alpha B1'), /\\[assigned request: answer this\\]/);
+      a.ok(!alive(startA.pid), 'A was replaced, not left running');
+
+      // Back to A: Pi resumes A's own session file, and the ledger keeps A1 out of the prompt.
+      const a2 = await say(direct, 'A2');
+      const resumedA = starts().at(-1);
+      a.notEqual(resumedA.pid, startB.pid);
+      a.equal(resumedA.dir, startA.dir);
+      a.equal(resumedA.resumed, 2, 'A1 and its answer');
+      a.ok(!alive(startB.pid));
+      a.ok(has(a2.message, 'A2') && !has(a2.message, 'A1'), a2.message);
+      a.ok(!has(a2.message, '@Alpha B1'));
+      const ledgerA = readDeliveries(startA.dir);
+      a.ok(ledgerA.has(identity(direct, 'A1')) && ledgerA.has(identity(direct, 'A2')));
+      a.ok(!ledgerA.has(identity(group.id, '@Alpha B1')), 'ledgers are per conversation');
+      a.ok(readDeliveries(startB.dir).has(identity(group.id, '@Alpha B1')));
+      a.deepEqual(runner.pendingAssignments(bot.id), []);
+
+      // Size: an ambiguous prompt grows the session past the cap. Nothing rotates until a turn settles.
+      mode('ambiguous big');
+      const a3 = await say(direct, 'A3');
+      a.ok(has(a3.message, 'A3'));
+      const sizeOf = d => readdirSync(d).filter(n => n.endsWith('.jsonl')).reduce((s, n) => s + statSync(join(d, n)).size, 0);
+      a.ok(sizeOf(startA.dir) >= SESSION_MAX_BYTES);
+      a.ok(!existsSync(join(startA.dir, 'settled')));
+      a.ok(!readDeliveries(startA.dir).has(identity(direct, 'A3')), 'an ambiguous prompt commits nothing');
+      mode('');
+      const a4 = await say(direct, 'A4');
+      a.equal(a4.dir, startA.dir, 'no rotation straight after an ambiguous prompt');
+      a.equal(starts().length, 3, 'the recovered Pi carries on');
+      // Not lost: A3 is still unread and comes again, unmarked, alongside A4.
+      a.ok(!/\\[(already seen|context only)/.test(marked(a4.message, 'A3')), a4.message);
+      a.ok(has(a4.message, 'A4') && !has(a4.message, 'A2'));
+      a.ok(existsSync(join(startA.dir, 'settled')));
+      // Now settled: the next turn starts a new generation and keeps the old one whole.
+      const a5 = await say(direct, 'A5');
+      const rotated = starts().at(-1);
+      a.notEqual(rotated.dir, startA.dir);
+      a.equal(dirname(rotated.dir), dirname(startA.dir));
+      a.equal(rotated.resumed, 0);
+      a.ok(!alive(resumedA.pid));
+      a.ok(sizeOf(startA.dir) >= SESSION_MAX_BYTES, 'old generation retained');
+      a.match(a5.message, /Previous session retained at /);
+      // A fresh session sees the history again, but only A5 is new: A3 isn't answered twice.
+      a.match(marked(a5.message, 'A3'), /\\[already seen\\]/);
+      a.match(marked(a5.message, 'A4'), /\\[already seen\\]/);
+      a.ok(!marked(a5.message, 'A5').includes('[already seen]'));
+      a.equal(readDeliveries(rotated.dir).has(identity(direct, 'A5')), true);
+
+      // Age: same rule. An ambiguous prompt past 24 hours doesn't rotate; the settled turn after it does.
+      mode('ambiguous');
+      await say(direct, 'A6');
+      mode('');
+      skew = 25 * 60 * 60 * 1000;
+      const a7 = await say(direct, 'A7');
+      a.equal(a7.dir, rotated.dir);
+      a.ok(has(a7.message, 'A6') && has(a7.message, 'A7') && !has(a7.message, 'A5'));
+      const a8 = await say(direct, 'A8');
+      a.notEqual(a8.dir, rotated.dir);
+      a.match(marked(a8.message, 'A6'), /\\[already seen\\]/);
+      a.ok(!marked(a8.message, 'A8').includes('[already seen]'));
+
+      // B's lane rotates on its own clock, inside B's lane, and B1 isn't asked for again.
+      const b2 = await say(group.id, '@Alpha B2');
+      const backToB = starts().at(-1);
+      a.equal(dirname(backToB.dir), dirname(startB.dir));
+      a.notEqual(backToB.dir, startB.dir);
+      a.equal(backToB.resumed, 0);
+      a.equal(sizeOf(startB.dir) > 0, true, 'old B generation retained');
+      a.match(marked(b2.message, '@Alpha B2'), /\\[assigned request: answer this\\]/);
+      a.match(marked(b2.message, '@Alpha B1'), /\\[context only: do not answer\\]/);
+      a.ok(!/A\\d/.test(b2.message.split('Conversation').slice(1).join('')), 'no A context in B');
+      a.deepEqual(runner.pendingAssignments(bot.id), []);
+      runner.stop(bot.id);
+      process.exit(0);
+    `], {
+      cwd: join(import.meta.dir, ".."),
+      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") },
+      stdout: "pipe", stderr: "pipe",
+    });
+    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+}, 60_000);
