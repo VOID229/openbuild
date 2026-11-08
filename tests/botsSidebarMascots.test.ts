@@ -114,6 +114,24 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
+  test("the eyes ease onto the pointer on hover-in as calmly as they ease back on hover-out", async () => {
+    const page = await open();
+    const find = item("row", "Manager");
+    const easing = `[...(${find}).querySelector('.bot').getAnimations({ subtree: true })].filter((a) => a instanceof CSSTransition && a.transitionProperty === 'transform' && a.effect.target.classList.contains('bot-look'))`;
+    const timing = () => page.eval<{ duration: number; delay: number }[]>(`${easing}.map((a) => ({ duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay }))`);
+    const [cx, cy] = await page.eval<[number, number]>(`(() => { const r = (${find}).querySelector('.bot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    // The eyes are aimed on the next frame, so wait for the transition to start.
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx + 20, y: cy + 4 });
+    await page.until(`${easing}.length > 0`);
+    const into = (await timing())[0]!;
+    await page.settle();
+    await away(page);
+    await page.until(`${easing}.length > 0`);
+    const out = (await timing())[0]!;
+    expect(into).toEqual(out);
+    expect(into.duration).toBeGreaterThanOrEqual(300);
+  });
+
   test("with reduced motion, nothing follows the pointer", async () => {
     const page = await open();
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
