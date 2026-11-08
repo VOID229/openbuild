@@ -81,12 +81,21 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
     const place = () => {
       const r = anchor.current?.getBoundingClientRect();
       if (!r) return;
-      const width = ref.current?.offsetWidth ?? 0;
+      // Measured every time the popover changes size, so one that grows (a longer list) stays on screen.
+      const width = Math.min(ref.current?.offsetWidth ?? 0, window.innerWidth - 24);
       const left = Math.max(12, Math.min(align === "end" ? r.right - width : r.left, window.innerWidth - width - 12));
       const below = window.innerHeight - r.bottom - 20;
       const above = r.top - 20;
-      const up = fixed === "up" || (fixed === "auto" && below < 320 && above > below);
-      const maxHeight = fixed === "auto" ? Math.min(420, up ? above : below) : undefined;
+      // "up"/"down" still flip when the anchor leaves no room on that side and there's more on the other.
+      const up = fixed === "up" ? !(above < 120 && below > above) : fixed === "down" ? above > below && below < 120 : below < 320 && above > below;
+      // Never taller than the room on the chosen side, so it can't run off the window.
+      // An anchor the window has left behind (a resize reflowed the page) leaves it pinned to the top.
+      if (r.bottom < 0 || r.top > window.innerHeight) {
+        setPos({ position: "fixed", left, top: 12, maxHeight: Math.max(0, window.innerHeight - 24) });
+        return;
+      }
+      const room = Math.max(0, up ? above : below);
+      const maxHeight = fixed === "auto" ? Math.min(420, room) : room;
       setPos(
         up
           ? { position: "fixed", left, bottom: window.innerHeight - r.top + 8, maxHeight }
@@ -101,11 +110,19 @@ export function Popover({ open, onClose, anchor, className, children, role = "di
       if (!r || r.bottom < 0 || r.top > window.innerHeight || (r.width === 0 && r.height === 0)) close.current();
       else place();
     };
+    // The page lays out again after a resize, which moves the anchor: look once more when it has.
+    const onResize = () => {
+      place();
+      requestAnimationFrame(place);
+    };
     place();
-    window.addEventListener("resize", place);
+    const size = ref.current && typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : undefined;
+    if (ref.current) size?.observe(ref.current);
+    window.addEventListener("resize", onResize);
     window.addEventListener("scroll", onScroll, true);
     return () => {
-      window.removeEventListener("resize", place);
+      size?.disconnect();
+      window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onScroll, true);
     };
   }, [fixed, align, open, mounted, anchor]);
