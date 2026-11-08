@@ -1,17 +1,19 @@
 // Settings → Runtimes: every thread runtime on a device (installed, version, updates, sign-in,
-// errors), and a switch that hides a runtime from the new-thread picker on that device.
-import { CircleAlert, Plus, RefreshCw, RotateCw } from "lucide-react";
-import { AddRuntime } from "./AddRuntime";
+// errors), and a switch that hides a runtime from the new-thread picker on that device. Below
+// them, the accounts added with "Add runtime", which can be edited or deleted.
+import { CircleAlert, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from "lucide-react";
+import { accountOnDevice, AddRuntime } from "./AddRuntime";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { RuntimeStatus, ThreadRuntime } from "../../shared/types";
+import type { RuntimeAccount, RuntimeStatus, ThreadRuntime } from "../../shared/types";
 import { deviceName, findDevice } from "../lib/devices";
 import { updateRuntime } from "../lib/pi";
 import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } from "../lib/runtimeStatus";
-import { RUNTIMES, runtimeEnabled, setRuntimeEnabled } from "../lib/runtimes";
+import { RUNTIMES, runtimeEnabled, runtimeName, setRuntimeEnabled } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
-import { DeviceRow, deviceRefusal, useJob, usePiDevice } from "./PiSettings";
-import { SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { DeviceRow, deviceRefusal, SubHeading, useJob, usePiDevice } from "./PiSettings";
+import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { ACCOUNT_VARIABLES } from "./RuntimeAccounts";
 import { RuntimeIcon } from "./Workspace";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
@@ -148,6 +150,57 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
   );
 }
 
+/** The runtimes added with "Add runtime" on one device. */
+function CustomRuntimes({ deviceId, onEdit }: { deviceId?: string; onEdit: (a: RuntimeAccount) => void }) {
+  const saved = useStore((s) => s.settings.runtimeAccounts);
+  const update = useStore((s) => s.updateSettings);
+  const reloadClaude = useStore((s) => s.loadClaudeModels);
+  const reloadCodex = useStore((s) => s.loadCodexModels);
+  const accounts = (saved ?? []).filter((a) => accountOnDevice(a, deviceId));
+  const remove = (a: RuntimeAccount) => {
+    if (!confirm(`Delete ${a.name}? Its folder and existing threads stay as they are.`)) return;
+    const { settings } = useStore.getState();
+    update({
+      runtimeAccounts: (settings.runtimeAccounts ?? []).filter((b) => b.id !== a.id),
+      ...(settings.threadAccountId === a.id ? { threadAccountId: undefined } : {}),
+    });
+    if (a.runtime === "claude") void reloadClaude(deviceId, true);
+    if (a.runtime === "codex") void reloadCodex(deviceId, true);
+  };
+  return (
+    <section className="rt-custom">
+      <SubHeading>Custom</SubHeading>
+      <ul className="pi-list">
+        {accounts.map((a) => (
+          <li key={a.id} className="rt-row">
+            <div className="pi-row">
+              <span className="rt-icon" aria-hidden>
+                <RuntimeIcon runtime={a.runtime} size={16} />
+              </span>
+              <span className="pi-row-text">
+                <span className="pi-row-name">
+                  {a.name}
+                  <span className="rt-badges"><span className="badge">{runtimeName(a.runtime)}</span></span>
+                </span>
+                <span className="pi-row-desc">{ACCOUNT_VARIABLES[a.runtime]}={a.shadowHome ? `${tilde(a.shadowHome)} · shares ${tilde(a.configDir)}` : tilde(a.configDir)}{a.binPath ? ` · ${tilde(a.binPath)}` : ""}</span>
+              </span>
+              <span className="pi-row-actions">
+                <IconButton label={`Edit ${a.name}`} tooltip="Edit" tooltipSide="top" className="key-icon-btn" onClick={() => onEdit(a)}>
+                  <Pencil size={14} />
+                </IconButton>
+                <IconButton label={`Delete ${a.name}`} tooltip="Delete" tooltipSide="top" className="key-icon-btn key-remove" onClick={() => remove(a)}>
+                  <Trash2 size={14} />
+                </IconButton>
+              </span>
+            </div>
+          </li>
+        ))}
+        {!accounts.length && <li className="pi-empty">None yet. Add runtime saves another account of Claude Code, Codex or Cursor here.</li>}
+      </ul>
+    </section>
+  );
+}
+
 export function RuntimesSection() {
   const [deviceId, setDeviceId] = usePiDevice();
   return (
@@ -169,7 +222,8 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
   const [error, setError] = useState<string>();
   const [checking, setChecking] = useState(false);
   const [adding, setAdding] = useState(false);
-  const closeAdding = useCallback(() => setAdding(false), []);
+  const [editing, setEditing] = useState<RuntimeAccount>();
+  const closeAdding = useCallback(() => { setAdding(false); setEditing(undefined); }, []);
   const where = deviceName(deviceId);
 
   const load = useCallback(
@@ -243,7 +297,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
           </button>
         </div>
       </div>
-      <AddRuntime open={adding} deviceId={deviceId} where={where ?? "this device"} onClose={closeAdding} />
+      <AddRuntime open={adding} deviceId={deviceId} where={where ?? "this device"} account={editing} onClose={closeAdding} />
       {error && (
         <p className="pi-error" role="alert">
           <CircleAlert size={14} /> {error}
@@ -269,8 +323,9 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
           );
         })}
       </ul>
+      <CustomRuntimes deviceId={deviceId} onEdit={(a) => { setEditing(a); setAdding(true); }} />
       <div className="rt-add">
-        <button type="button" className="btn btn-sm" onClick={() => setAdding(true)}><Plus size={14} /> Add runtime</button>
+        <button type="button" className="btn btn-sm" onClick={() => { setEditing(undefined); setAdding(true); }}><Plus size={14} /> Add runtime</button>
       </div>
     </>
   );
