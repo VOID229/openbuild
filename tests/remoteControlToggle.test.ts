@@ -24,7 +24,7 @@ afterAll(async () => {
   server?.stop(true);
 });
 
-const SIZES = { desktop: [1000, 700], phone: [390, 760] } as const;
+const SIZES = { desktop: [1000, 700], phone: [340, 760] } as const;
 
 async function open(query: string, size: keyof typeof SIZES) {
   const [width, height] = SIZES[size];

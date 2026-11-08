@@ -7387,8 +7387,9 @@ a.btn-primary {
 
 .remote-control-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 2px 8px;
   min-height: 26px;
   padding: 6px 8px 0;
   font-size: 12.5px;
@@ -7404,8 +7405,10 @@ a.btn-primary {
   transform: translateX(14px);
 }
 
+/* Too narrow for one row, the line goes under the switch whole rather than breaking mid-sentence. */
 .remote-control-note {
   min-width: 0;
+  white-space: nowrap;
 }
 
 /* In a thread, under the composer: where it works, and how full the context is */
