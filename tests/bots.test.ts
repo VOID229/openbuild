@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
+import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
   expect(isSilent(" [SILENT]\n")).toBe(true);
@@ -1549,4 +1549,27 @@ test("a bot's fallback mode: the defaults unless it has a list or is set to none
   expect(fallbackMode({ fallbackModels: [] })).toBe("inherit");
   expect(fallbackMode({ fallbackModels: ["a/one"] })).toBe("own");
   expect(fallbackMode({ noFallbacks: true, fallbackModels: ["a/one"] })).toBe("none");
+});
+
+test("@mention suggestions rank exact, prefix, word, substring, then tight fuzzy matches", () => {
+  const names = (bots: { name: string }[], q: string) => matchMentionBots(bots, q).map((b) => b.name);
+  const bots = [{ name: "ob-manager" }, { name: "manager" }, { name: "Manager Mike" }, { name: "submanager" }, { name: "helper" }, { name: "ob-helper · notes" }];
+  expect(names(bots, "manager")).toEqual(["manager", "Manager Mike", "ob-manager", "submanager"]);
+  expect(names(bots, "MANAGER")).toEqual(names(bots, "manager"));
+  expect(names([{ name: "ob-manager" }, { name: "helper" }], "manager")).toEqual(["ob-manager"]);
+  // Only the name before " · " counts.
+  expect(names(bots, "notes")).toEqual([]);
+  expect(names(bots, "help")).toEqual(["helper", "ob-helper · notes"]);
+  // Fuzzy: a tight subsequence of three letters or more.
+  expect(names([{ name: "ob-manager" }, { name: "helper" }], "obmgr")).toEqual(["ob-manager"]);
+  expect(names([{ name: "manager" }], "mngr")).toEqual(["manager"]);
+  // Irrelevant: too short, wrong order, or spread thin.
+  expect(names(bots, "mg")).toEqual([]);
+  expect(names(bots, "regam")).toEqual([]);
+  expect(names([{ name: "a really long bot name indeed" }], "ald")).toEqual([]);
+  // Ties go shorter first, then A to Z, then as given; a bare @ keeps the given order.
+  expect(names([{ name: "zed-bot" }, { name: "bot" }, { name: "abe-bot" }], "bot")).toEqual(["bot", "abe-bot", "zed-bot"]);
+  expect(names([{ name: "b" }, { name: "a" }], "")).toEqual(["b", "a"]);
+  // Duplicates stay as separate suggestions.
+  expect(names([{ name: "ob-manager" }, { name: "ob-manager" }], "manager")).toEqual(["ob-manager", "ob-manager"]);
 });

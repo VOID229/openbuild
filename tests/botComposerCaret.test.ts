@@ -19,7 +19,7 @@ afterAll(async () => {
 });
 
 const FIELD = "document.querySelector('.bots-composer-textarea')";
-const KEYS = { ArrowLeft: 37, ArrowUp: 38, Home: 36 } as const;
+const KEYS = { ArrowLeft: 37, ArrowUp: 38, Home: 36, Enter: 13 } as const;
 
 class CaretPage extends Page {
   async type(text: string) {
@@ -163,5 +163,23 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
     const f = await page.field();
     expect(f.focused).toBe(false);
     expect([f.value, f.start]).toEqual([A, A.length - 5]);
+  }, 60_000);
+
+  test("@manager suggests @ob-manager, and Enter inserts it with the caret after it", async () => {
+    const page = await open();
+    await page.eval(`bots.setState((s) => ({
+      bots: [...s.bots, { id: "ob-manager", name: "ob-manager", look: { shape: "ghost", color: "green" }, instructions: "", memory: [], routines: [], createdAt: 1 }],
+      conversations: [...s.conversations, { id: "d", kind: "group", name: "Mentions", botIds: ["ob-manager", "helper"], createdAt: 1, updatedAt: 1, messages: messages("d", 2) }],
+    }))`);
+    await page.select("d");
+    await page.focusField();
+    await page.type("hi @manager");
+    const labels = await page.eval<string[]>("[...document.querySelectorAll('.bots-mentions .menu-item-label')].map((e) => e.textContent)");
+    expect(labels).toEqual(["ob-manager"]);
+    await page.press("Enter");
+    const f = await page.field();
+    expect(f.value).toBe("hi @ob-manager ");
+    expect([f.start, f.end]).toEqual([f.value.length, f.value.length]);
+    expect(await page.eval<number>("document.querySelectorAll('.bots-mentions').length")).toBe(0);
   }, 60_000);
 });
