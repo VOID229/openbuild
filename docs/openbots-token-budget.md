@@ -18,12 +18,17 @@ still injected by full message id, including requests outside the latest transcr
 Session-local information needed long term should be saved through remember; chat search remains
 available. Old generations are retained for operator inspection, not exposed as bot filesystem tools.
 
-Bot-only `.pi/settings.json` enables automatic compaction. For known models the reserve is 25%
-of the context window, capped at 65,536 tokens; keep-recent is 1/16 of the window, capped at 8,000.
-Unknown models use a 16,384 reserve and 8,000 keep-recent. Pi defaults at inspection were
-16,384/20,000. The runner explicitly approves its managed bot working directory so Pi 1.5 loads
-these settings. It does not change global Pi settings or credentials. Settings are generated when
-a process starts. The real-Pi test verifies effective settings without requesting an inference.
+Bot-only `.pi/settings.json` enables automatic compaction. Pi compacts once context exceeds
+`contextWindow - reserveTokens`, and uses reserveTokens for nothing else, so the runner sets a
+per-model override (`compaction.modelOverrides["provider/id"]`) that triggers compaction at 3/4 of
+the window or 131,072 tokens, whichever is smaller: a 1M-window model compacts at 128k rather
+than about 984k. Keep-recent is 1/16 of the window, capped at 8,000. Models without a known
+window use a 16,384 reserve and 8,000 keep-recent. Pi defaults at inspection were 16,384/20,000.
+Context windows come from one model listing per extension set, cached for 10 minutes and dropped
+when Pi forgets its models, so a fresh per-conversation mind doesn't cost a second Pi start. The
+runner explicitly approves its managed bot working directory so Pi 1.5 loads these settings. It
+does not change global Pi settings or credentials. Settings are generated when a process starts.
+The real-Pi test verifies effective settings, including a model override, without an inference.
 
 Transcript delivery fingerprints use the full message object and conversation id, not truncated
 chat ids, cursors or text matching. Edits, reactions and poll changes produce new fingerprints.

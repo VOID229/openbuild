@@ -65,13 +65,17 @@ export function saveDeliveries(path: string, delivered: Set<string>) {
   renameSync(file + ".tmp", file);
 }
 
+/** Compaction starts at 3/4 of the window, and never past COMPACT_AT, so a large-window model
+ * doesn't carry (and re-bill) hundreds of thousands of cached tokens each call. Pi compacts when
+ * context > window - reserveTokens, and reserveTokens is used for nothing else. */
+export const COMPACT_AT = 128 * 1024;
 export function compactionPolicy(models: { provider: string; id: string; contextWindow?: number }[]) {
   return {
     enabled: true, reserveTokens: 16384, keepRecentTokens: 8000,
-    modelOverrides: Object.fromEntries(models.map(m => {
-      const window = m.contextWindow && m.contextWindow > 0 ? m.contextWindow : 65536;
+    modelOverrides: Object.fromEntries(models.filter(m => m.contextWindow && m.contextWindow > 0).map(m => {
+      const window = m.contextWindow!;
       return [`${m.provider}/${m.id}`, {
-        reserveTokens: Math.min(65536, Math.floor(window / 4)),
+        reserveTokens: window - Math.min(COMPACT_AT, Math.floor(window * 3 / 4)),
         keepRecentTokens: Math.min(8000, Math.floor(window / 16)),
       }];
     })),

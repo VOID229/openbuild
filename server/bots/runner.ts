@@ -270,6 +270,22 @@ function workDir(botId: string, lane = "main") {
   return dir;
 }
 
+/** Each model's context window, for compaction settings. Cached per extension set, so a fresh mind
+ * (one per conversation switch) doesn't cost a second Pi start; dropped when Pi forgets its models. */
+const windows = new Map<string, { at: number; models: Promise<{ provider: string; id: string; contextWindow?: number }[]> }>();
+function windowsFor(flags: string[], cwd: string) {
+  const key = JSON.stringify(flags);
+  const cached = windows.get(key);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.models;
+  const probe = new PiProcess(["--no-session", ...flags], cwd);
+  // A model it couldn't list keeps the bot-wide defaults, and a failed listing is asked again next time.
+  const models: Promise<{ provider: string; id: string; contextWindow?: number }[]> = settledModels(probe)
+    .catch(() => { if (windows.get(key)?.models === models) windows.delete(key); return []; })
+    .finally(() => probe.close());
+  windows.set(key, { at: Date.now(), models });
+  return models;
+}
+
 async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   const key = mindKey(botId, lane);
   let existing = minds.get(key);
@@ -289,9 +305,7 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     return existing;
   }
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
-  const probe = new PiProcess(["--no-session", ...flags], workDir(botId, lane));
-  let models;
-  try { models = await settledModels(probe); } finally { probe.close(); }
+  const models = await windowsFor(flags, workDir(botId, lane));
 
   // Bot-only project settings; shared auth and extension discovery remain unchanged.
   mkdirSync(join(workDir(botId, lane), ".pi"), { recursive: true, mode: 0o700 });
@@ -953,7 +967,7 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     candidates?.add(key);
     return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
   }).map(line(c, bots, user, botId, assigned));
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
 }
 
 /** What a shared chat's transcript says first: who else is in it, and that they aren't the user. */
@@ -1087,6 +1101,7 @@ export function startBots() {
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();
   hot.openbotsModelsWatch = onModelsForgotten(() => {
+    windows.clear();
     if (svc.piSetup()) void svc.greetOnFirstOpen();
   });
   resumeWatches();

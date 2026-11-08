@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { laneDirectory, sessionGeneration, SESSION_MAX_AGE, SESSION_MAX_BYTES, memoryContext, compactionPolicy, deliveryIdentity, readDeliveries, saveDeliveries } from "../server/bots/sessionPolicy";
+import { laneDirectory, sessionGeneration, SESSION_MAX_AGE, SESSION_MAX_BYTES, memoryContext, compactionPolicy, COMPACT_AT, deliveryIdentity, readDeliveries, saveDeliveries } from "../server/bots/sessionPolicy";
 
 test("bot and conversation lanes are independent including friend conversations", () => {
   const paths = new Set([laneDirectory("/tmp", "a", "direct"), laneDirectory("/tmp", "a", "friend"), laneDirectory("/tmp", "b", "direct")]);
@@ -56,7 +56,7 @@ test("real Pi loads bot-only compaction settings with explicit project approval,
   try {
     mkdirSync(join(root, ".pi"));
     mkdirSync(join(root, "agent"));
-    const policy = { enabled: true, reserveTokens: 65536, keepRecentTokens: 8000 };
+    const policy = { enabled: true, reserveTokens: 65536, keepRecentTokens: 8000, modelOverrides: { "test/big": { reserveTokens: 868928, keepRecentTokens: 8000 } } };
     writeFileSync(join(root, ".pi", "settings.json"), JSON.stringify({ compaction: policy }));
     const extension = join(root, "inspect.ts");
     writeFileSync(extension, `import { writeFileSync } from 'node:fs'; export default function(pi) { pi.on('session_start', () => writeFileSync(${JSON.stringify(join(root, "effective.json"))}, JSON.stringify(pi.getSettings().compaction))); }`);
@@ -70,11 +70,15 @@ test("real Pi loads bot-only compaction settings with explicit project approval,
   }
 }, 30000);
 
-test("compaction reserve scales down for small models and caps for large ones", () => {
-  const policy = compactionPolicy([32768, 65536, 1000000].map(contextWindow => ({ provider: "test", id: String(contextWindow), contextWindow })));
+test("compaction starts at 3/4 of small windows and at a fixed bound on large ones", () => {
+  const policy = compactionPolicy([...[32768, 65536, 200000, 1000000].map(contextWindow => ({ provider: "test", id: String(contextWindow), contextWindow })), { provider: "test", id: "unknown" }]);
   expect(policy.modelOverrides["test/32768"]).toEqual({ reserveTokens: 8192, keepRecentTokens: 2048 });
   expect(policy.modelOverrides["test/65536"]).toEqual({ reserveTokens: 16384, keepRecentTokens: 4096 });
-  expect(policy.modelOverrides["test/1000000"]).toEqual({ reserveTokens: 65536, keepRecentTokens: 8000 });
+  // Pi compacts once context exceeds window - reserve: here at COMPACT_AT, not near the window.
+  expect(200000 - policy.modelOverrides["test/200000"]!.reserveTokens).toBe(COMPACT_AT);
+  expect(policy.modelOverrides["test/1000000"]).toEqual({ reserveTokens: 1000000 - COMPACT_AT, keepRecentTokens: 8000 });
+  expect(policy.modelOverrides["test/unknown"]).toBeUndefined();
+  expect(policy).toMatchObject({ enabled: true, reserveTokens: 16384, keepRecentTokens: 8000 });
 });
 
 test("transcript suppresses committed context, retains explicit assignments and exposes reaction changes", async () => {
@@ -92,6 +96,7 @@ test("transcript suppresses committed context, retains explicit assignments and 
       a.match(first, /CONTEXT_CANARY/);
       const second = runner.transcript(bot.conversationId, bots, 'User', bot.bot.id, undefined, candidates);
       a.doesNotMatch(second, /CONTEXT_CANARY/);
+      a.match(second, /nothing new since you last saw it/);
       const assigned = runner.transcript(bot.conversationId, bots, 'User', bot.bot.id, [message.id], candidates);
       a.match(assigned, /assigned request: answer this.*CONTEXT_CANARY/);
       svc.toggleReaction(bot.conversationId, message.id, '❤️', bot.bot.id);
