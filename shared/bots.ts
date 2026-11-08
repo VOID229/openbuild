@@ -558,7 +558,7 @@ const AUTHORED_PHRASES: Record<string, string> = {
  * settings, which name a bot already, and a pause or a poll closing, which no one bot did.
  */
 export function authoredEventText(event: { kind: string; text: string; detail?: string }): string | undefined {
-  if (event.kind === "message" || event.kind === "model" || event.kind === "changed" || event.kind === "poll" || event.text === "Paused") return;
+  if (event.kind === "message" || event.kind === "model" || event.kind === "changed" || event.kind === "renamed" || event.kind === "poll" || event.text === "Paused") return;
   // A routine being set and one running were both saved as "Routine" once; only setting one had a schedule.
   if (event.text === "Routine") return event.detail?.includes(" · ") ? "set a routine" : "ran a routine";
   const text = eventText(event);

@@ -122,7 +122,8 @@ interface BotsState {
   select: (id: string) => void;
   setDetailsOpen: (open: boolean) => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
-  updateBot: (id: string, patch: Partial<Omit<Bot, "id">>) => void;
+  /** `conversationId`: the chat a rename was made in, which says so there. */
+  updateBot: (id: string, patch: Partial<Omit<Bot, "id">>, conversationId?: string) => void;
   makePrimary: (id: string) => void;
   deleteBot: (id: string) => void;
   createGroup: (group: { name: string; botIds: string[]; instructions?: string }) => string;
@@ -254,9 +255,9 @@ export const useBots = create<BotsState>()(
       void send("POST", "/api/bots", { id: bot.id, conversationId: conversation.id, name: bot.name, look: bot.look, instructions: bot.instructions });
       return conversation.id;
     },
-    updateBot: (id, patch) => {
+    updateBot: (id, patch, conversationId) => {
       set((s) => ({ bots: mapBot(s.bots, id, (b) => ({ ...b, ...patch })) }));
-      void send("PATCH", `/api/bots/${id}`, patch);
+      void send("PATCH", `/api/bots/${id}`, conversationId && patch.name !== undefined ? { ...patch, conversationId } : patch);
     },
     makePrimary: (id) => {
       set((s) => ({ bots: s.bots.map((b) => ({ ...b, primary: b.id === id || undefined })) }));

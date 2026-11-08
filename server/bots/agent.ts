@@ -583,13 +583,15 @@ export function manage(botId: string, p: Record<string, unknown>) {
       if (self.instructions.trim()) delete patch.instructions;
       delete patch.proactivity;
     }
+    // A rename is said in the chat it was asked in, when the bot is in it.
+    const where = typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : focus.get(botId);
     if (!changesModel(p) && !changesComputer(p)) {
       if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");
-      const bot = svc.updateBot(target, patch);
+      const bot = svc.updateBot(target, patch, { conversationId: where });
       return { id: bot.id, name: bot.name };
     }
     // The whole update is one write, after every model and the computer it names check out.
-    return settingsChange(p, db.getBot(target)?.computer).then((settings) => settingsSummary(svc.updateBot(target, { ...patch, ...settings }), p));
+    return settingsChange(p, db.getBot(target)?.computer).then((settings) => settingsSummary(svc.updateBot(target, { ...patch, ...settings }, { conversationId: where }), p));
   }
   throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models, defaults or computers.");
 }

@@ -483,7 +483,7 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
  * Whoever changed it, the bot's chat gets a line saying what did (see announceChanges), unless `quiet`:
  * a bot just made, getting its first settings.
  */
-export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; quiet?: boolean } = {}): Bot {
+export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; quiet?: boolean; conversationId?: string } = {}): Bot {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
   const before = { ...bot };
@@ -524,12 +524,13 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
   }
   db.putBot(bot);
   noteChanges(before, bot, opts.by === "me");
+  noteRename(before, bot);
   // A reply on the new model isn't a fallback coming back: the line below already says it changed.
   if (bot.model !== before.model) db.setValue(`ran:${id}`, null);
   if (newPace) touchHeartbeat(id);
   for (const other of db.listBots()) if (other.id !== id && patch.primary) emitBot(other.id);
   emitBot(id);
-  if (!opts.quiet) announceChanges(before, bot);
+  if (!opts.quiet) announceChanges(before, bot, opts.by, opts.conversationId);
   return fullBot(id)!;
 }
 
@@ -614,10 +615,19 @@ export function settingChanges(before: db.StoredBot, after: db.StoredBot): strin
  * One activity line in the bot's own chat for a save that changed something, however it was made: the
  * app's settings or the primary's manage_bot. "Juniper's model: Grok 4.7 → GPT 6.1 Sol; effort: high → max".
  * A save that changed nothing says nothing.
+ *
+ * A new name is also said where it was changed, when that's a chat the bot is in ("Juniper is now Atlas"):
+ * the others in it read it with the rest of the chat. It's the user's own line when they changed it, so it
+ * doesn't leave the chat unread. Its own chat says it once, there.
  */
-function announceChanges(before: db.StoredBot, after: db.StoredBot) {
-  const changes = settingChanges(before, after);
+function announceChanges(before: db.StoredBot, after: db.StoredBot, by?: "me", conversationId?: string) {
+  let changes = settingChanges(before, after);
   const where = directId(after.id);
+  if (before.name !== after.name) {
+    const here = conversationId && db.getConversation(conversationId)?.botIds.includes(after.id) ? conversationId : where;
+    if (here) postMessage(here, { id: crypto.randomUUID(), author: by === "me" ? "me" : after.id, at: Date.now(), text: "", event: { kind: "renamed", text: `${before.name} is now ${after.name}`, bot: after.id } });
+    if (here === where) changes = changes.filter((c) => !c.startsWith("name: "));
+  }
   if (!changes.length || !where) return;
   postMessage(where, { id: crypto.randomUUID(), author: after.id, at: Date.now(), text: "", event: { kind: "changed", text: `${before.name}'s ${changes.join("; ")}`, bot: after.id } });
 }
@@ -684,6 +694,53 @@ function noteChanges(before: db.StoredBot, after: db.StoredBot, user: boolean) {
   db.setValue(CHANGE_NOTES, list);
 }
 
+// ------------------------------------------------------------------ a bot's new name
+
+/**
+ * A rename a bot hasn't been told of yet, whoever made it and whichever bot it is: shown with its next
+ * turn, so it stops answering to the old name. One per bot: a run of renames reads as one, and renaming
+ * it back leaves nothing to say.
+ */
+export interface RenameNote {
+  botId: string;
+  from: string;
+  to: string;
+}
+const RENAME_NOTES = "rename-notes";
+const renameNotes = () => db.getValue<RenameNote[]>(RENAME_NOTES) ?? [];
+
+function noteRename(before: db.StoredBot, after: db.StoredBot) {
+  if (before.name === after.name) return;
+  const list = renameNotes();
+  const from = list.find((n) => n.botId === after.id)?.from ?? before.name;
+  const rest = list.filter((n) => n.botId !== after.id);
+  db.setValue(RENAME_NOTES, from === after.name ? rest : [...rest, { botId: after.id, from, to: after.name }]);
+}
+
+export function pendingRenameNotes(botId: string): RenameNote[] {
+  return renameNotes().filter((n) => n.botId === botId && db.getBot(botId));
+}
+
+export function renameNoteText(notes: RenameNote[]): string {
+  if (!notes.length) return "";
+  const lines = notes.map((n) => `- You were renamed from ${n.from} to ${n.to}. Go by ${n.to} now, and when people call you ${n.from}, that's you too.`);
+  return `Since your last turn:\n${lines.join("\n")}\nThat's just so you know; it needs no reply.`;
+}
+
+/** The bot was shown these. One renamed again meanwhile keeps what it hasn't heard. */
+export function settleRenameNotes(shown: RenameNote[]) {
+  if (!shown.length) return;
+  db.setValue(
+    RENAME_NOTES,
+    renameNotes().flatMap((n) => {
+      const seen = shown.find((s) => s.botId === n.botId);
+      if (!seen) return [n];
+      if (seen.to === n.to) return [];
+      return [{ ...n, from: seen.to }];
+    }),
+  );
+}
+
 /** What the user changed since the primary last heard, for its next turn. Only the primary's. */
 export function pendingChangeNotes(botId: string): ChangeNote[] {
   if (!db.getBot(botId)?.primary) return [];
@@ -740,6 +797,7 @@ export async function deleteBot(id: string) {
   }
   db.deleteBot(id);
   db.setValue(CHANGE_NOTES, changeNotes().filter((n) => n.botId !== id));
+  db.setValue(RENAME_NOTES, renameNotes().filter((n) => n.botId !== id));
   status.delete(id);
   emit({ t: "bot-deleted", id });
 }

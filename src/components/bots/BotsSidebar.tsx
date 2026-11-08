@@ -417,7 +417,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
         initial={conversation.friend ? (conversation.name ?? "") : name}
         action="Rename"
         onClose={onClose}
-        onSubmit={(next) => (conversation.kind === "direct" ? st.updateBot(conversation.botIds[0]!, { name: next }) : st.updateConversation(conversation.id, { name: next }))}
+        onSubmit={(next) => (conversation.kind === "direct" ? st.updateBot(conversation.botIds[0]!, { name: next }, conversation.id) : st.updateConversation(conversation.id, { name: next }))}
       />
     );
   if (dialog.kind === "section")

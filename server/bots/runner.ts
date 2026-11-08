@@ -633,7 +633,9 @@ async function runTurn(botId: string, all: Wake[]) {
     // Settings the user changed in the app, for the primary: shown once, in whatever turn of its own comes next.
     // They're the user's business, so a turn in a chat shared with a friend leaves them for later.
     const notes = lane === "main" ? svc.pendingChangeNotes(botId) : [];
-    const message = [svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
+    // A new name is told to its bot in any chat: it's how everyone there will call it.
+    const renames = svc.pendingRenameNotes(botId);
+    const message = [svc.renameNoteText(renames), svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -706,6 +708,7 @@ async function runTurn(botId: string, all: Wake[]) {
     await release(botId, m, key);
     if (handled) return;
     svc.settleChangeNotes(botId, notes);
+    svc.settleRenameNotes(renames);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     setStatus(botId, { state: "idle" });
