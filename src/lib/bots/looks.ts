@@ -245,8 +245,8 @@ export const COLOR_BY_ID = new Map(COLORS.map((c) => [c.id, c]));
 
 /** An expression a bot can hold or flash. */
 export type Mood = "idle" | "happy" | "thinking" | "sleepy" | "surprised" | "love" | "wink" | "squint";
-/** A one-off move. */
-export type Action = "hop" | "spin" | "wiggle" | "squish" | "nod";
+/** A one-off move. A stretch is waking up from a doze. */
+export type Action = "hop" | "spin" | "wiggle" | "squish" | "nod" | "stretch";
 
 export interface BotLook {
   shape: string;

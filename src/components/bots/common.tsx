@@ -1,6 +1,8 @@
 // Pieces the OpenBots sidebar, chat and details panel share.
 import { Star } from "lucide-react";
 import { memo, useEffect, useState, type ReactNode } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { busyBots } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -21,6 +23,13 @@ export function useSlow(busy: boolean, delay = 1200) {
     return () => clearTimeout(t);
   }, [busy, delay]);
   return busy && slow;
+}
+
+const NONE: string[] = [];
+
+/** The conversation's bots at work (see `busyBots`). In a group, these are awake and the rest doze. */
+export function useBusyBots(conversation: Pick<Conversation, "id" | "botIds"> | undefined): string[] {
+  return useBots(useShallow((s) => (conversation ? busyBots(conversation, s.status, s.typing) : NONE)));
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -106,7 +115,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   lively?: boolean;
   track?: boolean;
   busy?: boolean;
-  /** The bots at work, so a group animates just those members rather than all of them. */
+  /** The bots at work, so a group animates just those members and the rest doze. */
   working?: string[];
   mood?: Mood;
   badge?: boolean;

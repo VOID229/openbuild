@@ -13,6 +13,7 @@ import { BotComputer, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAd
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
+import { useBusyBots } from "./common";
 import { BotExtensions } from "./BotExtensions";
 import { BotFriends } from "./BotFriends";
 import { BotLoop } from "./BotLoop";
@@ -157,6 +158,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
   const [name, setName] = useState(group.name ?? "");
   useEffect(() => setName(group.name ?? ""), [group.name]);
   const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "orb", color: "gray" });
+  const working = useBusyBots(group);
   const saveName = () => {
     const next = name.trim();
     if (next && next !== group.name) st.updateConversation(group.id, { name: next });
@@ -166,7 +168,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
     <div className="bots-set-editor">
       <SettingsBack label="Back to all bots" onBack={onBack} />
       <div className="bots-set-hero">
-        <BotHuddle looks={looks} size={96} extra={looks.length > 4 ? looks.length - 4 : undefined} />
+        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} extra={looks.length > 4 ? looks.length - 4 : undefined} />
         <div className="bots-set-hero-text">
           <input className="input bots-set-name" value={name} maxLength={48} aria-label="Group name" onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
           <div className="bots-details-sub">{plural(group.botIds.length, "bot")}</div>
@@ -232,10 +234,11 @@ function BotRow({ bot, onEdit }: { bot: Bot; onEdit: () => void }) {
 function GroupRow({ group, bots, onEdit }: { group: Conversation; bots: Bot[]; onEdit: () => void }) {
   const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "orb", color: "gray" });
   const names = group.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" · ")[0]).filter(Boolean);
+  const working = useBusyBots(group);
   return (
     <li className="pi-row bots-set-row">
       <button type="button" className="bots-set-row-main" onClick={onEdit}>
-        <BotHuddle looks={looks} size={34} />
+        <BotHuddle looks={looks} size={34} active={group.botIds.map((id) => working.includes(id))} />
         <span className="pi-row-text">
           <span className="pi-row-name">{conversationName(group, bots)}</span>
           <span className="pi-row-desc bots-set-row-desc">{names.join(", ") || "No bots"}</span>
