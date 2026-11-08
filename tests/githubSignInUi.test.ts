@@ -142,3 +142,43 @@ for (const [name, width, height, mobile] of sizes) {
     expect(select.font).toBe(select.body);
   }, 20_000);
 }
+
+const button = (text: string) => `[...document.querySelectorAll('.app-page button')].find((b) => b.textContent.trim() === ${JSON.stringify(text)})`;
+
+test.skipIf(!browser)("copying the sign-in code says so, then goes back to its copy icon", async () => {
+  const page = await Page.open(ws, `${server!.url}?state=pending`, 1280, 900, false);
+  await page.eval(`Object.defineProperty(navigator, 'clipboard', { value: { writeText: (t) => { window.copied = t; return Promise.resolve(); } } })`);
+  await page.eval(`document.querySelector('.app-copy button').click()`);
+  await page.until(`document.querySelector('.app-copy-status').textContent === 'Copied'`);
+  expect(await page.eval<unknown>(`window.copied`)).toBe("WDJB-MJHT");
+  expect(await page.eval<unknown>(`document.querySelector('.app-copy button').getAttribute('aria-label')`)).toBe("Copied");
+  expect(await page.eval<unknown>(`!!document.querySelector('.app-copy button svg.lucide-check')`)).toBe(true);
+  await page.until(`document.querySelector('.app-copy-status').textContent === '' && !!document.querySelector('.app-copy button svg.lucide-copy')`);
+}, 20_000);
+
+test.skipIf(!browser)("when copying fails, it says so and selects the code to copy by hand", async () => {
+  const page = await Page.open(ws, `${server!.url}?state=pending&clipboard=fail`, 1280, 900, false);
+  await page.eval(`document.querySelector('.app-copy button').click()`);
+  await page.until(`!!document.querySelector('.app-guide [role=alert]')`);
+  expect(await page.eval<unknown>(`document.querySelector('.app-guide [role=alert]').textContent`)).toContain("Couldn't copy");
+  expect(await page.eval<unknown>(`String(getSelection())`)).toBe("WDJB-MJHT");
+  expect(await page.eval<unknown>(`document.querySelector('.app-copy-status').textContent`)).toBe("");
+}, 20_000);
+
+test.skipIf(!browser)("Save on a connected app saves its settings and closes the dialog", async () => {
+  const page = await Page.open(ws, `${server!.url}?state=connected`, 1280, 900, false);
+  await page.until(`!!${button("Save")}`);
+  await page.eval(`(() => { const s = document.querySelector('select.input'); s.value = 'write'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await page.eval(`${button("Save")}.click()`);
+  await page.until(`!!document.getElementById('closed')`);
+  expect(await page.eval<unknown>(`window.saved`)).toEqual({ fields: { access: "write" } });
+}, 20_000);
+
+test.skipIf(!browser)("a Save that fails keeps the dialog open with the error", async () => {
+  const page = await Page.open(ws, `${server!.url}?state=connected&save=fail`, 1280, 900, false);
+  await page.until(`!!${button("Save")}`);
+  await page.eval(`${button("Save")}.click()`);
+  await page.until(`[...document.querySelectorAll('.app-page [role=alert]')].some((e) => e.textContent.includes("GitHub didn't answer."))`);
+  expect(await page.eval<unknown>(`!!document.getElementById('closed')`)).toBe(false);
+  expect(await page.eval<unknown>(`!!${button("Save")}`)).toBe(true);
+}, 20_000);

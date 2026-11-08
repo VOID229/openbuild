@@ -225,9 +225,11 @@ export function useMediaQuery(query: string) {
   return matches;
 }
 
-export async function copyText(text: string) {
+/** Copies `text`, and says whether it made it to the clipboard. */
+export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
+    return true;
   } catch {
     // Clipboard API is unavailable on insecure origins (e.g. LAN IPs over http).
     const ta = document.createElement("textarea");
@@ -236,8 +238,13 @@ export async function copyText(text: string) {
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
-    document.execCommand("copy");
-    ta.remove();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      ta.remove();
+    }
   }
 }
 

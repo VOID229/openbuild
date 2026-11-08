@@ -1,6 +1,6 @@
 // OpenBots' Connect Apps: a catalog of official MCP servers and skills to search and browse, a page
 // for each app with whatever it takes to connect it, and the card a bot posts to offer one in a chat.
-import { ArrowLeft, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
@@ -99,19 +99,41 @@ function Section({ title, apps, onOpen, onAll }: { title: string; apps: CatalogA
   );
 }
 
+/** A value to copy, with a button that says whether it did. Failing, it selects the value to copy by hand. */
 export function CopyLine({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState<"yes" | "no">();
+  const code = useRef<HTMLElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const copy = async () => {
+    const ok = await copyText(value);
+    setCopied(ok ? "yes" : "no");
+    clearTimeout(timer.current);
+    if (ok) timer.current = setTimeout(() => setCopied(undefined), 1400);
+    else if (code.current) window.getSelection()?.selectAllChildren(code.current);
+  };
   return (
-    <div className="app-copy">
-      <code>{value}</code>
-      <IconButton label={label} onClick={() => void copyText(value)}>
-        <Copy size={14} />
-      </IconButton>
-    </div>
+    <>
+      <div className="app-copy">
+        <code ref={code}>{value}</code>
+        <span className="app-copy-status" aria-live="polite">
+          {copied === "yes" && "Copied"}
+        </span>
+        <IconButton label={copied === "yes" ? "Copied" : label} onClick={() => void copy()}>
+          {copied === "yes" ? <Check size={14} className="ok" /> : <Copy size={14} />}
+        </IconButton>
+      </div>
+      {copied === "no" && (
+        <p className="field-help key-status key-status-bad" role="alert">
+          <CircleAlert size={13} className="bad" /> Couldn't copy it. It's selected: copy it with your keyboard.
+        </p>
+      )}
+    </>
   );
 }
 
 /** One app: what it does, what connecting it takes, and what it gave bots. */
-function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
+function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void; onDone: () => void }) {
   const view = useApps((s) => s.apps[app.id]);
   const clients = useApps((s) => s.clients);
   const githubKey = useApps((s) => s.githubKey);
@@ -151,7 +173,14 @@ function AppPage({ app, onBack }: { app: CatalogApp; onBack: () => void }) {
     const input: ConnectInput = {};
     if (app.fields?.length) input.fields = fields;
     if (guide && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
-    void run(() => connectWith(input));
+    // Saving a connected app's settings is done once it's still connected after: the dialog closes.
+    // A failure stays here with its error, as does a reconnect that's still signing in.
+    const saving = connected;
+    void run(async () => {
+      await connectWith(input);
+      const after = useApps.getState().apps[app.id];
+      if (saving && isConnected(after) && !after?.signingIn) onDone();
+    });
   };
   const finish = () => void run(() => useApps.getState().finish(app.id, pasted).then(() => setPasted("")));
   const pastes = pastesSignIn(app);
@@ -385,7 +414,7 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
     <dialog {...modal} className="bots-dialog apps-dialog" aria-label="Connect Apps">
       <DialogHead title="Connect Apps" onClose={onClose} />
       {page ? (
-        <AppPage key={page.id} app={page} onBack={() => setOpen(undefined)} />
+        <AppPage key={page.id} app={page} onBack={() => setOpen(undefined)} onDone={onClose} />
       ) : (
         <div className="bots-dialog-body apps-body">
           <div className="apps-tools">
