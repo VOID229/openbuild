@@ -557,7 +557,10 @@ function serve(port: number, hostname: string) {
         POST: api(async (req) => {
           const body = await readJson(req);
           if (!Array.isArray(body?.ids) || !body.ids.every((id: unknown) => typeof id === "string")) return bad("Expected { ids: string[] }");
-          return Response.json({ summaries: await storage.chatSummaries(body.ids) });
+          const rows = await storage.chatSummaryRows(body.ids);
+          return new Response(`{"summaries":[${rows.map((r) => `{"v":${JSON.stringify(r.v)},"chat":${r.data}}`).join(",")}]}`, {
+            headers: { "content-type": "application/json" },
+          });
         }),
       },
       "/api/chats/search": {
