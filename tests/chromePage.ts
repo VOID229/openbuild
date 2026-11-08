@@ -125,9 +125,16 @@ export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Prom
  */
 export async function serveFixture(html: string, routes: Record<string, (req: Request) => Response | Promise<Response>> = {}) {
   const out = await mkdtemp(join(tmpdir(), "openbuild-fixture-"));
-  const build = Bun.spawn([process.execPath, "build", html, "--outdir", out, "--target", "browser", "--public-path", "/"], { stdout: "ignore", stderr: "pipe" });
-  const [code, err] = await Promise.all([build.exited, new Response(build.stderr).text()]);
-  if (code !== 0) throw new Error(`Couldn't build ${html}:\n${err}`);
+  // Now and then `bun build` doesn't exit: a build takes well under a second, so give up on one that
+  // hasn't after a few and start again.
+  for (let attempt = 1; ; attempt++) {
+    const build = Bun.spawn([process.execPath, "build", html, "--outdir", out, "--target", "browser", "--public-path", "/"], { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
+    const stuck = setTimeout(() => build.kill("SIGKILL"), 5000);
+    const [code, err] = await Promise.all([build.exited, new Response(build.stderr).text()]);
+    clearTimeout(stuck);
+    if (code === 0) break;
+    if (build.signalCode !== "SIGKILL" || attempt === 3) throw new Error(`Couldn't build ${html}:\n${err}`);
+  }
   const server = Bun.serve({
     port: 0,
     fetch: async (req) => {
