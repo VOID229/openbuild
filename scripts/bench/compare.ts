@@ -1,13 +1,18 @@
-// Two bench.ts results side by side, as a Markdown table of medians (ms).
+// bench.ts results side by side, as a Markdown table of medians (ms).
 //
 //   bun scripts/bench/compare.ts before.json after.json [label]
+//   bun scripts/bench/compare.ts before-1.json,before-2.json after-1.json,after-2.json [label]
+//
+// Comma-separated results are rounds run interleaved (before, after, before, after): each cell lists
+// every round's median, and the change compares each round's before with its own after.
 import { readFileSync } from "node:fs";
 
-const [beforePath, afterPath, label = ""] = process.argv.slice(2);
-if (!beforePath || !afterPath) throw new Error("usage: compare.ts before.json after.json [label]");
-const read = (p: string) => JSON.parse(readFileSync(p, "utf8"));
-const before = read(beforePath);
-const after = read(afterPath);
+const [beforePaths, afterPaths, label = ""] = process.argv.slice(2);
+if (!beforePaths || !afterPaths) throw new Error("usage: compare.ts before.json[,…] after.json[,…] [label]");
+const read = (paths: string) => paths.split(",").map((p) => JSON.parse(readFileSync(p, "utf8")));
+const before = read(beforePaths);
+const after = read(afterPaths);
+if (before.length !== after.length) throw new Error("as many before rounds as after rounds");
 
 const ROWS: [string, string][] = [
   ["cold load: thread on screen", "cold.thread"],
@@ -25,16 +30,29 @@ const ROWS: [string, string][] = [
 ];
 const at = (r: unknown, path: string) => path.split(".").reduce<any>((o, k) => o?.[k], r)?.median as number | undefined;
 const kb = (r: any, kind: "cold" | "warm") => r?.[kind]?.network ? `${r[kind].network.kb} KB` : undefined;
+const cell = (xs: (string | number | undefined)[]) => xs.every((x) => x === undefined) ? "–" : xs.map((x) => x ?? "–").join(", ");
+
+const change = (r: number) => r >= 1.05 ? `${r.toFixed(1)}× faster` : 1 / r >= 1.05 ? `${(1 / r).toFixed(1)}× slower` : "same";
+function changes(ratios: number[]) {
+  if (!ratios.length) return "";
+  const lo = Math.min(...ratios), hi = Math.max(...ratios);
+  if (change(lo) === change(hi)) return change(lo);
+  if (lo >= 1.05) return `${lo.toFixed(1)}–${hi.toFixed(1)}× faster`;
+  if (1 / hi >= 1.05) return `${(1 / hi).toFixed(1)}–${(1 / lo).toFixed(1)}× slower`;
+  return `${change(lo)} to ${change(hi)}`;
+}
 
 const lines = [`| ${label} | before | after | |`, "|---|---:|---:|---:|"];
 for (const [name, path] of ROWS) {
-  const a = at(before, path);
-  const b = at(after, path);
-  if (a === undefined && b === undefined) continue;
-  const ratio = a && b ? (a / b >= 1.05 ? `${(a / b).toFixed(1)}× faster` : b / a >= 1.05 ? `${(b / a).toFixed(1)}× slower` : "same") : "";
-  lines.push(`| ${name} | ${a ?? "–"} | ${b ?? "–"} | ${ratio} |`);
+  const a = before.map((r) => at(r, path));
+  const b = after.map((r) => at(r, path));
+  if ([...a, ...b].every((x) => x === undefined)) continue;
+  const ratios = a.flatMap((x, i) => x && b[i] ? [x / b[i]!] : []);
+  lines.push(`| ${name} | ${cell(a)} | ${cell(b)} | ${changes(ratios)} |`);
 }
 for (const kind of ["cold", "warm"] as const) {
-  if (kb(before, kind) || kb(after, kind)) lines.push(`| ${kind} load: transferred | ${kb(before, kind) ?? "–"} | ${kb(after, kind) ?? "–"} | |`);
+  const a = before.map((r) => kb(r, kind));
+  const b = after.map((r) => kb(r, kind));
+  if ([...a, ...b].some(Boolean)) lines.push(`| ${kind} load: transferred | ${cell(a)} | ${cell(b)} | |`);
 }
 console.log(lines.join("\n"));
