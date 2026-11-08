@@ -901,8 +901,25 @@ if (service) {
       if (!changed) stage.update({ steps: [{ label: CHECKING }], current: 0 });
       stage.end();
       console.log(result.installed
-        ? `Updated to OpenBuild ${result.current} (${result.track}). Run ob restart to use it.`
+        ? `Updated to OpenBuild ${result.current} (${result.track}).`
         : `OpenBuild ${result.current} (${result.track}) is up to date.`);
+      if (result.installed) {
+        // Update flags never consent to a restart. EOF also defers it, rather than
+        // accepting the default or leaving a readline question pending forever.
+        let restart = false;
+        if (process.stdin.isTTY && process.stdout.isTTY) {
+          try { restart = await confirm("Restart now?"); } catch { /* Input closed: defer. */ }
+        }
+        if (restart) {
+          // Re-enter the installed CLI so all restart safety checks, network
+          // settings and detached-worker preservation use the existing flow.
+          const child = spawnSync(process.execPath, [join(ROOT, "bin", "openbuild.ts"), "restart"], { cwd: ROOT, stdio: "inherit" });
+          if (child.error) throw child.error;
+          process.exit(child.status ?? 1);
+        }
+        console.log("Changes will take effect on the next restart.");
+        console.log("Run ob restart to use it.");
+      }
     } catch (error) { fail((error as Error).message); }
     break;
   }

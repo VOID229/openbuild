@@ -59,6 +59,11 @@ curl -fsSL https://raw.githubusercontent.com/VOID229/openbuild/main/nightly/inst
 Installs the newest published prerelease and selects the nightly update track.
 The regular installer selects the stable release and update track.
 
+After installing a release, `ob update` asks `Restart now? [Y/n]` in a terminal.
+Enter or Y runs `ob restart`; N leaves the server running as it is. Without an
+interactive terminal, or if input closes, restart later with `ob restart`.
+The `--yes` / `-y` flags do not answer the restart question.
+
 #### *Or*
 
 ```sh
