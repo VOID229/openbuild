@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { serverLog } from "./serverLog";
 
 // A tab on one device using another's OpenBots workspace, end to end over loopback: two real
 // OpenBuild servers on throwaway data directories, "Host Box" (whose workspace it is) and "Viewer
@@ -47,14 +48,31 @@ const freePort = () => {
 async function launch(port: number, dir: string) {
   const child = Bun.spawn([process.execPath, resolve("server/index.ts")], {
     env: { ...process.env, NODE_ENV: "production", PORT: String(port), HOST: "127.0.0.1", OPENCHAT_DATA_DIR: dir, OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json"), PI_CODING_AGENT_DIR: join(dir, "pi"), CI: "1" },
-    stdout: "ignore",
-    stderr: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
   });
   children.set(port, child);
-  await until(async () => {
-    if (child.exitCode !== null) throw new Error("A server exited");
-    return (await fetch(`http://127.0.0.1:${port}/api/auth/status`)).ok;
-  }, "server start");
+  // The server's own output, scrubbed and bounded, is all a failed start has to go on.
+  const log = serverLog();
+  void log.drain(child.stdout, "out");
+  void log.drain(child.stderr, "err");
+  const started = Date.now();
+  try {
+    await until(async () => {
+      if (child.exitCode !== null) throw new StartExit(child.exitCode);
+      return (await fetch(`http://127.0.0.1:${port}/api/auth/status`)).ok;
+    }, "server start");
+  } catch (err) {
+    // Not a root cause: what was observed when the wait ended, and the server's last output.
+    const exited = child.exitCode === null ? "still running, not answering" : `exited with code ${child.exitCode}`;
+    throw new Error(`Server on port ${port} failed to start after ${Date.now() - started} ms (${exited}); ${err instanceof Error ? err.message : String(err)}\nLast server output:\n${log.tail()}`);
+  }
+}
+
+class StartExit extends Error {
+  constructor(code: number | null) {
+    super(`A server exited (code ${code})`);
+  }
 }
 
 async function stop(port: number) {
