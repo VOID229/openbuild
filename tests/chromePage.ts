@@ -11,9 +11,19 @@ export const browser = findBrowser();
 export class Page {
   private id = 0;
   private waiting = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  /** The page's last few console errors, uncaught exceptions and failed requests, for a timeout's report. */
+  private events: string[] = [];
   constructor(private ws: WebSocket, private session: string) {
     ws.addEventListener("message", (e) => {
       const msg = JSON.parse(String(e.data));
+      if (msg.sessionId === this.session && this.session) {
+        const p = msg.params;
+        const line = msg.method === "Runtime.consoleAPICalled" && ["error", "warning"].includes(p.type) ? `console.${p.type}: ${p.args.map((a: any) => a.value ?? a.description).join(" ")}`
+          : msg.method === "Runtime.exceptionThrown" ? `exception: ${p.exceptionDetails.exception?.description ?? p.exceptionDetails.text}`
+          : msg.method === "Network.loadingFailed" ? `request failed: ${p.errorText}`
+          : undefined;
+        if (line) this.events = [...this.events, line.slice(0, 300)].slice(-10);
+      }
       const w = this.waiting.get(msg.id);
       if (!w) return;
       this.waiting.delete(msg.id);
@@ -30,6 +40,8 @@ export class Page {
     const { sessionId } = await root.send("Target.attachToTarget", { targetId, flatten: true });
     const page = new this(ws, sessionId);
     await page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
+    await page.send("Runtime.enable");
+    await page.send("Network.enable");
     await page.send("Page.navigate", { url });
     await page.until(ready);
     return page;
@@ -51,7 +63,16 @@ export class Page {
       if (await this.eval(expression).catch(() => false)) return;
       await Bun.sleep(25);
     }
-    throw new Error(`timed out waiting for ${expression}`);
+    throw new Error(`timed out waiting for ${expression}\n${await this.report()}`);
+  }
+  /** Why a wait may have timed out: whether the tab is shown and still gets frames, and what it logged. */
+  private async report() {
+    const state = await this.eval<string>(`new Promise((resolve) => {
+      let frame = false;
+      requestAnimationFrame(() => (frame = true));
+      setTimeout(() => resolve(JSON.stringify({ visibility: document.visibilityState, focused: document.hasFocus(), readyState: document.readyState, frameWithin500ms: frame })), 500);
+    })`).catch((e) => `page unreachable: ${e.message}`);
+    return `page: ${state}\nrecent: ${JSON.stringify(this.events)}`;
   }
   /** Two frames, so React has rendered and the resize observers have run. */
   settle() {

@@ -387,7 +387,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
             {conversation.kind === "side" ? (
               <div className="bots-details-name bots-details-name-static">{name}</div>
             ) : (
-              <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }) : st.updateConversation(conversation.id, { name: v }))} />
+              <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
             )}
             <div className="bots-details-sub">
               {bot?.primary && <span className="bots-pill">Primary</span>}

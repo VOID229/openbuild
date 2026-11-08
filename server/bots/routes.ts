@@ -247,7 +247,8 @@ export function botRoutes(api: Api) {
       PATCH: api(async (req: Bun.BunRequest<"/api/bots/:id">) => {
         try {
           const body = await readJson(req);
-          return json(svc.updateBot(req.params.id, (body ?? {}) as Partial<Bot>, { by: "me" }));
+          const { conversationId, ...patch } = (body ?? {}) as Partial<Bot> & { conversationId?: unknown };
+          return json(svc.updateBot(req.params.id, patch, { by: "me", conversationId: typeof conversationId === "string" ? conversationId : undefined }));
         } catch (err) {
           return fail(err);
         }

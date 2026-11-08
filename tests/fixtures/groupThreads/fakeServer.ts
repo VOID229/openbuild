@@ -36,6 +36,9 @@ export const thread = (id: string, title: string, by: string, from: string, proj
 
 const w = window as any;
 w.thread = thread;
+// The store lists chats newest first, so each starts a second after the one before it: threads built in
+// the same millisecond would otherwise come out in either order.
+const now = Date.now();
 w.serverChats = [
   thread("t-flaky", "Fix the flaky sidebar test", "manager", "dev", "openbuild"),
   thread("t-trace", "Trace the slow startup", "tracer", "dev", "openbuild-site"),
@@ -43,7 +46,7 @@ w.serverChats = [
   thread("t-direct", "Rename the config loader", "manager", "dm-manager", "openbuild"),
   thread("t-outside", "Tidy the vault", "outsider", "dm-outsider", "notes"),
   thread("t-done", "Bump dependencies", "tracer", "dev", "openbuild", true),
-];
+].map((chat, i) => ({ ...chat, updatedAt: now - i * 1000 }));
 
 /** The OpenBots stream: who it is, everything, then pings so it never seems to have gone quiet. */
 function stream(): Response {

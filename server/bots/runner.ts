@@ -674,7 +674,9 @@ async function runTurn(botId: string, all: Wake[]) {
     const notes = lane === "main" ? svc.pendingChangeNotes(botId) : [];
     let handoff = "";
     if (!delivered.size) { try { handoff = readFileSync(join(mind.sessionPath!, "handoff.txt"), "utf8"); } catch {} }
-    const message = [handoff, svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
+    // A new name is told to its bot in any chat: it's how everyone there will call it.
+    const renames = svc.pendingRenameNotes(botId);
+    const message = [handoff, svc.renameNoteText(renames), svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -751,6 +753,7 @@ async function runTurn(botId: string, all: Wake[]) {
     try { if (minds.get(key) === m && !m.needsRecovery && !m.proc.exited) saveDeliveries(m.sessionPath!, new Set([...delivered, ...candidates, ...(m.contextKeys ?? [])])); }
     catch { /* A lost optimization must never fail an otherwise completed assignment. */ }
     svc.settleChangeNotes(botId, notes);
+    svc.settleRenameNotes(renames);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     if (minds.get(key) === m && !m.needsRecovery && !m.proc.exited) writeFileSync(join(m.sessionPath!, "settled"), "", { mode: 0o600 });
