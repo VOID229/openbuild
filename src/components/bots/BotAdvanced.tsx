@@ -1,12 +1,13 @@
-// A bot's model, effort and computer for Settings → Bots, and the Advanced tab of the OpenBots details panel,
-// which puts them on one line each beside what the bot may do in OpenBuild.
-import { ArrowUp, Check, ChevronDown, CircleAlert, Trash2 } from "lucide-react";
+// A bot's model and effort for Settings → Bots, and the Advanced tab of the OpenBots details panel,
+// which puts them on one line each beside what the bot may do in OpenBuild, and the machines bots reach.
+import { ArrowUp, Check, ChevronDown, ChevronRight, CircleAlert, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { providerName, providerOf } from "../../lib/models";
 import { useBotModels } from "../../lib/bots/models";
 import { useBots } from "../../lib/bots/store";
 import type { Bot } from "../../lib/bots/types";
-import { LOCAL, loadTargets, targetLabel, targetNote, targetOptions } from "../../lib/bots/targets";
+import { loadTargets, showDevice, targetNote, targetStatus, targetSummary } from "../../lib/bots/targets";
+import { isLocalWorkspace, workspaceName } from "../../lib/bots/workspace";
 import { fallbackMode, type ComputerTarget, type FallbackMode } from "../../../shared/bots";
 import { cx } from "../../lib/ui";
 import { ModelMenu, OptionSelect } from "../ModelSelect";
@@ -219,10 +220,11 @@ export function DefaultFallbacks() {
   );
 }
 
-/** The places a bot's computer can run, loaded while its settings are open. */
-function useTargets() {
+/** The machines bots reach, loaded while a list of them is open. */
+function useTargets(on: boolean) {
   const [targets, setTargets] = useState<ComputerTarget[]>();
   useEffect(() => {
+    if (!on) return;
     let live = true;
     void loadTargets().then(
       (list) => live && setTargets(list),
@@ -231,75 +233,56 @@ function useTargets() {
     return () => {
       live = false;
     };
-  }, []);
+  }, [on]);
   return targets;
 }
 
-/** Which machine runs the bot's tools: this server, or a paired device that allowed it. */
-function TargetSelect({ bot, targets, className }: { bot: Bot; targets?: ComputerTarget[]; className?: string }) {
-  const cfg = bot.computer ?? LOCAL;
+const DOT: Partial<Record<ComputerTarget["status"], string>> = { access: "pi-status-dot-warn", offline: "pi-status-dot-off", revoked: "pi-status-dot-bad", outdated: "pi-status-dot-bad", mismatch: "pi-status-dot-bad", unpaired: "pi-status-dot-bad" };
+
+/** One machine: whether it allows bots, what with, and why not. It opens that device in Settings → Devices, where both are changed. */
+function MachineRow({ target, here }: { target: ComputerTarget; here: string }) {
+  const note = targetNote(target, here);
+  const summary = targetSummary(target);
   return (
-    <OptionSelect
-      label="Runs on"
-      className={className}
-      value={cfg.device}
-      options={targetOptions(targets, cfg).map((t) => ({ value: t.device, label: targetLabel(t) }))}
-      onChange={(device) => useBots.getState().updateBot(bot.id, { computer: { device, kind: cfg.kind } })}
-    />
+    <li className="pi-row pi-row-stack bot-machine">
+      <button type="button" className="bot-machine-link" aria-label={`${target.name}: ${targetStatus(target)}. Open in Settings → Devices`} onClick={() => showDevice(target.device)}>
+        <span className={cx("pi-status-dot", DOT[target.status])} aria-hidden />
+        <span className="pi-row-text">
+          <span className="pi-row-name">
+            {target.name}
+            <span className="device-status">{targetStatus(target)}</span>
+          </span>
+          {summary && <span className="pi-row-desc">{summary}</span>}
+        </span>
+        <ChevronRight size={14} className="bot-machine-chevron" aria-hidden />
+      </button>
+      {note && (
+        <p className={cx("setting-desc bot-target-note", note.tone === "bad" && "bot-target-note-bad")}>
+          <CircleAlert size={13} aria-hidden /> {note.text}
+        </p>
+      )}
+    </li>
   );
 }
 
-/** How it's kept apart there: a container, or a folder with no isolation. Separate from where. */
-function KindSelect({ bot, className }: { bot: Bot; className?: string }) {
-  const cfg = bot.computer ?? LOCAL;
-  return (
-    <OptionSelect
-      label="Isolation"
-      className={className}
-      value={cfg.kind}
-      options={[
-        { value: "container", label: "Container" },
-        { value: "host", label: "Host (unisolated)" },
-      ]}
-      onChange={(kind) => useBots.getState().updateBot(bot.id, { computer: { device: cfg.device, kind } })}
-    />
-  );
-}
+const MACHINES_DESC = "Bots reach every one of these at once and name one on each tool call, this server when they don't. Each keeps its own files. Whether a device allows this server's bots, and how they're isolated there, are set with that device in Settings → Devices.";
 
-/** Why the chosen device can't run every tool right now, and what to do about it. */
-function TargetNote({ bot, targets }: { bot: Bot; targets?: ComputerTarget[] }) {
-  const cfg = bot.computer ?? LOCAL;
-  const target = targets && targetOptions(targets, cfg).find((t) => t.device === cfg.device);
-  const note = targetNote(target, cfg, targets?.find((t) => t.device === "local")?.name ?? "this server");
-  if (!note) return null;
-  return (
-    <p className={cx("setting-desc bot-target-note", note.tone === "bad" && "bot-target-note-bad")} role="status">
-      <CircleAlert size={13} aria-hidden /> {note.text}
-    </p>
-  );
-}
-
-/** Where the bot's computer runs, and how it's isolated there. */
-export function BotComputer({ bot }: { bot: Bot }) {
-  const targets = useTargets();
+/**
+ * The machines a bot reaches, read-only: the same for every bot. Another server's workspace lists its
+ * own, which only its own Settings → Devices can change.
+ */
+export function BotMachines({ compact }: { compact?: boolean }) {
+  const workspace = useBots((s) => s.workspace);
+  const local = isLocalWorkspace(workspace);
+  const targets = useTargets(local);
+  const here = targets?.find((t) => t.device === "local")?.name ?? "this server";
+  if (!local) return <p className="setting-desc">{`These bots run on ${workspaceName(workspace)}, which lists their machines in its own Settings → Devices.`}</p>;
   return (
     <>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Runs on</div>
-          <p className="setting-desc">The machine its terminal, files and browser use. A paired device has to allow this server's bots first, in its Settings → Devices.</p>
-        </div>
-        <TargetSelect bot={bot} targets={targets} />
-      </div>
-      <TargetNote bot={bot} targets={targets} />
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Isolation</div>
-          <p className="setting-desc">Containers are isolated. Host access is unisolated: the bot can run commands and read or change files as the user running OpenBuild on that machine. Only choose host access if you trust this bot.</p>
-        </div>
-        <KindSelect bot={bot} />
-      </div>
-      <p className="setting-desc">Changes apply to the next request. Nothing moves: files on the previous computer stay there.</p>
+      {!compact && <p className="setting-desc">{MACHINES_DESC}</p>}
+      <ul className="pi-list bot-machines" aria-label="Machines bots can reach" aria-busy={!targets}>
+        {!targets ? <li className="pi-empty">Checking machines…</li> : targets.map((t) => <MachineRow key={t.device} target={t} here={here} />)}
+      </ul>
     </>
   );
 }
@@ -307,7 +290,6 @@ export function BotComputer({ bot }: { bot: Bot }) {
 /** The details panel's Advanced tab: the same settings as above, one line each so it fits the panel. The descriptions sit in tooltips on the labels. */
 export function BotAdvanced({ bot }: { bot: Bot }) {
   const defaultModel = useBots((s) => s.defaultModel);
-  const targets = useTargets();
   return (
     <div className="bots-pane bots-advanced">
       <div className="setting-row">
@@ -322,19 +304,6 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
         </div>
         <BotEffortSelect bot={bot} className="select-grow" />
       </div>
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip="The machine its terminal, files and browser use. A paired device has to allow this server's bots first. Applies to the next request, without moving files." data-tooltip-side="left">
-          Runs on
-        </div>
-        <TargetSelect bot={bot} targets={targets} className="select-grow" />
-      </div>
-      <TargetNote bot={bot} targets={targets} />
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip="Containers are isolated. Host access is unisolated: the bot can run commands and read or change files as the user running OpenBuild on that machine." data-tooltip-side="left">
-          Isolation
-        </div>
-        <KindSelect bot={bot} className="select-grow" />
-      </div>
       <BotFallbacks
         bot={bot}
         header={(select) => (
@@ -346,6 +315,12 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
           </div>
         )}
       />
+      <div className="setting-row">
+        <div className="setting-label" data-tooltip={MACHINES_DESC} data-tooltip-side="left">
+          Machines
+        </div>
+      </div>
+      <BotMachines compact />
       <BotThreads bot={bot} compact />
     </div>
   );

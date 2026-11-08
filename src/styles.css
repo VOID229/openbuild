@@ -6812,7 +6812,56 @@ p.key-status svg {
   color: var(--text-3);
 }
 
-/* Bot settings: why the chosen device can't run every tool right now. */
+/* Bot settings: the machines bots reach, each opening its device in Settings → Devices. */
+.bot-machines {
+  margin-top: 8px;
+}
+
+.bot-machine {
+  gap: 4px;
+}
+
+.bot-machine-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bot-machine-link:hover .pi-row-name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bot-machine-chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+/* Settings → Devices: the device a bot's machine list linked to. */
+.device-row-focused {
+  box-shadow: inset 0 0 0 2px var(--focus);
+  border-radius: 12px;
+}
+
+.device-row:focus {
+  outline: none;
+}
+
+.bot-on-device {
+  margin-top: 6px;
+}
+
+/* Why a machine can't run every tool right now. */
 .bot-target-note {
   display: flex;
   gap: 6px;

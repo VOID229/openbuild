@@ -41,7 +41,7 @@ function refusal(who: { name: string; botTools: BotToolGrants }, op: string, kin
   const tool = needs(op);
   if (tool && !g[tool]) return `${here} hasn't allowed ${TOOL_LABEL[tool]} for bots from ${who.name}. Allow it on ${here}: Settings → Devices → Using this device.`;
   if (!g.files && !g.terminal && !g.browser) return `${here} hasn't allowed bots from ${who.name} to use it. Allow them on ${here}: Settings → Devices → Using this device.`;
-  if (kind === "host" && !g.unisolated) return `${here} only allows bots from ${who.name} a container, not unisolated access. Choose Container in the bot's settings, or allow unisolated access on ${here}.`;
+  if (kind === "host" && !g.unisolated) return `${here} only allows bots from ${who.name} a container, not unisolated access. Choose Container for ${here} in ${who.name}'s Settings → Devices, or allow Unisolated on ${here}.`;
   return undefined;
 }
 
@@ -195,7 +195,7 @@ export function computerRoutes(api: Api) {
  */
 const legacyRefusal = () =>
   `${devices.deviceName()} has a computer under this bot's id from before bots needed permission here. It wasn't used, changed or replaced, and nothing ran. ` +
-  `${devices.deviceName()}'s owner has to decide what becomes of it before this bot can have a computer there; until then, choose another computer in the bot's settings.`;
+  `${devices.deviceName()}'s owner has to decide what becomes of it before this bot can have a computer there; until then, use another machine.`;
 
 /** A request that carries a device token. api() admits it only when the token is paired here, as a device, never as a browser. */
 const presentsDeviceToken = (req: Request) => /^Bearer /.test(req.headers.get("authorization") ?? "");
@@ -298,7 +298,7 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
         last = `it answered HTTP ${res.status}`;
         continue;
       }
-      if (res.status === 401) throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Pair it again, or choose another computer in the bot's settings.`);
+      if (res.status === 401) throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Nothing ran. Pair it again in Settings → Devices, or use another machine.`);
       const answered = res.headers.get(SERVER_HEADER);
       if (answered === device.id) {
         devices.touchDevice(device.id, true);
@@ -321,7 +321,7 @@ async function reach(device: StoredDevice, signal?: AbortSignal): Promise<string
 /** A request to a paired device's server, at the address it was just found answering as itself. */
 async function deviceFetch(deviceId: string, path: string, init: RequestInit = {}): Promise<Response> {
   const device = devices.deviceCredentials(deviceId);
-  if (!device) throw new TargetError("unpaired", "This bot's computer is on a device that isn't paired anymore. Choose another computer in the bot's settings.");
+  if (!device) throw new TargetError("unpaired", "That machine isn't paired with this server anymore. Nothing ran; use another machine.");
   const base = await reach(device, init.signal ?? undefined);
   let res: Response;
   try {
@@ -333,7 +333,7 @@ async function deviceFetch(deviceId: string, path: string, init: RequestInit = {
   }
   if (res.status === 401) {
     verified.delete(deviceId);
-    throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Pair it again, or choose another computer in the bot's settings.`);
+    throw new TargetError("revoked", `${device.name} no longer trusts this pairing. Nothing ran. Pair it again in Settings → Devices, or use another machine.`);
   }
   if (res.headers.get(SERVER_HEADER) !== device.id) {
     verified.delete(deviceId);
@@ -385,7 +385,7 @@ function remote(deviceId: string): ComputerApi {
 
 export const computerApi = (device: string): ComputerApi => (device === "local" ? local : remote(device));
 
-/** Every place a bot's computer could run, and whether it can right now. Asks each paired device. */
+/** Every machine bots can reach, and what each allows them right now. Asks each paired device. */
 export async function computerTargets(): Promise<ComputerTarget[]> {
   const here = await capabilities();
   const local: ComputerTarget = { device: "local", name: devices.deviceName(), status: "ready", grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: here.engines };

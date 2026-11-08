@@ -56,6 +56,7 @@ test("a change in the app's settings posts one activity line in the bot's chat, 
     await patch(helper.id, { effort: 'high' });
     await patch(helper.id, { fallbackModels: ['xai/grok-4.7'] });
     await patch(helper.id, { noFallbacks: true });
+    // Bots reach every machine now: a computer in a patch changes nothing and says nothing.
     await patch(helper.id, { computer: { device: 'dev1', kind: 'host' } });
     await patch(helper.id, { proactivity: 'high' });
     a.deepEqual(texts(helper), [
@@ -64,7 +65,6 @@ test("a change in the app's settings posts one activity line in the bot's chat, 
       "Juniper's effort: default → high",
       "Juniper's fallbacks: the defaults → Grok 4.7",
       "Juniper's fallbacks: Grok 4.7 → none",
-      "Juniper's computer: this server, container → Laptop, unisolated",
       "Juniper's check-ins: every 3 hours → every hour",
     ]);
     // An activity line, by the bot in its own chat, about it: no bubble, no unread mark, no wake-up.
@@ -101,7 +101,7 @@ test("OpenBuild access names its projects and the switches that changed", async 
 test("a save that changes several settings is one line; one that changes nothing is none", async () => {
   await run(`${SETUP}
     await patch(helper.id, { model: 'xai/grok-4.7', effort: 'low', computer: { device: 'local', kind: 'host' } });
-    a.deepEqual(texts(helper), ["Juniper's model: default → Grok 4.7; effort: default → low; computer: this server, container → this server, unisolated"]);
+    a.deepEqual(texts(helper), ["Juniper's model: default → Grok 4.7; effort: default → low"]);
     // The same values again, the defaults said out loud, and fields that aren't announced.
     await patch(helper.id, { model: 'xai/grok-4.7', effort: 'low', computer: { device: 'local', kind: 'host' } });
     await patch(primary.id, { proactivity: 'normal', computer: { device: 'local', kind: 'container' }, effort: '' });
@@ -118,16 +118,16 @@ test("a save that changes several settings is one line; one that changes nothing
 test("the primary's manage_bot changes post the same lines, and a new bot's first settings don't", async () => {
   await run(`${SETUP}
     await manage(primary.id, { action: 'update', bot: 'Juniper', model: 'openai/gpt-6.1-sol', effort: 'max' });
-    await manage(primary.id, { action: 'update', bot: 'Juniper', runs_on: 'Laptop' });
+    // Refused whole: nothing changes, nothing is said.
+    a.throws(() => manage(primary.id, { action: 'update', bot: 'Juniper', runs_on: 'Laptop' }), /Nothing changed/);
     await manage(primary.id, { action: 'update', bot: 'Juniper', effort: 'max' });
     await manage(primary.id, { action: 'update', fallback: 'none' });
     a.deepEqual(texts(helper), [
       "Juniper's model: default → GPT 6.1 Sol; effort: default → max",
-      "Juniper's computer: this server, container → Laptop, container",
     ]);
     a.deepEqual(texts(primary), ["Boss's fallbacks: the defaults → none"]);
-    // Made with a model and a computer: the "New bot" line is all there is.
-    const made = await manage(primary.id, { action: 'create', name: 'Scout', model: 'xai/grok-4.7', runs_on: 'Laptop' });
+    // Made with a model: the "New bot" line is all there is.
+    const made = await manage(primary.id, { action: 'create', name: 'Scout', model: 'xai/grok-4.7' });
     a.equal(db.getBot(made.id).model, 'xai/grok-4.7');
     a.deepEqual(texts({ id: made.id }), []);
     a.equal(wakes.filter(([, w]) => w.kind !== 'note').length, 0);

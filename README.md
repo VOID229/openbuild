@@ -37,7 +37,7 @@ ob friend chat <friend> "<name>" --bots <bot> # share a group chat with them
 
 A friend's bots and yours talk in the chats you share, and that's all a friend can reach. See [docs/friends.md](docs/friends.md).
 
-OpenBots shows the chats of the OpenBuild server you're connected to. Each server keeps its own OpenBots chats; pairing doesn't sync them. To use a host's chats, open that host's OpenBuild. Its bots can still work on a paired device's computer when you give them access to it.
+OpenBots shows the chats of the OpenBuild server you're connected to. Each server keeps its own OpenBots chats; pairing doesn't sync them. To use a host's chats, open that host's OpenBuild. Its bots reach every paired device whose owner allows them, all at once, and pick one per tool call (see [docs/bot-machines.md](docs/bot-machines.md)).
 
 OpenBuild works with your existing coding agents like [Pi](https://pi.dev), [Codex](https://developers.openai.com/codex), [Claude Code](https://code.claude.com), [Cursor](https://cursor.com), [OpenCode](https://opencode.ai), [Grok Build](https://x.ai/cli), and [Fx](https://fx.sh) with your paid Subs or connected API keys.
 

@@ -307,16 +307,19 @@ test("resetting says reset, and lively bots, pointer tracking and reactions are 
   expect(agent).not.toContain("Reactions are turned off");
 });
 
-test("computer settings require explicit host selection and explain isolation", async () => {
+test("bot settings only list machines, and each machine's isolation is chosen with its device", async () => {
   const settings = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
-  const targets = await Bun.file("src/lib/bots/targets.ts").text();
-  // Where it runs and how it's isolated are separate choices; unset means this server's container.
-  expect(settings).toContain('label="Runs on"');
-  expect(settings).toContain('label="Isolation"');
-  expect(targets).toContain('export const LOCAL: ComputerConfig = { device: "local", kind: "container" };');
-  expect(settings).toContain('label: "Host (unisolated)"');
-  expect(settings).toContain("Host access is unisolated");
-  expect(settings).not.toContain("<select");
+  const devices = await Bun.file("src/components/DeviceSettings.tsx").text();
+  // No choice of one machine or isolation per bot: a read-only list that opens Settings → Devices.
+  expect(settings).not.toContain('label="Runs on"');
+  expect(settings).not.toContain('label="Isolation"');
+  expect(settings).not.toContain("computer: {");
+  expect(settings).toContain("showDevice(target.device)");
+  // Isolation is per machine, a container unless host is chosen, and host says it's unisolated and asks first.
+  expect(devices).toContain('host: "Host (unisolated)"');
+  expect(devices).toContain("Host is unisolated");
+  expect(devices).toContain("Run bots unisolated on");
+  expect(settings + devices).not.toContain("<select");
 });
 
 test("the OpenBots switch lands entrance motion, keeps looping motion and outlasts a skipped switch", async () => {
