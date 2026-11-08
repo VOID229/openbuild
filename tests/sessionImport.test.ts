@@ -160,6 +160,70 @@ test("classifies from live activity: a busy process shows working, stale registr
   `);
 });
 
+test("a reused pid doesn't keep a dead Claude Code process busy: procStart is checked on macOS too", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-pid-"));
+  await run(dir, `${claudeFixture}
+    import { strict as assert } from "node:assert";
+    const mod = await import("./server/sessionImport.ts");
+    // Claude Code on macOS records \`LC_ALL=C TZ=UTC ps -o lstart= -p <pid>\`; procps prints the same.
+    const lstart = (pid) => Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" } }).stdout.toString().trim();
+    const mac = mod.processStarts("darwin");
+    assert.match(mac(process.pid), /^\\w{3} \\w{3} +\\d+ \\d\\d:\\d\\d:\\d\\d \\d{4}$/);
+    assert.equal(mod.processAlive(process.pid, lstart(process.pid), mac), true);
+    assert.equal(mod.processAlive(process.pid, "Mon Jan  5 09:00:00 2026", mac), false);
+    if (process.platform === "linux") {
+      const ticks = (await Bun.file("/proc/" + process.pid + "/stat").text()).split(") ")[1].split(" ")[19];
+      assert.equal(mod.processAlive(process.pid, ticks, mod.processStarts("linux")), true);
+      assert.equal(mod.processAlive(process.pid, "1", mod.processStarts("linux")), false);
+    }
+    const sessions = join(process.env.CLAUDE_CONFIG_DIR, "sessions");
+    await mkdir(sessions, { recursive: true });
+    const entry = (pid, sessionId, status, procStart) => writeFile(join(sessions, pid + ".json"), JSON.stringify({ pid, sessionId, status, procStart, kind: "interactive", entrypoint: "cli" }));
+    // A process that died mid-turn left "busy" behind, and its pid now belongs to someone else.
+    await entry(process.ppid, "dead-and-reused", "busy", "Mon Jan  5 09:00:00 2026");
+    await entry(process.pid, "live", "busy", lstart(process.pid));
+    assert.deepEqual([...mod.claudeActivity(process.env.CLAUDE_CONFIG_DIR, mac)], [["live", true]]);
+    // Only a turn in progress is work: an idle process, or one with no status, waits for a prompt.
+    for (const [status, busy] of [["idle", false], [undefined, false], ["daemon", false], ["waiting", true], ["shell", true]]) {
+      await entry(process.pid, "live", status, lstart(process.pid));
+      assert.equal(mod.claudeActivity(process.env.CLAUDE_CONFIG_DIR, mac).get("live"), busy, String(status));
+    }
+  `);
+});
+
+test("Pi's claude-bridge sessions aren't imported, and one imported before stops working", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-bridge-"));
+  await run(dir, `${claudeFixture}
+    import { strict as assert } from "node:assert";
+    import { appendFile } from "node:fs/promises";
+    const mod = await import("./server/sessionImport.ts");
+    // cc-session-io writes the bridge's sessions as if from the CLI, with synthesized replies...
+    const written = "77777777-7777-4777-8777-777777777777";
+    const synthesized = (uuid, parent, text) => ({ ...rec(uuid, parent, "assistant", [{ type: "text", text }]), version: "2.1.83", message: { id: "msg_syn_0123456789abcdef01234567", type: "message", role: "assistant", model: "claude-test-1", content: [{ type: "text", text }] }, requestId: "req_syn_0123456789abcdef01234567" });
+    await writeFile(join(dir, written + ".jsonl"), jsonl([{ ...rec("b1", null, "user", "<handover>The last task is done"), version: "2.1.83" }, synthesized("b2", "b1", "Noted.")]));
+    // ...then the Agent SDK resumes them, and what it writes carries its own entrypoint.
+    const resumed = "88888888-8888-4888-8888-888888888888";
+    await writeFile(join(dir, resumed + ".jsonl"), jsonl([rec("h1", null, "user", "<handover>The session was replaced"), { ...rec("h2", "h1", "assistant", [{ type: "tool_use", id: "t5", name: "Bash", input: { command: "ls" } }]), entrypoint: "sdk-ts" }]));
+    await registry(resumed, "busy");
+    await mod.discover();
+    assert.deepEqual(storage.listChats().map((c) => c.id), [threadOf(native)]);
+    // Imported by an earlier version, mid-turn: it looked like the CLI's until the SDK wrote to it.
+    const earlier = "99999999-9999-4999-8999-999999999999";
+    await writeFile(join(dir, earlier + ".jsonl"), jsonl([rec("e1", null, "user", "<handover>Carry on")]));
+    await registry(earlier, "busy");
+    await mod.discover();
+    assert.equal(storage.getChat(threadOf(earlier)).archived, false);
+    assert.equal(storage.getChat(threadOf(earlier)).messages.at(-1).status, "streaming");
+    await appendFile(join(dir, earlier + ".jsonl"), jsonl([{ ...rec("e2", "e1", "assistant", [{ type: "text", text: "On it." }]), entrypoint: "sdk-ts" }]));
+    await mod.discover();
+    const stopped = storage.getChat(threadOf(earlier));
+    assert.equal(stopped.archived, true);
+    assert.equal(stopped.messages.at(-1).status, "stopped");
+    assert.equal(stopped.messages.at(-1).stream, undefined);
+    assert.equal(storage.listChats().length, 2);
+  `);
+});
+
 // Drives Claude Code sessions turn by turn, in any process: each turn continues the transcript's
 // latest record, and the session's process (this one, or its parent) says whether it's busy.
 const claudeTurns = `

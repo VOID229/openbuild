@@ -192,47 +192,83 @@ const CLAUDE_NOISE = /^\s*(<command-|<local-command|Caveat: )/;
 const INTERRUPTED = /^\[Request interrupted by user/;
 
 /**
- * The session's first prompt says where it came from: only people's own sessions, not SDK-driven
- * or `claude -p` ones, nor OpenBuild's (which can be on disk before their thread maps them).
+ * Whether people drive the session themselves: not SDK-driven or `claude -p` ones, nor OpenBuild's
+ * (which can be on disk before their thread maps them). Every record Claude Code writes names its
+ * entrypoint, so any SDK-written record gives the session away, even when its first prompt claims
+ * the CLI: Pi's claude-bridge writes its sessions itself (cc-session-io stamps them `cli`, and its
+ * synthesized replies' ids start `msg_syn_`), then the Agent SDK resumes them.
  */
-const claudeOwn = (source: string) => { const entry = claudeEntrypoint(source); return entry === "openbuild" || !!entry?.startsWith("sdk-"); };
-function claudeEntrypoint(source: string): string | undefined {
-  const head = source.slice(0, 1 << 20);
-  for (const line of head.split("\n")) {
+const claudeOwn = (source: string) => {
+  for (const line of source.split("\n")) {
+    if (!line.includes('"entrypoint":"sdk-') && !line.includes('"entrypoint":"openbuild"') && !line.includes('"msg_syn_')) continue;
     try {
       const r = JSON.parse(line);
-      if (r.type === "user" && r.entrypoint) return r.entrypoint;
+      if (r.entrypoint === "openbuild" || (typeof r.entrypoint === "string" && r.entrypoint.startsWith("sdk-"))) return true;
+      if (r.type === "assistant" && typeof r.message?.id === "string" && r.message.id.startsWith("msg_syn_")) return true;
     } catch {}
   }
+  return false;
+};
+
+/**
+ * When a running process started, as Claude Code records it in `procStart`: clock ticks since boot
+ * on Linux, elsewhere `ps`'s lstart in UTC. Undefined when it can't tell; `ps` runs once per call.
+ */
+export function processStarts(platform: NodeJS.Platform = process.platform): (pid: number) => string | undefined {
+  if (platform === "linux") return (pid) => {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19];
+    } catch {}
+  };
+  if (platform === "win32") return () => undefined;
+  let starts: Map<number, string> | undefined;
+  return (pid) => {
+    if (!starts) {
+      starts = new Map();
+      try {
+        const ps = Bun.spawnSync(["ps", "-A", "-o", "pid=,lstart="], { env: { ...process.env, LC_ALL: "C", TZ: "UTC" }, stdout: "pipe", stderr: "ignore", timeout: 5000 });
+        for (const line of ps.stdout.toString().split("\n")) {
+          const m = /^\s*(\d+)\s+(\S.*)$/.exec(line);
+          if (m) starts.set(Number(m[1]), m[2]!.replace(/\s+/g, " ").trim());
+        }
+      } catch {}
+    }
+    return starts.get(pid);
+  };
 }
 
-/** Whether `pid` is still the process that started at `start` (Linux clock ticks), not a reused pid. */
-export function processAlive(pid: number, start?: unknown): boolean {
+/**
+ * Whether `pid` is still the process that started at `start`, not a reused pid. Exited Claude Code
+ * processes leave their registry files behind, and macOS hands their pids out again quickly.
+ */
+export function processAlive(pid: number, start?: unknown, started = processStarts()): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); } catch (err) { if ((err as NodeJS.ErrnoException).code !== "EPERM") return false; }
-  if (typeof start !== "string" || process.platform !== "linux") return true;
-  try {
-    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] === start;
-  } catch { return true; }
+  if (typeof start !== "string") return true;
+  const now = started(pid);
+  return now === undefined || now === start.replace(/\s+/g, " ").trim();
 }
+
+/** Claude Code's process statuses that mean it's on a turn: `idle` waits for a prompt. */
+const CLAUDE_WORKING = new Set(["busy", "shell", "waiting"]);
 
 /**
  * What Claude Code's running processes are on: each writes `sessions/<pid>.json` with its session
  * and whether it's busy. Files of exited processes stay behind with whatever they last said, so
  * only a live process counts. Undefined when this Claude Code keeps no such files.
  */
-export function claudeActivity(config = claudeConfig()): Map<string, boolean> | undefined {
+export function claudeActivity(config = claudeConfig(), started = processStarts()): Map<string, boolean> | undefined {
   let names: string[];
   try { names = readdirSync(join(config, "sessions")); } catch { return undefined; }
   const busy = new Map<string, boolean>();
   for (const name of names) {
     const pid = /^(\d+)\.json$/.exec(name)?.[1];
-    if (!pid || !processAlive(Number(pid))) continue;
+    if (!pid || !processAlive(Number(pid), undefined, started)) continue;
     try {
       const r = JSON.parse(readFileSync(join(config, "sessions", name), "utf8"));
-      if (typeof r.sessionId !== "string" || Number(r.pid) !== Number(pid) || !processAlive(Number(pid), r.procStart)) continue;
-      busy.set(r.sessionId, busy.get(r.sessionId) || r.status !== "idle");
+      if (typeof r.sessionId !== "string" || Number(r.pid) !== Number(pid) || !processAlive(Number(pid), r.procStart, started)) continue;
+      busy.set(r.sessionId, busy.get(r.sessionId) || CLAUDE_WORKING.has(r.status));
     } catch {}
   }
   return busy;
@@ -277,7 +313,8 @@ async function claudeSessions(visit: (found: Found[]) => Promise<void>): Promise
       // No process on it means it isn't running, whatever its last turn looks like.
       const busy = activity ? activity.get(id) ?? false : undefined;
       found.push({
-        nativeId: id, updatedAt: info.mtimeMs, stamp: `${info.mtimeMs}:${info.size}:${busy ?? isLive(info.mtimeMs)}`,
+        // `v2`: sessions read before SDK-driven ones were told apart by every record are read again.
+        nativeId: id, updatedAt: info.mtimeMs, stamp: `v2:${info.mtimeMs}:${info.size}:${busy ?? isLive(info.mtimeMs)}`,
         probe: () => claudeEligible(file, info.size),
         load: async () => {
           const source = await readFile(file, "utf8");
@@ -772,7 +809,8 @@ async function discoverSource(source: Source): Promise<void> {
       try {
         if (!imported && f.probe && !(await f.probe())) { skip(); continue; }
         const loaded = await timeout(f.load(), 120_000, `Reading a ${runtime} session`);
-        if (!loaded) { if (imported) track(id, { ...was, stamp: f.stamp }); else skip(); continue; }
+        // A thread whose session turns out not to be someone's own stays, but stops working.
+        if (!loaded) { if (imported) stop(source, id, { ...was, stamp: f.stamp }); else skip(); continue; }
         if (imported) refresh(id, was, f, loaded);
         else create(source, f, loaded);
       } catch (err) {
@@ -843,20 +881,25 @@ function settle(source: Source, listed: Set<string>) {
     let was: Tracked;
     try { was = JSON.parse(value); } catch { continue; }
     if (!was.working || was.left || was.source !== source.key || listed.has(was.nativeId)) continue;
-    const id = key.slice(`${STATE}thread:`.length);
-    storage.transaction(() => {
-      const chat = storage.getChat(id) as Chat | undefined;
-      if (!chat || storage.getValue(`${source.runtime}-session:${id}`) !== was.mapping) { track(id, { ...was, left: true }); return; }
-      const reply = chat.messages.findLast((m) => m.role === "assistant");
-      const running = reply?.status === "streaming" && reply.stream?.via === EXTERNAL_VIA;
-      const archived = closedState(chat, was, false);
-      if (running || archived !== chat.archived) {
-        const ended = running ? chat.messages.map((m) => { if (m !== reply) return m; const { stream: _, ...rest } = m; return { ...rest, status: "stopped" as const }; }) : chat.messages;
-        storage.putChat({ ...chat, messages: ended, archived } as unknown as storage.StoredChat);
-      }
-      track(id, { ...was, working: false, archived, chosen: chosen(chat, was) });
-    });
+    stop(source, key.slice(`${STATE}thread:`.length), was);
   }
+}
+
+/** Ends the run discovery shows in a thread, and closes it unless the user chose otherwise. */
+function stop(source: Source, id: string, was: Tracked) {
+  storage.transaction(() => {
+    const chat = storage.getChat(id) as Chat | undefined;
+    if (!chat || storage.getValue(`${source.runtime}-session:${id}`) !== was.mapping) { track(id, { ...was, left: true }); return; }
+    if (ownTurn(chat)) return;
+    const reply = chat.messages.findLast((m) => m.role === "assistant");
+    const running = reply?.status === "streaming" && reply.stream?.via === EXTERNAL_VIA;
+    const archived = closedState(chat, was, false);
+    if (running || archived !== chat.archived) {
+      const ended = running ? chat.messages.map((m) => { if (m !== reply) return m; const { stream: _, ...rest } = m; return { ...rest, status: "stopped" as const }; }) : chat.messages;
+      storage.putChat({ ...chat, messages: ended, archived } as unknown as storage.StoredChat);
+    }
+    track(id, { ...was, working: false, archived, chosen: chosen(chat, was) });
+  });
 }
 
 const failures = new Map<string, string>();
