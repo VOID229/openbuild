@@ -22,7 +22,10 @@ test("a sealed frame opens only with its sender's key, unchanged, and says truly
   // A signature from elsewhere, or a mangled one.
   const other = JSON.parse(seal({ t: "msg", from: alice.id, to: bob.id, seq: 3 }, alice));
   expect(unseal(JSON.stringify({ p: outer.p, s: other.s }), alice.publicKey)).toBeUndefined();
-  expect(unseal(JSON.stringify({ p: outer.p, s: outer.s.slice(0, -2) + "AA" }), alice.publicKey)).toBeUndefined();
+  // Swap the first char (never a padding bit) for a different one, so the mangled signature always differs.
+  const mangled = (outer.s[0] === "A" ? "B" : "A") + outer.s.slice(1);
+  expect(mangled).not.toBe(outer.s);
+  expect(unseal(JSON.stringify({ p: outer.p, s: mangled }), alice.publicKey)).toBeUndefined();
   for (const junk of ["", "{}", "null", "[]", JSON.stringify({ p: 1, s: outer.s }), "x".repeat(70_000), 42, undefined]) expect(unseal(junk, alice.publicKey)).toBeUndefined();
 
   // Mallory signing a frame that claims to be Alice's: opens with no key at all.
