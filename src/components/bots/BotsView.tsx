@@ -71,6 +71,8 @@ export function BotsView() {
       if (e.key !== "Escape" || e.defaultPrevented || useStore.getState().settingsOpen) return;
       const el = document.activeElement as HTMLElement | null;
       if (el?.closest("[role='menu'], dialog, textarea, input")) return;
+      // A thread open in the panel steps back to its list first (BotDetails).
+      if (document.querySelector(".bots-details-threadpane")) return;
       useBots.getState().setDetailsOpen(false);
     };
     window.addEventListener("keydown", onKey);

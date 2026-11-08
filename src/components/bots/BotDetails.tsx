@@ -1,7 +1,7 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
 // model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal and working threads;
 // who's in a side chat.
-import { ChevronLeft, Minus, Pencil, Plus, Trash, X } from "lucide-react";
+import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -10,7 +10,9 @@ import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
 import { cx, useMediaQuery, usePresence } from "../../lib/ui";
+import { LoadedChat } from "../LoadedChat";
 import { IconButton, Toggle } from "../primitives";
+import { expandBotsThread } from "../Sidebar";
 import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
@@ -219,8 +221,8 @@ function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string 
   }, [chats, conversation.id, conversation.messages]);
 }
 
-/** Opens like a thread from an activity link: in place of the chat, with Back returning to this tab. */
-function Threads({ threads, bots }: { threads: { chat: Chat; bot: string }[]; bots: Bot[] }) {
+/** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
+function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
   if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads working right now. When a bot here starts one, it shows up until it finishes.</p></div>;
   return (
     <div className="bots-pane">
@@ -229,7 +231,7 @@ function Threads({ threads, bots }: { threads: { chat: Chat; bot: string }[]; bo
           const bot = bots.find((b) => b.id === id);
           return (
             <li key={chat.id} className="bots-card-row bots-member">
-              <button type="button" className="bots-member-main" onClick={() => useStore.getState().openThreadInBots(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
+              <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
                 {bot && <BotAvatar look={bot.look} size={28} mood="thinking" />}
                 <span className="bots-card-text">
                   <span className="bots-routine-title">{chat.title}</span>
@@ -240,6 +242,29 @@ function Threads({ threads, bots }: { threads: { chat: Chat; bot: string }[]; bo
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/** A coding thread inside the details panel, in place of its tabs, which stay mounted underneath. */
+function ThreadPane({ chat, phone, back }: { chat: Chat; phone: boolean; back: () => void }) {
+  return (
+    <div className="bots-details-threadpane">
+      <div className="bots-details-top bots-details-thread-top">
+        <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
+          <ChevronLeft size={phone ? 26 : 18} />
+        </IconButton>
+        <span className="bots-details-thread-title">{chat.title}</span>
+        <IconButton label="Open in OpenBuild" tooltipSide="left" onClick={() => {
+          useStore.setState({ activeChatId: chat.id, searchFocus: undefined, botsThread: false });
+          expandBotsThread();
+        }}>
+          <Maximize2 size={16} />
+        </IconButton>
+      </div>
+      <div className="bots-details-thread">
+        <LoadedChat key={chat.id} chat={chat} />
+      </div>
     </div>
   );
 }
@@ -301,12 +326,41 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setTab(conversation.kind === "direct" ? "instructions" : "members");
   }
   useEffect(() => setEditingLook(false), [conversation.id]);
+  // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
+  const [threadId, setThreadId] = useState<string>();
+  const [threadFor, setThreadFor] = useState(conversation.id);
+  if (threadFor !== conversation.id) {
+    setThreadFor(conversation.id);
+    setThreadId(undefined);
+  }
+  const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
+  const showing = !!threadChat && tab === "threads";
+  const openThread = (id: string) => {
+    setThreadId(id);
+    if (useStore.getState().chats.find((c) => c.id === id)?.unread) useStore.getState().updateChat(id, { unread: false });
+  };
+  // Escape steps back to the list first, like Back, before BotsView's takes the panel itself.
+  useEffect(() => {
+    if (!showing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || e.keyCode === 229 || useStore.getState().settingsOpen) return;
+      if (document.querySelector("dialog[open], [aria-modal='true']")) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el?.closest("[role='menu'], [role='listbox'], [role='dialog'], dialog")) return;
+      if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) && !el.classList.contains("composer-input")) return;
+      e.preventDefault();
+      setThreadId(undefined);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showing]);
   if (!mounted) return null;
   const name = conversationName(conversation, bots);
   const close = () => (phone ? closeBotsLayer("details") : st.setDetailsOpen(false));
   return (
-    <aside className={cx("bots-details", visible && "bots-details-open")} aria-label="Details">
-      <div className="bots-details-inner">
+    <aside className={cx("bots-details", visible && "bots-details-open", showing && "bots-details-wide")} aria-label="Details">
+      {showing && <ThreadPane chat={threadChat} phone={phone} back={() => setThreadId(undefined)} />}
+      <div className="bots-details-inner" hidden={showing}>
         <div className="bots-details-top">
           <IconButton label="Close details" tooltipSide="left" onClick={close}>
             {phone ? <ChevronLeft size={26} /> : <X size={18} />}
@@ -388,7 +442,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 onChange={setTab}
               />
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
-              {tab === "threads" && <Threads threads={threads} bots={bots} />}
+              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               {tab === "goal" && (
                 <Instructions
                   value={conversation.instructions ?? ""}
