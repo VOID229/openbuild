@@ -49,7 +49,7 @@ OpenBuild appends question guidance to Claude's native `claude_code` system prom
 
 ## Remote Control
 
-A new Claude Code thread can start with **Remote Control** on (the pill beside permissions; bots pass `remote_control: true` to `openbuild start`). It's off by default and saved on the thread. You can then continue the thread from claude.ai/code or the Claude app.
+A new Claude Code thread can start with **Remote Control** on (the **Remote control** switch under the composer; bots pass `remote_control: true` to `openbuild start`). It's off by default and saved on the thread. You can then continue the thread from claude.ai/code or the Claude app.
 
 - It needs a claude.ai sign-in. With an API key or a custom endpoint the turn still runs, and the thread says Remote Control didn't start.
 - `--remote-control` only starts the bridge in the interactive CLI. Under the Agent SDK (headless stream-json) Claude Code 2.1.314 accepts the flag and ignores it. So OpenBuild sends the SDK's `remote_control` control request once per process, before the turn, and shows the session link it returns.

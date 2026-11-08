@@ -73,7 +73,7 @@ Fixtures reproduce inspected NDJSON/protobuf shapes without a model/external-net
 
 ## Remote Control
 
-Cursor sets Remote Control in the user's Cursor account and team settings (`remote_control_enabled`, the team's `RemoteControlV2Policy`). CLI `2026.10.22-27dcf5f` has no flag, environment variable or `cli-config.json` key for it, so OpenBuild can't turn it on or off for a thread. The composer shows a **Remote · account** pill explaining this. A bot asking for `remote_control` on a Cursor thread is refused with the same reason.
+Cursor sets Remote Control in the user's Cursor account and team settings (`remote_control_enabled`, the team's `RemoteControlV2Policy`). CLI `2026.10.22-27dcf5f` has no flag, environment variable or `cli-config.json` key for it, so OpenBuild can't turn it on or off for a thread. Under the composer, the **Remote control** switch is off and disabled for Cursor, with a line saying it's set in the Cursor account. A bot asking for `remote_control` on a Cursor thread is refused with the same reason.
 
 ## Steering
 

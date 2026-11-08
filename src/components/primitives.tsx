@@ -33,14 +33,16 @@ export function SettingsBack({ label, onBack }: SettingsBackTarget) {
   return null;
 }
 
-export function Toggle({ checked, onChange, label, disabled = false }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean }) {
+export function Toggle({ checked, onChange, label, disabled = false, id, className, describedBy }: { checked: boolean; onChange: (v: boolean) => void; label: string; disabled?: boolean; id?: string; className?: string; describedBy?: string }) {
   return (
     <button
       type="button"
+      id={id}
       role="switch"
       aria-checked={checked}
       aria-label={label}
-      className={cx("toggle", disabled && "toggle-disabled")}
+      aria-describedby={describedBy}
+      className={cx("toggle", className, disabled && "toggle-disabled")}
       disabled={disabled}
       onClick={() => onChange(!checked)}
     >
