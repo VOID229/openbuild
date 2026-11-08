@@ -28,7 +28,7 @@ test("Pi's unchanged archive survives server restart without transcript reads; e
       const { discoverSessions } = await import('./server/pi/discovery.ts');
       await discoverSessions();
       a.equal(storage.getChat('cached-session').messages[0].content, 'original');
-      a.equal(storage.listValues('pi-discovery:v2:').length, 1);
+      a.equal(storage.listValues('pi-discovery:v3:').length, 1);
     `);
     await run(`
       const { mock } = await import('bun:test');

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { autoNameWorktree, autoName, generateText, promptImages, threadTranscript } from "../src/lib/naming";
+import { autoNameDiscovered, autoNameWorktree, autoName, discoveredToName, generateText, promptImages, threadTranscript } from "../src/lib/naming";
 import { useStore } from "../src/lib/store";
 import type { Attachment } from "../shared/types";
 import type { Chat, Detection, Message } from "../src/lib/types";
@@ -158,6 +158,65 @@ describe("autoName", () => {
   });
 });
 
+describe("found threads", () => {
+  const reply = (id: number, status: Message["status"]) => ({ ...message(id, "assistant", "Updated the key in .env"), status });
+  const found = (id: string, extra: Partial<Chat> = {}) =>
+    ({ id, title: "1", createdAt: 1, updatedAt: 1, messages: [message(1, "user", "1"), reply(2, "done")], ...extra }) as Chat;
+
+  test("names the working and open ones that still go by their prompt, once each", () => {
+    const chats = [
+      found("pi-working", { discovered: true, messages: [message(1, "user", "1"), reply(2, "streaming")] }),
+      found("claude-working", { imported: true, messages: [message(1, "user", "2"), reply(2, "streaming")] }),
+      found("open", { discovered: true }),
+      found("closed", { imported: true, archived: true }),
+      found("named-by-runtime", { imported: true, titleSource: "auto", messages: [message(1, "user", "1"), reply(2, "streaming")] }),
+      found("renamed", { discovered: true, titleSource: "user", messages: [message(1, "user", "1"), reply(2, "streaming")] }),
+      // Started here: autoName titled it when its first prompt was sent.
+      found("native", { messages: [message(1, "user", "1"), reply(2, "streaming")] }),
+    ];
+    expect(discoveredToName(chats, "open", new Set())).toEqual(["pi-working", "claude-working", "open"]);
+    expect(discoveredToName(chats, undefined, new Set(["pi-working"]))).toEqual(["claude-working"]);
+  });
+
+  const withModel = async (chats: Chat[], answer: (body: any) => string, run: () => Promise<void>) => {
+    const before = useStore.getState();
+    const codex = { plan: "codex", status: "valid", checkedAt: 1, models: [{ id: "codex/gpt", input: ["text"], reasoning: { efforts: ["low"] } }] } as unknown as Detection;
+    useStore.setState({ chats, codexModels: { "": codex }, settings: { ...before.settings, naming: { enabled: true, models: [{ plan: "codex", id: "codex/gpt", effort: "off" }] } } });
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (_: string, init: RequestInit) => Response.json({ text: answer(JSON.parse(init.body as string)) })) as unknown as typeof fetch;
+    try {
+      await run();
+    } finally {
+      globalThis.fetch = realFetch;
+      useStore.setState({ chats: before.chats, codexModels: before.codexModels, settings: before.settings });
+    }
+  };
+
+  test("titles one from its transcript, not its prompt alone, as an automatic name", async () => {
+    const prompts: string[] = [];
+    await withModel([found("pi-1", { discovered: true })], (body) => { prompts.push(body.prompt); return "OpenRouter Key Rotation"; }, async () => {
+      const naming = autoNameDiscovered("pi-1");
+      expect(useStore.getState().titling.has("pi-1")).toBe(true);
+      await naming;
+      expect(useStore.getState().titling.has("pi-1")).toBe(false);
+      expect(useStore.getState().chats[0]).toMatchObject({ title: "OpenRouter Key Rotation", titleSource: "auto" });
+    });
+    expect(prompts[0]).toContain("User: 1");
+    expect(prompts[0]).toContain("Assistant: Updated the key in .env");
+  });
+
+  test("leaves a title the user or the runtime set meanwhile", async () => {
+    for (const patch of [{ title: "Mine", titleSource: "user" as const }, { title: "Named in Pi", titleSource: "auto" as const }]) {
+      await withModel([found("pi-2", { discovered: true })], () => {
+        useStore.setState({ chats: useStore.getState().chats.map((c) => ({ ...c, ...patch })) });
+        return "Generated";
+      }, async () => {
+        await autoNameDiscovered("pi-2");
+        expect(useStore.getState().chats[0]).toMatchObject(patch);
+      });
+    }
+  });
+});
 
 describe("autoNameWorktree", () => {
   test("renames in the background and updates threads sharing the same checkout", async () => {

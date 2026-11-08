@@ -27,6 +27,7 @@ import { usePanel } from "./lib/panel";
 import { refreshTerminal, toggleTerminal } from "./lib/terminal";
 import { cloudConfigured, CloudSync } from "./lib/cloud";
 import { loadChatHistory, loadChats } from "./lib/db";
+import { watchDiscoveredTitles } from "./lib/naming";
 import { RELOAD_THREADS } from "./lib/pulls";
 import { useHarnessSetupOpen } from "./lib/harnessSetup";
 import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
@@ -200,6 +201,8 @@ function Main() {
   // Plugins load after the app hydrates, so a slow or broken plugin never holds up startup.
   useEffect(() => { initPlugins(); }, []);
   useEffect(() => startPaneGestures(), []);
+  // Threads found in a runtime's own sessions get names like the ones started here.
+  useEffect(() => watchDiscoveredTitles(), []);
   const phone = useMediaQuery("(max-width: 768px)");
   const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
