@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
 import "fake-indexeddb/auto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,10 +22,12 @@ test("the server merges a thread's metadata into its stored history and answers 
   const call = (path: string, method = "GET", body?: unknown) =>
     fetch(base + path, { method, headers: { "content-type": "application/json" }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   try {
-    for (let i = 0; i < 300; i++) {
-      try { if ((await call("/api/auth/status")).ok) break; } catch {}
-      await Bun.sleep(25);
+    let up = false;
+    for (let i = 0; i < 600 && !up; i++) {
+      try { up = (await call("/api/auth/status")).ok; } catch {}
+      if (!up) await Bun.sleep(25);
     }
+    expect(up).toBe(true);
     const chat = {
       id: "t", title: "Thread", createdAt: 1, updatedAt: 2, runtime: "pi", unread: true,
       messages: [{ id: "u", role: "user", content: "keep this history", createdAt: 1 }, { id: "a", role: "assistant", content: "x".repeat(200_000), createdAt: 2, status: "done" }],
@@ -48,7 +51,11 @@ test("the server merges a thread's metadata into its stored history and answers 
     expect((await call("/api/chats/t", "PATCH", { id: "other", pinned: false })).status).toBe(400);
     expect((await call("/api/chats/t", "PATCH", { id: "t", runtime: "codex" })).status).toBe(400);
     expect((await call("/api/chats/missing", "PATCH", { id: "missing", pinned: true })).status).toBe(404);
-    expect((await call("/api/chats/t", "DELETE")).status).toBe(200);
+    // Deleted (a tombstone, as storage.deleteChat leaves; DELETE itself also asks a Pi worker,
+    // which a machine without Pi doesn't have): it stays deleted.
+    const db = new Database(join(data, "openchat.db"));
+    db.run("UPDATE chats SET data = NULL, version = NULL, deleted_at = ?1 WHERE id = 't'", [Date.now()]);
+    db.close();
     expect((await call("/api/chats/t", "PATCH", { id: "t", pinned: true })).status).toBe(410);
   } finally {
     server.kill();
