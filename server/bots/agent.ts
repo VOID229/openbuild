@@ -3,9 +3,9 @@
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, unavailableModels, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, unavailableModels, type Bot, type BotMessage, type ComputerConfig, type Proactivity } from "../../shared/bots";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
-import { computerApi } from "../computers/api";
+import { computerApi, computerTargets } from "../computers/api";
 import { deviceCredentials } from "../devices";
 import { capabilities } from "../computers/index";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -146,7 +146,7 @@ export function contextFor(botId: string): string {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. manage_bot defaults reads or sets the default model and fallbacks every bot without its own uses (default_model, default_fallbacks), also only when the user asks. They can't override you."
+      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. manage_bot defaults reads or sets the default model and fallbacks every bot without its own uses (default_model, default_fallbacks), also only when the user asks. Where a bot's computer runs (its terminal, files and browser) is yours to set too, for any bot and yourself, with manage_bot create or update (runs_on, isolation container|host); manage_bot computers lists the places. Host is unisolated, with the user's own access to that machine: choose it only when the user asks. They can't override you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions while you have none.`,
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
@@ -472,12 +472,15 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can change the default models.");
     return defaults(p);
   }
+  if (action === "computers") {
+    if (!self.primary) throw new svc.BotsError("Only the primary bot can choose where a bot's computer runs.");
+    return listComputers();
+  }
   if (action === "create") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can make bots.");
-    if (!changesModel(p)) return create(botId, p);
-    // Everything is checked before the bot exists: a bad model never leaves a half-made bot behind.
-    const change = modelChange(p);
-    return checkModels(change).then((models) => create(botId, p, models));
+    if (!changesModel(p) && !changesComputer(p)) return create(botId, p);
+    // Everything is checked before the bot exists: a bad model or computer never leaves a half-made bot behind.
+    return settingsChange(p).then((settings) => create(botId, p, settings));
   }
   if (action === "create_group") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can create groups.");
@@ -513,25 +516,38 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (!self.primary && target !== botId) throw new svc.BotsError("You can only change yourself.");
     if (!self.primary) {
       if (changesModel(p)) throw new svc.BotsError("Only the primary bot can change a bot's model.");
+      if (changesComputer(p)) throw new svc.BotsError("Only the primary bot can choose where a bot's computer runs.");
       // A bot can write its own first instructions; after that they're the user's and the primary's.
       if (self.instructions.trim()) delete patch.instructions;
       delete patch.proactivity;
     }
-    if (!changesModel(p)) {
+    if (!changesModel(p) && !changesComputer(p)) {
       if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");
       const bot = svc.updateBot(target, patch);
       return { id: bot.id, name: bot.name };
     }
-    // The whole update is one write, after every model it names checks out.
-    const change = modelChange(p);
-    return checkModels(change).then((models) => modelSummary(svc.updateBot(target, { ...patch, ...models })));
+    // The whole update is one write, after every model and the computer it names check out.
+    return settingsChange(p, db.getBot(target)?.computer).then((settings) => settingsSummary(svc.updateBot(target, { ...patch, ...settings }), p));
   }
-  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models or defaults.");
+  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models, defaults or computers.");
 }
 
-function create(botId: string, p: Record<string, unknown>, models?: Partial<Bot>) {
+/** A call's model and computer fields, each checked, as one patch. */
+async function settingsChange(p: Record<string, unknown>, current?: ComputerConfig): Promise<Partial<Bot>> {
+  // Read synchronously first, so a malformed field refuses before anything is looked up.
+  const models = changesModel(p) ? modelChange(p) : undefined;
+  const computer = changesComputer(p) ? computerFields(p, current) : undefined;
+  const [modelPatch, cfg] = await Promise.all([models ? checkModels(models) : {}, computer ? checkComputer(computer) : undefined]);
+  return { ...modelPatch, ...(cfg ? { computer: cfg } : {}) };
+}
+
+function settingsSummary(bot: Bot, p: Record<string, unknown>) {
+  return { ...(changesModel(p) ? modelSummary(bot) : { id: bot.id, name: bot.name }), ...(changesComputer(p) && bot.computer ? computerSummary(bot.computer) : {}) };
+}
+
+function create(botId: string, p: Record<string, unknown>, settings?: Partial<Bot>) {
   const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
-  const bot = models ? svc.updateBot(created.bot.id, models) : created.bot;
+  const bot = settings ? svc.updateBot(created.bot.id, settings) : created.bot;
   svc.postMessage(svc.directId(botId) || created.conversationId, {
     id: crypto.randomUUID(),
     author: botId,
@@ -541,13 +557,13 @@ function create(botId: string, p: Record<string, unknown>, models?: Partial<Bot>
   });
   // The new bot introduces itself. Imported lazily: runner imports this file.
   void import("./runner").then((r) => r.wake(bot.id, { kind: "note", conversationId: created.conversationId, text: "You were just created. Introduce yourself to the user in one or two short messages: who you are and what you'll help with." }));
-  return models ? modelSummary(bot) : { id: bot.id, name: bot.name };
+  return settings ? settingsSummary(bot, p) : { id: bot.id, name: bot.name };
 }
 
 // A bot's model, effort and fallbacks are the primary's to set, like making bots. They change which
 // model answers and nothing else: no tools, apps, devices or keys come with them.
 const MODEL_FIELDS = ["model", "effort", "fallback", "fallback_models"] as const;
-const EFFORT_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const EFFORT_LEVELS: readonly string[] = BOT_EFFORTS;
 const MAX_FALLBACKS = 8;
 /** "provider/model". A provider can be one account of several ("openai-codex-2"). */
 const MODEL_ID = /^[a-z0-9][\w.-]{0,79}\/\S{1,200}$/i;
@@ -699,6 +715,56 @@ function regroup(botId: string, add: boolean, target: string, conversation: unkn
     svc.updateConversation(id, { botIds: c.botIds.filter((b) => b !== target) });
   }
   return { ok: true, conversation: id.slice(0, 8), members: db.getConversation(id)!.botIds.length };
+}
+
+// Where a bot's computer runs is the primary's to set too, like its model, for any bot and itself. It
+// only picks among the places the user already allowed: this server, or a paired device that granted
+// this server's bots its tools (and Unisolated, for host access).
+const changesComputer = (p: Record<string, unknown>) => p.runs_on !== undefined || p.isolation !== undefined;
+
+/** Reads a call's computer fields over the bot's current computer. Nothing is checked against the devices yet. */
+function computerFields(p: Record<string, unknown>, current?: ComputerConfig): { runsOn?: string; kind: ComputerConfig["kind"]; device: string } {
+  if (p.isolation !== undefined && p.isolation !== "container" && p.isolation !== "host") throw new svc.BotsError(`isolation is container or host, not ${shown(p.isolation)}. Nothing changed.`);
+  if (p.runs_on !== undefined && (typeof p.runs_on !== "string" || !p.runs_on.trim())) throw new svc.BotsError("runs_on is a computer's name or id from manage_bot computers. Nothing changed.");
+  return { runsOn: (p.runs_on as string | undefined)?.trim(), kind: (p.isolation as ComputerConfig["kind"] | undefined) ?? current?.kind ?? "container", device: current?.device ?? "local" };
+}
+
+const LOCAL_NAMES = ["local", "this server", "here", "server"];
+
+/** The computer a change asks for, if it can run there right now: the bot's tools would only fail otherwise. */
+async function checkComputer({ runsOn, kind, device }: ReturnType<typeof computerFields>): Promise<ComputerConfig> {
+  const targets = await computerTargets();
+  if (runsOn) {
+    const wanted = runsOn.toLowerCase();
+    const hits = targets.filter((t) => t.device.toLowerCase() === wanted || t.name.toLowerCase() === wanted || (t.device === "local" && LOCAL_NAMES.includes(wanted)));
+    if (hits.length !== 1) throw new svc.BotsError(`${hits.length ? `${shown(runsOn)} is ambiguous; use its id` : `No computer called ${shown(runsOn)}`}. Choose from: ${targets.map((t) => `${t.name} (${t.device})`).join(", ")}. Nothing changed.`);
+    device = hits[0]!.device;
+  }
+  const target = targets.find((t) => t.device === device);
+  if (!target) throw new svc.BotsError("That device isn't paired with this server anymore. Choose another with runs_on. Nothing changed.");
+  if (target.status !== "ready") throw new svc.BotsError(`${target.name} can't run a bot's computer right now (${target.status}${target.message ? `: ${target.message.slice(0, 200)}` : ""}). Nothing changed.`);
+  if (kind === "host" && !target.grants?.unisolated) throw new svc.BotsError(`${target.name} only allows a container. Its owner can allow Unisolated in its Settings → Devices. Nothing changed.`);
+  if (kind === "container" && device === "local" && !target.engines?.length) throw new svc.BotsError("This server has no container engine (Podman or Docker), so a container can't run here. Nothing changed.");
+  return { device, kind };
+}
+
+function computerSummary(cfg: ComputerConfig) {
+  return { runs_on: cfg.device === "local" ? "this server" : (deviceCredentials(cfg.device)?.name ?? cfg.device), isolation: cfg.kind };
+}
+
+/** Where bots' computers can run, and what each place allows. */
+async function listComputers() {
+  const targets = await computerTargets();
+  return {
+    computers: targets.map((t) => ({
+      id: t.device,
+      name: t.device === "local" ? `${t.name} (this server)` : t.name,
+      status: t.status,
+      isolation: t.status !== "ready" ? [] : t.device === "local" ? [...(t.engines?.length ? ["container"] : []), "host"] : ["container", ...(t.grants?.unisolated ? ["host"] : [])],
+      tools: (["files", "terminal", "browser"] as const).filter((k) => t.grants?.[k]),
+    })),
+    bots: db.listBots().map((b) => ({ name: b.name, ...(b.computer ? computerSummary(b.computer) : { runs_on: "not chosen yet: this server's container on first use" }) })),
+  };
 }
 
 function lookOf(value: unknown): Bot["look"] | undefined {

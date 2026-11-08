@@ -1048,6 +1048,11 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     if (!authoritativeOnly && isLocalWorkspace(session?.id)) void useApps.getState().load().catch(() => {});
     return;
   }
+  if (e.t === "projects") {
+    // This server's projects, as the rest of the app lists them.
+    if (!authoritativeOnly && isLocalWorkspace(session?.id)) void useStore.getState().loadProjects();
+    return;
+  }
   if (e.t === "settings") {
     // Extensions switched elsewhere (another tab or device) change what bots can run on. A change made
     // here is already in the store by now, and BotExtensions asks for the fresh listing itself.

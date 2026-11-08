@@ -4,9 +4,9 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
-import { BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, findTags, firstName, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
-import { hasDevice } from "../devices";
+import { hasDevice, readDevices } from "../devices";
 import { isPermissionId } from "../../shared/types";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
@@ -73,6 +73,10 @@ export function subscribe(listener: (e: BotsEvent) => void): () => void {
 /** Something about apps changed; the app asks for the new state. */
 export function emitApps() {
   emit({ t: "apps" });
+}
+/** A bot added a project: the app asks for the list again. */
+export function emitProjects() {
+  emit({ t: "projects" });
 }
 
 function emit(e: BotsEvent) {
@@ -418,9 +422,11 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
   return { bot: fullBot(id)!, conversationId };
 }
 
-export function updateBot(id: string, patch: Partial<Bot>): Bot {
+/** `by: "me"` is the user, in the app: the primary hears what changed on its next turn (see noteChanges). */
+export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me" } = {}): Bot {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
+  const before = { ...bot };
   // Before anything changes: a computer only goes somewhere this server can reach as itself.
   if (typeof patch.computer?.device === "string" && patch.computer.device !== "local" && !hasDevice(patch.computer.device)) throw new BotsError("That device isn't paired with this server.");
   if (typeof patch.name === "string") {
@@ -442,7 +448,12 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
   if (typeof patch.noFallbacks === "boolean" || patch.noFallbacks === null) {
     bot.noFallbacks = patch.noFallbacks || undefined;
   }
-  if (typeof patch.effort === "string") bot.effort = patch.effort.slice(0, 40);
+  if (patch.effort === null || patch.effort === "") bot.effort = undefined;
+  else if (typeof patch.effort === "string") {
+    // Pi refuses a level it doesn't know, and the bot couldn't reply at all.
+    if (!isBotEffort(patch.effort)) throw new BotsError(`Effort is ${BOT_EFFORTS.join(", ")}, or empty for the default.`);
+    bot.effort = patch.effort;
+  }
   if (patch.computer && (patch.computer.kind === "container" || patch.computer.kind === "host") && typeof patch.computer.device === "string") {
     bot.computer = { kind: patch.computer.kind, device: patch.computer.device.slice(0, 80) };
   }
@@ -452,10 +463,104 @@ export function updateBot(id: string, patch: Partial<Bot>): Bot {
     bot.primary = true;
   }
   db.putBot(bot);
+  noteChanges(before, bot, opts.by === "me");
   if (newPace) touchHeartbeat(id);
   for (const other of db.listBots()) if (other.id !== id && patch.primary) emitBot(other.id);
   emitBot(id);
   return fullBot(id)!;
+}
+
+// ------------------------------------------------------------------ what the user changed
+
+/**
+ * A bot setting the user changed in the app that the primary hasn't been told of yet. One per bot and
+ * setting: `from` is what the primary last knew, `to` what it is now, so a run of changes reads as one,
+ * and changing it back leaves nothing to say. Changes the primary makes itself (manage_bot) aren't
+ * noted, and one made after the user's replaces that note: what it set is what it knows.
+ *
+ * A note changed back is kept, saying nothing, until the primary's next turn ends: the turn before it
+ * may have been shown the change, and then it's owed the correction (see settleChangeNotes).
+ */
+export interface ChangeNote {
+  botId: string;
+  field: NoteField;
+  from: string;
+  to: string;
+  at: number;
+}
+type NoteField = "model" | "effort" | "fallbacks" | "instructions" | "computer";
+const CHANGE_NOTES = "change-notes";
+const NOTE_FIELDS: NoteField[] = ["model", "effort", "fallbacks", "instructions", "computer"];
+
+const changeNotes = () => db.getValue<ChangeNote[]>(CHANGE_NOTES) ?? [];
+
+function describe(bot: db.StoredBot, field: NoteField): string {
+  switch (field) {
+    case "model":
+      return bot.model || "default";
+    case "effort":
+      return bot.effort || "default";
+    case "fallbacks": {
+      const mode = fallbackMode(bot);
+      return mode === "none" ? "no fallback" : mode === "inherit" ? "the default fallbacks" : bot.fallbackModels!.join(", ");
+    }
+    case "instructions":
+      return bot.instructions;
+    case "computer": {
+      if (!bot.computer) return "not chosen yet";
+      const { device, kind } = bot.computer;
+      const where = device === "local" ? "this server" : (readDevices().find((d) => d.id === device)?.name ?? "a device that's no longer paired");
+      return `${where}, ${kind === "host" ? "host (unisolated)" : "container"}`;
+    }
+  }
+}
+
+function noteChanges(before: db.StoredBot, after: db.StoredBot, user: boolean) {
+  let list = changeNotes();
+  const at = Date.now();
+  for (const field of NOTE_FIELDS) {
+    const to = describe(after, field);
+    if (to === describe(before, field)) continue;
+    const i = list.findIndex((n) => n.botId === after.id && n.field === field);
+    if (!user) {
+      if (i >= 0) list = list.filter((_, j) => j !== i);
+      continue;
+    }
+    const from = i >= 0 ? list[i]!.from : describe(before, field);
+    list = [...list.filter((_, j) => j !== i), { botId: after.id, field, from, to, at }];
+  }
+  db.setValue(CHANGE_NOTES, list);
+}
+
+/** What the user changed since the primary last heard, for its next turn. Only the primary's. */
+export function pendingChangeNotes(botId: string): ChangeNote[] {
+  if (!db.getBot(botId)?.primary) return [];
+  return changeNotes().filter((n) => n.from !== n.to && db.getBot(n.botId));
+}
+
+export function changeNoteText(botId: string, notes: ChangeNote[]): string {
+  if (!notes.length) return "";
+  const user = settings().user?.name || "The user";
+  const whose = (id: string) => (id === botId ? "your" : `${db.getBot(id)?.name ?? "A bot"}'s`);
+  const lines = notes.map((n) => {
+    const what = n.field === "fallbacks" ? "fallback models" : n.field;
+    return n.field === "instructions" ? `- ${user} changed ${whose(n.botId)} instructions.` : `- ${user} changed ${whose(n.botId)} ${what} from ${n.from} to ${n.to}.`;
+  });
+  return `Since your last turn, in the app's settings:\n${lines.join("\n")}\nThat's just so you know; it needs no reply, and don't change it back unless asked.`;
+}
+
+/** The primary was shown these: they're done, unless one changed again meanwhile, which then starts from what it saw. */
+export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
+  // Only the primary's turn settles them: another bot's ending says nothing about what the primary heard.
+  if (!db.getBot(botId)?.primary) return;
+  const list = changeNotes().flatMap((n) => {
+    const seen = shown.find((s) => s.botId === n.botId && s.field === n.field);
+    // Never shown, and back where the primary knew it: nothing to say.
+    if (!seen) return n.from === n.to ? [] : [n];
+    // The value it saw is what it knows: timestamps can match across different edits.
+    return seen.to === n.to ? [] : [{ ...n, from: seen.to }];
+  });
+  db.setValue(CHANGE_NOTES, list);
 }
 
 export async function deleteBot(id: string) {
@@ -481,6 +586,7 @@ export async function deleteBot(id: string) {
     }
   }
   db.deleteBot(id);
+  db.setValue(CHANGE_NOTES, changeNotes().filter((n) => n.botId !== id));
   status.delete(id);
   emit({ t: "bot-deleted", id });
 }

@@ -225,7 +225,7 @@ test("computer tools never silently fall back to unrestricted host access", asyn
       let engines = [];
       const calls = [];
       mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines }), procListeners: new Set() }));
-      mock.module('./server/computers/api.ts', () => ({ computerApi: (device) => ({ call: async (id, op, body) => { calls.push({ device, id, op, body }); return {}; } }) }));
+      mock.module('./server/computers/api.ts', () => ({ computerApi: (device) => ({ call: async (id, op, body) => { calls.push({ device, id, op, body }); return {}; } }), computerTargets: async () => [] }));
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
       const { sendMessage, setFocus } = await import('./server/bots/agent.ts');
@@ -260,7 +260,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
       mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), procListeners: new Set() }));
-      mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }) }));
+      mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }), computerTargets: async () => [] }));
       const svc = await import('./server/bots/service.ts');
       const vault = await import('./server/vault.ts');
       const { webSearch, webSearchNote } = await import('./server/bots/agent.ts');

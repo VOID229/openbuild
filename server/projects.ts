@@ -1,7 +1,7 @@
 // Projects (directories threads work in, usually git repositories), their branches, and the git
 // worktrees OpenBuild makes so a thread can work on its own branch without touching the project's
 // checkout. Worktrees live in <data dir>/worktrees/<project>/<name>.
-import { existsSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import type { GitInfo, Project, Workspace } from "../shared/types";
@@ -45,6 +45,30 @@ const isDir = (p: string) => {
 const expand = (p: string) => resolve(p.trim().replace(/^~(?=$|\/)/, homedir()));
 const tilde = (p: string) => (p.startsWith(homedir()) ? "~" + p.slice(homedir().length) : p);
 
+/**
+ * Where a path really lands: every symlink on the way resolved, and whatever doesn't exist yet kept as
+ * written, so it can be checked before anything is made there. A broken link on the way is refused.
+ */
+export function canonicalPath(rawPath: string): string {
+  let dir = expand(rawPath);
+  const rest: string[] = [];
+  while (!existsSync(dir)) {
+    let link = false;
+    try {
+      link = lstatSync(dir).isSymbolicLink();
+    } catch {}
+    if (link) throw new Error(`${tilde(dir)} is a link to something that isn't there`);
+    const up = dirname(dir);
+    if (up === dir) break;
+    rest.unshift(basename(dir));
+    dir = up;
+  }
+  return join(realpathSync(dir), ...rest);
+}
+
+/** Refuses a project root it doesn't want, by throwing. Called with canonical paths only. */
+export type ProjectGuard = (root: string) => void;
+
 export function listProjects(): Project[] {
   return stored().map((p) => ({ ...p, git: existsSync(join(p.path, ".git")), missing: !isDir(p.path) }));
 }
@@ -55,8 +79,10 @@ export const findProject = (id: string) => listProjects().find((p) => p.id === i
  * Add a directory as a project (a repository's root when it's inside one). With `create`, a folder
  * that doesn't exist yet is made first: that's how a new project starts.
  */
-export async function addProject(rawPath: string, opts: { name?: string; create?: boolean } = {}): Promise<Project> {
+export async function addProject(rawPath: string, opts: { name?: string; create?: boolean; allow?: ProjectGuard } = {}): Promise<Project> {
   let path = expand(rawPath);
+  // Before a folder is made: where it would land, through any links.
+  opts.allow?.(canonicalPath(path));
   if (!isDir(path)) {
     if (!opts.create || existsSync(path)) throw new Error(`No folder at ${tilde(path)}`);
     mkdirSync(path, { recursive: true });
@@ -64,6 +90,8 @@ export async function addProject(rawPath: string, opts: { name?: string; create?
   path = realpathSync(path);
   const top = await git(path, ["rev-parse", "--show-toplevel"]);
   if (top.code === 0 && top.out) path = realpathSync(top.out);
+  // And the root that's saved: links resolved and promoted to its repository's top.
+  opts.allow?.(path);
   const list = stored();
   const existing = list.find((p) => p.path === path);
   if (existing) return { ...existing, git: top.code === 0 };
@@ -76,10 +104,12 @@ export async function addProject(rawPath: string, opts: { name?: string; create?
 const CLONE_URL = /^(?:(?:https?|ssh|git):\/\/[^\s/]+\/\S+|[\w.-]+@[\w.-]+:\S+)$/;
 
 /** Clone a repository into a new folder and add it as a project. */
-export async function cloneProject(url: string, rawPath: string, name?: string): Promise<Project> {
+export async function cloneProject(url: string, rawPath: string, name?: string, allow?: ProjectGuard): Promise<Project> {
   url = url.trim();
   if (!CLONE_URL.test(url)) throw new Error("That doesn't look like a git URL (https://…, ssh://… or git@host:owner/repo)");
   const path = expand(rawPath);
+  // Nothing is written until where it lands checks out.
+  allow?.(canonicalPath(path));
   if (existsSync(path) && (!isDir(path) || readdirSync(path).length)) throw new Error(`${tilde(path)} already exists`);
   mkdirSync(dirname(path), { recursive: true });
   const r = await git(dirname(path), ["clone", "--", url, path], 10 * 60_000, {
@@ -88,7 +118,7 @@ export async function cloneProject(url: string, rawPath: string, name?: string):
     GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new",
   });
   if (r.code !== 0) throw new Error(r.err.split("\n").filter((l) => !l.startsWith("Cloning into")).pop() || "Couldn't clone the repository");
-  return addProject(path, { name });
+  return addProject(path, { name, allow });
 }
 
 export function removeProject(id: string) {

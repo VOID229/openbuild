@@ -448,3 +448,14 @@ test("a long thread list doesn't slow the OpenBots switch: rows out of view skip
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   expect(css).toMatch(/\.history-row \{[^}]*content-visibility: auto;[^}]*contain-intrinsic-size: auto \d+px;[^}]*overflow-clip-margin: \d+px;/);
 });
+
+test("a bot's effort sits next to its model in both settings layouts, limited to what its model takes", async () => {
+  const advanced = await Bun.file("src/components/bots/BotAdvanced.tsx").text();
+  // Settings → Bots and the details panel's Advanced tab: right after the model.
+  expect(advanced.match(/<BotModelSelect label="Model"[^\n]*\n\s*<\/div>\n\s*<div className="setting-row">\n\s*<div className="setting-(text|label)"[^]*?<BotEffortSelect bot=\{bot\}/g)?.length).toBe(2);
+  // Empty is the default, sent as empty so the server clears it; the levels are the model's own.
+  expect(advanced).toContain('[{ value: "", label: "Default" }, ...efforts.map((e) => ({ value: e, label: EFFORT_LABELS[e] ?? e }))]');
+  expect(advanced).toContain("const modelId = bot.model || defaultModel || listing?.defaultModel;");
+  expect(advanced).toContain("onChange={(effort) => useBots.getState().updateBot(bot.id, { effort })}");
+  expect(advanced).toContain('" · uses nearest"');
+});

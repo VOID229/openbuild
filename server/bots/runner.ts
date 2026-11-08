@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { botModelChain, conversationTitle, eventDetail, eventText, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
+import { BOT_EFFORTS, botModelChain, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -399,10 +399,23 @@ export function successfulMessageTool(record: PiRecord): boolean {
     && typeof record.result?.details?.id === "string" && !!record.result.details.id;
 }
 
+/** Pi's own default thinking level, from its settings. */
+function piDefaultEffort(): string {
+  try {
+    const level = JSON.parse(readFileSync(join(agentDir(), "settings.json"), "utf8")).defaultThinkingLevel;
+    if (isBotEffort(level)) return level;
+  } catch {}
+  return "medium";
+}
+
+/**
+ * Put a bot's Pi on its effort, or on Pi's default when it has none: a running process and a resumed
+ * session keep the last level, so going back to default has to be asked for too. A level the model
+ * doesn't take becomes the nearest one it does.
+ */
 export async function applyEffort(proc: Pick<PiProcess, "send">, botId: string) {
-  const effort = db.getBot(botId)?.effort;
-  if (!effort) return;
-  const order = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+  const effort = db.getBot(botId)?.effort || piDefaultEffort();
+  const order: readonly string[] = BOT_EFFORTS;
   if (!order.includes(effort)) throw new PiError(`Unknown bot effort: ${effort}`);
   const { levels } = await proc.send<{ levels: string[] }>({ type: "get_available_thinking_levels" });
   const supported = levels.filter((level) => order.includes(level));
@@ -559,8 +572,11 @@ async function run(botId: string, all: Wake[]) {
     const shown = new Map<string, number>();
     for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));
     mind.shown = shown;
-    const message = render(jobs, botId);
-    if (!message.trim()) return;
+    const rendered = render(jobs, botId);
+    if (!rendered.trim()) return;
+    // Settings the user changed in the app, for the primary: shown once, in whatever turn comes next.
+    const notes = svc.pendingChangeNotes(botId);
+    const message = [svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -632,6 +648,7 @@ async function run(botId: string, all: Wake[]) {
     });
     await release(botId, m);
     if (handled) return;
+    svc.settleChangeNotes(botId, notes);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
     setStatus(botId, { state: "idle" });
