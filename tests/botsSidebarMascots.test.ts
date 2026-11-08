@@ -117,19 +117,21 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
   test("the eyes ease onto the pointer on hover-in as calmly as they ease back on hover-out", async () => {
     const page = await open();
     const find = item("row", "Manager");
-    const easing = `[...(${find}).querySelector('.bot').getAnimations({ subtree: true })].filter((a) => a instanceof CSSTransition && a.transitionProperty === 'transform' && a.effect.target.classList.contains('bot-look'))`;
-    const timing = () => page.eval<{ duration: number; delay: number }[]>(`${easing}.map((a) => ({ duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay }))`);
+    // Record each transform transition the eyes start, as it starts: it may be over by the time we look.
+    await page.eval(`window.runs = []; (${find}).querySelector('.bot-look').addEventListener('transitionrun', (e) => {
+      if (e.propertyName === 'transform') window.runs.push(e.target.getAnimations().find((a) => a.transitionProperty === 'transform' && a.effect.target === e.target)?.effect.getTiming() ?? null);
+    })`);
     const [cx, cy] = await page.eval<[number, number]>(`(() => { const r = (${find}).querySelector('.bot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-    // The eyes are aimed on the next frame, so wait for the transition to start.
-    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx + 20, y: cy + 4 });
-    await page.until(`${easing}.length > 0`);
-    const into = (await timing())[0]!;
+    for (let i = 1; i <= 4; i++) await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx + 5 * i, y: cy + i });
+    await page.until("window.runs.length >= 1");
     await page.settle();
+    const hoverIn = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
+    await page.eval("window.runs = []");
     await away(page);
-    await page.until(`${easing}.length > 0`);
-    const out = (await timing())[0]!;
-    expect(into).toEqual(out);
-    expect(into.duration).toBeGreaterThanOrEqual(300);
+    await page.until("window.runs.length >= 1");
+    const hoverOut = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
+    expect(hoverIn).toEqual(hoverOut);
+    expect(hoverIn!.duration).toBeGreaterThanOrEqual(300);
   });
 
   test("with reduced motion, nothing follows the pointer", async () => {
