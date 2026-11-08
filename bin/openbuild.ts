@@ -7,6 +7,7 @@
 //   openbuild stop | restart | status | logs | open
 //   openbuild unpair              unpair a paired device (asks which)
 //   openbuild remote server stop|start   control a paired device's server remotely
+//   openbuild friend invite|add|list|remove|chat|…   another person's OpenBuild, for shared bot chats (bin/friend.ts)
 //   openbuild set pass <password>   set/change the local access password
 //
 // The server's pid, mode and address are kept in <data dir>/server.json, its output in
@@ -20,6 +21,7 @@ import { ask, confirm } from "./prompt";
 import { stage } from "./motion";
 import { describeUninstall, uninstallPlan, removeInstallation } from "./uninstall";
 import { remoteRequest } from "./remoteRequest";
+import { FRIEND_HELP, friendCommand } from "./friend";
 import { dataDir } from "../server/paths";
 import { localAuth } from "../server/localAuth";
 import * as devices from "../server/devices";
@@ -532,6 +534,7 @@ function help() {
   openbuild remote server stop   stop a paired device's server, keep it paired
   openbuild remote server start  start that server again
   openbuild remote status       where each paired device's server stands
+${FRIEND_HELP}
   openbuild set pass <pw>     set/change the local access password (optional)
   openbuild unset pass        remove it: anyone who can reach the server can use it
   openbuild password          the same, typed at a hidden prompt instead
@@ -969,6 +972,11 @@ if (service) {
   }
   case "unpair":
     await unpair(args.slice(1).filter((a) => a !== "--yes" && a !== "-y"));
+    break;
+  case "friend":
+  case "friends":
+    // Its own words and flags, --yes included: approving an invite without asking is its to decide.
+    await friendCommand(args.slice(1), { fail, bold, dim });
     break;
   case "remote": {
     const rest = args.slice(1).filter((a) => a !== "--yes" && a !== "-y");

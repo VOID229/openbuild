@@ -44,6 +44,8 @@ import { botRoutes } from "./bots/routes";
 import { workspaceRoutes } from "./bots/workspace";
 import { githubToken } from "./github/auth";
 import { githubRoutes } from "./github/routes";
+import * as friends from "./friends";
+import { friendRoutes } from "./friends/routes";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -670,6 +672,8 @@ function serve(port: number, hostname: string) {
 
       ...workspaceRoutes(api),
 
+      ...friendRoutes(api),
+
       "/api/*": api(() => bad("Not found", 404)),
     },
     error(err) {
@@ -718,6 +722,13 @@ void warmStartup(() => refreshChats()).catch((err) => console.warn("[startup] Wa
 // OpenCode servers a previous run started and couldn't stop (SIGKILL, out of memory): only ours, by token.
 const reaped = reapOpencodeOrphans();
 if (reaped.length) console.warn(`[opencode] Stopped ${reaped.length} orphaned server(s) from an earlier run`);
+// Friends' servers: the friend-only listener (only while there's an invite or a friend to serve), and
+// connections to friends who host. Never part of the app's own listener above.
+try {
+  friends.start();
+} catch (err) {
+  console.error("[friends] Startup failed:", err);
+}
 // Native runtimes' sessions show up as threads by themselves, in the background (sessionImport.ts).
 sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));

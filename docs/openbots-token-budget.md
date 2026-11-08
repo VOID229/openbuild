@@ -1,9 +1,9 @@
 # OpenBots session and context budgets
 
-The runner serializes turns per bot, but persists Pi sessions per **bot + full conversation id**.
+The runner serializes turns per bot, but persists Pi sessions per **bot + full conversation id + execution lane**.
 Direct, group, and any friend conversation with a distinct conversation id have separate lanes.
-There is no separate friend-lane identifier in this runner's Wake API: callers must supply the
-actual conversation id. The old bot-wide JSONL sessions are retained and never resumed by the
+Friends use their explicit friend lane, with the existing restricted tool/auth scope retained.
+Changing a conversation's lane cannot reuse its earlier session or delivery ledger. The old bot-wide JSONL sessions are retained and never resumed by the
 new lane scheme. Auth, tools, extension selection, model/fallback selection and the durable
 SQLite assignment/change-note records remain shared as before; transcript context is isolated.
 
@@ -69,8 +69,7 @@ as exact turn aggregates: session records are per assistant call, while tool tur
 calls. No paid model replay or production configuration/session mutation was performed.
 
 Remaining measurement limits: production-after usage and compaction charges require a future
-rollout/observation; a separate friend scheduler lane without a conversation id is not represented
-in this runner. This change requires deployment and a server restart to take effect. Do not restart
+rollout/observation; friend-lane isolation is included after integrating the newly merged Friends feature. This change requires deployment and a server restart to take effect. Do not restart
 production as part of validation.
 
 Multiple direct steers within one turn may repeat newly queued context until release confirms

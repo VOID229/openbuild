@@ -23,7 +23,7 @@ import { Linkify, WebLink } from "../Linkify";
 import { openLightbox } from "../Lightbox";
 import { DictationButton } from "../DictationButton";
 import { useFieldDictation } from "../../lib/useFieldDictation";
-import { IconButton, Popover, Sheet } from "../primitives";
+import { Avatar, IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { uid } from "../../lib/id";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
@@ -32,6 +32,9 @@ import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } fr
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
+
+/** A friend's bot whose look didn't come across. */
+const FRIEND_LOOK = { shape: "orb", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
 import { authorName, ConversationAvatar, dividerTime, messageLine, messageText } from "./common";
@@ -681,7 +684,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       {quoted && (
         <button type="button" className="bm-quote" onClick={() => useBots.getState().focusMessage(conversation.id, quoted.id)}>
           <CornerUpLeft size={12} />
-          <span className="bm-quote-who">{authorName(quoted.author, bots).split(" ·")[0]}</span>
+          <span className="bm-quote-who">{authorName(quoted.author, bots, quoted.from).split(" ·")[0]}</span>
           <span className="bm-quote-text">{messageLine(quoted)}</span>
         </button>
       )}
@@ -1310,15 +1313,28 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
           }
           const mine = b.author === "me";
           const bot = mine ? undefined : bots.find((x) => x.id === b.author);
+          // A friend's message: their bot, named with its friend, or the friend themselves.
+          const from = mine || bot ? undefined : b.messages[0]!.from;
           return (
             <div key={b.messages[0]!.id} className={cx("bm-group", mine ? "bm-mine" : "bm-theirs")}>
               {group && !mine && (
-                <div className="bm-name" style={{ "--who": bot ? colorOf(bot.look).hex : undefined } as React.CSSProperties}>
-                  {bot?.name ?? "Deleted bot"}
+                <div className="bm-name" style={{ "--who": bot ? colorOf(bot.look).hex : from?.look ? colorOf(from.look).hex : undefined } as React.CSSProperties}>
+                  {from ? (
+                    <>
+                      {from.owner ? from.friendName : from.name}
+                      <span className="bm-name-friend">{from.owner ? " · friend" : ` · ${from.friendName}`}</span>
+                    </>
+                  ) : (
+                    bot?.name ?? "Deleted bot"
+                  )}
                 </div>
               )}
               <div className="bm-group-row">
-                {group && !mine && <span className="bm-avatar">{bot && <BotAvatar look={bot.look} size={28} pulse={pulses[bot.id]} />}</span>}
+                {group && !mine && (
+                  <span className="bm-avatar">
+                    {bot ? <BotAvatar look={bot.look} size={28} pulse={pulses[bot.id]} /> : from?.owner ? <Avatar name={from.friendName} size={28} /> : from ? <BotAvatar look={from.look ?? FRIEND_LOOK} size={28} alive={false} /> : null}
+                  </span>
+                )}
                 <div className="bm-stack">
                   {b.messages.map((m, i) => {
                     const n = b.messages.length;
@@ -1568,6 +1584,8 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
   const touch = useMediaQuery("(pointer: coarse)");
   const phone = useMediaQuery("(max-width: 768px)");
   const [adding, setAdding] = useState(false);
+  // A chat shared with a friend carries text only: photos and polls would stay on this side.
+  const textOnly = !!conversation.friend;
   const name = conversationName(conversation, bots);
   const quoted = replyTo ? conversation.messages.find((m) => m.id === replyTo) : undefined;
   const members = bots.filter((b) => conversation.botIds.includes(b.id));
@@ -1826,6 +1844,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         }}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
+          if (textOnly) return;
           const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
           if (!files.length) return;
           e.preventDefault();
@@ -1853,7 +1872,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         {quoted && (
           <div className="bots-reply-bar">
             <CornerUpLeft size={14} />
-            <span className="bots-reply-who">Replying to {authorName(quoted.author, bots).split(" ·")[0]}</span>
+            <span className="bots-reply-who">Replying to {authorName(quoted.author, bots, quoted.from).split(" ·")[0]}</span>
             <span className="bots-reply-text">{messageLine(quoted)}</span>
             <IconButton label="Cancel reply" tooltip={false} className="bots-reply-x" onClick={() => onReply(undefined)}>
               <X size={14} />
@@ -1876,7 +1895,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           </div>
         )}
         <div className="bots-composer-row">
-          {phone ? (
+          {textOnly ? null : phone ? (
             // One button, so the text gets the width. Only a group has more than images to offer.
             <IconButton
               label={conversation.kind === "group" ? "Add to message" : "Add images"}
@@ -1937,6 +1956,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
               if (e.currentTarget.offsetParent) keepPlace(e.currentTarget);
             }}
             onPaste={(e) => {
+              if (textOnly) return;
               const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
               if (!files.length) return;
               e.preventDefault();
@@ -2044,7 +2064,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const [openedAt] = useState(Date.now);
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
-  const members = conversation.kind === "direct" ? "" : conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))).join(", ");
+  const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
   const sub = typing ? "typing…" : activity ?? away ?? members;
   return (
     <div className="bots-chat">

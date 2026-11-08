@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import type { BotExtension } from "../../shared/bots";
+import { FRIEND_TOOLS } from "../../shared/friends";
 import { agentDir } from "../pi/install";
 import * as resources from "../pi/resources";
 import { PiProcess } from "../pi/rpc";
@@ -51,18 +52,32 @@ function selected(): string[] {
     .filter((target) => !isAbsolute(target) || existsSync(target));
 }
 
+const BASE = [
+  "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",
+  // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery.
+  // Empty CLI values suppress both while retaining Pi's default prompt and extension hooks.
+  "--system-prompt", "", "--append-system-prompt", "",
+];
+
 export function piFlags(): string[] {
   const extra = selected();
   return [
-    "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",
-    // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery.
-    // Empty CLI values suppress both while retaining Pi's default prompt and extension hooks.
-    "--system-prompt", "", "--append-system-prompt", "",
+    ...BASE,
     // The list keeps a bot to its own tools. An extension the user switched on brings tools of its own, so it goes.
     ...(extra.length ? [] : ["--tools", TOOLS]),
     "-e", OWN,
     ...extra.flatMap((target) => ["-e", target]),
   ];
+}
+
+/**
+ * A bot's Pi for a chat shared with a friend. The user's extensions still load, since a bot's model can
+ * come from one, but the tool list stays: only chat, theirs included. With `allowTools` it's the bot's
+ * usual Pi.
+ */
+export function friendFlags(allowTools: boolean): string[] {
+  if (allowTools) return piFlags();
+  return [...BASE, "--tools", FRIEND_TOOLS.join(","), "-e", OWN, ...selected().flatMap((target) => ["-e", target])];
 }
 
 let cache: { key: string; at: number; value: Promise<PiModels> } | undefined;

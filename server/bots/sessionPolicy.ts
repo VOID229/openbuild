@@ -5,8 +5,8 @@ import { join } from "node:path";
 export const SESSION_MAX_BYTES = 8 * 1024 * 1024;
 export const SESSION_MAX_AGE = 24 * 60 * 60 * 1000;
 /** Separate directories also prevent Pi's prefix-based session lookup crossing lanes. */
-export function laneDirectory(root: string, bot: string, conversation: string): string {
-  return join(root, createHash("sha256").update(JSON.stringify([bot, conversation])).digest("hex"));
+export function laneDirectory(root: string, bot: string, conversation: string, lane = "main"): string {
+  return join(root, createHash("sha256").update(JSON.stringify([bot, conversation, lane])).digest("hex"));
 }
 /** Called only after recovery, between turns. Old generations are retained verbatim. */
 export function sessionGeneration(lane: string, now = Date.now()): string {

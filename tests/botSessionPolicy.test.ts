@@ -7,6 +7,8 @@ import { laneDirectory, sessionGeneration, SESSION_MAX_AGE, SESSION_MAX_BYTES, m
 test("bot and conversation lanes are independent including friend conversations", () => {
   const paths = new Set([laneDirectory("/tmp", "a", "direct"), laneDirectory("/tmp", "a", "friend"), laneDirectory("/tmp", "b", "direct")]);
   expect(paths.size).toBe(3);
+  expect(laneDirectory("/tmp", "a", "direct", "friend:one")).not.toBe(laneDirectory("/tmp", "a", "direct", "friend:two"));
+  expect(laneDirectory("/tmp", "a", "direct", "friend:one")).not.toBe(laneDirectory("/tmp", "a", "direct"));
   expect(laneDirectory("/tmp", "a/b", "c")).not.toBe(laneDirectory("/tmp", "a", "b/c"));
 });
 test("size and age rotate retained generations and delivery ledgers start fresh", () => {

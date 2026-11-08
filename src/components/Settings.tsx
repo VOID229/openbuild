@@ -566,6 +566,7 @@ export function SettingsModal() {
   const restoreFocus = useRef<HTMLElement | null>(null);
   // Set by the page inside a section that is open, if any (see SettingsBack).
   const [back, setBack] = useState<SettingsBackTarget>();
+  const content = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -602,6 +603,12 @@ export function SettingsModal() {
     if (!back && open && document.activeElement === document.body) dialog.current?.focus({ preventScroll: true });
   }, [back, open]);
 
+  // Into a page or back out of it, what shows next starts at its top, not at the offset the last one was scrolled to.
+  const nested = !!back;
+  useLayoutEffect(() => {
+    if (content.current) content.current.scrollTop = 0;
+  }, [nested]);
+
   if (!mounted) return null;
   return (
     <div className="modal-root" data-state={visible ? "open" : "closed"}>
@@ -629,7 +636,7 @@ export function SettingsModal() {
           </IconButton>
         )}
         <SettingsBackContext.Provider value={setBack}>
-          <div className="settings-content" key={section}>
+          <div ref={content} className="settings-content" key={section}>
             {section === "profile" && <ProfileSection />}
             {section === "security" && <SecuritySection />}
             {hasCloud && section === "account" && (
