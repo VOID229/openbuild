@@ -9,6 +9,7 @@ import { busyBots } from "../../lib/bots/activity";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Conversation } from "../../lib/bots/types";
+import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
 import { arrowNav, canHover, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
@@ -120,18 +121,19 @@ function PeekCard({ peek }: { peek?: PeekState }) {
 
 /**
  * A sidebar avatar that keeps still unless its bots are at work (then they fidget; in a group, only
- * the members at work). Hovering its row, tile or rail button makes the eyes follow the pointer, and
- * nothing more.
+ * the members at work). Hovering a bot's row, tile or rail button makes its eyes follow the pointer,
+ * and nothing more: no hop or smile, no spin when pressed. A group's huddle doesn't react at all.
  */
-function SidebarAvatar({ conversation, size, playful }: { conversation: Conversation; size: number; playful?: boolean }) {
+function SidebarAvatar({ conversation, size }: { conversation: Conversation; size: number }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
+  const watches = conversation.kind === "direct";
   useEffect(() => {
     const host = ref.current?.closest("button");
-    if (!host) return;
+    if (!host || !watches) return setHover(false);
     const enter = (e: PointerEvent) => e.pointerType !== "touch" && setHover(true);
     const leave = () => setHover(false);
     host.addEventListener("pointerenter", enter);
@@ -140,10 +142,10 @@ function SidebarAvatar({ conversation, size, playful }: { conversation: Conversa
       host.removeEventListener("pointerenter", enter);
       host.removeEventListener("pointerleave", leave);
     };
-  }, []);
+  }, [watches]);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover} playful={playful} mood={typing ? "thinking" : undefined} />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} />
     </span>
   );
 }
@@ -215,13 +217,29 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       }}
     >
       <span className="bots-tile-avatar">
-        <SidebarAvatar conversation={conversation} size={64} playful={conversation.kind === "direct"} />
+        <SidebarAvatar conversation={conversation} size={64} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>
     </button>
   );
 });
+
+/** Who the friends are and whether they're connected, under their chats: one quiet line. */
+function FriendsLine({ friends }: { friends: FriendSummary[] }) {
+  if (!friends.length) return null;
+  return (
+    <p className="history-empty bots-friends-line">
+      {friends.map((f, i) => (
+        <span key={f.id}>
+          {i > 0 && ", "}
+          <span className={cx("bots-friend-dot", f.status === "online" && "bots-friend-dot-on")} role="img" aria-label={f.status === "online" ? "Connected" : "Not connected"} title={f.status === "online" ? "Connected" : f.status === "refused" ? "Their OpenBuild turned this one away" : "Not connected"} />
+          {f.name}
+        </span>
+      ))}
+    </p>
+  );
+}
 
 function Section({ name, label, count, children }: { name: string; label: string; count?: number; children: React.ReactNode }) {
   const open = !useBots((s) => s.folded.includes(name));
@@ -395,7 +413,7 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
     return (
       <NameDialog
         title={conversation.kind === "direct" ? "Rename bot" : "Rename group"}
-        initial={name}
+        initial={conversation.friend ? (conversation.name ?? "") : name}
         action="Rename"
         onClose={onClose}
         onSubmit={(next) => (conversation.kind === "direct" ? st.updateBot(conversation.botIds[0]!, { name: next }) : st.updateConversation(conversation.id, { name: next }))}
@@ -519,13 +537,16 @@ export function BotsSidebar() {
     return () => window.removeEventListener("openbots:dialog", on);
   }, []);
 
-  const { pinned, rest, filed, side, hidden } = useMemo(() => {
+  const friends = useBots((s) => s.friends);
+  const { pinned, rest, filed, side, hidden, shared } = useMemo(() => {
     const byRecent = (a: Conversation, b: Conversation) => b.updatedAt - a.updatedAt;
     const shown = conversations.filter((c) => !c.hidden);
     const listed = shown.filter((c) => !c.pinnedAt && c.kind !== "side").sort(byRecent);
     return {
       pinned: shown.filter((c) => c.pinnedAt).sort((a, b) => a.pinnedAt! - b.pinnedAt!),
-      rest: listed.filter((c) => !c.section || !sections.includes(c.section)),
+      // Chats shared with friends get a section of their own, unless the user filed one elsewhere.
+      shared: listed.filter((c) => c.friend && (!c.section || !sections.includes(c.section))),
+      rest: listed.filter((c) => !c.friend && (!c.section || !sections.includes(c.section))),
       filed: sections.map((name) => [name, listed.filter((c) => c.section === name)] as const),
       side: shown.filter((c) => !c.pinnedAt && c.kind === "side").sort(byRecent),
       hidden: conversations.filter((c) => c.hidden).sort(byRecent),
@@ -546,7 +567,7 @@ export function BotsSidebar() {
       <div className={cx("sidebar-scrim", open && mobile && "sidebar-scrim-visible")} onClick={() => useStore.getState().setBotsSidebarOpen(false)} aria-hidden />
       <aside className={cx("sidebar bots-sidebar", rail ? "bots-sidebar-rail" : open ? "sidebar-open" : "sidebar-closed")} aria-label="OpenBots" aria-hidden={!open && !rail} inert={!open && !rail}>
         {rail ? (
-          <Rail pinned={pinned} rest={[...rest, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
+          <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         ) : (
           <div className="sidebar-inner bots-sidebar-inner">
             <div className="brand-row">
@@ -608,6 +629,12 @@ export function BotsSidebar() {
                         {!list.length && <p className="history-empty">{touch ? "Press and hold" : "Right-click"} a bot and pick Move to section.</p>}
                       </Section>
                     ))}
+                    {(shared.length > 0 || friends.length > 0) && (
+                      <Section name="friends" label="With friends" count={shared.length}>
+                        {shared.map(row)}
+                        <FriendsLine friends={friends} />
+                      </Section>
+                    )}
                     {side.length > 0 && (
                       <Section name="side" label="Between bots" count={side.length}>
                         {side.map(row)}

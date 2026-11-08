@@ -10,28 +10,33 @@ export type { Action, Mood };
 const calm = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 const pick = <T,>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)]!;
 
-// One pointer listener for every avatar whose eyes follow it, batched to a frame.
+// One pointer listener for every avatar whose eyes follow it, batched to a frame. Where the pointer
+// is stays known between followers, so eyes that start following look the right way at once.
 const followers = new Set<() => void>();
-const pointer = { x: -1, y: -1, frame: 0 };
+const pointer = { x: -1, y: -1, frame: 0, watching: false };
 function onPointerMove(e: PointerEvent) {
   pointer.x = e.clientX;
   pointer.y = e.clientY;
+  if (!followers.size) return;
   pointer.frame ||= requestAnimationFrame(() => {
     pointer.frame = 0;
     for (const f of followers) f();
   });
 }
 function follow(fn: () => void) {
-  if (!followers.size) window.addEventListener("pointermove", onPointerMove, { passive: true });
+  if (!pointer.watching) {
+    pointer.watching = true;
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+  }
   followers.add(fn);
-  return () => {
-    followers.delete(fn);
-    if (!followers.size) window.removeEventListener("pointermove", onPointerMove);
-  };
+  if (pointer.x >= 0) fn();
+  return () => void followers.delete(fn);
 }
 
 /** How far the eyes travel when looking, in the 100-unit box. */
 const REACH = 5;
+/** Further when following the pointer, which they do only while it's on their row. */
+const TRACK_REACH = 8;
 
 /** Where a busy bot faces (-1…1 each way, x right and y down), how it tilts, and how open its eyes are. */
 type Pose = { x: number; y: number; tilt?: number; eyes?: "wide" | "squint" };
@@ -219,26 +224,31 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   }, [alive, lively, track, busy]);
 
   // Eyes that follow the pointer, written straight to the element so moving the mouse doesn't render.
+  // Aimed from the eyes themselves (shapes carry their faces off-centre), all the way over once the
+  // pointer is past the avatar's edge, in proportion closer in.
+  const { x: faceX, y: faceY } = shape.face;
   useEffect(() => {
     const el = ref.current;
     if (!track || !el || calm()) return;
+    el.dataset.tracking = "";
     const stop = follow(() => {
       const r = el.getBoundingClientRect();
       if (!r.width) return;
-      const dx = pointer.x - (r.left + r.width / 2);
-      const dy = pointer.y - (r.top + r.height / 2);
+      const dx = pointer.x - (r.left + (faceX / 100) * r.width);
+      const dy = pointer.y - (r.top + (faceY / 100) * r.height);
       const dist = Math.hypot(dx, dy) || 1;
-      const k = Math.min(1, dist / (r.width * 2.2));
-      el.style.setProperty("--track-x", String((dx / dist) * REACH * k));
-      el.style.setProperty("--track-y", String((dy / dist) * REACH * 0.8 * k));
+      const k = Math.min(1, dist / (r.width * 0.75));
+      el.style.setProperty("--track-x", ((dx / dist) * TRACK_REACH * k).toFixed(2));
+      el.style.setProperty("--track-y", ((dy / dist) * TRACK_REACH * 0.85 * k).toFixed(2));
     });
     return () => {
       stop();
-      // Look ahead again once it stops following, e.g. when hovering ends.
+      // Look ahead again once it stops following, e.g. when hovering ends: eased back, not snapped.
+      delete el.dataset.tracking;
       el.style.removeProperty("--track-x");
       el.style.removeProperty("--track-y");
     };
-  }, [track]);
+  }, [track, faceX, faceY]);
 
   const pulseKey = pulse?.key;
   const lastPulse = useRef(pulseKey);

@@ -1,9 +1,9 @@
-import { loadChatHistory } from "../lib/db";
+import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { isHosted } from "../lib/runtime";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { stopGeneration } from "../lib/chat";
+import { adoptHistory, stopGeneration } from "../lib/chat";
 import { regenerateTitle, threadTranscript } from "../lib/naming";
 import { harnessSession, removeWorktree } from "../lib/pi";
 import { runtimeName } from "../lib/runtimes";
@@ -284,6 +284,15 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
   const input = useRef<HTMLInputElement>(null);
   const rowRef = useRef<HTMLDivElement>(null);
   const longPress = useLongPress((x, y) => onMenu(chat.id, x, y));
+  // Pointing at a row (or pressing it) starts loading its history, so the click doesn't wait for it.
+  // A brief pause first, so a pointer passing over the list doesn't fetch every thread on its way.
+  const intent = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const prefetch = () => !active && prefetchHistory(chat);
+  const soon = () => {
+    clearTimeout(intent.current);
+    intent.current = setTimeout(prefetch, 80);
+  };
+  useEffect(() => () => clearTimeout(intent.current), []);
 
   useLayoutEffect(() => {
     const motion = landing.get(chat.id);
@@ -345,7 +354,17 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         } else onMenu(chat.id, e.clientX, e.clientY);
       }}
     >
-      <button type="button" className="history-title" onClick={() => onSelect(chat, hit)} aria-current={active ? "page" : undefined} title={titling ? undefined : chat.title}>
+      <button
+        type="button"
+        className="history-title"
+        onClick={() => onSelect(chat, hit)}
+        onPointerEnter={soon}
+        onPointerLeave={() => clearTimeout(intent.current)}
+        onPointerDown={prefetch}
+        onFocus={soon}
+        aria-current={active ? "page" : undefined}
+        title={titling ? undefined : chat.title}
+      >
         <span className="history-title-line">
           <span className="history-icon" title={model?.name}>
             {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
@@ -535,16 +554,52 @@ export function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | 
   return <div ref={thumb} className="scroll-thumb" aria-hidden />;
 }
 
-/** Section whose header toggles its rows with a height animation. */
-function Collapsible({ label, open, onToggle, children }: { label: string; open: boolean; onToggle: () => void; children: React.ReactNode }) {
+/** How long a section takes to fold shut; matches .collapse in styles.css. */
+const COLLAPSE_MS = 260;
+
+/**
+ * Section whose header toggles its rows with a height animation. A shut section has no rows at all,
+ * only while it folds shut: "Closed" is most threads, and its rows were most of what a page load
+ * built (thousands of icons) for a list nobody could see.
+ */
+function Collapsible({ label, open, onToggle, chats, row }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  // Decided while rendering, so the render that shuts it still has the rows to fold away.
+  const [wasOpen, setWasOpen] = useState(open);
+  const [folding, setFolding] = useState(false);
+  if (wasOpen !== open) {
+    setWasOpen(open);
+    setFolding(!open);
+  }
+  useEffect(() => {
+    if (!folding) return;
+    const timer = setTimeout(() => setFolding(false), COLLAPSE_MS);
+    return () => clearTimeout(timer);
+  }, [folding]);
+  const rows = open || folding;
+  // A thread filed into the shut section has no row to arrive in, so the heading marks the spot, and
+  // a section that only now has a thread folds in (as playLanding does for a row in a shut section).
+  useLayoutEffect(() => {
+    if (rows || !ref.current) return;
+    const landed = chats.filter((c) => landing.delete(c.id));
+    if (!landed.length) return;
+    const section = ref.current;
+    const heading = section.querySelector<HTMLElement>(".history-heading")!;
+    heading.dataset.landed = "";
+    if (chats.length === 1) fold(section, "in");
+    setTimeout(() => {
+      delete heading.dataset.landed;
+      unfold(section);
+    }, ROW_IN_MS);
+  }, [chats, rows]);
   return (
-    <section className="history-group">
+    <section ref={ref} className="history-group">
       <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
         {label}
         <ChevronDown size={14} className="history-heading-chevron" />
       </button>
       <div className={cx("collapse", open && "collapse-open")} inert={!open}>
-        <div className="collapse-inner">{children}</div>
+        <div className="collapse-inner">{rows && chats.map((c) => row(c))}</div>
       </div>
     </section>
   );
@@ -1477,6 +1532,9 @@ export function Sidebar() {
   const onSelect = useCallback(
     (c: Chat, hit?: SearchHit) => {
       const open = () => {
+        // Prefetched while the row was pointed at: it opens with its messages, not "Loading thread…".
+        const full = historyAtHand(c);
+        if (full) adoptHistory(c, full);
         selectChat(c.id);
         if (hit?.snippet) setSearchFocus({ chatId: c.id, messageId: hit.snippet.messageId, words: hit.words });
       };
@@ -1585,44 +1643,28 @@ export function Sidebar() {
             ) : (
               <>
                 {pinned.length > 0 && (
-                  <Collapsible label={`Pinned (${pinned.length})`} open={sections.pinned} onToggle={() => toggleSection("pinned")}>
-                    {pinned.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Pinned (${pinned.length})`} open={sections.pinned} onToggle={() => toggleSection("pinned")} chats={pinned} row={row} />
                 )}
                 {attention.length > 0 && (
-                  <Collapsible label={`Attention (${attention.length})`} open={sections.attention} onToggle={() => toggleSection("attention")}>
-                    {attention.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Attention (${attention.length})`} open={sections.attention} onToggle={() => toggleSection("attention")} chats={attention} row={row} />
                 )}
                 {limits.length > 0 && (
-                  <Collapsible label={`Limits (${limits.length})`} open={sections.limits} onToggle={() => toggleSection("limits")}>
-                    {limits.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Limits (${limits.length})`} open={sections.limits} onToggle={() => toggleSection("limits")} chats={limits} row={row} />
                 )}
                 {subagents.length > 0 && (
-                  <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")}>
-                    {subagents.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")} chats={subagents} row={row} />
                 )}
                 {woke.length > 0 && (
-                  <Collapsible label={`Woke (${woke.length})`} open={sections.woke} onToggle={() => toggleSection("woke")}>
-                    {woke.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Woke (${woke.length})`} open={sections.woke} onToggle={() => toggleSection("woke")} chats={woke} row={row} />
                 )}
                 {done.length > 0 && (
-                  <Collapsible label={`Done (${done.length})`} open={sections.done} onToggle={() => toggleSection("done")}>
-                    {done.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Done (${done.length})`} open={sections.done} onToggle={() => toggleSection("done")} chats={done} row={row} />
                 )}
                 {working.length > 0 && (
-                  <Collapsible label={`Working (${working.length})`} open={sections.working} onToggle={() => toggleSection("working")}>
-                    {working.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Working (${working.length})`} open={sections.working} onToggle={() => toggleSection("working")} chats={working} row={row} />
                 )}
                 {snoozed.length > 0 && (
-                  <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")}>
-                    {snoozed.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")} chats={snoozed} row={row} />
                 )}
                 {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
@@ -1632,9 +1674,7 @@ export function Sidebar() {
                   </p>
                 )}
                 {closed.length > 0 && (
-                  <Collapsible label={`Closed (${closed.length})`} open={sections.closed} onToggle={() => toggleSection("closed")}>
-                    {closed.map((c) => row(c))}
-                  </Collapsible>
+                  <Collapsible label={`Closed (${closed.length})`} open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
                 )}
               </>
             )}

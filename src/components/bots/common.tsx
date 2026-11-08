@@ -5,6 +5,7 @@ import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
 import { eventDetail, eventText } from "../../../shared/bots";
+import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 
@@ -68,8 +69,11 @@ export function messageLine(m: BotMessage): ReactNode {
   );
 }
 
-export function authorName(author: string, bots: Bot[]) {
-  return author === "me" ? "You" : (bots.find((b) => b.id === author)?.name ?? "Deleted bot");
+/** Who wrote a message. A friend's bot reads "Juniper · Alice" (its tag is its friend), a friend themselves "Alice". */
+export function authorName(author: string, bots: Bot[], from?: FriendFrom) {
+  if (author === "me") return "You";
+  if (from) return from.owner ? from.friendName : `${from.name.split(" · ")[0]} · ${from.friendName}`;
+  return bots.find((b) => b.id === author)?.name ?? "Deleted bot";
 }
 
 /** The sidebar's second line: the latest message, with who said it where that isn't obvious. */
@@ -78,7 +82,7 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
   if (!last) return "Say hi";
   const text = messageLine(last);
   if (last.author === "me") return <>You: {text}</>;
-  if (c.kind !== "direct") return <>{authorName(last.author, bots).split(" ·")[0]}: {text}</>;
+  if (c.kind !== "direct") return <>{authorName(last.author, bots, last.from).split(" ·")[0]}: {text}</>;
   return text;
 }
 
@@ -91,7 +95,6 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   alive = true,
   lively,
   track,
-  playful,
   busy,
   working,
   mood,
@@ -102,7 +105,6 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   alive?: boolean;
   lively?: boolean;
   track?: boolean;
-  playful?: boolean;
   busy?: boolean;
   /** The bots at work, so a group animates just those members rather than all of them. */
   working?: string[];
@@ -116,7 +118,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} playful={playful} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />

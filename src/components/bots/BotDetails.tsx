@@ -113,7 +113,11 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   const st = useBots.getState();
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
   const others = bots.filter((b) => !conversation.botIds.includes(b.id));
-  const editable = conversation.kind === "group";
+  const shared = conversation.friend;
+  // A shared chat that stopped syncing is there to read; its members don't change anymore.
+  const editable = conversation.kind === "group" && !shared?.ended;
+  // A group keeps two bots; a shared chat can be down to none of yours, since the friend's are there too.
+  const removable = shared ? members.length > 0 : members.length > 2;
   const open = (bot: Bot) => {
     const c = directOf(useBots.getState().conversations, bot.id);
     if (!c) return;
@@ -123,14 +127,32 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   };
   return (
     <div className="bots-pane">
+      {shared && (
+        <>
+          <div className="bots-pane-label">{shared.friendName}'s bots</div>
+          <ul className="bots-cards">
+            {shared.members.map((m) => (
+              <li key={m.id} className="bots-card-row bots-member">
+                <span className="bots-member-main">
+                  <BotAvatar look={m.look ?? { shape: "orb", color: "gray" }} size={28} alive={false} />
+                  <span className="bots-card-text">{m.name}</span>
+                </span>
+              </li>
+            ))}
+            {!shared.members.length && <li className="bots-hint">None yet.</li>}
+          </ul>
+          <div className="bots-pane-label">Yours</div>
+        </>
+      )}
       <ul className="bots-cards">
+        {shared && !members.length && <li className="bots-hint">None of your bots are in it yet. Add one below: it hears messages that mention it.</li>}
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
               <BotAvatar look={b.look} size={28} />
               <span className="bots-card-text">{b.name}</span>
             </button>
-            {editable && members.length > 2 && (
+            {editable && removable && (
               <IconButton
                 label="Remove from group"
                 tooltipSide="left"
@@ -148,7 +170,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
       </ul>
       {editable && others.length > 0 && (
         <>
-          <div className="bots-pane-label">Add to the group</div>
+          <div className="bots-pane-label">{shared ? "Bring in" : "Add to the group"}</div>
           <ul className="bots-cards">
             {others.map((b) => (
               <li key={b.id} className="bots-card-row bots-member">
@@ -308,13 +330,15 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
             {conversation.kind === "side" ? (
               <div className="bots-details-name bots-details-name-static">{name}</div>
             ) : (
-              <InlineName value={name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }) : st.updateConversation(conversation.id, { name: v }))} />
+              <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }) : st.updateConversation(conversation.id, { name: v }))} />
             )}
             <div className="bots-details-sub">
               {bot?.primary && <span className="bots-pill">Primary</span>}
               {bot
                 ? `Made ${new Date(bot.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
-                : conversation.kind === "group"
+                : conversation.friend
+                  ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
+                  : conversation.kind === "group"
                   ? `${conversation.botIds.length} bots`
                   : "Side chat between bots"}
             </div>

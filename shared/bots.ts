@@ -2,6 +2,7 @@
 // it: bots, the conversations they're in, their memory, routines and computers. The app gets a
 // snapshot and then a stream of changes (`BotsEvent`) from /api/bots/stream.
 import type { BotLook } from "../src/lib/bots/looks";
+import type { FriendChat, FriendFrom, FriendSummary } from "./friends";
 import type { BotToolGrants } from "./types";
 
 export type { BotLook };
@@ -271,6 +272,8 @@ export interface BotMessage {
   connect?: { app: string };
   /** For the user's messages: the bots that have read it. */
   seenBy?: string[];
+  /** A message from a friend's server in a shared chat: who wrote it there. Its author is a friend author (shared/friends.ts). */
+  from?: FriendFrom;
 }
 
 /**
@@ -298,6 +301,8 @@ export interface Conversation {
   messages: BotMessage[];
   /** Older messages exist on the server than the ones here. */
   more?: boolean;
+  /** A group shared with a friend's server: their bots and they are in it too. */
+  friend?: FriendChat;
 }
 
 export interface BotsSettings {
@@ -393,6 +398,8 @@ export interface BotsSnapshot {
   typing: Record<string, string[]>;
   drafts: Draft[];
   setup?: PiSetup;
+  /** Other people's OpenBuilds this one is friends with. */
+  friends?: FriendSummary[];
 }
 
 export type BotsEvent =
@@ -412,7 +419,8 @@ export type BotsEvent =
   /** The connected apps changed: ask /api/bots/apps for them. */
   | { t: "apps" }
   /** A bot added a project: ask /api/projects for them. */
-  | { t: "projects" };
+  | { t: "projects" }
+  | { t: "friends"; friends: FriendSummary[] };
 
 /** The first line of every OpenBots stream: the workspace (its server's id) the rest comes from. */
 export interface BotsHello {

@@ -9,6 +9,7 @@
 // the host's own session; another device's tab only uses the conversations that are there.
 import { create } from "zustand";
 import { abortable } from "../abort";
+import { suspectOutage, waitForServer } from "../serverOutage";
 import { uid } from "../id";
 import { useApps } from "./apps";
 import { createStore, get as cacheGet, set as cacheSet } from "../kv";
@@ -17,6 +18,7 @@ import { botModels } from "../pi";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
 import { castVote, DEFAULT_BOT_LOOP, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotLoopSettings, type BotsHello } from "../../../shared/bots";
+import type { FriendSummary } from "../../../shared/friends";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
@@ -96,6 +98,8 @@ interface BotsState {
   harnesses: BotHarnessSettings;
   /** When a chat pauses because bots keep replying to each other. */
   botLoop: BotLoopSettings;
+  /** Other people's OpenBuilds this workspace shares chats with. */
+  friends: FriendSummary[];
 
   /** Bots typing right now, by conversation. */
   typing: Record<string, string[]>;
@@ -199,6 +203,7 @@ export const useBots = create<BotsState>()(
     customExtensions: NO_EXTENSIONS,
     harnesses: {},
     botLoop: DEFAULT_BOT_LOOP,
+    friends: [],
     typing: {},
     drafts: [],
     pulses: {},
@@ -386,6 +391,8 @@ export const useBots = create<BotsState>()(
 
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
 export function conversationName(c: Conversation, bots: Bot[]): string {
+  // A shared chat carries its friend's name as the tag the sidebar shows after a " · ".
+  if (c.kind === "group" && c.friend) return `${c.name || "Shared chat"} · ${c.friend.friendName}`;
   if (c.kind === "group") return c.name || "Untitled group";
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
   // A side chat goes by its bots' first names ("Scout & Tally"), without their " · tags".
@@ -741,6 +748,7 @@ function enter(id: string): Visit {
     customExtensions: NO_EXTENSIONS,
     harnesses: {},
     botLoop: DEFAULT_BOT_LOOP,
+    friends: [],
   });
   rememberWorkspace(id);
   return visit;
@@ -910,6 +918,7 @@ async function stream(visit: Visit) {
     } catch {
       // The server is restarting, it isn't up yet, or the connection went quiet. The next
       // connection's snapshot brings back whatever was missed.
+      if (live(visit) && isLocalWorkspace(visit.id)) suspectOutage();
     } finally {
       clearInterval(watchdog);
       visit.ctrl.signal.removeEventListener("abort", leave);
@@ -922,7 +931,8 @@ async function stream(visit: Visit) {
     }
     if (!live(visit)) break;
     useBots.setState({ connected: false });
-    await new Promise((r) => setTimeout(r, slow ? 5000 : delay));
+    // Back at once when a restart is over, rather than at the next retry.
+    await (slow ? new Promise((r) => setTimeout(r, 5000)) : waitForServer(delay, visit.ctrl.signal));
     delay = Math.min(delay * 2, 2000);
   }
   visit.streaming = false;
@@ -961,6 +971,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       harnesses: e.settings.harnesses ?? {},
       botLoop: e.settings.botLoop ?? DEFAULT_BOT_LOOP,
+      friends: e.friends ?? [],
       activeId: openable(e.conversations, s.activeId),
     }));
     return;
@@ -971,6 +982,10 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
   }
   if (e.t === "setup") {
     set({ setup: e.setup });
+    return;
+  }
+  if (e.t === "friends") {
+    set({ friends: e.friends });
     return;
   }
   if (e.t === "bot") {

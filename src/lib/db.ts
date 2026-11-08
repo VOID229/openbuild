@@ -17,6 +17,7 @@ import { clear, createStore, del, delIf, entries, set } from "./kv";
 import { fetchWithTimeout } from "./abort";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { canResume, config, isHosted } from "./runtime";
+import { SERVER_BACK } from "./serverOutage";
 import type { Chat } from "./types";
 
 const browserChats = createStore("openchat-chats", "chats");
@@ -41,7 +42,7 @@ type Cached = { v: string; chat: Chat };
 const cached = new Map<string, Cached>();
 // Full histories are read only when opened, never by enumerating the entire browser cache.
 const requestedHistories = new Set<string>();
-const historyRequests = new Map<string, Promise<Chat>>();
+const historyRequests = new Map<string, Promise<Cached & { current: boolean }>>();
 /** Bound retained visited histories too; streams keep their complete in-flight state. */
 function retainHistory(id: string) {
   requestedHistories.delete(id);
@@ -54,22 +55,92 @@ function retainHistory(id: string) {
     if (row) cached.set(old, { ...row, chat: chatSummary(row.chat) });
   }
 }
-export function loadChatHistory(chat: Chat, retain = false): Promise<Chat> {
-  if (!chat.historyDeferred) return Promise.resolve(chat);
-  if (retain) retainHistory(chat.id);
+/**
+ * Histories fetched ahead of a click (the row was pointed at or pressed), by thread, kept a little
+ * while for it to be opened. Only used while the thread list still says it's that version.
+ */
+const prefetched = new Map<string, { v: string; chat: Chat; at: number }>();
+const PREFETCH_KEEP = 2;
+const PREFETCH_MS = 30_000;
+/** Bumped as each thread list is applied: a history asked for before it may be older than it says. */
+let listRevision = 0;
+
+/** `current`: nothing newer than this answer is known, so it may be kept and opened from later. */
+function fetchHistory(chat: Chat): Promise<Cached & { current: boolean }> {
   const pending = historyRequests.get(chat.id);
-  if (pending) return pending.then(full => materialize(chat, full));
+  if (pending) return pending;
+  const asked = listRevision;
   const work = (async () => {
+    // settle() judges which replies can be picked back up by the config: it must be in first.
+    await config;
     const res = await fetchWithTimeout("/api/chats/fetch", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: [chat.id] }) });
     if (!res.ok) throw new Error(`Couldn't load thread (HTTP ${res.status})`);
     const row = (await res.json()).chats[0] as Cached | undefined;
     if (!row) throw new Error("This thread is no longer on the server");
-    remember(chat.id, row.v, row.chat);
+    // A list applied meanwhile can know a newer version than this answer (a slow response): keep
+    // this one only if it's that version, so the cache never goes back to an older one.
+    const current = listRevision === asked || cached.get(chat.id)?.v === row.v;
+    if (current) remember(chat.id, row.v, row.chat);
     // Sidebar edits can be made while history is deferred; only messages come from the history.
-    return settle(row.chat);
+    return { v: row.v, chat: settle(row.chat), current };
   })().finally(() => historyRequests.delete(chat.id));
   historyRequests.set(chat.id, work);
-  return work.then(full => materialize(chat, full));
+  return work;
+}
+
+/** The history `chat` will open with, when it's already here: what a prefetch brought, if still current. */
+function takePrefetched(chat: Chat, retain: boolean): Chat | undefined {
+  const hit = prefetched.get(chat.id);
+  if (!hit) return;
+  prefetched.delete(chat.id);
+  if (hit.v !== cached.get(chat.id)?.v || Date.now() - hit.at > PREFETCH_MS) return;
+  // Opened for good: kept like any history loaded on opening.
+  if (retain) {
+    retainHistory(chat.id);
+    remember(chat.id, hit.v, hit.chat);
+  }
+  return materialize(chat, hit.chat);
+}
+
+/** Start loading a thread's history before it's opened. A miss costs a request; a hit, the wait. */
+export function prefetchHistory(chat: Chat) {
+  if (!chat.historyDeferred || isHosted() || prefetched.has(chat.id) || historyRequests.has(chat.id)) return;
+  void fetchHistory(chat).then(({ v, chat: full, current }) => {
+    if (!current) return;
+    prefetched.set(chat.id, { v, chat: full, at: Date.now() });
+    for (const id of prefetched.keys()) if (prefetched.size > PREFETCH_KEEP) prefetched.delete(id);
+  }, () => { /* Opening it tries again, and says why. */ });
+}
+
+/** A thread's history when it's here without asking the server (see takePrefetched). */
+export function historyAtHand(chat: Chat): Chat | undefined {
+  return chat.historyDeferred ? takePrefetched(chat, true) : chat;
+}
+
+/**
+ * A thread's full history. `retain`: it's being opened, to show; what a prefetch brought or what's
+ * already held at the current version does. Without it (a save rebuilding the history to write
+ * back), it's always asked of the server, so nothing older than the server's is ever written.
+ */
+export function loadChatHistory(chat: Chat, retain = false): Promise<Chat> {
+  if (!chat.historyDeferred) return Promise.resolve(chat);
+  if (retain) {
+    const ready = takePrefetched(chat, true);
+    if (ready) return Promise.resolve(ready);
+    retainHistory(chat.id);
+    // A full history in the cache is the current version: a newer one would have replaced it.
+    const held = cached.get(chat.id)?.chat;
+    if (held && !held.historyDeferred) return Promise.resolve(materialize(chat, held));
+  }
+  return currentHistory(chat).then((full) => materialize(chat, full));
+}
+/** A history no thread list applied since it was asked for knows to be older: an answer a newer list
+ *  overtook (a prefetch still on its way when the list moved on) is asked for again. */
+async function currentHistory(chat: Chat): Promise<Chat> {
+  for (let attempt = 1; ; attempt++) {
+    const { chat: full, current } = await fetchHistory(chat);
+    if (current || attempt === 3) return full;
+  }
 }
 function materialize(summary: Chat, full: Chat): Chat {
   const { historyDeferred: _, ...metadata } = summary;
@@ -89,16 +160,21 @@ class Retry extends Error {}
 /** The outbox in the order it applies: "delete all" first, since anything else queued came after it. */
 const queued = async () => (await entries<string, Op>(outbox)).sort(([a], [b]) => (a === CLEAR ? -1 : b === CLEAR ? 1 : 0));
 
+const putChat = (id: string, chat: Chat) =>
+  fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(chat) });
+
 async function send(id: string, op: Op) {
   let res: Response;
   try {
-    if (op.op === "put") {
-      const chat = await loadChatHistory(op.chat);
-      res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(chat),
-      });
+    if (op.op === "put" && op.chat.historyDeferred) {
+      // Edits to a thread whose history isn't here (marked read, pinned, closed): only its metadata,
+      // for the server to merge into the history it has, rather than downloading it to send back whole.
+      const { messages: _, historyDeferred: __, ...metadata } = op.chat;
+      res = await fetchWithTimeout(`/api/chats/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(metadata) });
+      // A server from before that (404, or 405): the whole history, as it used to be sent.
+      if (res.status === 404 || res.status === 405) res = await putChat(id, await loadChatHistory(op.chat));
+    } else if (op.op === "put") {
+      res = await putChat(id, op.chat);
     } else {
       res = await fetchWithTimeout(op.op === "clear" ? "/api/chats" : `/api/chats/${encodeURIComponent(id)}`, { method: "DELETE" });
     }
@@ -164,6 +240,7 @@ function schedule() {
 
 if (typeof window !== "undefined") {
   window.addEventListener("online", () => void flush());
+  window.addEventListener(SERVER_BACK, () => void flush());
   document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && void flush());
 }
 
@@ -243,13 +320,17 @@ async function readChats(): Promise<Chat[]> {
   }
   await flush();
   await importLegacy();
-  const res = await fetchWithTimeout(initialLoad ? "/api/chats?summaries&startup" : "/api/chats?summaries");
+  // A page load, with no summaries of its own yet: they come with the index, a round trip sooner.
+  const res = await fetchWithTimeout(initialLoad ? "/api/chats?summaries&startup&all" : "/api/chats?summaries");
   if (!res.ok) throw new Error(`Couldn't load chats (HTTP ${res.status})`);
   const body = (await res.json()) as { summaryIndex?: { id: string; v: string }[]; summaries?: Cached[]; index?: { id: string; v: string }[]; chats?: Chat[] };
+  listRevision++;
   let chats: Map<string, Chat>;
   if (body.summaryIndex) {
     const stale = body.summaryIndex.filter(e => cached.get(e.id)?.v !== e.v).map(e => e.id);
-    if (stale.length) {
+    if (body.summaries) {
+      // Sent with the index.
+    } else if (stale.length) {
       const res = await fetchWithTimeout("/api/chats/summaries", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: stale }) });
       if (!res.ok) throw new Error(`Couldn't load thread list (HTTP ${res.status})`);
       body.summaries = (await res.json()).summaries;

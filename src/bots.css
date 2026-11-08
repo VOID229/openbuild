@@ -81,6 +81,11 @@
   transition: transform 260ms var(--ease);
 }
 
+/* Following the pointer: close behind it, so it reads as watching rather than catching up. */
+.bot[data-tracking] .bot-look {
+  transition: transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .bot[data-busy] .bot-look {
   transition: transform 520ms cubic-bezier(0.3, 1.35, 0.45, 1);
 }
@@ -525,6 +530,27 @@
   flex: none;
   color: var(--text-3);
   font-weight: 400;
+}
+
+/* Friends under their shared chats: a name and whether their OpenBuild is connected. */
+.bots-friends-line {
+  margin: 6px 12px 10px;
+  font-size: 12px;
+}
+
+.bots-friend-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: var(--text-3);
+  opacity: 0.5;
+}
+
+.bots-friend-dot-on {
+  background: var(--ok);
+  opacity: 1;
 }
 
 .bots-row-preview {
@@ -995,6 +1021,12 @@
 
 .bm-group:has(.bot[data-color="white"]) .bm-name {
   color: var(--text-2);
+}
+
+/* A friend's bot: which friend it's with, as quietly as a row's tag. */
+.bm-name-friend {
+  color: var(--text-3);
+  font-weight: 400;
 }
 
 .bm-group-row {

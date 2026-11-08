@@ -8,6 +8,7 @@ import { apiUrl } from "./devices";
 import { browserSecretById, browserSecrets } from "./keyStore";
 import { config } from "./runtime";
 import { abortable, fetchWithTimeout } from "./abort";
+import { SERVER_BACK, suspectOutage } from "./serverOutage";
 
 /**
  * Check a saved key (by id) and list its models. Local app: the secret stays on the server, which
@@ -141,6 +142,7 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
       if (signal.aborted) return;
       console.warn("[chat] lost the connection to a reply", err);
       outcome = "lost";
+      if (stream.via !== "hosted") suspectOutage();
     } finally {
       // Cancellation must not wait for a transport that is itself stuck in next().
       void source.return("lost").catch(() => {});
@@ -183,12 +185,13 @@ export async function* streamChat(req: ChatRequest | PiChatRequest | undefined, 
   }
 }
 
-/** Wait, but retry right away when the network or the page comes back. */
+/** Wait, but retry right away when the network, the page or the server comes back. */
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     const done = () => {
       clearTimeout(timer);
       removeEventListener("online", done);
+      removeEventListener(SERVER_BACK, done);
       document.removeEventListener("visibilitychange", onVisible);
       signal.removeEventListener("abort", done);
       resolve();
@@ -196,6 +199,7 @@ function pause(ms: number, signal: AbortSignal) {
     const onVisible = () => document.visibilityState === "visible" && done();
     const timer = setTimeout(done, ms);
     addEventListener("online", done);
+    addEventListener(SERVER_BACK, done);
     document.addEventListener("visibilitychange", onVisible);
     signal.addEventListener("abort", done, { once: true });
     if (signal.aborted) done();

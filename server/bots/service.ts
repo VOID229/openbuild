@@ -5,6 +5,8 @@ import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
 import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import type { FriendChat, FriendSummary } from "../../shared/friends";
+import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
 import { readDevices } from "../devices";
 import { findProject } from "../projects";
@@ -39,6 +41,17 @@ type Hooks = {
   stop: (botId: string) => void;
   pendingAssignments?: (botId: string) => { conversationId: string; messageIds: string[] }[];
 };
+/** What the friends module (server/friends/) hears about shared chats, so this file never imports it either. */
+type FriendHooks = {
+  /** One of this side's messages in a shared chat, to pass on to the friend. */
+  relay: (c: db.StoredConversation, message: BotMessage) => void;
+  /** Which of this side's bots are in a shared chat changed. */
+  members: (c: db.StoredConversation) => void;
+  /** A shared chat is going away here. */
+  left: (c: db.StoredConversation) => void;
+  /** The friends, for the snapshot. */
+  list: () => FriendSummary[];
+};
 /** What Pi still needs before a bot can run on it, if anything. `fresh` asks Pi again rather than trusting a cached answer. */
 type PiCheck = (fresh: boolean) => Promise<PiSetup | undefined>;
 
@@ -55,11 +68,22 @@ const mem = globalThis as {
   openbotsWaiters?: Waiter[];
   openbotsPiCheck?: PiCheck;
   openbotsSetup?: { value?: PiSetup };
+  openbotsFriendHooks?: FriendHooks;
 };
 let hooks: Hooks = (mem.openbotsHooks ??= { wake() {}, stop() {} });
 /** runner.ts registers these at startup. */
 export function setHooks(next: Hooks) {
   hooks = mem.openbotsHooks = next;
+}
+
+let friendHooks: FriendHooks = (mem.openbotsFriendHooks ??= { relay() {}, members() {}, left() {}, list: () => [] });
+/** server/friends/ registers these at startup. */
+export function setFriendHooks(next: FriendHooks) {
+  friendHooks = mem.openbotsFriendHooks = next;
+}
+/** Who the friends are, or whether they're online, changed. */
+export function emitFriends() {
+  emit({ t: "friends", friends: friendHooks.list() });
 }
 
 let piCheck: PiCheck = (mem.openbotsPiCheck ??= async () => undefined);
@@ -192,6 +216,7 @@ export function snapshot(): BotsSnapshot {
     typing: { ...typing },
     drafts: [...drafts],
     setup: setup.value,
+    friends: friendHooks.list(),
   };
 }
 
@@ -415,6 +440,8 @@ export async function resetAll() {
   // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions they load, each machine's isolation and the apps they connected aren't those, and the keys stay too.
   const { defaultModel, defaultFallbackModels, searxng, customExtensions, isolation } = settings();
   const apps = db.getValue("apps");
+  // Shared chats go too: their friends hear they were left, rather than writing on into nothing.
+  for (const c of db.listConversations()) if (c.friend && !c.friend.ended) friendHooks.left(c);
   db.wipe();
   if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions || isolation) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions, isolation });
   if (apps) db.setValue("apps", apps);
@@ -696,6 +723,7 @@ export async function deleteBot(id: string) {
       const last = db.messages(c.id, 1).at(-1);
       if (last) emit({ t: "message", conversationId: c.id, message: last.message });
       settlePolls(c.id);
+      if (next.friend) friendHooks.members(next);
     }
   }
   db.deleteBot(id);
@@ -704,10 +732,16 @@ export async function deleteBot(id: string) {
   emit({ t: "bot-deleted", id });
 }
 
-export function createConversation(input: { id?: string; kind: Conversation["kind"]; name?: string; botIds: string[]; instructions?: string; messages?: BotMessage[] }): Conversation {
+/**
+ * A group or side chat. With `friend`, a group shared with a friend's server (server/friends/ makes
+ * those): it can start with none of this side's bots, since a chat a friend shared waits for the owner
+ * to pick which of theirs join.
+ */
+export function createConversation(input: { id?: string; kind: Conversation["kind"]; name?: string; botIds: string[]; instructions?: string; messages?: BotMessage[]; friend?: FriendChat }): Conversation {
   if (input.kind === "direct") throw new BotsError("A bot's own chat is created with the bot.");
+  if (input.friend && input.kind !== "group") throw new BotsError("Only groups are shared with friends.");
   const botIds = [...new Set(input.botIds)].filter((id) => db.getBot(id));
-  if (botIds.length < 2) throw new BotsError("Pick at least two bots.");
+  if (!input.friend && botIds.length < 2) throw new BotsError("Pick at least two bots.");
   if (input.kind === "group" && !clip(input.name, 80)) throw new BotsError("A group needs a name.");
   const now = Date.now();
   const id = input.id && isBotId(input.id) ? input.id : crypto.randomUUID();
@@ -720,6 +754,7 @@ export function createConversation(input: { id?: string; kind: Conversation["kin
     botIds,
     createdAt: now,
     updatedAt: now,
+    ...(input.friend ? { friend: input.friend } : {}),
   };
   db.putConversation(c);
   const messages = input.messages?.length
@@ -746,9 +781,11 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   if (typeof patch.hidden === "boolean") c.hidden = patch.hidden || undefined;
   if (typeof patch.unread === "boolean") c.unread = patch.unread || undefined;
   if ("section" in patch) c.section = clip(patch.section, 40);
+  const before = c.botIds.join();
   if (patch.botIds && c.kind === "group") {
     const ids = [...new Set(patch.botIds)].filter((b) => db.getBot(b));
-    if (ids.length >= 1) {
+    // A shared chat can be down to none of this side's bots: the friend's are still talking in it.
+    if (ids.length >= (c.friend ? 0 : 1)) {
       c.botIds = ids;
       const follow = db.groupFollow(id);
       if (follow) db.setGroupFollow(id, { ...follow, ids: follow.ids.filter(botId => ids.includes(botId)) });
@@ -757,13 +794,23 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   db.putConversation(c);
   emitConversation(id);
   if (patch.botIds && c.kind === "group") settlePolls(id);
+  if (c.friend && !c.friend.ended && c.botIds.join() !== before) friendHooks.members(c);
   return conversationView(id)!;
+}
+
+/** What the friends module changes about a shared chat: who's in it on the friend's side, and whether it still syncs. */
+export function updateSharedChat(id: string, friend: Partial<FriendChat>) {
+  const c = db.getConversation(id);
+  if (!c?.friend) return;
+  db.putConversation({ ...c, friend: { ...c.friend, ...friend } });
+  emitConversation(id);
 }
 
 export function deleteConversation(id: string) {
   const c = db.getConversation(id);
   if (!c) throw new BotsError("No such conversation.", 404);
   if (c.kind === "direct") throw new BotsError("Delete the bot to remove its chat.");
+  if (c.friend && !c.friend.ended) friendHooks.left(c);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
 }
@@ -851,7 +898,13 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     if (existing.conversationId !== conversationId || existing.message.author !== message.author) throw new BotsError("That message id already exists.");
     return existing.message;
   }
-  if (message.author !== "me" && !c.botIds.includes(message.author)) throw new BotsError("That bot isn't in this conversation.");
+  // A friend's message only ever comes from server/friends/, into a chat shared with that friend: the
+  // app's routes post as "me" and bots post as themselves, so nothing else can write as a friend.
+  const fromFriend = parseFriendAuthor(message.author)?.friend;
+  const friendHere = !!fromFriend && c.friend?.friend === fromFriend;
+  if (message.author !== "me" && !c.botIds.includes(message.author) && !friendHere) throw new BotsError("That bot isn't in this conversation.");
+  // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
+  if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.poll)) throw new BotsError("Photos and polls aren't shared with friends yet.");
   if (message.poll) {
     if (c.kind !== "group") throw new BotsError("Polls are for group chats.");
     const poll = cleanPoll(message.poll);
@@ -863,7 +916,8 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   db.putConversation({ ...c, updatedAt: message.at, unread, hidden });
   emitConversation(conversationId);
   emit({ t: "message", conversationId, message });
-  if (message.author !== "me" && !message.event) pulse(message.author, "happy");
+  if (message.author !== "me" && !message.event && !friendHere) pulse(message.author, "happy");
+  if (c.friend && !c.friend.ended && !friendHere && !message.event) friendHooks.relay(c, message);
 
   const waiting = waiters.filter((w) => w.conversationId === conversationId && w.afterSeq < seq && w.botId !== message.author);
   for (const w of waiting) {
