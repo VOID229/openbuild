@@ -139,12 +139,14 @@ export function projectSession(source: string, file: string, modified: number): 
   }
   // Never answered (the reply was stopped): nothing is waiting for it anymore.
   for (const ask of asks.values()) ask.answer ??= "";
-  const names = entries.filter((e) => e.type === "session_info" && typeof e.name === "string").map((e) => e.name as string);
+  // As Pi lists sessions: the latest session_info names it, and an empty one clears the name.
+  const names = entries.filter((e) => e.type === "session_info" && typeof e.name === "string").map((e) => (e.name as string).trim());
   const subagent = CHILD_NAME.test(names[0] ?? "");
-  const name = subagent ? names.at(-1)!.replace(CHILD_NAME, "") : names.at(-1);
+  const name = subagent ? names.at(-1)!.replace(CHILD_NAME, "").trim() : names.at(-1);
   const id = isThreadId(header.id) ? header.id : `pi-${createHash("sha256").update(file).digest("hex").slice(0, 32)}`;
   return {
-    id, title: name || messages.find((m) => m.role === "user")?.content.slice(0, 100) || "Pi session",
+    // A prompt of images alone has no text: the first one that does stands in.
+    id, title: name || messages.find((m) => m.role === "user" && m.content.trim())?.content.trim().slice(0, 100) || "Pi session",
     // Without a Pi session name the title is only the prompt's opening: not a name yet.
     ...(name ? { titleSource: "auto" as const } : {}), createdAt, updatedAt: modified, messages, ...(subagent ? { subagent } : {}),
     workspace: { cwd: header.cwd, projectId: "", projectName: basename(header.cwd) || header.cwd },
@@ -171,7 +173,8 @@ async function filesIn(dir: string): Promise<string[]> {
 }
 
 const fingerprints = new Map<string, string>();
-const fingerprintKey = (file: string) => `pi-discovery:v2:${createHash("sha256").update(resolve(file)).digest("hex")}`;
+// `v3`: sessions read before discovered threads were marked (Chat.discovered) are read again once.
+const fingerprintKey = (file: string) => `pi-discovery:v3:${createHash("sha256").update(resolve(file)).digest("hex")}`;
 const fileFingerprint = (info: Stats, id?: string) => `${info.dev}:${info.ino}:${info.ctimeMs}:${info.mtimeMs}:${info.size}:${isLive(info.mtimeMs)}:${id ?? ""}:${id ? managedSessionBoundary(id) ?? "" : ""}:${id ? ownsSession(id) : false}`;
 let running: Promise<void> | undefined;
 
@@ -226,8 +229,10 @@ async function discover() {
       // Metadata (pins, archive, titles) belongs to OpenBuild, history belongs to Pi. A title OpenBuild
       // generated stays unless Pi named the session since; one the user typed always stays.
       const keepTitle = old?.titleSource === "user" || (old?.titleSource === "auto" && !projected.titleSource);
+      // Pi's transcript is all OpenBuild has of it: new to OpenBuild, or unnamed since discovery took it in.
+      const discovered = !managed && (!old || !!old.discovered || !old.titleSource);
       const chat = { ...old, ...projected, id, updatedAt: Math.max(old?.updatedAt || 0, projected.updatedAt),
-        ...(keepTitle ? { title: old.title, titleSource: old.titleSource } : {}),
+        ...(keepTitle ? { title: old.title, titleSource: old.titleSource } : {}), ...(discovered ? { discovered: true as const } : {}),
         workspace: old?.workspace || projected.workspace,
       };
       let savedFingerprint = fingerprint;
@@ -238,6 +243,26 @@ async function discover() {
         storage.setValue(fingerprintKey(file), savedFingerprint);
       });
       fingerprints.set(file, savedFingerprint);
-    } catch { /* A session can disappear or be replaced while scanning. Retry next time. */ }
+    } catch (err) {
+      // A session can disappear or be replaced while scanning: retry next time. One that's gone
+      // for good can't finish the turn it was on.
+      if ((err as NodeJS.ErrnoException).code !== "ENOENT" || fingerprints.get(file) === GONE) return;
+      fingerprints.set(file, GONE);
+      stopVanished(mappings.get(resolve(file)));
+    }
   }));
+}
+
+const GONE = "gone";
+
+/** A discovered run whose transcript was deleted reads as stopped, not working forever. */
+function stopVanished(id: string | undefined) {
+  if (!id || ownsSession(id)) return;
+  storage.transaction(() => {
+    const chat = storage.getChat(id) as Chat | undefined;
+    const reply = chat?.messages.findLast((m) => m.role === "assistant");
+    if (!chat || reply?.status !== "streaming" || reply.stream?.via !== EXTERNAL_VIA) return;
+    const stopped = chat.messages.map((m) => { if (m !== reply) return m; const { stream: _, ...rest } = m; return { ...rest, status: "stopped" as const }; });
+    storage.putChat({ ...chat, messages: stopped });
+  });
 }

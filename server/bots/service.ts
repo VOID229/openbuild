@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
-import { BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import { computerApi } from "../computers/api";
 import { hasDevice, readDevices } from "../devices";
 import { isPermissionId } from "../../shared/types";
@@ -12,7 +12,6 @@ import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
 
 const MESSAGE_LIMIT = 200;
-const CHAIN_LIMIT = 8;
 
 export class BotsError extends Error {
   constructor(
@@ -127,6 +126,11 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
   if ("searxng" in patch) next.searxng = [...new Set((Array.isArray(patch.searxng) ? patch.searxng : []).filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim().slice(0, 500)))].slice(0, 8);
+  if (patch.botLoop) {
+    // A limit that isn't a number keeps the saved one; anything else is held to the range.
+    const limit = Number.isFinite(Number(patch.botLoop.limit)) ? patch.botLoop.limit : (settings().botLoop ?? DEFAULT_BOT_LOOP).limit;
+    next.botLoop = { enabled: patch.botLoop.enabled !== false, limit: num(limit, BOT_LOOP_MIN, BOT_LOOP_MAX) };
+  }
   if (patch.customExtensions) next.customExtensions = { enabled: patch.customExtensions.enabled === true, ids: [...new Set((Array.isArray(patch.customExtensions.ids) ? patch.customExtensions.ids : []).filter((id) => typeof id === "string"))].slice(0, 200) };
   if (patch.harnesses) {
     const permissions = patch.harnesses.permissions ?? {};
@@ -763,7 +767,9 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
       chainWarned.delete(conversationId);
     } else chains.set(conversationId, (chains.get(conversationId) ?? 0) + 1);
     const depth = chains.get(conversationId) ?? 0;
-    if (message.author !== "me" && depth > CHAIN_LIMIT) {
+    // Read on every message, so a change in Settings applies to chats already going.
+    const loop = settings().botLoop ?? DEFAULT_BOT_LOOP;
+    if (message.author !== "me" && loop.enabled && depth > loop.limit) {
       if (!chainWarned.has(conversationId)) {
         chainWarned.add(conversationId);
         postMessage(conversationId, {

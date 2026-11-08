@@ -7,7 +7,7 @@ import { join } from "node:path";
 test("discovers past and future Pi sessions, refreshes history, resumes originals and respects deletions", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-pi-discovery-"));
   const script = `
-    import { mkdir, writeFile, appendFile, utimes } from "node:fs/promises";
+    import { mkdir, writeFile, appendFile, utimes, rm } from "node:fs/promises";
     import { join } from "node:path";
     import { strict as assert } from "node:assert";
     const storage = await import("./server/storage.ts");
@@ -38,6 +38,8 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.equal(chats.length, 1);
     assert.equal(chats[0].id, id);
     assert.equal(chats[0].title, "Old terminal task");
+    assert.equal(chats[0].titleSource, undefined); // Only its prompt so far: auto-naming may name it.
+    assert.equal(chats[0].discovered, true);
     assert.equal(chats[0].workspace.cwd, root);
     const { allowedCwd } = await import("./server/projects.ts");
     assert(allowedCwd(root)); // Resumable without adding the folder as an OpenBuild project.
@@ -88,6 +90,17 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert(!storage.listChats().some((c) => c.id === id));
     assert(await Bun.file(file).exists());
 
+    // A session whose file is deleted mid-turn can't finish it: its run stops instead of working forever.
+    const doomed = join(root, "doomed.jsonl");
+    await writeFile(doomed, jsonl([{ ...header, id: "doomed-session-1234" }, user, assistant]));
+    await discoverSessions();
+    assert.equal(storage.getChat("doomed-session-1234").messages[1].status, "streaming");
+    await rm(doomed);
+    await discoverSessions();
+    const vanished = storage.getChat("doomed-session-1234").messages[1];
+    assert.equal(vanished.status, "stopped");
+    assert.equal(vanished.stream, undefined);
+
     // Follow the active branch, not abandoned alternatives; tolerate a partial final write.
     const alternative = entry("alternate", "user1", "assistant", [{ type: "text", text: "Alternative answer" }]);
     const projected = projectSession(jsonl([...lines, alternative]) + '{"type":', file, 10);
@@ -122,6 +135,15 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.equal(child.subagent, true);
     assert.equal(child.title, "runtime-ui");
     assert.equal(projectSession(jsonl(lines), file, 10).subagent, undefined);
+    // Named as Pi lists it: the latest session_info, trimmed, and an empty one clears the name.
+    const named = (...names) => projectSession(jsonl([header, ...names.map((name, i) => ({ type: "session_info", id: "n" + i, parentId: null, timestamp: header.timestamp, name })), user]), file, 10);
+    assert.deepEqual([named("  Key rotation\t").title, named("  Key rotation ").titleSource], ["Key rotation", "auto"]);
+    assert.deepEqual([named("Old name", "").title, named("Old name", "").titleSource], ["Old terminal task", undefined]);
+    // A prompt of images alone has no text to go by: the first prompt that does names it.
+    const picture = entry("pic", null, "user", [{ type: "image", mimeType: "image/png", data: "QUJD" }]);
+    const worded = entry("worded", "pic", "user", "  What is this?  ");
+    assert.equal(projectSession(jsonl([header, picture, worded]), file, 10).title, "What is this?");
+    assert.equal(projectSession(jsonl([header, picture]), file, 10).title, "Pi session");
     // Worker-owned UI history stays intact, but later terminal continuations are still imported.
     const { projectStoredChats } = await import('./server/pi/projection.ts');
     const managedId = 'managed-thread-1234';
@@ -144,6 +166,7 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     assert.deepEqual(continued.messages.map(m=>m.id),['ob-user','ob-assistant','terminal-user','terminal-reply']);
     assert.deepEqual(continued.messages[1].stream,ownedStream);
     assert.equal(continued.messages[3].content,'Terminal answer');
+    assert.equal(continued.discovered,undefined); // OpenBuild's own thread, though Pi wrote some of it.
     process.exit(0);
   `;
   try {

@@ -314,6 +314,26 @@ export interface BotsSettings {
   customExtensions?: { enabled: boolean; ids: string[] };
   /** How bots' OpenBuild threads use each harness. */
   harnesses?: BotHarnessSettings;
+  /** Pausing a chat after this many bot messages in a row, so bots can't reply to each other forever. */
+  botLoop?: BotLoopSettings;
+}
+
+export interface BotLoopSettings {
+  enabled: boolean;
+  /** Bot messages in a row allowed before the chat pauses. */
+  limit: number;
+}
+
+export const BOT_LOOP_MIN = 1;
+export const BOT_LOOP_MAX = 200;
+export const DEFAULT_BOT_LOOP: BotLoopSettings = { enabled: true, limit: 8 };
+
+/** The limit typed in, or why it can't be one. */
+export function parseBotLoopLimit(raw: string): { limit: number } | { error: string } {
+  const text = raw.trim();
+  const n = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(n) || n < BOT_LOOP_MIN || n > BOT_LOOP_MAX) return { error: `Enter a whole number from ${BOT_LOOP_MIN} to ${BOT_LOOP_MAX}` };
+  return { limit: n };
 }
 
 /** One of the user's Pi extensions or packages, as Settings → Bots lists them. */
