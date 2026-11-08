@@ -207,6 +207,8 @@ test("the primary's next turn opens with the note, and the turn after doesn't re
     const svc = await import('./server/bots/service.ts');
     const runner = await import('./server/bots/runner.ts');
     const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
     const primary = svc.createBot({ name: 'Boss' });
     const helper = svc.createBot({ name: 'Helper' });
     svc.updateSettings({ user: { name: 'Outis' } });
@@ -216,7 +218,8 @@ test("the primary's next turn opens with the note, and the turn after doesn't re
         if (cmd.type === 'prompt') prompts.push({ ...cmd, bot: bot.id, finish(text) { mind.draft = text; mind.onSettled?.(); } });
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      minds.set(bot.id, mind);
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
+        minds.set(bot.id, mind);
     }
     svc.setHooks({ wake: runner.wake, stop: runner.stop });
     const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
@@ -254,6 +257,8 @@ test("a change the user takes back while the primary's turn is under way is corr
     const svc = await import('./server/bots/service.ts');
     const runner = await import('./server/bots/runner.ts');
     const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
     const primary = svc.createBot({ name: 'Boss' });
     const helper = svc.createBot({ name: 'Helper' });
     svc.updateSettings({ user: { name: 'Outis' } });
@@ -263,7 +268,8 @@ test("a change the user takes back while the primary's turn is under way is corr
         if (cmd.type === 'prompt') prompts.push({ ...cmd, bot: bot.id, finish(text) { mind.draft = text; mind.onSettled?.(); } });
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      minds.set(bot.id, mind);
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
+        minds.set(bot.id, mind);
     }
     svc.setHooks({ wake: runner.wake, stop: runner.stop });
     const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };

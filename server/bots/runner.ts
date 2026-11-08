@@ -2,14 +2,14 @@
 // idle, the same way threads do. Messages that arrive mid-reply are steered in; everything else waits
 // and runs when the bot is free. The process loads server/bots/extension.ts, which calls back over
 // the unix socket in agent.ts.
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
 import { BOT_EFFORTS, botModelChain, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
-import { listModels, onModelsForgotten } from "../pi/sessions";
+import { listModels, onModelsForgotten, settledModels } from "../pi/sessions";
 import { piFlags } from "./extensions";
 import { botsDir } from "./db";
 import * as db from "./db";
@@ -19,10 +19,15 @@ import { resumeWatches } from "./threads";
 import type { Wake } from "./service";
 import type { BotStatus, PiSetup } from "../../shared/bots";
 
+import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
+
 const IDLE = 20 * 60 * 1000;
 
 interface Mind {
   proc: PiProcess;
+  sessionPath?: string;
+  usage?: Record<string, number>;
+  contextKeys?: Set<string>;
   token: string;
   /** The extensions it started with. */
   loaded: string;
@@ -34,7 +39,7 @@ interface Mind {
   /** Steers on their way into this turn: the turn holds on to Pi until each is answered. */
   pendingSteers?: Set<Promise<void>>;
   /** Steers Pi queued this turn, in order, and how many queued ones were cleared unread. */
-  queuedSteers?: { item: Wake; conversationId: string; from: number }[];
+  queuedSteers?: { item: Wake; conversationId: string; from: number; keys?: Set<string> }[];
   dropped?: number;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
@@ -98,7 +103,8 @@ export function wake(botId: string, item: Wake) {
     // What this turn hasn't seen yet, screenshots included: they'd otherwise never reach the bot.
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
     const through = db.latestSeq(conversationId);
-    const text = render([item], botId);
+    const keys = new Set<string>();
+    const text = render([item], botId, mind.contextKeys, keys);
     const images = imagesBetween(conversationId, from, through);
     shown.set(conversationId, through);
     if (item.kind === "messages") {
@@ -107,7 +113,7 @@ export function wake(botId: string, item: Wake) {
     }
     // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
     steerSafely(mind, { type: "steer", message: text, ...(images.length ? { images } : {}) }, (disposition) => {
-      if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from });
+      if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from, keys });
       if (disposition) return;
       // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
       shown.set(conversationId, Math.min(shown.get(conversationId) ?? from, from));
@@ -240,8 +246,9 @@ async function ensureMind(botId: string): Promise<Mind> {
     await retire(botId, existing);
     existing = undefined;
   }
+  const path = sessionGeneration(laneDirectory(sessionDir(), botId, getFocus(botId) ?? svc.directId(botId) ?? "default"));
   // The user changed which extensions bots load. Only ever reached between turns, and the session carries on.
-  if (existing && !existing.proc.exited && existing.loaded !== JSON.stringify(piFlags())) {
+  if (existing && !existing.proc.exited && (existing.loaded !== JSON.stringify(piFlags()) || existing.sessionPath !== path)) {
     revokeToken(existing.token);
     existing.proc.close();
     minds.delete(botId);
@@ -249,14 +256,21 @@ async function ensureMind(botId: string): Promise<Mind> {
     return existing;
   }
   if (!piBin()) throw new PiError("Pi isn't installed. Install it in Settings → Pi.");
-  const token = mintToken(botId);
   const flags = piFlags();
+  const probe = new PiProcess(["--no-session", ...flags], workDir(botId));
+  let models;
+  try { models = await settledModels(probe); } finally { probe.close(); }
+
+  // Bot-only project settings; shared auth and extension discovery remain unchanged.
+  mkdirSync(join(workDir(botId), ".pi"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(workDir(botId), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models) }), { mode: 0o600 });
+  const token = mintToken(botId);
   const proc = new PiProcess(
-    ["--session-dir", sessionDir(), "--session-id", botId, ...flags],
+    ["--approve", "--session-dir", path, "--session-id", botId, ...flags],
     workDir(botId),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId },
   );
-  const mind: Mind = { proc, token, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
+  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(botId, mind);
   return mind;
@@ -454,6 +468,13 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
+  if (ended?.role === "assistant" && mind.usage && ended.usage) {
+    for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
+      const value = ended.usage[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) mind.usage[key] = (mind.usage[key] ?? 0) + value;
+    }
+    mind.usage.calls = (mind.usage.calls ?? 0) + 1;
+  }
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
@@ -588,16 +609,23 @@ async function runTurn(botId: string, all: Wake[]) {
   try {
     mind = await ensureMind(botId);
     mind.busy = true;
+    mind.usage = {};
+    rmSync(join(mind.sessionPath!, "settled"), { force: true });
     mind.quiet = quiet && "reaction";
     // The transcript is read now, so anything later is the next steer's or turn's to show.
     const shown = new Map<string, number>();
     for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));
     mind.shown = shown;
-    const rendered = render(jobs, botId);
+    const delivered = readDeliveries(mind.sessionPath!);
+    const candidates = new Set<string>();
+    const rendered = render(jobs, botId, delivered, candidates);
+    mind.contextKeys = new Set([...delivered, ...candidates]);
     if (!rendered.trim()) return;
     // Settings the user changed in the app, for the primary: shown once, in whatever turn comes next.
     const notes = svc.pendingChangeNotes(botId);
-    const message = [svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
+    let handoff = "";
+    if (!delivered.size) { try { handoff = readFileSync(join(mind.sessionPath!, "handoff.txt"), "utf8"); } catch {} }
+    const message = [handoff, svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {
@@ -669,9 +697,14 @@ async function runTurn(botId: string, all: Wake[]) {
     });
     await release(botId, m);
     if (handled) return;
+    // Only settled successful prompts advance this optimization. Failed/ambiguous deliveries
+    // are deliberately replayable; assignments always remain explicit even when context was seen.
+    try { if (minds.get(botId) === m && !m.needsRecovery && !m.proc.exited) saveDeliveries(m.sessionPath!, new Set([...delivered, ...candidates, ...(m.contextKeys ?? [])])); }
+    catch { /* A lost optimization must never fail an otherwise completed assignment. */ }
     svc.settleChangeNotes(botId, notes);
     for (const [id, seq] of shown) db.setCursor(botId, id, caughtUp(botId, id, seq));
     svc.touchHeartbeat(botId);
+    if (minds.get(botId) === m && !m.needsRecovery && !m.proc.exited) writeFileSync(join(m.sessionPath!, "settled"), "", { mode: 0o600 });
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -692,6 +725,10 @@ async function runTurn(botId: string, all: Wake[]) {
       minds.delete(botId);
     }
   } finally {
+    if (mind?.usage) {
+      try { appendFileSync(join(botsDir(), "usage.jsonl"), JSON.stringify({ bot: botId, turn: crypto.randomUUID(), at: Date.now(), source: "assistant-message-usage", measured: !!mind.usage.calls, excludesCompactionUsage: true, ...mind.usage }) + "\n", { mode: 0o600 }); } catch { /* Telemetry must not disrupt delivery. */ }
+      mind.usage = undefined;
+    }
     // Already done once the reply went through; after a failure it's what keeps late work out of the next turn.
     if (mind) await release(botId, mind).catch((err) => console.error("[bots] couldn't release Pi:", err));
     if (mind) {
@@ -699,6 +736,7 @@ async function runTurn(botId: string, all: Wake[]) {
       mind.steerable = false;
       mind.shown = undefined;
       mind.steered = undefined;
+      mind.contextKeys = undefined;
       mind.onCommit = undefined;
       mind.onSettled = undefined;
       mind.onExit = undefined;
@@ -797,6 +835,7 @@ async function release(botId: string, mind: Mind) {
   const queued = (mind.queuedSteers ?? []).splice(0);
   // A deleted bot's leftovers have nowhere to go.
   const unread = mind.dropped && db.getBot(botId) ? queued.slice(-mind.dropped) : [];
+  for (const entry of queued) if (!unread.includes(entry)) for (const key of entry.keys ?? []) mind.contextKeys?.add(key);
   mind.dropped = 0;
   for (const { item, conversationId, from } of unread) {
     mind.shown?.set(conversationId, Math.min(mind.shown.get(conversationId) ?? from, from));
@@ -845,7 +884,7 @@ function waitSettled(mind: Mind): Promise<void> {
   });
 }
 
-function render(jobs: Wake[], botId: string): string {
+function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>): string {
   const bots = db.listBots();
   const user = svc.getSettings().user?.name || "User";
   const parts: string[] = [];
@@ -855,7 +894,7 @@ function render(jobs: Wake[], botId: string): string {
       seen.add(job.conversationId);
       const scoped = jobs.filter(j => j.conversationId === job.conversationId);
       const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
-      parts.push(transcript(job.conversationId, bots, user, botId, assigned));
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
@@ -863,7 +902,7 @@ function render(jobs: Wake[], botId: string): string {
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[]): string {
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const rows = db.messages(conversationId, 16);
@@ -873,7 +912,12 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     if (row?.conversationId === conversationId && !rows.some(r => r.message.id === id)) rows.push(row);
   }
   rows.sort((a, b) => a.seq - b.seq);
-  const lines = rows.map(line(c, bots, user, botId, assigned));
+  const pending = new Set(bots.flatMap(bot => pendingAssignments(bot.id).filter(a => a.conversationId === conversationId).flatMap(a => a.messageIds)));
+  const lines = rows.filter(r => {
+    const key = deliveryIdentity(conversationId, r.message);
+    candidates?.add(key);
+    return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
+  }).map(line(c, bots, user, botId, assigned));
   return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${conversationTitle(c, bots)}”):\n${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || "(empty)"}`;
 }
 

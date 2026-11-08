@@ -750,6 +750,8 @@ test("any number of routines stay active at once, each bot's separate, each in i
       const { getFocus } = await import('./server/bots/agent.ts');
       const { wake, stop } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
 
@@ -764,6 +766,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
         mind.loaded = JSON.stringify(piFlags());
+        Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(botId) });
         minds.set(botId, mind);
       };
       const first = svc.createBot({ name: 'First' });
@@ -870,6 +873,8 @@ test("a screenshot sent while a bot is replying reaches it, by steering or in th
       const svc = await import('./server/bots/service.ts');
       const { wake, stop } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
       const { bot, conversationId } = svc.createBot({ name: 'Shot' });
@@ -882,7 +887,8 @@ test("a screenshot sent while a bot is replying reaches it, by steering or in th
         if (cmd.type === 'prompt') release = () => mind.onSettled?.();
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      minds.set(bot.id, mind);
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
+        minds.set(bot.id, mind);
       const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); a.ok(ok()); };
       const post = (text, data) => svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text, images: data ? ['data:image/png;base64,' + data] : undefined });
 
@@ -1213,6 +1219,8 @@ test("a bot falls back through its models in order, only before its reply has do
       const svc = await import('./server/bots/service.ts');
       const { wake, stop, busy, onRecord, modelChain } = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       svc.setHooks({ wake, stop });
       svc.updateSettings({ onboarding: 'done' });
       const until = async (ok) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); a.ok(ok()); };
@@ -1252,6 +1260,7 @@ test("a bot falls back through its models in order, only before its reply has do
           if (cmd.type === 'get_state') return current ? { model: { provider: current.slice(0, current.indexOf('/')), id: current.slice(current.indexOf('/') + 1), name: names[current] } } : {};
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
+        Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
         minds.set(bot.id, mind);
         };
         open(start);

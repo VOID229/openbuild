@@ -16,6 +16,8 @@ async function run(name: string, body: string) {
       const svc = await import('./server/bots/service.ts');
       const runner = await import('./server/bots/runner.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       const { getFocus } = await import('./server/bots/agent.ts');
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       svc.updateSettings({ onboarding: 'done' });
@@ -43,6 +45,7 @@ async function run(name: string, body: string) {
           if (cmd.type === 'prompt') prompts.push({ bot: bot.id, focus: getFocus(bot.id), message: cmd.message, images: (cmd.images ?? []).map(i => i.data), drained: piQueue(bot).splice(0), finish(text) { piQueue(bot).splice(0); mind.draft = text; mind.onSettled?.(); }, fail(error) { runner.onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: error } }); mind.onSettled?.(); } });
           return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
         } } };
+        Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(bot.id) });
         minds.set(bot.id, mind);
         return mind;
       };

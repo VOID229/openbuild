@@ -17,6 +17,8 @@ async function run(name: string, body: string) {
       const runner = await import('./server/bots/runner.ts');
       const { PiTimeoutError } = await import('./server/pi/rpc.ts');
       const { piFlags } = await import('./server/bots/extensions.ts');
+      const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
+      const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       svc.setHooks({ wake: runner.wake, stop: runner.stop });
       svc.updateSettings({ onboarding: 'done' });
       const prompts = [], steers = [], commands = [], piQueue = [];
@@ -43,7 +45,8 @@ async function run(name: string, body: string) {
         }
         return cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {};
       } } };
-      minds.set(alpha.bot.id, mind);
+      Object.defineProperty(mind, 'sessionPath', { get: () => sessionPathFor(alpha.bot.id) });
+        minds.set(alpha.bot.id, mind);
       const until = async (check) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(5); a.ok(check()); };
       const settle = () => Bun.sleep(40);
       const post = (text, image) => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: Date.now(), ...(image ? { images: ['data:image/png;base64,' + image] } : {}) });
