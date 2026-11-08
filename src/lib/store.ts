@@ -361,7 +361,7 @@ interface State {
 const detectControllers: Partial<Record<PlanId, AbortController>> = {};
 const searchControllers = new Map<string, AbortController>();
 
-const initialRoute = typeof window === "undefined" ? {} : readRoute(window.location.pathname, window.location.hash);
+const initialRoute = typeof window === "undefined" || !window.location ? {} : readRoute(window.location.pathname, window.location.hash);
 
 export const useStore = create<State>()(
   persist(
