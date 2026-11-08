@@ -16,7 +16,7 @@ import type { BotLook, Mood } from "./looks";
 import { botModels } from "../pi";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
+import { castVote, DEFAULT_BOT_LOOP, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotLoopSettings, type BotsHello } from "../../../shared/bots";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
 export interface Draft {
@@ -92,6 +92,8 @@ interface BotsState {
   /** The user's own Pi extensions to load into bots as well. */
   customExtensions: { enabled: boolean; ids: string[] };
   harnesses: BotHarnessSettings;
+  /** When a chat pauses because bots keep replying to each other. */
+  botLoop: BotLoopSettings;
 
   /** Bots typing right now, by conversation. */
   typing: Record<string, string[]>;
@@ -110,6 +112,7 @@ interface BotsState {
   setSearxng: (urls: string[]) => void;
   setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   setHarnesses: (harnesses: BotHarnessSettings) => void;
+  setBotLoop: (botLoop: BotLoopSettings) => void;
   select: (id: string) => void;
   setDetailsOpen: (open: boolean) => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
@@ -189,6 +192,7 @@ export const useBots = create<BotsState>()(
     searxng: [],
     customExtensions: NO_EXTENSIONS,
     harnesses: {},
+    botLoop: DEFAULT_BOT_LOOP,
     typing: {},
     drafts: [],
     pulses: {},
@@ -213,6 +217,10 @@ export const useBots = create<BotsState>()(
     setHarnesses: (harnesses) => {
       set({ harnesses });
       void send("PATCH", "/api/bots/settings", { harnesses });
+    },
+    setBotLoop: (botLoop) => {
+      set({ botLoop });
+      void send("PATCH", "/api/bots/settings", { botLoop });
     },
     setCustomExtensions: (customExtensions) => {
       set({ customExtensions });
@@ -724,6 +732,7 @@ function enter(id: string): Visit {
     searxng: [],
     customExtensions: NO_EXTENSIONS,
     harnesses: {},
+    botLoop: DEFAULT_BOT_LOOP,
   });
   rememberWorkspace(id);
   return visit;
@@ -943,6 +952,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
       searxng: e.settings.searxng ?? [],
       customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS,
       harnesses: e.settings.harnesses ?? {},
+      botLoop: e.settings.botLoop ?? DEFAULT_BOT_LOOP,
       activeId: openable(e.conversations, s.activeId),
     }));
     return;
@@ -1043,7 +1053,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     // here is already in the store by now, and BotExtensions asks for the fresh listing itself.
     const extensions = e.settings.customExtensions ?? NO_EXTENSIONS;
     if (!authoritativeOnly && JSON.stringify(extensions) !== JSON.stringify(get().customExtensions)) void botModels(true).catch(() => {});
-    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {} });
+    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {}, botLoop: e.settings.botLoop ?? DEFAULT_BOT_LOOP });
   }
 }
 
