@@ -15,7 +15,7 @@ import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
-import { ConversationAvatar } from "./common";
+import { ConversationAvatar, useBusyBots } from "./common";
 
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -118,6 +118,8 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   const editable = conversation.kind === "group" && !shared?.ended;
   // A group keeps two bots; a shared chat can be down to none of yours, since the friend's are there too.
   const removable = shared ? members.length > 0 : members.length > 2;
+  // As in the group's huddle: awake at work, dozing otherwise.
+  const working = useBusyBots(conversation);
   const open = (bot: Bot) => {
     const c = directOf(useBots.getState().conversations, bot.id);
     if (!c) return;
@@ -149,7 +151,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
-              <BotAvatar look={b.look} size={28} />
+              <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} asleep={!working.includes(b.id)} />
               <span className="bots-card-text">{b.name}</span>
             </button>
             {editable && removable && (
@@ -288,6 +290,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
+  const working = useBusyBots(conversation);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
   const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
@@ -323,7 +326,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               </button>
             ) : (
               <span className="bots-details-avatar">
-                <ConversationAvatar conversation={conversation} size={104} />
+                <ConversationAvatar conversation={conversation} size={104} working={working} />
               </span>
             )}
             {bot && editingLook && <LookEditor bot={bot} onDone={() => setEditingLook(false)} />}

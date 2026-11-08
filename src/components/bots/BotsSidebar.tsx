@@ -4,8 +4,6 @@
 import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useShallow } from "zustand/react/shallow";
-import { busyBots } from "../../lib/bots/activity";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Conversation } from "../../lib/bots/types";
@@ -19,7 +17,7 @@ import { place, type Side } from "../Tooltip";
 import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
-import { ConversationAvatar, previewOf, shortTime } from "./common";
+import { ConversationAvatar, previewOf, shortTime, useBusyBots } from "./common";
 
 type Dialog =
   | { kind: "bot" }
@@ -96,6 +94,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   const conversation = useBots((s) => s.conversations.find((c) => c.id === peek?.id));
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => (peek ? (s.typing[peek.id]?.length ?? 0) : 0)) > 0;
+  const working = useBusyBots(conversation);
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; side: Side }>();
   useLayoutEffect(() => {
@@ -107,7 +106,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   return createPortal(
     <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
       <span className="bots-peek-head">
-        <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} />
+        <ConversationAvatar conversation={conversation} size={18} alive={false} working={working} badge={false} />
         <span className="bots-peek-name">
           {title}
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
@@ -121,12 +120,13 @@ function PeekCard({ peek }: { peek?: PeekState }) {
 
 /**
  * A sidebar avatar that keeps still unless its bots are at work (then they fidget; in a group, only
- * the members at work). Hovering a bot's row, tile or rail button makes its eyes follow the pointer,
- * and nothing more: no hop or smile, no spin when pressed. A group's huddle doesn't react at all.
+ * the members at work, while the rest doze, breathing slowly). Hovering a bot's row, tile or rail
+ * button makes its eyes follow the pointer, and nothing more: no hop or smile, no spin when pressed.
+ * A group's huddle doesn't react at all.
  */
 function SidebarAvatar({ conversation, size }: { conversation: Conversation; size: number }) {
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
-  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
+  const working = useBusyBots(conversation);
   const busy = working.length > 0;
   const ref = useRef<HTMLSpanElement>(null);
   const [hover, setHover] = useState(false);
@@ -145,7 +145,7 @@ function SidebarAvatar({ conversation, size }: { conversation: Conversation; siz
   }, [watches]);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy || !watches} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} />
     </span>
   );
 }
@@ -217,7 +217,8 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
       }}
     >
       <span className="bots-tile-avatar">
-        <SidebarAvatar conversation={conversation} size={64} />
+        {/* A group's huddle is drawn bigger than the box, into the tile's padding, so its members read at a glance. */}
+        <SidebarAvatar conversation={conversation} size={conversation.kind === "direct" ? 64 : 80} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>

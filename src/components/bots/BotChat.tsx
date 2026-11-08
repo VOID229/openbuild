@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleD
 import { createPortal } from "react-dom";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { busyBots, elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
+import { elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -37,7 +37,7 @@ import { BotAvatar } from "./BotAvatar";
 const FRIEND_LOOK = { shape: "orb", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1123,6 +1123,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
   const draftCount = useBots((s) => s.drafts.filter((d) => d.conversationId === conversation.id).length);
   const working = useBots(useShallow((s) => showWorking(conversation.id, s.status, typing)));
+  // In a group, the mascots beside messages doze unless their bot is at work, as the huddle's do.
+  const busy = useBusyBots(conversation.kind === "direct" ? undefined : conversation);
   const focus = useBots((s) => (s.focus?.conversationId === conversation.id ? s.focus : undefined));
   // Until Pi can run it, the primary bot's chat says what's missing instead of the bot saying hello.
   const setup = useBots((s) => s.setup);
@@ -1332,7 +1334,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
               <div className="bm-group-row">
                 {group && !mine && (
                   <span className="bm-avatar">
-                    {bot ? <BotAvatar look={bot.look} size={28} pulse={pulses[bot.id]} /> : from?.owner ? <Avatar name={from.friendName} size={28} /> : from ? <BotAvatar look={from.look ?? FRIEND_LOOK} size={28} alive={false} /> : null}
+                    {bot ? <BotAvatar look={bot.look} size={28} asleep={!busy.includes(bot.id)} pulse={pulses[bot.id]} /> : from?.owner ? <Avatar name={from.friendName} size={28} /> : from ? <BotAvatar look={from.look ?? FRIEND_LOOK} size={28} alive={false} /> : null}
                   </span>
                 )}
                 <div className="bm-stack">
@@ -2040,8 +2042,8 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
     const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
     return held ? holdingLine(conversation.id, held) : undefined;
   });
-  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does.
-  const working = useBots(useShallow((s) => busyBots(conversation, s.status, s.typing)));
+  // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does; a group's others doze.
+  const working = useBusyBots(conversation);
   const busy = working.length > 0;
   // Busy in another chat: said as that, never as thinking here.
   const away = useBots((s) => {
@@ -2073,7 +2075,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </IconButton>
         )}
         <button type="button" className="bots-head-pill" aria-expanded={remote ? undefined : detailsOpen} disabled={remote} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
-          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={busy ? working : undefined} mood={typing ? "thinking" : undefined} badge={false} />
+          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
           <span className="bots-head-text">
             <span className="bots-head-name">{name}</span>
             {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
