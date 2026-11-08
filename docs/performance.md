@@ -8,16 +8,23 @@ against a real install.
 
 ```sh
 # A data folder shaped like a long-used install: 740 threads (~890 MB, a few with tens of MB of
-# pasted screenshots), 11 OpenBots chats (one group of 1,700 messages). Deterministic.
+# pasted screenshots), 11 OpenBots chats (one group of 1,700 messages). The same shape every time.
 mkdir -p /tmp/ob-bench/golden/{data,home}
 HOME=/tmp/ob-bench/golden/home OPENCHAT_DATA_DIR=/tmp/ob-bench/golden/data bun scripts/bench/seed.ts
 
-# Times the app, from a fresh copy of that folder per run. --repo runs another checkout's server
-# (e.g. `git archive main | tar -x -C /tmp/ob-base`) for a before/after.
-bun scripts/bench/bench.ts --golden /tmp/ob-bench/golden [--runs 5] [--cpu 4] [--remote --latency 40 --kbps 40000] [--repo /tmp/ob-base] [--out result.json]
+# An older server to compare against: its own checkout, and a copy of the data as its own database
+# would be, without the `chats_listing` index (with it there, its thread listing gets that fix free).
+git archive a9bd9b7 | tar -x -C /tmp/ob-base && (cd /tmp/ob-base && bun install --frozen-lockfile)
+cp -a /tmp/ob-bench/golden /tmp/ob-bench/golden-base
+bun -e 'new (require("bun:sqlite").Database)("/tmp/ob-bench/golden-base/data/openchat.db").run("DROP INDEX chats_listing")'
 
-# Two results side by side, as the tables below.
+# Times the app, from a fresh copy of that folder per run. --repo runs another checkout's server.
+bun scripts/bench/bench.ts --golden /tmp/ob-bench/golden [--runs 5] [--cpu 4] [--remote --latency 40 --kbps 40000] [--only cold,warm,switch,bots,restart] [--out after.json]
+bun scripts/bench/bench.ts --golden /tmp/ob-bench/golden-base --repo /tmp/ob-base [...] [--out before.json]
+
+# Results side by side, as the tables below; comma-separated results are interleaved rounds.
 bun scripts/bench/compare.ts before.json after.json "Local, 1× CPU"
+bun scripts/bench/compare.ts before-1.json,before-2.json after-1.json,after-2.json "Local, 1× CPU"
 
 # DevTools traces (and, with --profile, CPU profiles) of a reload, a switch and going into OpenBots.
 bun scripts/bench/trace.ts --golden /tmp/ob-bench/golden --out /tmp/ob-bench/traces [--profile]
@@ -32,69 +39,104 @@ included); `--latency`/`--kbps` shape that link, `--cpu` slows the page's CPU (4
 
 What's timed, from Chrome's side, to the first frame where the result is on screen:
 
-- **cold load**: a new browser profile (nothing cached) opening a thread's URL, to its last message shown;
-- **warm reload**: reloading that page;
-- **thread switch**: clicking a sidebar row, to the thread's last message shown, first visit and again,
-  and first visits pointed at for a quarter second before the click (as a hand does);
-- **OpenBuild ↔ OpenBots**, and switching OpenBots chats by clicking their rows;
-- **restart**: the server stopped and started again under an open tab: until the tab is talking to it,
-  has the thread list again and OpenBots' live stream back; and a reload straight after a start.
+- **cold load**: a new browser profile (nothing cached) opening a thread's URL, to its last message
+  shown; 5 loads;
+- **warm reload**: reloading that page; 5 reloads;
+- **thread switch**: clicking a sidebar row, to the thread's last message shown: six threads of
+  189 KB–10.2 MB, first visit and again, and six others (228 KB–6.3 MB) pointed at for a quarter
+  second before the click, as a hand does. Each row is the median of its six threads, so it says
+  little about the largest ones (see below), and the two first-visit rows open different threads;
+- **OpenBuild ↔ OpenBots**, 5 times each way, and switching OpenBots chats by clicking their rows
+  (8 clicks over chats of 1,700, 400, 120 and 90 messages);
+- **restart**: the server stopped, and started again 1.5 s later under an open tab: until the tab has
+  the thread list again and OpenBots' live stream back; and a reload straight after a start. 3 each.
 
 ## Results
 
-Base `a9bd9b7` against this work (`37c3740`), measured in one session, medians in ms (5 runs; 3 at
-4× CPU). Linux, 16 cores, Chrome for Testing 156 headless (swiftshader), 1440×900, the server on Bun
-1.4.0; the seeded data above (740 threads, 891 MB; median thread 379 KB, largest 15 MB; OpenBots'
-snapshot 4.8 MB). Each scenario starts from a fresh copy of the data, 4 s after the server is up.
-Locally every answer is uncompressed (the browser asks for 127.0.0.1); `--remote` is where gzip shows.
+Base `a9bd9b7` against this work (`34354d8`; its app code is that of `37c3740`, later commits are
+documentation and tests), medians in ms. Measured on 8 November 2026 in one 20-minute session, base
+and this work one at a time and interleaved, in the order of the tables (the 1× pair twice). Linux,
+16 cores, 60 GB; the machine wasn't otherwise idle (load average 1.1–2.7, other sessions' work, a test
+suite at times). Chrome for Testing 156.0.8078.4, headless, swiftshader, 1440×900; the server on Bun
+1.4.0. The seeded data above: 740 threads, 891 MB (median thread 329 KB, largest 17.5 MB, 78 in the
+sidebar's open sections), the opened thread 337 KB, OpenBots' snapshot 4.7 MB. Each scenario starts
+from a fresh copy of the data, 4 s after the server is up. Locally every API answer is uncompressed
+(the browser asks for 127.0.0.1); `--remote` is where gzip shows.
 
-| Local, 1× CPU | before | after | |
+| Local, 1× CPU (two rounds) | before | after | |
 |---|---:|---:|---:|
-| cold load: thread on screen | 930 | 398 | 2.3× faster |
-| warm reload: thread on screen | 674 | 176 | 3.8× faster |
-| thread switch, first visit | 102 | 90 | 1.1× faster |
-| thread switch, first visit pointed at 250 ms first | 73 | 54 | 1.4× faster |
-| thread switch, again | 55 | 47 | 1.2× faster |
-| OpenBuild → OpenBots | 130 | 147 | 1.1× slower |
-| OpenBots → OpenBuild | 94 | 93 | same |
-| OpenBots chat switch | 88 | 87 | same |
-| server answering after a start | 1134 | 323 | 3.5× faster |
-| after a restart: thread list fresh | 376 | 42 | 9.0× faster |
-| after a restart: OpenBots stream back | 195 | 19 | 10.3× faster |
-| reload right after a restart | 921 | 314 | 2.9× faster |
-| cold load: transferred | 12166 KB | 7661 KB | |
-| warm load: transferred | 6733 KB | 6728 KB | |
+| cold load: thread on screen | 935, 1002 | 450, 419 | 2.1–2.4× faster |
+| warm reload: thread on screen | 691, 721 | 143, 173 | 4.2–4.8× faster |
+| thread switch, first visit | 112, 111 | 108, 88 | same to 1.3× faster |
+| thread switch, first visit pointed at 250 ms first | 74, 73 | 49, 49 | 1.5× faster |
+| thread switch, again | 51, 54 | 49, 53 | same |
+| OpenBuild → OpenBots | 141, 143 | 121, 133 | 1.1–1.2× faster |
+| OpenBots → OpenBuild | 91, 92 | 89, 88 | same |
+| OpenBots chat switch | 88, 90 | 92, 85 | same to 1.1× faster |
+| server answering after a start | 1106, 1150 | 280, 300 | 3.8–4.0× faster |
+| after a restart: thread list fresh | 389, 329 | 63, 44 | 6.2–7.5× faster |
+| after a restart: OpenBots stream back | 214, 188 | 43, 40 | 4.7–5.0× faster |
+| reload right after a restart | 901, 902 | 326, 318 | 2.8× faster |
+| cold load: transferred | 12076 KB, 12076 KB | 7574 KB, 7532 KB | |
+| warm load: transferred | 6643 KB, 6642 KB | 6637 KB, 6639 KB | |
 
 | Local, 4× CPU slowdown | before | after | |
 |---|---:|---:|---:|
-| cold load: thread on screen | 2200 | 1278 | 1.7× faster |
-| warm reload: thread on screen | 1342 | 482 | 2.8× faster |
-| thread switch, first visit | 341 | 303 | 1.1× faster |
-| thread switch, first visit pointed at 250 ms first | 147 | 87 | 1.7× faster |
-| thread switch, again | 116 | 105 | 1.1× faster |
-| OpenBuild → OpenBots | 462 | 371 | 1.2× faster |
-| OpenBots → OpenBuild | 226 | 192 | 1.2× faster |
-| OpenBots chat switch | 263 | 248 | 1.1× faster |
-| server answering after a start | 1181 | 319 | 3.7× faster |
-| after a restart: thread list fresh | 301 | 97 | 3.1× faster |
-| after a restart: OpenBots stream back | 158 | 26 | 6.1× faster |
-| reload right after a restart | 1595 | 745 | 2.1× faster |
-| cold load: transferred | 12167 KB | 7662 KB | |
-| warm load: transferred | 6733 KB | 6730 KB | |
+| cold load: thread on screen | 2211 | 1386 | 1.6× faster |
+| warm reload: thread on screen | 1296 | 534 | 2.4× faster |
+| thread switch, first visit | 385 | 326 | 1.2× faster |
+| thread switch, first visit pointed at 250 ms first | 184 | 82 | 2.2× faster |
+| thread switch, again | 133 | 104 | 1.3× faster |
+| OpenBuild → OpenBots | 455 | 387 | 1.2× faster |
+| OpenBots → OpenBuild | 228 | 184 | 1.2× faster |
+| OpenBots chat switch | 236 | 274 | 1.2× slower |
+| server answering after a start | 1152 | 289 | 4.0× faster |
+| after a restart: thread list fresh | 339 | 116 | 2.9× faster |
+| after a restart: OpenBots stream back | 192 | 39 | 4.9× faster |
+| reload right after a restart | 1594 | 648 | 2.5× faster |
+| cold load: transferred | 12077 KB | 7574 KB | |
+| warm load: transferred | 6642 KB | 6640 KB | |
+
+| OpenBots alone, 4× CPU (three rounds) | before | after | |
+|---|---:|---:|---:|
+| OpenBuild → OpenBots | 458, 443, 505 | 376, 437, 460 | same to 1.2× faster |
+| OpenBots → OpenBuild | 229, 232, 263 | 204, 226, 218 | same to 1.2× faster |
+| OpenBots chat switch | 336, 330, 333 | 281, 287, 303 | 1.1–1.2× faster |
 
 | Remote: 40 ms RTT, 40 Mbps | before | after | |
 |---|---:|---:|---:|
-| cold load: thread on screen | 3100 | 786 | 3.9× faster |
-| warm reload: thread on screen | 1658 | 363 | 4.6× faster |
-| thread switch, first visit | 209 | 155 | 1.3× faster |
-| thread switch, first visit pointed at 250 ms first | 288 | 55 | 5.2× faster |
-| thread switch, again | 46 | 47 | same |
-| cold load: transferred | 12165 KB | 1528 KB | |
-| warm load: transferred | 6733 KB | 453 KB | |
+| cold load: thread on screen | 2938 | 818 | 3.6× faster |
+| warm reload: thread on screen | 1587 | 369 | 4.3× faster |
+| thread switch, first visit | 215 | 169 | 1.3× faster |
+| thread switch, first visit pointed at 250 ms first | 272 | 53 | 5.1× faster |
+| thread switch, again | 44 | 47 | 1.1× slower |
+| cold load: transferred | 12075 KB | 1526 KB | |
+| warm load: transferred | 6642 KB | 451 KB | |
 
-Runs vary by ±15–20 % between sessions (base's warm reload was 762 ms in an earlier one), so before
-and after come from the same session. "OpenBuild → OpenBots" read 130 → 147 in this one; interleaved
-A/B runs of 15 each put it at 126/126 before and 120/114 after: no change beyond noise at 1× CPU.
+Reading them:
+
+- **Noise.** Differences under ~10 % are noise: the two 1× rounds differ by up to 20 % from each
+  other (warm reload after: 143 and 173), and an earlier session the same day with the same tools read
+  cold 930 → 398 and warm 674 → 176. "Thread switch, again" (remote 44 → 47) and the OpenBots rows at 1×
+  are unchanged. The first of the five cold loads is the slowest on both sides (before ~1.4 s, after
+  ~700 ms), the first load against the started server.
+- **The 4× "OpenBots chat switch: 1.2× slower"** is a median of 8 clicks that falls between two
+  clusters (the 1,700- and 400-message chats at 434–535 ms, the others at 185–274); per chat that run
+  is mixed, −11 to +42 ms. Run alone and interleaved three times, OpenBots chat switching reads
+  330–336 → 281–303 ms at 4×: no regression.
+- **The largest threads** gain more than the switch medians show: a first visit to the 10.2 MB one took
+  394 and 369 → 158 ms at 1×, 1479 → 543 ms at 4×, with the main thread's blocking time (long tasks
+  beyond 50 ms) 1110 → 248 ms. That's consistent with marking it read no longer serializing and
+  uploading its whole history (change 8 below). Over the remote link, pointing at a thread first
+  doesn't hide a big one: the 4.5 and 6.3 MB threads took 1020 and 1432 → 642 and 915 ms, as a quarter
+  second isn't long enough to download them.
+- **Restarts.** How long base took to see a restarted server depends on where its backoff (1, 2, 3 …
+  s) falls against the outage: at 1× its first restart took 2.3 s in both rounds, the next two
+  313–389 ms. After this work it was 43–165 ms in every restart measured.
+- **Transferred.** Locally the cold load's assets fell from 5.4 MB to 1.0 MB; its API answers stay
+  6.6 MB, uncompressed for 127.0.0.1 (OpenBots' snapshot 4.7 MB, the thread list's summaries 1.4 MB).
+  A remote browser gets 12.1 → 1.5 MB on a cold load and 6.6 MB → 451 KB on a reload.
+
 The traces and CPU profiles behind the changes below come from `trace.ts`.
 
 ## What changed, and why
@@ -142,25 +184,33 @@ production build keeps the old route's 404 for scripts from an older build.
 
 ## Still slow, with what's known
 
-- **Going into OpenBots and switching its chats** (~90–150 ms at 1× CPU, 250–370 ms at 4×). OpenBots stays mounted in a
-  hidden `<Activity>` (`display: none`), so showing it lays out and restyles its whole open chat (200
-  messages) from scratch; BotChat's scroll-restoring layout effect is where that forced layout lands
-  (45 ms self time in a profile). `content-visibility: auto` on its message groups, as threads do, would
-  cut it to what's on screen, but BotChat restores places from `offsetTop`/`offsetHeight` while sizes
-  are estimates, and `tests/botChatScroll.test.ts` fails five ways with it. Doing it needs ChatView's
+- **Going into OpenBots and switching its chats** (121–133 ms and 85–92 ms at 1× CPU; 376–460 ms and
+  274–303 ms at 4×, the two big chats 410–553 ms). OpenBots stays mounted in a hidden `<Activity>`
+  (`display: none`), so showing it lays out and restyles its whole open chat (200 messages) from
+  scratch; BotChat's scroll-restoring layout effect is where that forced layout lands (45 ms self time
+  in a profile). `content-visibility: auto` on its message groups, as threads do, would cut it to
+  what's on screen, but BotChat restores places from `offsetTop`/`offsetHeight` while sizes are
+  estimates, and `tests/botChatScroll.test.ts` fails five ways with it. Doing it needs ChatView's
   anchor-holding logic ported to BotChat, or a windowed message list.
 - **OpenBots' snapshot on every page load**: the last 200 messages of every conversation, with images
-  inline as base64 (4–5 MB here, mostly images), fetched even when OpenBots isn't opened. Serving images
-  by URL (cacheable, deduplicated) and fewer messages up front would shrink it most.
+  inline as base64 (4.7 MB here, mostly images), fetched even when OpenBots isn't opened, and the
+  largest part of a local load's 6.6 MB of API answers. Serving images by URL (cacheable,
+  deduplicated) and fewer messages up front would shrink it most.
 - **Histories carry pasted screenshots inline** (base64 in the transcript JSON, up to 28 MB per thread on
-  a real install): a first visit downloads and parses all of it. Attachments by URL would fix it.
-- **A revisit still remounts the thread** (`LoadedChat key={chat.id}`), Composer included: ~45–105 ms
-  (1×–4× CPU).
+  a real install): a first visit downloads and parses all of it, 158 ms locally and 543 ms at 4× for the
+  10.2 MB thread here, 640–915 ms over the remote link for 4.5–6.3 MB ones even when pointed at first.
+  Attachments by URL would fix it.
+- **A revisit still remounts the thread** (`LoadedChat key={chat.id}`), Composer included: "thread
+  switch, again" is 49–53 ms at 1× and 104 ms at 4×, the same as before this work.
 - **After a sidebar edit of an opened thread**, its history is fetched again once (its version changed);
   correct, and no more than the full PUT's response used to send.
 - **Startup is still a chain**: auth check → config → thread list (and the routed thread) → render; each
-  link is a round trip on a remote link. Runtime model probes (Cursor, Grok, Pi status: 200–500 ms each
-  when the runtime is missing) also hold some of the browser's six connections per host meanwhile.
+  link is a round trip on a remote link. Runtime probes may also hold the browser's six connections
+  per host meanwhile: on the first page load against a freshly started server, answers a reload gets in
+  1–30 ms (auth status, state, the thread list) took ~340 ms, arriving about when the slow probes did
+  (Claude's models 489 ms, Pi's status 384 ms; Cursor's and Grok's models and the runtimes' status
+  hadn't answered when the thread was on screen). That fits connections held by probes, but no trace
+  confirms it yet. On reloads every answer took 30 ms or less.
 - **Saving a large chat** re-serializes all of it on the server (synchronously), and rebuilds its summary.
 - **`bun test` on many-core machines**: an HTML import route (or Bun.build inside the test process) can
   fail to resolve a large page's imports at random; Chrome fixtures are built by `bun build` in a process
