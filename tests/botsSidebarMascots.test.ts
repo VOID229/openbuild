@@ -117,8 +117,9 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
   test("with reduced motion, nothing follows the pointer", async () => {
     const page = await open();
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
-    await page.eval("location.reload()");
-    await page.until("document.querySelectorAll('.bots-row, .bots-tile').length >= 5");
+    // The old page is still there for a moment after reload() returns: mark it, to wait for the new one.
+    await page.eval("window.beforeReload = true; location.reload()");
+    await page.until("!window.beforeReload && document.querySelectorAll('.bots-row, .bots-tile').length >= 5");
     await page.settle();
     const find = item("row", "Manager");
     await pointAt(page, find, "far", 12);
