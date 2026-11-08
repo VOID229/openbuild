@@ -183,3 +183,44 @@ The safe escape hatch is `OPENBUILD_SAFE=1` (or `?safe`): the app starts with no
 - No remote install or registry; plugins are folders on disk.
 - Only the built-in slots above; new ones are added in the components that render `<PluginSlot>`.
 - Plugin sections stay selected after a plugin is disabled; pick another section.
+
+## Bots authoring and controlling plugins
+
+A bot needs enabled OpenBuild access and a grant to this installation's registered OpenBuild
+project (or a worktree of the same repository). An unrelated project, even one named OpenBuild,
+does not qualify. The existing “all projects” grant includes it only while it is registered.
+Grants are checked on every tool call, including after a grant is removed.
+
+Use the `plugins` bot tool:
+
+- `action: "guide"`: any qualifying bot gets the project id and authoring instructions.
+- `action: "list"`: primary only; lists the live plugin directory, errors and switches.
+- `action: "set", id: "daily-note", enabled: true` (or `false`): primary only; saves a
+  per-plugin choice through the same API implementation as Settings.
+- `action: "system", enabled: true` (or `false`): primary only; changes the master switch.
+
+List and toggle results distinguish `configuredEnabled` (the saved choice, or the manifest default)
+from `effectiveEnabled` (available under the master switch, safe mode, config and load errors).
+`blockedByConfig` identifies `disabledPlugins` restrictions; `serverLoaded` reports a running server
+module separately. Effective availability does not prove that a client module has rendered in every
+browser; a browser's `?safe` session can still suppress it. Safe mode ignores master-switch writes,
+preserving the saved master choice. Per-plugin choices can be saved while the system is off or in
+safe mode, but cannot override config restrictions or activate code then.
+
+For example, ask an authorized bot to create a daily-note OpenBuild plugin. It calls `plugins guide`,
+then `openbuild options`, then `openbuild start` with the returned project id and a prompt to read
+this document, author and test the plugin in its worktree, set `defaultEnabled: false`, and report the
+artifact for review. It follows the normal thread using `read`, `send` and `answer`; existing harness
+permissions, permission prompts, project grants and computer isolation still apply. This also works
+for nonprimary authoring bots. Only the primary can inspect live status or change switches.
+
+Review before installation. Copying a reviewed plugin into the active folder is a separate action
+for the user or a coding thread already authorized and permitted to write there. The bot tool does
+not install, delete, write files, change project grants, or grant access to the host or plugin folder.
+Do not add a data-directory project or change isolation to bypass a denied write. Keep the reviewed
+artifact in the coding workspace when installation is outside the thread's permissions. Plugins are
+trusted executable code, **not sandboxed**; enabling one can execute it immediately. Editing an
+already active plugin can also execute its replacement through hot reload.
+
+This workflow adds no UI. A plugin artifact review/install interface or richer bot controls would
+need separate UI work; Settings → Plugins remains the existing place for human controls.

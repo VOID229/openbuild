@@ -15,6 +15,7 @@ import { botsDir } from "./db";
 import * as db from "./db";
 import * as svc from "./service";
 import * as threads from "./threads";
+import * as plugins from "./plugins";
 
 const kept = globalThis as { openbotsFocus?: Map<string, string>; openbotsTokens?: Map<string, string>; openbotsAgent?: ReturnType<typeof Bun.serve> };
 const focus = (kept.openbotsFocus ??= new Map<string, string>());
@@ -109,6 +110,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return askBot(botId, p);
     case "manage_bot":
       return manage(botId, p);
+    case "plugins":
+      return plugins.handle(botId, p);
     case "openbuild":
       return threads.handle(botId, p);
     case "bash":
@@ -163,6 +166,7 @@ export function contextFor(botId: string): string {
       : "There are no other bots yet.",
     `Conversations you're in:\n${convos.map((c) => `- ${c.id.slice(0, 8)} ${c.kind} “${conversationTitle(c, db.listBots())}”`).join("\n")}`,
     threads.guide(bot),
+    plugins.guide(bot),
     `You have a computer: a home folder, a terminal (bash), files (read, write, edit) and a browser. It stays around between chats. The time is ${new Date().toString()}.`,
   ];
   const ownChat = bot.primary ? svc.directId(botId) : undefined;
