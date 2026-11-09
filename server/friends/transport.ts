@@ -7,6 +7,7 @@
 import { networkInterfaces } from "node:os";
 import type { FriendMode } from "../../shared/friends";
 import { isTailscaleIp, tailscaleStatus } from "../pairClient";
+import { TransportError } from "./errors";
 import { tunnel } from "./tunnel";
 
 export interface Socket {
@@ -29,8 +30,7 @@ export interface Transport {
   stop?(): void;
 }
 
-/** Something the owner can fix: said to them as it is. */
-export class TransportError extends Error {}
+export { TransportError };
 
 function lanAddresses(): string[] {
   const out: string[] = [];

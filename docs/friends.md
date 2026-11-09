@@ -6,7 +6,7 @@ Pairing is different. A paired device is one of **your own** machines, trusted t
 
 ## Becoming friends
 
-One of you invites, the other adds the code. You pick Tailscale, LAN or your own OpenTunnel relay when you invite.
+One of you invites, the other adds the code. You pick Tailscale, LAN or OpenTunnel when you invite.
 
 ```sh
 # on the inviting computer (the host)
@@ -73,41 +73,46 @@ On a LAN the friend traffic is **signed but not encrypted**. Nobody can forge or
 
 ### Over OpenTunnel
 
-[OpenTunnel](https://github.com/anomalyco/opentunnel) gives a machine a public HTTPS address through a relay, with no port forwarding and nothing for your friend to set up. OpenBuild uses **your own self-hosted relay only**. It has no default relay and never falls back to a public one: without `OPENBUILD_FRIEND_TUNNEL_API`, `--tunnel` refuses.
+[OpenTunnel](https://github.com/anomalyco/opentunnel) gives a machine a public HTTPS address, like `https://<route>.<id>.opentunnel.xyz`, through a relay. You don't need port forwarding, an account or a domain, and your friend sets up nothing. OpenBuild uses the **hosted relay at opentunnel.xyz** unless you name a relay of your own.
+
+```sh
+npm install -g opentunnel      # once, on the computer that invites (or: cargo install opentunnel-cli)
+ob friend invite --tunnel
+```
+
+The first invite creates the tunnel, which takes a few seconds and up to a few minutes while its certificate is issued. Later invites reuse it.
 
 Only the host runs a tunnel. Your friend just adds the code: their server opens one long-lived, encrypted WebSocket (WSS) to the address in it, and messages go both ways over that, as over Tailscale.
 
 What the tunnel reaches is the **friend listener and nothing else**. OpenBuild runs the `opentunnel` client with one route, to the friend port on `127.0.0.1`. The app's port, its sign-in and its API are never routed. The client runs only while an invite through it waits or a friend connects through it, and stops with OpenBuild.
 
-#### Set up your relay
+#### How OpenBuild runs the client
 
-You run the relay; OpenBuild only runs the client. Following OpenTunnel's [self-hosting guide](https://github.com/anomalyco/opentunnel/blob/master/docs/server.md#self-hosting):
+The client is kept apart from anything else you do with OpenTunnel:
 
-1. Run the OpenTunnel server on a machine with a public address, port 443 open, and the MySQL database it needs.
-2. Give it a domain: point the domain and its wildcard (`*.tunnel.example.com`) at that machine.
-3. Give it DNS-01 access so it can get wildcard certificates: `DNS_PROVIDER=cloudflare` with `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN`, or `DNS_PROVIDER=exec` with a `DNS_HOOK` script for other DNS hosts.
-4. Install the client on the computer that invites: `npm install -g opentunnel` or `cargo install opentunnel-cli`. The guest doesn't need it.
+- **Its own profile.** It uses `openbuild-friends`, with its own home, config, data and logs under `<data>/friends/tunnel`. Its control socket is in a private folder of its own under `$XDG_RUNTIME_DIR` (or `/tmp`), because socket paths have to be short. It never touches your own profiles or tunnels.
+- **Only the environment it needs.** It gets no `OPENTUNNEL_*` variables meant for your own tunnels, and nothing else of OpenBuild's beyond proxy and certificate settings (`HTTPS_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`).
+- **The native client.** `npm install -g opentunnel` puts a Node launcher on your `PATH` (`#!/usr/bin/env node`), which runs the real client from its platform package, `@opentunnel/cli-<platform>-<arch>`. OpenBuild finds that client the way the launcher does and runs it directly, because the client runs with no `PATH`, where `env node` can't start. A client installed with `cargo install opentunnel-cli`, or named in `OPENBUILD_FRIEND_TUNNEL_BIN`, runs as it is.
+- **No login service.** `opentunnel up` normally registers a systemd or launchd service that starts at login. OpenBuild runs `opentunnel serve` as its own child instead, with no `PATH`, so the client finds no `systemctl` or `launchctl` to register with. `serve` only connects a tunnel that already exists, so the first time OpenBuild also runs `opentunnel up` once to create it. Finding OpenBuild's `serve` already running, `up` has that reload rather than starting another.
 
-OpenBuild doesn't do any of this for you, and doesn't change DNS.
+The tunnel's hostname and route name are kept, so your friend's saved address keeps working across restarts. Deleting `<data>/friends/tunnel` gives you a new address, and your friends would need a new invite.
 
-#### Point OpenBuild at it
+#### Settings
 
-Set these in the environment OpenBuild starts with, then restart it:
+Set these in the environment OpenBuild starts with, then restart it. None is needed for the hosted relay.
 
 | Variable | |
 | --- | --- |
-| `OPENBUILD_FRIEND_TUNNEL_API` | **Required.** Your relay's URL, like `https://tunnel.example.com`. It has to be `https://`, except for a relay on this machine (`http://localhost:8080`) while you try one out. |
+| `OPENBUILD_FRIEND_TUNNEL_API` | A relay of your own instead of the hosted one, like `https://tunnel.example.com`. It has to be `https://`, except for a relay on this machine (`http://localhost:8080`) while you try one out. A tunnel belongs to the relay it was made on, so after changing this, delete `<data>/friends/tunnel` and invite again. |
 | `OPENBUILD_FRIEND_TUNNEL_BIN` | The `opentunnel` client, when it isn't on `PATH`. |
-| `OPENBUILD_FRIEND_TUNNEL_CA` | A CA certificate the client should trust, for a relay with a private CA (`ISSUER=local`). The guest's server needs it too, through `NODE_EXTRA_CA_CERTS`. |
+| `OPENBUILD_FRIEND_TUNNEL_CA` | A CA certificate the client should trust: for a TLS-inspecting proxy, or a relay of your own with a private CA. For a private CA, the guest's server needs it too, through `NODE_EXTRA_CA_CERTS`. |
 
-Then `ob friend invite --tunnel`. The code gives `https://<route>.<your tunnel's hostname>`.
-
-The client gets a profile of its own (`openbuild-friends`), with its config and data under `<data>/friends/tunnel`. So it doesn't touch tunnels you run yourself, and it ignores any `OPENTUNNEL_*` variables you've set for them. The tunnel's hostname and the route name are kept, so your friend's saved address keeps working across restarts. Deleting that folder gives you a new address, and your friends would need a new invite.
+To run your own relay instead, follow OpenTunnel's [self-hosting guide](https://github.com/anomalyco/opentunnel/blob/master/docs/server.md#self-hosting). You need a public machine with port 443 open, the MySQL database the relay uses, a domain with its wildcard pointed at the machine, and DNS-01 access for wildcard certificates. OpenBuild doesn't set any of that up, and doesn't change DNS.
 
 #### What the relay can and can't do
 
-- The relay passes TLS it can't decrypt. The client on your computer holds the certificate's key. But the relay's operator controls DNS and certificates for its domain, which is why it should be yours.
-- The friend protocol doesn't trust the tunnel at all. Everything that crosses is signed with the keys you approved, as on a LAN. Tunneled requests reach the listener from `127.0.0.1`, and anyone can find the address (it ends up in certificate logs). Neither means anything to OpenBuild.
+- The relay passes TLS it can't decrypt. The client on your computer holds the certificate's key, so the relay doesn't see what your bots say. But the relay's operator controls DNS and certificate issuance for its domain: for the hosted relay that's OpenTunnel's operator, Anomaly. An operator acting in bad faith could issue itself a certificate and read the traffic. It still couldn't forge or alter a message, since every frame is signed with the keys you approved. If you need nobody but the two of you to be able to read it, use Tailscale or a relay you run yourself.
+- The friend protocol doesn't trust the tunnel at all. Everything that crosses is signed with the keys you approved, as on a LAN. Tunneled requests reach the listener from `127.0.0.1` with whatever `Host` the visitor sent, and anyone may find the address. None of that means anything to OpenBuild.
 - The address is public, so the listener is held to a budget there: [the protocol](#the-protocol) has the limits.
 - The relay resets a connection with no traffic for 15 minutes by default. Friends' heartbeats every 20 seconds keep theirs up.
 
