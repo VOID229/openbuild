@@ -151,13 +151,40 @@ function resolvePowerShell(env: Record<string, string | undefined>): string {
   return "powershell.exe";
 }
 
+/**
+ * OpenBuild: what Claude Code reads before its own sign-in, or to send requests elsewhere. Inherited
+ * from the server's environment they would sign every profile in as one account (an OAuth token),
+ * bill an API key, or move the backend, so no Claude Code launch gets them. Upstream strips only
+ * ANTHROPIC_API_KEY and refuses the rest, which made discovery and requests fail outright.
+ */
+export const AMBIENT_AUTH = [
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_CUSTOM_HEADERS",
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_BEDROCK_BASE_URL",
+  "ANTHROPIC_VERTEX_BASE_URL",
+  "ANTHROPIC_FOUNDRY_BASE_URL",
+  "ANTHROPIC_FOUNDRY_API_KEY",
+  "ANTHROPIC_FOUNDRY_RESOURCE",
+  "AWS_BEARER_TOKEN_BEDROCK",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "CLAUDE_CODE_SKIP_BEDROCK_AUTH",
+  "CLAUDE_CODE_SKIP_VERTEX_AUTH",
+  "CLAUDE_CODE_SKIP_FOUNDRY_AUTH",
+] as const;
+const AMBIENT = new Set<string>(AMBIENT_AUTH);
+
 function claudeEnvironment(env: Record<string, string | undefined>): Record<string, string> {
   const output: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     if (value === undefined) continue;
     // Windows environment names are case-insensitive, so strip every spelling.
-    const apiKey = process.platform === "win32" ? key.toUpperCase() === "ANTHROPIC_API_KEY" : key === "ANTHROPIC_API_KEY";
-    if (!apiKey) output[key] = value;
+    if (!AMBIENT.has(process.platform === "win32" ? key.toUpperCase() : key)) output[key] = value;
   }
   const configDir = envValue(output, "PI_CLAUDE_CODE_CONFIG_DIR");
   if (configDir) output.CLAUDE_CONFIG_DIR = configDir;

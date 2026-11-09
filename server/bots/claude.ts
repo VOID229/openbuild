@@ -17,6 +17,7 @@ import { claudeAccounts } from "../claude/accounts";
 import { claudeBin } from "../claude/install";
 import { withRuntimeAccount } from "../runtimeAccounts";
 import * as storage from "../storage";
+import { AMBIENT_AUTH } from "./claude-code/claude-cli.ts";
 import { botsDir } from "./db";
 import * as svc from "./service";
 
@@ -26,8 +27,6 @@ export const BRIDGE_PACKAGE = "@earendil-works/pi-claude-code";
 export const DEFAULT_ID = "claude-code";
 const SIGN_IN_MS = 10 * 60_000;
 const STATUS_MS = 20_000;
-/** Claude Code reads these before its own sign-in; a bot's subscription must not quietly become an API key. */
-const AMBIENT_AUTH = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"];
 
 export interface ClaudeProfile {
   id: string;
@@ -100,6 +99,7 @@ export function bridgeExtension(profiles = botProfiles(), revision = svc.getSett
 
 function cliEnv(profile: ClaudeProfile): Record<string, string> {
   const env = { ...process.env, PATH: `${join(homedir(), ".local/bin")}:${process.env.PATH ?? ""}`, CLAUDE_CONFIG_DIR: profile.configDir, BROWSER: "true" } as Record<string, string>;
+  // The same overrides the bridge drops: a sign-in here is for this login's subscription, nothing else.
   for (const key of AMBIENT_AUTH) delete env[key];
   return env;
 }

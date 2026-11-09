@@ -36,6 +36,13 @@ Each change is marked `OpenBuild:` in the source.
     messages in this request too (Haiku 4.5 refuses the `system` role), and
     `alignSystemOutputConfig` gives them this request's `output_config`, or none. Before, a turn
     after the model behind a Pi model id changed failed with HTTP 400.
+  - `AMBIENT_AUTH`: every Claude Code launch (auth status, the ready check, discovery and
+    requests, including `processEnvironment`'s merge of `process.env`) drops inherited auth and
+    backend overrides: API keys, auth and OAuth tokens, custom headers, base URLs, and the
+    Bedrock/Vertex/Foundry switches. Upstream drops only `ANTHROPIC_API_KEY` and refuses the
+    rest, so an ambient `CLAUDE_CODE_OAUTH_TOKEN` signed every profile in as one account, and an
+    ambient `ANTHROPIC_BASE_URL` made discovery fail. A request's base URL is the bridge's own
+    loopback relay, set after this. OpenBuild's Settings sign-in uses the same list.
   - Process output is read until `close`, not `exit`, and `claude auth status` is asked again when
     it prints nothing, so a login doesn't flicker to signed out and hide its models.
   - Unused imports removed for OpenBuild's stricter compiler settings.
@@ -45,4 +52,4 @@ Each change is marked `OpenBuild:` in the source.
 
 Upstream's README, ARCHITECTURE and package files aren't copied. Its behaviour notes still apply:
 requests count against the Claude plan's limits, Claude Code never runs tools (Pi does), and an
-inherited API key, proxy, Bedrock, Vertex or Foundry setting is ignored rather than used.
+inherited API key, token, base URL, Bedrock, Vertex or Foundry setting is ignored rather than used (see `AMBIENT_AUTH`).

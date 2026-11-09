@@ -451,3 +451,126 @@ test("the cache budget keeps the request valid however the markers are spread", 
   budgetCacheMarkers(again);
   expect(again).toEqual(nested);
 });
+
+// ------------------------------------------------------------------ every bridge launch drops ambient auth
+
+/** A Claude Code that answers auth status, discovery and one streamed request, logging what each launch saw. */
+const FAKE_CLI = `#!/usr/bin/env node
+const { appendFileSync } = require("node:fs");
+const readline = require("node:readline");
+const ambient = JSON.parse(process.env.AMBIENT_NAMES);
+const args = process.argv.slice(2);
+const kind = args[0] === "auth" ? "status" : args.includes("--system-prompt-file") ? "request" : "discovery";
+const base = process.env.ANTHROPIC_BASE_URL;
+appendFileSync(process.env.LAUNCH_LOG, JSON.stringify({ kind, dir: process.env.CLAUDE_CONFIG_DIR, base: base && new URL(base).hostname, leaked: ambient.filter((n) => n in process.env) }) + "\\n");
+if (kind === "status") {
+  // A token in the environment would sign any directory in, as Claude Code does.
+  const loggedIn = process.env.CLAUDE_CONFIG_DIR === process.env.SIGNED_IN_DIR || !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  console.log(JSON.stringify(loggedIn ? { loggedIn, authMethod: "claude.ai", subscriptionType: "max" } : { loggedIn }));
+  process.exit(0);
+}
+const out = (v) => console.log(JSON.stringify(v));
+const usage = { input_tokens: 3, output_tokens: 1, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
+(async () => {
+  for await (const line of readline.createInterface({ input: process.stdin })) {
+    const frame = JSON.parse(line);
+    if (frame.type === "control_request" && frame.request?.subtype === "initialize") {
+      out({ type: "control_response", response: { subtype: "success", request_id: frame.request_id, response: { models: [
+        { value: "sonnet", resolvedModel: "claude-sonnet-5", displayName: "Sonnet", description: "Efficient", supportsAdaptiveThinking: true },
+      ] } } });
+      continue;
+    }
+    const echo = frame.uuid ? { user_message_uuids: [frame.uuid] } : {};
+    if (frame.shouldQuery === false) { out({ type: "result", num_turns: 0, ...echo }); continue; }
+    if (frame.type !== "user") continue;
+    for (const event of [
+      { type: "message_start", message: { id: "m1", role: "assistant", content: [], usage } },
+      { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+      { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "ok" } },
+      { type: "content_block_stop", index: 0 },
+      { type: "message_delta", delta: { stop_reason: "end_turn" }, usage },
+      { type: "message_stop" },
+    ]) out({ type: "stream_event", event });
+    out({ type: "assistant", message: { id: "m1", role: "assistant", content: [{ type: "text", text: "ok" }], stop_reason: "end_turn", usage } });
+    out({ type: "result", subtype: "success", is_error: false, usage, ...echo });
+  }
+})();
+`;
+
+test("status, discovery and requests for each login never see the server's Claude credentials or backend", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-claude-launch-"));
+  try {
+    const cli = join(root, "claude");
+    writeFileSync(cli, FAKE_CLI);
+    chmodSync(cli, 0o755);
+    const dirs = [join(root, "one"), join(root, "two")];
+    for (const d of dirs) mkdirSync(d);
+    const ambient = {
+      ANTHROPIC_API_KEY: "sk-ant-ambient",
+      ANTHROPIC_AUTH_TOKEN: "ambient-bearer",
+      CLAUDE_CODE_OAUTH_TOKEN: "ambient-oauth",
+      ANTHROPIC_BASE_URL: "https://ambient-proxy.invalid",
+      CLAUDE_CODE_USE_BEDROCK: "1",
+      ANTHROPIC_CUSTOM_HEADERS: "x-auth: ambient",
+    };
+    // Its own process: the ambient values go in process.env, where Pi's would be.
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from "node:assert";
+      import { readFileSync } from "node:fs";
+      const { createClaudeCodeProvider } = await import("./server/bots/claude-code/provider.ts");
+      const dirs = ${JSON.stringify(dirs)};
+      const [one, two] = dirs.map((configDir, i) => createClaudeCodeProvider({ id: i ? "claude-code-2" : "claude-code", configDir, command: ${JSON.stringify(cli)} }));
+      const signal = new AbortController().signal;
+      const ctx = { env: async () => undefined, fileExists: async () => false };
+
+      // Provider checks: only the login that's signed in counts. The second doesn't borrow a token.
+      a.equal((await one.auth.apiKey.check({ ctx, signal }))?.type, "oauth");
+      a.equal(await two.auth.apiKey.check({ ctx, signal }), undefined);
+
+      // Discovery works (upstream refused the ambient base URL) and lists this login's models.
+      await one.refreshModels({ allowNetwork: true, force: true, signal, publish: async ({ update }) => (update?.(), true) });
+      const models = one.filterModels(one.getModels());
+      a.deepEqual(models.map((m) => m.id), ["claude-sonnet-5"]);
+      a.ok(models.every((m) => m.provider === "claude-code"));
+
+      // A request, the way Pi sends one: resolve, then stream with that environment.
+      const ask = async (provider, model) => {
+        const resolved = await provider.auth.apiKey.resolve({ ctx, signal });
+        const stream = provider.stream(model, { systemPrompt: "system", messages: [{ role: "user", content: "hi", timestamp: Date.now() }], tools: [] }, { env: resolved.env, signal });
+        let done;
+        for await (const event of stream) if (event.type === "done" || event.type === "error") done = event;
+        return done;
+      };
+      const answered = await ask(one, models[0]);
+      a.equal(answered.type, "done", JSON.stringify(answered).slice(0, 400));
+      a.deepEqual(answered.message.content.filter((b) => b.type === "text").map((b) => b.text), ["ok"]);
+      // The second login isn't signed in, and an ambient token mustn't make it look like it is.
+      const refused = await ask(two, { ...models[0], provider: "claude-code-2" });
+      a.equal(refused.type, "error");
+      a.match(refused.error.errorMessage, /log|sign/i);
+
+      const launches = readFileSync(process.env.LAUNCH_LOG, "utf8").trim().split("\\n").map((l) => JSON.parse(l));
+      for (const kind of ["status", "discovery", "request"]) a.ok(launches.some((l) => l.kind === kind), "no " + kind + " launch");
+      for (const l of launches) {
+        // A request's ANTHROPIC_BASE_URL is the relay's, checked below; anything else is a leak.
+        a.deepEqual(l.leaked.filter((n) => !(l.kind === "request" && n === "ANTHROPIC_BASE_URL")), [], JSON.stringify(l));
+        a.ok(dirs.includes(l.dir), JSON.stringify(l));
+        // Requests go to the bridge's own loopback relay, never the ambient backend.
+        if (l.kind === "request") a.match(l.base, /^(127\\.0\\.0\\.1|localhost|\\[::1\\])$/, JSON.stringify(l));
+        else a.equal(l.base, undefined, JSON.stringify(l));
+      }
+      a.ok(launches.filter((l) => l.dir === dirs[1]).every((l) => l.kind === "status"), "the second login only ever had its status asked");
+      process.exit(0);
+    `], {
+      cwd: ROOT,
+      env: { ...process.env, ...ambient, HOME: root, SIGNED_IN_DIR: dirs[0], LAUNCH_LOG: join(root, "launches.jsonl"), AMBIENT_NAMES: JSON.stringify(Object.keys(ambient)) },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    expect(err + out).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 60_000);
