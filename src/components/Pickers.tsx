@@ -135,9 +135,9 @@ export function ReasoningSection({ deviceId }: { deviceId?: string }) {
       {note ? (
         <p className="mp-effort-note">{note}</p>
       ) : (
-        <div className="mp-effort-levels" role="radiogroup" aria-label="Reasoning effort" onKeyDown={(e) => arrowNav(e)}>
+        <div className="mp-effort-levels" role="radiogroup" aria-label="Reasoning effort" onKeyDown={(e) => arrowNav(e, undefined, { horizontal: true })}>
           {levels.map((level) => (
-            <button key={level} type="button" role="radio" aria-checked={shown === level} className="mp-effort-level" onClick={() => setEffort(level)}>
+            <button key={level} type="button" role="radio" aria-checked={shown === level} tabIndex={shown === level ? 0 : -1} className="mp-effort-level" onClick={() => setEffort(level)}>
               <span className="mp-effort-long">{labelOf(level)}</span>
               <span className="mp-effort-short" aria-hidden>{labelOf(level, true)}</span>
               {shown === level && <Check size={14} className="mp-effort-check" aria-hidden />}
@@ -156,13 +156,14 @@ export function SpeedToggle({ deviceId }: { deviceId?: string }) {
   if (!speeds.length) return null;
   const options: { id?: string; name: string; description?: string }[] = [{ name: "Standard", description: "Default speed and usage" }, ...speeds];
   return (
-    <span className="mp-speed" role="radiogroup" aria-label="Speed" onKeyDown={(e) => arrowNav(e)}>
+    <span className="mp-speed" role="radiogroup" aria-label="Speed" onKeyDown={(e) => arrowNav(e, undefined, { horizontal: true })}>
       {options.map((o) => (
         <button
           key={o.id ?? ""}
           type="button"
           role="radio"
           aria-checked={current?.id === o.id}
+          tabIndex={current?.id === o.id ? 0 : -1}
           className="mp-speed-opt"
           data-tooltip={o.description}
           data-tooltip-side="top"

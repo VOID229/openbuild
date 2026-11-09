@@ -248,12 +248,16 @@ export async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** Arrow-key navigation between focusable items inside a list. */
-export function arrowNav(e: React.KeyboardEvent<HTMLElement>, selector = "button:not(:disabled)") {
-  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+/**
+ * Arrow-key navigation between focusable items inside a list. `horizontal` also takes ←/→, for a
+ * group whose items may sit in a row (radio groups).
+ */
+export function arrowNav(e: React.KeyboardEvent<HTMLElement>, selector = "button:not(:disabled)", { horizontal = false } = {}) {
+  const forward = e.key === "ArrowDown" || (horizontal && e.key === "ArrowRight");
+  if (!forward && e.key !== "ArrowUp" && !(horizontal && e.key === "ArrowLeft")) return;
   const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(selector));
   const i = items.indexOf(document.activeElement as HTMLElement);
-  const next = e.key === "ArrowDown" ? items[Math.min(items.length - 1, i + 1)] : items[Math.max(0, i - 1)];
+  const next = forward ? items[Math.min(items.length - 1, i + 1)] : items[Math.max(0, i - 1)];
   next?.focus();
   e.preventDefault();
 }
