@@ -44,6 +44,9 @@ test("an invite code carries the host's addresses, key and secret, and nothing t
   // Pasted with spaces and line breaks.
   expect(decodeInvite(`  ${code.slice(0, 20)}\n${code.slice(20)}  `)).toEqual(invite);
   expect(keyId(decodeInvite(code)!.key)).toBe(alice.id);
+  // Through a tunnel: the route's https address, and the mode, come back as they went.
+  const tunneled = { ...invite, mode: "tunnel" as const, urls: ["https://f0123456789abcdef0123.t1.tunnel.example.com"] };
+  expect(decodeInvite(encodeInvite(tunneled))).toEqual(tunneled);
   for (const bad of ["", "obf1_", "obf1_!!!!", code.slice(5), "obf2_" + code.slice(5), encodeInvite({ ...invite, urls: ["file:///etc/passwd"] }), encodeInvite({ ...invite, urls: ["http://x/path"] }), encodeInvite({ ...invite, key: "short" })]) {
     expect(decodeInvite(bad)).toBeUndefined();
   }

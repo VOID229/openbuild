@@ -136,11 +136,12 @@ export function handleJoin(text: string): Response {
 
 /** POST /friend/v1/join/status: the guest asks whether it was approved. */
 export function handlePoll(text: string): Response {
+  if (limited()) return refuse(429);
   const invite = current();
   const request = invite?.request;
   const payload = request ? unseal(text, request.publicKey) : undefined;
   const me = store.identity();
-  if (!invite || !request || !payload || payload.t !== "join-poll" || payload.to !== me.id || payload.request !== request.id || typeof payload.nonce !== "string") return refuse(403);
+  if (!invite || !request || !payload || payload.t !== "join-poll" || payload.to !== me.id || payload.request !== request.id || typeof payload.nonce !== "string") return failed() ? refuse(429) : refuse(403);
   // An answered invite stays until it expires, so a reply lost on the way can be asked for again.
   const status = invite.decision ?? "pending";
   return json(JSON.parse(seal({ t: "join-result", from: me.id, to: payload.from, request: request.id, nonce: payload.nonce, status, name: invite.name }, me)));

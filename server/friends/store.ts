@@ -34,6 +34,8 @@ export interface StoredFriend {
 interface FriendsFile {
   /** The friend listener's port, fixed the first time it's chosen so a friend's saved address keeps working. */
   port?: number;
+  /** The route name friends reach this server's tunnel by: random, and kept, so their saved URL keeps working. */
+  tunnelRoute?: string;
   friends: StoredFriend[];
 }
 
@@ -126,6 +128,15 @@ export function listenPort(): number {
 export function keepPort(port: number) {
   const file = readFile();
   if (file.port !== port && !process.env.OPENBUILD_FRIEND_PORT) writeJson(friendsFile(), { ...file, port });
+}
+
+/** The tunnel's route name, made the first time it's needed. Not a secret that protects anything: it's only hard to guess. */
+export function tunnelRoute(): string {
+  const file = readFile();
+  if (file.tunnelRoute) return file.tunnelRoute;
+  const route = "f" + randomBytes(10).toString("hex");
+  writeJson(friendsFile(), { ...file, tunnelRoute: route });
+  return route;
 }
 
 // ------------------------------------------------------------------ sequence numbers and the outbox

@@ -4,14 +4,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { dataDir } from "../server/paths";
-import type { FriendSummary } from "../shared/friends";
+import { MODE_LABEL, type FriendMode, type FriendSummary } from "../shared/friends";
 import { ask, confirm } from "./prompt";
 
 type Out = { fail: (msg: string) => never; bold: (s: string) => string; dim: (s: string) => string };
 
 const socket = () => join(dataDir(), "friends", "control.sock");
 
-export const FRIEND_HELP = `  openbuild friend invite     let a friend's OpenBuild connect here (prints a one-time code)
+export const FRIEND_HELP = `  openbuild friend invite [--tailscale|--lan|--tunnel]   let a friend's OpenBuild connect here (prints a one-time code)
   openbuild friend add <code> become friends with the OpenBuild that printed the code
   openbuild friend list       your friends, and whether they're connected
   openbuild friend remove <friend>   stop being friends, at once
@@ -56,7 +56,7 @@ const STATUS: Record<FriendSummary["status"], string> = { online: "connected", o
 function printFriends(out: Out, friends: FriendSummary[]) {
   if (!friends.length) return console.log("No friends yet. Run `openbuild friend invite` here, or `openbuild friend add <code>` with a friend's code.");
   for (const f of friends) {
-    const how = f.role === "host" ? `you connect to them over ${f.mode === "lan" ? "LAN" : "Tailscale"}` : `they connect here over ${f.mode === "lan" ? "LAN" : "Tailscale"}`;
+    const how = f.role === "host" ? `you connect to them over ${MODE_LABEL[f.mode] ?? "Tailscale"}` : `they connect here over ${MODE_LABEL[f.mode] ?? "Tailscale"}`;
     console.log(`${out.bold(f.name)}  ${STATUS[f.status]}`);
     console.log(out.dim(`  ${f.fingerprint} · ${how}${f.allowTools ? " · bots may use their tools" : ""}`));
     if (f.failing) console.log(`  A message from them couldn't be delivered here after ${f.failing.attempts} tries (${f.failing.error}). Still trying; what they send next waits for it.`);
@@ -77,11 +77,11 @@ async function invite(out: Out, args: string[]) {
   const { flags } = parse(args);
   // Someone has to say yes to whoever uses the code: the owner at a terminal, or --yes beforehand.
   if (!process.stdin.isTTY && flags.yes !== true) out.fail("run this in a terminal so you can approve your friend, or pass --yes to approve whoever uses the code.");
-  let mode: "lan" | "tailscale" | undefined = flags.lan ? "lan" : flags.tailscale ? "tailscale" : undefined;
+  let mode: FriendMode | undefined = flags.lan ? "lan" : flags.tailscale ? "tailscale" : flags.tunnel ? "tunnel" : undefined;
   if (!mode) {
-    if (!process.stdin.isTTY) out.fail("say --tailscale or --lan.");
-    const answer = (await ask("Friends connect over [1] Tailscale or [2] LAN? [1] ")).toLowerCase();
-    mode = answer === "2" || answer === "lan" ? "lan" : "tailscale";
+    if (!process.stdin.isTTY) out.fail("say --tailscale, --lan or --tunnel.");
+    const answer = (await ask("Friends connect over [1] Tailscale, [2] LAN or [3] your OpenTunnel relay? [1] ")).toLowerCase();
+    mode = answer === "2" || answer === "lan" ? "lan" : answer === "3" || answer === "tunnel" ? "tunnel" : "tailscale";
   }
   const created = await call<{ code: string; urls: string[]; expiresAt: number; port: number; tailscaleIp?: string }>(out, "invite", {
     mode,
@@ -100,6 +100,7 @@ async function invite(out: Out, args: string[]) {
   console.log(out.dim(`  It points at ${created.urls.join(", ")}, which only answers the friend protocol.`));
   if (mode === "tailscale" && created.tailscaleIp) aclHint(out, created.tailscaleIp, created.port);
   if (mode === "lan") console.log(out.dim("  Over LAN, what you and your friend's bots say is signed but not encrypted. Tailscale encrypts it."));
+  if (mode === "tunnel") console.log(out.dim("  Through your OpenTunnel relay, which reaches the friend listener only. Your friend needs nothing but the code."));
   console.log(out.dim("\n  Waiting for them… (Ctrl+C cancels)"));
   for (;;) {
     const { request } = await call<{ request: { id: string; name: string; fingerprint: string } | null }>(out, "wait");
@@ -152,7 +153,7 @@ async function add(out: Out, args: string[]) {
 
 /** With the server stopped, the list is still on disk. */
 function listOffline(out: Out) {
-  let friends: { id: string; name: string; role: "host" | "guest"; mode: "lan" | "tailscale"; addedAt: number }[] = [];
+  let friends: { id: string; name: string; role: "host" | "guest"; mode: FriendMode; addedAt: number }[] = [];
   try {
     friends = JSON.parse(readFileSync(join(dataDir(), "friends", "friends.json"), "utf8")).friends ?? [];
   } catch {}

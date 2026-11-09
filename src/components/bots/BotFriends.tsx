@@ -3,7 +3,7 @@
 // terminal for now. Always this server's own friends, whichever workspace the tab is showing.
 import { CircleAlert } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { FriendSummary } from "../../../shared/friends";
+import { MODE_LABEL, type FriendSummary } from "../../../shared/friends";
 import { useBots } from "../../lib/bots/store";
 import { ago, cx } from "../../lib/ui";
 import { Spinner } from "../primitives";
@@ -46,7 +46,7 @@ function FriendRow({ friend, onRemoved }: { friend: FriendSummary; onRemoved: ()
           <span className="device-status">{label}</span>
         </span>
         <span className="pi-row-desc" title={friend.status === "refused" ? "Their OpenBuild turned this one away: they may have removed you." : undefined}>
-          {[friend.fingerprint, friend.mode === "tailscale" ? "Tailscale" : "LAN", friend.role === "host" ? "you connect to them" : "they connect here", friend.allowTools && "bots may use tools", seen && `seen ${seen}`].filter(Boolean).join(" · ")}
+          {[friend.fingerprint, MODE_LABEL[friend.mode] ?? "LAN", friend.role === "host" ? "you connect to them" : "they connect here", friend.allowTools && "bots may use tools", seen && `seen ${seen}`].filter(Boolean).join(" · ")}
         </span>
         {friend.failing && (
           <span className="pi-error device-error" role="status">

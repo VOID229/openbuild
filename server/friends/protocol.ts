@@ -126,7 +126,7 @@ export interface Invite {
 const CODE_PREFIX = "obf1_";
 
 export function encodeInvite(invite: Invite): string {
-  const body = { i: invite.id, s: invite.secret, k: invite.key, n: invite.name, m: invite.mode === "lan" ? "l" : "t", u: invite.urls, e: Math.floor(invite.expiresAt / 1000) };
+  const body = { i: invite.id, s: invite.secret, k: invite.key, n: invite.name, m: invite.mode === "lan" ? "l" : invite.mode === "tunnel" ? "o" : "t", u: invite.urls, e: Math.floor(invite.expiresAt / 1000) };
   return CODE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
 }
 
@@ -143,7 +143,7 @@ export function decodeInvite(code: string): Invite | undefined {
   const urls = Array.isArray(body?.u) ? body.u.filter((u: unknown): u is string => typeof u === "string" && /^https?:\/\/[^/\s]+$/.test(u)).slice(0, 8) : [];
   if (typeof body?.i !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(body.i)) return undefined;
   if (typeof body.s !== "string" || !/^[A-Za-z0-9_-]{16,64}$/.test(body.s) || !isKeyText(body.k) || !urls.length || !Number.isFinite(body.e)) return undefined;
-  return { id: body.i, secret: body.s, key: body.k, name: cleanName(body.n) || "Friend", mode: body.m === "l" ? "lan" : "tailscale", urls, expiresAt: body.e * 1000 };
+  return { id: body.i, secret: body.s, key: body.k, name: cleanName(body.n) || "Friend", mode: body.m === "l" ? "lan" : body.m === "o" ? "tunnel" : "tailscale", urls, expiresAt: body.e * 1000 };
 }
 
 /** What a guest sends to show it has the invite's secret: tied to the invite, its own key and a fresh nonce. */
