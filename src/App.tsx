@@ -36,7 +36,7 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
-import { cx, slideSidebar, useMediaQuery } from "./lib/ui";
+import { cx, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -317,10 +317,8 @@ function Main() {
           st.newChat();
           break;
         case "toggleSidebar":
-          slideSidebar(() => {
-            if (st.botsOpen) st.setBotsSidebarOpen(!st.botsSidebarOpen);
-            else st.setSidebarOpen(!st.sidebarOpen);
-          });
+          if (st.botsOpen) st.setBotsSidebarOpen(!st.botsSidebarOpen);
+          else st.setSidebarOpen(!st.sidebarOpen);
           break;
         case "toggleRightSidebar": {
           const { panel, tree, setPanel, setTree } = usePanel.getState();
@@ -422,7 +420,7 @@ function Main() {
               </>
             ) : (
               <>
-                <IconButton label="Open sidebar" tooltipSide="right" onClick={() => slideSidebar(() => setSidebarOpen(true))}>
+                <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
                   <PanelLeft size={18} />
                 </IconButton>
                 <IconButton label="New thread" tooltipSide="right" onClick={newChat}>

@@ -17,7 +17,7 @@ import type { Device } from "../../shared/types";
 import { limitReason } from "../../shared/usage";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { useLongPress } from "../lib/gestures";
-import { arrowNav, canHover, copyText, crossfade, cx, slideSidebar, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
+import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
@@ -1582,7 +1582,7 @@ export function Sidebar() {
       <aside ref={sidebarRef} className={cx("sidebar", open ? "sidebar-open" : "sidebar-closed")} aria-hidden={!open} inert={!open}>
         <div className="sidebar-inner">
           <div className="brand-row">
-            <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => slideSidebar(() => setSidebarOpen(false))}>
+            <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
               <PanelLeft size={18} />
             </IconButton>
             <span className="wordmark">OpenBuild</span>

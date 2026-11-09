@@ -92,9 +92,9 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   /* Opening and closing the side panel and file tree: quick off the mark, long soft landing. */
   --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
-  /* A damped spring (damping 0.82, ~1% overshoot) sampled for CSS: sidebars and switching worlds. */
-  --spring: linear(0, 0.0241, 0.0847, 0.1674, 0.2614, 0.3589, 0.4544, 0.5441, 0.6259, 0.6985, 0.7617, 0.8155, 0.8605, 0.8975, 0.9273, 0.9509, 0.9692, 0.9831, 0.9933, 1.0006, 1.0055, 1.0086, 1.0103, 1.011, 1.011, 1.0105, 1.0097, 1.0087, 1.0076, 1.0065, 1.0055, 1.0046, 1.0037, 1.003, 1.0023, 1.0018, 1);
-  --spring-ms: 480ms;
+  /* The sidebars: quick off the mark and a long, soft landing, with no overshoot to wobble the page. */
+  --sidebar-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --sidebar-ms: 320ms;
   --fast: 120ms;
   --med: 180ms;
 
@@ -888,73 +888,33 @@ select.input {
   opacity: 0;
 }
 
-/* Opening and closing the sidebar (ui.ts slideSidebar): a view transition, so the browser moves
-   snapshots and nothing reflows frame by frame. The sidebar slides in from, or out to, the left edge
-   on a spring while the main pane's edge follows it; the main pane's old content fades off the new. */
-.sidebar-switch .sidebar:not(.bots-sidebar) {
-  view-transition-name: side-threads;
+/* Opening and closing the sidebar: its width eases (the main pane follows, which costs a cheap layout
+   per frame) while its content slides with it on a transform, so the panel reads as one sheet moving
+   in and out from the left edge. Nothing else animates. Phones have a drawer (Responsive). */
+@media (min-width: 769px) {
+  /* Shown at once on the way in; hidden only once it has slid away. */
+  .sidebar {
+    transition: width var(--sidebar-ms) var(--sidebar-ease), opacity 0s;
+  }
+
+  .sidebar-closed {
+    transition: width var(--sidebar-ms) var(--sidebar-ease), opacity 0s var(--sidebar-ms);
+  }
+
+  .sidebar-inner {
+    transition: transform var(--sidebar-ms) var(--sidebar-ease);
+  }
+
+  .sidebar-closed:not(.bots-sidebar-rail) .sidebar-inner {
+    transform: translateX(-100%);
+  }
 }
 
-.sidebar-switch .bots-sidebar {
-  view-transition-name: side-bots;
-}
-
-.sidebar-switch .main {
-  view-transition-name: side-main;
-}
-
-::view-transition-group(side-threads),
-::view-transition-group(side-bots),
-::view-transition-group(side-main) {
-  animation-duration: var(--spring-ms);
-  animation-timing-function: var(--spring);
-}
-
-::view-transition-image-pair(side-threads),
-::view-transition-image-pair(side-bots),
-::view-transition-image-pair(side-main) {
-  isolation: auto;
-}
-
-/* The sidebar's content rides its right edge, so it slides rather than unfolds. */
-::view-transition-old(side-threads),
-::view-transition-new(side-threads),
-::view-transition-old(side-bots),
-::view-transition-new(side-bots) {
-  width: 100%;
-  height: 100%;
-  object-fit: none;
-  object-position: right top;
-  mix-blend-mode: normal;
-}
-
-::view-transition-old(side-main),
-::view-transition-new(side-main) {
-  width: 100%;
-  height: 100%;
-  object-fit: none;
-  object-position: left top;
-  mix-blend-mode: normal;
-}
-
-::view-transition-new(side-threads),
-::view-transition-new(side-bots),
-::view-transition-new(side-main) {
-  animation: none;
-  opacity: 1;
-}
-
-::view-transition-old(side-threads),
-::view-transition-old(side-bots) {
-  animation: side-out calc(var(--spring-ms) * 0.6) var(--ease) both;
-}
-
-::view-transition-old(side-main) {
-  animation: side-out 200ms var(--ease) both;
-}
-
-@keyframes side-out {
-  to { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-inner {
+    transition: none;
+  }
 }
 
 .sidebar-inner {
@@ -976,22 +936,7 @@ select.input {
   }
 }
 
-/* Desktop only: on a phone the drawer slides in whole. */
-@media (min-width: 769px) {
-  .sidebar-open:not(.bots-sidebar) > .sidebar-inner {
-    animation: sidebar-in var(--med) var(--ease-out);
-  }
-}
-
-@keyframes sidebar-in {
-  from {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-open > .sidebar-inner,
   .collapse-open {
     animation: none;
     transition: none;
@@ -5054,7 +4999,7 @@ p.key-status svg {
     box-shadow: var(--shadow-lg);
     transform: none;
     visibility: visible;
-    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s;
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), opacity var(--med) var(--ease-out), visibility 0s;
   }
 
   /* Hidden once it has slid away, so Safari doesn't sample it for the status bar color. */
@@ -5063,7 +5008,7 @@ p.key-status svg {
     transform: translateX(-100%);
     box-shadow: none;
     visibility: hidden;
-    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s var(--spring-ms);
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), opacity var(--med) var(--ease-out), visibility 0s var(--sidebar-ms);
   }
 
   .sidebar-inner {

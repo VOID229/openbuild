@@ -10,7 +10,7 @@ import type { Conversation } from "../../lib/bots/types";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
-import { arrowNav, canHover, copyText, cx, slideSidebar, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
+import { arrowNav, canHover, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
@@ -488,13 +488,13 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
         onMenu({ id: c.id, x: e.clientX, y: e.clientY });
       }}
     >
-      <SidebarAvatar conversation={c} size={34} />
+      <SidebarAvatar conversation={c} size={42} />
       {c.unread && <span className="unread-dot bots-rail-dot" aria-label="Unread" />}
     </button>
   );
   return (
     <div className="bots-rail-inner">
-      <IconButton label="Open sidebar" tooltipSide="right" className="bots-rail-btn" onClick={() => slideSidebar(() => useStore.getState().setBotsSidebarOpen(true))}>
+      <IconButton label="Open sidebar" tooltipSide="right" className="bots-rail-btn" onClick={() => useStore.getState().setBotsSidebarOpen(true)}>
         <PanelLeft size={18} />
       </IconButton>
       <div className="history-wrap">
@@ -514,7 +514,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
         )}
         <BotsToggle />
         <button type="button" className="bots-rail-me" aria-label="Settings" data-tooltip="Settings" data-tooltip-side="right" onClick={() => useStore.getState().openSettings()}>
-          <Avatar src={avatar} name={name} size={26} />
+          <Avatar src={avatar} name={name} size={32} />
         </button>
       </div>
     </div>
@@ -593,7 +593,7 @@ export function BotsSidebar() {
             <div className="brand-row">
               {/* On a phone the list is a screen of its own, with the search always at hand. */}
               {!mobile && (
-                <IconButton label="Close sidebar" onClick={() => slideSidebar(() => useStore.getState().setBotsSidebarOpen(false))}>
+                <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
                   <PanelLeft size={18} />
                 </IconButton>
               )}

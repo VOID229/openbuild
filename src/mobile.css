@@ -489,14 +489,14 @@
     background: var(--surface);
     box-shadow: -1px 0 0 var(--border);
     touch-action: pan-y;
-    transition: transform var(--spring-ms) var(--spring), visibility 0s;
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), visibility 0s;
   }
 
   .main-bots-under {
     transform: translateX(100%);
     box-shadow: none;
     visibility: hidden;
-    transition: transform var(--spring-ms) var(--spring), visibility 0s var(--spring-ms);
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), visibility 0s var(--sidebar-ms);
   }
 
   .bots-sidebar,
@@ -505,13 +505,13 @@
     background: var(--surface);
     box-shadow: none;
     opacity: 1;
-    transition: transform var(--spring-ms) var(--spring), visibility 0s;
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), visibility 0s;
   }
 
   .bots-sidebar.sidebar-closed {
     transform: translateX(-28%);
     visibility: hidden;
-    transition: transform var(--spring-ms) var(--spring), visibility 0s var(--spring-ms);
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), visibility 0s var(--sidebar-ms);
   }
 
   .sidebar-scrim:has(+ .bots-sidebar) {
@@ -1361,13 +1361,13 @@
     height: 42px;
   }
 
-  /* The same spring as OpenBots' panes. */
+  /* The same easing as OpenBots' panes. */
   .sidebar:not(.bots-sidebar) {
-    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s;
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), opacity var(--med) var(--ease-out), visibility 0s;
   }
 
   .sidebar-closed:not(.bots-sidebar) {
-    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s var(--spring-ms);
+    transition: transform var(--sidebar-ms) var(--sidebar-ease), opacity var(--med) var(--ease-out), visibility 0s var(--sidebar-ms);
   }
 
   .sidebar-scrim {

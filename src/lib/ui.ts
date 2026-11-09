@@ -21,46 +21,23 @@ function settleMotion() {
   }
 }
 
-let switching = 0;
-const SWITCH_CLASSES = ["world-switch", "sidebar-switch"];
+let entering: ReturnType<typeof setTimeout> | undefined;
 
 /**
- * Run a layout change as a view transition, with `className` on the root while it plays so only the
- * panes taking part get transition names (a name makes its element a stacking context). The browser
- * animates snapshots, so nothing reflows frame by frame however heavy the panes are. Without view
- * transitions, or when motion isn't welcome, the change just happens.
+ * Switch the sidebar and main pane between OpenBuild and OpenBots. The layout changes at once and the
+ * incoming panes fade in (bots.css, .world-enter): no snapshots of the page, nothing else moves.
  */
-function viewTransition(className: string, update: () => void, when = true) {
-  const change = () => {
-    flushSync(update);
-    settleMotion();
-  };
-  if (!when || typeof document === "undefined" || !document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
-  const root = document.documentElement;
-  const id = ++switching;
-  root.classList.remove(...SWITCH_CLASSES);
-  root.classList.add(className);
-  const done = () => {
-    if (id === switching) root.classList.remove(className);
-  };
-  const transition = document.startViewTransition(change);
-  // A quick second change skips this one, which is fine.
-  transition.ready.catch(() => {});
-  transition.finished.then(done, done);
-}
-
-/** Switch the sidebar and main pane between OpenBuild and OpenBots (see bots.css, .world-switch). */
 export function crossfade(update: () => void) {
-  viewTransition("world-switch", update);
-}
-
-/**
- * Open or close the sidebar with a spring (styles.css, .sidebar-switch): the panel slides in from or
- * out to the left edge while the main pane's edge follows. On a phone the sidebar is a drawer with its
- * own slide, so the change just happens there.
- */
-export function slideSidebar(update: () => void) {
-  viewTransition("sidebar-switch", update, typeof window !== "undefined" && window.innerWidth > 768);
+  flushSync(update);
+  settleMotion();
+  if (typeof document === "undefined" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const root = document.documentElement;
+  root.classList.remove("world-enter");
+  // Restart the fade if a second switch comes before the first has finished.
+  void root.offsetWidth;
+  root.classList.add("world-enter");
+  clearTimeout(entering);
+  entering = setTimeout(() => root.classList.remove("world-enter"), 260);
 }
 
 /**

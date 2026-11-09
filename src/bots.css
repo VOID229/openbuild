@@ -872,7 +872,7 @@
 
 /* Closed on a desktop, the sidebar keeps a rail of avatars. */
 .sidebar.bots-sidebar-rail {
-  width: 64px;
+  width: 84px;
   opacity: 1;
 }
 
@@ -881,7 +881,7 @@
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  width: 64px;
+  width: 84px;
   height: 100%;
   padding: 10px 0 12px;
   animation: bots-fade-in var(--med) var(--ease-out) both;
@@ -896,7 +896,7 @@
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0;
@@ -942,9 +942,9 @@
   display: grid;
   flex: none;
   place-items: center;
-  width: 46px;
-  height: 46px;
-  border-radius: var(--radius-lg);
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -1028,17 +1028,17 @@
 /* Unread: a small white dot on the avatar's corner, ringed in the rail's colour. */
 .bots-rail-dot {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
   border: 2px solid var(--bg);
   box-sizing: content-box;
 }
 
 .bots-rail-sep {
   flex: none;
-  width: 24px;
+  width: 40px;
   height: 1px;
   margin: 4px 0;
   background: var(--border);
@@ -1049,9 +1049,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding-top: 6px;
-  border-top: 1px solid var(--border);
 }
 
 .bots-rail-foot .bots-rail-btn:not(:hover),
@@ -1060,22 +1059,22 @@
 }
 
 .bots-rail-btn {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius);
 }
 
 .bots-rail-foot .bots-toggle {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
 }
 
 .bots-rail-me {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
-  margin-top: 4px;
+  width: 44px;
+  height: 44px;
+  margin-top: 6px;
   border-radius: 50%;
   transition: background-color var(--fast) var(--ease);
 }
@@ -1103,71 +1102,24 @@
   --bm-them: color-mix(in srgb, var(--text) 6%, var(--surface));
 }
 
-/* Switching between OpenBuild and OpenBots. The two sidebars are different things (a thread list,
-   a rail of bots), so neither morphs into the other: the outgoing one is gone at once and the
-   incoming one slides in from the left edge. The main pane's edge slides to its new place while its
-   old content fades off the new, so the old world never lingers once the switch has started. */
-.world-switch .sidebar:not(.bots-sidebar) {
-  view-transition-name: world-threads;
+/* Switching between OpenBuild and OpenBots (ui.ts crossfade): the layout changes at once and the
+   incoming sidebar and pane fade in, the sidebar's content drifting in a few pixels from the left.
+   Opacity and transform only, so it costs nothing however heavy the panes are. */
+.world-enter .sidebar:not(.sidebar-closed) > *,
+.world-enter .sidebar.bots-sidebar-rail > * {
+  animation: world-side-in 220ms var(--ease-out) both;
 }
 
-.world-switch .bots-sidebar {
-  view-transition-name: world-bots;
-}
-
-.world-switch .main {
-  view-transition-name: world-main;
-}
-
-::view-transition-old(root),
-::view-transition-new(root),
-::view-transition-group(world-threads),
-::view-transition-group(world-bots) {
-  animation: none;
-}
-
-::view-transition-old(world-threads),
-::view-transition-old(world-bots) {
-  animation: none;
-  opacity: 0;
-}
-
-::view-transition-new(world-threads),
-::view-transition-new(world-bots) {
-  animation: world-side-in var(--spring-ms) var(--spring) both;
+.world-enter .main > * {
+  animation: world-main-in 180ms var(--ease-out) both;
 }
 
 @keyframes world-side-in {
-  from { opacity: 0; transform: translateX(-24px); }
-  40% { opacity: 1; }
+  from { opacity: 0; transform: translateX(-8px); }
 }
 
-::view-transition-group(world-main) {
-  animation-duration: var(--spring-ms);
-  animation-timing-function: var(--spring);
-}
-
-/* Cropped as the edge slides, not stretched. */
-::view-transition-old(world-main),
-::view-transition-new(world-main) {
-  width: 100%;
-  height: 100%;
-  object-fit: none;
-  object-position: left top;
-  mix-blend-mode: normal;
-}
-
-::view-transition-old(world-main) {
-  animation: world-out 140ms var(--ease) both;
-}
-
-::view-transition-new(world-main) {
-  animation: none;
-  opacity: 1;
-}
-
-@keyframes world-out {
-  to { opacity: 0; }
+@keyframes world-main-in {
+  from { opacity: 0; }
 }
 
 .main-bots {
