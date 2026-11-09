@@ -737,7 +737,7 @@ export function RemoteControlToggle({ chatId }: { chatId?: string }) {
     ? remote.scope === "machine" ? "Set per machine, not per thread" : `Set in your ${RUNTIME_NAME[runtime]} account`
     : chatId ? "On since this thread started" : "Needs a claude.ai sign-in";
   return (
-    <div className="remote-control-row" data-runtime={runtime}>
+    <div className="remote-control-row" data-runtime={runtime} data-tooltip={note} data-tooltip-side="bottom">
       <label htmlFor={id} className="remote-control-label">Remote control</label>
       <Toggle id={id} className="toggle-sm" checked={perThread && (chatId ? chatOn : draftOn)} disabled={!perThread || !!chatId} onChange={setDraft} label="Remote control" describedBy={`${id}-note`} />
       <span id={`${id}-note`} className="remote-control-note">{note}</span>

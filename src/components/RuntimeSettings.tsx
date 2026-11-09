@@ -121,7 +121,7 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
               />
             </span>
           </span>
-          <span className="pi-row-desc">{status?.bin ? `${desc} · ${tilde(status.bin)}` : desc}</span>
+          <span className="pi-row-desc" title={status?.bin ? tilde(status.bin) : undefined}>{desc}</span>
         </span>
         <Toggle
           checked={enabled}
@@ -290,7 +290,7 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
   return (
     <>
       <div className="pi-subhead">
-        <p className="setting-desc">Turned-off runtimes are hidden from the runtime picker for new threads on {where ?? "this device"}. Existing threads keep their runtime.</p>
+        <p className="setting-desc">Turned-off runtimes are hidden from the picker for new threads.</p>
         <div className="row-actions">
           <button type="button" className="btn btn-sm" disabled={checking || !!updating || job.running} onClick={() => void load(true)}>
             {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check for updates

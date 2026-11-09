@@ -251,15 +251,15 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
       </div>
       <div className={cx("dv-body", wrap && "dv-wrap")}>
         {!folder.cwd ? (
-          <p className="fv-note">No project folder to compare.</p>
+          <p className="fv-note">No project folder</p>
         ) : error && !data ? (
           <p className="fv-note">{error}</p>
         ) : !data ? (
           <p className="fv-note">Loading the diff…</p>
         ) : !data.repo ? (
-          <p className="fv-note">This folder isn't a git repository.</p>
+          <p className="fv-note">Not a git repository</p>
         ) : !files.length ? (
-          <p className="fv-note">No changes against HEAD.</p>
+          <p className="fv-note">No changes</p>
         ) : (
           <>
             {files.map((f) => (

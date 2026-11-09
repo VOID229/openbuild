@@ -279,10 +279,19 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
 
 // Extensions are listed, edited, removed and toggled here, but not created: no New button for them.
 const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: string; creatable: boolean }> = {
-  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads from ~/.pi/agent/extensions.", creatable: false },
-  skill: { title: "Skills", one: "skill", help: "Instructions Pi's models can pull in when a task calls for them.", creatable: true },
-  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name in the composer.", creatable: true },
+  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads.", creatable: false },
+  skill: { title: "Skills", one: "skill", help: "Instructions Pi pulls in when a task needs them.", creatable: true },
+  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name.", creatable: true },
 };
+
+/** A description that starts by repeating the name ("undo — Session undo") reads as just the rest. */
+function describeResource(r: PiResource) {
+  const text = r.description?.trim();
+  if (!text) return "";
+  if (!text.toLowerCase().startsWith(r.name.toLowerCase())) return text;
+  const rest = /^\s*[—–:-]\s*(\S.*)$/s.exec(text.slice(r.name.length))?.[1];
+  return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : text;
+}
 
 export function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }: { kind: ResourceKind; items: PiResource[]; deviceId?: string; onChanged: () => void; onEdit: (r: PiResource) => void; busy: boolean }) {
   const [adding, setAdding] = useState(false);
@@ -339,7 +348,7 @@ export function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }:
                 {r.name}
                 {r.builtin && <span className="badge">built-in</span>}
               </span>
-              {r.description && <span className="pi-row-desc">{r.description}</span>}
+              {describeResource(r) && <span className="pi-row-desc">{describeResource(r)}</span>}
             </div>
             <span className="pi-row-actions">
               {!r.builtin && r.files.length > 0 && (
@@ -385,7 +394,7 @@ function Packages({ packages, job, deviceId, onChanged }: { packages: string[]; 
   return (
     <section className="pi-block">
       <SubHeading>Packages</SubHeading>
-      <p className="setting-desc">Extensions, skills and prompts bundled as npm or git packages (pi install).</p>
+      <p className="setting-desc">Extensions, skills and prompts from npm or git.</p>
       <ul className="pi-list">
         {packages.map((p) => (
           <li key={p} className="pi-row">
@@ -448,7 +457,7 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
           ))}
         </ul>
       ) : (
-        <p className="pi-empty">Nothing reported. Warnings and extension errors from Pi show up here.</p>
+        <p className="pi-empty">No problems reported.</p>
       )}
     </section>
   );
@@ -541,7 +550,7 @@ export function PiSection() {
             <div className="pi-card-text">
               <div className="pi-version">Pi isn't installed</div>
               <div className="pi-meta">
-                OpenBuild needs Pi to run threads. Install it with Pi's installer (<code>curl -fsSL https://pi.dev/install.sh | sh</code>) in a terminal on {where ?? "this computer"}.
+                Pi runs threads. Install it on {where ?? "this computer"} to continue.
               </div>
             </div>
             <button type="button" className="btn btn-sm btn-primary" disabled={job.running} onClick={() => void start(() => installPi(deviceId))}>
@@ -904,7 +913,7 @@ function PiProvidersSection({ deviceId }: { deviceId?: string }) {
                   {actions(p)}
                 </li>
               ))}
-              {!configured.length && <li className="pi-empty">{q ? "No match." : "No provider is set up yet. Add one below."}</li>}
+              {!configured.length && <li className="pi-empty">{q ? "No match." : "No providers yet. Add one below."}</li>}
             </ul>
           </section>
           <section className="pi-block">
@@ -922,7 +931,7 @@ function PiProvidersSection({ deviceId }: { deviceId?: string }) {
                   {actions(p)}
                 </li>
               ))}
-              {!others.length && <li className="pi-empty">{q ? "No match." : "Every provider Pi knows is already set up."}</li>}
+              {!others.length && <li className="pi-empty">{q ? "No match." : "All providers are set up."}</li>}
             </ul>
           </section>
         </>
@@ -1041,7 +1050,7 @@ export function ProjectsSection() {
           {shown.map((p) => (
             <ProjectRow key={p.id} project={p} onChanged={loadProjects} />
           ))}
-          {!shown.length && <li className="pi-empty">{projects.length ? "No projects on this device." : "No projects yet. Add one with New project… in the project picker."}</li>}
+          {!shown.length && <li className="pi-empty">{projects.length ? "No projects on this device." : "No projects yet."}</li>}
         </ul>
       </section>
     </>

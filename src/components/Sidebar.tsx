@@ -194,8 +194,8 @@ function RowTitle({ title, titling }: { title: string; titling: boolean }) {
 type RowMotion = "close" | "snooze" | "open";
 
 /** How long a row takes to play out, and to settle in; both match the row-* animations in styles.css. */
-const ROW_OUT_MS = 300;
-const ROW_IN_MS = 460;
+const ROW_OUT_MS = 180;
+const ROW_IN_MS = 240;
 
 /** Threads on their way out of the list, so a quick second action doesn't pick or move them again. */
 const moving = new Set<string>();
@@ -366,9 +366,6 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         title={titling ? undefined : chat.title}
       >
         <span className="history-title-line">
-          <span className="history-icon" title={model?.name}>
-            {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
-          </span>
           {hit ? (
             <span className="history-title-text">
               <Highlight text={chat.title} ranges={hit.titleRanges} />
@@ -418,7 +415,6 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               {/* Branch naming leaves the checkout path stable for running sessions. */}
               {chat.workspace.worktree && (
                 <span className="history-worktree">
-                  <GitBranch size={12} />
                   <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
                 </span>
               )}
@@ -430,7 +426,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             </span>
           )}
           {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} />}
-          <span className="history-runtime" title={runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+          <span className="history-runtime" title={`${runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}${model ? ` · ${model.name}` : ""}`}>
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
@@ -558,8 +554,8 @@ export function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | 
 const COLLAPSE_MS = 260;
 
 /**
- * Section whose header toggles its rows with a height animation. A shut section has no rows at all,
- * only while it folds shut: "Closed" is most threads, and its rows were most of what a page load
+ * Section whose header toggles its rows. A shut section has no rows at all, except for a moment
+ * while it folds shut: "Closed" is most threads, and its rows were most of what a page load
  * built (thousands of icons) for a list nobody could see.
  */
 function Collapsible({ label, open, onToggle, chats, row }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode }) {
@@ -595,8 +591,9 @@ function Collapsible({ label, open, onToggle, chats, row }: { label: string; ope
   return (
     <section ref={ref} className="history-group">
       <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
-        {label}
-        <ChevronDown size={14} className="history-heading-chevron" />
+        {label}{" "}
+        <span className="history-count">{chats.length}</span>
+        <ChevronDown size={12} className="history-heading-chevron" />
       </button>
       <div className={cx("collapse", open && "collapse-open")} inert={!open}>
         <div className="collapse-inner">{rows && chats.map((c) => row(c))}</div>
@@ -1601,13 +1598,13 @@ export function Sidebar() {
             }}
           >
             <span className="new-chat-icon">
-              <SquarePen size={15} />
+              <SquarePen size={16} />
             </span>
             New thread
           </button>
 
           <label className="search">
-            <Search size={16} />
+            <Search size={14} />
             <input
               type="text"
               value={query}
@@ -1630,41 +1627,41 @@ export function Sidebar() {
           <nav ref={historyRef} className="history" aria-label="Thread history">
             {deferredQuery ? (
               <section className="history-group history-results">
-                <h3 className="history-heading">{hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"}` : "Results"}</h3>
+                <h3 className="history-heading">{hits.length ? <>Results{" "}<span className="history-count">{hits.length}</span></> : "Results"}</h3>
                 {hits.map((h) => row(h.chat, h))}
                 {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
               </section>
             ) : closedView ? (
               <section className="history-group">
-                <h3 className="history-heading">{`Closed (${closed.length})`}</h3>
+                <h3 className="history-heading">Closed{" "}<span className="history-count">{closed.length}</span></h3>
                 {closed.map((c) => row(c))}
                 {!closed.length && <p className="history-empty">No closed threads.</p>}
               </section>
             ) : (
               <>
                 {pinned.length > 0 && (
-                  <Collapsible label={`Pinned (${pinned.length})`} open={sections.pinned} onToggle={() => toggleSection("pinned")} chats={pinned} row={row} />
+                  <Collapsible label="Pinned" open={sections.pinned} onToggle={() => toggleSection("pinned")} chats={pinned} row={row} />
                 )}
                 {attention.length > 0 && (
-                  <Collapsible label={`Attention (${attention.length})`} open={sections.attention} onToggle={() => toggleSection("attention")} chats={attention} row={row} />
+                  <Collapsible label="Attention" open={sections.attention} onToggle={() => toggleSection("attention")} chats={attention} row={row} />
                 )}
                 {limits.length > 0 && (
-                  <Collapsible label={`Limits (${limits.length})`} open={sections.limits} onToggle={() => toggleSection("limits")} chats={limits} row={row} />
+                  <Collapsible label="Limits" open={sections.limits} onToggle={() => toggleSection("limits")} chats={limits} row={row} />
                 )}
                 {subagents.length > 0 && (
-                  <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")} chats={subagents} row={row} />
+                  <Collapsible label="Subagents" open={sections.subagents} onToggle={() => toggleSection("subagents")} chats={subagents} row={row} />
                 )}
                 {woke.length > 0 && (
-                  <Collapsible label={`Woke (${woke.length})`} open={sections.woke} onToggle={() => toggleSection("woke")} chats={woke} row={row} />
+                  <Collapsible label="Woke" open={sections.woke} onToggle={() => toggleSection("woke")} chats={woke} row={row} />
                 )}
                 {done.length > 0 && (
-                  <Collapsible label={`Done (${done.length})`} open={sections.done} onToggle={() => toggleSection("done")} chats={done} row={row} />
+                  <Collapsible label="Done" open={sections.done} onToggle={() => toggleSection("done")} chats={done} row={row} />
                 )}
                 {working.length > 0 && (
-                  <Collapsible label={`Working (${working.length})`} open={sections.working} onToggle={() => toggleSection("working")} chats={working} row={row} />
+                  <Collapsible label="Working" open={sections.working} onToggle={() => toggleSection("working")} chats={working} row={row} />
                 )}
                 {snoozed.length > 0 && (
-                  <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")} chats={snoozed} row={row} />
+                  <Collapsible label="Snoozed" open={sections.snoozed} onToggle={() => toggleSection("snoozed")} chats={snoozed} row={row} />
                 )}
                 {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
@@ -1674,7 +1671,7 @@ export function Sidebar() {
                   </p>
                 )}
                 {closed.length > 0 && (
-                  <Collapsible label={`Closed (${closed.length})`} open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
+                  <Collapsible label="Closed" open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
                 )}
               </>
             )}
@@ -1685,7 +1682,7 @@ export function Sidebar() {
 
           <div className="settings-row">
             <button type="button" className="settings-btn" onClick={() => openSettings()}>
-              <Avatar src={avatar} name={name} size={26} />
+              <Avatar src={avatar} name={name} size={22} />
               Settings
             </button>
             <button
@@ -1702,7 +1699,7 @@ export function Sidebar() {
                 if (mobile && !usageOpen) setSidebarOpen(false);
               }}
             >
-              <ChartNoAxesColumn size={18} />
+              <ChartNoAxesColumn size={16} />
             </button>
             <button
               type="button"
@@ -1713,7 +1710,7 @@ export function Sidebar() {
               data-tooltip-side="top"
               onClick={() => setClosedView((v) => !v)}
             >
-              <SquareCheck size={18} />
+              <SquareCheck size={16} />
             </button>
             <BotsToggle />
           </div>

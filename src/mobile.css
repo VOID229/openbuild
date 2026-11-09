@@ -16,7 +16,7 @@
   background: var(--scrim);
   opacity: 0;
   touch-action: none;
-  transition: opacity 260ms var(--ease);
+  transition: opacity var(--med) var(--ease-out);
 }
 
 .sheet-root[data-state="open"] .sheet-scrim {
@@ -35,12 +35,12 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   border: 1px solid var(--border);
-  border-radius: 24px;
-  background: var(--surface-2);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
   outline: none;
   transform: translateY(calc(100% + 32px));
-  transition: transform 300ms var(--ease-panel);
+  transition: transform 220ms var(--ease-out);
 }
 
 .sheet-root[data-state="open"] .sheet {
@@ -64,10 +64,10 @@
   align-items: center;
   gap: 14px;
   width: 100%;
-  min-height: 52px;
+  min-height: 48px;
   padding: 0 14px;
-  border-radius: 16px;
-  font-size: 16.5px;
+  border-radius: var(--radius-lg);
+  font-size: 16px;
   text-align: left;
   color: var(--text);
   transition: background-color var(--fast) var(--ease);
@@ -87,7 +87,7 @@
 }
 
 /* What holding a bubble brings up (MessageMenu in BotChat.tsx): the bubble lifted where it was over
-   the blurred conversation, its reactions just above and its actions just below. Only touch screens
+   the dimmed conversation, its reactions just above and its actions just below. Only touch screens
    open it. The padding is the room it keeps from the screen's edges. */
 .bm-hold-root {
   position: fixed;
@@ -101,11 +101,9 @@
   position: absolute;
   inset: 0;
   background: var(--scrim);
-  -webkit-backdrop-filter: blur(14px) saturate(1.15);
-  backdrop-filter: blur(14px) saturate(1.15);
   opacity: 0;
   touch-action: none;
-  transition: opacity 240ms var(--ease);
+  transition: opacity var(--med) var(--ease-out);
 }
 
 .bm-hold-root[data-state="open"] .bm-hold-scrim {
@@ -122,7 +120,7 @@
   gap: 8px;
   pointer-events: none;
   transform: translateY(var(--hold-shift, 0px));
-  transition: transform 300ms var(--ease-panel);
+  transition: transform 220ms var(--ease-out);
 }
 
 .bm-hold-stack[data-mine] {
@@ -141,25 +139,25 @@
 .bm-hold-menu {
   max-width: 100%;
   border: 1px solid var(--border);
-  background: var(--surface-2);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
   pointer-events: auto;
   opacity: 0;
-  transform: scale(0.92);
-  transition: opacity 180ms var(--ease), transform 240ms var(--ease-panel), visibility 0s 240ms;
+  transform: scale(0.96);
+  transition: opacity var(--fast) var(--ease-out), transform var(--med) var(--ease-out), visibility 0s var(--med);
 }
 
 .bm-hold-root[data-state="open"] :is(.bm-hold-reactions, .bm-hold-menu) {
   opacity: 1;
   transform: none;
-  transition: opacity 180ms var(--ease), transform 240ms var(--ease-panel);
+  transition: opacity var(--fast) var(--ease-out), transform var(--med) var(--ease-out);
 }
 
 /* Selecting leaves the bubble on its own. */
 .bm-hold-root[data-selecting] :is(.bm-hold-reactions, .bm-hold-menu) {
   visibility: hidden;
   opacity: 0;
-  transform: scale(0.92);
+  transform: scale(0.96);
   pointer-events: none;
 }
 
@@ -318,7 +316,7 @@
 
   .bm-row > * {
     transform: translateX(var(--swipe, 0px));
-    transition: transform 240ms var(--ease);
+    transition: transform 200ms var(--ease-out);
   }
 
   .bm-row[data-swiping] > * {
@@ -391,7 +389,6 @@
   .segment,
   .menu-item,
   .sheet-item,
-  .model-row,
   .settings-nav-item,
   .select-trigger,
   .reasoning-toggle,
@@ -401,8 +398,8 @@
   .bots-toggle,
   .bots-composer-btn {
     transition-property: background-color, border-color, color, opacity, transform;
-    transition-duration: 240ms;
-    transition-timing-function: var(--ease);
+    transition-duration: 200ms;
+    transition-timing-function: var(--ease-out);
   }
 
   .btn:active,
@@ -415,7 +412,6 @@
   .segment:active,
   .menu-item:active,
   .sheet-item:active,
-  .model-row:active,
   .settings-nav-item:active,
   .select-trigger:active,
   .reasoning-toggle:active,
@@ -491,16 +487,16 @@
     z-index: 55;
     height: var(--app-h, 100dvh);
     background: var(--surface);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.14);
+    box-shadow: -1px 0 0 var(--border);
     touch-action: pan-y;
-    transition: transform 340ms var(--ease-panel), visibility 0s;
+    transition: transform 220ms var(--ease-out), visibility 0s;
   }
 
   .main-bots-under {
     transform: translateX(100%);
     box-shadow: none;
     visibility: hidden;
-    transition: transform 340ms var(--ease-panel), visibility 0s 340ms;
+    transition: transform 220ms var(--ease-out), visibility 0s 220ms;
   }
 
   .bots-sidebar,
@@ -509,13 +505,13 @@
     background: var(--surface);
     box-shadow: none;
     opacity: 1;
-    transition: transform 340ms var(--ease-panel), visibility 0s;
+    transition: transform 220ms var(--ease-out), visibility 0s;
   }
 
   .bots-sidebar.sidebar-closed {
     transform: translateX(-28%);
     visibility: hidden;
-    transition: transform 340ms var(--ease-panel), visibility 0s 340ms;
+    transition: transform 220ms var(--ease-out), visibility 0s 220ms;
   }
 
   .sidebar-scrim:has(+ .bots-sidebar) {
@@ -802,9 +798,9 @@
   .bm-bubble {
     max-width: min(78vw, 560px);
     padding: 8px 13px;
-    border-radius: 19px;
+    border-radius: var(--radius-bubble);
     font-size: 16px;
-    line-height: 1.36;
+    line-height: 1.5;
   }
 
   .bm-mine .bm-bubble {
@@ -837,11 +833,11 @@
   }
 
   .bm-reactions {
-    margin: -6px 0 0 8px;
+    margin: 4px 0 2px 6px;
   }
 
   .bm-reactions-mine {
-    margin: -6px 8px 0 0;
+    margin: 4px 6px 2px 0;
   }
 
   .bm-reaction-pill {
@@ -936,9 +932,9 @@
   }
 
   .bots-btn {
-    height: 44px;
-    border-radius: 22px;
-    font-size: 15.5px;
+    height: 40px;
+    border-radius: var(--radius);
+    font-size: 15px;
   }
 
   /* --- The composer: a pill with an add button, the text, and a mic that turns into send. --- */
@@ -1114,8 +1110,8 @@
     margin: 0;
     overscroll-behavior: contain;
     border-width: 1px 0 0;
-    border-radius: 22px 22px 0 0;
-    animation: sheet-rise 320ms var(--ease-panel) both;
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    animation: sheet-rise 220ms var(--ease-out) both;
   }
 
   .confirm-dialog {
@@ -1148,7 +1144,7 @@
     top: 0;
     z-index: 3;
     padding: 10px 8px 10px max(20px, env(safe-area-inset-left));
-    background: var(--surface);
+    background: var(--surface-raised);
   }
 
   .bots-dialog-head .icon-btn {
@@ -1166,7 +1162,7 @@
     bottom: 0;
     z-index: 3;
     padding: 10px max(16px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-    background: var(--surface);
+    background: var(--surface-raised);
   }
 
   [data-keyboard] .bots-dialog-foot {
@@ -1175,7 +1171,7 @@
 
   .bots-dialog-foot .bots-btn {
     flex: 1;
-    height: 46px;
+    height: 44px;
   }
 
   .bots-dialog .bots-color {
@@ -1211,13 +1207,13 @@
     padding: 6px;
     overflow-y: auto;
     overscroll-behavior: contain;
-    border-radius: 22px;
-    background: var(--surface-2);
+    border-radius: var(--radius-xl);
+    background: var(--surface-raised);
     /* The rest of the page dims behind it. A tap out there closes it and goes no further (see useDismiss). */
     box-shadow: 0 0 0 100vmax var(--scrim), var(--shadow-lg);
-    transform: translateY(24px);
+    transform: translateY(16px);
     transform-origin: bottom center !important;
-    transition: opacity 180ms var(--ease), transform 280ms var(--ease-panel);
+    transition: opacity var(--fast) var(--ease-out), transform 220ms var(--ease-out);
   }
 
   .popover-portal.menu[data-state="open"],
@@ -1228,9 +1224,9 @@
   .popover-portal.menu .menu-item,
   .context-menu .menu-item {
     gap: 14px;
-    height: 50px;
+    height: 48px;
     padding: 0 12px;
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     font-size: 16px;
   }
 
@@ -1249,46 +1245,14 @@
     margin: 2px 0 6px 12px;
     padding: 2px;
     border: 0;
-    border-radius: 14px;
+    border-radius: var(--radius-lg);
     background: var(--hover);
     box-shadow: none;
     opacity: 1;
     transform: none;
   }
 
-  /* --- Settings: the sections scroll sideways, each with its name, since 13 icons don't fit. --- */
-
-  .settings-nav {
-    justify-content: flex-start;
-    gap: 4px;
-    padding: 10px 8px 10px max(12px, env(safe-area-inset-left));
-    overflow-x: auto;
-    overscroll-behavior: contain;
-    scrollbar-width: none;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-  }
-
-  .settings-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .settings-nav-item {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: 7px;
-    max-width: none;
-    height: 40px;
-    padding: 0 13px 0 11px;
-    border-radius: 20px;
-    font-size: 14.5px;
-  }
-
-  .settings-nav-label {
-    display: inline;
-    white-space: nowrap;
-  }
+  /* Settings' phone layout lives with the rest of it, in styles.css (Responsive). */
 
   /* --- A thread. --- */
 
@@ -1391,21 +1355,21 @@
     height: 42px;
   }
 
-  /* The same soft landing as OpenBots' panes. */
+  /* The same quick landing as OpenBots' panes. */
   .sidebar:not(.bots-sidebar) {
-    transition: transform 340ms var(--ease-panel), opacity 200ms var(--ease), visibility 0s;
+    transition: transform 220ms var(--ease-out), opacity var(--med) var(--ease-out), visibility 0s;
   }
 
   .sidebar-closed:not(.bots-sidebar) {
-    transition: transform 340ms var(--ease-panel), opacity 200ms var(--ease), visibility 0s 340ms;
+    transition: transform 220ms var(--ease-out), opacity var(--med) var(--ease-out), visibility 0s 220ms;
   }
 
   .sidebar-scrim {
-    transition: opacity 340ms var(--ease-panel), visibility 0s 340ms;
+    transition: opacity var(--med) var(--ease-out), visibility 0s var(--med);
   }
 
   .sidebar-scrim-visible {
-    transition: opacity 340ms var(--ease-panel), visibility 0s;
+    transition: opacity var(--med) var(--ease-out), visibility 0s;
   }
 
   .new-chat {
@@ -1422,12 +1386,6 @@
 
   .settings-btn {
     min-height: 44px;
-  }
-
-  /* Under the title it belongs to, not off under the row's menu button. */
-  .history-meta {
-    justify-content: flex-start;
-    margin-left: 24px;
   }
 
   .scroll-down {

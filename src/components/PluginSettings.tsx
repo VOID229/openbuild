@@ -43,8 +43,7 @@ function DeletePluginDialog({ plugin, busy, onCancel, onConfirm }: { plugin: Plu
     >
       <h2 id="plugin-delete-title">Delete “{plugin.name}”?</h2>
       <p id="plugin-delete-description">
-        This permanently removes the <code>{plugin.id}</code> folder from <code>plugins/</code>, including its manifest, client and
-        server files. It can't be undone from OpenBuild.
+        This permanently deletes the plugin’s folder and files. It can’t be undone.
       </p>
       <label className="confirm-skip">
         <input type="checkbox" checked={skipNextTime} onChange={(event) => setSkipNextTime(event.target.checked)} />
@@ -102,19 +101,15 @@ export function PluginsSection() {
   return (
     <>
       <Heading>Plugins</Heading>
-      <p className="settings-hint">
-        Add a folder with a <code>plugin.json</code> to extend OpenBuild's UI or server without changing its source.
-        A plugin can fill slots (composer, sidebar, messages, settings), add a settings page, render custom tool rows,
-        restyle the app, or add authenticated <code>/api/plugins/&lt;id&gt;/…</code> routes.
-      </p>
+      <p className="settings-hint">Extend OpenBuild’s interface or server without changing its source.</p>
 
       <div className={`plugin-master${systemEnabled ? " plugin-master-on" : ""}`}>
         <div className="plugin-master-copy">
           <div className="plugin-master-title">Enable plugins</div>
           <p className="plugin-master-hint">
             {systemEnabled
-              ? "Plugins are on. Only the plugins enabled below load."
-              : "Plugins are off. Nothing from the plugin folder loads — no UI slots, styles, server routes or hooks. This is the default."}
+              ? "Only the plugins enabled below load."
+              : "Off by default. Nothing from the plugins folder loads."}
           </p>
         </div>
         <Toggle
@@ -128,7 +123,7 @@ export function PluginsSection() {
       {info?.safe && (
         <div className="plugin-notice">
           <TriangleAlert size={15} />
-          <span>Safe mode is on (<code>OPENBUILD_SAFE=1</code> or <code>?safe</code>). No plugins load. Restart without it to use them.</span>
+          <span>Safe mode is on, so no plugins load. Restart without it to use them.</span>
         </div>
       )}
       {error && (
@@ -139,9 +134,7 @@ export function PluginsSection() {
       )}
 
       {!info?.plugins.length && !loading && (
-        <p className="settings-hint">
-          No plugins yet. Create <code>{info ? `${info.dir}/my-plugin/plugin.json` : "plugins/my-plugin/plugin.json"}</code> to make your own.
-        </p>
+        <p className="settings-hint">No plugins installed.</p>
       )}
 
       <div className="plugin-list">

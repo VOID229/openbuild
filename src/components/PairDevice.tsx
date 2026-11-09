@@ -168,7 +168,7 @@ export function PairDeviceView({ state, dispatch, onSubmit, onCancel }: ViewProp
             onChange={(e) => dispatch({ type: "address", address: e.target.value })}
           />
           <span className="pair-hint" id={`${id}-address-help`}>
-            A host name or IP, with <code>:port</code> if it isn't 3100. Leave it empty to search the {NETWORK[state.mode]} again.
+            Host name or IP, with <code>:port</code> if not 3100. Leave empty to search again.
           </span>
         </label>
       ) : (

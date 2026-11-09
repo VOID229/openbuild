@@ -4,8 +4,8 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 const EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
-/** Longer for taller changes, so a big fold doesn't snap and a small one doesn't drag. */
-const timeFor = (px: number) => (matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : Math.min(460, 180 + Math.sqrt(px) * 5));
+/** A touch longer for taller changes, but never long enough to feel like waiting: 120–180ms. */
+const timeFor = (px: number) => (matchMedia("(prefers-reduced-motion: reduce)").matches ? 1 : Math.min(180, 120 + Math.sqrt(px) * 2));
 
 export function Fold({
   open,

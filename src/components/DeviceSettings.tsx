@@ -71,7 +71,7 @@ function BotsOnDevice({ target, here, onChanged }: { target: ComputerTarget; her
       )}
       {noEngine && (
         <span className="setting-desc bot-target-note">
-          <CircleAlert size={13} aria-hidden /> There's no container engine here (Podman or Docker), so bots' tools fail here until one is installed or Host is chosen.
+          <CircleAlert size={13} aria-hidden /> There's no container engine here. Install Podman or Docker, or choose Host.
         </span>
       )}
       {choosable && (
@@ -80,7 +80,7 @@ function BotsOnDevice({ target, here, onChanged }: { target: ComputerTarget; her
             <span className="pi-row-name">Isolation</span>
             <span className="pi-row-desc">
               {hostAllowed
-                ? "Containers are isolated. Host is unisolated: bots run commands and read or change files as the user running OpenBuild there."
+                ? "Containers are isolated. Host is unisolated: bots run as the user running OpenBuild."
                 : `Container only: ${target.name} hasn't allowed Unisolated for this server's bots.`}
             </span>
           </div>
@@ -340,7 +340,7 @@ export function DevicesSection() {
         {pairing && <PairDevice onPaired={onPaired} onClose={closePairing} />}
         {paired && (
           <p className="pair-done" role="status">
-            <Check size={14} className="device-check-ok" aria-hidden /> Paired with {paired}. Its projects are under Settings → Projects.
+            <Check size={14} className="device-check-ok" aria-hidden /> Paired with {paired}.
           </p>
         )}
         <ul className="pi-list">

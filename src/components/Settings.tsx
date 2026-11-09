@@ -50,7 +50,6 @@ function Field({ label, htmlFor, children }: { label: string; htmlFor: string; c
   return (
     <div className="field">
       <label className="md-label" htmlFor={htmlFor}>
-        <span className="md-hash">#</span>
         {label}
       </label>
       {children}
@@ -111,12 +110,12 @@ function ProfileSection() {
          
           onChange={(e) => updateProfile({ bio: e.target.value })}
         />
-        <p className="field-help">Shared with the model as context, so preferences here shape its answers.</p>
+        <p className="field-help">Shared with the model as context.</p>
       </Field>
       <Field label="Location" htmlFor="profile-location">
         <input id="profile-location" className="input" value={profile.location} onChange={(e) => updateProfile({ location: e.target.value })} />
       </Field>
-      <Field label="language" htmlFor="profile-language">
+      <Field label="Language" htmlFor="profile-language">
         <input id="profile-language" className="input" value={profile.language} onChange={(e) => updateProfile({ language: e.target.value })} />
       </Field>
     </>
@@ -141,23 +140,22 @@ function NotificationsSection() {
       <Heading>Notifications</Heading>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">New Builds</div>
-          <p className="setting-desc">Notify when a release is available on this server’s update track, and offer a reload after the server starts running newer code.</p>
+          <div className="setting-label">New builds</div>
+          <p className="setting-desc">Notify when an OpenBuild update is available.</p>
         </div>
-        <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New Builds" />
+        <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New builds" />
       </div>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">Runtime Updates</div>
-          <p className="setting-desc">Show when a newer version of a runtime is out for this computer. Closing the notice skips that release.</p>
+          <div className="setting-label">Runtime updates</div>
+          <p className="setting-desc">Notify when an installed runtime has a new version.</p>
         </div>
-        <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Runtime Updates" />
+        <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Runtime updates" />
       </div>
       {n.runtimeUpdates && (
         <div className="setting-group">
           <div className="setting-text">
             <div className="setting-label">Notify for</div>
-            <p className="setting-desc">Which runtime releases to announce. Only runtimes installed here can have an update.</p>
           </div>
           <ul className="pi-list" aria-label="Runtimes to announce updates for">
             {UPDATABLE_RUNTIMES.map((runtime) => {
@@ -193,7 +191,7 @@ function GeneralSection() {
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Default workspace</div>
-          <p className="setting-desc">Choose where new threads start. You can still change this above the composer.</p>
+          <p className="setting-desc">Where new threads start.</p>
         </div>
         <OptionSelect
           label="Default workspace for new threads"
@@ -209,36 +207,36 @@ function GeneralSection() {
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Close threads when their PR merges</div>
-          <p className="setting-desc">Close a thread once the pull request from its worktree’s branch, or one its agent opened, is merged on GitHub, unless it’s pinned, snoozed, working, or you wrote to it after the merge. Its worktree is removed when nothing in it would be lost.</p>
+          <p className="setting-desc">Pinned, snoozed or active threads stay open. Worktrees are removed only when nothing would be lost.</p>
         </div>
         <Toggle checked={s.workspace.closeMerged ?? true} onChange={(closeMerged) => update({ workspace: { ...s.workspace, closeMerged } })} label="Close threads when their PR merges" />
       </div>
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Auto-delete worktrees</div>
-          <p className="setting-desc">Delete a thread’s worktree when you close it. Worktrees with uncommitted changes are kept.</p>
+          <p className="setting-desc">Delete a thread’s worktree when it closes. Uncommitted changes are kept.</p>
         </div>
         <Toggle checked={s.autoDeleteWorktrees ?? false} onChange={(autoDeleteWorktrees) => update({ autoDeleteWorktrees })} label="Auto-delete worktrees" />
       </div>
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Cross-stashing</div>
-          <p className="setting-desc">Share one stash between OpenBuild and OpenBots. When off, each keeps its own.</p>
+          <p className="setting-desc">Share one stash between OpenBuild and OpenBots.</p>
         </div>
         <Toggle checked={s.crossStash ?? false} onChange={(crossStash) => update({ crossStash })} label="Cross-stashing" />
       </div>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">Enable Auto Scroll</div>
+          <div className="setting-label">Auto scroll</div>
+          <p className="setting-desc">Follow new output as it streams in.</p>
         </div>
-        <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Enable Auto Scroll" />
+        <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Auto scroll" />
       </div>
       <div className="setting-row">
         <div className="setting-text">
-          <div className="setting-label">Confirm Before Deleting Threads</div>
-          <p className="setting-desc">Ask before a thread is deleted from the sidebar.</p>
+          <div className="setting-label">Confirm before deleting threads</div>
         </div>
-        <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm Before Deleting Threads" />
+        <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm before deleting threads" />
       </div>
       <DictationSettings />
       <TextGeneration />
@@ -297,11 +295,11 @@ function TextGeneration() {
       <div className="setting-row setting-row-top setting-row-divided">
         <div className="setting-text">
           <div className="setting-label">Text generation models</div>
-          <p className="setting-desc">Used for thread names and commit messages. Tried top to bottom; if one fails, the next is used.</p>
+          <p className="setting-desc">Write thread names and commit messages. Tried in order.</p>
         </div>
       </div>
       <div className="naming-list">
-        {!naming.models.length && <p className="naming-empty">Uses the thread's own model at its lowest reasoning. Select models to override.</p>}
+        {!naming.models.length && <p className="naming-empty">Uses the thread’s own model.</p>}
         {naming.models.map((entry, i) => {
           const model = planDetection(useStore.getState(), entry.plan)?.models.find((m) => m.id === entry.id);
           const efforts = model?.reasoning.efforts ?? [];
@@ -347,14 +345,14 @@ function TextGeneration() {
           );
         })}
         <button type="button" className="add-key" disabled={!usable.length} onClick={() => void addModel()}>
-          <Plus size={14} /> {naming.models.length ? "add model" : "select model"}
+          <Plus size={14} /> {naming.models.length ? "Add model" : "Select model"}
         </button>
-        {!usable.length && <p className="naming-empty">Sign in to a provider in Settings → Providers to choose models.</p>}
+        {!usable.length && <p className="naming-empty">Sign in to a provider to choose models.</p>}
       </div>
       <div className="setting-row">
         <div className="setting-text">
           <div className="setting-label">Name threads automatically</div>
-          <p className="setting-desc">Give each new thread a title after its first prompt.</p>
+          <p className="setting-desc">Title each thread after its first prompt.</p>
         </div>
         <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Name threads automatically" />
       </div>
@@ -364,9 +362,23 @@ function TextGeneration() {
 
 // ------------------------------------------------------------------ Appearance
 
+const THEMES: [Theme, string][] = [
+  ["light", "Light"],
+  ["dark", "Dark"],
+  ["system", "System"],
+];
+
+/** Stored values stay as they were; the names are what the fonts are. */
+const FONTS: [FontStyle, string][] = [
+  ["normal", "Geist"],
+  ["serif", "Serif"],
+  ["fun", "Comic"],
+  ["mono", "Mono"],
+];
+
 function AppearanceSection() {
   const theme = useStore((s) => s.settings.theme);
-  const font = useStore((s) => s.settings.font) ?? "fun";
+  const font = useStore((s) => s.settings.font) ?? "normal";
   const update = useStore((s) => s.updateSettings);
   return (
     <>
@@ -374,9 +386,9 @@ function AppearanceSection() {
       <div className="setting-row setting-row-stack">
         <div className="setting-label">Theme</div>
         <div className="segmented" role="radiogroup" aria-label="Theme">
-          {(["light", "dark", "system"] as Theme[]).map((t) => (
+          {THEMES.map(([t, name]) => (
             <button key={t} type="button" role="radio" aria-checked={theme === t} className="segment" onClick={() => update({ theme: t })}>
-              {t}
+              {name}
             </button>
           ))}
         </div>
@@ -384,9 +396,9 @@ function AppearanceSection() {
       <div className="setting-row setting-row-stack">
         <div className="setting-label">Font</div>
         <div className="segmented" role="radiogroup" aria-label="Font">
-          {(["normal", "serif", "fun", "mono"] as FontStyle[]).map((f) => (
-            <button key={f} type="button" role="radio" aria-checked={font === f} className="segment" onClick={() => update({ font: f })}>
-              {f}
+          {FONTS.map(([f, name]) => (
+            <button key={f} type="button" role="radio" aria-checked={font === f} className={`segment segment-font-${f}`} onClick={() => update({ font: f })}>
+              {name}
             </button>
           ))}
         </div>
@@ -477,8 +489,8 @@ function SecuritySection() {
           <div className="setting-label">Instance password</div>
           <p className="setting-desc">
             {configured === false
-              ? "Off. Anyone who can reach this server can run Pi as the server user."
-              : "Anyone who unlocks this instance can run Pi as the server user."}
+              ? "Off. Anyone who can reach this server can run agents as its user."
+              : "Required to open this instance in a new browser."}
           </p>
           {saved && step === "closed" && (
             <p className="field-help" role="status">
@@ -505,9 +517,9 @@ function SecuritySection() {
       </div>
       {step === "closed" ? (
         <p className="field-help security-cli">
-          {configured === false ? "Optional. " : "Changing it signs out every other browser. "}
-          From the host you can also run <code>openbuild set pass &lt;password&gt;</code>
-          {configured && <> or <code>openbuild unset pass</code></>}
+          {configured && "Changing it signs out every other browser. "}
+          On the host: <code>openbuild set pass &lt;password&gt;</code>
+          {configured && <> · <code>openbuild unset pass</code></>}
         </p>
       ) : (
         <div className="field">
@@ -524,7 +536,7 @@ function SecuritySection() {
                 </Field>
                 <Field label="Confirm new password" htmlFor="security-confirm">
                   <input id="security-confirm" className="input" type="password" autoComplete="new-password" maxLength={1024} value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-                  <p className="field-help">At least {MIN_LOCAL_PASSWORD} characters. Every other browser will be signed out.</p>
+                  <p className="field-help">At least {MIN_LOCAL_PASSWORD} characters. Other browsers will be signed out.</p>
                 </Field>
               </>
             )}

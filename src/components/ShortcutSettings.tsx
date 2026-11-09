@@ -99,12 +99,7 @@ export function ShortcutsSection() {
     <>
       <Heading>Shortcuts</Heading>
       <p className="shortcut-intro">
-        Click a shortcut, then press the keys you want. Press <kbd className="shortcut-key">Esc</kbd>{" "}
-        to cancel and keep the old one.
-      </p>
-      <p className="shortcut-intro shortcut-intro-muted">
-        Some combinations belong to the browser or your system ({mac ? "⌘N, ⌘T, ⌘W" : "Ctrl+N, Ctrl+T, Ctrl+W"}) and
-        may not reach OpenBuild.
+        Click a shortcut, then press the new keys. <kbd className="shortcut-key">Esc</kbd> cancels.
       </p>
       <div className="shortcut-list">
         {SHORTCUTS.map((def) => {

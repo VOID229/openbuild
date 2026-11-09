@@ -34,7 +34,7 @@ test("a shut section has no rows until it opens, and keeps them while it folds s
   const root = createRoot(host);
   await act(async () => root.render(h(Sidebar)));
   expect(rows(host, "Pinned").rows).toBe(1);
-  expect(rows(host, "Closed").heading.textContent).toContain("Closed (300)");
+  expect(rows(host, "Closed").heading.textContent).toContain("Closed 300");
   expect(rows(host, "Closed").rows).toBe(0);
 
   await act(async () => rows(host, "Closed").heading.click());
@@ -51,7 +51,7 @@ test("a shut section has no rows until it opens, and keeps them while it folds s
   await act(async () => host.querySelector<HTMLElement>('.history-row[data-thread="pinned"] [aria-label="Close"]')!.click());
   await act(() => Bun.sleep(340));
   const after = rows(host, "Closed");
-  expect(after.heading.textContent).toContain("Closed (301)");
+  expect(after.heading.textContent).toContain("Closed 301");
   expect(after.rows).toBe(0);
   expect(after.heading.dataset.landed).toBe("");
   await act(() => Bun.sleep(500));

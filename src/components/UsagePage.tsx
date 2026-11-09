@@ -212,7 +212,7 @@ function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageR
     return (
       <div className="ustats-empty">
         <p>No usage in this range.</p>
-        <p className="ustats-dim">Pi, Claude Code, Codex, Grok, Cursor and OpenCode sessions on this machine show up here.</p>
+        <p className="ustats-dim">Sessions from every runtime on this machine show up here.</p>
       </div>
     );
   }
@@ -224,9 +224,12 @@ function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageR
           <div className="ustats-sub">
             {plural(data.totals.sessions, "session")}
             {cost ? (
-              <span className="ustats-hint" data-tooltip="Reported cost where the agent records one, otherwise the tokens at the model's API price, including use covered by a subscription." data-tooltip-side="bottom">
-                {" "}· API estimate <Info size={13} />
-              </span>
+              <>
+                {" · "}
+                <span className="ustats-hint" data-tooltip="Reported cost where the agent records one, otherwise the tokens at the model's API price, including use covered by a subscription." data-tooltip-side="bottom">
+                  API estimate <Info size={13} />
+                </span>
+              </>
             ) : ` · ${plural(data.totals.requests, "request")}`}
             {error && <span className="ustats-stale"> · couldn't refresh</span>}
           </div>

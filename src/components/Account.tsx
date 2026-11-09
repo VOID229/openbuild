@@ -35,12 +35,7 @@ export function AccountSection() {
     return (
       <>
         <Note>
-          Accounts sync your threads, settings and profile between devices, end-to-end encrypted. They aren't switched on for this copy of OpenBuild
-          yet.
-        </Note>
-        <Note>
-          To switch them on, create your own Convex dev deployment (see the README), then restart <code>bun run dev</code> with{" "}
-          <code>OPENCHAT_CLOUD_URL</code> set to its address.
+          Accounts sync your threads, settings and profile between devices, end-to-end encrypted. They aren’t available on this server yet.
         </Note>
       </>
     );
@@ -146,10 +141,8 @@ export function SyncLockScreen() {
             </div>
             {info && (
               <p className="setting-desc sync-lock-info">
-                Because Lockdown Mode is enabled on this iPhone, {passkey === "on" ? "it needs to sign in with the passkey" : "it needs your password"} after
-                each refresh to re-enable syncing.
-                {passkey !== "on" && " Set up Unlock with Face ID in Settings → Account to use Face ID instead."} To avoid this, disable Lockdown Mode for
-                this website only in Safari: tap the page menu in the address bar → Website Settings → turn off Lockdown Mode.
+                Lockdown Mode is on for this site, so syncing needs {passkey === "on" ? "the passkey" : "your password"} after each reload. To avoid this,
+                turn off Lockdown Mode for this website in Safari’s Website Settings.
               </p>
             )}
             {faceId ? (
@@ -198,10 +191,10 @@ function FaceIdSetting({ username }: { username: string }) {
         <div className="setting-label">Unlock with Face ID</div>
         <p className="setting-desc">
           {state === "on"
-            ? "On. This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so after a reload you unlock with Face ID instead of your password. After turning it off, you can delete the \"OpenBuild sync unlock\" passkey in the Passwords app."
+            ? "On. After a reload, unlock sync with Face ID instead of your password."
             : state === "pending"
               ? "Almost done: confirm with Face ID once more to finish."
-              : "This browser can't keep sync unlocked across reloads (Lockdown Mode turns off the storage it needs), so you'd need your password after every reload. Set up a passkey to unlock with Face ID instead. Your password still works."}
+              : "Lockdown Mode means sync locks on every reload. Set up a passkey to unlock it with Face ID."}
         </p>
         {error && (
           <p className="account-error" role="alert">
@@ -293,9 +286,6 @@ function DeviceRows({ devices, busy, action, onAction }: { devices: Device[]; bu
   );
 }
 
-const WAITLIST_NOTE =
-  "New accounts are invite-only for now: the sync server runs on a free plan with room for a limited number of people.";
-
 function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId?: boolean }) {
   const { signIn } = useAuthActions();
   // New visitors land on sign-up, which starts with the invite code alone; the username and
@@ -385,8 +375,7 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
     return (
       <div className="account-form">
         <Note>
-          {normalizeUsername(username)} is already signed in on {full.length} devices, the most an account can be on. Sign one of them out to use this
-          one instead.
+          {normalizeUsername(username)} is signed in on {full.length} devices, the maximum. Sign one out to use this one.
         </Note>
         <DeviceRows devices={full} busy={typeof busy === "string" ? busy : busy ? "-" : undefined} action="Sign out" onAction={(id) => void run(id)} />
         {error && (
@@ -414,13 +403,12 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
         {unlockFor
           ? `Enter the password for ${unlockFor.username} to start syncing on this device.`
           : signUp
-            ? `${WAITLIST_NOTE} Enter the invite code you were sent, then choose a username and password.`
-            : "Sync your threads, settings and profile between devices. Everything is encrypted on your device with your password before it's uploaded, so only you can read it. No tracking. New accounts are invite-only for now."}
+            ? "New accounts are invite-only. Enter your invite code, then choose a username and password."
+            : "Sync threads, settings and your profile between devices, end-to-end encrypted with your password. New accounts are invite-only."}
       </Note>
       {signUp && (
         <div className="field">
           <label className="md-label" htmlFor="account-invite">
-            <span className="md-hash">#</span>
             Invite code
           </label>
           <input
@@ -462,7 +450,6 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       {!unlockFor && !needsCode && (
         <div className="field">
           <label className="md-label" htmlFor="account-username">
-            <span className="md-hash">#</span>
             Username
           </label>
           <input id="account-username" className="input" value={username} autoFocus={signUp} autoComplete="username" autoCapitalize="none" spellCheck={false} onChange={(e) => setUsername(e.target.value)} />
@@ -471,7 +458,6 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       {!needsCode && (
         <div className="field">
           <label className="md-label" htmlFor="account-password">
-            <span className="md-hash">#</span>
             Password
           </label>
           <input
@@ -487,12 +473,11 @@ function SignInForm({ unlockFor, hideFaceId }: { unlockFor?: Account; hideFaceId
       {signUp && inviteOk && (
         <div className="field">
           <label className="md-label" htmlFor="account-confirm">
-            <span className="md-hash">#</span>
             Confirm password
           </label>
           <input id="account-confirm" className="input" type="password" value={confirm} autoComplete="new-password" onChange={(e) => setConfirm(e.target.value)} />
           <p className="field-help">
-            Your password is the only key to your synced data. If you forget it, it can't be reset or recovered (what's on your devices stays).
+            Your password is the only key to your synced data. It can’t be reset or recovered.
           </p>
         </div>
       )}
@@ -550,8 +535,7 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
     return (
       <div className="account-form">
         <Note>
-          You're on the waitlist. When there's room, a one-time invite code will be emailed to <strong>{joined}</strong>. Then come back here,
-          choose Create an account, and enter the code with a username and password.
+          You’re on the waitlist. We’ll email an invite code to <strong>{joined}</strong> when there’s room.
         </Note>
         <div className="account-actions">
           <button type="button" className="btn" onClick={() => onDone("signUp")}>
@@ -568,17 +552,15 @@ function WaitlistForm({ onDone }: { onDone: (mode: "signIn" | "signUp") => void 
   return (
     <form className="account-form" onSubmit={submit}>
       <Note>
-        Join the waitlist and you'll get a one-time invite code by email when there's room. Then come back here, enter the code, and choose a username
-        and password.
+        Join the waitlist to get an invite code by email when there’s room.
       </Note>
       <div className="field">
         <label className="md-label" htmlFor="account-email">
-          <span className="md-hash">#</span>
           Email
         </label>
         <input id="account-email" className="input" type="email" value={email} autoComplete="email" autoCapitalize="none" spellCheck={false} onChange={(e) => setEmail(e.target.value)} />
         <p className="field-help">
-          Only used to send your code. It's never linked to your account, and it's deleted from the waitlist once the code is used.
+          Only used to send your code, then deleted. Never linked to your account.
         </p>
       </div>
       {error && (
@@ -663,8 +645,8 @@ function SyncKeysSetting() {
         <div className="setting-label">Sync API keys</div>
         <p className="setting-desc">
           {on
-            ? "Your Opencode and search keys sync to every device on this account, encrypted with your password like everything else. Turning this off removes them from the account; each device keeps its own copy."
-            : "Off: API keys stay on each device, and you add them on every device separately. Turn on to enter them once and have them everywhere, end-to-end encrypted."}
+            ? "Keys sync to every device on this account, end-to-end encrypted. Turning this off keeps each device’s own copy."
+            : "Enter API keys once and use them on every device, end-to-end encrypted."}
         </p>
       </div>
       <Toggle checked={on} onChange={(v) => update({ syncApiKeys: v })} label="Sync API keys" />
@@ -700,8 +682,7 @@ function DevicesSetting() {
           </span>
         </div>
         <p className="setting-desc">
-          An account can be signed in on up to {list?.max ?? "…"} devices. To use a new one, sign one of these out. Devices that go unused for a
-          month are signed out on their own.
+          Up to {list?.max ?? "…"} devices. Devices unused for a month are signed out automatically.
         </p>
         <DeviceRows devices={list?.devices ?? []} busy={busy} action="Sign out" onAction={(id) => void remove(id)} />
         {error && (
@@ -753,10 +734,6 @@ function SignedIn({ account }: { account: Account }) {
         </div>
         <SignOutButton username={account.username} />
       </div>
-      <Note>
-        Threads, settings and your profile sync live between every device signed in to this account. They're encrypted on the device before upload; the
-        sync server stores only ciphertext.
-      </Note>
       <SyncKeysSetting />
       <DevicesSetting />
       <FaceIdSetting username={account.username} />
@@ -767,7 +744,6 @@ function SignedIn({ account }: { account: Account }) {
           {confirming && (
             <div className="field account-delete">
               <label className="md-label" htmlFor="account-delete-confirm">
-                <span className="md-hash">#</span>
             Type {account.username} to confirm
               </label>
               <input id="account-delete-confirm" className="input" value={typed} autoComplete="off" onChange={(e) => setTyped(e.target.value)} />

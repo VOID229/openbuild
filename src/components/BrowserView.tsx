@@ -141,8 +141,8 @@ export function BrowserView({ tab, folder }: { tab: BrowserTab; folder: Terminal
         ) : (
           <div className="bv-empty">
             <Globe size={22} />
-            <p>Type an address above: a URL, a port like 3000 for localhost, or words to search Google.</p>
-            <p className="bv-hint">If a page won't embed, use Open in a new browser tab in the toolbar.</p>
+            <p>Enter a URL, a localhost port or a search</p>
+            <p className="bv-hint">Pages that won't embed can open in a new browser tab</p>
           </div>
         )}
       </div>

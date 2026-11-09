@@ -52,7 +52,7 @@ function Counts({ adds, dels }: { adds: number; dels: number }) {
 
 export function PullRequestsView({ folder }: { folder: TerminalFolder }) {
   const active = usePanel((s) => s.activePull);
-  if (!folder.cwd) return <div className="pv"><p className="fv-note">No project folder to look in.</p></div>;
+  if (!folder.cwd) return <div className="pv"><p className="fv-note">No project folder</p></div>;
   return typeof active === "number" ? <PullView key={`${folderKey(folder)}#${active}`} folder={folder} number={active} /> : <PullListView folder={folder} resolving={active === "current"} />;
 }
 
@@ -94,7 +94,7 @@ function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving
       </div>
       <div className="pv-scroll">
         {data && !data.repo ? (
-          <p className="fv-note">This folder isn't a git repository.</p>
+          <p className="fv-note">Not a git repository</p>
         ) : data && !data.gh ? (
           <p className="fv-note">Pull requests need the GitHub CLI (gh) on this machine.</p>
         ) : error && !data ? (
@@ -102,7 +102,7 @@ function PullListView({ folder, resolving }: { folder: TerminalFolder; resolving
         ) : !data || resolving ? (
           <p className="fv-note">Loading pull requests…</p>
         ) : !sorted.length ? (
-          <p className="fv-note">No {filter} pull requests.</p>
+          <p className="fv-note">No {filter} pull requests</p>
         ) : (
           <ul className="pv-list">
             {sorted.map((pr) => (

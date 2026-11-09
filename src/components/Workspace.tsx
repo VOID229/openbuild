@@ -213,7 +213,7 @@ function DeviceMenu() {
   );
 }
 
-/** The home heading; the underlined part opens the project picker. */
+/** The home heading; the project's name in it opens the project picker. */
 export function ProjectHeading() {
   const [open, setOpen] = useState(false);
   // The picker's step: its projects, or where a new project comes from.
