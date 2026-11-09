@@ -3,7 +3,7 @@
 // chats name each bot over its messages; side chats between bots are read-only.
 import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
 import { elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
@@ -15,7 +15,7 @@ import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { accountName } from "../../lib/models";
-import { PULL_REF_RE, inPullContext, pullRefUrl } from "../../lib/bots/pullRefs";
+import { PULL_REF_RE, conversationRepo, pullRefHref, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
 import { copyText, cx, useMediaQuery, usePresence } from "../../lib/ui";
@@ -94,20 +94,20 @@ const namesBot = (text: string, bots: Bot[]) => {
   return named.length > 0 && botNames(named).test(text);
 };
 
-/** Text with every bot it names linked. Longer names first, so "Sage Two" wins over "Sage". */
+/** Text with every bot it names linked, and its threads and pull requests. Longer names first, so "Sage Two" wins over "Sage". */
 function WithBotLinks({ text, bots }: { text: string; bots: Bot[] }) {
   const named = namedBots(bots);
-  if (!named.length) return <>{text}</>;
+  if (!named.length) return <ThreadReferences text={text} />;
   const pattern = botNames(named);
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const m of text.matchAll(pattern)) {
     const start = m.index ?? 0;
-    if (start > last) parts.push(text.slice(last, start));
+    if (start > last) parts.push(<ThreadReferences key={last} text={text.slice(last, start)} />);
     parts.push(<BotLink key={start} bot={named.find((b) => b.name === m[0])!} />);
     last = start + m[0].length;
   }
-  if (last < text.length) parts.push(text.slice(last));
+  if (last < text.length) parts.push(<ThreadReferences key={last} text={text.slice(last)} />);
   return <>{parts}</>;
 }
 
@@ -201,8 +201,12 @@ function MessageActivity({ event, other }: { event: NonNullable<BotMessage["even
 
 /** Opens on GitHub on any click: OpenBots has no pull requests tab to keep it in. */
 function PullLink({ url, children }: { url: string; children: React.ReactNode }) {
-  return <a className="link" href={url} target="_blank" rel="noopener noreferrer">{children}</a>;
+  // An event row toggles open on click; following its link shouldn't do that as well.
+  return <a className="link" href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>{children}</a>;
 }
+
+/** The repository the open conversation's "#n" are in, when it can be told (conversationRepo). */
+const PullRepo = createContext<string | undefined>(undefined);
 
 /**
  * The thread an activity is about. Closes and merges recorded before they carried an id fall back to
@@ -248,7 +252,7 @@ function RemoteEventThread({ event, host }: { event: NonNullable<BotMessage["eve
   const title = ref ? detail.slice(ref.length) : detail;
   const thread = <span className="bm-unavailable" title={`This thread is on ${host}. Open it there.`}>{title} <span className="bm-unavailable-note">(on {host})</span></span>;
   if (!ref) return thread;
-  return <><span onClick={(e) => e.stopPropagation()}><PullLink url={event.pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
+  return <><PullLink url={event.pullUrl!}>{ref.trimEnd()}</PullLink> {thread}</>;
 }
 
 function LocalEventThread({ event }: { event: NonNullable<BotMessage["event"]> }) {
@@ -259,21 +263,23 @@ function LocalEventThread({ event }: { event: NonNullable<BotMessage["event"]> }
   const title = ref ? detail.slice(ref.length) : detail;
   const thread = id ? <ThreadLink id={id}>{title}</ThreadLink> : <>{title}</>;
   if (!ref) return thread;
-  return <><span onClick={(e) => e.stopPropagation()}><PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}</>;
+  return <><PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink> {thread}</>;
 }
 
 /**
- * Only link IDs that resolve uniquely to a known thread, and "#n" that reads as a pull request and is one
- * a thread opened; ordinary hex text, and numbered labels like a model's "#2", stay text.
+ * Only link IDs that resolve uniquely to a known thread, and "#n" in the conversation's repository or
+ * one a thread opened (pullRefHref); ordinary hex text, colours and labels like a model's "#2" stay text.
+ * `pulls={false}` (code) links no "#n".
  */
-function ThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
+function ThreadReferences({ text, fileHref, pulls = true }: { text: string; fileHref?: (url: string) => string; pulls?: boolean }) {
   // Another device's threads aren't this tab's to look up: ids and "#n" there stay text.
   if (useRemoteWorkspace()) return <Linkify text={text} fileHref={fileHref} bare />;
-  return <LocalThreadReferences text={text} fileHref={fileHref} />;
+  return <LocalThreadReferences text={text} fileHref={fileHref} withPulls={pulls} />;
 }
 
-function LocalThreadReferences({ text, fileHref }: { text: string; fileHref?: (url: string) => string }) {
+function LocalThreadReferences({ text, fileHref, withPulls }: { text: string; fileHref?: (url: string) => string; withPulls: boolean }) {
   const chats = useStore((s) => s.chats);
+  const repo = useContext(PullRepo);
   const pulls = useMemo(() => chats.flatMap((c) => (c.pullRequest ? [c.pullRequest] : [])), [chats]);
   const parts: React.ReactNode[] = [];
   let last = 0;
@@ -284,7 +290,7 @@ function LocalThreadReferences({ text, fileHref }: { text: string; fileHref?: (u
     if (/[/:]/.test(token)) continue;
     let link: React.ReactNode;
     if (m[1]) {
-      const url = inPullContext(text, m.index, m.index + m[0].length) ? pullRefUrl(Number(m[1]), pulls) : undefined;
+      const url = withPulls ? pullRefHref(text, m.index, m.index + m[0].length, Number(m[1]), { repo, pulls }) : undefined;
       if (!url) continue;
       link = <PullLink key={m.index + "-pull"} url={url}>{m[0]}</PullLink>;
     } else {
@@ -320,10 +326,12 @@ const RichText = memo(function RichText({ text, bots, everyone, botId }: { text:
   const fileHref = botId && workspace ? (url: string) => workspacePath(workspace, `/api/bots/${encodeURIComponent(botId)}/file?url=${encodeURIComponent(url)}`) : undefined;
   const parts: React.ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
+  // A fenced block shows as it was written, with no "#n" in it linked, as in inline code.
+  for (const m of text.matchAll(/```[\s\S]*?(?:```|$)|`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g)) {
     const start = m.index ?? 0;
     if (start > last) parts.push(<WithMentions key={last} text={text.slice(last, start)} bots={bots} everyone={everyone} fileHref={fileHref} />);
-    if (m[1]) parts.push(<code key={start}><ThreadReferences text={m[1]} fileHref={fileHref} /></code>);
+    if (m[0].startsWith("```")) parts.push(<ThreadReferences key={start} text={m[0]} fileHref={fileHref} pulls={false} />);
+    else if (m[1]) parts.push(<code key={start}><ThreadReferences text={m[1]} fileHref={fileHref} pulls={false} /></code>);
     else if (m[2]) parts.push(<strong key={start}><WithMentions text={m[2]} bots={bots} everyone={everyone} fileHref={fileHref} /></strong>);
     else parts.push(<WebLink key={start} url={m[4]!}>{m[3]}</WebLink>);
     last = start + m[0].length;
@@ -2066,6 +2074,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
   const sub = typing ? "typing…" : activity ?? away ?? members;
+  const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
     <div className="bots-chat">
       <div className="bots-head">
@@ -2084,7 +2093,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </span>
         </button>
       </div>
-      <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />
+      <PullRepo.Provider value={repo}>
+        <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />
+      </PullRepo.Provider>
       {conversation.kind === "side" ? (
         <div className="bots-dock">
           <div className="bots-side-note">
