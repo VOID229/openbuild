@@ -95,7 +95,7 @@
   --fast: 120ms;
   --med: 180ms;
 
-  --sidebar-w: clamp(272px, 21vw, 340px);
+  --sidebar-w: clamp(300px, 26vw, 420px);
   --content-w: 768px;
   color-scheme: light;
 }
