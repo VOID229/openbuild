@@ -12,6 +12,8 @@ export interface Face {
   gap: number;
   /** Eye size, 1 = the default 7.5 × 16. */
   scale?: number;
+  /** How far the eyes may go following the pointer, 1 = all the way; less where the body has no room. */
+  reach?: number;
 }
 
 export interface Shape {
@@ -168,7 +170,7 @@ export const SHAPES: Shape[] = [
     id: "pebble",
     label: "Pebble",
     path: roundedPolygon(regular(3, 47, -24, 48, 54), 17),
-    face: { x: 54, y: 50, gap: 13 },
+    face: { x: 54, y: 50, gap: 13, reach: 0.5 },
   },
   {
     id: "gem",
@@ -181,7 +183,7 @@ export const SHAPES: Shape[] = [
     label: "Burst",
     // A wobbly splat: eight soft points of uneven length.
     path: smooth(polar((t) => 31 + 9 * Math.cos(7 * t) + 2.5 * Math.sin(3 * t + 1) + w(8, 1)(t), { n: 112, rotate: -6 })),
-    face: { x: 52, y: 50, gap: 13 },
+    face: { x: 52, y: 50, gap: 13, reach: 0.85 },
   },
   {
     id: "jelly",

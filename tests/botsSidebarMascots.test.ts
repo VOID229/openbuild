@@ -3,6 +3,8 @@
 // over: no hop or happy face on the way in, no spin when pressed. A group's huddle doesn't react to
 // the pointer at all, and keeps fidgeting only for the member at work.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { aimAt, TRACK_REACH } from "../src/components/bots/BotAvatar";
+import { SHAPES } from "../src/lib/bots/looks";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
@@ -39,6 +41,11 @@ const mascots = (page: Page, find: string) =>
     tracking: 'tracking' in b.dataset, action: b.dataset.action ?? null, mood: b.dataset.mood ?? null, busy: 'busy' in b.dataset,
   }))`);
 
+/** Waits until the item's first bot's eyes satisfy `holds` (given x, y and tracking), as they spring there. */
+const until = (page: Page, find: string, holds: string) =>
+  page.until(`(() => { const b = (${find}).querySelector('.bot'); const v = (n) => b.style.getPropertyValue(n) === '' ? null : Number(b.style.getPropertyValue(n));
+    const x = v('--track-x'), y = v('--track-y'), tracking = 'tracking' in b.dataset; return ${holds}; })()`);
+
 /** Moves the real pointer to (dx, dy) from the item's avatar's centre, in steps, as a hand does. "far"
  *  is as far right as the item goes, still on it. */
 async function pointAt(page: Page, find: string, dx: number | "far", dy: number) {
@@ -59,17 +66,19 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
 
       // Off to the right of the avatar, a little below: the eyes go right and a little down, well over.
       await pointAt(page, find, "far", 12);
+      await until(page, find, `tracking && x > ${TRACK_REACH * 0.95}`);
       const right = (await mascots(page, find))[0]!;
-      expect(right.tracking).toBe(true);
-      expect(right.x!).toBeGreaterThan(kind === "row" ? 7.5 : 5);
+      expect(right.x!).toBeLessThan(TRACK_REACH * 1.06);
       expect(right.y!).toBeGreaterThan(0);
-      expect(right.y!).toBeLessThan(2);
+      expect(right.y!).toBeLessThan(right.x! / 3);
       // No hop and no smile on the way in.
       expect(right.action).toBeNull();
       expect(right.mood).toBe("idle");
 
       // Up and to the left, close in: the eyes follow there, by less.
       await pointAt(page, find, -8, -10);
+      await until(page, find, "x < 0 && y < 0");
+      await Bun.sleep(400);
       const near = (await mascots(page, find))[0]!;
       expect(near.x!).toBeLessThan(0);
       expect(near.y!).toBeLessThan(0);
@@ -83,9 +92,9 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       expect((await mascots(page, find))[0]!.action).toBeNull();
       await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 
-      // Off the item: it stops following and looks ahead again.
+      // Off the item: it stops following and eases back to looking ahead.
       await away(page);
-      await page.settle();
+      await until(page, find, "x === null");
       expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, tracking: false, action: null });
     });
   }
@@ -114,24 +123,68 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
-  test("the eyes ease onto the pointer on hover-in as calmly as they ease back on hover-out", async () => {
+  test("the eyes spring onto the pointer on hover-in, and ease back home on hover-out", async () => {
     const page = await open();
     const find = item("row", "Manager");
-    // Record each transform transition the eyes start, as it starts: it may be over by the time we look.
-    await page.eval(`window.runs = []; (${find}).querySelector('.bot-look').addEventListener('transitionrun', (e) => {
-      if (e.propertyName === 'transform') window.runs.push(e.target.getAnimations().find((a) => a.transitionProperty === 'transform' && a.effect.target === e.target)?.effect.getTiming() ?? null);
-    })`);
-    const [cx, cy] = await page.eval<[number, number]>(`(() => { const r = (${find}).querySelector('.bot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
-    for (let i = 1; i <= 4; i++) await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: cx + 5 * i, y: cy + i });
-    await page.until("window.runs.length >= 1");
-    await page.settle();
-    const hoverIn = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
-    await page.eval("window.runs = []");
+    // Sample where they look every frame, from just before the pointer comes on.
+    const sample = `window.track = []; (function frame() { const b = (${find}).querySelector('.bot'); const x = b.style.getPropertyValue('--track-x');
+      window.track.push([performance.now(), x === '' ? null : Number(x)]); if (window.track.length < 120) requestAnimationFrame(frame); })()`;
+    await page.eval(sample);
+    await pointAt(page, find, "far", 0);
+    await page.until("window.track.length >= 120");
+    const inn = await page.eval<[number, number | null][]>("window.track");
+    const moving = inn.filter(([, x]) => x !== null) as [number, number][];
+    const t0 = moving[0]![0];
+    // Eased in from rest, then well over within ~150ms and holding there, near enough on the pointer.
+    expect(moving[0]![1]).toBeLessThan(TRACK_REACH * 0.5);
+    const at = (ms: number) => moving.find(([t]) => t - t0 >= ms)?.[1];
+    expect(at(150)!).toBeGreaterThan(TRACK_REACH * 0.8);
+    expect(moving.at(-1)![1]).toBeGreaterThan(TRACK_REACH * 0.95);
+    expect(Math.max(...moving.map(([, x]) => x))).toBeLessThan(TRACK_REACH * 1.06);
+
+    await page.eval(sample);
     await away(page);
-    await page.until("window.runs.length >= 1");
-    const hoverOut = await page.eval<{ duration: number; delay: number } | null>("window.runs[0] && { duration: window.runs[0].duration, delay: window.runs[0].delay }");
-    expect(hoverIn).toEqual(hoverOut);
-    expect(hoverIn!.duration).toBeGreaterThanOrEqual(300);
+    await page.until("window.track.length >= 120");
+    const out = (await page.eval<[number, number | null][]>("window.track")).map(([, x]) => x);
+    // Back home gradually, never past it, and then let go of entirely.
+    const going = out.filter((x) => x !== null) as number[];
+    expect(going.length).toBeGreaterThan(5);
+    for (let i = 1; i < going.length; i++) expect(going[i]!).toBeLessThanOrEqual(going[i - 1]! + 0.01);
+    expect(Math.min(...going)).toBeGreaterThanOrEqual(0);
+    expect(out.at(-1)).toBeNull();
+    expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, tracking: false });
+  });
+
+  test("however far over they look, every shape keeps its eyes on its body", async () => {
+    const page = await open();
+    // Each shape's body, and both eyes (as drawn at their default size) at full reach every which way.
+    const misses = await page.eval<string[]>(`(() => {
+      const shapes = ${JSON.stringify(SHAPES.map((s) => ({ id: s.id, path: s.path, face: s.face })))};
+      const aims = ${JSON.stringify(Object.fromEntries(SHAPES.map((s) => [s.id, Array.from({ length: 16 }, (_, a) => aimAt(Math.cos((a / 8) * Math.PI) * 1000, Math.sin((a / 8) * Math.PI) * 1000, 28, s.face.reach))])))};
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('viewBox', '0 0 100 100');
+      document.body.append(svg);
+      const misses = [];
+      for (const { id, path, face } of shapes) {
+        const body = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        body.setAttribute('d', path);
+        svg.append(body);
+        const s = (face.scale ?? 1) * 1.12, gap = face.gap * 1.1, ew = 7.5 * s, eh = 16 * s;
+        for (let a = 0; a < 16; a++) {
+          const [lx, ly] = aims[id][a];
+          for (const side of [-1, 1]) {
+            const cx = face.x + (side * gap) / 2 + lx, cy = face.y + ly;
+            // The eye's outline: the ends of its rounded caps and the sides at their middle.
+            for (const [px, py] of [[cx, cy - eh / 2], [cx, cy + eh / 2], [cx - ew / 2, cy], [cx + ew / 2, cy]])
+              if (!body.isPointInFill(new DOMPoint(px, py))) misses.push(id + ' ' + a);
+          }
+        }
+        body.remove();
+      }
+      svg.remove();
+      return [...new Set(misses)];
+    })()`);
+    expect(misses).toEqual([]);
   });
 
   test("with reduced motion, nothing follows the pointer", async () => {
