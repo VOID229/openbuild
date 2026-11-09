@@ -154,6 +154,19 @@ interface BotsState {
 }
 
 const mapBot = (bots: Bot[], id: string, fn: (b: Bot) => Bot) => bots.map((b) => (b.id === id ? fn(b) : b));
+/** The sections still holding a chat, plus `keep` (the one a chat is moving into); the server prunes the same way. */
+const filedSections = (sections: string[], conversations: Conversation[], keep?: string) => {
+  const used = new Set(conversations.map((c) => c.section));
+  const next = sections.filter((s) => s === keep || used.has(s));
+  return next.length === sections.length ? sections : next;
+};
+/** Folded state without the sections that just went, so one made again later by that name starts open. */
+const unfoldGone = (folded: string[], before: string[], after: string[]) => {
+  const gone = before.filter((s) => !after.includes(s));
+  return gone.length ? folded.filter((f) => !gone.includes(f)) : folded;
+};
+/** The state for a new list of sections, folded state included. */
+const withSections = (s: Pick<BotsState, "sections" | "folded">, sections: string[]) => ({ sections, folded: unfoldGone(s.folded, s.sections, sections) });
 const mapConversation = (list: Conversation[], id: string, fn: (c: Conversation) => Conversation) => list.map((c) => (c.id === id ? fn(c) : c));
 
 /** A bot's own conversation with the user. */
@@ -271,7 +284,7 @@ export const useBots = create<BotsState>()(
           .filter((c) => !(c.botIds.includes(id) && (c.kind === "direct" || c.kind === "side")))
           .map((c) => (c.botIds.includes(id) ? { ...c, botIds: c.botIds.filter((b) => b !== id) } : c));
         if (s.bots.find((b) => b.id === id)?.primary && bots[0]) bots[0] = { ...bots[0], primary: true };
-        return { bots, conversations, activeId: conversations.some((c) => c.id === s.activeId) ? s.activeId : conversations[0]?.id };
+        return { bots, conversations, ...withSections(s, filedSections(s.sections, conversations)), activeId: conversations.some((c) => c.id === s.activeId) ? s.activeId : conversations[0]?.id };
       });
       void send("DELETE", `/api/bots/${id}`);
     },
@@ -293,7 +306,10 @@ export const useBots = create<BotsState>()(
       return conversation.id;
     },
     updateConversation: (id, patch) => {
-      set((s) => ({ conversations: mapConversation(s.conversations, id, (c) => ({ ...c, ...patch })) }));
+      set((s) => {
+        const conversations = mapConversation(s.conversations, id, (c) => ({ ...c, ...patch }));
+        return "section" in patch ? { conversations, ...withSections(s, filedSections(s.sections, conversations, patch.section)) } : { conversations };
+      });
       const wire = Object.fromEntries(Object.entries(patch).map(([key, value]) => [key, value === undefined && (key === "section" || key === "pinnedAt") ? null : value]));
       void send("PATCH", `/api/bots/conversations/${id}`, wire);
     },
@@ -302,7 +318,7 @@ export const useBots = create<BotsState>()(
       if (c?.kind === "direct") return get().deleteBot(c.botIds[0]!);
       set((s) => {
         const conversations = s.conversations.filter((x) => x.id !== id);
-        return { conversations, activeId: s.activeId === id ? conversations[0]?.id : s.activeId };
+        return { conversations, ...withSections(s, filedSections(s.sections, conversations)), activeId: s.activeId === id ? conversations[0]?.id : s.activeId };
       });
       void send("DELETE", `/api/bots/conversations/${id}`);
     },
@@ -1082,7 +1098,7 @@ function applyEvent(e: BotsEvent, get: StoreGet, set: StoreSet, authoritativeOnl
     // here is already in the store by now, and BotExtensions asks for the fresh listing itself.
     const extensions = e.settings.customExtensions ?? NO_EXTENSIONS;
     if (!authoritativeOnly && JSON.stringify(extensions) !== JSON.stringify(get().customExtensions)) void botModels(true).catch(() => {});
-    set({ sections: e.settings.sections, defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {}, botLoop: e.settings.botLoop ?? DEFAULT_BOT_LOOP });
+    set((s) => ({ ...withSections(s, e.settings.sections), defaultModel: e.settings.defaultModel, defaultFallbackModels: e.settings.defaultFallbackModels ?? NO_MODELS, searxng: e.settings.searxng ?? [], customExtensions: e.settings.customExtensions ?? NO_EXTENSIONS, harnesses: e.settings.harnesses ?? {}, botLoop: e.settings.botLoop ?? DEFAULT_BOT_LOOP }));
   }
 }
 
