@@ -115,14 +115,16 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     expect(tilt).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
   }, 20_000);
 
-  test("dozing bots only breathe, and on the compositor", async () => {
+  test("dozing bots only breathe under their zzz, and on the compositor", async () => {
     const page = await open();
     await setWorking(page, []);
     // Let them nod off.
     await Bun.sleep(2200);
-    const running = await page.eval<{ name: string; onBot: boolean }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, onBot: a.effect.target.matches('.bot[data-asleep]') }))`);
+    const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
     expect(running.length).toBeGreaterThan(10);
-    for (const a of running) expect(a).toEqual({ name: "bot-breathe", onBot: true });
+    // The breathing, and the letters of the "zzz" over them floating up.
+    for (const a of running) expect(a).toEqual(a.on === "zzz" ? { name: "bot-zzz", on: "zzz" } : { name: "bot-breathe", on: "bot" });
+    expect(running.some((a) => a.on === "zzz")).toBe(true);
     // Breathing runs off the main thread: no restyling frame after frame (that would be ~120 in the
     // two seconds), only now and then as a bot's cycle of breaths comes round, and no layout at all.
     await page.send("Performance.enable");
