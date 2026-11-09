@@ -32,7 +32,12 @@ const SILENT_FOR = 65_000;
 const HANDSHAKE_MS = 10_000;
 const BACKOFF_MAX = 60_000;
 
-export const CLOSE = { replaced: 4000, handshake: 4001, signature: 4002, refused: 4003, removed: 4004, rate: 4008 } as const;
+/** A frame that won't apply is tried again after `first`, then twice as long each time up to `max`, for as long as it takes. Tests shorten it. */
+export const retrying = { first: 1000, max: 60_000 };
+/** Failing this many times in a row, it's shown to the owner. */
+export const SHOW_FAILURE_AFTER = 3;
+
+export const CLOSE = { replaced: 4000, handshake: 4001, signature: 4002, refused: 4003, removed: 4004, rate: 4008, resend: 4009 } as const;
 
 type Apply = (friend: store.StoredFriend, kind: string, body: unknown) => void;
 type Hooks = { apply: Apply; status: () => void; removedByPeer: (friendId: string) => void };
@@ -42,6 +47,7 @@ const hot = globalThis as {
   openbuildFriendDialers?: Map<string, Dialer>;
   openbuildFriendRefused?: Set<string>;
   openbuildFriendWindows?: Map<string, { since: number; count: number }>;
+  openbuildFriendStuck?: Map<string, Stuck>;
   openbuildFriendHooks?: Hooks;
   openbuildFriendTimer?: ReturnType<typeof setInterval>;
 };
@@ -51,6 +57,23 @@ const dialers = (hot.openbuildFriendDialers ??= new Map());
 const refused = (hot.openbuildFriendRefused ??= new Set());
 /** Data frames heard from each friend this minute, for the rate limit. Per friend, so reconnecting doesn't reset it. */
 const windows = (hot.openbuildFriendWindows ??= new Map());
+/**
+ * A frame from a friend that couldn't be applied (the database busy, a disk full), kept here and tried
+ * again until it applies. It isn't acknowledged meanwhile, so the friend keeps it in its outbox too,
+ * and nothing after it is applied before it is: frames are applied in order, and none is ever skipped.
+ */
+interface Stuck {
+  seq: number;
+  kind: string;
+  body: unknown;
+  attempts: number;
+  since: number;
+  error: string;
+  /** Later frames arrived meanwhile, and weren't kept: the friend sends them again once this one applies. */
+  behind?: boolean;
+  timer?: ReturnType<typeof setTimeout>;
+}
+const stuck = (hot.openbuildFriendStuck ??= new Map());
 let hooks: Hooks = (hot.openbuildFriendHooks ??= { apply() {}, status() {}, removedByPeer() {} });
 export function setHooks(next: Hooks) {
   hooks = hot.openbuildFriendHooks = next;
@@ -58,6 +81,52 @@ export function setHooks(next: Hooks) {
 
 export const online = (friendId: string) => sessions.has(friendId);
 export const wasRefused = (friendId: string) => refused.has(friendId);
+/** A frame from this friend that has kept failing to apply, for the owner to see. */
+export function failing(friendId: string): { since: number; attempts: number; error: string } | undefined {
+  const s = stuck.get(friendId);
+  return s && s.attempts >= SHOW_FAILURE_AFTER ? { since: s.since, attempts: s.attempts, error: s.error } : undefined;
+}
+
+function forget(friendId: string) {
+  clearTimeout(stuck.get(friendId)?.timer);
+  stuck.delete(friendId);
+}
+
+/** Apply a frame from a friend. False when it failed: it's kept, and tried again later. */
+function apply(friend: store.StoredFriend, seq: number, kind: string, body: unknown): boolean {
+  try {
+    hooks.apply(friend, kind, body);
+  } catch (err) {
+    const s: Stuck = stuck.get(friend.id) ?? { seq, kind, body, attempts: 0, since: Date.now(), error: "" };
+    s.attempts++;
+    s.error = (err as Error).message || String(err);
+    stuck.set(friend.id, s);
+    const wait = Math.min(retrying.max, retrying.first * 2 ** Math.min(s.attempts - 1, 6));
+    console.warn(`[friends] couldn't apply frame ${seq} from ${friend.name} (${s.attempts} ${s.attempts === 1 ? "try" : "tries"}), trying again in ${wait}ms:`, s.error);
+    clearTimeout(s.timer);
+    s.timer = setTimeout(() => retry(friend.id), wait);
+    s.timer.unref?.();
+    if (s.attempts === SHOW_FAILURE_AFTER) hooks.status();
+    return false;
+  }
+  return true;
+}
+
+function retry(friendId: string) {
+  const s = stuck.get(friendId);
+  const friend = store.friend(friendId);
+  if (!s || !friend) return forget(friendId);
+  if (!apply(friend, s.seq, s.kind, s.body)) return;
+  stuck.delete(friendId);
+  store.setLastIn(friendId, s.seq);
+  const session = sessions.get(friendId);
+  if (session) {
+    transmit(session, { t: "ack", sid: session.sid, seq: s.seq });
+    // What came after it wasn't kept: a fresh connection has the friend send it all again.
+    if (s.behind) session.socket.close(CLOSE.resend, "resend");
+  }
+  if (s.attempts >= SHOW_FAILURE_AFTER) hooks.status();
+}
 
 const me = () => store.identity();
 const frame = (friendId: string, payload: Omit<Payload, "from" | "to">) => seal({ ...payload, from: me().id, to: friendId } as Payload, me());
@@ -98,6 +167,7 @@ function end(friendId: string, socket: Socket) {
 
 /** Close a friend's connection now (they were removed), telling them why first when `bye`. */
 export function disconnect(friendId: string, bye: boolean) {
+  forget(friendId);
   const dialer = dialers.get(friendId);
   if (dialer) {
     dialer.stopped = true;
@@ -131,14 +201,16 @@ function receive(session: Session, text: unknown) {
     const now = Date.now();
     let heard = windows.get(friend.id);
     if (!heard || now - heard.since > 60_000) windows.set(friend.id, (heard = { since: now, count: 0 }));
+    // One that wouldn't apply is being tried again: it, and everything after it, waits for that.
+    // Unacknowledged, so the friend still has them all.
+    const held = stuck.get(friend.id);
+    if (held) {
+      if ((seq as number) > held.seq) held.behind = true;
+      return;
+    }
     // Unacknowledged, so the friend sends it again once it has reconnected.
     if (++heard.count > RATE_LIMIT) return session.socket.close(CLOSE.rate, "too many messages");
-    try {
-      hooks.apply(friend, String(payload.kind ?? ""), payload.body);
-    } catch (err) {
-      // One frame that can't be applied mustn't hold up the rest behind it forever.
-      console.warn(`[friends] couldn't apply a frame from ${friend.name}:`, (err as Error).message);
-    }
+    if (!apply(friend, seq as number, String(payload.kind ?? ""), payload.body)) return;
     store.setLastIn(friend.id, seq as number);
     return transmit(session, { t: "ack", sid: session.sid, seq });
   }
@@ -296,6 +368,7 @@ export function startTimer() {
 
 /** Stop everything, for shutdown and hot reloads. */
 export function stopAll() {
+  for (const id of [...stuck.keys()]) forget(id);
   for (const id of [...dialers.keys()]) {
     const d = dialers.get(id)!;
     d.stopped = true;

@@ -59,6 +59,7 @@ function printFriends(out: Out, friends: FriendSummary[]) {
     const how = f.role === "host" ? `you connect to them over ${f.mode === "lan" ? "LAN" : "Tailscale"}` : `they connect here over ${f.mode === "lan" ? "LAN" : "Tailscale"}`;
     console.log(`${out.bold(f.name)}  ${STATUS[f.status]}`);
     console.log(out.dim(`  ${f.fingerprint} · ${how}${f.allowTools ? " · bots may use their tools" : ""}`));
+    if (f.failing) console.log(`  A message from them couldn't be delivered here after ${f.failing.attempts} tries (${f.failing.error}). Still trying; what they send next waits for it.`);
   }
 }
 

@@ -48,6 +48,11 @@ function FriendRow({ friend, onRemoved }: { friend: FriendSummary; onRemoved: ()
         <span className="pi-row-desc" title={friend.status === "refused" ? "Their OpenBuild turned this one away: they may have removed you." : undefined}>
           {[friend.fingerprint, friend.mode === "tailscale" ? "Tailscale" : "LAN", friend.role === "host" ? "you connect to them" : "they connect here", friend.allowTools && "bots may use tools", seen && `seen ${seen}`].filter(Boolean).join(" · ")}
         </span>
+        {friend.failing && (
+          <span className="pi-error device-error" role="status">
+            <CircleAlert size={13} /> A message from {friend.name} couldn't be delivered here ({friend.failing.error}). Still trying; what they send next waits for it.
+          </span>
+        )}
         {error && (
           <span className="pi-error device-error" role="alert">
             <CircleAlert size={13} /> {error}
