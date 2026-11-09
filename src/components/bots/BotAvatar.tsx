@@ -160,7 +160,7 @@ export interface BotAvatarProps {
    * if it's alive. Set (true or false) on any avatar that can doze, so it eases in and out of it.
    */
   asleep?: boolean;
-  /** A little "zzz" floats up while it dozes. Off where something around it shows one instead (a huddle). */
+  /** A little "zzz" floats up while it dozes. Only the sidebars turn it on: beside chat messages the shut eyes say enough. */
   zzz?: boolean;
   /** Change it to make the bot react once: a hop and a happy face, or the given mood. */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
@@ -168,7 +168,7 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = true, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const shape = shapeOf(look);
   const color = colorOf(look);
@@ -348,8 +348,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   );
 });
 
-/** Sized from the avatar's, but never so small it stops reading as letters (the sidebar's are 28px and less). */
-const zzzSize = (size: number) => Math.round(Math.min(16, Math.max(10, size * 0.3)));
+/** Sized from the avatar's, within a narrow range: still letters at the sidebar's 28px, and never loud on the big ones. */
+const zzzSize = (size: number) => Math.round(Math.min(11, Math.max(8, size * 0.18)));
 
 /** The "zzz" over a dozing bot or huddle: shown, and floating up a letter at a time, only while it dozes (see .bot-zzz). */
 function Zzz({ size }: { size: number }) {
@@ -374,7 +374,7 @@ export const HUDDLE_SEAT_MIN = 32;
  * alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every member
  * is awake and `alive` and `busy` go for all of them.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = true }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean }) {
   const seats = me ? 3 : 4;
   const over = looks.length > seats;
   const seated = over && size >= HUDDLE_SEAT_MIN;
@@ -400,14 +400,14 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   if (me) items.push(["me", me]);
   members.forEach((i, n) => {
     const s = layout[n + (me ? 1 : 0)]?.[2] ?? 0.5;
-    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} track={track} />]);
+    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} track={track} />]);
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
-  // Hanging from the top corner, its lowest letter (2.15em down, and floating 0.2em more) would reach
+  // Hanging from the top corner, its lowest letter (1.95em down, and floating 0.2em more) would reach
   // the count's seat below in a small huddle: there it hangs that much higher.
   const z = zzzSize(size);
-  const zzzTop = seated && active && zzz ? Math.min(-0.1 * z, 0.54 * size - 2.35 * z) : undefined;
+  const zzzTop = seated && active && zzz ? Math.min(-0.1 * z, 0.54 * size - 2.15 * z) : undefined;
   const label = `+${extra}`;
   const spot = ([x, y, s]: [number, number, number]) => ({ left: `${(x - s / 2) * 100}%`, top: `${(y - s / 2) * 100}%`, width: `${s * 100}%`, height: `${s * 100}%` });
   return (

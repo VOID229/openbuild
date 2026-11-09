@@ -156,7 +156,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
-              <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} asleep={!working.includes(b.id)} />
+              <BotAvatar look={b.look} size={28} busy={working.includes(b.id)} asleep={!working.includes(b.id)} zzz />
               <span className="bots-card-text">{b.name}</span>
             </button>
             {editable && removable && (
@@ -235,7 +235,7 @@ function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }
           return (
             <li key={chat.id} className="bots-card-row bots-member">
               <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
-                {bot && <BotAvatar look={bot.look} size={28} {...threadMascot(activity)} />}
+                {bot && <BotAvatar look={bot.look} size={28} {...threadMascot(activity)} zzz />}
                 <span className="bots-card-text">
                   <span className="bots-routine-title">{chat.title}</span>
                   <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName, activity === "waiting" && "Waiting for you"].filter(Boolean).join(" · ")}</span>
@@ -438,7 +438,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               </button>
             ) : (
               <span className="bots-details-avatar">
-                <ConversationAvatar conversation={conversation} size={104} working={working} />
+                <ConversationAvatar conversation={conversation} size={104} working={working} zzz />
               </span>
             )}
             {bot && editingLook && <LookEditor bot={bot} onDone={() => setEditingLook(false)} />}

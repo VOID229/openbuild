@@ -109,17 +109,18 @@
 
 /* A "zzz" over a dozing bot's head (a huddle's corner), coming in once the eyes have shut and gone
    at once on waking. Its letters climb in steps and float up in turn, each a little bigger. Only
-   transform and opacity move, on the compositor, and on a long cycle like the breathing. Its size is
-   set from the avatar's with a floor (BotAvatar.tsx), so it still reads at the sidebar's. */
+   transform and opacity move, on the compositor, and on a long cycle like the breathing. Small and
+   quiet, in the faint text colour: its size is set from the avatar's within a narrow range
+   (BotAvatar.tsx), so it reads at the sidebar's and stays a footnote on the big ones. Only the
+   sidebars show it (the `zzz` prop); beside chat messages the shut eyes say enough. */
 .bot-zzz {
   position: absolute;
   left: 74%;
   bottom: 70%;
   display: flex;
   align-items: flex-end;
-  color: var(--text-2);
-  font-weight: 700;
-  font-style: italic;
+  color: var(--text-3);
+  font-weight: 600;
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
@@ -158,7 +159,7 @@
 
 .bot-zzz > span {
   display: block;
-  font-size: 0.8em;
+  font-size: 0.85em;
 }
 
 .bot-zzz > span::before {
@@ -166,13 +167,13 @@
 }
 
 .bot-zzz > span:nth-child(2) {
-  margin-bottom: 0.45em;
-  font-size: 0.95em;
+  margin-bottom: 0.35em;
+  font-size: 1em;
 }
 
 .bot-zzz > span:nth-child(3) {
-  margin-bottom: 0.95em;
-  font-size: 1.1em;
+  margin-bottom: 0.7em;
+  font-size: 1.15em;
 }
 
 .bot[data-asleep] > .bot-zzz > span,
@@ -191,7 +192,7 @@
 @keyframes bot-zzz {
   0% {
     opacity: 0;
-    transform: translate(-0.15em, 0.35em) scale(0.7);
+    transform: translate(-0.1em, 0.2em) scale(0.8);
   }
   18%,
   62% {
@@ -200,7 +201,7 @@
   }
   100% {
     opacity: 0;
-    transform: translate(0.2em, -0.3em) scale(1.08);
+    transform: translate(0.12em, -0.2em) scale(1.05);
   }
 }
 
