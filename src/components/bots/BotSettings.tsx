@@ -169,7 +169,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
     <div className="bots-set-editor">
       <SettingsBack label="Back to all bots" onBack={onBack} />
       <div className="bots-set-hero">
-        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} extra={looks.length > 4 ? looks.length - 4 : undefined} />
+        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} />
         <div className="bots-set-hero-text">
           <input className="input bots-set-name" value={name} maxLength={48} aria-label="Group name" onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
           <div className="bots-details-sub">{plural(group.botIds.length, "bot")}</div>

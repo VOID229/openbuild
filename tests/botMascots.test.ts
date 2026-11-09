@@ -75,12 +75,13 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     const page = await open();
     const everyone = `[...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Everyone'))`;
     const colors = () => page.eval<string[]>(`[...(${everyone}).querySelectorAll('.bot')].map((b) => b.dataset.color)`);
-    expect(await colors()).toEqual(["white", "green", "amber", "blue"]);
-    expect(await page.eval<string>(`(${everyone}).querySelector('.bot-huddle-more').textContent`)).toBe("+2");
-    // Spark (teal), the fifth, starts work: it takes the last dozing member's place, awake.
+    // Three members, and the other three as a count in the fourth seat.
+    expect(await colors()).toEqual(["white", "green", "amber"]);
+    expect(await page.eval<string>(`(${everyone}).querySelector('.bot-huddle-seat .bot-huddle-more').textContent`)).toBe("+3");
+    // Spark (teal), the sixth, starts work: it takes the last dozing member's place, awake.
     await setWorking(page, ["moss", "spark"]);
     await page.settle();
-    expect(await colors()).toEqual(["white", "green", "amber", "teal"]);
+    expect(await colors()).toEqual(["white", "green", "teal"]);
     expect(await page.eval<boolean>(`'busy' in (${everyone}).querySelector('.bot[data-color="teal"]').dataset`)).toBe(true);
   });
 
@@ -120,7 +121,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     await setWorking(page, []);
     // Let them nod off.
     await Bun.sleep(2200);
-    const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
+    const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle-box[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
     expect(running.length).toBeGreaterThan(10);
     // The breathing, and the letters of the "zzz" over them floating up.
     for (const a of running) expect(a).toEqual(a.on === "zzz" ? { name: "bot-zzz", on: "zzz" } : { name: "bot-breathe", on: "bot" });

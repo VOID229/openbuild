@@ -363,21 +363,31 @@ function Zzz({ size }: { size: number }) {
   );
 }
 
+/** Below this size a seat in the huddle is too small for a readable count, so it goes beside it. */
+export const HUDDLE_SEAT_MIN = 32;
+
 /**
- * A group's avatar: its members huddled together (up to four, the rest as a count). The user can
- * sit in the huddle too, as their profile picture. `active` picks, by member, who is at work: those
- * come alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every
- * member is awake and `alive` and `busy` go for all of them.
+ * A group's avatar: its members huddled together (up to four), and the rest as a count that never
+ * sits over one of them. Big enough, the count takes the last seat of the huddle, so the avatar keeps
+ * its box and lines up with the others; smaller, it follows the huddle as a number. The user can sit
+ * in the huddle too, as their profile picture. `active` picks, by member, who is at work: those come
+ * alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every member
+ * is awake and `alive` and `busy` go for all of them.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, extra, me, zzz = true }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; extra?: number; me?: React.ReactNode; zzz?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = true }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean }) {
+  const seats = me ? 3 : 4;
+  const over = looks.length > seats;
+  const seated = over && size >= HUDDLE_SEAT_MIN;
   // Who sits in it: those at work first, so a busy member is never one of the count, and then in the
   // group's own order, so they keep their places.
-  const room = me ? 3 : 4;
+  const room = seated ? seats - 1 : seats;
   const order = looks.map((_, i) => i);
   const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
-  const count = members.length + (me ? 1 : 0);
+  const extra = looks.length - members.length;
+  const count = members.length + (me ? 1 : 0) + (seated ? 1 : 0);
   // Where each member sits, as fractions of the box (centre x, centre y, size): a 2×2 grid filled as
-  // far as the shapes allow, three as two over one, a pair on the diagonal.
+  // far as the shapes allow, three as two over one, a pair on the diagonal. The count's seat is the
+  // last one of the grid.
   const spots: [number, number, number][][] = [
     [],
     [[0.5, 0.5, 0.9]],
@@ -394,20 +404,33 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
+  // Hanging from the top corner, its lowest letter (2.15em down, and floating 0.2em more) would reach
+  // the count's seat below in a small huddle: there it hangs that much higher.
+  const z = zzzSize(size);
+  const zzzTop = seated && active && zzz ? Math.min(-0.1 * z, 0.54 * size - 2.35 * z) : undefined;
+  const label = `+${extra}`;
+  const spot = ([x, y, s]: [number, number, number]) => ({ left: `${(x - s / 2) * 100}%`, top: `${(y - s / 2) * 100}%`, width: `${s * 100}%`, height: `${s * 100}%` });
   return (
-    <span className="bot-huddle" style={{ width: size, height: size }} data-dozing={dozing ? "" : undefined} aria-hidden>
-      {items.map(([key, item], i) => {
-        const [x, y, s] = layout[i] ?? [0.5, 0.5, 0.5];
-        // Dozing, heads lean in toward the middle of the huddle.
-        const lean = Math.abs(x - 0.5) < 0.1 ? 0 : x < 0.5 ? 5 : -5;
-        return (
-          <span key={key} className="bot-huddle-spot" style={{ left: `${(x - s / 2) * 100}%`, top: `${(y - s / 2) * 100}%`, width: `${s * 100}%`, height: `${s * 100}%`, "--lean": `${lean}deg` } as React.CSSProperties}>
-            {item}
+    <span className="bot-huddle" data-more={over ? (seated ? "seat" : "beside") : undefined} aria-hidden>
+      <span className="bot-huddle-box" style={{ width: size, height: size, ...(zzzTop !== undefined && { "--zzz-top": `${zzzTop.toFixed(1)}px` }) } as React.CSSProperties} data-dozing={dozing ? "" : undefined}>
+        {items.map(([key, item], i) => {
+          const [x, y, s] = layout[i] ?? [0.5, 0.5, 0.5];
+          // Dozing, heads lean in toward the middle of the huddle.
+          const lean = Math.abs(x - 0.5) < 0.1 ? 0 : x < 0.5 ? 5 : -5;
+          return (
+            <span key={key} className="bot-huddle-spot" style={{ ...spot([x, y, s]), "--lean": `${lean}deg` } as React.CSSProperties}>
+              {item}
+            </span>
+          );
+        })}
+        {seated && (
+          <span className="bot-huddle-spot bot-huddle-seat" style={{ ...spot(layout[3]!), "--more-font": `${Math.max(9, Math.round(size * (label.length > 2 ? 0.19 : 0.23)))}px` } as React.CSSProperties}>
+            <span className="bot-huddle-more">{label}</span>
           </span>
-        );
-      })}
-      {!!extra && <span className="bot-huddle-more">+{extra}</span>}
-      {active && zzz && <Zzz size={size} />}
+        )}
+        {active && zzz && <Zzz size={size} />}
+      </span>
+      {over && !seated && <span className="bot-huddle-more" style={{ "--more-font": `${Math.max(10, Math.round(size * 0.55))}px` } as React.CSSProperties}>{label}</span>}
     </span>
   );
 });
