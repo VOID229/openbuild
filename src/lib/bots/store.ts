@@ -411,6 +411,8 @@ export function conversationName(c: Conversation, bots: Bot[]): string {
   // A shared chat carries its friend's name as the tag the sidebar shows after a " · ".
   if (c.kind === "group" && c.friend) return `${c.name || "Shared chat"} · ${c.friend.friendName}`;
   if (c.kind === "group") return c.name || "Untitled group";
+  // A huddle goes by its topic.
+  if (c.kind === "side" && c.name) return c.name;
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
   // A side chat goes by its bots' first names ("Scout & Tally"), without their " · tags".
   return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");

@@ -3,8 +3,8 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
-import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
+import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle } from "../../shared/bots";
+import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -34,12 +34,18 @@ export interface Wake {
   text?: string;
   /** For a reaction: dropped if it's taken back before the bot looks. */
   reaction?: { messageId: string; emoji: string; by: string; to?: string };
+  /** A request sent to several bots: the one of them that answers it (see pickLead). */
+  lead?: string;
 }
 
 type Hooks = {
   wake: (botId: string, wake: Wake) => void;
   stop: (botId: string) => void;
   pendingAssignments?: (botId: string) => { conversationId: string; messageIds: string[] }[];
+  /** What arrived in a conversation since the bot's turn there showed it, as transcript lines; shown from then on. */
+  unseen?: (botId: string, conversationId: string) => string[];
+  /** The bot's turn is answering the user in this conversation: a request of theirs, not a bot's message or a note. */
+  userWoke?: (botId: string, conversationId: string) => boolean;
 };
 /** What the friends module (server/friends/) hears about shared chats, so this file never imports it either. */
 type FriendHooks = {
@@ -818,7 +824,7 @@ export async function deleteBot(id: string) {
  * those): it can start with none of this side's bots, since a chat a friend shared waits for the owner
  * to pick which of theirs join.
  */
-export function createConversation(input: { id?: string; kind: Conversation["kind"]; name?: string; botIds: string[]; instructions?: string; messages?: BotMessage[]; friend?: FriendChat }): Conversation {
+export function createConversation(input: { id?: string; kind: Conversation["kind"]; name?: string; botIds: string[]; instructions?: string; messages?: BotMessage[]; friend?: FriendChat; huddle?: SideHuddle }): Conversation {
   if (input.kind === "direct") throw new BotsError("A bot's own chat is created with the bot.");
   if (input.friend && input.kind !== "group") throw new BotsError("Only groups are shared with friends.");
   const botIds = [...new Set(input.botIds)].filter((id) => db.getBot(id));
@@ -836,6 +842,7 @@ export function createConversation(input: { id?: string; kind: Conversation["kin
     createdAt: now,
     updatedAt: now,
     ...(input.friend ? { friend: input.friend } : {}),
+    ...(input.huddle && input.kind === "side" ? { huddle: input.huddle } : {}),
   };
   db.putConversation(c);
   const messages = input.messages?.length
@@ -965,6 +972,46 @@ function groupRecipients(c: db.StoredConversation, message: BotMessage): string[
   return primary ? [primary] : [];
 }
 
+const COMMON = new Set("the and for you your are can what that this with have from they about there their would could should just like some then them when which will been were does into also more here know want need make tell please think each every other only very much really thing anyone everyone someone right now still again today all".split(" ").map(stem));
+function stem(word: string) {
+  return word.replace(/(?:ing|ed|es|s|e)$/, "");
+}
+const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).map(stem).filter((w) => w.length >= 3 && !COMMON.has(w)));
+
+/** What a bot says it's for: the first sentence of its own instructions, where a bot says what it does. The rest often names other bots' jobs. */
+const ownRole = (instructions: string) => instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? "";
+
+/** Where a bot's name first shows in some text, tagged or just written ("tracer, find bugs"); -1 if it doesn't. */
+function namedAt(text: string, bot: db.StoredBot): number {
+  const name = mentionName(bot.name).toLowerCase();
+  if (!name) return -1;
+  return text.toLowerCase().search(new RegExp(`(?<![\\p{L}\\d_])@?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\d_])`, "u"));
+}
+
+/**
+ * Who answers a user's group message that went to several bots, so they don't all say the same thing.
+ * A bot the message names, tagged or just written ("tracer, find bugs"), answers. Otherwise, or among
+ * several named, the one whose role (the first sentence of its instructions) shares the most words with
+ * it. A tie, or nothing in common, goes to the primary if it was asked, else whoever was named first.
+ * Decided here, with no model call; the others still get it, to add what's theirs alone.
+ */
+export function pickLead(text: string, ids: string[]): string | undefined {
+  const bots = ids.flatMap((id) => db.getBot(id) ?? []);
+  if (bots.length < 2) return bots[0]?.id;
+  const named = bots.map((b) => ({ b, at: namedAt(text, b) })).filter((n) => n.at >= 0).sort((x, y) => x.at - y.at).map((n) => n.b);
+  if (named.length === 1) return named[0]!.id;
+  const pool = named.length ? named : bots;
+  // The bots' own names aren't what it's about.
+  const names = new Set(bots.flatMap((b) => [...words(mentionName(b.name))]));
+  const asked = [...words(text)].filter((w) => !names.has(w));
+  const scored = pool.map((b) => {
+    const role = words(ownRole(b.instructions));
+    return { b, fit: asked.filter((w) => role.has(w)).length };
+  }).sort((x, y) => y.fit - x.fit);
+  if (scored[0]!.fit && scored[0]!.fit > (scored[1]?.fit ?? 0)) return scored[0]!.b.id;
+  return (pool.find((b) => b.primary) ?? bots.find((b) => b.primary) ?? pool[0])!.id;
+}
+
 function mentionedBots(text: string, ids: string[]): string[] {
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
   const tags = findTags(text, bots);
@@ -986,6 +1033,10 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   const fromFriend = parseFriendAuthor(message.author)?.friend;
   const friendHere = !!fromFriend && c.friend?.friend === fromFriend;
   if (message.author !== "me" && !c.botIds.includes(message.author) && !friendHere) throw new BotsError("That bot isn't in this conversation.");
+  if (c.huddle && !message.event) {
+    if (message.author === "me") throw new BotsError("Side chats are between bots. You can read along.");
+    if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
+  }
   // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
   if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.poll)) throw new BotsError("Photos and polls aren't shared with friends yet.");
   if (message.poll) {
@@ -1010,6 +1061,11 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   }
   const skip = new Set(waiting.map((w) => w.botId));
   if (c.kind === "side" && message.author !== "me" && !message.event) noteSideMessage(c, message.author);
+  // A huddle closes on its last allowed message, which wakes nobody but the bot that reports back.
+  if (c.huddle && !message.event && huddleMessages(conversationId) >= c.huddle.limit) {
+    closeHuddle(conversationId, `It reached its ${c.huddle.limit}-message limit.`, message.author);
+    return message;
+  }
 
   if (!message.event) {
     if (message.author === "me") {
@@ -1037,7 +1093,9 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
         if (!targets.length) targets = groupRecipients(c, message);
         db.setGroupFollow(conversationId, { ids: targets, at: message.at });
       }
-      for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id] } : {}) });
+      // Several bots asked at once: one answers, and the others add only what's theirs.
+      const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets) : undefined;
+      for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
     }
   }
   return message;
@@ -1060,6 +1118,90 @@ function noteSideMessage(side: db.StoredConversation, from: string) {
     if (!other) continue;
     const text = botId === from ? `Sent a message to ${name(other)}` : `Received a message from ${name(other)}`;
     postMessage(own, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "message", text, bot: other, conversationId: side.id } });
+  }
+}
+
+/** What arrived in a conversation since the bot's turn there showed it (see Hooks.unseen). */
+export function unseenSince(botId: string, conversationId: string): string[] {
+  return hooks.unseen?.(botId, conversationId) ?? [];
+}
+
+// ------------------------------------------------------------------ huddles
+
+/** How long a huddle can go without a message, with none of its bots at work, before it closes. */
+export const HUDDLE_QUIET_MS = 2 * 60_000;
+/** How long a huddle can stay open at all. */
+export const HUDDLE_MAX_MS = 5 * 60_000;
+
+const huddleMessages = (conversationId: string) => db.messages(conversationId, 60).filter((r) => r.message.author !== "me" && !r.message.event).length;
+
+/**
+ * A temporary side chat `by` opens with other bots to work something out without filling `from`.
+ * Its first message is the topic, which asks them all. Only a bot answering the user there can open
+ * one, and only while it's in no other open huddle: never from a side chat or a chat shared with a friend.
+ */
+export function openHuddle(by: string, from: string, botIds: string[], topic: string): db.StoredConversation {
+  const origin = db.getConversation(from);
+  if (!origin?.botIds.includes(by)) throw new BotsError("You aren't in that conversation.");
+  if (origin.kind === "side") throw new BotsError("Open a side chat from the chat that needs the answer, not from another side chat.");
+  if (origin.friend) throw new BotsError("Side chats can't report to a chat shared with a friend.");
+  if (!hooks.userWoke?.(by, from)) throw new BotsError("Open a side chat only while you're answering the user there.");
+  const text = topic.trim().slice(0, 2000);
+  if (!text) throw new BotsError("Say what the side chat is for.");
+  const others = [...new Set(botIds)].filter((id) => id !== by);
+  if (!others.length || others.length > 4) throw new BotsError("Pick one to four other bots.");
+  for (const id of others) if (!db.getBot(id)) throw new BotsError("No such bot.");
+  if (db.listConversations().some((c) => c.huddle && !c.huddle.closedAt && c.botIds.includes(by))) throw new BotsError("You're already in an open side chat. Finish that one first.");
+  const request = hooks.pendingAssignments?.(by).find((a) => a.conversationId === from)?.messageIds;
+  const members = [by, ...others];
+  const side = createConversation({
+    kind: "side",
+    name: clip(text.split("\n")[0], 60),
+    botIds: members,
+    huddle: { by, from, topic: text, limit: huddleLimit(members.length), ...(request?.length ? { request } : {}) },
+  });
+  const name = (id: string) => mentionName(db.getBot(id)?.name ?? "a bot");
+  const list = others.map(name);
+  const who = list.length > 1 ? `${list.slice(0, -1).join(", ")} and ${list.at(-1)}` : list[0];
+  postMessage(from, { id: crypto.randomUUID(), author: by, at: Date.now(), text: "", event: { kind: "message", text: `${name(by)} is talking it over with ${who}`, detail: clip(text, 120), conversationId: side.id } });
+  postMessage(side.id, { id: crypto.randomUUID(), author: by, at: Date.now(), text });
+  return db.getConversation(side.id)!;
+}
+
+/** Closes a huddle, once, and asks the bot that opened it to report back where it came from. */
+export function closeHuddle(id: string, why: string, author: string) {
+  const c = db.getConversation(id);
+  if (!c?.huddle || c.huddle.closedAt) return;
+  const huddle = { ...c.huddle, closedAt: Date.now() };
+  db.putConversation({ ...c, huddle });
+  emitConversation(id);
+  if (c.botIds.includes(author)) postMessage(id, { id: crypto.randomUUID(), author, at: Date.now(), text: "", event: { kind: "changed", text: "Side chat closed", detail: why } });
+  const from = db.getConversation(huddle.from);
+  if (!db.getBot(huddle.by) || !from?.botIds.includes(huddle.by)) return;
+  hooks.wake(huddle.by, { kind: "note", conversationId: huddle.from, ...(huddle.request?.length ? { messageIds: huddle.request } : {}), text: huddleReport(c, why) });
+}
+
+/** What the bot that reports back is told: the whole huddle (it's short) and what to do with it. */
+export function huddleReport(c: db.StoredConversation, why: string): string {
+  const name = (id: string) => (id === c.huddle!.by ? "you" : mentionName(db.getBot(id)?.name ?? "a bot"));
+  const said = db.messages(c.id, 60).filter((r) => !r.message.event && r.message.author !== "me").slice(-16).map((r) => `${name(r.message.author)}: ${r.message.text.slice(0, 600)}`);
+  return [
+    `Your side chat ${c.id.slice(0, 8)} (“${c.name ?? "side chat"}”) closed. ${why} What was said there:`,
+    said.join("\n"),
+    "Now report back here, once, for everyone, in one message: the answer or what you decided, not the whole discussion. If nobody here needs to hear it, stay [silent].",
+  ].join("\n");
+}
+
+/** Huddles close after five minutes, or sooner once nobody has written for a while and none of their bots is at work. */
+function closeQuietHuddles(now: number, busy: (botId: string) => boolean) {
+  for (const c of db.listConversations()) {
+    if (!c.huddle || c.huddle.closedAt) continue;
+    if (now - c.createdAt >= HUDDLE_MAX_MS) {
+      closeHuddle(c.id, "Its five minutes were up.", c.huddle.by);
+      continue;
+    }
+    const last = db.messages(c.id, 1)[0]?.message.at ?? c.createdAt;
+    if (now - last >= HUDDLE_QUIET_MS && !c.botIds.some(busy)) closeHuddle(c.id, "It went quiet.", c.huddle.by);
   }
 }
 
@@ -1096,8 +1238,6 @@ export function removeMessage(conversationId: string, messageId: string) {
   emit({ t: "message-deleted", conversationId, id: messageId });
 }
 
-/** Bots answering bots' reactions wake each other only this deep, so a chain of them settles. */
-const BOT_REACTION_DEPTH = 2;
 
 export function toggleReaction(conversationId: string, messageId: string, emoji: string, by: string, to?: string): BotMessage {
   const row = db.getMessage(messageId);
@@ -1107,12 +1247,12 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
   if (to && !target) throw new BotsError("No such reaction.", 404);
   const { next, added } = toggleReactionIn(reactions, emoji, by, to);
   const patched = patchMessage(conversationId, messageId, { reactions: next });
-  // Whoever was reacted to hears about it if they're a bot here: the message's author, or the one whose reaction this answers.
+  // Whoever the user reacted to hears about it if they're a bot here: the message's author, or the one
+  // whose reaction this answers. A bot's reaction is where it leaves things, and never wakes another bot.
   const owner = target ? target.by : row.message.author;
-  const depth = added ? reactionDepth(next, added) : 0;
   const bots = db.getConversation(conversationId)?.botIds ?? [];
-  if (added && owner !== by && owner !== "me" && !row.message.event && bots.includes(owner) && (by === "me" || depth < BOT_REACTION_DEPTH)) {
-    const who = by === "me" ? getSettings().user?.name || "The user" : db.getBot(by)?.name || "Another bot";
+  if (added && by === "me" && owner !== "me" && !row.message.event && bots.includes(owner)) {
+    const who = getSettings().user?.name || "The user";
     const quote = `“${row.message.text.slice(0, 200)}”`;
     const short = messageId.slice(0, 8);
     const text = target
@@ -1297,6 +1437,7 @@ export function tick(busy: (botId: string) => boolean) {
   const now = Date.now();
   reportPollChanges(now);
   db.sweepGroupFollows(now, GROUP_FOLLOW_MS, CLOCK_SKEW_MS);
+  closeQuietHuddles(now, busy);
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;

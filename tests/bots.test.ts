@@ -732,21 +732,25 @@ test("send_message, models and check-ins against a real bots database", async ()
       svc.toggleReaction(conversationId, own.id, '👍', 'me');
       a.equal(reacted().length, 1);
 
-      // Reactions can answer reactions. Bots hear about answers to theirs, and a chain between bots settles.
+      // Reactions can answer reactions. Bots hear about the user's answers to theirs, but a bot's
+      // reaction is where it leaves things: it never wakes another bot, to its message or its reaction.
       const chat = svc.createConversation({ kind: 'group', name: 'Chain', botIds: [bot.id, other.bot.id] });
       const post = svc.postMessage(chat.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'look' });
+      const theirs = svc.postMessage(chat.id, { id: crypto.randomUUID(), author: other.bot.id, at: Date.now(), text: 'done' });
       const start = reacted().length;
+      svc.toggleReaction(chat.id, theirs.id, '👍', bot.id);
+      a.equal(reacted().length, start);
       const fire = svc.toggleReaction(chat.id, post.id, '🔥', other.bot.id).reactions[0];
       a.equal(reacted().length, start);
       const thanks = svc.toggleReaction(chat.id, post.id, '🙏', bot.id, fire.id).reactions[1];
       a.equal(thanks.to, fire.id);
-      a.equal(reacted().length, start + 1);
-      a.equal(reacted().at(-1).reaction.to, fire.id);
-      a.match(reacted().at(-1).text, /to your 🔥 reaction/);
+      a.equal(reacted().length, start);
       const laugh = svc.toggleReaction(chat.id, post.id, '😂', other.bot.id, thanks.id).reactions[2];
-      a.equal(reacted().length, start + 1);
+      a.equal(reacted().length, start);
       svc.toggleReaction(chat.id, post.id, '❤️', 'me', laugh.id);
-      a.equal(reacted().length, start + 2);
+      a.equal(reacted().length, start + 1);
+      a.equal(reacted().at(-1).reaction.to, laugh.id);
+      a.match(reacted().at(-1).text, /to your 😂 reaction/);
       a.match(transcript(chat.id, db.listBots(), 'User', bot.id), /#2 🙏 from you → #1, #3 😂 from Other → #2, #4 ❤️ from User → #3/);
       // Taking one back takes the answers with it.
       a.equal(svc.toggleReaction(chat.id, post.id, '🙏', bot.id, fire.id).reactions.length, 1);

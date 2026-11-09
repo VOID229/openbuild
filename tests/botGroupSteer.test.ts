@@ -120,9 +120,10 @@ test('mixed recipients each get only their own requests and images', () => run('
   // A request for both, while both are busy in the group: each is steered it, with its image only.
   const both = post(group.id, 'me', '@Alpha @Beta BOTH', { image: 'CCCC' });
   await until(() => steersOf(alpha.bot).length === 1 && steersOf(beta.bot).length === 1 && steers.every(s => s.ok));
-  for (const bot of [alpha.bot, beta.bot]) {
+  // Alpha, tagged first, answers for both; Beta hears that it does.
+  for (const [bot, mark] of [[alpha.bot, '[new, for you; it went to others too, and you answer for all of you]'], [beta.bot, '[asked of several bots; Alpha answers it.']]) {
     const [steer] = steersOf(bot);
-    a.ok(lineFor(steer.message, '@Alpha @Beta BOTH')?.includes('[new, for you]'), steer.message);
+    a.ok(lineFor(steer.message, '@Alpha @Beta BOTH')?.includes(mark), steer.message);
     a.deepEqual(steer.images, ['CCCC']);
     a.ok(!steer.message.includes('START'));
   }
