@@ -169,7 +169,7 @@ test("logins keep the provider ids the pi-claude-code package uses", () => {
 });
 
 /** Runs `script` in its own server process: its own data directory, home and fake Claude Code. */
-async function inServer(script: string, setup?: (home: string) => void) {
+async function inServer(script: string, setup?: (home: string) => void, env: Record<string, string | undefined> = {}) {
   const home = mkdtempSync(join(tmpdir(), "openbuild-bot-claude-"));
   try {
     mkdirSync(join(home, ".claude"));
@@ -181,9 +181,9 @@ async function inServer(script: string, setup?: (home: string) => void) {
     const claude = join(home, "claude");
     writeFileSync(claude, `#!/bin/sh
 log="$HOME/calls.log"
-echo "$CLAUDE_CONFIG_DIR $*" >> "$log"
+echo "$CLAUDE_CONFIG_DIR $* key=\${ANTHROPIC_API_KEY:+leaked}\${CLAUDE_CODE_OAUTH_TOKEN:+leaked}" >> "$log"
 case "$1 $2" in
-  "auth status") if [ -f "$CLAUDE_CONFIG_DIR/in" ]; then echo '{"loggedIn":true,"email":"me@example.com","subscriptionType":"max","authMethod":"claude.ai"}'; else echo '{"loggedIn":false}'; fi ;;
+  "auth status") if [ -f "$CLAUDE_CONFIG_DIR/in" ]; then echo '{"loggedIn":true,"email":"me@example.com","subscriptionType":"max","authMethod":"claude.ai","accessToken":"SECRET-ACCESS-TOKEN","orgId":"SECRET-ORG"}'; else echo '{"loggedIn":false}'; fi ;;
   "auth login")
     echo "If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&state=abc"
     printf 'Paste code here if prompted > '
@@ -197,7 +197,7 @@ esac
     setup?.(home);
     const child = Bun.spawn([process.execPath, "-e", `import { strict as a } from "node:assert";\n${script}\nprocess.exit(0);`], {
       cwd: ROOT,
-      env: { ...process.env, HOME: home, OPENCHAT_DATA_DIR: join(home, "data"), PI_CODING_AGENT_DIR: join(home, "pi"), CLAUDE_BIN: claude, CLAUDE_CONFIG_DIR: "", PATH: "/usr/bin:/bin" },
+      env: { ...process.env, HOME: home, OPENCHAT_DATA_DIR: join(home, "data"), PI_CODING_AGENT_DIR: join(home, "pi"), CLAUDE_BIN: claude, CLAUDE_CONFIG_DIR: "", PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "sk-ant-ambient", CLAUDE_CODE_OAUTH_TOKEN: "ambient-oauth", ...env } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",
     });
@@ -298,3 +298,156 @@ test("connecting signs in through Claude Code, and the code goes only to its std
   `);
   rmSync(home, { recursive: true, force: true });
 }, 30_000);
+
+// ------------------------------------------------------------------ fresh installs, enabled extensions, credentials
+
+test("on a fresh install bots get the bridge with no Pi package, and nothing works until Claude Code is there", async () => {
+  // No packages in Pi, no extensions picked, no app settings, no Claude Code on the server.
+  const home = await inServer(`
+    const { existsSync, readdirSync } = await import("node:fs");
+    const { piFlags } = await import("./server/bots/extensions.ts");
+    const claude = await import("./server/bots/claude.ts");
+    const flags = piFlags();
+    const loaded = flags.flatMap((f, i) => (f === "-e" ? [flags[i + 1]] : []));
+    a.equal(loaded.length, 2);
+    a.match(loaded[1], /bridge-[a-z0-9]+\\.ts$/);
+    a.ok(flags.includes("--no-extensions"));
+    const view = await claude.logins();
+    a.equal(view.installed, false);
+    a.equal(view.userPackage, false);
+    a.deepEqual(view.logins.map((l) => [l.id, l.signedIn, l.enabled]), [["claude-code", false, true]]);
+    a.match(view.logins[0].error, /isn't installed/);
+    await a.rejects(claude.connect("claude-code"), /isn't installed/);
+    // Nothing was started: no sign-in, no Claude config written.
+    a.equal(existsSync(process.env.HOME + "/.claude"), false);
+  `, (home) => {
+    rmSync(join(home, ".claude"), { recursive: true, force: true });
+    writeFileSync(join(home, "pi", "settings.json"), "{}");
+  }, { CLAUDE_BIN: join(tmpdir(), "no-such-claude-binary") });
+  rmSync(home, { recursive: true, force: true });
+}, 30_000);
+
+test("extensions already enabled for bots: only the user's own pi-claude-code keeps OpenBuild's out", async () => {
+  const home = await inServer(`
+    const svc = await import("./server/bots/service.ts");
+    const claude = await import("./server/bots/claude.ts");
+    const { piFlags } = await import("./server/bots/extensions.ts");
+    const loaded = () => { const f = piFlags(); return f.flatMap((x, i) => (x === "-e" ? [f[i + 1]] : [])).slice(1); };
+    const bridge = (list) => list.filter((p) => /bridge-[a-z0-9]+\\.ts$/.test(p)).length;
+    const pick = (ids, enabled = true) => svc.updateSettings({ customExtensions: { enabled, ids } });
+    // Another Claude bridge (its own "pi-claude" provider) loads beside ours.
+    pick(["package:local/pi-claude-bridge"]);
+    a.equal(bridge(loaded()), 1);
+    a.equal(loaded().length, 2);
+    // The user's pi-claude-code, by package name even in a renamed folder: ours stays out, theirs loads once.
+    pick(["package:local/renamed"]);
+    a.equal(bridge(loaded()), 0);
+    a.deepEqual(loaded().map((p) => p.split("/").pop()), ["renamed"]);
+    a.equal((await claude.logins()).userPackage, true);
+    // From git or npm, by its source.
+    pick(["package:git:github.com/earendil-works/pi-claude-code"]);
+    a.equal(bridge(loaded()), 0);
+    pick(["package:npm:@earendil-works/pi-claude-code@0.2.0"]);
+    a.equal(bridge(loaded()), 0);
+    // Picked but switched off as a whole, or since uninstalled from Pi: ours is back.
+    pick(["package:local/renamed"], false);
+    a.equal(bridge(loaded()), 1);
+    pick(["package:local/gone"]);
+    a.deepEqual(loaded().map((p) => /bridge-/.test(p)), [true]);
+    // The wrapper registers each login exactly once.
+    const { readFileSync } = await import("node:fs");
+    const body = readFileSync(loaded()[0], "utf8");
+    const ids = JSON.parse(body.slice(body.indexOf("bridge(pi, ") + 11, body.lastIndexOf(");"))).map((p) => p.id);
+    a.deepEqual(ids, [...new Set(ids)]);
+  `, (home) => {
+    const pkg = (dir: string, name: string) => {
+      mkdirSync(join(home, "pi", "local", dir), { recursive: true });
+      writeFileSync(join(home, "pi", "local", dir, "package.json"), JSON.stringify({ name }));
+    };
+    pkg("pi-claude-bridge", "@vanillagreen/pi-claude-bridge");
+    pkg("renamed", "@earendil-works/pi-claude-code");
+    writeFileSync(join(home, "pi", "settings.json"), JSON.stringify({
+      packages: ["local/pi-claude-bridge", "local/renamed", "git:github.com/earendil-works/pi-claude-code", "npm:@earendil-works/pi-claude-code@0.2.0"],
+    }));
+  });
+  rmSync(home, { recursive: true, force: true });
+}, 30_000);
+
+test("one directory is one login, whatever names point at it", () => {
+  const home = mkdtempSync(join(tmpdir(), "openbuild-claude-dupes-"));
+  try {
+    for (const d of [".claude", ".claude-2"]) mkdirSync(join(home, d));
+    mkdirSync(join(home, "bin"));
+    writeFileSync(join(home, "bin", "claude2"), `#!/bin/sh\nCLAUDE_CONFIG_DIR="$HOME/.claude-2" exec claude "$@"\n`);
+    writeFileSync(join(home, "bin", "claude3"), `#!/bin/sh\nCLAUDE_CONFIG_DIR="$HOME/.claude" exec claude "$@"\n`);
+    const saved = [
+      { id: "a", name: "Work", runtime: "claude", configDir: join(home, ".claude-2") },
+      { id: "b", name: "Again", runtime: "claude", configDir: join(home, ".claude-2") },
+      { id: "c", name: "Default", runtime: "claude", configDir: join(home, ".claude") },
+    ];
+    const profiles = allProfiles(saved, home, join(home, "bin"));
+    expect(new Set(profiles.map((p) => p.id)).size).toBe(profiles.length);
+    expect(new Set(profiles.map((p) => p.configDir)).size).toBe(profiles.length);
+    expect(profiles.map((p) => p.configDir).sort()).toEqual([join(home, ".claude"), join(home, ".claude-2")]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("Claude's credentials never reach OpenBuild's answers, files or Claude Code's sign-in", async () => {
+  const home = await inServer(`
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const claude = await import("./server/bots/claude.ts");
+    const sign = await claude.connect("claude-code");
+    await claude.submitCode("claude-code", sign.id, "good-code");
+    // Status keeps only what Settings shows, never a token or org id Claude Code might print.
+    const view = JSON.stringify(await claude.logins());
+    a.match(view, /me@example\\.com/);
+    for (const secret of ["SECRET-ACCESS-TOKEN", "SECRET-ORG", "good-code", "sk-ant-ambient", "ambient-oauth"]) a.doesNotMatch(view, new RegExp(secret));
+    // Ambient API keys never reach Claude Code: a subscription sign-in can't quietly become API billing.
+    const calls = readFileSync(process.env.HOME + "/calls.log", "utf8").trim().split("\\n");
+    a.ok(calls.length >= 3);
+    for (const line of calls) a.match(line, / key=$/);
+    // Nothing OpenBuild writes holds any of them.
+    const walk = (d) => readdirSync(d).flatMap((n) => { const p = d + "/" + n; return statSync(p).isDirectory() ? walk(p) : [p]; });
+    for (const file of walk(process.env.OPENCHAT_DATA_DIR)) for (const secret of ["SECRET-ACCESS-TOKEN", "good-code", "sk-ant-ambient", "ambient-oauth"]) a.doesNotMatch(readFileSync(file, "latin1"), new RegExp(secret), file);
+    // Wrapper files (and their folder) are private to the user.
+    (await import("./server/bots/extensions.ts")).piFlags();
+    a.equal(statSync(process.env.OPENCHAT_DATA_DIR + "/bots/claude-code").mode & 0o077, 0);
+    for (const file of walk(process.env.OPENCHAT_DATA_DIR + "/bots/claude-code")) a.equal(statSync(file).mode & 0o077, 0, file);
+  `);
+  rmSync(home, { recursive: true, force: true });
+}, 30_000);
+
+test("the cache budget keeps the request valid however the markers are spread", () => {
+  const all = (payload: any) => [
+    ...(payload.tools ?? []),
+    ...(payload.system ?? []),
+    ...payload.messages.flatMap((m: any) => (Array.isArray(m.content) ? m.content.flatMap((b: any) => [b, ...(b.type === "tool_result" && Array.isArray(b.content) ? b.content : [])]) : [])),
+  ];
+  const markers = (payload: any) => all(payload).filter((b: any) => b.cache_control).map((b: any) => b.text ?? b.name ?? b.type);
+  // Many markers in history alone: the four nearest the end stay.
+  const history = { messages: Array.from({ length: 8 }, (_, i) => ({ role: i % 2 ? "assistant" : "user", content: [cached(`m${i}`)] })) };
+  budgetCacheMarkers(history);
+  expect(markers(history)).toEqual(["m4", "m5", "m6", "m7"]);
+  // Markers nested in tool results count, and string content is skipped without error.
+  const nested = {
+    system: [cached("s")],
+    messages: [
+      { role: "user", content: "plain text" },
+      { role: "user", content: [{ type: "tool_result", tool_use_id: "a", content: [cached("r1"), cached("r2")] }, { type: "tool_result", tool_use_id: "b", content: "text result" }] },
+      { role: "user", content: [cached("last")] },
+    ],
+  };
+  budgetCacheMarkers(nested);
+  expect(markers(nested)).toEqual(["s", "r1", "r2", "last"]);
+  // A 1h marker is never left after a 5m one: dropping only the earliest keeps their order.
+  const ttl = { system: [cached("a"), cached("b")], messages: [{ content: [{ type: "text", text: "c", cache_control: { type: "ephemeral" } }, { type: "text", text: "d", cache_control: { type: "ephemeral" } }, { type: "text", text: "e", cache_control: { type: "ephemeral" } }] }] };
+  budgetCacheMarkers(ttl);
+  const ttls = all(ttl).filter((b: any) => b.cache_control).map((b: any) => b.cache_control.ttl ?? "5m");
+  expect(ttls).toEqual(["1h", "5m", "5m", "5m"]);
+  // Running it twice changes nothing more.
+  const again = structuredClone(nested);
+  budgetCacheMarkers(again);
+  expect(again).toEqual(nested);
+});
