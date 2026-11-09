@@ -65,7 +65,7 @@ async function run(name: string, body: string) {
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(unexpectedStderr(err)).toBe('');
+    expect(unexpectedStderr(err.replace(/^\[bots\] [0-9a-f-]{36} fallback one\/primary → two\/fallback: overloaded\n/gm, ""))).toBe('');
     expect(code).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });

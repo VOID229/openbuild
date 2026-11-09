@@ -9,7 +9,7 @@ async function run(script: string) {
   try {
     const child = Bun.spawn([process.execPath, "-e", script], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe("");
+    expect(err.replace(/^\[bots\] [0-9a-f-]{36} fallback xai\/grok-4.7 → openai\/gpt-6.1-sol: down\n/gm, "")).toBe("");
     expect(code).toBe(0);
   } finally {
     await rm(dir, { recursive: true, force: true });

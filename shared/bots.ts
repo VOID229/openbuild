@@ -520,35 +520,23 @@ export const MODEL_SIGN_IN = "The sign-in for this model has expired. Sign in ag
 
 /** What the chat says of a bot's model that Pi, with the extensions bots load, doesn't have: switched off with its extension, say. */
 export const modelUnavailable = (model: string) => `${model} isn't available to bots. Its extension may be switched off in Settings → Bots.`;
-const MODEL_UNAVAILABLE = /[\w.:@-]+\/[\w.:@/-]+ isn't available to bots\. Its extension may be switched off in Settings → Bots\./;
 
-/**
- * OpenBuild's own reasons a reply failed, which say what happened (and what to do) without anything a
- * provider sent. Anything else, "rate limited" and "insufficient credits" included, may carry the
- * provider's words or a key, so it isn't shown.
- */
-const SAFE_REPLY_ERRORS = [
-  /^Pi isn't installed\. Install it in Settings → Pi\.$/,
-  /^The reply took too long and was stopped\.$/,
-  /^Pi didn't answer "\w+" in time$/,
-  /^Pi isn't running \(exited with code -?\d+\)$/,
-  /^Pi exited(?: \(code -?\d+\))?$/,
-];
+/** A provider's error with anything that looks like a key or token taken out, for the server log. */
+export function redactSecrets(text: string): string {
+  return text
+    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, "$1 [redacted]")
+    .replace(/((?:api[ _-]?key|access[ _-]?token|refresh[ _-]?token|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
+    .replace(/\bAIza[0-9A-Za-z_-]{35}(?![0-9A-Za-z_-])/g, "[redacted]")
+    .replace(/\b(?:sk|pk|rk|xai|gsk|ghp|gho|ghs|github_pat)[-_][\w-]{8,}/g, "[redacted]")
+    .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
+}
 
-/**
- * Why a reply failed, as the chat shows it: a lapsed sign-in's fix, or one of OpenBuild's own reasons,
- * and nothing else. A provider's error, or each fallback's, is kept in the server log and the bot's
- * status instead. Older lines saved those errors whole, in any shape, so they're hidden here too.
- */
-export function shownReplyError(detail: string | undefined, provider?: boolean): string | undefined {
-  if (!detail) return;
+
+/** Provider diagnostics are useful in chat too; redact before storing and again for legacy data. */
+export function shownReplyError(detail: string | undefined, _provider?: boolean): string | undefined {
+  if (!detail?.trim()) return;
   if (detail.includes(MODEL_SIGN_IN)) return MODEL_SIGN_IN;
-  // The model's id is the bot's own setting, not anything a provider said, so it's shown wherever it's found, the first of a chain's.
-  const unavailable = detail.match(MODEL_UNAVAILABLE);
-  if (unavailable) return unavailable[0];
-  if (provider) return;
-  const line = detail.trim();
-  return SAFE_REPLY_ERRORS.some((safe) => safe.test(line)) ? line : undefined;
+  return redactSecrets(detail).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "").trim().slice(0, 4000);
 }
 
 /**

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { BOT_EFFORTS, botModelChain, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -361,13 +361,14 @@ export async function applyModel(proc: Pick<PiProcess, "send">, botId: string, f
       // Pi's default can come from an extension bots don't load. Nobody picked it for this bot, so the next candidate, or Pi's own pick, will do.
       if (!chosen) continue;
       // One picked for it that Pi doesn't list at all came from an extension that's off now, most likely: said so, rather than as Pi's bare refusal.
-      if (await unlisted(proc, model)) throw new PiError(modelUnavailable(model));
-      throw err;
+      if (err instanceof PiTimeoutError) throw err;
+      if (await unlisted(proc, model)) throw new ModelFailure(modelUnavailable(model));
+      throw modelStartFailure(err);
     }
   }
   if (fallback) db.setValue(`fallback:${key}`, fallback);
   else {
-    if (!chosen && onFallback && current === onFallback) throw new PiError(`Couldn't switch back from fallback model ${onFallback} to the default model.`);
+    if (!chosen && onFallback && current === onFallback) throw new ModelFailure(`Couldn't switch back from fallback model ${onFallback} to the default model.`);
     db.setValue(`fallback:${key}`, null);
     if (!chosen && current) db.setValue(`primary:${key}`, current);
   }
@@ -394,6 +395,14 @@ export class ProviderError extends PiError {}
 
 /** A model failed before the reply did anything: no tool ran and no text was written, so another model can take the turn over. */
 export class ModelFailure extends ProviderError {}
+
+/** Only an explicit model/auth refusal proves a prompt never started. */
+export function modelStartFailure(err: unknown): unknown {
+  if (err instanceof PiTimeoutError) return err;
+  const message = err instanceof Error ? err.message : String(err);
+  return /model not found|no api key|isn't available to bots|unknown model|authentication|unauthorized|invalid.*(?:key|token)/i.test(message)
+    ? new ModelFailure(message) : err;
+}
 
 /**
  * Try a turn on each model of the chain until one manages it. Only a ModelFailure moves on; anything
@@ -426,7 +435,8 @@ export async function withFallbacks(
         const last = err instanceof Error ? err.message : String(err);
         throw new ProviderError(`Every model failed.\n${[...failures, `${model}: ${last}`].join("\n")}`);
       }
-      failures.push(`${model ?? "Default model"}: ${err.message.split("\n").pop()!.slice(0, 160)}`);
+      console.warn(`[bots] ${botId} fallback ${model ?? "Default model"} → ${chain[i + 1]}:`, redactSecrets(err.message));
+      failures.push(`${model ?? "Default model"}: ${redactSecrets(err.message)}`);
     }
   }
 }
@@ -446,6 +456,7 @@ function noteRan(botId: string, conversationId: string | undefined, chain: (stri
   if (index === 0 && !recovered) return;
   const where = conversationId ?? svc.directId(botId);
   if (!where || !on.model) return;
+  console.info(`[bots] ${botId} model switch ${last?.model ?? "none"} → ${on.model} (${recovered ? "primary retry succeeded" : "fallback after model failure"})`);
   const slash = on.model.indexOf("/");
   const id = on.model.slice(slash + 1);
   const twin = chain.some((m) => m && m !== on.model && m.slice(m.indexOf("/") + 1) === id);
@@ -565,14 +576,7 @@ export function modelError(message: unknown): string {
     : text;
 }
 
-/** A provider's error with anything that looks like a key or token taken out, for the server log. */
-export function redactSecrets(text: string): string {
-  return text
-    .replace(/\b(Bearer|Basic)\s+[\w.~+/=-]+/gi, "$1 [redacted]")
-    .replace(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)["']?\s*[:=]\s*["']?)[^\s"',}]+/gi, "$1[redacted]")
-    .replace(/\b(?:sk|pk|rk|xai|gsk|ghp|gho|ghs|github_pat)[-_][\w-]{8,}/g, "[redacted]")
-    .replace(/\b[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[redacted]");
-}
+export { redactSecrets } from "../../shared/bots";
 
 const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
 
@@ -710,15 +714,16 @@ async function runTurn(botId: string, all: Wake[]) {
         for (const job of m.steered?.splice(0) ?? []) enqueue(botId, job);
       }
       // Nothing has happened yet: a model Pi can't switch to, or that it refuses to start, is the next one's turn.
-      const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent ? err : new ModelFailure(err instanceof Error ? err.message : String(err)));
+      const untouched = (err: unknown) => (m.proc.exited || m.acted || m.sent || err instanceof PiTimeoutError ? err : modelStartFailure(err));
       try {
         const on = await applyModel(m.proc, botId, index ? model : undefined, key);
-        await applyEffort(m.proc, botId);
         // The switch is told once the model has taken the turn on, so a model that fails first isn't.
         m.onCommit = () => ran(on);
       } catch (err) {
         throw untouched(err);
       }
+      // Effort/configuration failures do not mean this model failed.
+      await applyEffort(m.proc, botId);
       let settled = false;
       m.onSettled = () => {
         settled = true;
@@ -760,10 +765,9 @@ async function runTurn(botId: string, all: Wake[]) {
     setStatus(botId, { state: "idle" });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // The provider's errors, each fallback's included, are for the log. The chat says only that it
-    // couldn't reply, how to sign in again, or one of OpenBuild's own reasons; whatever it leaves out is logged.
+    // Store redacted diagnostics so both the status and the chat explain the failure.
     const provider = err instanceof ProviderError;
-    setStatus(botId, { state: "error", error: message, provider: provider || undefined, since: Date.now() });
+    setStatus(botId, { state: "error", error: redactSecrets(message), provider: provider || undefined, since: Date.now() });
     const detail = shownReplyError(message, provider);
     if (provider || detail !== message.trim()) console.warn(`[bots] ${botId} couldn't reply:`, redactSecrets(message));
     const where = conversationId ?? svc.directId(botId);
