@@ -138,7 +138,8 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} extra={looks.length > 4 ? looks.length - 4 : undefined} />;
+  // Set beside a name (no badge either), there's no room for a "zzz": the huddle's own corner shows it elsewhere.
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} extra={looks.length > 4 ? looks.length - 4 : undefined} zzz={badge} />;
 });
 
 export { conversationName };

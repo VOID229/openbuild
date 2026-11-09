@@ -1,7 +1,7 @@
 // OpenBots' bots: a shape and a colour with two little eyes. Left alone they breathe, blink and
 // glance about; the bigger ones now and then nod, wiggle or squish. Eyes can follow the pointer, a
 // held mood (thinking while typing, happy at a reaction) changes their expression, and in a group the
-// ones not at work doze.
+// ones not at work doze, a "zzz" floating up over them.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood, type Shape } from "../../lib/bots/looks";
 import { cx } from "../../lib/ui";
@@ -160,13 +160,15 @@ export interface BotAvatarProps {
    * if it's alive. Set (true or false) on any avatar that can doze, so it eases in and out of it.
    */
   asleep?: boolean;
+  /** A little "zzz" floats up while it dozes. Off where something around it shows one instead (a huddle). */
+  zzz?: boolean;
   /** Change it to make the bot react once: a hop and a happy face, or the given mood. */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
   className?: string;
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = true, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const shape = shapeOf(look);
   const color = colorOf(look);
@@ -341,9 +343,25 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
           </g>
         </g>
       </svg>
+      {asleep !== undefined && zzz && <Zzz size={size} />}
     </span>
   );
 });
+
+/** Sized from the avatar's, but never so small it stops reading as letters (the sidebar's are 28px and less). */
+const zzzSize = (size: number) => Math.round(Math.min(16, Math.max(10, size * 0.3)));
+
+/** The "zzz" over a dozing bot or huddle: shown, and floating up a letter at a time, only while it dozes (see .bot-zzz). */
+function Zzz({ size }: { size: number }) {
+  return (
+    <span className="bot-zzz" style={{ fontSize: zzzSize(size) }} aria-hidden>
+      {/* The letters are drawn by CSS, so they stay out of the row's text. */}
+      <span data-z="z" />
+      <span data-z="z" />
+      <span data-z="Z" />
+    </span>
+  );
+}
 
 /**
  * A group's avatar: its members huddled together (up to four, the rest as a count). The user can
@@ -351,7 +369,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
  * come alive and fidget, and the rest doze (breathing, unless `alive` is false). Without it, every
  * member is awake and `alive` and `busy` go for all of them.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, extra, me }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; extra?: number; me?: React.ReactNode }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, extra, me, zzz = true }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; extra?: number; me?: React.ReactNode; zzz?: boolean }) {
   // Who sits in it: those at work first, so a busy member is never one of the count, and then in the
   // group's own order, so they keep their places.
   const room = me ? 3 : 4;
@@ -372,10 +390,12 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   if (me) items.push(["me", me]);
   members.forEach((i, n) => {
     const s = layout[n + (me ? 1 : 0)]?.[2] ?? 0.5;
-    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} track={track} />]);
+    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} track={track} />]);
   });
+  // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
+  const dozing = !!active && members.some((i) => !active[i]);
   return (
-    <span className="bot-huddle" style={{ width: size, height: size }} aria-hidden>
+    <span className="bot-huddle" style={{ width: size, height: size }} data-dozing={dozing ? "" : undefined} aria-hidden>
       {items.map(([key, item], i) => {
         const [x, y, s] = layout[i] ?? [0.5, 0.5, 0.5];
         // Dozing, heads lean in toward the middle of the huddle.
@@ -387,6 +407,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
         );
       })}
       {!!extra && <span className="bot-huddle-more">+{extra}</span>}
+      {active && zzz && <Zzz size={size} />}
     </span>
   );
 });

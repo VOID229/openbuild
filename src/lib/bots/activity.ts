@@ -1,5 +1,7 @@
 // Who is busy, and where. The sidebar, the chat's header and its list all read from here, so a bot
 // never looks busy in one place and idle in another, and work in another chat isn't shown as work here.
+import type { Chat } from "../types";
+import type { Mood } from "./looks";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -35,4 +37,23 @@ export function showWorking(conversationId: string, status: Statuses, typing: st
   return Object.entries(status)
     .filter(([id, st]) => !typing.includes(id) && (holding(st, conversationId) || (workingHere(st, conversationId) && !st!.quiet)))
     .map(([id]) => id);
+}
+
+/** Where a coding thread a bot started is: replying, blocked on a question for the user, or done. */
+export type ThreadActivity = "working" | "waiting" | "idle";
+
+export function threadActivity(chat: Pick<Chat, "messages">): ThreadActivity {
+  const last = chat.messages.findLast((m) => m.role === "assistant");
+  if (last?.status !== "streaming") return "idle";
+  return last.parts?.some((p) => p.type === "ask" && p.answer === undefined) ? "waiting" : "working";
+}
+
+/**
+ * How the mascot beside a thread shows it: at work it fidgets like a busy bot anywhere else, waiting
+ * on the user it's awake and looking up wide-eyed, and once the thread is done it dozes.
+ */
+export function threadMascot(activity: ThreadActivity): { busy: boolean; asleep: boolean; mood: Mood } {
+  if (activity === "working") return { busy: true, asleep: false, mood: "idle" };
+  if (activity === "waiting") return { busy: false, asleep: false, mood: "surprised" };
+  return { busy: false, asleep: true, mood: "idle" };
 }

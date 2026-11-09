@@ -3,6 +3,7 @@
 // who's in a side chat.
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { threadActivity, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation } from "../../lib/bots/types";
@@ -203,9 +204,6 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
   );
 }
 
-/** A thread whose latest reply is still coming. */
-const isWorking = (chat: Chat) => chat.messages.findLast((m) => m.role === "assistant")?.status === "streaming";
-
 /**
  * The coding threads this group's bots started from it that are working now, with the bot that
  * started each. Threads started before chats recorded it are found by the group's "Started a thread"
@@ -218,7 +216,7 @@ function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string 
     for (const m of conversation.messages) if (m.event?.kind === "thread" && m.event.text === "Started a thread" && m.event.threadId) started.set(m.event.threadId, m.author);
     return chats.flatMap((chat) => {
       const bot = chat.startedBy ? (chat.startedBy.conversation === conversation.id ? chat.startedBy.bot : undefined) : started.get(chat.id);
-      return bot && isWorking(chat) ? [{ chat, bot }] : [];
+      return bot && threadActivity(chat) !== "idle" ? [{ chat, bot }] : [];
     });
   }, [chats, conversation.id, conversation.messages]);
 }
@@ -231,13 +229,14 @@ function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }
       <ul className="bots-cards">
         {threads.map(({ chat, bot: id }) => {
           const bot = bots.find((b) => b.id === id);
+          const activity = threadActivity(chat);
           return (
             <li key={chat.id} className="bots-card-row bots-member">
               <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
-                {bot && <BotAvatar look={bot.look} size={28} mood="thinking" />}
+                {bot && <BotAvatar look={bot.look} size={28} {...threadMascot(activity)} />}
                 <span className="bots-card-text">
                   <span className="bots-routine-title">{chat.title}</span>
-                  <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName].filter(Boolean).join(" · ")}</span>
+                  <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName, activity === "waiting" && "Waiting for you"].filter(Boolean).join(" · ")}</span>
                 </span>
               </button>
             </li>
