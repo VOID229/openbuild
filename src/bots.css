@@ -1180,27 +1180,157 @@
   pointer-events: auto;
 }
 
+/* At rest a compact pill of the bots alone. Hovered, focused from the keyboard, or with the details
+   open, it widens to show the name and a chevron; a touch screen, with no hover to find it by, keeps
+   them out. The width eases with the panels' curve while the words fade in and slide out from behind
+   the bots, so the pill grows as one piece. */
 .bots-head-pill {
+  --head-ease: var(--ease-panel);
+  --head-open: 420ms;
   display: flex;
   align-items: center;
-  gap: 9px;
   max-width: min(420px, calc(100% - 120px));
-  height: 42px;
-  padding: 0 16px 0 9px;
-  border-radius: 21px;
+  height: 36px;
+  padding: 0 9px 0 8px;
+  border-radius: 18px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface) 82%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: var(--shadow-sm);
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 500;
   transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+
+.bot-lineup {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 1px;
+}
+
+.bot-lineup-more {
+  padding-left: 3px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+/* Each part (the name, then the chevron) sits in a track that goes from nothing to its full width (0fr
+   to 1fr), so the pill sizes itself to the name without a guessed width. The words keep their full
+   width inside, never squeezed into an ellipsis on the way, and the clip shows them through a soft
+   right edge: it falls in the padding once open, and fades a name too long for the pill. */
+.bots-head-reveal {
+  display: grid;
+  grid-template-columns: 0fr;
+  min-width: 0;
+  transition: grid-template-columns var(--head-open) var(--head-ease);
+}
+
+.bots-head-reveal-clip {
+  min-width: 0;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
+}
+
+.bots-head-reveal-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  padding: 0 10px 0 9px;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateX(-10px);
+  filter: blur(3px);
+  transition:
+    opacity 180ms var(--ease),
+    transform var(--head-open) var(--head-ease),
+    filter 240ms var(--ease);
+}
+
+/* The chevron's own track, which a long name never squeezes. */
+.bots-head-reveal-chevron {
+  flex: none;
+}
+
+.bots-head-reveal-chevron .bots-head-reveal-clip {
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+.bots-head-reveal-chevron .bots-head-reveal-body {
+  padding: 0 1px 0 0;
+  transform: translateX(-8px);
+}
+
+.bots-head-chevron {
+  display: block;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease);
+}
+
+.bots-head-pill:is(:focus-visible, [aria-expanded="true"]) .bots-head-reveal {
+  grid-template-columns: 1fr;
+}
+
+.bots-head-pill:is(:focus-visible, [aria-expanded="true"]) .bots-head-reveal-body {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  transition-delay: 40ms, 0ms, 40ms;
 }
 
 @media (hover: hover) {
   .bots-head-pill:hover {
     background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  }
+
+  .bots-head-pill:hover .bots-head-chevron {
+    color: var(--text-2);
+  }
+}
+
+/* Opening isn't behind (hover: hover): a touch screen's sticky hover after a tap only opens what the
+   rule below already keeps open there. */
+.bots-head-pill:hover .bots-head-reveal {
+  grid-template-columns: 1fr;
+}
+
+.bots-head-pill:hover .bots-head-reveal-body {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  transition-delay: 40ms, 0ms, 40ms;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .bots-head-reveal {
+    grid-template-columns: 1fr;
+  }
+
+  .bots-head-reveal-body {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* Reduced motion: it opens at once, the words only fading in. */
+@media (prefers-reduced-motion: reduce) {
+  .bots-head-reveal {
+    transition: none;
+  }
+
+  .bots-head-reveal-body {
+    transform: none;
+    filter: none;
+    transition: opacity 120ms linear;
   }
 }
 
@@ -1228,6 +1358,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .bots-head-side {

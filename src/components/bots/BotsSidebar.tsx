@@ -106,7 +106,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
   return createPortal(
     <div ref={ref} role="tooltip" className="bots-peek" data-side={pos?.side ?? peek.side} data-state={pos ? "open" : "measuring"} style={{ left: pos?.left ?? 0, top: pos?.top ?? 0 }}>
       <span className="bots-peek-head">
-        <ConversationAvatar conversation={conversation} size={18} alive={false} working={working} badge={false} />
+        <ConversationAvatar conversation={conversation} size={18} alive={false} working={working} badge={false} lineup />
         <span className="bots-peek-name">
           {title}
           {tag && <span className="bots-peek-tag"> · {tag}</span>}

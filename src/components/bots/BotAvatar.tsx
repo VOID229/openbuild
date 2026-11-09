@@ -501,6 +501,26 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   );
 });
 
+/**
+ * A group's members side by side, each its own mascot, for where a huddle would be too small to read
+ * (the chat's header at rest). Up to `max` show, those at work first as in a huddle, and the rest as a
+ * count after them. `active` picks who is at work, as in BotHuddle; the rest doze, without a "zzz" each.
+ */
+export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; max?: number }) {
+  const room = looks.length > max ? max - 1 : max;
+  const order = looks.map((_, i) => i);
+  const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
+  const extra = looks.length - members.length;
+  return (
+    <span className="bot-lineup" aria-hidden>
+      {members.map((i) => (
+        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} track={track} />
+      ))}
+      {extra > 0 && <span className="bot-lineup-more">+{extra}</span>}
+    </span>
+  );
+});
+
 /** OpenBots' icon for the sidebar: a puff outline with two eyes, in the text colour like the other icons. */
 export function BotsGlyph({ size = 18, className }: { size?: number; className?: string; "aria-hidden"?: boolean }) {
   return (
