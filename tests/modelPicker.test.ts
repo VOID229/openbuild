@@ -143,6 +143,40 @@ describe.skipIf(!browser)("model picker", () => {
     expect((await pill(page)).label).toStartWith("Model: Claude Sonnet 5.5");
   }, 30_000);
 
+  test("reasoning and speed are radio groups: ←/→ move between options, and each group is one Tab stop", async () => {
+    const page = await open("desktop");
+    await page.openPicker();
+    // A level's name is its long label; the short one is for narrow pickers.
+    const name = "(el) => (el.querySelector('.mp-effort-long') ?? el).textContent";
+    const focused = () => page.eval<any>(`(${name})(document.activeElement)`);
+    const stops = (group: string) => page.eval<any>(`[...document.querySelectorAll('${group} [role=radio]')].filter((el) => el.tabIndex === 0).map(${name})`);
+    // Only the selected option takes Tab.
+    expect(await stops(".mp-effort-levels")).toEqual(["Medium"]);
+    expect(await stops(".mp-speed")).toEqual(["Standard"]);
+
+    await page.eval(`document.querySelector('.mp-effort-level[aria-checked="true"]').focus()`);
+    await page.key("ArrowRight", "ArrowRight", 39);
+    expect(await focused()).toBe("High");
+    await page.key("ArrowLeft", "ArrowLeft", 37);
+    await page.key("ArrowLeft", "ArrowLeft", 37);
+    expect(await focused()).toBe("Low");
+    await page.key("ArrowDown", "ArrowDown", 40);
+    expect(await focused()).toBe("Medium");
+    // Tab leaves the group rather than stepping through its levels.
+    await page.key("Tab", "Tab", 9);
+    expect(await page.eval<any>("!!document.activeElement?.closest('.mp-effort-levels')")).toBe(false);
+
+    await page.eval(`document.querySelector('.mp-speed-opt[aria-checked="true"]').focus()`);
+    await page.key("ArrowRight", "ArrowRight", 39);
+    expect(await focused()).toBe("Fast");
+    await page.key("ArrowLeft", "ArrowLeft", 37);
+    expect(await focused()).toBe("Standard");
+
+    // Picking a level moves the Tab stop with it.
+    await page.click('.mp-effort-level:nth-child(3)');
+    expect(await stops(".mp-effort-levels")).toEqual(["High"]);
+  }, 30_000);
+
   test("a model without reasoning levels says so instead of listing them", async () => {
     const page = await open("desktop");
     await page.openPicker();
