@@ -20,7 +20,7 @@ import { PluginSlot } from "../lib/plugins";
 import { RUNTIMES } from "../lib/runtimes";
 import { cx } from "../lib/ui";
 import { openLightbox } from "./Lightbox";
-import { EffortPicker, ModelPicker, PermissionPicker, RemoteControlToggle, SpeedPicker } from "./Pickers";
+import { ModelPicker, PermissionPicker, RemoteControlToggle } from "./Pickers";
 import { IconButton } from "./primitives";
 import { DictationButton } from "./DictationButton";
 import { WorkspaceBelow, WorkspaceTop } from "./Workspace";
@@ -851,7 +851,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
 
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
-      {!chatId && <WorkspaceTop />}
+      {!chatId && <WorkspaceTop permission={<PermissionPicker dropUp={false} deviceId={mentionDevice} cwd={mentionCwd} />} />}
       {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={removeStash} />}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
@@ -947,9 +947,6 @@ export function Composer({ variant, chatId, streaming }: Props) {
             }}
           />
           <ModelPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
-          <EffortPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
-          <SpeedPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
-          <PermissionPicker dropUp={variant === "dock"} chatId={chatId} deviceId={mentionDevice} cwd={mentionCwd} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>
@@ -987,7 +984,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
       </div>
       <RemoteControlToggle chatId={chatId} />
       <PluginSlot name="composer:below" context={{ variant, chatId }} />
-      {chatId && <WorkspaceBelow chatId={chatId} streaming={streaming} />}
+      {chatId && <WorkspaceBelow chatId={chatId} streaming={streaming} permission={<PermissionPicker dropUp chatId={chatId} deviceId={mentionDevice} cwd={mentionCwd} />} />}
     </div>
   );
 }
