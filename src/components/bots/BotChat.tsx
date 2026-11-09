@@ -353,6 +353,10 @@ interface Picker {
   messageId: string;
   mine: boolean;
   what: "react";
+  /** Answering this reaction, by id, rather than the message. */
+  to?: string;
+  /** The bot whose reaction is answered, to perk up at it. */
+  answering?: string;
 }
 
 function CopyAction({ text }: { text: string }) {
@@ -584,7 +588,7 @@ function ReactionArrow() {
   );
 }
 
-function Reactions({ message, conversation, bots, mine }: { message: BotMessage; conversation: Conversation; bots: Bot[]; mine: boolean }) {
+function Reactions({ message, conversation, bots, mine, onPicker }: { message: BotMessage; conversation: Conversation; bots: Bot[]; mine: boolean; onPicker?: RowProps["onPicker"] }) {
   const threads = useMemo(() => reactionThreads(message.reactions ?? []), [message.reactions]);
   if (!threads.length) return null;
   const names = (by: string[]) => by.map((b) => authorName(b, bots)).join(", ");
@@ -596,6 +600,8 @@ function Reactions({ message, conversation, bots, mine }: { message: BotMessage;
             const { emoji, by, to } = group;
             const reactors = by.filter((b) => b !== "me").map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
             const answered = parent ? parent.by.find((b) => b !== "me") : message.author !== "me" ? message.author : undefined;
+            // A bot's reaction can be answered with one of the user's own, which then hangs off it with an arrow.
+            const bot = by.findIndex((b) => b !== "me");
             return (
               <span key={group.key} className="bm-reaction-link">
                 {parent && <ReactionArrow />}
@@ -609,12 +615,31 @@ function Reactions({ message, conversation, bots, mine }: { message: BotMessage;
                     if (!by.includes("me") && answered) noticeReaction(answered, emoji);
                   }}
                 >
-                  <span className="bm-reaction-emoji">{emoji}</span>
-                  {reactors.slice(0, 2).map((b) => (
-                    <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
-                  ))}
-                  {by.length > 1 && <span className="bm-reaction-count">{by.length}</span>}
+                  <span className="bm-reaction-pill">
+                    <span className="bm-reaction-emoji">{emoji}</span>
+                    {by.length > 1 && <span className="bm-reaction-count">{by.length}</span>}
+                  </span>
+                  {/* Who reacted hangs off the pill's lower corner, part of the same button; the count says how many. */}
+                  {reactors.length > 0 && (
+                    <span className="bm-reaction-mascots" aria-hidden="true">
+                      {reactors.slice(0, 3).map((b) => (
+                        <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
+                      ))}
+                    </span>
+                  )}
                 </button>
+                {onPicker && bot >= 0 && (
+                  <button
+                    type="button"
+                    className="bm-reaction-reply"
+                    aria-label={`React to ${names(by.filter((b) => b !== "me"))}'s ${emoji}`}
+                    data-tooltip="React to this"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => onPicker({ messageId: message.id, mine, what: "react", to: group.ids[bot], answering: by[bot] }, e.currentTarget)}
+                  >
+                    <SmilePlus size={10} strokeWidth={2.4} />
+                  </button>
+                )}
               </span>
             );
           })}
@@ -732,7 +757,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           </div>
         )}
       </div>
-      <Reactions message={m} conversation={conversation} bots={bots} mine={mine} />
+      <Reactions message={m} conversation={conversation} bots={bots} mine={mine} onPicker={readonly ? undefined : onPicker} />
       {seen}
     </div>
   );
@@ -1153,7 +1178,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const onPicker = useCallback((p: Picker, el: HTMLElement) => {
     anchor.current = el;
     setShowAll(false);
-    setPicker((cur) => (cur?.messageId === p.messageId && cur.what === p.what ? undefined : p));
+    setPicker((cur) => (cur?.messageId === p.messageId && cur.what === p.what && cur.to === p.to ? undefined : p));
   }, []);
   const sending = useBots((s) => s.sending);
   const touchY = useRef(0);
@@ -1237,6 +1262,15 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const picked = picker ? conversation.messages.find((m) => m.id === picker.messageId) : undefined;
   const heldMessage = held ? conversation.messages.find((m) => m.id === held.id) : undefined;
   const closePicker = () => setPicker(undefined);
+  /** Toggles the user's `emoji` on the picked message, or on the reaction it answers. */
+  const pick = (emoji: string) => {
+    if (!picked || !picker) return;
+    const had = picked.reactions?.some((r) => r.by === "me" && r.emoji === emoji && r.to === picker.to);
+    st.toggleReaction(conversation.id, picked.id, emoji, "me", picker.to);
+    const author = picker.to ? picker.answering : picked.author;
+    if (!had && author && author !== "me") noticeReaction(author, emoji);
+    closePicker();
+  };
   const st = useBots.getState();
 
   return (
@@ -1400,14 +1434,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             <button
               key={e}
               type="button"
-              className={cx("bm-react-btn", picked?.reactions?.some((r) => r.by === "me" && r.emoji === e && !r.to) && "bm-react-btn-on")}
-              onClick={() => {
-                if (!picked) return;
-                const had = picked.reactions?.some((r) => r.by === "me" && r.emoji === e && !r.to);
-                st.toggleReaction(conversation.id, picked.id, e, "me");
-                if (!had && picked.author !== "me") noticeReaction(picked.author, e);
-                closePicker();
-              }}
+              className={cx("bm-react-btn", picked?.reactions?.some((r) => r.by === "me" && r.emoji === e && r.to === picker?.to) && "bm-react-btn-on")}
+              onClick={() => pick(e)}
             >
               {e}
             </button>
@@ -1423,12 +1451,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 key={e}
                 type="button"
                 className="bm-react-btn"
-                onClick={() => {
-                  if (!picked) return;
-                  st.toggleReaction(conversation.id, picked.id, e, "me");
-                  if (picked.author !== "me") noticeReaction(picked.author, e);
-                  closePicker();
-                }}
+                onClick={() => pick(e)}
               >
                 {e}
               </button>
