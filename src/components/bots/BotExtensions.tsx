@@ -66,18 +66,18 @@ export function BotExtensions() {
           <div className="setting-row">
             <div className="setting-text">
               <div className="setting-label">Load my Pi extensions too</div>
-              <p className="setting-desc">Bots have everything they need without these. Turn this on to pick extensions from your own Pi to add to them, including any that provide models.</p>
+              <p className="setting-desc">Add extensions from your own Pi, including ones that provide models.</p>
             </div>
             <Toggle checked={custom.enabled} label="Load my Pi extensions too" onChange={(enabled) => void apply({ ...custom, enabled })} />
           </div>
           {!checking && missing.length > 0 && (
             <p className="field-help key-status key-status-bad" role="alert">
-              <CircleAlert size={13} className="bad" /> Bots can't use {missing.map((m) => `${m.model} (${m.usedBy.join(", ")})`).join("; ")} with the extensions loaded now. They move on to a fallback, or can't reply, until they're given another model or its extension is back on.
+              <CircleAlert size={13} className="bad" /> Bots can't use {missing.map((m) => `${m.model} (${m.usedBy.join(", ")})`).join("; ")} with the extensions loaded now, so they fall back or can't reply until that changes.
             </p>
           )}
           {custom.enabled && (
             <>
-              <p className="field-help keys-help">Most extensions work fine, but they weren't all made with bots in mind, so one may clash or misbehave. They also run on this server rather than in a bot's container. Changes apply from each bot's next reply.</p>
+              <p className="field-help keys-help">Not every extension is made for bots, so one may misbehave. They run on this server, outside bots' containers.</p>
               {checking && (
                 <p className="field-help key-status" role="status">
                   <Spinner size={12} /> Checking these work together

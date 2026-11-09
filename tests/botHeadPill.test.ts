@@ -1,7 +1,7 @@
-// The chat's header pill, in a real Chrome and in both themes: at rest just the bots, one by one in a
-// row, with the name and chevron tucked away; hovered or reached by keyboard, it widens smoothly to
-// show them, and a click still opens the details. A touch screen keeps it open, as do the details,
-// and with reduced motion it opens at once.
+// The chat's header, in a real Chrome and in both themes: a solid bar above the conversation (never over
+// it) holding a pill of the bots, one by one in a row, with the name and a chevron beside them. It
+// doesn't change size on hover, nothing in it animates layout, and a click (or Enter from the keyboard)
+// toggles the details.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -38,22 +38,20 @@ const open = async (theme: "light" | "dark", before?: (page: Page) => Promise<un
 const done = (page: Page) =>
   page.eval(`Promise.all(${PILL}.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {}))).then(() => true)`);
 
-type Pill = { width: number; height: number; reveal: number; opacity: number; nameClipped: boolean; nameInside: boolean; chevron: { width: number; inside: boolean } | null; bots: { left: number; right: number; top: number; bottom: number }[]; huddles: number; bg: string; text: string };
+type Pill = { width: number; height: number; nameInside: boolean; nameClipped: boolean; chevron: { width: number; inside: boolean } | null; bots: { left: number; right: number; top: number; bottom: number }[]; huddles: number; bg: string; text: string };
 const pill = (page: Page) =>
   page.eval<Pill>(`(() => {
     const p = ${PILL}, r = p.getBoundingClientRect();
     const inside = (el) => { const b = el.getBoundingClientRect(); return b.width > 0 && b.left >= r.left && b.right <= r.right; };
     const name = p.querySelector('.bots-head-name'), chev = p.querySelector('.bots-head-chevron');
-    const shown = p.querySelector('.bots-head-reveal-clip').getBoundingClientRect(), chevClip = chev?.closest('.bots-head-reveal-clip').getBoundingClientRect();
     return {
-      width: r.width, height: r.height, reveal: shown.width,
-      opacity: Number(getComputedStyle(p.querySelector('.bots-head-reveal-body')).opacity),
-      nameClipped: name.scrollWidth > name.clientWidth + 0.5 || name.getBoundingClientRect().right > shown.right - 9.5,
+      width: r.width, height: r.height,
       nameInside: inside(name),
-      chevron: chev && { width: chev.getBoundingClientRect().width, inside: inside(chev) && chev.getBoundingClientRect().right <= chevClip.right + 0.5 },
+      nameClipped: name.scrollWidth > name.clientWidth + 0.5,
+      chevron: chev && { width: chev.getBoundingClientRect().width, inside: inside(chev) },
       bots: [...p.querySelectorAll('.bot')].map((b) => { const x = b.getBoundingClientRect(); return { left: x.left, right: x.right, top: x.top, bottom: x.bottom }; }),
       huddles: p.querySelectorAll('.bot-huddle').length,
-      bg: getComputedStyle(p).backgroundColor, text: getComputedStyle(name).color,
+      bg: getComputedStyle(document.querySelector('.bots-head')).backgroundColor, text: getComputedStyle(name).color,
     };
   })()`);
 
@@ -64,26 +62,19 @@ const hover = async (page: Page) => {
 };
 const leave = (page: Page) => page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 700 });
 
-/** Collapsed: only the bots show, nothing of the name or chevron. */
-const expectRest = (p: Pill) => {
-  expect(p.reveal).toBeLessThan(0.5);
-  expect(p.opacity).toBe(0);
-  expect(p.nameInside).toBe(false);
-};
-/** Open: the whole name and the chevron inside the pill. */
-const expectOpen = (p: Pill, chevron = true) => {
-  expect(p.opacity).toBe(1);
+/** The whole name and the chevron inside the pill. */
+const expectShown = (p: Pill, chevron = true) => {
   expect(p.nameInside).toBe(true);
   expect(p.nameClipped).toBe(false);
   if (chevron) expect(p.chevron?.inside).toBe(true);
 };
 
-describe.skipIf(!browser)("the chat's header pill", () => {
+describe.skipIf(!browser)("the chat's header", () => {
   for (const theme of ["light", "dark"] as const) {
-    test(`at rest, the group's bots one by one in a row and no name; hovered, the name and a chevron (${theme})`, async () => {
+    test(`shows the group's bots one by one in a row, the name and a chevron, and holds its size on hover (${theme})`, async () => {
       const page = await open(theme);
       const rest = await pill(page);
-      expectRest(rest);
+      expectShown(rest);
       // Each member its own mascot, side by side on one line, not a huddle.
       expect(rest.huddles).toBe(0);
       expect(rest.bots).toHaveLength(4);
@@ -92,88 +83,68 @@ describe.skipIf(!browser)("the chat's header pill", () => {
         expect(Math.abs(rest.bots[i]!.top - rest.bots[0]!.top)).toBeLessThan(1);
       }
       expect(rest.height).toBeLessThanOrEqual(36);
-      // Readable in this theme.
+      // Readable in this theme, on a solid bar.
       expect(rest.text).not.toBe(rest.bg);
+      expect(rest.bg).not.toBe("rgba(0, 0, 0, 0)");
 
       await hover(page);
       await done(page);
-      const opened = await pill(page);
-      expectOpen(opened);
-      expect(opened.width).toBeGreaterThan(rest.width + 60);
-      expect(opened.height).toBe(rest.height);
-      // The bots stay put relative to each other.
-      expect(opened.bots.map((b) => Math.round(b.right - b.left))).toEqual(rest.bots.map((b) => Math.round(b.right - b.left)));
+      const hovered = await pill(page);
+      expectShown(hovered);
+      expect(hovered.width).toBe(rest.width);
+      expect(hovered.height).toBe(rest.height);
 
       await leave(page);
       await done(page);
-      expectRest(await pill(page));
+      expect((await pill(page)).width).toBe(rest.width);
     }, 20_000);
   }
 
-  test("it widens smoothly, frame by frame, rather than jumping", async () => {
+  test("sits above the conversation, not over it, and animates no layout", async () => {
     const page = await open("dark");
-    const start = (await pill(page)).width;
+    const [head, messages] = await page.eval<[{ bottom: number }, { top: number }]>(`[{ bottom: document.querySelector('.bots-head').getBoundingClientRect().bottom }, { top: document.querySelector('.bots-messages').getBoundingClientRect().top }]`);
+    // The conversation's scrolling area starts where the bar ends, so nothing readable sits under it.
+    expect(messages.top).toBeGreaterThanOrEqual(head.bottom - 0.5);
     await hover(page);
-    const widths = await page.eval<number[]>(`new Promise((resolve) => {
-      const seen = [], p = ${PILL}, t0 = performance.now();
-      const tick = () => { seen.push(p.getBoundingClientRect().width); performance.now() - t0 < 600 ? requestAnimationFrame(tick) : resolve(seen); };
-      requestAnimationFrame(tick);
-    })`);
-    const end = widths.at(-1)!;
-    expect(end).toBeGreaterThan(start + 60);
-    // Many steps in between, each no narrower than the last.
-    expect(new Set(widths.filter((w) => w > start + 1 && w < end - 1).map(Math.round)).size).toBeGreaterThanOrEqual(5);
-    for (let i = 1; i < widths.length; i++) expect(widths[i]!).toBeGreaterThanOrEqual(widths[i - 1]! - 0.5);
-    const eased = await page.eval<boolean>(`getComputedStyle(document.querySelector('.bots-head-reveal')).transitionProperty.includes('grid-template-columns')`);
-    expect(eased).toBe(true);
+    const moving = await page.eval<string[]>(`${PILL}.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition && !a.effect.target.closest('.bot')).map((a) => a.transitionProperty)`);
+    for (const property of moving) expect(["grid-template-columns", "transform", "filter", "width", "padding-right", "backdrop-filter"]).not.toContain(property);
+    const blur = await page.eval<string>(`getComputedStyle(${PILL}).backdropFilter`);
+    expect(blur).toBe("none");
   }, 20_000);
 
-  test("reached by keyboard it opens, and Enter still opens the details", async () => {
+  test("reached by keyboard, Enter opens the details", async () => {
     const page = await open("dark");
     for (let i = 0; i < 40 && !(await page.eval<boolean>(`document.activeElement === ${PILL}`)); i++) {
       for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     }
     expect(await page.eval<boolean>(`document.activeElement === ${PILL} && ${PILL}.matches(':focus-visible')`)).toBe(true);
     await page.settle();
-    await done(page);
-    expectOpen(await pill(page));
+    expectShown(await pill(page));
     for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" && { text: "\r" }) });
     await page.settle();
     expect(await page.eval<boolean>("bots.getState().detailsOpen")).toBe(true);
   }, 20_000);
 
-  test("a click still toggles the details, and while they're open it stays wide", async () => {
+  test("a click toggles the details, and the pill says so", async () => {
     const page = await open("light");
     await page.click(".bots-head-pill");
     expect(await page.eval<boolean>("bots.getState().detailsOpen")).toBe(true);
+    expect(await page.eval<string | null>(`${PILL}.getAttribute('aria-expanded')`)).toBe("true");
     await leave(page);
     await page.settle();
     await done(page);
-    const opened = await pill(page);
-    expectOpen(opened);
+    expectShown(await pill(page));
     await page.click(".bots-head-pill");
     expect(await page.eval<boolean>("bots.getState().detailsOpen")).toBe(false);
   }, 20_000);
 
-  test("on a touch screen, with no hover, the name and chevron stay out", async () => {
+  test("on a touch screen the name and chevron show too", async () => {
     const page = await open("dark", (p) => p.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 }));
     expect(await page.eval<boolean>("matchMedia('(hover: none) and (pointer: coarse)').matches")).toBe(true);
-    expectOpen(await pill(page));
+    expectShown(await pill(page));
   }, 20_000);
 
-  test("with reduced motion it opens at once, without sliding", async () => {
-    const page = await open("dark", (p) => p.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] }));
-    await hover(page);
-    await page.settle();
-    // Laid out wide straight away: nothing grows, slides or blurs, the words only fade.
-    const moving = await page.eval<string[]>(`${PILL}.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition && !a.effect.target.closest('.bot')).map((a) => a.transitionProperty)`);
-    for (const property of moving) expect(["grid-template-columns", "transform", "filter", "width", "padding-right"]).not.toContain(property);
-    expect((await pill(page)).reveal).toBeGreaterThan(60);
-    await done(page);
-    expectOpen(await pill(page));
-  }, 20_000);
-
-  test("a bot's own chat shows its one mascot, and a long name fades out inside the pill, chevron and all", async () => {
+  test("a bot's own chat shows its one mascot, and a long name ends in an ellipsis inside the pill, chevron and all", async () => {
     const page = await open("dark");
     await page.eval(`bots.getState().select("dm")`);
     await page.until(`!!document.querySelector('.bots-head-pill .bot') && document.querySelector('.bots-head-name').textContent === 'Dr Eggbot'`);
@@ -182,13 +153,11 @@ describe.skipIf(!browser)("the chat's header pill", () => {
     await page.eval(`bots.getState().select("dev")`);
     await page.eval(`bots.setState((s) => ({ conversations: s.conversations.map((c) => c.id === "dev" ? { ...c, name: "A group with a name far too long to fit in the header pill at all" } : c) }))`);
     await page.settle();
-    await hover(page);
-    await done(page);
-    const [p, clipped] = await page.eval<[number, boolean]>(`(() => { const p = ${PILL}, c = p.querySelector('.bots-head-reveal-clip'); return [p.getBoundingClientRect().width, c.scrollWidth > c.clientWidth]; })()`);
-    // Its max-width: min(420px, the pane less room either side).
-    expect(p).toBeLessThanOrEqual(420.5);
-    expect(clipped).toBe(true);
-    expect((await pill(page)).chevron?.inside).toBe(true);
+    const p = await pill(page);
+    // Its max-width: min(480px, the pane less room either side).
+    expect(p.width).toBeLessThanOrEqual(480.5);
+    expect(p.nameClipped).toBe(true);
+    expect(p.chevron?.inside).toBe(true);
   }, 20_000);
 });
 

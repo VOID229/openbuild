@@ -109,7 +109,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
         <Instructions
           value={bot.instructions}
           placeholder="What is this bot for, and how should it act?"
-          hint="The bots write these as they learn what this one is for, and you can change them any time. It reads them before every reply."
+          hint="Read before every reply. The bot updates these as it learns, and you can edit them any time."
           onChange={(v) => st.updateBot(bot.id, { instructions: v })}
         />
       </section>
@@ -131,7 +131,7 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
         <div className="setting-row">
           <div className="setting-text">
             <div className="setting-label">Check in on its own</div>
-            <p className="setting-desc">How often it wakes up to see if anything's worth telling you, roughly, outside quiet hours. Each check uses its model. Messages and routines work either way.</p>
+            <p className="setting-desc">How often it checks whether anything's worth telling you, outside quiet hours. Each check uses its model.</p>
           </div>
           <OptionSelect label="Check in on its own" value={bot.proactivity ?? "normal"} options={CHECK_INS} onChange={(proactivity) => st.updateBot(bot.id, { proactivity })} />
         </div>
@@ -342,9 +342,7 @@ export function BotsSettingsSection() {
     <>
       <SettingsHeading>Bots</SettingsHeading>
       {syncStatus}
-      <p className="bots-set-intro">
-        Bots keep their own instructions, memory and conversation with you, and work together in groups. Open them from the bot button at the bottom of the sidebar.
-      </p>
+      <p className="bots-set-intro">Each bot keeps its own instructions, memory and chat. Groups put several bots in one chat.</p>
 
       <section className="pi-block">
         <div className="pi-subhead">
@@ -372,7 +370,7 @@ export function BotsSettingsSection() {
           {groups.map((g) => (
             <GroupRow key={g.id} group={g} bots={bots} onEdit={() => setEditing({ kind: "group", id: g.id })} />
           ))}
-          {!groups.length && <li className="pi-empty">No groups yet. A group puts a few bots in one chat to work on something together.</li>}
+          {!groups.length && <li className="pi-empty">No groups yet.</li>}
         </ul>
       </section>
 
@@ -384,7 +382,7 @@ export function BotsSettingsSection() {
         <div className="setting-row setting-row-stack">
           <div className="setting-text">
             <div className="setting-label">Default model</div>
-            <p className="setting-desc">What every bot set to Default runs on. A bot with its own model keeps it. Changes apply from each bot's next reply.</p>
+            <p className="setting-desc">Used by every bot set to Default.</p>
           </div>
           <BotModelSelect label="Default model" value={defaultModel} unset="Pi's default" onChange={st.setDefaultModel} />
         </div>

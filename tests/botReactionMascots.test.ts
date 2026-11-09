@@ -134,10 +134,11 @@ describe.skipIf(!browser)("reactions from bots", () => {
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     await page.settle();
     expect(await page.eval<unknown>(`getComputedStyle(document.querySelector('.bm-reaction')).animationName`)).toBe("none");
-    // Headless Chrome has no hover to try it with: every rule growing a hovered chip asks for motion first.
-    const hovers = await page.eval<string[]>(`[...document.styleSheets].flatMap((s) => [...s.cssRules]).filter((r) => r.cssText.includes(".bm-reaction:hover")).map((r) => r.conditionText ?? "")`);
+    // Headless Chrome has no hover to try it with: a hovered chip only changes colour, and any rule that
+    // would grow or move it asks for motion first.
+    const hovers = await page.eval<{ media: string; moves: boolean }[]>(`[...document.styleSheets].flatMap((s) => [...s.cssRules]).filter((r) => r.cssText.includes(".bm-reaction:hover")).map((r) => ({ media: r.conditionText ?? "", moves: /transform|scale|translate/.test(r.cssText) }))`);
     expect(hovers.length).toBeGreaterThan(0);
-    for (const media of hovers) expect(media).toContain("prefers-reduced-motion: no-preference");
+    for (const { media, moves } of hovers) if (moves) expect(media).toContain("prefers-reduced-motion: no-preference");
   }, 60_000);
 });
 

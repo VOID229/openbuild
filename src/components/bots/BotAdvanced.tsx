@@ -94,7 +94,7 @@ export function BotEffortSelect({ bot, className }: { bot: Bot; className?: stri
   );
 }
 
-const EFFORT_DESC = "How hard the model thinks. Default is Pi's own level; only the levels its model takes are listed. Changes apply from the bot's next reply.";
+const EFFORT_DESC = "How much the model reasons before answering. Default uses Pi's own level.";
 
 /** The bot's model, falling back to the default in Settings → Bots. */
 export function BotModel({ bot }: { bot: Bot }) {
@@ -104,7 +104,7 @@ export function BotModel({ bot }: { bot: Bot }) {
       <div className="setting-row setting-row-stack">
         <div className="setting-text">
           <div className="setting-label">Model</div>
-          <p className="setting-desc">Default follows the default model in Settings → Bots. Changes apply from the bot's next reply.</p>
+          <p className="setting-desc">Default uses your default model.</p>
         </div>
         <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
       </div>
@@ -156,13 +156,13 @@ export function BotFallbacks({ bot, header }: { bot: Bot; header: (select: React
     else if (next === "inherit") updateBot(bot.id, { noFallbacks: false, fallbackModels: [] });
     else if (saved === "none") updateBot(bot.id, { noFallbacks: false });
   };
-  const following = defaults ? `the ${defaults === 1 ? "fallback" : `${defaults} fallbacks`} of the default model in Settings → Bots` : "the default fallbacks in Settings → Bots, none so far";
+  const following = defaults ? `the default fallbacks (${defaults})` : "the default fallbacks (none set)";
   const note =
     mode === "inherit"
-      ? `Following ${following}.`
+      ? `Uses ${following}.`
       : mode === "none"
-        ? "Never switches models: when its model fails, the chat shows the error."
-        : !bot.fallbackModels?.length && `Until this lists one, the bot follows ${following}.`;
+        ? "Never switches models. If its model fails, the chat shows the error."
+        : !bot.fallbackModels?.length && `Until you add one, it uses ${following}.`;
   return (
     <>
       {header(<OptionSelect label="Fallback models" className="select-grow" value={mode} options={FALLBACK_MODES} onChange={choose} />)}
@@ -202,7 +202,7 @@ export function FallbackList({ list, onChange: set }: { list: string[]; onChange
   );
 }
 
-const FALLBACKS_DESC = "Tried in order when the model fails before the bot has said or done anything. A reply that's under way isn't retried on another model. The chat notes each switch.";
+const FALLBACKS_DESC = "Tried in order if the model fails before the bot starts replying.";
 
 /** Settings → Bots: the default fallbacks, for every bot without a list of its own or set to none, whatever its model. */
 export function DefaultFallbacks() {
@@ -212,7 +212,7 @@ export function DefaultFallbacks() {
       <div className="setting-row setting-row-top">
         <div className="setting-text">
           <div className="setting-label">Default fallback models</div>
-          <p className="setting-desc">{FALLBACKS_DESC} Every bot uses these, on Default or on a model of its own, unless it lists its own or is set to No fallback.</p>
+          <p className="setting-desc">{FALLBACKS_DESC} Every bot uses these, whatever its model, unless it has its own list or No fallback.</p>
         </div>
       </div>
       <FallbackList list={list} onChange={useBots.getState().setDefaultFallbackModels} />
@@ -265,7 +265,7 @@ function MachineRow({ target, here }: { target: ComputerTarget; here: string }) 
   );
 }
 
-const MACHINES_DESC = "Bots reach every one of these at once and name one on each tool call, this server when they don't. Each keeps its own files. Whether a device allows this server's bots, and how they're isolated there, are set with that device in Settings → Devices.";
+const MACHINES_DESC = "Bots can work on any of these. What each device allows is set in Settings → Devices.";
 
 /**
  * The machines a bot reaches, read-only: the same for every bot. Another server's workspace lists its
@@ -293,7 +293,7 @@ export function BotAdvanced({ bot }: { bot: Bot }) {
   return (
     <div className="bots-pane bots-advanced">
       <div className="setting-row">
-        <div className="setting-label" data-tooltip="Default follows the default model in Settings → Bots. Changes apply from the bot's next reply." data-tooltip-side="left">
+        <div className="setting-label" data-tooltip="Default uses your default model from Settings → Bots." data-tooltip-side="left">
           Model
         </div>
         <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />

@@ -96,7 +96,7 @@ export function Routines({ bot }: { bot: Bot }) {
               <span className="bots-card-text">
                 <span className="bots-routine-title">{r.title}</span>
                 <span className="bots-routine-when">
-                  {r.schedule} · {r.enabled ? "Working" : "Paused"}
+                  {r.schedule}{r.enabled ? "" : " · Paused"}
                 </span>
                 {r.task && <span className="bots-routine-task">{r.task}</span>}
               </span>
@@ -108,7 +108,7 @@ export function Routines({ bot }: { bot: Bot }) {
           ))}
         </ul>
       ) : (
-        <p className="bots-hint">No routines yet. {bot.name.split(" ·")[0]} sets these up itself: tell it what you'd like done and when.</p>
+        <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
       )}
     </div>
   );
@@ -152,7 +152,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         </>
       )}
       <ul className="bots-cards">
-        {shared && !members.length && <li className="bots-hint">None of your bots are in it yet. Add one below: it hears messages that mention it.</li>}
+        {shared && !members.length && <li className="bots-hint">None of your bots yet. Add one below; it answers when mentioned.</li>}
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
@@ -225,7 +225,7 @@ function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string 
 
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
 function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
-  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads working right now. When a bot here starts one, it shows up until it finishes.</p></div>;
+  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads running. Threads the bots here start show up until they finish.</p></div>;
   return (
     <div className="bots-pane">
       <ul className="bots-cards">
@@ -473,7 +473,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 <Instructions
                   value={bot.instructions}
                   placeholder="What is this bot for, and how should it act?"
-                  hint="The bots write these as they learn what this one is for, and you can change them any time. It reads them before every reply."
+                  hint="Read before every reply. The bot updates these as it learns, and you can edit them any time."
                   onChange={(v) => st.updateBot(bot.id, { instructions: v })}
                 />
               )}

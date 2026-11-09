@@ -163,7 +163,7 @@ function useSelect() {
   );
 }
 
-const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 36 }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek; avatar?: number }) {
+const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 }: { conversation: Conversation; active: boolean; onMenu: (m: MenuState) => void; peek: Peek; avatar?: number }) {
   const bots = useBots((s) => s.bots);
   const typing = useBots((s) => s.typing[conversation.id]?.length ?? 0) > 0;
   const select = useSelect();
@@ -218,7 +218,7 @@ const Tile = memo(function Tile({ conversation, active, onMenu }: { conversation
     >
       <span className="bots-tile-avatar">
         {/* A group's huddle is drawn bigger than the box, into the tile's padding, so its members read at a glance. */}
-        <SidebarAvatar conversation={conversation} size={conversation.kind === "direct" ? 64 : 80} />
+        <SidebarAvatar conversation={conversation} size={conversation.kind === "direct" ? 52 : 64} />
         {conversation.unread && <span className="unread-dot bots-tile-dot" aria-label="Unread" />}
       </span>
       <span className="bots-tile-name">{name}</span>
@@ -487,7 +487,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
         onMenu({ id: c.id, x: e.clientX, y: e.clientY });
       }}
     >
-      <SidebarAvatar conversation={c} size={40} />
+      <SidebarAvatar conversation={c} size={34} />
       {c.unread && <span className="unread-dot bots-rail-dot" aria-label="Unread" />}
     </button>
   );
@@ -513,7 +513,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
         )}
         <BotsToggle />
         <button type="button" className="bots-rail-me" aria-label="Settings" data-tooltip="Settings" data-tooltip-side="right" onClick={() => useStore.getState().openSettings()}>
-          <Avatar src={avatar} name={name} size={30} />
+          <Avatar src={avatar} name={name} size={26} />
         </button>
       </div>
     </div>

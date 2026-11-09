@@ -14,10 +14,10 @@ function Installation({ inst }: { inst: GithubInstallation }) {
   const repos = inst.repositorySelection === "all" ? "All repositories" : inst.repositories?.length ? inst.repositories.map((r) => `${r.name}${r.private ? " (private)" : ""}`).join(", ") + (inst.moreRepositories ? `, and ${inst.moreRepositories} more` : "") : "No repositories selected";
   return (
     <li>
-      <code>
-        {inst.account} · {inst.accountType === "Organization" ? "organization" : "personal account"}
-        {inst.suspended ? " · suspended" : ""}
-      </code>
+      <b>
+        {inst.account} · {inst.accountType === "Organization" ? "Organization" : "Personal account"}
+        {inst.suspended ? " · Suspended" : ""}
+      </b>
       <span>{repos}</span>
       <a href={inst.manageUrl} target="_blank" rel="noreferrer">
         Change repositories or uninstall <ExternalLink size={11} />
@@ -84,11 +84,11 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
 
   return (
     <div className="app-guide">
-      <div className="bots-field-label">Signing in to GitHub</div>
+      <div className="bots-field-label">GitHub account</div>
 
       {device?.status.status === "pending" ? (
         <>
-          <p className="field-help">Enter this code on GitHub, then approve OpenBuild there. This page carries on by itself.</p>
+          <p className="field-help">Enter this code on GitHub and approve OpenBuild. This page updates by itself.</p>
           <CopyLine value={device.status.userCode} label="Copy code" />
           <div className="app-page-actions">
             <a className="btn bots-btn bots-btn-primary" href={device.status.verificationUri} target="_blank" rel="noreferrer">
@@ -109,11 +109,11 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
               </>
             ) : (
               <>
-                Signed in as <b>{app.login}</b> through the OpenBuild GitHub App. Its token lasts eight hours and renews by itself.
+                Signed in as <b>{app.login}</b> with the OpenBuild GitHub App.
               </>
             )}
           </p>
-          {expiring && !app.signedOut && <p className="field-help">The sign-in runs out within two weeks. Connect again to keep it going.</p>}
+          {expiring && !app.signedOut && <p className="field-help">This sign-in expires within two weeks. Connect again to renew it.</p>}
           {(app.signedOut || expiring) && (
             <div className="app-page-actions">
               <button type="button" className="btn bots-btn bots-btn-primary" disabled={busy || !view.configured} onClick={() => void run(() => useGithub.getState().startDevice())}>
@@ -124,7 +124,7 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
 
           {!app.signedOut && (
             <>
-              <div className="bots-field-label">Where the app is installed</div>
+              <div className="bots-field-label">Installations</div>
               {installationsError ? (
                 <p className="field-help key-status key-status-bad">{installationsError}</p>
               ) : !installations ? (
@@ -139,11 +139,9 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
                   </ul>
                 </details>
               ) : (
-                <p className="field-help">Not installed anywhere yet, so bots can't reach any repository. Install it on your account or an organization.</p>
+                <p className="field-help">Not installed yet, so bots can't reach any repository.</p>
               )}
-              <p className="field-help">
-                Bots can use every installation listed here at once; this list doesn't limit them. What does is set on GitHub: install the app only where bots should work, with only those repositories. On an organization, its owners install the app or approve your request; it shows up here once they have.
-              </p>
+              <p className="field-help">Bots can use every installation listed. To limit them, install the app only where they should work, with only those repositories. On an organization, an owner installs or approves it.</p>
               <div className="app-page-actions">
                 {view.installPersonalUrl && (
                   <a className="btn bots-btn" href={view.installPersonalUrl} target="_blank" rel="noreferrer">
@@ -162,9 +160,9 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
             </>
           )}
 
-          <div className="bots-field-label">Disconnecting</div>
+          <div className="bots-field-label">Disconnect</div>
           <p className="field-help">
-            Disconnect deletes OpenBuild's GitHub tokens from this server, and bots stop using GitHub. GitHub keeps the authorization until you revoke it there; only you can.{" "}
+            Disconnecting deletes the tokens from this server. GitHub keeps the authorization until you revoke it.{" "}
             <a href={GITHUB_AUTHORIZATIONS_URL} target="_blank" rel="noreferrer">
               Revoke on GitHub <ExternalLink size={11} />
             </a>
@@ -183,15 +181,15 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
               </button>
             )}
           </div>
-          {confirmRevoke && <p className="field-help">This uses GitHub's service for exposed credentials. GitHub emails you that the tokens were revoked. You can connect again afterwards.</p>}
+          {confirmRevoke && <p className="field-help">GitHub revokes both tokens and emails you. You can connect again afterwards.</p>}
         </>
       ) : (
         <>
-          {view.mode === "pat" && view.hasPat && view.configured && <p className="field-help">Bots use your personal access token. The GitHub App is safer: its tokens expire, and you pick accounts and repositories on GitHub.</p>}
-          {view.mode === "off" && <p className="field-help">Disconnected. Nothing uses a GitHub credential until you connect one.</p>}
+          {view.mode === "pat" && view.hasPat && view.configured && <p className="field-help">Bots use your personal access token. The GitHub App is safer: its tokens expire, and you choose which repositories it reaches.</p>}
+          {view.mode === "off" && <p className="field-help">Not connected.</p>}
           {view.configured ? (
             <>
-              <p className="field-help">Sign in with the OpenBuild GitHub App, then install it on your personal account or an organization and pick the repositories there.</p>
+              <p className="field-help">Sign in with the OpenBuild GitHub App, then install it where bots should work.</p>
               <div className="app-page-actions">
                 <button type="button" className="btn bots-btn bots-btn-primary" disabled={busy} onClick={() => void run(() => useGithub.getState().startDevice())}>
                   {busy ? <Spinner size={13} /> : "Connect with GitHub"}
@@ -210,7 +208,7 @@ export function GithubSignIn({ onConnected, onPat, patShown }: { onConnected: ()
             </>
           ) : (
             <p className="field-help">
-              The GitHub App isn't set up on this server yet (see docs/github.md), so GitHub connects with a personal access token.
+              The GitHub App isn't set up on this server, so GitHub connects with a personal access token.
               {view.mode === "off" && view.hasPat && (
                 <>
                   {" "}

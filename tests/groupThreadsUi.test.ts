@@ -99,7 +99,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     expect(await page.eval<unknown>(`${row("Fix the flaky")}.querySelector('svg').outerHTML !== ${row("Trace the slow")}.querySelector('svg').outerHTML`)).toBe(true);
     // Rows look like the Members tab's.
     const style = await page.eval(`(() => { const s = getComputedStyle(document.querySelector('.bots-details .bots-cards')); return [s.borderRadius, s.borderStyle]; })()`);
-    expect(style).toEqual(["16px", "solid"]);
+    expect(style).toEqual(["12px", "solid"]);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "threads-tab");
   }, 60_000);
@@ -118,7 +118,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     // And the rest.
     await serve(page, `serverChats.map((c) => thread(c.id, c.title, c.startedBy.bot, c.startedBy.conversation, c.workspace.projectName, true))`);
     await page.until(`!document.querySelector('.bots-details .bots-cards')`);
-    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads working right now. When a bot here starts one, it shows up until it finishes.");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads running. Threads the bots here start show up until they finish.");
     expect(await page.eval<unknown>(`${TAB}.textContent`)).toBe("Threads");
     await shoot(page, "threads-empty");
   }, 60_000);

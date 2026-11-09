@@ -35,7 +35,7 @@ let root: ReturnType<typeof createRoot>;
 const frames = (ms = 40) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 const event = (id: string, author: string, e: Record<string, unknown>) => ({ id, author, at: Number(id.slice(1)), text: "", event: e });
 const lines = () => [...document.querySelectorAll(".bm-event")];
-const line = (id: string) => document.querySelector(`.bm-event[data-id="${id}"]`)!;
+const line = (id: string) => document.querySelector<HTMLElement>(`.bm-event[data-id="${id}"]`)!;
 const lead = (id: string) => line(id).querySelector(".bm-event-text")!;
 
 async function show(messages: any[], bots: any[] = [scout, juniper], status: Record<string, unknown> = {}) {
@@ -232,4 +232,45 @@ test("models bots are set to that bots can't use are named with who uses them", 
     { model: "bridge/x", usedBy: ["default fallbacks", "Alpha", "Alpha fallbacks"] },
   ]);
   expect(unavailableModels(bots, {}, new Set(["mock/m", "bridge/x", "bridge/y"]))).toEqual([]);
+});
+
+test("activity lines in a row fold into one quiet toggle, opened on a click; an error stands on its own", async () => {
+  await show([
+    { id: "m1", author: "scout", at: 1, text: "On it." },
+    event("e2", "scout", { kind: "routine", text: "Set a follow-up", detail: "Check CI · in 10 minutes" }),
+    event("e3", "scout", { kind: "routine", text: "Followed up", detail: "Check CI" }),
+    event("e4", "juniper", { kind: "routine", text: "Ran a routine", detail: "Standup" }),
+    event("e5", "scout", { kind: "error", text: "Couldn't reply", detail: "rate limited" }),
+    { id: "m6", author: "scout", at: 6, text: "Back." },
+    event("e7", "scout", { kind: "thread", text: "Closed a thread", detail: "Fix the build", threadId: "t1" }),
+  ]);
+  const runs = [...document.querySelectorAll(".bm-events")];
+  expect(runs).toHaveLength(1);
+  const toggle = runs[0]!.querySelector<HTMLButtonElement>(".bm-events-toggle")!;
+  // Who did it (their mascots), and how much, but not the lines themselves until asked.
+  expect(toggle.textContent).toBe("3 background actions");
+  expect(toggle.querySelectorAll(".bot")).toHaveLength(2);
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
+  // Their words are still there, for finding a line by id or reading it.
+  expect(lead("e2").textContent).toBe("Scout set a follow-up");
+  // An error, and a line on its own between messages, show as they are.
+  expect(line("e5").hidden).toBe(false);
+  expect(line("e5").closest(".bm-events")).toBeNull();
+  expect(line("e7").hidden).toBe(false);
+  await act(async () => toggle.click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(false);
+  await act(async () => toggle.click());
+  for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
+});
+
+test("a mention followed by the rest of the bot's full name reads as the name alone, and copies whole", async () => {
+  await show([{ id: "m1", author: "me", at: 1, text: "@Scout · Primary hey" }], [{ ...scout, name: "Scout · Primary" }, juniper]);
+  const mention = document.querySelector(".bm-mention")!;
+  expect(mention.textContent).toBe("@Scout · Primary");
+  expect(mention.querySelector(".bm-mention-tail")!.textContent).toBe(" · Primary");
+  // Outside the chip, only the message's own words.
+  expect(document.querySelector(".bm-text")!.textContent).toBe("@Scout · Primary hey");
+  expect(mention.nextSibling?.textContent).toBe(" hey");
 });

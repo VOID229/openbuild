@@ -1,14 +1,14 @@
 // OpenBots' Marketplace: a catalog of official MCP servers and skills to search and browse, a page
 // for each app with whatever it takes to connect it, and the card a bot posts to offer one in a chat.
-import { ArrowLeft, Check, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, Copy, ExternalLink, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
 import { useRemoteWorkspace } from "../../lib/bots/store";
 import { useGithub } from "../../lib/github";
-import { arrowNav, copyText, cx } from "../../lib/ui";
-import { IconButton, Popover, Spinner } from "../primitives";
-import { DialogHead, useModal } from "./BotDialogs";
+import { copyText, cx } from "../../lib/ui";
+import { IconButton, Spinner } from "../primitives";
+import { useModal } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
 import { GithubSignIn } from "./GithubSignIn";
 
@@ -29,12 +29,24 @@ const connectsStraightAway = (app: CatalogApp, clients: string[]) => {
   return c.kind !== "client" || !!OAUTH_CLIENTS[c.client].env || clients.includes(c.client);
 };
 
-function statusText(view?: AppView) {
-  if (view?.status === "connected") return "Connected";
-  if (view?.status === "needs-auth") return "Signed out";
-  if (view?.status === "error") return "Couldn't connect";
-  if (view?.status === "connecting") return "Waiting for sign-in";
+/** Where a connection stands, beside the app's name: a dot for its state and a word for it. */
+function statusOf(view?: AppView): { label: string; tone: "ok" | "warn" | "bad" | "busy" } | undefined {
+  if (view?.status === "connected") return { label: "Connected", tone: "ok" };
+  if (view?.status === "needs-auth") return { label: "Signed out", tone: "warn" };
+  if (view?.status === "error") return { label: "Couldn't connect", tone: "bad" };
+  if (view?.status === "connecting") return { label: "Waiting for sign-in", tone: "busy" };
   return undefined;
+}
+
+function AppStatus({ view }: { view?: AppView }) {
+  const status = statusOf(view);
+  if (!status) return null;
+  return (
+    <span className={cx("app-status", `app-status-${status.tone}`)}>
+      <span className="app-status-dot" aria-hidden />
+      {status.label}
+    </span>
+  );
 }
 
 function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
@@ -55,46 +67,41 @@ function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
       setBusy(false);
     }
   };
-  const status = statusText(view);
   return (
-    <div className="app-row">
+    <li className="app-row">
       <button type="button" className="app-row-main" onClick={onOpen}>
-        <AppLogo app={app} size={32} />
+        <AppLogo app={app} size={36} />
         <span className="app-row-text">
-          <span className="app-row-name">{app.name}</span>
-          {problem ? <span className="app-row-status bad">{problem}</span> : status && <span className={cx("app-row-status", view?.status === "connected" ? "app-row-status-on" : view?.status !== "connecting" && "bad")}>{status}</span>}
+          <span className="app-row-name">
+            {app.name}
+            <AppStatus view={view} />
+          </span>
+          {problem ? <span className="app-row-desc app-row-problem">{problem}</span> : <span className="app-row-desc">{app.description}</span>}
         </span>
       </button>
       {isConnected(view) ? (
-        <button type="button" className="btn btn-sm" onClick={onOpen}>
+        <button type="button" className="btn btn-sm app-row-action" onClick={onOpen}>
           Manage
         </button>
       ) : (
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void go()}>
+        <button type="button" className="btn btn-sm app-row-action" disabled={busy} onClick={() => void go()}>
           {busy ? <Spinner size={12} /> : view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
         </button>
       )}
-    </div>
+    </li>
   );
 }
 
-function Section({ title, apps, onOpen, onAll }: { title: string; apps: CatalogApp[]; onOpen: (id: string) => void; onAll?: () => void }) {
+function Section({ title, apps, onOpen }: { title?: string; apps: CatalogApp[]; onOpen: (id: string) => void }) {
   if (!apps.length) return null;
   return (
-    <section className="apps-section">
-      <div className="apps-section-head">
-        <h3>{title}</h3>
-        {onAll && (
-          <button type="button" className="apps-view-all" onClick={onAll}>
-            View all
-          </button>
-        )}
-      </div>
-      <div className="apps-grid">
+    <section className="apps-section" aria-label={title}>
+      {title && <h3 className="apps-section-title">{title}</h3>}
+      <ul className="apps-list">
         {apps.map((app) => (
           <AppRow key={app.id} app={app} onOpen={() => onOpen(app.id)} />
         ))}
-      </div>
+      </ul>
     </section>
   );
 }
@@ -133,7 +140,7 @@ export function CopyLine({ value, label }: { value: string; label: string }) {
 }
 
 /** One app: what it does, what connecting it takes, and what it gave bots. */
-function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void; onDone: () => void }) {
+function AppPage({ app, onDone }: { app: CatalogApp; onDone: () => void }) {
   const view = useApps((s) => s.apps[app.id]);
   const clients = useApps((s) => s.clients);
   const githubKey = useApps((s) => s.githubKey);
@@ -188,13 +195,13 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
 
   return (
     <div className="bots-dialog-body app-page">
-      <button type="button" className="apps-back" onClick={onBack}>
-        <ArrowLeft size={15} /> All apps
-      </button>
       <div className="app-page-head">
-        <AppLogo app={app} size={44} />
+        <AppLogo app={app} size={48} />
         <div className="app-page-title">
-          <h3>{app.name}</h3>
+          <h3>
+            {app.name}
+            <AppStatus view={view} />
+          </h3>
           <p>
             Official, by {app.by} ·{" "}
             <a href={app.docs} target="_blank" rel="noreferrer">
@@ -275,7 +282,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
               value={fields[field.id] ?? ""}
               autoComplete="off"
               spellCheck={false}
-              placeholder={connected && field.secret ? "Saved. Paste a new one to replace it." : canReuseKey && field.secret ? "Uses your GitHub key from Settings. Paste another to use that." : field.placeholder}
+              placeholder={connected && field.secret ? "Saved · paste a new one to replace it" : canReuseKey && field.secret ? "Using your GitHub key from Settings" : field.placeholder}
               onChange={(e) => setFields({ ...fields, [field.id]: e.target.value })}
             />
           )}
@@ -292,7 +299,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
         </label>
       ))}
 
-      {pastes && !connected && !view?.signingIn && <p className="field-help">{app.by} only sends sign-ins back to localhost, so connecting from this address takes one extra step: you'll copy an address back here after signing in.</p>}
+      {pastes && !connected && !view?.signingIn && <p className="field-help">{app.by} only returns sign-ins to localhost, so after signing in you'll paste the address back here.</p>}
 
       {pastes && view?.signingIn && (
         <form
@@ -305,7 +312,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
           <label className="bots-field">
             <span className="bots-field-label">Finish signing in</span>
             <input className="input" value={pasted} autoComplete="off" spellCheck={false} placeholder="http://localhost…" onChange={(e) => setPasted(e.target.value)} />
-            <span className="field-help">Once you approve {app.name}, its tab ends on a page that won't load. That's expected. Copy the whole address from that tab and paste it here.</span>
+            <span className="field-help">After you approve {app.name}, its tab lands on a page that won't load. Copy that tab's full address and paste it here.</span>
           </label>
           <div className="app-page-actions">
             <button type="submit" className="btn bots-btn bots-btn-primary" disabled={busy || !pasted.trim()}>
@@ -329,7 +336,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
         )}
         {connected && (
           <button type="button" className="btn bots-btn" disabled={busy} onClick={() => void run(() => useApps.getState().check(app.id))}>
-            Check it
+            Test connection
           </button>
         )}
         {view && view.status !== "off" && (
@@ -340,7 +347,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
         )}
       </div>
 
-      {connected && <p className="field-help">Every bot can use this as you. Bots never see the sign-in itself.</p>}
+      {connected && <p className="field-help">Bots use this as you, without seeing your sign-in.</p>}
 
       {!!view?.tools?.length && (
         <details className="app-details">
@@ -368,12 +375,21 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
           </ul>
         </details>
       )}
-      {!view?.skills?.length && !!app.skills?.length && !connected && <p className="field-help">Comes with {app.by}'s own skills, installed when you connect.</p>}
+      {!view?.skills?.length && !!app.skills?.length && !connected && <p className="field-help">Includes {app.by}'s skills, installed when you connect.</p>}
     </div>
   );
 }
 
 type Filter = "all" | "connected" | AppCategory;
+
+function NavItem({ on, label, count, onClick }: { on: boolean; label: string; count: number; onClick: () => void }) {
+  return (
+    <button type="button" className="apps-nav-item" aria-current={on ? "true" : undefined} onClick={onClick}>
+      <span className="apps-nav-label">{label}</span>
+      <span className="apps-nav-count">{count}</span>
+    </button>
+  );
+}
 
 export function AppsDialog({ initial, onClose }: { initial?: string; onClose: () => void }) {
   const modal = useModal(onClose);
@@ -381,8 +397,7 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [open, setOpen] = useState<string | undefined>(initial);
-  const [more, setMore] = useState(false);
-  const moreRef = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     void useApps.getState().load().catch(() => {});
@@ -406,87 +421,69 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
     });
   }, [words, apps]);
   const inCategory = (id: AppCategory) => APP_CATALOG.filter((a) => a.category === id);
-  const chips = APP_CATEGORIES.filter((c) => !c.more);
-  const extras = APP_CATEGORIES.filter((c) => c.more);
-  const extraPicked = extras.find((c) => c.id === filter);
+  // Picking a category clears the search and starts its list at the top.
+  const pick = (next: Filter) => {
+    setFilter(next);
+    setQuery("");
+    list.current?.scrollTo({ top: 0 });
+  };
 
   return (
     <dialog {...modal} className="bots-dialog apps-dialog" aria-label="Marketplace">
-      <DialogHead title="Marketplace" onClose={onClose} />
       {page ? (
-        <AppPage key={page.id} app={page} onBack={() => setOpen(undefined)} onDone={onClose} />
-      ) : (
-        <div className="bots-dialog-body apps-body">
-          <div className="apps-tools">
-            <label className="search apps-search">
-              <Search size={16} />
-              <input type="text" value={query} placeholder="Search across apps and skills" aria-label="Search across apps and skills" autoFocus onChange={(e) => setQuery(e.target.value)} />
-            </label>
-            <button type="button" className="apps-connected" disabled={!connected.length} onClick={() => setFilter(filter === "connected" ? "all" : "connected")}>
-              {connected.slice(0, 4).map((a) => (
-                <AppLogo key={a.id} app={a} size={22} />
-              ))}
-              <span>{connected.length} connected</span>
-              <ChevronRight size={14} />
+        <>
+          <div className="bots-dialog-head apps-page-head">
+            <button type="button" className="apps-back" onClick={() => setOpen(undefined)}>
+              <ArrowLeft size={15} /> Marketplace
             </button>
+            <IconButton label="Close" tooltip={false} onClick={onClose}>
+              <X size={18} />
+            </IconButton>
           </div>
-          {!words && (
-            <div className="apps-chips" role="group" aria-label="Categories">
-              <button type="button" className={cx("apps-chip", filter === "all" && "apps-chip-on")} onClick={() => setFilter("all")}>
-                All
-              </button>
-              {chips.map((c) => (
-                <button key={c.id} type="button" className={cx("apps-chip", filter === c.id && "apps-chip-on")} onClick={() => setFilter(c.id)}>
-                  {c.label}
-                </button>
+          <AppPage key={page.id} app={page} onDone={onClose} />
+        </>
+      ) : (
+        <>
+          <div className="bots-dialog-head apps-head">
+            <h2>Marketplace</h2>
+            <label className="apps-search">
+              <Search size={15} />
+              <input type="search" value={query} placeholder="Search apps and skills" aria-label="Search apps and skills" autoFocus onChange={(e) => setQuery(e.target.value)} />
+            </label>
+            <IconButton label="Close" tooltip={false} onClick={onClose}>
+              <X size={18} />
+            </IconButton>
+          </div>
+          <div className="apps-body">
+            <nav className="apps-nav" aria-label="Categories">
+              <NavItem on={!words && filter === "all"} label="All apps" count={APP_CATALOG.length} onClick={() => pick("all")} />
+              <NavItem on={!words && filter === "connected"} label="Connected" count={connected.length} onClick={() => pick("connected")} />
+              <span className="apps-nav-sep" aria-hidden />
+              {APP_CATEGORIES.map((c) => (
+                <NavItem key={c.id} on={!words && filter === c.id} label={c.label} count={inCategory(c.id).length} onClick={() => pick(c.id)} />
               ))}
-              {!!extras.length && (
-                <>
-                  <button ref={moreRef} type="button" className={cx("apps-chip", extraPicked && "apps-chip-on")} aria-haspopup="menu" aria-expanded={more} onClick={() => setMore(!more)}>
-                    {extraPicked?.label ?? "More"} <ChevronDown size={14} />
-                  </button>
-                  <Popover open={more} onClose={() => setMore(false)} anchor={moreRef} className="menu" role="menu" label="More categories" fixed="down">
-                    <div onKeyDown={(e) => arrowNav(e)}>
-                      {extras.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          role="menuitem"
-                          className="menu-item"
-                          onClick={() => {
-                            setMore(false);
-                            setFilter(c.id);
-                          }}
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                  </Popover>
-                </>
+            </nav>
+            <div ref={list} className="apps-main">
+              {words ? (
+                matches.length ? (
+                  <Section title={matches.length === 1 ? "1 result" : `${matches.length} results`} apps={matches} onOpen={setOpen} />
+                ) : (
+                  <p className="apps-empty">No apps match “{query.trim()}”.</p>
+                )
+              ) : filter === "all" ? (
+                APP_CATEGORIES.map((c) => <Section key={c.id} title={c.label} apps={inCategory(c.id)} onOpen={setOpen} />)
+              ) : filter === "connected" ? (
+                connected.length ? (
+                  <Section title="Connected" apps={connected} onOpen={setOpen} />
+                ) : (
+                  <p className="apps-empty">Nothing connected yet.</p>
+                )
+              ) : (
+                <Section title={APP_CATEGORIES.find((c) => c.id === filter)!.label} apps={inCategory(filter)} onOpen={setOpen} />
               )}
             </div>
-          )}
-          {words ? (
-            matches.length ? (
-              <Section title={`${matches.length} found`} apps={matches} onOpen={setOpen} />
-            ) : (
-              <p className="pi-empty">Nothing matches that.</p>
-            )
-          ) : filter === "all" ? (
-            <>
-              <Section title="Recommended for you" apps={APP_CATALOG.filter((a) => a.recommended && !isConnected(apps[a.id])).slice(0, 6)} onOpen={setOpen} />
-              {APP_CATEGORIES.map((c) => {
-                const list = inCategory(c.id);
-                return <Section key={c.id} title={c.label} apps={list.slice(0, 6)} onOpen={setOpen} onAll={list.length > 6 ? () => setFilter(c.id) : undefined} />;
-              })}
-            </>
-          ) : filter === "connected" ? (
-            <Section title="Connected" apps={connected} onOpen={setOpen} />
-          ) : (
-            <Section title={APP_CATEGORIES.find((c) => c.id === filter)!.label} apps={inCategory(filter)} onOpen={setOpen} />
-          )}
-        </div>
+          </div>
+        </>
       )}
     </dialog>
   );

@@ -206,15 +206,15 @@ test("routine/memory actions do not fabricate bot events", async () => {
 
 test("thread activity details are titles, so bot names inside them don't become bot links", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot');
+  expect(chat).toContain('event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot');
   expect(chat).toContain("id ? <ThreadLink id={id}>{title}</ThreadLink> : <>{title}</>");
 });
 
 test("a bot's activity line names the bot that did it, by author id; the user's lines keep their wording", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);');
-  expect(chat).toContain("const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;");
-  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(m.event!)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("const authored = author && !namesBot(eventText(event), bots) ? authoredEventText(event) : undefined;");
+  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}");
   const { authoredEventText } = await import("../shared/bots");
   expect(authoredEventText({ kind: "thread", text: "Merged a pull request" })).toBe("merged a pull request");
   expect(authoredEventText({ kind: "thread", text: "Wrote a prompt" })).toBe("wrote a prompt in");
@@ -237,7 +237,7 @@ test("older follow-up prompts read with the current wording", async () => {
 
 test("a message between bots links to the side chat and to the other bot", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined');
+  expect(chat).toContain('event.kind === "message" && event.conversationId ? eventBot : undefined');
   expect(chat).toContain("<ConversationLink id={event.conversationId!}>");
 });
 
@@ -292,7 +292,7 @@ test("memory stays out of sight, and routines are the bots' to write: people can
   expect(settings).not.toContain("<Memory");
   expect(settings).not.toContain("bot.memory");
   expect(details).not.toContain("<form");
-  expect(details).toContain('r.enabled ? "Working" : "Paused"');
+  expect(details).toContain('{r.schedule}{r.enabled ? "" : " · Paused"}');
   expect(details).toContain("<textarea");
   expect(routes).not.toContain("/api/bots/:id/memory");
   expect(routes).not.toContain('"/api/bots/:id/routines":');
@@ -389,7 +389,7 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
 
 test("a model switch names the bot and its model, and the account only to tell two of a model apart", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
+  expect(chat).toContain('const switcher = event.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
   expect(chat).toContain("<BotLink bot={switcher} /> switched to {switchedTo}");
   const { eventDetail, eventText } = await import("../shared/bots");
   // Lines saved before said where in the chain the model sat, and always named its provider.
@@ -428,7 +428,7 @@ test("Settings → Bots lists the default fallbacks, which every bot follows unt
   // No wording left that says a bot with its own model skips the defaults.
   expect(advanced).not.toContain("keeps its own fallbacks");
   expect(advanced).not.toMatch(/bot\.model \|\| bot\.fallbackModels/);
-  expect(advanced).toContain("Every bot uses these, on Default or on a model of its own, unless it lists its own or is set to No fallback.");
+  expect(advanced).toContain("Every bot uses these, whatever its model, unless it has its own list or No fallback.");
   const store = await Bun.file("src/lib/bots/store.ts").text();
   expect(store).toContain('void send("PATCH", "/api/bots/settings", { defaultFallbackModels });');
 });

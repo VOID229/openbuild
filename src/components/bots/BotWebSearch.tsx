@@ -145,11 +145,11 @@ function KeyField({ provider, value, index, total, autoFocus, status, onRetry, o
         <div className="key-actions">
           {editing ? (
             <button type="button" className="btn btn-sm" data-key-action={actionId} disabled={!draft.trim()} onClick={save}>
-              save
+              Save
             </button>
           ) : (
             <button type="button" className="btn btn-sm" data-key-action={actionId} onClick={replace}>
-              {isUrl ? "edit" : "replace"}
+              {isUrl ? "Edit" : "Replace"}
             </button>
           )}
           {onRemove && !editing && (
@@ -237,7 +237,7 @@ function KeyList({ provider, keys, setKeys, statusOf, onRetry }: KeyListProps) {
         )}
         {open && keys.length > 0 && !adding && (
           <button type="button" className="add-key" onClick={() => setAdding(true)}>
-            <Plus size={13} /> add more
+            <Plus size={13} /> Add another
           </button>
         )}
       </div>
@@ -293,7 +293,7 @@ export function BotWebSearch() {
       </div>
       <div className={cx("collapse", open && "collapse-open")} inert={!open}>
         <div className="collapse-inner">
-          <p className="setting-desc">Add your own key for any provider and every bot can search with it, picking whichever suits the question. Searches are billed to your account with that provider, including ones a bot runs during routines and check-ins.</p>
+          <p className="setting-desc">Add a key for any provider and every bot can search with it. Searches are billed to your account with that provider.</p>
           {error && (
             <p className="field-help key-status key-status-bad" role="alert">
               <CircleAlert size={13} className="bad" /> {error}
@@ -303,9 +303,7 @@ export function BotWebSearch() {
           <div className="key-list">
             {SEARCH_ORDER.map((p) => (SEARCH_PROVIDERS[p].credential === "url" ? <SearxngKeys key={p} /> : <ProviderKeys key={p} provider={p} />))}
           </div>
-          <p className="field-help keys-help">
-            With more than one key, the next is used if one is rejected, out of credit or rate limited. Keys stay on the server: they aren't sent back to the browser or shown to bots. For SearXNG, enter the address of an instance you already run, with the JSON format turned on.
-          </p>
+          <p className="field-help keys-help">With more than one key, the next takes over when one is rejected or rate limited. Keys stay on this server and are never shown to bots. SearXNG needs an instance with JSON output turned on.</p>
         </div>
       </div>
     </>
