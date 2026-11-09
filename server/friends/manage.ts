@@ -18,6 +18,7 @@ export function summaries(): FriendSummary[] {
     addedAt: f.addedAt,
     lastSeenAt: f.lastSeenAt,
     ...(f.allowTools ? { allowTools: true } : {}),
+    ...(link.failing(f.id) ? { failing: link.failing(f.id) } : {}),
   }));
 }
 

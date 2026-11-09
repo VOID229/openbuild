@@ -21,6 +21,8 @@ export interface FriendSummary {
   lastSeenAt?: number;
   /** The owner let their bots use their usual tools in chats with this friend, not only chat. */
   allowTools?: boolean;
+  /** Something they sent has kept failing to apply here. It's kept and tried again, and nothing after it is applied before it. */
+  failing?: { since: number; attempts: number; error: string };
 }
 
 /** One of a friend's bots in a shared chat, as their server names it. */

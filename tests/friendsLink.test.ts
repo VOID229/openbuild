@@ -83,3 +83,100 @@ test("a friend's connection applies each frame once, resends what's unacknowledg
     await rm(dir, { recursive: true, force: true });
   }
 }, 30_000);
+
+// A frame the host couldn't apply (the database busy, say) is neither acknowledged nor counted as had,
+// and never passed over: it's kept and tried again, later, until it applies, and only then are the
+// frames after it applied, in order. One that keeps failing is shown to the owner meanwhile.
+test("a frame that fails to apply is kept and retried until it applies, and is never skipped", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbuild-friends-apply-"));
+  try {
+    const child = Bun.spawn([process.execPath, "-e", `
+      import { strict as a } from 'node:assert';
+      const store = await import('./server/friends/store.ts');
+      const link = await import('./server/friends/link.ts');
+      const { newKeyPair, loadKeyPair, seal, unseal } = await import('./server/friends/protocol.ts');
+      console.warn = () => {};
+      link.retrying.first = 20;
+      link.retrying.max = 80;
+      const guest = loadKeyPair(newKeyPair());
+      store.putFriend({ id: guest.id, name: 'Guest', publicKey: guest.publicKey, role: 'guest', mode: 'lan', listen: '127.0.0.1', addedAt: Date.now() });
+      const me = store.identity();
+      const applied = [];
+      let failing = 0;
+      let statuses = 0;
+      link.setHooks({ apply: (_f, _kind, body) => { if (failing > 0) { failing--; throw new Error('database is locked'); } applied.push(body.n); }, status: () => statuses++, removedByPeer() {} });
+
+      const connect = () => {
+        const sent = [];
+        const ws = { data: { friendId: guest.id, nonce: crypto.randomUUID() }, closed: undefined, send: (t) => sent.push(unseal(t, me.publicKey)), close(code) { if (this.closed === undefined) { this.closed = code; link.accepting.close(ws); } } };
+        link.accepting.open(ws);
+        const challenge = sent.shift();
+        const sid = crypto.randomUUID();
+        link.accepting.message(ws, seal({ t: 'auth', from: guest.id, to: me.id, nonce: challenge.nonce, sid }, guest));
+        sent.shift();
+        const frame = (seq) => link.accepting.message(ws, seal({ t: 'msg', from: guest.id, to: me.id, seq, kind: 'test', body: { n: seq } }, guest));
+        const acks = () => sent.filter((f) => f.t === 'ack').map((f) => f.seq);
+        return { ws, frame, acks };
+      };
+      const until = async (check, label) => { for (let i = 0; i < 400 && !check(); i++) await Bun.sleep(10); a.ok(check(), label); };
+
+      let c = connect();
+      c.frame(1);
+      a.deepEqual(c.acks(), [1]);
+      // Frame 2 fails, and keeps failing a while: no ack, nothing recorded as had, the connection stays.
+      failing = 4;
+      c.frame(2);
+      a.deepEqual(c.acks(), [1]);
+      a.equal(store.lastIn(guest.id), 1);
+      a.equal(c.ws.closed, undefined);
+      // Frame 3 waits behind it, unacknowledged, so the friend still has it too.
+      c.frame(3);
+      a.deepEqual(applied, [1]);
+      a.deepEqual(c.acks(), [1]);
+      // Failing for a while, it's shown to the owner, and nothing is given up on.
+      await until(() => link.failing(guest.id)?.attempts >= link.SHOW_FAILURE_AFTER, 'shown as failing');
+      a.equal(link.failing(guest.id).error, 'database is locked');
+      a.ok(statuses > 0);
+      // It applies once the trouble passes, and is acknowledged; then the friend is asked to send what
+      // came after it again, on a fresh connection.
+      await until(() => applied.includes(2), 'applied on a later try');
+      a.deepEqual(applied, [1, 2]);
+      a.deepEqual(c.acks(), [1, 2]);
+      a.equal(store.lastIn(guest.id), 2);
+      a.equal(c.ws.closed, link.CLOSE.resend);
+      a.equal(link.failing(guest.id), undefined);
+      c = connect();
+      c.frame(3); c.frame(4);
+      a.deepEqual(applied, [1, 2, 3, 4]);
+      a.deepEqual(c.acks(), [3, 4]);
+
+      // Still failing across a reconnect: the resend waits for the try already under way, and the
+      // try applies it.
+      failing = 2;
+      c.frame(5);
+      c.ws.close(1006);
+      c = connect();
+      c.frame(5);
+      a.deepEqual(c.acks(), []);
+      await until(() => applied.includes(5), 'applied after reconnecting');
+      a.deepEqual(applied, [1, 2, 3, 4, 5]);
+      a.deepEqual(c.acks(), [5]);
+      a.equal(c.ws.closed, undefined);
+
+      // Removed while one is stuck: it's dropped with the friend, and not tried again.
+      failing = Infinity;
+      c.frame(6);
+      link.disconnect(guest.id, false);
+      store.deleteFriend(guest.id);
+      failing = 0;
+      await Bun.sleep(150);
+      a.deepEqual(applied, [1, 2, 3, 4, 5]);
+      process.exit(0);
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    expect(err).toBe("");
+    expect(code).toBe(0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 30_000);
