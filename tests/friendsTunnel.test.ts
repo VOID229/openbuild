@@ -111,7 +111,11 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
 
   // Past the listener's budget, everyone is asked to wait, with no work done for them. The guest's
   // connection, already proved, isn't counted against it.
-  const codes = await Promise.all(Array.from({ length: 320 }, () => fetch(`${base}/`, ca).then((r) => [r.status, r.headers.get("retry-after")] as const)));
+  // A few at a time: hundreds of TLS handshakes at once through the fake relay are a test of the fake.
+  const codes: (readonly [number, string | null])[] = [];
+  for (let sent = 0; sent < 320; sent += 8) {
+    codes.push(...(await Promise.all(Array.from({ length: 8 }, () => fetch(`${base}/`, ca).then((r) => [r.status, r.headers.get("retry-after")] as const)))));
+  }
   expect(codes.filter(([s]) => s === 404).length).toBeGreaterThan(0);
   expect(codes.filter(([s, after]) => s === 429 && after === "60").length).toBeGreaterThan(0);
   host.send({ send: 8 });
