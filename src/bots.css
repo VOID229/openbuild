@@ -130,21 +130,21 @@
 
 /* A huddle's hangs from its top corner rather than rising above it, where the sidebar's list would
    cut it off. */
-.bot-huddle > .bot-zzz {
+.bot-huddle-box > .bot-zzz {
   top: -0.1em;
   bottom: auto;
   left: 86%;
 }
 
 /* In a list row the name sits right beside it, and there's room above instead. */
-.bots-row .bot-huddle > .bot-zzz {
+.bots-row .bot-huddle-box > .bot-zzz {
   top: auto;
   bottom: 74%;
   left: 64%;
 }
 
 .bot[data-asleep] > .bot-zzz,
-.bot-huddle[data-dozing] > .bot-zzz {
+.bot-huddle-box[data-dozing] > .bot-zzz {
   opacity: 1;
   transition: opacity 420ms ease-in-out 1100ms;
 }
@@ -169,7 +169,7 @@
 }
 
 .bot[data-asleep] > .bot-zzz > span,
-.bot-huddle[data-dozing] > .bot-zzz > span {
+.bot-huddle-box[data-dozing] > .bot-zzz > span {
   animation: bot-zzz 6s ease-in-out infinite;
 }
 
@@ -441,10 +441,18 @@
   cursor: pointer;
 }
 
-/* A group's huddle of members. */
+/* A group's huddle of members, and the count of the rest: in a seat of its own when there's room,
+   after the huddle when there isn't. Never over a member. */
 .bot-huddle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  vertical-align: middle;
+}
+
+.bot-huddle-box {
   position: relative;
-  display: inline-block;
   flex: none;
 }
 
@@ -460,20 +468,23 @@
 }
 
 .bot-huddle-more {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 4px;
-  border-radius: 9px;
-  border: 2px solid var(--bg);
-  background: var(--surface-3);
   color: var(--text-2);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 14px;
-  text-align: center;
+  font-size: var(--more-font, 11px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* The seat: a quiet disc about a member's size, so the count reads as one more of them. */
+.bot-huddle-seat > .bot-huddle-more {
+  display: grid;
+  place-items: center;
+  width: 72%;
+  height: 72%;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
 }
 
 .bots-glyph-eyes rect {
@@ -654,12 +665,6 @@
    above than below, so the tile and its name stay where they were. */
 .bots-tile-avatar .bot-huddle {
   margin: -9px -8px -7px;
-}
-
-/* The count of the rest sits beside the last member, in the tile's spare width, clear of the name. */
-.bots-tile-avatar .bot-huddle-more {
-  right: -15px;
-  bottom: 7px;
 }
 
 .bots-tile-dot {

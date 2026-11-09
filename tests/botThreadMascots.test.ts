@@ -130,14 +130,14 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
     // A huddle in the sidebar has one, over its corner: its members, a dozen pixels across, have none.
     const tile = `[...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('OpenBuild Dev'))`;
     expect(await page.eval<number>(`(${tile}).querySelectorAll('.bot > .bot-zzz').length`)).toBe(0);
-    const huddle = await page.eval<Zzz[]>(`[...(${tile}).querySelectorAll('.bot-huddle > .bot-zzz')].map((z) => ({ opacity: Number(getComputedStyle(z).opacity), font: parseFloat(getComputedStyle(z.firstElementChild).fontSize), height: z.getBoundingClientRect().height, running: 0 }))`);
+    const huddle = await page.eval<Zzz[]>(`[...(${tile}).querySelectorAll('.bot-huddle-box > .bot-zzz')].map((z) => ({ opacity: Number(getComputedStyle(z).opacity), font: parseFloat(getComputedStyle(z.firstElementChild).fontSize), height: z.getBoundingClientRect().height, running: 0 }))`);
     expect(huddle.length).toBe(1);
     expect(huddle[0]!.opacity).toBe(1);
     expect(huddle[0]!.font).toBeGreaterThanOrEqual(8);
     // Everyone at work in the group: no zzz over it at all.
     await page.eval(`bots.setState({ status: Object.fromEntries(["egg", "moss", "boo", "pill"].map((id) => [id, { state: "working", conversationId: "dev" }])) })`);
     await Bun.sleep(400);
-    expect(await page.eval<number>(`Number(getComputedStyle((${tile}).querySelector('.bot-huddle > .bot-zzz')).opacity)`)).toBe(0);
+    expect(await page.eval<number>(`Number(getComputedStyle((${tile}).querySelector('.bot-huddle-box > .bot-zzz')).opacity)`)).toBe(0);
     expect((await zzzs(page, ".bots-details .bots-member .bot > .bot-zzz")).every((z) => z.opacity === 0 && z.running === 0)).toBe(true);
   }, 20_000);
 
@@ -147,7 +147,7 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
     await page.send("Page.navigate", { url: server!.url.href });
     await page.until(READY);
     await page.settle();
-    const shown = (await zzzs(page, ".bot[data-asleep] > .bot-zzz, .bot-huddle[data-dozing] > .bot-zzz"));
+    const shown = (await zzzs(page, ".bot[data-asleep] > .bot-zzz, .bot-huddle-box[data-dozing] > .bot-zzz"));
     expect(shown.length).toBeGreaterThan(3);
     for (const z of shown) expect({ opacity: z.opacity, running: z.running }).toEqual({ opacity: 1, running: 0 });
     // Each letter in full, not caught part way through fading in.

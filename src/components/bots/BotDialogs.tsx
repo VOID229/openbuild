@@ -167,7 +167,7 @@ export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose
         <div className="bots-dialog-body">
           <div className="bots-dialog-hero">
             {members.length ? (
-              <BotHuddle key={picked.join()} looks={members.map((b) => b.look)} size={112} extra={members.length > 4 ? members.length - 4 : undefined} />
+              <BotHuddle key={picked.join()} looks={members.map((b) => b.look)} size={112} />
             ) : (
               <div className="bots-hero-empty">Pick at least two bots</div>
             )}
