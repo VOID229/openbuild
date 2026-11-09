@@ -11,6 +11,7 @@ import "../../../src/bots.css";
 import "../../../src/mobile.css";
 import { createRoot } from "react-dom/client";
 import { RELOAD_THREADS } from "../../../src/lib/pulls";
+import { trackKeyboardNav } from "../../../src/lib/keyboardNav";
 
 const { App, preloadApp } = await import("../../../src/App");
 const { useStore } = await import("../../../src/lib/store");
@@ -18,4 +19,6 @@ const { useBots } = await import("../../../src/lib/bots/store");
 await preloadApp();
 useStore.getState().updateSettings({ theme: new URLSearchParams(location.search).get("theme") === "light" ? "light" : "dark" });
 Object.assign(window, { store: useStore, bots: useBots, reloadThreads: () => window.dispatchEvent(new Event(RELOAD_THREADS)) });
+// As main.tsx does, so focus rings show once the keyboard is in use.
+trackKeyboardNav();
 createRoot(document.getElementById("root")!).render(<App />);

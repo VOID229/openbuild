@@ -4,12 +4,14 @@
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BotLook } from "../../lib/bots/looks";
+import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation } from "../../lib/bots/types";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
 import { cx, useMediaQuery, usePresence } from "../../lib/ui";
+import { useEdgeDrag } from "../FileTree";
 import { LoadedChat } from "../LoadedChat";
 import { IconButton, Toggle } from "../primitives";
 import { expandBotsThread } from "../Sidebar";
@@ -248,10 +250,65 @@ function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }
   );
 }
 
+/**
+ * The thread's width (see lib/bots/threadWidth), held to what the panel's row has room for as the window
+ * changes. `room` is the row's width, measured from the panel's parent once the panel is mounted.
+ */
+function useThreadWidth(panel: React.RefObject<HTMLElement | null>, mounted: boolean) {
+  const [saved, setSaved] = useState(loadThreadWidth);
+  const [room, setRoom] = useState<number>();
+  useEffect(() => {
+    const row = panel.current?.parentElement;
+    if (!row) return;
+    const observer = new ResizeObserver(() => setRoom(row.clientWidth));
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [panel, mounted]);
+  const width = room === undefined ? saved : clampThreadWidth(saved, room);
+  const set = (w: number) => {
+    const next = room === undefined ? Math.max(THREAD_MIN, Math.round(w)) : clampThreadWidth(w, room);
+    setSaved(next);
+    saveThreadWidth(next);
+  };
+  return { width, max: room === undefined ? undefined : threadMax(room), set };
+}
+
+/** The thread's left edge: drag it (a finger too), use the arrow keys and Home/End, or double-click for the default width. */
+function ThreadGrip({ width, max, set }: ReturnType<typeof useThreadWidth>) {
+  const drag = useEdgeDrag(width, set, "panel-dragging");
+  const onKey = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 64 : 16;
+    const to = e.key === "ArrowLeft" ? width + step
+      : e.key === "ArrowRight" ? width - step
+      : e.key === "Home" ? THREAD_MIN
+      : e.key === "End" ? (max ?? width)
+      : undefined;
+    if (to === undefined) return;
+    e.preventDefault();
+    set(to);
+  };
+  return (
+    <div
+      className="side-grip bots-thread-grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize the thread"
+      aria-valuenow={width}
+      aria-valuemin={THREAD_MIN}
+      aria-valuemax={max}
+      tabIndex={0}
+      onPointerDown={drag}
+      onDoubleClick={() => set(THREAD_DEFAULT)}
+      onKeyDown={onKey}
+    />
+  );
+}
+
 /** A coding thread inside the details panel, in place of its tabs, which stay mounted underneath. */
-function ThreadPane({ chat, phone, back }: { chat: Chat; phone: boolean; back: () => void }) {
+function ThreadPane({ chat, phone, back, size }: { chat: Chat; phone: boolean; back: () => void; size: ReturnType<typeof useThreadWidth> }) {
   return (
     <div className="bots-details-threadpane">
+      {!phone && <ThreadGrip {...size} />}
       <div className="bots-details-top bots-details-thread-top">
         <IconButton label="Back to threads" tooltipSide="right" onClick={back}>
           <ChevronLeft size={phone ? 26 : 18} />
@@ -337,6 +394,8 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setThreadId(undefined);
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
+  const panel = useRef<HTMLElement>(null);
+  const size = useThreadWidth(panel, mounted);
   const showing = !!threadChat && tab === "threads";
   const openThread = (id: string) => {
     setThreadId(id);
@@ -361,8 +420,8 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const name = conversationName(conversation, bots);
   const close = () => (phone ? closeBotsLayer("details") : st.setDetailsOpen(false));
   return (
-    <aside className={cx("bots-details", visible && "bots-details-open", showing && "bots-details-wide")} aria-label="Details">
-      {showing && <ThreadPane chat={threadChat} phone={phone} back={() => setThreadId(undefined)} />}
+    <aside ref={panel} className={cx("bots-details", visible && "bots-details-open", showing && "bots-details-wide")} style={{ "--thread-w": `${size.width}px` } as React.CSSProperties} aria-label="Details">
+      {showing && <ThreadPane chat={threadChat} phone={phone} back={() => setThreadId(undefined)} size={size} />}
       <div className="bots-details-inner" hidden={showing}>
         <div className="bots-details-top">
           <IconButton label="Close details" tooltipSide="left" onClick={close}>

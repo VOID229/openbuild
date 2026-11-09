@@ -34,8 +34,13 @@ async function shoot(page: Page, name: string) {
 const TAB = `[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Threads'))`;
 
 /** The group chat open in OpenBots with its details showing the Threads tab. */
-async function open(width = 1280, height = 860) {
-  const page = await Page.open(chrome!.ws, server!.url.href, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+async function open(width = 1280, height = 860, theme = "dark") {
+  const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=${theme}`, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+  await showTab(page, width);
+  return page;
+}
+
+async function showTab(page: Page, width: number) {
   await page.eval(`(() => {
     store.getState().setBotsOpen(true);
     store.getState().setBotsSidebarOpen(${width > 768});
@@ -51,7 +56,6 @@ async function open(width = 1280, height = 860) {
   // The panel's opening transition has finished.
   await Bun.sleep(350);
   await page.settle();
-  return page;
 }
 
 /** What the tab lists: each row's title, the line under it, and its mascot's colour. */
@@ -176,4 +180,169 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     expect(await page.eval<unknown>("!!document.querySelector('.bots-details-open')")).toBe(true);
     await shoot(page, "phone-back-to-tab");
   }, 60_000);
+
+  describe("resizing a thread open in the panel", () => {
+    const GRIP = ".bots-details-threadpane .bots-thread-grip";
+    const KEY = "openbuild:bots-thread-width";
+    /** The thread's width, the bot chat's beside it, and the row they share. */
+    const widths = (page: Page) => page.eval<{ thread: number; chat: number; room: number; overlap: number }>(`(() => {
+      const panel = document.querySelector('.bots-details').getBoundingClientRect();
+      const chat = document.querySelector('.bots-view .bots-messages').getBoundingClientRect();
+      return { thread: Math.round(panel.width), chat: Math.round(chat.width), room: document.querySelector('.bots-view-content').clientWidth, overlap: chat.right - panel.left };
+    })()`);
+    const gripAt = (page: Page) => page.eval<[number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(GRIP)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
+    async function drag(page: Page, dx: number) {
+      const [x, y] = await gripAt(page);
+      await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", buttons: 1, clickCount: 1 });
+      for (let i = 1; i <= 5; i++) await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + (dx * i) / 5, y, button: "left", buttons: 1 });
+      // Moves go out with the next frame: let the last one land before letting go.
+      await page.settle();
+      await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x + dx, y, button: "left", buttons: 0, clickCount: 1 });
+      await page.settle();
+    }
+    async function key(page: Page, name: string, shift = false) {
+      const codes: Record<string, number> = { ArrowLeft: 37, ArrowRight: 39, Home: 36, End: 35 };
+      for (const type of ["rawKeyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: name, code: name, windowsVirtualKeyCode: codes[name], modifiers: shift ? 8 : 0 });
+      await page.settle();
+    }
+    /** Waits out the panel's width transition. */
+    const rest = () => Bun.sleep(350);
+    async function openThread(page: Page) {
+      await clickRow(page, "Trace the slow");
+      await page.until(`!!document.querySelector(${JSON.stringify(GRIP)})`);
+      await rest();
+      await page.settle();
+    }
+
+    test("drags by the left edge, between a smallest width and one that leaves the chat room", async () => {
+      const page = await open();
+      await openThread(page);
+      expect((await widths(page)).thread).toBe(480);
+      const grip = await page.eval<Record<string, string | null>>(`(() => { const g = document.querySelector(${JSON.stringify(GRIP)}); return Object.fromEntries(['role', 'aria-orientation', 'aria-label', 'aria-valuenow', 'aria-valuemin', 'tabindex'].map((a) => [a, g.getAttribute(a)])); })()`);
+      expect(grip).toEqual({ role: "separator", "aria-orientation": "vertical", "aria-label": "Resize the thread", "aria-valuenow": "480", "aria-valuemin": "360", tabindex: "0" });
+      expect(await page.eval<unknown>(`getComputedStyle(document.querySelector(${JSON.stringify(GRIP)})).cursor`)).toBe("ew-resize");
+
+      // Wider, following the pointer, and the chat gives way beside it rather than under it.
+      await drag(page, -80);
+      let w = await widths(page);
+      expect(w.thread).toBe(560);
+      expect(w.overlap).toBeLessThanOrEqual(1);
+      expect(await page.eval<unknown>(`localStorage.getItem(${JSON.stringify(KEY)})`)).toBe("560");
+      expect(await page.eval<unknown>("document.body.classList.contains('panel-dragging')")).toBe(false);
+      await shoot(page, "thread-resized-dark");
+
+      // No wider than leaves the bot chat its room.
+      await drag(page, -2000);
+      w = await widths(page);
+      expect(w.thread).toBe(w.room - 420);
+      expect(w.chat).toBeGreaterThanOrEqual(420 - 1);
+      expect(await page.eval<unknown>(`document.querySelector(${JSON.stringify(GRIP)}).getAttribute('aria-valuemax')`)).toBe(String(w.room - 420));
+      // And no narrower than a thread still reads.
+      await drag(page, 2000);
+      expect((await widths(page)).thread).toBe(360);
+      expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+
+      // A double-click goes back to the default, which isn't kept as a choice.
+      const [x, y] = await gripAt(page);
+      for (const clickCount of [1, 2]) for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount });
+      await rest();
+      expect((await widths(page)).thread).toBe(480);
+      expect(await page.eval<unknown>(`localStorage.getItem(${JSON.stringify(KEY)})`)).toBe(null);
+    }, 60_000);
+
+    test("works from the keyboard", async () => {
+      const page = await open();
+      await openThread(page);
+      // Tabbed to: it comes just before the thread's Back button.
+      await page.eval(`document.querySelector('.bots-details-threadpane [aria-label="Back to threads"]').focus()`);
+      for (const type of ["rawKeyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9, modifiers: 8 });
+      await page.settle();
+      expect(await page.eval<unknown>(`document.activeElement === document.querySelector(${JSON.stringify(GRIP)})`)).toBe(true);
+      await key(page, "ArrowLeft");
+      await rest();
+      expect((await widths(page)).thread).toBe(496);
+      await key(page, "ArrowLeft", true);
+      await rest();
+      expect((await widths(page)).thread).toBe(560);
+      await key(page, "ArrowRight");
+      await rest();
+      expect((await widths(page)).thread).toBe(544);
+      await key(page, "Home");
+      await rest();
+      expect((await widths(page)).thread).toBe(360);
+      await key(page, "End");
+      await rest();
+      const w = await widths(page);
+      expect(w.thread).toBe(w.room - 420);
+      // The keys only resize: focus stays on the edge and the thread stays open.
+      expect(await page.eval<unknown>("document.activeElement?.classList.contains('bots-thread-grip')")).toBe(true);
+      expect(await page.eval<unknown>("!!document.querySelector('.bots-details-threadpane')")).toBe(true);
+      // Focused from the keyboard, the edge shows its line.
+      await Bun.sleep(300);
+      expect(await page.eval<unknown>(`getComputedStyle(document.querySelector(${JSON.stringify(GRIP)}), '::after').opacity`)).toBe("1");
+      await shoot(page, "thread-grip-focused");
+    }, 60_000);
+
+    test("follows a finger, with a wider edge to catch", async () => {
+      const page = await open();
+      await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
+      await page.settle();
+      await openThread(page);
+      expect(await page.eval<unknown>(`document.querySelector(${JSON.stringify(GRIP)}).getBoundingClientRect().width`)).toBe(14);
+      const [x, y] = await gripAt(page);
+      await page.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+      for (let i = 1; i <= 5; i++) await page.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: x - 20 * i, y }] });
+      await page.settle();
+      await page.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await page.settle();
+      expect((await widths(page)).thread).toBe(580);
+    }, 60_000);
+
+    test("keeps its width across a reload, held to what a narrower window has room for", async () => {
+      const page = await open();
+      await openThread(page);
+      await drag(page, -100);
+      expect((await widths(page)).thread).toBe(580);
+
+      await page.send("Page.reload");
+      await page.until("window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+      await showTab(page, 1280);
+      await openThread(page);
+      expect((await widths(page)).thread).toBe(580);
+
+      // A narrower window: the chat keeps its room, and the width chosen comes back with the room.
+      await page.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 860, deviceScaleFactor: 1, mobile: false });
+      await rest();
+      await page.settle();
+      let w = await widths(page);
+      expect(w.thread).toBe(w.room - 420);
+      expect(w.chat).toBeGreaterThanOrEqual(420 - 1);
+      expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+      await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+      await rest();
+      await page.settle();
+      expect((await widths(page)).thread).toBe(580);
+    }, 60_000);
+
+    test("in the light theme too", async () => {
+      const page = await open(1280, 860, "light");
+      await openThread(page);
+      await drag(page, -80);
+      expect((await widths(page)).thread).toBe(560);
+      await shoot(page, "thread-resized-light");
+    }, 60_000);
+
+    test("on a phone the thread fills the details screen, with no edge to drag and a width kept on a wider screen ignored", async () => {
+      const page = await open(390, 800);
+      await page.eval(`localStorage.setItem(${JSON.stringify(KEY)}, "900")`);
+      await clickRow(page, "Fix the flaky");
+      await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
+      await rest();
+      expect(await page.eval<unknown>(`!!document.querySelector('.bots-thread-grip')`)).toBe(false);
+      const fit = await page.eval<number[]>(`(() => { const p = document.querySelector('.bots-details').getBoundingClientRect(); const t = document.querySelector('.bots-details-threadpane').getBoundingClientRect(); return [p.width, t.width]; })()`);
+      expect(fit[0]).toBe(390);
+      expect(fit[1]).toBeGreaterThanOrEqual(389);
+      expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    }, 60_000);
+  });
 });
