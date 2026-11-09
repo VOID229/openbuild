@@ -3,6 +3,9 @@
 // user looks up wide-eyed, a finished one leaves the list, and dozing bots and huddles in the sidebars
 // show a small zzz that still reads there, still while motion is reduced, and none beside the chat.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { BotAvatar, BotHuddle } from "../src/components/bots/BotAvatar";
 import { threadActivity, threadMascot } from "../src/lib/bots/activity";
 import type { Chat, Message } from "../src/lib/types";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
@@ -29,6 +32,23 @@ describe("a thread's mascot", () => {
     expect(threadMascot("working")).toEqual({ busy: true, asleep: false, mood: "idle" });
     expect(threadMascot("waiting")).toEqual({ busy: false, asleep: false, mood: "surprised" });
     expect(threadMascot("idle")).toEqual({ busy: false, asleep: true, mood: "idle" });
+  });
+});
+
+describe("where the zzz shows", () => {
+  const looks = [{ shape: "puff", color: "white" }, { shape: "orb", color: "green" }];
+  test("off unless asked for, on a dozing bot or huddle", () => {
+    expect(renderToStaticMarkup(createElement(BotAvatar, { look: looks[0]!, size: 28, asleep: true }))).not.toContain("bot-zzz");
+    expect(renderToStaticMarkup(createElement(BotHuddle, { looks, size: 96, active: [false, false] }))).not.toContain("bot-zzz");
+    expect(renderToStaticMarkup(createElement(BotAvatar, { look: looks[0]!, size: 28, asleep: true, zzz: true }))).toContain("bot-zzz");
+    expect(renderToStaticMarkup(createElement(BotHuddle, { looks, size: 96, active: [false, false], zzz: true }))).toContain("bot-zzz");
+  });
+
+  test("only the sidebars ask for it: not the chat, nor Settings' group huddles", async () => {
+    const asks = async (file: string) => /\bzzz(?:=\{true\})?[\s/>]/.test(await Bun.file(`src/components/bots/${file}`).text());
+    expect(await asks("BotsSidebar.tsx")).toBe(true);
+    expect(await asks("BotDetails.tsx")).toBe(true);
+    for (const file of ["BotChat.tsx", "BotSettings.tsx", "BotDialogs.tsx"]) expect({ file, asks: await asks(file) }).toEqual({ file, asks: false });
   });
 });
 
