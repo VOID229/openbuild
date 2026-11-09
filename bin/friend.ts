@@ -80,7 +80,7 @@ async function invite(out: Out, args: string[]) {
   let mode: FriendMode | undefined = flags.lan ? "lan" : flags.tailscale ? "tailscale" : flags.tunnel ? "tunnel" : undefined;
   if (!mode) {
     if (!process.stdin.isTTY) out.fail("say --tailscale, --lan or --tunnel.");
-    const answer = (await ask("Friends connect over [1] Tailscale, [2] LAN or [3] your OpenTunnel relay? [1] ")).toLowerCase();
+    const answer = (await ask("Friends connect over [1] Tailscale, [2] LAN or [3] OpenTunnel? [1] ")).toLowerCase();
     mode = answer === "2" || answer === "lan" ? "lan" : answer === "3" || answer === "tunnel" ? "tunnel" : "tailscale";
   }
   const created = await call<{ code: string; urls: string[]; expiresAt: number; port: number; tailscaleIp?: string }>(out, "invite", {
@@ -100,7 +100,7 @@ async function invite(out: Out, args: string[]) {
   console.log(out.dim(`  It points at ${created.urls.join(", ")}, which only answers the friend protocol.`));
   if (mode === "tailscale" && created.tailscaleIp) aclHint(out, created.tailscaleIp, created.port);
   if (mode === "lan") console.log(out.dim("  Over LAN, what you and your friend's bots say is signed but not encrypted. Tailscale encrypts it."));
-  if (mode === "tunnel") console.log(out.dim("  Through your OpenTunnel relay, which reaches the friend listener only. Your friend needs nothing but the code."));
+  if (mode === "tunnel") console.log(out.dim("  Through OpenTunnel, which reaches the friend listener only. Your friend needs nothing but the code."));
   console.log(out.dim("\n  Waiting for them… (Ctrl+C cancels)"));
   for (;;) {
     const { request } = await call<{ request: { id: string; name: string; fingerprint: string } | null }>(out, "wait");

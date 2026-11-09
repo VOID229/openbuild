@@ -1,24 +1,34 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keyId } from "../server/friends/protocol";
 import { certificate, fakeClientBin, fakeRelay, freePort, identities, peer, until, type Peer } from "./fakeTunnel";
 
-// Friends through a tunnel, with a fake relay in OpenTunnel's place (there's no self-hosted relay to
-// test against here; friendsTunnelLive.test.ts runs the same through a real one when it's configured).
-// The host starts the tunnel client the way an invite does: a stand-in client (fakeOpentunnel.ts) that
-// notes how it was started. The guest dials one WSS through the fake relay, which copies bytes to the
+// Friends through a tunnel, with a fake relay in OpenTunnel's place (friendsTunnelLive.test.ts runs the
+// same through the real client and relay when asked to). The host starts the tunnel client the way an
+// invite does: a stand-in client (fakeOpentunnel.ts) that behaves as the real one does where OpenBuild
+// relies on it, and notes how it was started. The guest dials one WSS through the fake relay, which copies bytes to the
 // host's friend listener on loopback and resets connections idle too long, like the real one. Each
 // side is its own process on a throwaway data dir, and everything they say is synthetic.
 const directory = mkdtempSync(join(tmpdir(), "openbuild-friends-tunnel-"));
 const peers: Peer[] = [];
 let relay: ReturnType<typeof fakeRelay> | undefined;
+let runtime: string | undefined;
 afterAll(() => {
   for (const p of peers) p.child.kill("SIGKILL");
   relay?.stop();
   rmSync(directory, { recursive: true, force: true });
+  if (runtime) rmSync(runtime, { recursive: true, force: true });
 });
+const gone = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+};
 
 test("a guest holds one WSS through the tunnel, reconnects without losing anything, and is turned away once removed", async () => {
   const hostDir = join(directory, "host");
@@ -27,7 +37,8 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   const { cert, key, certFile } = certificate(directory);
   const friendPort = freePort();
   const appPort = freePort();
-  const record = join(directory, "client.json");
+  const tunnelDir = join(hostDir, "friends", "tunnel");
+  const runs = () => readFileSync(join(tunnelDir, "home", "runs.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
 
   const host = peer({
     OPENCHAT_DATA_DIR: hostDir,
@@ -38,13 +49,13 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
     PORT: String(appPort),
     OPENBUILD_FRIEND_HOST: "127.0.0.1",
     OPENBUILD_FRIEND_PORT: String(friendPort),
-    OPENBUILD_FRIEND_TUNNEL_API: "https://relay.test",
+    // No OPENBUILD_FRIEND_TUNNEL_API: the hosted relay.
     OPENBUILD_FRIEND_TUNNEL_BIN: fakeClientBin(directory),
     // The owner's own tunnel settings, which friends' tunnel mustn't pick up.
-    OPENTUNNEL_API: "https://opentunnel.xyz",
+    OPENTUNNEL_API: "https://tunnel.someone-else.test",
     OPENTUNNEL_PROFILE: "default",
     OPENTUNNEL_TOKEN: "not-for-friends",
-    FAKE_OPENTUNNEL_RECORD: record,
+    DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/0/bus",
   });
   peers.push(host);
   const placed = (await host.next((e) => e.placed || e.placeError)).placed;
@@ -55,15 +66,31 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   expect(placed.urls[0]).toMatch(/^https:\/\/f[0-9a-f]{20}\.t1\.relay\.test$/);
   expect((await host.next((e) => e.listening)).listening).toEqual({ port: friendPort });
 
-  // The client: the owner's self-hosted relay and nothing else, on a profile and folders of its own,
-  // with one route, to the friend port. The app's port is never routed.
-  const client = JSON.parse(readFileSync(record, "utf8"));
-  expect(client.args).toEqual(["--profile", "openbuild-friends", "serve"]);
-  expect(client.env).toEqual({ OPENTUNNEL_API: "https://relay.test", OPENTUNNEL_PROFILE: "openbuild-friends" });
-  expect(client.configHome).toBe(join(hostDir, "friends", "tunnel", "config"));
-  const routes = client.routes.split("\n").filter((l: string) => l.includes("="));
+  // The client, as OpenTunnel 0.6.2 needs it: `serve`, OpenBuild's own child, then `up` to create the
+  // tunnel, which finds that service running and has it reload. The hosted relay is the client's own
+  // default, so no --api. A profile, HOME and XDG folders of its own; none of the owner's OPENTUNNEL_*
+  // settings; and no PATH, so it finds no systemctl to register a login service with.
+  const [serve, up] = runs();
+  expect(serve.command).toBe("serve");
+  expect(serve.args).toEqual(["--profile", "openbuild-friends", "serve"]);
+  expect(up.command).toBe("up");
+  expect(up.args).toEqual(["--profile", "openbuild-friends", "up"]);
+  expect(up.serviceRunning).toBe(true);
+  for (const run of [serve, up]) {
+    expect(Object.keys(run.env).filter((k) => k.startsWith("OPENTUNNEL_") || k.startsWith("DBUS"))).toEqual([]);
+    expect(run.env.HOME).toBe(join(tunnelDir, "home"));
+    expect(run.env.XDG_CONFIG_HOME).toBe(join(tunnelDir, "config"));
+    expect(run.env.XDG_DATA_HOME).toBe(join(tunnelDir, "data"));
+    expect(run.env.XDG_STATE_HOME).toBe(join(tunnelDir, "state"));
+    expect(readdirSync(run.env.PATH)).toEqual([]);
+  }
+  // The control socket's folder: short enough for a socket path, and private.
+  runtime = serve.env.XDG_RUNTIME_DIR as string;
+  expect(join(runtime, "opentunnel", "openbuild-friends.sock").length).toBeLessThan(100);
+  expect(statSync(runtime).mode & 0o777).toBe(0o700);
+  const routes = serve.routes.split("\n").filter((l: string) => l.includes("="));
   expect(routes).toEqual([`${new URL(placed.urls[0]).hostname.split(".")[0]} = "127.0.0.1:${friendPort}"`]);
-  expect(client.routes).not.toContain(String(appPort));
+  expect(serve.routes).not.toContain(String(appPort));
 
   // Connections idle for 1.5s are reset, as the relay does after its idle timeout. Heartbeats keep
   // the one connection up well past that.
@@ -127,15 +154,7 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   host.send({ remove: true });
   await guest.next((e) => e.removedByPeer);
   guest.send({ send: 999 });
-  const gone = (pid: number) => {
-    try {
-      process.kill(pid, 0);
-      return false;
-    } catch {
-      return true;
-    }
-  };
-  await until(() => gone(client.pid), "the tunnel client stopping once nobody needs it", 5000);
+  await until(() => gone(serve.pid), "the tunnel client stopping once nobody needs it", 5000);
   await Bun.sleep(1500);
   expect(host.applied()).not.toContain(999);
   expect(await fetch(`http://127.0.0.1:${friendPort}/`).then(() => "answered", () => "closed")).toBe("closed");
@@ -143,7 +162,8 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   await host.child.exited;
   expect(guest.stderr()).toBe("");
 
-  // A signal stops the server's tunnel client with it, since Bun runs no exit hooks there.
+  // Again, through a relay of the owner's own: the client is told it, and nothing else changes. A
+  // signal stops the client with the server, since Bun runs no exit hooks there.
   const again = peer({
     OPENCHAT_DATA_DIR: hostDir,
     PEER_ROLE: "host",
@@ -153,17 +173,37 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
     OPENBUILD_FRIEND_PORT: String(friendPort),
     OPENBUILD_FRIEND_TUNNEL_API: "https://relay.test",
     OPENBUILD_FRIEND_TUNNEL_BIN: fakeClientBin(directory),
-    FAKE_OPENTUNNEL_RECORD: record,
   });
   peers.push(again);
   const replaced = (await again.next((e) => e.placed || e.placeError)).placed;
   // The same route under the same hostname: a friend's saved address keeps working.
   expect(replaced.urls).toEqual(placed.urls);
-  // The hostname was already known, so the invite needn't wait for the client to come up again.
-  const read = () => JSON.parse(readFileSync(record, "utf8"));
-  await until(() => read().pid !== client.pid, "the client starting again");
-  const second = read();
+  // The tunnel exists, so only `serve` runs this time.
+  await until(() => runs().length === 3, "the client starting again");
+  const second = runs()[2];
+  expect(second.args).toEqual(["--profile", "openbuild-friends", "--api", "https://relay.test", "serve"]);
   again.child.kill("SIGTERM");
   await again.child.exited;
   await until(() => gone(second.pid), "the tunnel client stopping with the server", 5000);
+  expect(existsSync(join(runtime, "opentunnel", "openbuild-friends.sock"))).toBe(false);
 }, 90_000);
+
+// Which relay the client is told to use: the hosted one unless the owner names theirs, and a bad
+// address of theirs is refused rather than quietly swapped for the hosted one.
+test("the tunnel uses the hosted relay unless OPENBUILD_FRIEND_TUNNEL_API names another", () => {
+  const run = (env: Record<string, string>) => {
+    const child = Bun.spawnSync([process.execPath, "-e", `
+      const t = await import('./server/friends/tunnel.ts');
+      let out;
+      try { out = { relay: t.relay(), args: t.clientArgs() }; } catch (err) { out = { error: err.message }; }
+      console.log(JSON.stringify(out));
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(directory, "relay-check"), OPENBUILD_FRIEND_TUNNEL_API: "", OPENTUNNEL_API: "https://someone-else.test", ...env }, stdout: "pipe", stderr: "pipe" });
+    return JSON.parse(child.stdout.toString());
+  };
+  expect(run({})).toEqual({ relay: "https://opentunnel.xyz", args: ["--profile", "openbuild-friends"] });
+  expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "https://tunnel.example.com/" })).toEqual({ relay: "https://tunnel.example.com", args: ["--profile", "openbuild-friends", "--api", "https://tunnel.example.com"] });
+  expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "http://localhost:8080" }).relay).toBe("http://localhost:8080");
+  expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "http://tunnel.example.com" }).error).toContain("has to be https://");
+  expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "not a url" }).error).toContain("isn't a URL");
+  expect(run({ OPENBUILD_FRIEND_TUNNEL_CA: "/etc/ca.pem" }).args).toEqual(["--profile", "openbuild-friends", "--ca-cert", "/etc/ca.pem"]);
+});

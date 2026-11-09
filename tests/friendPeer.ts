@@ -3,6 +3,7 @@
 // stdout and takes commands as JSON lines on stdin:
 //   {"send": n}     deliver a synthetic frame { n } to the friend
 //   {"remove": true} stop being friends, the way `openbuild friend remove` does on the link
+//   {"deleteTunnel": true} (host) delete its OpenTunnel tunnel for good, with the same isolated client
 //   {"exit": true}  stop everything and exit
 // PEER_ROLE is host or guest, PEER_OTHER_KEY the friend's public key, PEER_URL (guest) where to dial,
 // PEER_PLACE=1 (host) to start the tunnel the way an invite does, PEER_PING_MS to shorten heartbeats.
@@ -12,6 +13,7 @@ const store = await import("../server/friends/store");
 const link = await import("../server/friends/link");
 const listener = await import("../server/friends/listener");
 const { transports } = await import("../server/friends/transport");
+const tunnel = await import("../server/friends/tunnel");
 
 const emit = (event: Record<string, unknown>) => console.log(JSON.stringify(event));
 const role = process.env.PEER_ROLE === "host" ? "host" : "guest";
@@ -30,6 +32,7 @@ link.setHooks({
 link.startTimer();
 
 if (role === "host") {
+  emit({ runtime: tunnel.runtimeDir() });
   store.putFriend({ id, name: "Guest", publicKey: other, role: "guest", mode: "tunnel", listen: "127.0.0.1", addedAt: Date.now() });
   if (process.env.PEER_PLACE) {
     try {
@@ -59,6 +62,11 @@ for await (const chunk of Bun.stdin.stream()) {
       store.deleteFriend(id);
       listener.sync();
       emit({ removed: true });
+    }
+    if (command.deleteTunnel) {
+      tunnel.stop();
+      const run = Bun.spawnSync([tunnel.bin()!, ...tunnel.clientArgs(), "delete", "--yes"], { env: tunnel.clientEnv() });
+      emit({ deleted: run.exitCode === 0, output: (run.stdout.toString() + run.stderr.toString()).trim() });
     }
     if (command.exit) {
       link.stopAll();
