@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readRoute, startRouting, threadPath } from "../src/lib/routes";
+import { initialRouteState, readRoute, startRouting, threadPath } from "../src/lib/routes";
 
 function harness(url = "/new") {
   let state = { activeChatId: undefined as string | undefined, settingsOpen: false, settingsSection: "profile" as import("../src/lib/store").SettingsSection, botsOpen: undefined as boolean | undefined, botsThread: undefined as boolean | undefined, chats: [{ id: "abc" }, { id: "def" }] };
@@ -156,5 +156,17 @@ describe("clean URLs", () => {
     expect(h.location.pathname).toBe("/new");
     expect(h.store.getState().activeChatId).toBeUndefined();
     h.stop();
+  });
+});
+
+describe("initialRouteState", () => {
+  test("a thread opened inside OpenBots loads as that thread, not the bot chat", () => {
+    expect(initialRouteState("/bots/thread-abc")).toEqual({ usageOpen: false, botsOpen: true, botsThread: true, activeChatId: "abc" });
+  });
+  test("OpenBots, Usage and plain threads load into their own mode", () => {
+    expect(initialRouteState("/bots")).toMatchObject({ botsOpen: true, botsThread: false, activeChatId: undefined });
+    expect(initialRouteState("/bots/usage")).toMatchObject({ botsOpen: true, usageOpen: true, botsThread: false });
+    expect(initialRouteState("/thread-abc")).toMatchObject({ botsOpen: false, botsThread: false });
+    expect(initialRouteState("/new")).toMatchObject({ botsOpen: false, usageOpen: false });
   });
 });

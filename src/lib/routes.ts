@@ -31,6 +31,12 @@ export function readRoute(pathname: string, hash = ""): Route {
   return {};
 }
 
+/** The mode a page loads into, before routing starts: OpenBots, a thread opened inside it, or Usage. */
+export function initialRouteState(pathname: string, hash = "") {
+  const route = readRoute(pathname, hash);
+  return { usageOpen: !!route.usage, botsOpen: !!route.bots, botsThread: !!route.bots && !!route.threadId, activeChatId: route.bots ? route.threadId : undefined };
+}
+
 interface RouteState {
   activeChatId?: string;
   settingsOpen: boolean;

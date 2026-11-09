@@ -11,6 +11,7 @@ import { defaultModel, findModel, isAuto } from "./models";
 import { keyId } from "./keys";
 import { effortFor, effortKey, speedFor, threadModel } from "./effort";
 import type { ClaudeAccountModels, Effort, ModelInfo, PermissionModes, RuntimeAccount } from "../../shared/types";
+import { initialRouteState } from "./routes";
 import { serverStorage, skipUnchanged } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
@@ -360,6 +361,8 @@ interface State {
 const detectControllers: Partial<Record<PlanId, AbortController>> = {};
 const searchControllers = new Map<string, AbortController>();
 
+const initialRoute: Partial<ReturnType<typeof initialRouteState>> = typeof window === "undefined" || !window.location ? {} : initialRouteState(window.location.pathname, window.location.hash);
+
 export const useStore = create<State>()(
   persist(
     (set, get) => ({
@@ -402,9 +405,11 @@ export const useStore = create<State>()(
       view: DEFAULT_VIEW,
       settingsOpen: false,
       settingsSection: "profile",
-      usageOpen: false,
-      botsOpen: false,
-      botsThread: false,
+      // From the URL, so a reload paints the world it was on rather than OpenBuild until routing starts.
+      usageOpen: initialRoute.usageOpen ?? false,
+      botsOpen: initialRoute.botsOpen ?? false,
+      botsThread: initialRoute.botsThread ?? false,
+      ...(initialRoute.activeChatId ? { activeChatId: initialRoute.activeChatId } : {}),
       projects: [],
       projectsLoaded: false,
       devices: [],
