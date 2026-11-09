@@ -1,4 +1,4 @@
-import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star, Zap } from "lucide-react";
+import { Check, KeyRound, Search, ShieldCheck, Star, Zap } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   EFFORTS,
@@ -208,7 +208,6 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
   const configured = modes.find((m) => m.id === listing?.defaultMode);
   const current = picked ? modes.find((m) => m.id === picked) : undefined;
   const label = current?.name ?? (picked ? picked : configured ? configured.name : "Default");
-  const risky = /full-access|force|danger|bypassPermissions/.test(current?.id ?? "");
   const tooltip = listing?.status === "error" && !modes.length
     ? `Couldn't list ${name}'s permission modes: ${listing.error}`
     : current?.description
@@ -221,7 +220,7 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
       <button
         ref={anchor}
         type="button"
-        className={cx("ws-pill permission-pill", open && "ws-pill-open", risky && "permission-risky")}
+        className={cx("ws-pill permission-pill", open && "ws-pill-open")}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Permissions: ${label}`}
@@ -229,7 +228,7 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
         data-tooltip-side={dropUp ? "top" : "bottom"}
         onClick={() => setOpen((o) => !o)}
       >
-        {risky ? <ShieldAlert size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
+        <ShieldCheck size={13} aria-hidden />
         <span className="ws-pill-text">{label}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu effort-menu speed-menu" role="listbox" label="Permissions" fixed={dropUp ? "up" : "auto"}>

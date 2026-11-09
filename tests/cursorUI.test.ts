@@ -90,7 +90,10 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(bar()).toContain('aria-label="Permissions: Configured"');
     useStore.getState().setPermission("force");
     expect(bar()).toContain('aria-label="Permissions: Run everything"');
-    expect(bar()).toContain("permission-risky");
+    // Every mode looks the same: no red, no alert shield.
+    expect(bar()).not.toContain("permission-risky");
+    expect(bar()).not.toContain("lucide-shield-alert");
+    expect(bar()).toContain("lucide-shield-check");
     useStore.getState().newChat();
     expect(useStore.getState().settings.runtimePermissions?.cursor).toBe("force");
     for (const runtime of ["pi", "durable", "fx"] as const) {

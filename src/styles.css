@@ -7454,7 +7454,6 @@ a.btn-primary {
 
 .permission-pill { display: inline-flex; align-items: center; gap: 5px; }
 .permission-pill svg { flex-shrink: 0; opacity: 0.75; }
-.permission-risky { color: var(--danger); }
 
 /* Under the composer: Remote Control, outside the option row. Claude Code switches it per thread;
    other harnesses show it disabled with where it's set. */
