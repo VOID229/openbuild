@@ -35,7 +35,9 @@ const TAB = `[...document.querySelectorAll('.bots-details .bots-tab')].find((t) 
 
 /** The group chat open in OpenBots with its details showing the Threads tab. */
 async function open(width = 1280, height = 860, theme = "dark") {
-  const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=${theme}`, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+  // Opened at /bots: the app's routing applies the URL once threads load, and at / that could close
+  // OpenBots again after it was opened here.
+  const page = await Page.open(chrome!.ws, `${server!.url.href}bots?theme=${theme}`, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
   await showTab(page, width);
   return page;
 }
@@ -47,7 +49,8 @@ async function showTab(page: Page, width: number) {
     bots.getState().select("dev");
   })()`);
   // On a phone OpenBots starts with the details closed, once it shows: they're opened after that.
-  await page.until("!!document.querySelector('.bots-view .bots-messages')");
+  // Shown, not just there: a hidden OpenBots keeps its chat in the page with its effects off.
+  await page.until("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()");
   await page.settle();
   await page.eval(`bots.getState().setDetailsOpen(true)`);
   await page.until("!!document.querySelector('.bots-details-open')");
