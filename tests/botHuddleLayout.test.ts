@@ -26,11 +26,11 @@ const open = async (theme: "light" | "dark") => {
 };
 
 type Box = { left: number; top: number; right: number; bottom: number };
-type Huddle = { where: string; size: number; bodies: Box[]; hidden: number; touched: number; more: (Box & { text: string; font: number; clipped: boolean; seat: boolean }) | null; host: Box | null };
+type Huddle = { where: string; size: number; bodies: Box[]; hidden: number; touched: number; more: (Box & { text: string; font: number; clipped: boolean; seat: boolean; cell: Box | null }) | null; host: Box | null };
 
 /**
  * Every huddle on the page: its members' drawn bodies, how many are covered, how many the count
- * touches (any point of its disc, or its box beside the huddle, inside a body's outline), the count
+ * touches (any point of its disc or pill, or its box beside the huddle, inside a body's outline), the count
  * and the item it's in.
  */
 const huddles = (page: Page) =>
@@ -48,7 +48,8 @@ const huddles = (page: Page) =>
         const r = m.getBoundingClientRect(), round = !!m.closest('.bot-huddle-seat');
         const points = [];
         for (let x = r.left; x <= r.right; x += 0.5) for (let y = r.top; y <= r.bottom; y += 0.5)
-          if (!round || Math.hypot(x - (r.left + r.right) / 2, y - (r.top + r.bottom) / 2) <= r.width / 2) points.push([x, y]);
+          // In a seat it's a disc, or a pill: within half its height of the line through its middle.
+          if (!round || Math.hypot(x - Math.max(r.left + r.height / 2, Math.min(x, r.right - r.height / 2)), y - (r.top + r.bottom) / 2) <= r.height / 2) points.push([x, y]);
         touched = shapes.filter((s) => {
           const inv = s.getScreenCTM().inverse();
           return points.some(([x, y]) => s.isPointInFill(new DOMPoint(x, y).matrixTransform(inv)));
@@ -56,7 +57,7 @@ const huddles = (page: Page) =>
       }
       return {
         where, size: h.querySelector('.bot-huddle-box').offsetWidth, bodies: shapes.map((s) => box(s.getBoundingClientRect())), hidden, touched,
-        more: m && { ...box(m.getBoundingClientRect()), text: m.textContent, font: parseFloat(getComputedStyle(m).fontSize), clipped: m.scrollWidth > m.clientWidth + 0.5, seat: !!m.closest('.bot-huddle-seat') },
+        more: m && { ...box(m.getBoundingClientRect()), text: m.textContent, font: parseFloat(getComputedStyle(m).fontSize), clipped: m.scrollWidth > m.clientWidth + 0.5, seat: !!m.closest('.bot-huddle-seat'), cell: m.closest('.bot-huddle-seat') && box(m.closest('.bot-huddle-seat').getBoundingClientRect()) },
         host: host && box(host.getBoundingClientRect()),
       };
     });
@@ -80,6 +81,7 @@ describe.skipIf(!browser)("groups' avatars", () => {
         if (!h.more.seat) expect(h.more.left).toBeGreaterThanOrEqual(Math.max(...h.bodies.map((b) => b.right)));
         expect(h.more.font).toBeGreaterThanOrEqual(9);
         expect({ label, clipped: h.more.clipped }).toEqual({ label, clipped: false });
+        if (h.more.cell) expect({ label, inSeat: within(h.more, h.more.cell) }).toEqual({ label, inSeat: true });
         if (h.host) expect({ label, inside: within(h.more, h.host) }).toEqual({ label, inside: true });
       }
       // Seven in a group: three shown and four counted in a seat, four shown and three counted beside.
