@@ -65,6 +65,7 @@ const mem = globalThis as {
   openbotsActivityTimes?: Map<string, { turnStartedAt: number | null; lastActivityAt: number }>;
   openbotsChains?: Map<string, number>;
   openbotsChainWarned?: Set<string>;
+  openbotsSectionsSwept?: boolean;
   openbotsWaiters?: Waiter[];
   openbotsPiCheck?: PiCheck;
   openbotsSetup?: { value?: PiSetup };
@@ -143,6 +144,18 @@ export function getSettings(): BotsSettings {
 function modelList(value: unknown): string[] | undefined {
   const list = strings(Array.isArray(value) ? value.map((m) => (typeof m === "string" ? m.trim().slice(0, 200) : m)).filter((m) => typeof m === "string" && m.includes("/")) : [], 8);
   return list.length ? list : undefined;
+}
+
+/**
+ * Drops sections no conversation is filed under any more, once a chat moves or goes: a section only
+ * holds chats, so the last one out takes it along. `keep` is the one a chat is being moved into,
+ * which the client may have only just added.
+ */
+function pruneSections(keep?: string) {
+  const { sections } = settings();
+  const used = new Set(db.listConversations().map((c) => c.section));
+  const next = sections.filter((s) => s === keep || used.has(s));
+  if (next.length !== sections.length) updateSettings({ sections: next });
 }
 
 export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
@@ -332,6 +345,11 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; thre
 ];
 
 export function ensureStarted() {
+  // Sections left empty before chats took theirs along when they went; once per server is enough.
+  if (!mem.openbotsSectionsSwept) {
+    mem.openbotsSectionsSwept = true;
+    pruneSections();
+  }
   if (db.listBots().length) return;
   const now = Date.now();
   const botId = crypto.randomUUID();
@@ -787,6 +805,7 @@ export async function deleteBot(id: string) {
       if (next.friend) friendHooks.members(next);
     }
   }
+  pruneSections();
   db.deleteBot(id);
   db.setValue(CHANGE_NOTES, changeNotes().filter((n) => n.botId !== id));
   db.setValue(RENAME_NOTES, renameNotes().filter((n) => n.botId !== id));
@@ -857,6 +876,7 @@ export function updateConversation(id: string, patch: Partial<Conversation>): Co
   emitConversation(id);
   if (patch.botIds && c.kind === "group") settlePolls(id);
   if (c.friend && !c.friend.ended && c.botIds.join() !== before) friendHooks.members(c);
+  if ("section" in patch) pruneSections(c.section);
   return conversationView(id)!;
 }
 
@@ -875,6 +895,7 @@ export function deleteConversation(id: string) {
   if (c.friend && !c.friend.ended) friendHooks.left(c);
   db.deleteConversation(id);
   emit({ t: "conversation-deleted", id });
+  pruneSections();
 }
 
 export function markRead(id: string) {
