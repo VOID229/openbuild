@@ -363,7 +363,7 @@
 
   .bm-option:active:not(:disabled),
   .bots-pick:active,
-  .bm-reaction:active,
+  .bm-reaction:active .bm-reaction-pill,
   .bots-toggle:active,
   .bots-composer-btn:active:not(:disabled),
   .bm-jump:active,
@@ -844,7 +844,7 @@
     margin: -6px 8px 0 0;
   }
 
-  .bm-reaction {
+  .bm-reaction-pill {
     height: 28px;
     padding: 0 8px;
     border-radius: 14px;

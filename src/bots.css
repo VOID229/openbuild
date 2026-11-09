@@ -1639,7 +1639,14 @@
   animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
 }
 
+/* The button is the pill and the mascots of the bots that reacted, so both toggle it and show who. */
 .bm-reaction {
+  display: inline-flex;
+  animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  transition: transform var(--fast) var(--ease);
+}
+
+.bm-reaction-pill {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -1650,14 +1657,82 @@
   background: var(--surface);
   box-shadow: var(--shadow-sm);
   font-size: 13px;
-  animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
-  transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+  transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
-@media (hover: hover) {
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .bm-reaction:hover {
     transform: scale(1.06);
   }
+}
+
+/* The reacting bots sit just past the pill's lower right corner, overlapping each other. A ring in
+   the page's colour, traced around each shape, keeps them apart from each other and the pill. */
+.bm-reaction-mascots {
+  display: flex;
+  align-self: flex-end;
+  margin: 0 0 -10px -6px;
+}
+
+.bm-reaction-mascots .bot {
+  filter: drop-shadow(1.5px 0 0 var(--bg)) drop-shadow(-1.5px 0 0 var(--bg)) drop-shadow(0 1.5px 0 var(--bg)) drop-shadow(0 -1.5px 0 var(--bg));
+}
+
+.bm-reaction-mascots .bot + .bot {
+  margin-left: -5px;
+}
+
+/* Answering a bot's reaction with one of the user's own: a tiny button just past the pill's upper
+   right corner, above the mascots and clear of them. It shows on hover or focus, and always on touch screens. */
+.bm-reaction-reply {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  align-self: flex-start;
+  width: 16px;
+  height: 16px;
+  /* Over the room the mascots leave above themselves, past the pill's corner. */
+  margin: -5px 0 0 -8px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+/* A bigger target than it looks. */
+.bm-reaction-reply::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+}
+
+.bm-reaction-link:hover .bm-reaction-reply,
+.bm-reaction-link:focus-within .bm-reaction-reply {
+  opacity: 1;
+}
+
+.bm-reaction-reply:hover,
+.bm-reaction-reply:focus-visible {
+  color: var(--text);
+}
+
+@media (hover: none) {
+  .bm-reaction-reply {
+    opacity: 1;
+  }
+}
+
+/* Room for the mascots below, so they don't reach the next message or a wrapped row of reactions. */
+.bm-reactions:has(.bm-reaction-mascots) {
+  row-gap: 12px;
+  padding-bottom: 10px;
+}
+
+.bm-reactions:has(.bm-reaction-mascots) .bm-reaction-thread {
+  row-gap: 12px;
 }
 
 .bm-reaction-emoji {
