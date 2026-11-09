@@ -53,6 +53,20 @@ const transitions = (page: Page, bot: string) =>
     on: ['bot-lid', 'bot-eye', 'bot-tilt', 'bot-turn', 'bot-look', 'bot-light'].find((c) => a.effect.target.classList.contains(c)) ?? '', property: a.transitionProperty, duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay,
   }))`);
 
+/**
+ * Records every transition from now on as it starts: a short one (the lids open in 140 ms) can be
+ * over before a slow frame lets `transitions` look. `started` reads them back for a bot.
+ */
+const watchTransitions = (page: Page) =>
+  page.eval(`(window.started = [], window.watching ||= (document.addEventListener('transitionrun', (e) => {
+    const a = e.target.getAnimations().find((a) => a instanceof CSSTransition && a.transitionProperty === e.propertyName);
+    if (a) window.started.push({ target: e.target, property: e.propertyName, duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay });
+  }), true), true)`);
+const started = (page: Page, bot: string) =>
+  page.eval<{ on: string; property: string; duration: number; delay: number }[]>(`window.started.filter((t) => (${bot}).contains(t.target)).map((t) => ({
+    on: ['bot-lid', 'bot-eye', 'bot-tilt', 'bot-turn', 'bot-look', 'bot-light'].find((c) => t.target.classList.contains(c)) ?? '', property: t.property, duration: t.duration, delay: t.delay,
+  }))`);
+
 const setWorking = (page: Page, ids: string[]) =>
   page.eval(`bots.setState({ status: Object.fromEntries(${JSON.stringify(ids)}.map((id) => [id, { state: "working", conversationId: "dev" }])) })`);
 
@@ -88,11 +102,12 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
   test("a bot wakes when it starts work and dozes off when it stops, eased both ways", async () => {
     const page = await open();
     // Boo (amber) starts work: awake at once, with a stretch, its eyes opening and head coming up.
+    await watchTransitions(page);
     await setWorking(page, ["moss", "boo"]);
     await page.settle();
     const boo = devBot("amber");
     expect(await page.eval<object>(`({ asleep: 'asleep' in (${boo}).dataset, busy: 'busy' in (${boo}).dataset, action: (${boo}).dataset.action })`)).toEqual({ asleep: false, busy: true, action: "stretch" });
-    const waking = await transitions(page, boo);
+    const waking = await started(page, boo);
     expect(waking.some((t) => t.on === "bot-lid" && t.property === "opacity" && t.duration >= 100)).toBe(true);
     expect(waking.some((t) => t.on === "bot-tilt" && t.duration >= 400)).toBe(true);
 
