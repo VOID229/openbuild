@@ -66,11 +66,11 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     const page = await open();
     const [x, y] = await page.centre(MASCOT);
     // A pointer over the mascot, wherever it is on it.
-    expect(await page.eval(`getComputedStyle(document.elementFromPoint(${x}, ${y})).cursor`)).toBe("pointer");
+    expect(await page.eval<unknown>(`getComputedStyle(document.elementFromPoint(${x}, ${y})).cursor`)).toBe("pointer");
     await page.moveTo(x, y);
     await page.until(`!!document.querySelector('.bm-profile[data-state="open"]')`);
     expect(await page.card()).toEqual({ name: "manager", buttons: ["Open chat", "Edit profile"], side: "top" });
-    expect(await page.eval(`${MASCOT}.getAttribute('aria-expanded')`)).toBe("true");
+    expect(await page.eval<unknown>(`${MASCOT}.getAttribute('aria-expanded')`)).toBe("true");
     // Above the mascot and starting by it, not over the message.
     const fit = await page.eval<{ above: boolean; near: boolean }>(`(() => {
       const m = ${MASCOT}.getBoundingClientRect(), c = document.querySelector('.bm-profile').getBoundingClientRect();
@@ -82,12 +82,12 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     await page.moveTo(bx, by);
     await Bun.sleep(400);
     expect(await page.card()).not.toBeNull();
-    expect(await page.eval(`getComputedStyle(document.elementFromPoint(${bx}, ${by})).cursor`)).toBe("pointer");
+    expect(await page.eval<unknown>(`getComputedStyle(document.elementFromPoint(${bx}, ${by})).cursor`)).toBe("pointer");
     await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: bx, y: by, button: "left", clickCount: 1 });
     await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: bx, y: by, button: "left", clickCount: 1 });
     await page.until(`bots.getState().activeId === "a"`);
-    expect(await page.eval(`!!document.querySelector('.bm-profile')`)).toBe(false);
-    expect(await page.eval(`bots.getState().detailsOpen`)).toBe(false);
+    expect(await page.eval<unknown>(`!!document.querySelector('.bm-profile')`)).toBe(false);
+    expect(await page.eval<unknown>(`bots.getState().detailsOpen`)).toBe(false);
   }, 60_000);
 
   test("goes once the pointer leaves the mascot and card, and never shows for a pointer passing by", async () => {
@@ -102,7 +102,7 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     await page.until(`!!document.querySelector('.bm-profile[data-state="open"]')`);
     await page.moveTo(x + 400, y + 10);
     await page.until(`!document.querySelector('.bm-profile')`);
-    expect(await page.eval(`${MASCOT}.getAttribute('aria-expanded')`)).toBe("false");
+    expect(await page.eval<unknown>(`${MASCOT}.getAttribute('aria-expanded')`)).toBe("false");
   }, 60_000);
 
   test("Edit profile opens the bot's chat with its details", async () => {
@@ -112,7 +112,7 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     await page.until(`!!document.querySelector('.bm-profile[data-state="open"]')`);
     await page.click(`.bm-profile-btn:last-child`);
     await page.until(`bots.getState().activeId === "a" && bots.getState().detailsOpen`);
-    expect(await page.eval(`!!document.querySelector('.bm-profile')`)).toBe(false);
+    expect(await page.eval<unknown>(`!!document.querySelector('.bm-profile')`)).toBe(false);
   }, 60_000);
 
   test("works from the keyboard: focus shows it, Tab goes in, arrows move, Escape comes back", async () => {
@@ -142,7 +142,7 @@ describe.skipIf(!browser)("a bot's profile card", () => {
     expect(await page.card()).toBeNull();
     expect(await page.focused()).toBe("mascot");
     // Escape didn't also leave the chat or close anything else.
-    expect(await page.eval(`bots.getState().activeId`)).toBe("b");
+    expect(await page.eval<unknown>(`bots.getState().activeId`)).toBe("b");
     // Enter opens it and goes straight to its first button; Tab off its end moves on and puts it away.
     await page.key("Enter");
     await page.until(`document.activeElement?.textContent === "Open chat"`);
@@ -196,11 +196,11 @@ describe.skipIf(!browser)("a bot's profile card", () => {
       await page.until(`!!document.querySelector('.bm-profile[data-state="open"]')`);
     };
     await show();
-    expect(await page.eval(`getComputedStyle(document.querySelector('.bm-profile')).animationName`)).toBe("tip-in");
+    expect(await page.eval<unknown>(`getComputedStyle(document.querySelector('.bm-profile')).animationName`)).toBe("tip-in");
     await page.key("Escape");
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
     await show();
-    expect(await page.eval(`getComputedStyle(document.querySelector('.bm-profile')).animationName`)).toBe("none");
+    expect(await page.eval<unknown>(`getComputedStyle(document.querySelector('.bm-profile')).animationName`)).toBe("none");
     const colours = () =>
       page.eval<{ bg: string; text: string; surface: string }>(`(() => {
         const s = getComputedStyle(document.querySelector('.bm-profile'));
