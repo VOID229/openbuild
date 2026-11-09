@@ -2,53 +2,25 @@
 // (owner-only, like the folder it's in). The server is what holds friends' connections and the bots'
 // chats, so the CLI asks it rather than writing anything itself.
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
-import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import type { FriendMode } from "../../shared/friends";
 import { fingerprintOf } from "../../shared/friends";
 import { mentionName } from "../../shared/bots";
 import * as db from "../bots/db";
 import * as svc from "../bots/service";
-import { isTailscaleIp, tailscaleStatus } from "../pairClient";
 import * as chats from "./chats";
 import * as invites from "./invites";
 import * as listener from "./listener";
 import { added, remove, setAllowTools, summaries } from "./manage";
 import { cleanName } from "./protocol";
 import * as store from "./store";
+import { TransportError, transports } from "./transport";
 
 export const controlSocketPath = () => join(store.friendsDir(), "control.sock");
 
 const hot = globalThis as { openbuildFriendControl?: ReturnType<typeof Bun.serve> };
 
 class ControlError extends Error {}
-
-function lanAddresses(): string[] {
-  const out: string[] = [];
-  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && !isTailscaleIp(a.address)) out.push(a.address);
-  return out;
-}
-
-const bindable = (ip: string) => Object.values(networkInterfaces()).some((list) => list?.some((a) => a.address === ip));
-
-/** Where an invite listens and what addresses the code gives, for LAN or Tailscale. `address` is what to advertise instead. */
-async function placeInvite(mode: FriendMode, address: string | undefined, port: number): Promise<{ listen: string; urls: string[]; tailscaleIp?: string }> {
-  const url = (host: string) => (/^https?:\/\//.test(host) ? host.replace(/\/$/, "") : /:\d+$/.test(host) ? `http://${host}` : `http://${host}:${port}`);
-  if (address && !/^(https?:\/\/)?[A-Za-z0-9.\-[\]:]+$/.test(address)) throw new ControlError(`${address} isn't an address. Give a host or IP, optionally with :port.`);
-  if (mode === "lan") {
-    const urls = address ? [url(address)] : lanAddresses().map(url);
-    if (!urls.length) throw new ControlError("This computer has no LAN address. Connect it to a network, or give one with --address.");
-    return { listen: "0.0.0.0", urls };
-  }
-  const status = await tailscaleStatus();
-  const self = status?.Self;
-  const ip: string | undefined = self?.TailscaleIPs?.find((a: string) => a.includes(".")) ?? Object.values(networkInterfaces()).flat().find((a) => a?.family === "IPv4" && isTailscaleIp(a.address))?.address;
-  if (!ip) throw new ControlError("Tailscale isn't running here (no tailnet address found). Connect Tailscale first, or invite over LAN.");
-  // Only the tailnet address, so the friend port isn't on any other network.
-  if (!bindable(ip) && !process.env.OPENBUILD_FRIEND_HOST) throw new ControlError(`Tailscale here has no network interface for ${ip} (userspace networking), so OpenBuild can't listen on it. Run Tailscale with its own interface, or invite over LAN.`);
-  const name = String(self?.DNSName ?? "").replace(/\.$/, "");
-  return { listen: ip, urls: address ? [url(address)] : [url(ip), ...(name ? [url(name)] : [])], tailscaleIp: ip };
-}
 
 function findFriend(spec: unknown): store.StoredFriend {
   const text = String(spec ?? "").trim().toLowerCase();
@@ -108,9 +80,14 @@ async function handle(method: string, p: Record<string, unknown>, signal: AbortS
       return { me: { id: me.id, fingerprint: fingerprintOf(me.id) }, friends: summaries(), invite: invite ? { expiresAt: invite.expiresAt, urls: invite.urls, mode: invite.mode } : null, listening: listener.listening(), port: store.listenPort() };
     }
     case "invite": {
-      const mode: FriendMode = p.mode === "lan" ? "lan" : "tailscale";
+      const mode: FriendMode = p.mode === "lan" ? "lan" : p.mode === "tunnel" ? "tunnel" : "tailscale";
       const port = store.listenPort();
-      const place = await placeInvite(mode, typeof p.address === "string" && p.address.trim() ? p.address.trim() : undefined, port);
+      let place;
+      try {
+        place = await transports[mode].place({ port, address: typeof p.address === "string" && p.address.trim() ? p.address.trim() : undefined });
+      } catch (err) {
+        throw err instanceof TransportError ? new ControlError(err.message) : err;
+      }
       const created = invites.create({ name: cleanName(p.name) || chats.ownerName(), mode, listen: place.listen, urls: place.urls });
       const listening = listener.sync();
       if (listening.error) {

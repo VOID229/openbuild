@@ -3,7 +3,9 @@
 // their bots can talk in shared group chats, and that is all a friend can reach here. Shared by the
 // server and the app.
 
-export type FriendMode = "lan" | "tailscale";
+/** How a guest reaches its host: on a LAN, over Tailscale, or through the host's own OpenTunnel relay. */
+export type FriendMode = "lan" | "tailscale" | "tunnel";
+export const MODE_LABEL: Record<FriendMode, string> = { lan: "LAN", tailscale: "Tailscale", tunnel: "OpenTunnel" };
 
 /** A friend as the app shows them. Their key and addresses stay on the server. */
 export interface FriendSummary {

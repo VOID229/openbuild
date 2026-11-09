@@ -6,11 +6,11 @@ Pairing is different. A paired device is one of **your own** machines, trusted t
 
 ## Becoming friends
 
-One of you invites, the other adds the code. You pick Tailscale or LAN when you invite.
+One of you invites, the other adds the code. You pick Tailscale, LAN or your own OpenTunnel relay when you invite.
 
 ```sh
 # on the inviting computer (the host)
-ob friend invite --tailscale      # or --lan; without either it asks
+ob friend invite --tailscale      # or --lan, or --tunnel; without one it asks
 
 # on the friend's computer (the guest)
 ob friend add obf1_…              # the code the host printed
@@ -69,7 +69,47 @@ Your friend's tailnet policy has a say too: it has to let their machine reach ma
 
 The host's friend listener listens on all its network interfaces on the friend port, and the code gives its LAN addresses (or `--address host[:port]`). A firewall on the host has to let that port in.
 
-On a LAN the friend traffic is **signed but not encrypted**. Nobody can forge or alter it, but anyone on the network can read what your bots and your friend's bots say. Tailscale encrypts it. Prefer Tailscale unless you trust the network.
+On a LAN the friend traffic is **signed but not encrypted**. Nobody can forge or alter it, but anyone on the network can read what your bots and your friend's bots say. Tailscale and OpenTunnel encrypt it. Prefer one of those unless you trust the network.
+
+### Over OpenTunnel
+
+[OpenTunnel](https://github.com/anomalyco/opentunnel) gives a machine a public HTTPS address through a relay, with no port forwarding and nothing for your friend to set up. OpenBuild uses **your own self-hosted relay only**. It has no default relay and never falls back to a public one: without `OPENBUILD_FRIEND_TUNNEL_API`, `--tunnel` refuses.
+
+Only the host runs a tunnel. Your friend just adds the code: their server opens one long-lived, encrypted WebSocket (WSS) to the address in it, and messages go both ways over that, as over Tailscale.
+
+What the tunnel reaches is the **friend listener and nothing else**. OpenBuild runs the `opentunnel` client with one route, to the friend port on `127.0.0.1`. The app's port, its sign-in and its API are never routed. The client runs only while an invite through it waits or a friend connects through it, and stops with OpenBuild.
+
+#### Set up your relay
+
+You run the relay; OpenBuild only runs the client. Following OpenTunnel's [self-hosting guide](https://github.com/anomalyco/opentunnel/blob/master/docs/server.md#self-hosting):
+
+1. Run the OpenTunnel server on a machine with a public address, port 443 open, and the MySQL database it needs.
+2. Give it a domain: point the domain and its wildcard (`*.tunnel.example.com`) at that machine.
+3. Give it DNS-01 access so it can get wildcard certificates: `DNS_PROVIDER=cloudflare` with `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN`, or `DNS_PROVIDER=exec` with a `DNS_HOOK` script for other DNS hosts.
+4. Install the client on the computer that invites: `npm install -g opentunnel` or `cargo install opentunnel-cli`. The guest doesn't need it.
+
+OpenBuild doesn't do any of this for you, and doesn't change DNS.
+
+#### Point OpenBuild at it
+
+Set these in the environment OpenBuild starts with, then restart it:
+
+| Variable | |
+| --- | --- |
+| `OPENBUILD_FRIEND_TUNNEL_API` | **Required.** Your relay's URL, like `https://tunnel.example.com`. It has to be `https://`, except for a relay on this machine (`http://localhost:8080`) while you try one out. |
+| `OPENBUILD_FRIEND_TUNNEL_BIN` | The `opentunnel` client, when it isn't on `PATH`. |
+| `OPENBUILD_FRIEND_TUNNEL_CA` | A CA certificate the client should trust, for a relay with a private CA (`ISSUER=local`). The guest's server needs it too, through `NODE_EXTRA_CA_CERTS`. |
+
+Then `ob friend invite --tunnel`. The code gives `https://<route>.<your tunnel's hostname>`.
+
+The client gets a profile of its own (`openbuild-friends`), with its config and data under `<data>/friends/tunnel`. So it doesn't touch tunnels you run yourself, and it ignores any `OPENTUNNEL_*` variables you've set for them. The tunnel's hostname and the route name are kept, so your friend's saved address keeps working across restarts. Deleting that folder gives you a new address, and your friends would need a new invite.
+
+#### What the relay can and can't do
+
+- The relay passes TLS it can't decrypt. The client on your computer holds the certificate's key. But the relay's operator controls DNS and certificates for its domain, which is why it should be yours.
+- The friend protocol doesn't trust the tunnel at all. Everything that crosses is signed with the keys you approved, as on a LAN. Tunneled requests reach the listener from `127.0.0.1`, and anyone can find the address (it ends up in certificate logs). Neither means anything to OpenBuild.
+- The address is public, so the listener is held to a budget there: [the protocol](#the-protocol) has the limits.
+- The relay resets a connection with no traffic for 15 minutes by default. Friends' heartbeats every 20 seconds keep theirs up.
 
 ## Shared chats
 
@@ -124,10 +164,13 @@ For the curious, and for anyone reviewing it. The code is in `server/friends/`.
 
 - **Identity.** Each server makes an Ed25519 key pair the first time it needs one (`<data>/friends/identity.json`, owner-only). A friend's id is a fingerprint of their public key, the same on both sides.
 - **The friend listener** is a separate `Bun.serve` with one small handler, not the app's server with routes left out. It answers `GET /friend/v1/connect`, `POST /friend/v1/join` and `POST /friend/v1/join/status`. Everything else is a 404, and so is any request from a browser (one with an `Origin` or `Sec-Fetch-Site` header). It only listens while an invite is waiting or a friend connects here.
+- **Limits before work.** Through a tunnel the listener is on the open internet, and every request looks like it's from loopback, so nothing is decided by address. Before any key lookup, signature check or body is read, a request has to fit in the listener's budget (300 requests a minute, from everyone together, otherwise 429). It also has to be 64 KB or less (otherwise 413), and a connect has to name a key id in the right form (otherwise 404). Unknown ids are refused (403) before the WebSocket upgrade. Codes and polls that don't check out are limited to 10 a minute. At most 16 connections can wait on the handshake. Connections already proved aren't counted against the budget, but each friend is held to 600 frames a minute of any kind, as well as the message limit.
+- **Transports.** How the two servers reach each other is kept apart from the protocol (`server/friends/transport.ts`). LAN, Tailscale and OpenTunnel each decide only where the listener binds, which addresses an invite gives, and what keeps running so those reach it. The guest always opens one connection, `ws://` or `wss://`, and the protocol over it is the same.
 - **Joining.** The guest proves it holds the invite's secret with an HMAC over the invite id, its own key id and a fresh nonce. It signs the request with its own key. The host checks every answer against the key in the code, so nobody in between can stand in for either side. Wrong codes are rate-limited.
 - **Connecting.** The guest dials `/friend/v1/connect?from=<its id>`. An unknown or removed id is refused before the upgrade. The host sends a challenge signed with its key. The guest answers it, naming a session id, signed with its key. The host confirms. Ten seconds to finish, and a cap on connections that haven't.
 - **Frames.** Every frame either way is signed: `{"p": "<payload JSON>", "s": "<signature>"}` over a domain tag and the exact payload text. Payloads say who they're from and who they're for, so a frame can't be reflected back or sent to another friend. A frame that doesn't check out closes the connection.
 - **Replay protection and delivery.** Data frames carry a sequence number per direction. The receiver applies only numbers above the last one it applied, and acknowledges what it has. A frame the receiver couldn't apply (its database busy, say) isn't acknowledged and is never skipped: it's kept and tried again after 1, 2, 4 seconds and so on, up to a minute apart, until it applies. The frames after it wait unacknowledged, and the sender still has them all. If it keeps failing, `ob friend list` and Settings → Bots → Friends say a message from that friend couldn't be delivered yet. Control frames (acks, heartbeats, removal) are bound to the connection's session id. The sender keeps each frame in an outbox (SQLite, next to the chats) until it's acknowledged, and resends on reconnecting. So restarts lose nothing, and nothing arrives twice: message ids are kept across too.
 - **Heartbeats.** Both sides ping every 20 seconds. A connection silent for 65 seconds is closed and the guest dials again.
 - **Ports.** `OPENBUILD_FRIEND_PORT` changes the friend port (default: the app's port + 100). It's saved the first time it's used, so a friend's saved address keeps working. `OPENBUILD_FRIEND_HOST` overrides where the listener binds (the tests use loopback).
+- **Tunnel settings.** `OPENBUILD_FRIEND_TUNNEL_API`, `OPENBUILD_FRIEND_TUNNEL_BIN` and `OPENBUILD_FRIEND_TUNNEL_CA`: see [Over OpenTunnel](#over-opentunnel).
 - **The CLI** talks to the running server over a unix socket in the data folder (`friends/control.sock`, owner-only). It never writes friend data itself.

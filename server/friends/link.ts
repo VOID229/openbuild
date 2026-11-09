@@ -2,6 +2,9 @@
 // Tailscale can be reached but can't start connections back to whoever it's shared with. So the guest
 // opens one WebSocket to the host's friend listener and holds it, and frames go both ways over it.
 //
+// What carries it is the transport's (transport.ts): a WebSocket on a LAN or tailnet, or one WSS
+// through the host's tunnel. Nothing here depends on which.
+//
 // Opening it, both sides prove who they are: the host sends a challenge signed with its key, the guest
 // answers it signed with its own (naming a session id), and the host confirms. From then on every frame
 // is signed and checked against the key that friend was approved with. Data frames are numbered per
@@ -11,11 +14,10 @@
 import type { ServerWebSocket } from "bun";
 import { PATHS, nonce, seal, unseal, type Payload } from "./protocol";
 import * as store from "./store";
+import * as transport from "./transport";
+import type { Socket } from "./transport";
 
-export interface Socket {
-  send(text: string): void;
-  close(code?: number, reason?: string): void;
-}
+export type { Socket };
 
 interface Session {
   friendId: string;
@@ -27,8 +29,10 @@ interface Session {
 
 /** A friend sending this many messages a minute is cut off, and has to reconnect: nothing is lost, it just slows them down. */
 export const RATE_LIMIT = 120;
-const PING_EVERY = 20_000;
-const SILENT_FOR = 65_000;
+/** Every frame counts toward this one, acks, pings and resends of what's already had included. */
+export const FRAME_LIMIT = 600;
+/** Heartbeats: both sides ping this often, and a connection silent for `silentFor` is closed. Tests shorten them. */
+export const timing = { pingEvery: 20_000, silentFor: 65_000 };
 const HANDSHAKE_MS = 10_000;
 const BACKOFF_MAX = 60_000;
 
@@ -46,7 +50,7 @@ const hot = globalThis as {
   openbuildFriendSessions?: Map<string, Session>;
   openbuildFriendDialers?: Map<string, Dialer>;
   openbuildFriendRefused?: Set<string>;
-  openbuildFriendWindows?: Map<string, { since: number; count: number }>;
+  openbuildFriendWindows?: Map<string, { since: number; count: number; frames: number }>;
   openbuildFriendStuck?: Map<string, Stuck>;
   openbuildFriendHooks?: Hooks;
   openbuildFriendTimer?: ReturnType<typeof setInterval>;
@@ -192,15 +196,16 @@ function receive(session: Session, text: unknown) {
   const payload = unseal(text, friend.publicKey);
   if (!payload || payload.to !== me().id) return session.socket.close(CLOSE.signature, "bad signature");
   session.lastHeard = Date.now();
+  const now = session.lastHeard;
+  let heard = windows.get(friend.id);
+  if (!heard || now - heard.since > 60_000) windows.set(friend.id, (heard = { since: now, count: 0, frames: 0 }));
+  if (++heard.frames > FRAME_LIMIT) return session.socket.close(CLOSE.rate, "too many frames");
   if (payload.t === "msg") {
     const seq = payload.seq;
     if (!Number.isSafeInteger(seq) || (seq as number) < 1) return session.socket.close(CLOSE.signature, "bad frame");
     const last = store.lastIn(friend.id);
     // Already applied: a resend after a reconnect, or a replay. Say again how far this side got.
     if ((seq as number) <= last) return transmit(session, { t: "ack", sid: session.sid, seq: last });
-    const now = Date.now();
-    let heard = windows.get(friend.id);
-    if (!heard || now - heard.since > 60_000) windows.set(friend.id, (heard = { since: now, count: 0 }));
     // One that wouldn't apply is being tried again: it, and everything after it, waits for that.
     // Unacknowledged, so the friend still has them all.
     const held = stuck.get(friend.id);
@@ -298,25 +303,23 @@ export function dial(friendId: string) {
   let state: "challenge" | "auth" | "ready" = "challenge";
   let sid = "";
   let heard = false;
-  const ws = new WebSocket(wsUrl(base));
-  const socket: Socket = { send: (t) => ws.send(t), close: (code, reason) => ws.close(code, reason) };
+  const socket = transport.dial(wsUrl(base), { message: (text) => onMessage(text), close: (code) => onClose(code) });
   d.socket = socket;
-  const handshake = setTimeout(() => state !== "ready" && ws.close(CLOSE.handshake, "no handshake"), HANDSHAKE_MS);
-  ws.onmessage = (event) => {
+  const handshake = setTimeout(() => state !== "ready" && socket.close(CLOSE.handshake, "no handshake"), HANDSHAKE_MS);
+  const onMessage = (text: string) => {
     heard = true;
-    const text = typeof event.data === "string" ? event.data : "";
     if (state === "ready") {
       const session = sessions.get(friendId);
-      return session?.socket === socket ? receive(session, text) : ws.close(CLOSE.replaced, "replaced");
+      return session?.socket === socket ? receive(session, text) : socket.close(CLOSE.replaced, "replaced");
     }
     const host = store.friend(friendId);
     const payload = host && unseal(text, host.publicKey);
     // The host proves itself first: a challenge not signed by the key in the invite isn't theirs.
-    if (!payload || payload.to !== me().id) return ws.close(CLOSE.signature, "bad signature");
+    if (!payload || payload.to !== me().id) return socket.close(CLOSE.signature, "bad signature");
     if (state === "challenge" && payload.t === "challenge" && typeof payload.nonce === "string") {
       sid = nonce();
       state = "auth";
-      return ws.send(frame(friendId, { t: "auth", nonce: payload.nonce, sid }));
+      return socket.send(frame(friendId, { t: "auth", nonce: payload.nonce, sid }));
     }
     if (state === "auth" && payload.t === "ready" && payload.sid === sid) {
       clearTimeout(handshake);
@@ -324,22 +327,21 @@ export function dial(friendId: string) {
       d.attempt = 0;
       return begin(friendId, socket, sid);
     }
-    ws.close(CLOSE.handshake, "unexpected frame");
+    socket.close(CLOSE.handshake, "unexpected frame");
   };
-  ws.onclose = (event) => {
+  const onClose = (code: number) => {
     clearTimeout(handshake);
     if (d.socket === socket) d.socket = undefined;
     end(friendId, socket);
     if (d.stopped || !store.friend(friendId)) return void dialers.delete(friendId);
     // Turned away before a word was said: ask the plain address whether it knows this server at all.
-    if (!heard || event.code === CLOSE.refused) void checkRefused(friendId, base);
+    if (!heard || code === CLOSE.refused) void checkRefused(friendId, base);
     d.attempt++;
     // Cut off for sending too much (either way): there's no point trying again before the minute is out.
-    const wait = event.code === CLOSE.rate ? 30_000 : Math.min(BACKOFF_MAX, 1000 * 2 ** Math.min(d.attempt - 1, 6)) * (0.8 + Math.random() * 0.4);
+    const wait = code === CLOSE.rate ? 30_000 : Math.min(BACKOFF_MAX, 1000 * 2 ** Math.min(d.attempt - 1, 6)) * (0.8 + Math.random() * 0.4);
     d.timer = setTimeout(() => dial(friendId), wait);
     d.timer.unref?.();
   };
-  ws.onerror = () => {};
 }
 
 /** Whether the friend's listener says it doesn't know this server: they removed it, most likely. */
@@ -359,10 +361,10 @@ export function startTimer() {
   hot.openbuildFriendTimer = setInterval(() => {
     const now = Date.now();
     for (const session of [...sessions.values()]) {
-      if (now - session.lastHeard > SILENT_FOR) session.socket.close(CLOSE.handshake, "silent");
+      if (now - session.lastHeard > timing.silentFor) session.socket.close(CLOSE.handshake, "silent");
       else transmit(session, { t: "ping", sid: session.sid });
     }
-  }, PING_EVERY);
+  }, timing.pingEvery);
   hot.openbuildFriendTimer.unref?.();
 }
 

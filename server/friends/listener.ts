@@ -3,11 +3,18 @@
 // app, its sign-in, pairing, files, terminals, threads, projects, settings and bots' computers aren't
 // reachable from it at all. It only listens while there's something to serve: an invite waiting, or a
 // friend who connects here.
+//
+// Through a tunnel it's on the open internet, and the relay hides who's asking: every request looks
+// like it comes from loopback. So nothing here trusts an address, and before any work (a key lookup,
+// a signature check, reading a body) a request has to fit in the listener's budget, be small, and name
+// a key in the right form. The budget is one for everyone, since there's no address to tell callers
+// apart; connections already proved, which carry the frames, aren't counted against it.
 import type { Server } from "bun";
-import { nonce, PATHS, MAX_FRAME } from "./protocol";
+import { isKeyId, nonce, PATHS, MAX_FRAME } from "./protocol";
 import * as invites from "./invites";
 import { accepting, type Pending } from "./link";
 import * as store from "./store";
+import { transports } from "./transport";
 
 const hot = globalThis as { openbuildFriendListeners?: { key: string; servers: Server<Pending>[] } };
 
@@ -15,6 +22,14 @@ const notFound = () => new Response("Not found", { status: 404 });
 /** Guests that connected but haven't answered the challenge yet. A few is plenty. */
 let unanswered = 0;
 const UNANSWERED_LIMIT = 16;
+/** Requests the listener answers a minute, from everyone together. A guest polling for approval makes about 50. */
+export const REQUEST_LIMIT = 300;
+const requests = { since: 0, count: 0 };
+function overBudget(): boolean {
+  const now = Date.now();
+  if (now - requests.since > 60_000) Object.assign(requests, { since: now, count: 0 });
+  return ++requests.count > REQUEST_LIMIT;
+}
 
 async function body(req: Request): Promise<string | undefined> {
   const length = Number(req.headers.get("content-length") ?? 0);
@@ -25,12 +40,14 @@ async function body(req: Request): Promise<string | undefined> {
 
 /** Everything the friend port answers. Exported so the tests can hold it to that. */
 export async function friendFetch(req: Request, server: Server<Pending>): Promise<Response | undefined> {
+  if (overBudget()) return new Response("Too many requests", { status: 429, headers: { "retry-after": "60" } });
   const url = new URL(req.url);
   // A web page can send requests to any address, but browsers always say where they come from and
   // other servers don't: nothing a browser sends is a friend's.
   if (req.headers.has("origin") || req.headers.has("sec-fetch-site")) return notFound();
   if (url.pathname === PATHS.connect && req.method === "GET") {
     const from = url.searchParams.get("from") ?? "";
+    if (!isKeyId(from)) return notFound();
     const friend = store.friend(from);
     // Only a friend who dials this server, as approved; a removed one is a stranger again.
     if (!friend || friend.role !== "guest") return new Response("Not a friend", { status: 403 });
@@ -61,6 +78,9 @@ export function wanted(): string[] {
 export function sync(): { error?: string; port?: number } {
   const hosts = wanted();
   const port = store.listenPort();
+  const invite = invites.current();
+  // The tunnel, while an invite through it waits or a friend comes in through it.
+  transports.tunnel.sync?.({ needed: invite?.mode === "tunnel" || store.friends().some((f) => f.role === "guest" && f.mode === "tunnel"), port });
   const key = `${hosts.join(",")}:${port}`;
   const running = hot.openbuildFriendListeners;
   if (running?.key === key) return { port };
@@ -97,6 +117,7 @@ export function sync(): { error?: string; port?: number } {
 }
 
 export function stop() {
+  transports.tunnel.stop?.();
   for (const server of hot.openbuildFriendListeners?.servers ?? []) server.stop(true);
   hot.openbuildFriendListeners = undefined;
 }
