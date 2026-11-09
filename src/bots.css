@@ -3595,16 +3595,6 @@ a.bots-btn-primary {
   padding-left: 8px;
 }
 
-/* Bot messages in a row: a short number field, beside its label. */
-.bots-loop-limit {
-  width: 84px;
-  flex: none;
-  text-align: right;
-}
-.bots-loop-limit:disabled {
-  opacity: 0.6;
-}
-
 .bots-set-row-main {
   display: flex;
   flex: 1;

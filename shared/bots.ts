@@ -158,17 +158,6 @@ export interface Reaction {
 
 export const reactionId = (r: Reaction) => r.id ?? String(r.at);
 
-/** How many reactions deep this one is: 0 on the message, 1 answering a reaction, and so on. */
-export function reactionDepth(list: Reaction[], r: Reaction): number {
-  let depth = 0;
-  for (let at = r; at.to && depth < list.length; depth++) {
-    const up = list.find((x) => reactionId(x) === at.to);
-    if (!up) break;
-    at = up;
-  }
-  return depth;
-}
-
 /** Adds or takes back `by`'s emoji (on the message, or answering reaction `to`). Taking one back takes its answers with it. */
 export function toggleReactionIn(list: Reaction[], emoji: string, by: Author, to?: string): { next: Reaction[]; added?: Reaction } {
   const had = list.find((r) => r.by === by && r.emoji === emoji && r.to === to);
@@ -349,8 +338,6 @@ export interface BotsSettings {
   harnesses?: BotHarnessSettings;
   /** Claude logins bots don't use (provider ids, "claude-code-2"), and when that or a sign-in last changed. */
   claude?: { off: string[]; changedAt?: number };
-  /** Pausing a chat after this many bot messages in a row, so bots can't reply to each other forever. */
-  botLoop?: BotLoopSettings;
   /**
    * How bots' computers are kept apart on each machine, by device id ("local" for this server), set
    * in Settings → Devices. A container where unset. Host on a paired device also needs that device's
@@ -388,23 +375,6 @@ export interface BotClaudeLogin {
 /** A container (Podman or Docker), or a folder on the machine with no isolation. */
 export type Isolation = "container" | "host";
 
-export interface BotLoopSettings {
-  enabled: boolean;
-  /** Bot messages in a row allowed before the chat pauses. */
-  limit: number;
-}
-
-export const BOT_LOOP_MIN = 1;
-export const BOT_LOOP_MAX = 200;
-export const DEFAULT_BOT_LOOP: BotLoopSettings = { enabled: true, limit: 8 };
-
-/** The limit typed in, or why it can't be one. */
-export function parseBotLoopLimit(raw: string): { limit: number } | { error: string } {
-  const text = raw.trim();
-  const n = Number(text);
-  if (!/^\d+$/.test(text) || !Number.isSafeInteger(n) || n < BOT_LOOP_MIN || n > BOT_LOOP_MAX) return { error: `Enter a whole number from ${BOT_LOOP_MIN} to ${BOT_LOOP_MAX}` };
-  return { limit: n };
-}
 
 /** One of the user's Pi extensions or packages, as Settings → Bots lists them. */
 export interface BotExtension {

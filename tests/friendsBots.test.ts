@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // A friend's messages in a shared chat, on this side: who they're from, whom they wake, how they count
-// toward the bot-loop pause, how bots read them, and what a bot may do in that chat. The friend is a
+// toward nothing that pauses a chat, how bots read them, and what a bot may do in that chat. The friend is a
 // stored key with no server behind it; frames arrive through chats.apply as link.ts would hand them
 // over, and what this side sends waits in the outbox. All of it in a subprocess on a throwaway data dir.
 async function run(script: string) {
@@ -97,26 +97,11 @@ test("a friend's chat arrives attributed, wakes only the bots it addresses, rela
     const group = svc.createConversation({ kind: 'group', name: 'Ours', botIds: [primary.bot.id, juniper.bot.id] });
     a.throws(() => svc.postMessage(group.id, { id: crypto.randomUUID(), author: friendAuthor(FID, BOLT), at: Date.now(), text: 'sneaky' }), /isn't in this conversation/);
 
-    // The bot-loop pause: a friend isn't the owner, so their messages run the count up like a bot's.
-    svc.updateSettings({ botLoop: { enabled: true, limit: 3 } });
-    svc.postMessage(shared.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'go on' });
+    // However many messages a friend sends in a row, each mention still wakes the bot: nothing pauses the chat.
     wakes.length = 0;
-    for (let i = 0; i < 3; i++) say('@Juniper again ' + i);
-    a.equal(wakes.length, 3);
-    say('@Juniper and again');
-    a.equal(wakes.length, 3);
-    const paused = () => svc.messagePage(shared.id).messages.filter((m) => m.event?.text === 'Paused').length;
-    a.equal(paused(), 1);
-    // The friend's owner speaking doesn't lift it: only this side's owner does.
-    say('@Juniper please continue', 'owner');
-    a.equal(wakes.length, 3);
-    svc.postMessage(shared.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'carry on' });
-    wakes.length = 0;
-    say('@Juniper back again');
-    a.equal(wakes.length, 1);
-    svc.updateSettings({ botLoop: { enabled: false, limit: 3 } });
-    for (let i = 0; i < 10; i++) say('@Juniper loop ' + i);
-    a.equal(paused(), 1);
+    for (let i = 0; i < 20; i++) say('@Juniper again ' + i);
+    a.equal(wakes.length, 20);
+    a.equal(svc.messagePage(shared.id).messages.filter((m) => m.event?.text === 'Paused').length, 0);
 
     // A chat this side doesn't have: the friend is told it was left.
     chats.apply(friend, 'chat.message', { chat: crypto.randomUUID(), message: { id: crypto.randomUUID(), member: BOLT, text: 'anyone?' } });

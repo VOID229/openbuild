@@ -328,41 +328,32 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("the bot-loop pause follows its setting live: default 8, a custom limit, and off", async () => {
+test("bots replying to each other never pause a chat, and an old bot-loop setting is ignored", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-loop-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
       import { strict as a } from 'node:assert';
+      const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
-      const { DEFAULT_BOT_LOOP, parseBotLoopLimit } = await import('./shared/bots.ts');
+      // Settings saved before the pause was removed, with it switched on at its lowest limit.
+      db.setValue('settings', { ...svc.getSettings(), botLoop: { enabled: true, limit: 1 } });
+      a.equal('botLoop' in svc.getSettings(), false);
       const one = svc.createBot({ name: 'One' }).bot.id;
       const two = svc.createBot({ name: 'Two' }).bot.id;
       const group = svc.createConversation({ kind: 'group', name: 'Loop', botIds: [one, two] });
-      svc.setHooks({ wake() {}, stop() {} });
+      const wakes = [];
+      svc.setHooks({ wake(botId) { wakes.push(botId); }, stop() {} });
       const post = (author) => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text: 'hi @' + (author === one ? 'Two' : 'One'), at: Date.now() });
-      const paused = () => svc.messagePage(group.id).messages.filter((m) => m.event?.text === 'Paused').length;
-      const run = (n) => { post('me'); for (let i = 0; i < n; i++) post(i % 2 ? two : one); };
 
-      a.deepEqual(svc.getSettings().botLoop ?? DEFAULT_BOT_LOOP, { enabled: true, limit: 8 });
-      run(8); a.equal(paused(), 0);
-      post(one); a.equal(paused(), 1);
+      post('me');
+      wakes.length = 0;
+      for (let i = 0; i < 50; i++) post(i % 2 ? two : one);
+      a.equal(wakes.length, 50);
+      a.equal(svc.messagePage(group.id).messages.filter((m) => m.event?.text === 'Paused').length, 0);
 
-      // Read on each message: lowering it mid-chat pauses the next bot message.
-      svc.updateSettings({ botLoop: { enabled: true, limit: 3 } });
-      run(3); a.equal(paused(), 1);
-      post(two); a.equal(paused(), 2);
-
-      svc.updateSettings({ botLoop: { enabled: false, limit: 3 } });
-      run(50); a.equal(paused(), 2);
-
-      // The server clamps whatever it's sent.
-      a.deepEqual(svc.updateSettings({ botLoop: { enabled: true, limit: 0 } }).botLoop, { enabled: true, limit: 1 });
-      a.deepEqual(svc.updateSettings({ botLoop: { enabled: true, limit: 9999 } }).botLoop, { enabled: true, limit: 200 });
-      a.deepEqual(svc.updateSettings({ botLoop: { enabled: true, limit: 'x' } }).botLoop, { enabled: true, limit: 200 });
-      a.deepEqual(svc.getSettings().botLoop, { enabled: true, limit: 200 });
-
-      a.deepEqual(parseBotLoopLimit(' 12 '), { limit: 12 });
-      for (const bad of ['', '0', '201', '2.5', '-3', 'abc', '1e2']) a.ok('error' in parseBotLoopLimit(bad), bad);
+      // A client still sending it changes nothing, and the next save drops the old value.
+      a.equal('botLoop' in svc.updateSettings({ botLoop: { enabled: true, limit: 3 } }), false);
+      a.equal('botLoop' in db.getValue('settings'), false);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
