@@ -80,3 +80,48 @@ production as part of validation.
 Multiple direct steers within one turn may repeat newly queued context until release confirms
 consumption. The handoff cannot guarantee preservation of arbitrary notes found only in old tool
 results; such notes must be saved durably rather than relying on session equivalence.
+
+## Stable system prompt (2026-11-09)
+
+Pi 1.4+ keeps the system prompt as named sections and, at the start of every run, re-sends each
+section whose text changed as a mid-conversation system message (or, on models without those,
+rewrites the leading system prompt). The bot context used to be one `addendum` section ending in
+`The time is …` to the second, so every turn re-sent the whole ~28 KB addendum (~6.6k tokens),
+which then stayed in the context and was read again by every later call until compaction.
+
+The clock now goes at the end of each turn's prompt (`render()`), and the context is split into
+sections, steadiest first: `openbots`, `openbots_instructions`, `openbots_team`,
+`openbots_machines`, `openbots_routines`, `openbots_memory` (and `openbots_friend` first in a
+friend lane, which keeps exactly the content it had: only the friend note unless the owner allowed
+tools, never machines, web search or apps). A new memory re-sends only the memory section. A Pi
+without `systemPromptOptions.sections` still gets the same text as one addendum.
+
+Measured read-only on copies of every lane session written after the 00:55 deploy of #186
+(`bun scripts/bot-context-audit.ts <copied-session-directory> --since 2026-11-08T22:55:30Z`,
+numeric output only, no model call):
+
+| | Tokens |
+| --- | ---: |
+| Assistant calls | 303 |
+| Uncached input | 1,068,775 |
+| Cache read | 14,930,747 |
+| Cache write | 1,070,903 |
+| Output | 31,260 |
+| Compaction (5 runs): input / cache write / output | 14,688 / 60,752 / 12,181 |
+| System patches / clock-only | 81 / 60 |
+| Clock-only patches, uncached or cache write (estimate) | 370,589 |
+| Clock-only patches, cache read (estimate) | 5,308,533 |
+| Unchanged sections re-sent with a real change, uncached or write / cache read (estimate) | 107,564 / 913,410 |
+
+So about 33% of all context input was the clock, and another 6% was unchanged context re-sent
+with a memory, routine or machine change. Estimates divide patch bytes by 4.28, the ratio measured
+on production Codex turns (a 28,590-byte patch plus prompt cost 6,676 uncached tokens); the usage
+columns are what providers reported. Compaction is cheap per run (10–22k tokens): its cost is the
+~130k context it lets every call read first, and slower growth means fewer compactions as well.
+
+Fallback churn, seen but not changed here: 24 calls right after a provider switch averaged 41k
+uncached-plus-written tokens against 14k for a warm turn's first call (~650k extra). Every
+claude-code failure was `A maximum of 4 blocks with cache_control may be provided. Found 5.` from
+the Claude Code bridge's replay of mid-conversation system messages. Fewer system patches should
+make it rare, but a turn after a memory change still sends one; the breakpoint count needs fixing
+in the bridge itself.

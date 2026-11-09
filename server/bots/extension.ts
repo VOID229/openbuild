@@ -86,8 +86,11 @@ const machine = str("The machine to run on: a name or id from your context's mac
 export default function openbots(pi: any) {
   pi.on("before_agent_start", async (event: any) => {
     try {
-      const note = String(await call("context"));
+      const context = (await call("context")) as { sections: Record<string, string> };
       const opts = event.systemPromptOptions ?? event;
+      // Pi re-sends only the sections whose text changed, so a new memory doesn't repeat the whole context.
+      if (opts.sections && typeof opts.sections === "object") return void Object.assign(opts.sections, context.sections);
+      const note = Object.values(context.sections).filter(Boolean).join("\n\n");
       const current = String(opts.appendSystemPrompt ?? "");
       if (!current.includes("one of the user's bots in OpenBots")) opts.appendSystemPrompt = [current, note].filter(Boolean).join("\n\n");
     } catch {

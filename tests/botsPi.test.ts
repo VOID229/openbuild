@@ -41,6 +41,9 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
         a.ok(!prompt.includes('USER_APPEND_CANARY'), prompt);
         a.ok(prompt.includes("one of the user's bots in OpenBots"), prompt);
         a.ok(prompt.includes('For every tool that has a status parameter'), prompt);
+        // The clock rides with the prompt, so the system prompt stays the same turn after turn.
+        a.ok(!prompt.includes('The time is'), prompt);
+        a.match(JSON.stringify(body.messages.find((m) => m.role === 'user').content), /The time is /);
         for (const t of body.tools ?? []) {
           seenTools.add(t.function.name);
           if (['ask_bot', 'bot_web_search', 'bash', 'use_app'].includes(t.function.name)) {
