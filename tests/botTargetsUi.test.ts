@@ -81,6 +81,12 @@ const click = (el: Element) => act(async () => { el.dispatchEvent(new win.MouseE
 const patches = () => requests.filter((r) => r.method === "PATCH");
 const machineRows = () => [...host.querySelectorAll<HTMLElement>(".bot-machine")];
 const rowText = (name: string) => machineRows().find((r) => r.querySelector(".pi-row-name")?.firstChild?.textContent === name)?.textContent ?? "";
+/** Why a machine can't run every tool: a few words in the row, the whole of it in their tooltip (and the row's label). */
+const noteOf = (name: string) => {
+  const row = machineRows().find((r) => r.querySelector(".pi-row-name")?.firstChild?.textContent === name);
+  const note = row?.querySelector<HTMLElement>(".bot-machine-note");
+  return { short: note?.textContent ?? "", full: note?.dataset.tooltip ?? "", label: row?.querySelector("button")?.getAttribute("aria-label") ?? "" };
+};
 
 async function mount(surface: "settings" | "advanced", computer?: Bot["computer"]) {
   useBots.setState({ bots: [{ id: "b1", name: "Scout", look: {} as Bot["look"], instructions: "", createdAt: 1, computer } as Bot] });
@@ -99,11 +105,17 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(rowText("Studio iMac")).toContain("This server");
     expect(rowText("Studio iMac")).toContain("Files, terminal and browser · Container");
     expect(rowText("MacBook")).toContain("Doesn't allow bots");
-    expect(rowText("MacBook")).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+    expect(noteOf("MacBook").short).toBe("How to allow");
+    expect(noteOf("MacBook").full).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+    expect(noteOf("MacBook").label).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
     expect(rowText("Cloud VM")).toContain("Files and terminal · Container");
-    expect(rowText("Cloud VM")).toContain("Cloud VM doesn't allow browser");
+    expect(noteOf("Cloud VM").short).toBe("How to allow browser");
+    expect(noteOf("Cloud VM").full).toContain("Cloud VM doesn't allow browser");
     expect(rowText("Old Mini")).toContain("Unreachable");
-    expect(rowText("Old Mini")).toContain("nothing runs elsewhere instead");
+    expect(noteOf("Old Mini").full).toContain("nothing runs elsewhere instead");
+    // The long explanation stays out of the row itself.
+    expect(rowText("MacBook")).not.toContain("Using this device");
+    expect(noteOf("Studio iMac").full).toBe("");
     // Nothing here to pick: no device or isolation select, and nothing saved.
     expect(host.querySelector('button[aria-haspopup="listbox"][aria-label="Runs on"], button[aria-haspopup="listbox"][aria-label="Isolation"]')).toBeNull();
     expect(patches()).toEqual([]);

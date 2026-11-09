@@ -1,6 +1,6 @@
 // A bot's model and effort for Settings → Bots, and the Advanced tab of the OpenBots details panel,
-// which puts them on one line each beside what the bot may do in OpenBuild, and the machines bots reach.
-import { ArrowUp, Check, ChevronDown, ChevronRight, CircleAlert, Trash2 } from "lucide-react";
+// which groups them, one line each, with the machines bots reach and what the bot may do in OpenBuild.
+import { ArrowUp, Check, ChevronDown, ChevronRight, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { providerName, providerOf } from "../../lib/models";
 import { useBotModels } from "../../lib/bots/models";
@@ -165,7 +165,7 @@ export function BotFallbacks({ bot, header }: { bot: Bot; header: (select: React
         : !bot.fallbackModels?.length && `Until you add one, it uses ${following}.`;
   return (
     <>
-      {header(<OptionSelect label="Fallback models" className="select-grow" value={mode} options={FALLBACK_MODES} onChange={choose} />)}
+      {header(<OptionSelect label="Fallback models" value={mode} options={FALLBACK_MODES} onChange={choose} />)}
       {note && <p className="setting-desc bots-fallbacks-note">{note}</p>}
       {mode === "own" && <FallbackList list={bot.fallbackModels ?? []} onChange={(fallbackModels) => (setDrafting(true), updateBot(bot.id, { fallbackModels }))} />}
     </>
@@ -239,28 +239,35 @@ function useTargets(on: boolean) {
 
 const DOT: Partial<Record<ComputerTarget["status"], string>> = { access: "pi-status-dot-warn", offline: "pi-status-dot-off", revoked: "pi-status-dot-bad", outdated: "pi-status-dot-bad", mismatch: "pi-status-dot-bad", unpaired: "pi-status-dot-bad" };
 
-/** One machine: whether it allows bots, what with, and why not. It opens that device in Settings → Devices, where both are changed. */
+/**
+ * One machine: whether it allows bots, and what with, on a line; why not in a few words, with the
+ * whole story in a tooltip. It opens that device in Settings → Devices, where both are changed.
+ */
 function MachineRow({ target, here }: { target: ComputerTarget; here: string }) {
   const note = targetNote(target, here);
   const summary = targetSummary(target);
+  const status = targetStatus(target);
   return (
-    <li className="pi-row pi-row-stack bot-machine">
-      <button type="button" className="bot-machine-link" aria-label={`${target.name}: ${targetStatus(target)}. Open in Settings → Devices`} onClick={() => showDevice(target.device)}>
+    <li className="pi-row bot-machine">
+      <button type="button" className="bot-machine-link" aria-label={`${target.name}: ${status}.${note ? ` ${note.text}` : ""} Open in Settings → Devices`} onClick={() => showDevice(target.device)}>
         <span className={cx("pi-status-dot", DOT[target.status])} aria-hidden />
         <span className="pi-row-text">
-          <span className="pi-row-name">
-            {target.name}
-            <span className="device-status">{targetStatus(target)}</span>
-          </span>
-          {summary && <span className="pi-row-desc">{summary}</span>}
+          <span className="pi-row-name">{target.name}</span>
+          {(summary || note) && (
+            <span className="pi-row-desc">
+              {summary}
+              {summary && note && " · "}
+              {note && (
+                <span className={cx("bot-machine-note", note.tone === "bad" && "bot-machine-note-bad")} data-tooltip={note.text} data-tooltip-side="top">
+                  {note.short}
+                </span>
+              )}
+            </span>
+          )}
         </span>
+        <span className="device-status bot-machine-status">{status}</span>
         <ChevronRight size={14} className="bot-machine-chevron" aria-hidden />
       </button>
-      {note && (
-        <p className={cx("setting-desc bot-target-note", note.tone === "bad" && "bot-target-note-bad")}>
-          <CircleAlert size={13} aria-hidden /> {note.text}
-        </p>
-      )}
     </li>
   );
 }
@@ -287,41 +294,58 @@ export function BotMachines({ compact }: { compact?: boolean }) {
   );
 }
 
-/** The details panel's Advanced tab: the same settings as above, one line each so it fits the panel. The descriptions sit in tooltips on the labels. */
+/** A titled group of the Advanced tab's settings; `card` puts its rows in a hairline card of their own. */
+function Group({ title, hint, card = true, children }: { title: string; hint?: string; card?: boolean; children: ReactNode }) {
+  return (
+    <section className="bots-adv-group" aria-label={title}>
+      <h3 className="bots-adv-title">
+        <span data-tooltip={hint} data-tooltip-side="left">{title}</span>
+      </h3>
+      {card ? <div className="bots-adv-card">{children}</div> : children}
+    </section>
+  );
+}
+
+/**
+ * The details panel's Advanced tab: the same settings as Settings → Bots, in three groups (its model,
+ * the machines it reaches, what it may do in OpenBuild), one line each so they fit the panel. The
+ * descriptions sit in tooltips on the labels.
+ */
 export function BotAdvanced({ bot }: { bot: Bot }) {
   const defaultModel = useBots((s) => s.defaultModel);
   return (
     <div className="bots-pane bots-advanced">
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip="Default uses your default model from Settings → Bots." data-tooltip-side="left">
-          Model
-        </div>
-        <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
-      </div>
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip={EFFORT_DESC} data-tooltip-side="left">
-          Effort
-        </div>
-        <BotEffortSelect bot={bot} className="select-grow" />
-      </div>
-      <BotFallbacks
-        bot={bot}
-        header={(select) => (
-          <div className="setting-row">
-            <div className="setting-label" data-tooltip={FALLBACKS_DESC} data-tooltip-side="left">
-              Fallback models
-            </div>
-            {select}
+      <Group title="Model">
+        <div className="setting-row bots-adv-stack">
+          <div className="setting-label" data-tooltip="Default uses your default model from Settings → Bots." data-tooltip-side="left">
+            Model
           </div>
-        )}
-      />
-      <div className="setting-row">
-        <div className="setting-label" data-tooltip={MACHINES_DESC} data-tooltip-side="left">
-          Machines
+          <BotModelSelect label="Model" value={bot.model} unset="Default" inherited={defaultModel} onChange={(model) => useBots.getState().updateBot(bot.id, { model })} />
         </div>
-      </div>
-      <BotMachines compact />
-      <BotThreads bot={bot} compact />
+        <div className="setting-row">
+          <div className="setting-label" data-tooltip={EFFORT_DESC} data-tooltip-side="left">
+            Effort
+          </div>
+          <BotEffortSelect bot={bot} />
+        </div>
+        <BotFallbacks
+          bot={bot}
+          header={(select) => (
+            <div className="setting-row">
+              <div className="setting-label" data-tooltip={FALLBACKS_DESC} data-tooltip-side="left">
+                Fallbacks
+              </div>
+              {select}
+            </div>
+          )}
+        />
+      </Group>
+      <Group title="Machines" hint={MACHINES_DESC} card={false}>
+        <BotMachines compact />
+      </Group>
+      <Group title="OpenBuild access">
+        <BotThreads bot={bot} compact />
+      </Group>
     </div>
   );
 }

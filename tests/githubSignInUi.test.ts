@@ -165,7 +165,7 @@ test.skipIf(!browser)("when copying fails, it says so and selects the code to co
   expect(await page.eval<unknown>(`document.querySelector('.app-copy-status').textContent`)).toBe("");
 }, 20_000);
 
-test.skipIf(!browser)("Save on a connected app saves its settings and closes the dialog", async () => {
+test.skipIf(!browser)("Save on a connected app saves its settings and leaves the page", async () => {
   const page = await Page.open(ws, `${server!.url}?state=connected`, 1280, 900, false);
   await page.until(`!!${button("Save")}`);
   await page.eval(`(() => { const s = document.querySelector('select.input'); s.value = 'write'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -174,7 +174,7 @@ test.skipIf(!browser)("Save on a connected app saves its settings and closes the
   expect(await page.eval<unknown>(`window.saved`)).toEqual({ fields: { access: "write" } });
 }, 20_000);
 
-test.skipIf(!browser)("a Save that fails keeps the dialog open with the error", async () => {
+test.skipIf(!browser)("a Save that fails stays on the page with the error", async () => {
   const page = await Page.open(ws, `${server!.url}?state=connected&save=fail`, 1280, 900, false);
   await page.until(`!!${button("Save")}`);
   await page.eval(`${button("Save")}.click()`);

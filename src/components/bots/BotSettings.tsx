@@ -77,10 +77,11 @@ function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: str
             onBlur={saveName}
             onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
           />
-          <div className="bots-details-sub">
-            {bot.primary && <span className="bots-pill">Primary</span>}
-            Made {new Date(bot.createdAt).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" })}
-          </div>
+          {bot.primary && (
+            <div className="bots-details-sub">
+              <span className="bots-pill">Primary</span>
+            </div>
+          )}
           <div className="bots-set-hero-actions">
             {conversation && (
               <button type="button" className="btn btn-sm" onClick={() => openChat(conversation.id)}>

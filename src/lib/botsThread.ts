@@ -12,7 +12,7 @@ export function escapeLeavesBotsThread(e: KeyboardEvent): boolean {
   // An IME uses Escape to cancel what's being composed (Safari reports that keydown as keyCode 229).
   if (e.isComposing || e.keyCode === 229) return false;
   const st = useStore.getState();
-  if (!st.botsOpen || !st.botsThread || st.usageOpen || st.settingsOpen) return false;
+  if (!st.botsOpen || !st.botsThread || st.usageOpen || st.settingsOpen || st.marketplaceOpen) return false;
   // A dialog, image viewer or sheet takes Escape first, even one that missed it (focus left it).
   if (document.querySelector("dialog[open], [aria-modal='true']")) return false;
   const el = document.activeElement as HTMLElement | null;

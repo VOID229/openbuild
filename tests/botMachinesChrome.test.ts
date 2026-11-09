@@ -52,8 +52,8 @@ for (const [device, width, height] of sizes) {
       const page = await Page.open(chrome!.ws, `${server!.url}?theme=${theme}`, width, height, LISTED);
       await page.settle();
       await shoot(page, `${device}-${theme}-bots`);
-      const rows = await page.eval<{ name: string; status: string; text: string }[]>(
-        `[...document.querySelectorAll('.bot-machine')].map((r) => ({ name: r.querySelector('.pi-row-name').firstChild.textContent, status: r.querySelector('.device-status').textContent, text: r.textContent }))`,
+      const rows = await page.eval<{ name: string; status: string; text: string; note: string }[]>(
+        `[...document.querySelectorAll('.bot-machine')].map((r) => ({ name: r.querySelector('.pi-row-name').firstChild.textContent, status: r.querySelector('.device-status').textContent, text: r.textContent, note: r.querySelector('.bot-machine-note')?.dataset.tooltip ?? '' }))`,
       );
       expect(rows.map((r) => [r.name, r.status])).toEqual([
         ["Studio iMac", "This server"],
@@ -61,7 +61,9 @@ for (const [device, width, height] of sizes) {
         ["Cloud VM", "Allows bots"],
         ["Old Mini", "Unreachable"],
       ]);
-      expect(rows[1]!.text).toContain("Settings → Devices → Using this device → Studio iMac");
+      // How to allow it is a few words in the row, the steps in their tooltip.
+      expect(rows[1]!.text).toContain("How to allow");
+      expect(rows[1]!.note).toContain("Settings → Devices → Using this device → Studio iMac");
       expect(rows[2]!.text).toContain("Files and terminal · Container");
       // Nothing to choose: no select at all, and every machine is a link to its device.
       expect(await page.eval<number>("document.querySelectorAll('.settings-content [aria-haspopup=\"listbox\"]').length")).toBe(0);
