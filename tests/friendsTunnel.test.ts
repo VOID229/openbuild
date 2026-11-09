@@ -96,7 +96,8 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   expect(relay.opened()).toBe(2);
 
   // The public endpoint, through the relay: nothing but the friend protocol, and strangers get nowhere.
-  const ca = { tls: { ca: cert } } as RequestInit;
+  // A fresh connection each: the relay resets idle ones, and a pooled one it reset would fail the request.
+  const ca = { tls: { ca: cert }, keepalive: false } as RequestInit;
   const status = async (path: string, init: RequestInit = {}) => (await fetch(`${base}${path}`, { ...ca, ...init })).status;
   expect(await status("/")).toBe(404);
   expect(await status("/api/auth/status")).toBe(404);
