@@ -36,13 +36,13 @@ test("fonts are files of their own, not inlined into the stylesheet the first pa
   const css = await (await get(stylesheet)).text();
   expect(css).not.toContain("data:font");
   expect(css.length).toBeLessThan(600_000);
-  const url = /url\("?(\/fonts\/[^/]+\/inter-latin-wght-normal\.woff2)"?\)/.exec(css)![1]!;
+  const url = /url\("?(\/fonts\/[^/]+\/geist-latin-wght-normal\.woff2)"?\)/.exec(css)![1]!;
   const font = await get(url);
   expect(font.status).toBe(200);
   expect(font.headers.get("content-type")).toBe("font/woff2");
   expect(font.headers.get("cache-control")).toContain("immutable");
   // A page from before an update still finds its font by name.
-  expect((await get("/fonts/older/inter-latin-wght-normal.woff2")).status).toBe(200);
+  expect((await get("/fonts/older/geist-latin-wght-normal.woff2")).status).toBe(200);
   expect((await get("/fonts/older/no-such-font.woff2")).status).toBe(404);
 });
 

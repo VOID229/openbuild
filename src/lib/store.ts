@@ -20,7 +20,7 @@ export type SettingsSection = "security" | "account" | "profile" | "general" | "
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
-  font: "fun",
+  font: "normal",
   autoScroll: true,
   confirmDelete: true,
   autoDeleteWorktrees: false,
@@ -871,7 +871,7 @@ export const useStore = create<State>()(
       name: "openchat",
       // Saved by the local server on disk, so every port and browser sees the same settings.
       storage: skipUnchanged(createJSONStorage(() => serverStorage)),
-      version: 5,
+      version: 6,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
         // v1 shipped sample router chips and the auto router on; reset those to the new defaults.
@@ -918,6 +918,9 @@ export const useStore = create<State>()(
             },
           };
         }
+        // v6: the playful Comic Neue default gave way to Geist. Everyone still on it moves to the new
+        // default; the old face stays available in Appearance.
+        if (version < 6 && state.settings?.font === "fun") state.settings = { ...state.settings, font: "normal" };
         return state as State;
       },
       partialize: (s) => ({

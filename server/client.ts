@@ -18,10 +18,10 @@ const FONT_CSS = /node_modules\/(?:@fontsource(?:-variable)?\/[^/]+|katex\/dist)
 const FONT_URL = /url\(\s*(["']?)([^"')]+\.(?:woff2?|ttf))\1\s*\)/g;
 /** The files each font setting (styles.css, data-font) paints the first screen with. */
 const FIRST_PAINT: Record<string, string[]> = {
-  normal: ["inter-latin-wght-normal.woff2"],
+  normal: ["geist-latin-wght-normal.woff2"],
   fun: ["comic-neue-latin-400-normal.woff2", "comic-neue-latin-700-normal.woff2"],
   serif: ["newsreader-latin-wght-normal.woff2"],
-  mono: ["jetbrains-mono-latin-wght-normal.woff2"],
+  mono: ["geist-mono-latin-wght-normal.woff2"],
 };
 const FONT_TYPES: Record<string, string> = { woff2: "font/woff2", woff: "font/woff", ttf: "font/ttf" };
 const COMPRESSIBLE = /^(?:text\/|application\/(?:javascript|json|manifest\+json)|image\/svg\+xml)/;

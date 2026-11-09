@@ -1,8 +1,8 @@
-import "@fontsource-variable/inter";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "@fontsource/comic-neue/400.css";
 import "@fontsource/comic-neue/700.css";
 import "@fontsource-variable/newsreader";
-import "@fontsource-variable/jetbrains-mono";
 import "katex/dist/katex.min.css";
 import "./styles.css";
 import "./bots.css";
