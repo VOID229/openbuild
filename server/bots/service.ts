@@ -6,7 +6,7 @@ import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine } from "../../shared/bots";
 import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionDepth, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
-import { parseFriendAuthor } from "../../shared/friends";
+import { OWNER, parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
 import { readDevices } from "../devices";
 import { findProject } from "../projects";
@@ -1016,10 +1016,30 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
         if (!targets.length) targets = groupRecipients(c, message);
         db.setGroupFollow(conversationId, { ids: targets, at: message.at });
       }
-      for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id] } : {}) });
+      const person = message.author === "me" || parseFriendAuthor(message.author)?.member === OWNER;
+      for (const botId of targets) if (!skip.has(botId) && (person || !ranOn(c, botId))) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id] } : {}) });
     }
   }
   return message;
+}
+
+/** In a chat shared with a friend, how many times one of ours writes, with no person writing, before bots stop waking it. */
+export const FRIEND_RUN = 8;
+
+/**
+ * A hard backstop against two servers' bots answering each other forever, with no setting: one of our
+ * bots that has written FRIEND_RUN times since a person last did (the user, or the friend themselves)
+ * isn't woken by bots there again until a person writes.
+ */
+function ranOn(c: db.StoredConversation, botId: string): boolean {
+  if (!c.friend) return false;
+  let mine = 0;
+  for (const { message: m } of db.messages(c.id, 60).reverse()) {
+    if (m.event) continue;
+    if (m.author === "me" || parseFriendAuthor(m.author)?.member === OWNER) return false;
+    if (m.author === botId && ++mine >= FRIEND_RUN) return true;
+  }
+  return false;
 }
 
 /**
