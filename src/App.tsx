@@ -192,7 +192,8 @@ function Main() {
   const titling = useStore((s) => !!s.activeChatId && s.titling.has(s.activeChatId)) && !chat?.titleSource;
   // A thread opened from a link in OpenBots shows in place of the bot chat, with the bots' sidebar kept.
   // Usage opened over it covers it, and closing Usage comes back to it.
-  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && !!chat;
+  // Until threads load, a thread named by the URL holds its place rather than flashing the bot chat.
+  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && (!!chat || !chatsLoaded);
   const botsChat = botsOpen && !botsThread;
   useBotsThreadEscape(botsThread);
   const { setSidebarOpen, newChat } = useStore.getState();
