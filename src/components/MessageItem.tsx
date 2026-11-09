@@ -281,7 +281,7 @@ function Worked({ message, folding, children }: { message: Message; folding: boo
 }
 
 /** A Pi reply in order: text, runs of tool calls and thinking, and questions. */
-function Parts({ message, chatId }: { message: Message; chatId: string }) {
+function Parts({ message, chatId, old }: { message: Message; chatId: string; old: boolean }) {
   const cwd = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace?.cwd);
   const streaming = message.status === "streaming";
   // Seen streaming here, so the fold below happens in front of the reader and should animate.
@@ -303,7 +303,7 @@ function Parts({ message, chatId }: { message: Message; chatId: string }) {
     ) : b.type === "text" ? (
       <Markdown key={`t${i}`} content={b.text} className={cx(streaming && i === blocks.length - 1 && "markdown-streaming")} block={i} />
     ) : isShownPage(b) ? (
-      <HtmlRender key={b.id} part={b} block={i} />
+      <HtmlRender key={b.id} part={b} block={i} old={old} />
     ) : b.type === "ask" ? (
       <AskCard key={b.id} part={b} chatId={chatId} messageId={message.id} block={i} />
     ) : b.type === "notice" ? (
@@ -353,7 +353,7 @@ function Typing() {
   );
 }
 
-function AssistantMessage({ message, chatId, isLast }: { message: Message; chatId: string; isLast: boolean }) {
+function AssistantMessage({ message, chatId, isLast, old }: { message: Message; chatId: string; isLast: boolean; old: boolean }) {
   const durable = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime === "durable");
   const native = useStore((s) => { const runtime = s.chats.find((c) => c.id === chatId)?.runtime; return runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "opencode" || runtime === "grok"; });
   const hasWorkspace = useStore((s) => !!s.chats.find((c) => c.id === chatId)?.workspace);
@@ -369,7 +369,7 @@ function AssistantMessage({ message, chatId, isLast }: { message: Message; chatI
         <Typing />
       )}
       {message.parts?.length ? (
-        <Parts message={message} chatId={chatId} />
+        <Parts message={message} chatId={chatId} old={old} />
       ) : (
         message.content && <Markdown content={message.content} className={cx(streaming && "markdown-streaming")} />
       )}
@@ -413,16 +413,19 @@ export const MessageItem = memo(function MessageItem({
   message,
   chatId,
   isLast,
+  oldPages = false,
 }: {
   message: Message;
   chatId: string;
   isLast: boolean;
+  /** Its pages are a few turns back, so they start collapsed (src/lib/pagePreviews.ts). */
+  oldPages?: boolean;
 }) {
   return message.role === "user" ? (
     <UserMessage message={message} chatId={chatId} />
   ) : message.role === "shell" && message.shell ? (
     <ShellMessage message={message} chatId={chatId} />
   ) : (
-    <AssistantMessage message={message} chatId={chatId} isLast={isLast} />
+    <AssistantMessage message={message} chatId={chatId} isLast={isLast} old={oldPages} />
   );
 });

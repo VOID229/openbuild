@@ -1,5 +1,6 @@
 import { ArrowDown } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { threadPagesOld } from "../lib/pagePreviews";
 import { fold } from "../lib/search";
 import { useStore } from "../lib/store";
 import type { Chat } from "../lib/types";
@@ -126,6 +127,9 @@ export function ChatView({ chat }: { chat: Chat }) {
   // Commands the user ran can come after a reply that's still going.
   const streaming = chat.messages.findLast((m) => m.role === "assistant")?.status === "streaming";
   const userCount = chat.messages.filter((m) => m.role !== "assistant").length;
+  // Pages a few of the user's turns back start collapsed: a boolean per message, so a row only draws
+  // again on the turn its pages age.
+  const oldPages = useMemo(() => threadPagesOld(chat.messages), [chat.messages]);
 
   const gap = (el: HTMLElement) => el.scrollHeight - el.clientHeight - el.scrollTop;
 
@@ -358,7 +362,7 @@ export function ChatView({ chat }: { chat: Chat }) {
         <div ref={inner} className="messages-inner">
           <PluginSlot name="chat:before-messages" context={{ chat }} />
           {chat.messages.map((m, i) => (
-            <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} />
+            <MessageItem key={m.id} message={m} chatId={chat.id} isLast={i === chat.messages.length - 1} oldPages={oldPages[i]} />
           ))}
         </div>
         <div ref={spacer} aria-hidden />
