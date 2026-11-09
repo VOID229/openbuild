@@ -160,7 +160,8 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
     expect(huddle[0]!.font).toBeLessThanOrEqual(10);
     // Everyone at work in the group: no zzz over it at all.
     await page.eval(`bots.setState({ status: Object.fromEntries(["egg", "moss", "boo", "pill"].map((id) => [id, { state: "working", conversationId: "dev" }])) })`);
-    await Bun.sleep(400);
+    // It fades out over 160 ms: wait for that rather than a fixed while, which slow frames outlast.
+    await page.until(`Number(getComputedStyle((${tile}).querySelector('.bot-huddle-box > .bot-zzz')).opacity) === 0`);
     expect(await page.eval<number>(`Number(getComputedStyle((${tile}).querySelector('.bot-huddle-box > .bot-zzz')).opacity)`)).toBe(0);
     expect((await zzzs(page, ".bots-details .bots-member .bot > .bot-zzz")).every((z) => z.opacity === 0 && z.running === 0)).toBe(true);
   }, 20_000);
