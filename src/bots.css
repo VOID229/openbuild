@@ -901,6 +901,35 @@
   display: none;
 }
 
+/* Avatars fade out at an end of the list with more past it, instead of being sliced off there. A mask
+   fades them into whatever is behind in either theme, and leaves them clickable through the fade;
+   the buttons below sit outside it. */
+@property --rail-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --rail-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.bots-rail-list {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--rail-fade-top), #000 calc(100% - var(--rail-fade-bottom)), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--rail-fade-top), #000 calc(100% - var(--rail-fade-bottom)), transparent);
+  transition: --rail-fade-top 160ms var(--ease), --rail-fade-bottom 160ms var(--ease);
+}
+
+.bots-rail-list[data-more-above] {
+  --rail-fade-top: 28px;
+}
+
+.bots-rail-list[data-more-below] {
+  --rail-fade-bottom: 36px;
+}
+
 .bots-rail-item {
   position: relative;
   display: grid;

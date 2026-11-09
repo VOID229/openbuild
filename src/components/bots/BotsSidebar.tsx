@@ -456,6 +456,23 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   const avatar = useStore((s) => s.settings.profile.avatar);
   const name = useStore((s) => s.settings.profile.name);
   const listRef = useRef<HTMLElement>(null);
+  // Which ends of the list have more past them, so they fade out there (bots.css) instead of being cut.
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    const edges = () => {
+      el.toggleAttribute("data-more-above", el.scrollTop > 1);
+      el.toggleAttribute("data-more-below", el.scrollHeight - el.clientHeight - el.scrollTop > 1);
+    };
+    edges();
+    el.addEventListener("scroll", edges, { passive: true });
+    const resize = new ResizeObserver(edges);
+    resize.observe(el);
+    return () => {
+      el.removeEventListener("scroll", edges);
+      resize.disconnect();
+    };
+  }, [pinned.length, rest.length]);
   const item = (c: Conversation) => (
     <button
       key={c.id}
