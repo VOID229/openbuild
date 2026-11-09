@@ -11,6 +11,7 @@ import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/b
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
 import * as apps from "./apps";
+import * as claude from "./claude";
 import { machines, setIsolation } from "./machines";
 import { startBots } from "./runner";
 import { BotsError, snapshot, subscribe } from "./service";
@@ -211,6 +212,58 @@ export function botRoutes(api: Api) {
       }),
     },
     // The user's Pi extensions, and what bots can run on with the ones they've switched on.
+    // ---------------------------------------------------------------- Claude for bots
+    "/api/bots/claude": {
+      GET: api(async () => {
+        try {
+          return json(await claude.logins());
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // Signs in with Claude Code first when this login isn't; otherwise bots just use it again.
+    "/api/bots/claude/:id/connect": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/claude/:id/connect">) => {
+        try {
+          return json({ signIn: (await claude.connect(req.params.id)) ?? null });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    // The code goes to Claude Code's stdin; it's never logged or kept.
+    "/api/bots/claude/:id/code": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/claude/:id/code">) => {
+        try {
+          const body = (await readJson(req)) as { flowId?: unknown; code?: unknown } | undefined;
+          return json({ signIn: await claude.submitCode(req.params.id, body?.flowId, body?.code) });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/claude/:id/cancel": {
+      POST: api((req: Bun.BunRequest<"/api/bots/claude/:id/cancel">) => {
+        try {
+          claude.cancel(req.params.id);
+          return json({ ok: true });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
+    "/api/bots/claude/:id/disconnect": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/claude/:id/disconnect">) => {
+        try {
+          const body = (await readJson(req)) as { signOut?: unknown } | undefined;
+          await claude.disconnect(req.params.id, body?.signOut === true);
+          return json({ ok: true });
+        } catch (err) {
+          return fail(err);
+        }
+      }),
+    },
     "/api/bots/extensions": {
       GET: api(() => {
         try {

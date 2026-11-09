@@ -3931,3 +3931,32 @@ a.bots-btn-primary {
 .bots-gone svg {
   color: var(--text-2);
 }
+
+/* Settings → Bots → Claude: the login rows and Claude Code's sign-in. */
+.bots-claude-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.bots-claude-signin {
+  margin: 4px 0 10px;
+}
+
+.bots-claude-code {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bots-claude-code .input {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-family: var(--font-mono, monospace);
+}
+
+.bots-small-dialog .bots-poll-check {
+  margin: 0 0 14px;
+}

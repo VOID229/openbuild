@@ -166,6 +166,10 @@ export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
       permissions: Object.fromEntries(PERMISSION_HARNESSES.flatMap((h) => (isPermissionId(permissions[h]) ? [[h, permissions[h]]] : []))),
     };
   }
+  if ("claude" in patch) {
+    const off = strings(patch.claude?.off, 32).filter((id) => /^claude-code(-[a-z0-9_-]{1,40})?$/.test(id));
+    next.claude = { off, changedAt: Number.isFinite(patch.claude?.changedAt) ? Number(patch.claude!.changedAt) : Date.now() };
+  }
   if ("isolation" in patch) {
     const kinds = Object.entries(patch.isolation && typeof patch.isolation === "object" ? patch.isolation : {}).filter(([device, kind]) => device.length <= 80 && kind === "host");
     next.isolation = kinds.length ? Object.fromEntries(kinds.slice(0, 200)) : undefined;
@@ -437,13 +441,13 @@ async function destroyComputers(botId: string) {
 export async function resetAll() {
   for (const bot of db.listBots()) hooks.stop(bot.id);
   for (const bot of db.listBots()) await destroyComputers(bot.id);
-  // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions they load, each machine's isolation and the apps they connected aren't those, and the keys stay too.
-  const { defaultModel, defaultFallbackModels, searxng, customExtensions, isolation } = settings();
+  // Reset is about bots and chats. Their default model and its fallbacks, how the user searches the web, which extensions and Claude logins they load, each machine's isolation and the apps they connected aren't those, and the keys stay too.
+  const { defaultModel, defaultFallbackModels, searxng, customExtensions, claude, isolation } = settings();
   const apps = db.getValue("apps");
   // Shared chats go too: their friends hear they were left, rather than writing on into nothing.
   for (const c of db.listConversations()) if (c.friend && !c.friend.ended) friendHooks.left(c);
   db.wipe();
-  if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions || isolation) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions, isolation });
+  if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions || claude || isolation) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions, claude, isolation });
   if (apps) db.setValue("apps", apps);
   status.clear();
   chains.clear();
