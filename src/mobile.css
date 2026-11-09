@@ -1376,7 +1376,7 @@
     flex: none;
   }
 
-  /* While typing, the words get the room: effort, permissions and the like come back with the keyboard gone. */
+  /* While typing, the words get the room: permissions, the workspace row and the like come back with the keyboard gone. */
   [data-keyboard] .composer-bar > .picker:not(.picker-static),
   [data-keyboard] .composer-wrap .ws-bottom,
   [data-keyboard] .composer-wrap .remote-control-row {

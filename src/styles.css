@@ -2252,8 +2252,21 @@ select.input {
 }
 
 .pill-model {
-  max-width: 240px;
+  max-width: 340px;
   min-width: 0;
+}
+
+/* After the model's name: its reasoning level, then a bolt while a faster tier is on. */
+.pill-effort {
+  flex: none;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.pill-fast {
+  flex: none;
+  margin-left: -2px;
+  color: var(--text-2);
 }
 
 .pill-text {
@@ -4687,7 +4700,7 @@ p.key-status svg {
   }
 
   .pill-model {
-    max-width: 150px;
+    max-width: 280px;
   }
 
   .pill {
@@ -4867,7 +4880,7 @@ p.key-status svg {
     padding: 0 10px;
   }
   .pill-model {
-    max-width: 132px;
+    max-width: 100%;
   }
 
   /* Stacked rows: the label on top, the full-width control below. */
@@ -4932,7 +4945,7 @@ p.key-status svg {
     display: none;
   }
   .pill-model {
-    max-width: 112px;
+    max-width: 100%;
   }
 }
 
@@ -4998,7 +5011,7 @@ p.key-status svg {
     z-index: 60;
     width: auto;
     max-width: none;
-    height: min(560px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
+    height: min(480px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
     max-height: none !important;
     border-radius: 20px;
     transform: translateY(12px);
@@ -7429,8 +7442,14 @@ a.btn-primary {
   padding: 0 4px 8px;
 }
 
-.ws-top .ws-pill {
+.ws-top .ws-pill,
+.ws-bottom .ws-pill {
   border-color: transparent;
+}
+
+.ws-bottom .permission-pill {
+  flex: none;
+  height: 24px;
 }
 
 .permission-pill { display: inline-flex; align-items: center; gap: 5px; }
@@ -7728,13 +7747,15 @@ a.btn-primary {
   line-height: 1;
 }
 
-/* Model picker: provider rail, search, two-line rows, thinking level */
+/* Model picker: provider rail, search, one-line rows, and the model's reasoning and speed. Wide,
+   the Reasoning column sits beside the list; narrow (a phone's sheet), its levels make a row under
+   it. The footer, across the whole picker, holds the speed toggle and the runtime. */
 
 .mp {
-  display: flex;
-  width: min(420px, calc(100vw - 24px));
+  width: min(540px, calc(100vw - 24px));
   overflow: hidden;
   padding: 0;
+  container: mp / inline-size;
 }
 
 .mp.drop-up {
@@ -7747,14 +7768,31 @@ a.btn-primary {
   left: 0;
 }
 
+.mp-body {
+  display: grid;
+  grid-template:
+    "rail main effort" minmax(0, 1fr)
+    "foot foot foot" auto / 40px minmax(0, 1fr) 132px;
+  height: 100%;
+}
+
+@container mp (max-width: 479px) {
+  .mp-body {
+    grid-template:
+      "rail main" minmax(0, 1fr)
+      "effort effort" auto
+      "foot foot" auto / 40px minmax(0, 1fr);
+  }
+}
+
 .mp-rail {
+  grid-area: rail;
   display: flex;
-  flex: none;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  width: 46px;
-  padding: 6px 0 0;
+  min-height: 0;
+  padding: 5px 0 0;
   border-right: 1px solid var(--border);
   background: var(--surface-2);
 }
@@ -7768,7 +7806,7 @@ a.btn-primary {
   gap: 2px;
   width: 100%;
   min-height: 0;
-  padding: 2px 0 6px;
+  padding: 2px 0 5px;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: none;
@@ -7797,22 +7835,23 @@ a.btn-primary {
   display: grid;
   flex: none;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 .mp-rail-btn .brand-icon {
-  width: 20px;
-  height: 20px;
+  width: 17px;
+  height: 17px;
+  font-size: 17px;
 }
 
 .mp-rail-btn .provider-letter {
-  width: 22px;
-  height: 22px;
-  font-size: 12px;
+  width: 19px;
+  height: 19px;
+  font-size: 11px;
 }
 
 @media (hover: hover) {
@@ -7829,18 +7868,20 @@ a.btn-primary {
 }
 
 .mp-main {
+  grid-area: main;
   display: flex;
-  flex: 1;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .mp-search {
   display: flex;
+  flex: none;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 12px;
+  gap: 7px;
+  height: 36px;
+  padding: 0 10px;
   border-bottom: 1px solid var(--border);
   color: var(--text-3);
 }
@@ -7851,14 +7892,14 @@ a.btn-primary {
   border: 0;
   outline: none;
   background: transparent;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text);
 }
 
 .mp-list {
   flex: 1;
   min-height: 0;
-  padding: 4px;
+  padding: 3px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
@@ -7867,9 +7908,9 @@ a.btn-primary {
 .mp-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding-right: 6px;
-  border-radius: 8px;
+  gap: 2px;
+  padding-right: 3px;
+  border-radius: 6px;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -7886,58 +7927,58 @@ a.btn-primary {
 .mp-pick {
   display: flex;
   flex: 1;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 1px;
+  align-items: center;
+  gap: 7px;
   min-width: 0;
-  padding: 5px 8px;
+  height: 28px;
+  padding: 0 4px 0 7px;
   text-align: left;
 }
 
-.mp-name {
-  max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 13.5px;
-  font-weight: 500;
-}
-
-.mp-sub {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 100%;
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
-.mp-sub .brand-icon {
+.mp-pick .brand-icon {
   flex: none;
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
 }
 
-.mp-sub .provider-letter {
-  width: 13px;
-  height: 13px;
-  font-size: 8px;
+.mp-pick .provider-letter {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
 }
 
-.mp-sub-text {
+.mp-name {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* Context and price, after the name; it gives way first when the row runs out of room. */
+.mp-facts {
+  flex: 0 100 auto;
+  min-width: 0;
+  margin-left: auto;
+  padding-left: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
 }
 
 .mp-star {
   display: grid;
   flex: none;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
   color: var(--text-3);
   opacity: 0;
   transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
@@ -7962,13 +8003,14 @@ a.btn-primary {
 /* A device's Pi model scope narrows the picker; this switch widens it back to every model. */
 .mp-scope {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--border);
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
@@ -7991,39 +8033,211 @@ a.btn-primary {
   color: var(--text);
 }
 
-.mp-foot {
+/* Reasoning: a column of levels beside the list. */
+.mp-effort {
+  grid-area: effort;
   display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--border);
+}
+
+.mp-effort-head {
+  display: flex;
+  flex: none;
+  align-items: baseline;
+  gap: 6px;
+  height: 36px;
+  padding: 11px 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.mp-section-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.mp-effort-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-height: 0;
+  padding: 3px;
+  overflow-y: auto;
+}
+
+.mp-effort-level {
+  display: flex;
+  flex: none;
   align-items: center;
-  gap: 10px;
-  min-height: 40px;
-  padding: 4px 8px 4px 12px;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: nowrap;
+  text-align: left;
+  color: var(--text-2);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .mp-effort-level:hover {
+    background: var(--hover);
+    color: var(--text);
+  }
+}
+
+.mp-effort-level[aria-checked="true"] {
+  color: var(--text);
+}
+
+.mp-effort-short {
+  display: none;
+}
+
+.mp-effort-check {
+  flex: none;
+  margin-left: auto;
+}
+
+.mp-effort-note {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+
+/* Narrow: one row under the list, the levels as short chips. */
+@container mp (max-width: 479px) {
+  .mp-effort {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .mp-effort-head {
+    height: auto;
+    padding: 0;
+    border: 0;
+  }
+
+  .mp-effort-levels {
+    flex: 1;
+    flex-direction: row;
+    justify-content: flex-end;
+    gap: 2px;
+    padding: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .mp-effort-level {
+    height: 26px;
+    padding: 0 8px;
+    font-size: 12.5px;
+  }
+
+  .mp-effort-level[aria-checked="true"] {
+    background: var(--active);
+  }
+
+  .mp-effort-long,
+  .mp-effort-check {
+    display: none;
+  }
+
+  .mp-effort-short {
+    display: inline;
+  }
+
+  .mp-effort-note {
+    padding: 0;
+    text-align: right;
+    margin-left: auto;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}
+
+/* Footer: speed on the left, the runtime on the right. */
+.mp-foot {
+  grid-area: foot;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 38px;
+  padding: 5px 6px 5px 8px;
   border-top: 1px solid var(--border);
-  font-size: 13.5px;
+  font-size: 12px;
 }
 
 .mp-foot-label {
   flex: none;
-  font-weight: 500;
+  margin-left: auto;
+  color: var(--text-3);
 }
 
 .mp-foot-value {
-  margin-left: auto;
+  color: var(--text-2);
+}
+
+/* A segmented toggle: Standard, then the model's faster tiers. */
+.mp-speed {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.mp-speed-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 6px;
+  font-size: 12px;
   color: var(--text-3);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .mp-speed-opt:hover {
+    color: var(--text);
+  }
+}
+
+.mp-speed-opt[aria-checked="true"] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--border);
 }
 
 .mp-levels {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 2px;
-  margin-left: auto;
+  gap: 1px;
 }
 
 .mp-level {
   height: 26px;
-  padding: 0 9px;
-  border-radius: 8px;
-  font-size: 12.5px;
+  padding: 0 8px;
+  border-radius: 7px;
+  font-size: 12px;
   color: var(--text-3);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
@@ -8126,12 +8340,23 @@ a.btn-primary {
     font-size: 16px;
   }
 
-  .mp-pick,
   .pp-pick {
     min-height: 52px;
   }
 
-  .mp-level {
+  /* Still compact, but tall enough to tap. */
+  .mp-pick,
+  .mp-effort-level {
+    height: 38px;
+  }
+
+  .mp-level,
+  .mp-speed-opt {
+    height: 32px;
+  }
+
+  .mp-star {
+    width: 32px;
     height: 32px;
   }
 }
@@ -8139,10 +8364,6 @@ a.btn-primary {
 @media (max-width: 768px) {
   .mp {
     width: 100%;
-  }
-
-  .mp-rail {
-    width: 46px;
   }
 
   .ws-top {
@@ -9914,7 +10135,7 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: 8px; }
 .mp-runtime {
   display: grid;
   place-items: center;
-  width: 32px;
+  width: 28px;
   padding: 0;
 }
 

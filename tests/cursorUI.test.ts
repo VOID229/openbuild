@@ -32,7 +32,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
   const { useStore, deviceDetection, selectionFor, composerEffort } = await import("../src/lib/store");
   const { WorkspaceTop, WorkspaceBelow } = await import("../src/components/Workspace");
   const { Sidebar } = await import("../src/components/Sidebar");
-  const { EffortPicker, ModelPicker, PermissionPicker } = await import("../src/components/Pickers");
+  const { ModelPicker, PermissionPicker, ReasoningSection, SpeedToggle } = await import("../src/components/Pickers");
   const { sendMessage, regenerate, resumeReplies, steerQueued } = await import("../src/lib/chat");
   const { runShell } = await import("../src/lib/shell");
   const { providerSvg } = await import("../src/lib/models");
@@ -196,7 +196,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     useStore.getState().setSelection({ plan: "cursor", id: remote.id });
     useStore.getState().setEffort("high");
     expect(composerEffort(useStore.getState())).toBe("high");
-    expect(markup(createElement(EffortPicker, { dropUp: false, deviceId: "mac" }))).toContain("Reasoning effort");
+    expect(markup(createElement(ReasoningSection, { deviceId: "mac" }))).toContain('aria-label="Reasoning effort"');
     const saved = JSON.parse(JSON.stringify(useStore.getState().settings));
     reset(saved);
     useStore.setState({ cursorModels: { "": { ...listing(local), models: [local, shared] }, mac: listing(remote) } });
@@ -207,9 +207,49 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(selectionFor(useStore.getState())).toBeUndefined();
     useStore.getState().updateSettings({ threadRuntime: "cursor" });
     useStore.setState({ cursorModels: { "": listing(model("fixed", [])) } });
-    const fixed = markup(createElement(EffortPicker, { dropUp: false }));
-    expect(fixed).toContain('aria-disabled="true"');
+    const fixed = markup(createElement(ReasoningSection, {}));
+    expect(fixed).not.toContain('role="radio"');
     expect(fixed).toContain("uses its default reasoning");
+  });
+
+  test("the model pill carries the reasoning level and a Fast bolt; reasoning and speed are chosen inside the picker", () => {
+    reset();
+    const fast: ModelInfo = { ...model("swift", ["low", "medium", "high"]), speeds: [{ id: "fast", name: "Fast", description: "Faster output" }] };
+    useStore.setState({ cursorModels: { "": listing(fast) } });
+    useStore.getState().setEffort("high");
+    const pill = () => markup(createElement(ModelPicker, { dropUp: false }));
+    expect(pill()).toContain('aria-label="Model: swift, High reasoning"');
+    expect(pill()).toContain('<span class="pill-effort">High</span>');
+    expect(pill()).not.toContain("lucide-zap");
+    // Only the levels the model has, as radios; the one in use is checked.
+    const levels = markup(createElement(ReasoningSection, {}));
+    expect(levels.match(/role="radio"/g)).toHaveLength(3);
+    expect(levels).toMatch(/aria-checked="true"[^>]*><span class="mp-effort-long">High</);
+    // Standard and the model's tiers; the bolt is Lucide's SVG, not an emoji.
+    expect(markup(createElement(SpeedToggle, {}))).toMatch(/aria-checked="true"[^>]*>Standard</);
+    useStore.getState().setSpeed("fast");
+    const toggle = markup(createElement(SpeedToggle, {}));
+    expect(toggle).toMatch(/aria-checked="true"[^>]*><svg[^>]*lucide-zap[^>]*>.*?<\/svg>Fast</);
+    expect(pill()).toContain('aria-label="Model: swift, High reasoning, Fast"');
+    expect(pill()).toMatch(/<svg[^>]*class="[^"]*lucide-zap[^"]*pill-fast/);
+    expect(pill()).not.toContain("⚡");
+    // A model without tiers has no toggle, and the bolt goes with it.
+    useStore.setState({ cursorModels: { "": listing(model("plain")) } });
+    expect(markup(createElement(SpeedToggle, {}))).toBe("");
+    expect(pill()).not.toContain("lucide-zap");
+  });
+
+  test("permissions sit in the workspace row, outside the composer's controls", async () => {
+    const { readFileSync } = await import("node:fs");
+    const composer = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
+    const bar = composer.slice(composer.indexOf('<div className="composer-bar">'), composer.indexOf("<RemoteControlToggle"));
+    expect(bar).toContain("<ModelPicker");
+    expect(bar).not.toContain("<PermissionPicker");
+    reset();
+    useStore.setState({ permissionModes: { "cursor||": { modes: [{ id: "default", name: "Configured" }], defaultMode: "default", status: "valid", checkedAt: Date.now() } } });
+    const top = markup(createElement(WorkspaceTop, { permission: createElement(PermissionPicker, { dropUp: false }) }));
+    expect(top).toContain('class="ws-pill permission-pill"');
+    expect(top).toContain('aria-label="Permissions: Configured"');
   });
 
   test("empty Cursor model UI never opens API-key setup", () => {

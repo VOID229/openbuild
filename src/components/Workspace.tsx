@@ -4,7 +4,7 @@ import { ThreadAccountSelect } from "./RuntimeAccounts";
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
 import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitCommitHorizontal, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
@@ -441,8 +441,8 @@ function RuntimeMenu() {
   );
 }
 
-/** New thread: runtime, checkout or worktree, and branch, right above the composer. */
-export function WorkspaceTop() {
+/** New thread: runtime, checkout or worktree, branch and the runtime's permission mode, right above the composer. */
+export function WorkspaceTop({ permission }: { permission?: ReactNode }) {
   const { project, pref, info, loading } = useNewWorkspace();
   return (
     <div className="ws-top">
@@ -453,6 +453,7 @@ export function WorkspaceTop() {
       </>}
       <RuntimeMenu />
       <ThreadAccountSelect />
+      {permission}
     </div>
   );
 }
@@ -578,7 +579,7 @@ function UsageMeter({ chatId, runtime }: { chatId: string; runtime: ThreadRuntim
   );
 }
 
-function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; workspace?: Workspace; streaming: boolean }) {
+function ThreadWorkspace({ chatId, workspace, streaming, permission }: { chatId: string; workspace?: Workspace; streaming: boolean; permission?: ReactNode }) {
   const [info, setInfo] = useState<GitInfo>();
   const runtime = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime ?? "pi");
   // Refresh after each reply (Pi may have committed or switched branches) and on coming back.
@@ -613,6 +614,7 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
           {!!info?.ahead && <span className="ws-dirty">↑{info.ahead}</span>}
         </span>
       )}
+      {permission}
       <UsageMeter chatId={chatId} runtime={runtime} />
       <IconButton label="Open a terminal here" tooltip="Terminal (⌘J)" tooltipSide="top" className="ws-terminal" onClick={toggleTerminal}>
         <SquareTerminal size={14} />
@@ -621,7 +623,8 @@ function ThreadWorkspace({ chatId, workspace, streaming }: { chatId: string; wor
   );
 }
 
-export function WorkspaceBelow({ chatId, streaming }: { chatId: string; streaming: boolean }) {
+/** `permission` is the composer's permission picker, shown in this row rather than among the composer's controls. */
+export function WorkspaceBelow({ chatId, streaming, permission }: { chatId: string; streaming: boolean; permission?: ReactNode }) {
   const workspace = useStore((s) => s.chats.find((c) => c.id === chatId)?.workspace);
-  return <ThreadWorkspace chatId={chatId} workspace={workspace} streaming={streaming} />;
+  return <ThreadWorkspace chatId={chatId} workspace={workspace} streaming={streaming} permission={permission} />;
 }

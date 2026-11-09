@@ -1,4 +1,4 @@
-import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star } from "lucide-react";
+import { Check, KeyRound, Search, ShieldAlert, ShieldCheck, Star, Zap } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   EFFORTS,
@@ -21,19 +21,19 @@ import { REMOTE_CONTROL } from "../../shared/remoteControl";
 import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, CursorMark, FxMark, Popover, ProviderIcon, Spinner, Toggle } from "./primitives";
 
 const SHORT: Record<Effort, string> = {
-  off: "off",
-  low: "low",
-  medium: "med",
-  high: "high",
-  xhigh: "xhigh",
-  max: "max",
+  off: "Off",
+  low: "Low",
+  medium: "Med",
+  high: "High",
+  xhigh: "XHigh",
+  max: "Max",
 };
 const LONG: Record<Effort, string> = {
   off: "Off",
   low: "Low",
   medium: "Medium",
   high: "High",
-  xhigh: "XHigh",
+  xhigh: "Extra high",
   max: "Max",
 };
 
@@ -85,166 +85,94 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
   return detection;
 }
 
-export function EffortPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
+/** The selected model's reasoning levels and the one in use, for the picker's Reasoning section and the pill. */
+function useEffortChoice(deviceId?: string) {
   const effort = useStore(composerEffort);
   const selection = useStore(selectionFor);
   const detection = useDeviceDetection(deviceId);
-  const setEffort = useStore((s) => s.setEffort);
-
   const auto = isAuto(selection);
   const model = auto ? undefined : findModel(detection, selection);
   // Availability comes from the model's metadata; the auto router applies the level wherever supported.
-  const levels: Effort[] = auto
-    ? [...EFFORTS]
-    : (model?.reasoning.efforts ?? []);
-  const supported = levels.length > 0;
+  const levels: Effort[] = auto ? [...EFFORTS] : (model?.reasoning.efforts ?? []);
   const shown = nearestEffort(levels, effort) ?? effort;
   // Toggle-only models (thinking on/off, no levels): "medium" means "on, at the model's default".
-  const onOff =
-    !!model && model.reasoning.mode === "none" && model.reasoning.toggle;
-  const labelOf = (e: Effort, short: boolean) =>
-    onOff && e === "medium"
-      ? short
-        ? "on"
-        : "On"
-      : short
-        ? SHORT[e]
-        : LONG[e];
-  const tooltip =
+  const onOff = !!model && model.reasoning.mode === "none" && model.reasoning.toggle;
+  const labelOf = (e: Effort, short = false) => (onOff && e === "medium" ? "On" : short ? SHORT[e] : LONG[e]);
+  const note =
     !model && !auto
       ? "Select a model first"
-      : !supported
+      : !levels.length
         ? model?.id.startsWith("fx/")
           ? "This fx version can't set reasoning effort. Update fx (`fx upgrade`) to choose it here."
           : `${model?.name} uses its default reasoning`
-        : "Reasoning effort";
-
-  return (
-    <div className="picker">
-      <button
-        ref={anchor}
-        type="button"
-        className={cx("pill pill-plain", open && "pill-open")}
-        // aria-disabled (not disabled) keeps hover working so the tooltip can explain why.
-        aria-disabled={!supported}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        data-tooltip={open ? undefined : tooltip}
-        data-tooltip-side={dropUp ? "top" : "bottom"}
-        onClick={() => supported && setOpen((o) => !o)}
-      >
-        {supported ? labelOf(shown, false) : "Default"}
-      </button>
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={anchor}
-        className="menu effort-menu"
-        role="listbox"
-        label="Reasoning effort"
-        // Portaled and flipped to whichever side has room, so it never runs off the screen.
-        fixed={dropUp ? "up" : "auto"}
-      >
-        <div className="menu-label">Thinking level</div>
-        <div onKeyDown={(e) => arrowNav(e)}>
-          {EFFORTS.map((level) => {
-            const enabled = levels.includes(level);
-            return (
-              <button
-                key={level}
-                type="button"
-                role="option"
-                aria-selected={shown === level}
-                className="menu-item"
-                disabled={!enabled}
-                title={
-                  enabled
-                    ? undefined
-                    : `Not supported by ${model?.name ?? "this model"}`
-                }
-                onClick={() => {
-                  setEffort(level);
-                  setOpen(false);
-                }}
-              >
-                <span className="menu-item-label">{labelOf(level, true)}</span>
-                {shown === level && <Check size={15} className="menu-check" />}
-              </button>
-            );
-          })}
-        </div>
-      </Popover>
-    </div>
-  );
+        : undefined;
+  return { model, levels, shown, labelOf, note };
 }
 
-/**
- * The speed (service tier) for the selected model, right of the effort picker. Only shown when the
- * provider lists faster tiers for the model (ModelInfo.speeds), and offers only those plus standard.
- */
-export function SpeedPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
+/** The selected model's faster service tiers (ModelInfo.speeds) and the one in use; none listed means no choice. */
+function useSpeedChoice(deviceId?: string) {
   const selection = useStore(selectionFor);
   const detection = useDeviceDetection(deviceId);
   const wanted = useStore(composerSpeed);
-  const setSpeed = useStore((s) => s.setSpeed);
   const model = isAuto(selection) ? undefined : findModel(detection, selection);
   const speeds = model?.speeds ?? [];
-  if (!speeds.length) return null;
   const shown = supportedSpeed(speeds, wanted);
-  const current = speeds.find((s) => s.id === shown);
-  const options: { id?: string; name: string; description?: string }[] = [{ name: "Standard", description: "Default speed and usage" }, ...speeds];
+  return { speeds, current: speeds.find((s) => s.id === shown) };
+}
 
+/**
+ * The model picker's Reasoning section: a column beside the list on a wide picker, a row of levels
+ * under it on a narrow one (CSS decides). Picking a level keeps the picker open.
+ */
+export function ReasoningSection({ deviceId }: { deviceId?: string }) {
+  const { model, levels, shown, labelOf, note } = useEffortChoice(deviceId);
+  const setEffort = useStore((s) => s.setEffort);
   return (
-    <div className="picker">
-      <button
-        ref={anchor}
-        type="button"
-        className={cx("pill pill-plain", open && "pill-open")}
-        aria-haspopup="listbox"
-        aria-expanded={open}
-        data-tooltip={open ? undefined : current?.description ? `Speed: ${current.description}` : "Speed"}
-        data-tooltip-side={dropUp ? "top" : "bottom"}
-        onClick={() => setOpen((o) => !o)}
-      >
-        {current?.name ?? "Standard"}
-      </button>
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchor={anchor}
-        className="menu effort-menu speed-menu"
-        role="listbox"
-        label="Speed"
-        fixed={dropUp ? "up" : "auto"}
-      >
-        <div className="menu-label">Speed</div>
-        <div onKeyDown={(e) => arrowNav(e)}>
-          {options.map((o) => (
-            <button
-              key={o.id ?? ""}
-              type="button"
-              role="option"
-              aria-selected={shown === o.id}
-              className="menu-item"
-              onClick={() => {
-                setSpeed(o.id);
-                setOpen(false);
-              }}
-            >
-              <span className="menu-item-label">
-                {o.name}
-                {o.description && <span className="speed-desc">{o.description}</span>}
-              </span>
-              {shown === o.id && <Check size={15} className="menu-check" />}
+    <section className="mp-effort" aria-label="Reasoning effort">
+      <div className="mp-effort-head" title={model ? `For ${model.name}` : undefined}>
+        <span className="mp-section-label">Reasoning</span>
+      </div>
+      {note ? (
+        <p className="mp-effort-note">{note}</p>
+      ) : (
+        <div className="mp-effort-levels" role="radiogroup" aria-label="Reasoning effort" onKeyDown={(e) => arrowNav(e)}>
+          {levels.map((level) => (
+            <button key={level} type="button" role="radio" aria-checked={shown === level} className="mp-effort-level" onClick={() => setEffort(level)}>
+              <span className="mp-effort-long">{labelOf(level)}</span>
+              <span className="mp-effort-short" aria-hidden>{labelOf(level, true)}</span>
+              {shown === level && <Check size={14} className="mp-effort-check" aria-hidden />}
             </button>
           ))}
         </div>
-      </Popover>
-    </div>
+      )}
+    </section>
+  );
+}
+
+/** Standard or one of the model's faster tiers, at the foot of the model picker. Hidden when the model lists none. */
+export function SpeedToggle({ deviceId }: { deviceId?: string }) {
+  const { speeds, current } = useSpeedChoice(deviceId);
+  const setSpeed = useStore((s) => s.setSpeed);
+  if (!speeds.length) return null;
+  const options: { id?: string; name: string; description?: string }[] = [{ name: "Standard", description: "Default speed and usage" }, ...speeds];
+  return (
+    <span className="mp-speed" role="radiogroup" aria-label="Speed" onKeyDown={(e) => arrowNav(e)}>
+      {options.map((o) => (
+        <button
+          key={o.id ?? ""}
+          type="button"
+          role="radio"
+          aria-checked={current?.id === o.id}
+          className="mp-speed-opt"
+          data-tooltip={o.description}
+          data-tooltip-side="top"
+          onClick={() => setSpeed(o.id)}
+        >
+          {o.id && <Zap size={13} aria-hidden />}
+          {o.name}
+        </button>
+      ))}
+    </span>
   );
 }
 
@@ -254,7 +182,8 @@ const RUNTIME_NAME: Partial<Record<ThreadRuntime, string>> = { codex: "Codex", c
 /**
  * The permission mode for a Codex or Cursor thread, as that runtime lists its modes on the device
  * (Codex: its permission profiles for the folder; Cursor: the modes its installed CLI offers).
- * "Default" sends nothing, so the runtime's own configuration applies.
+ * "Default" sends nothing, so the runtime's own configuration applies. It sits outside the composer,
+ * in the workspace row: above a new thread's composer, under a thread's.
  */
 export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: boolean; chatId?: string; deviceId?: string; cwd?: string }) {
   const [open, setOpen] = useState(false);
@@ -291,7 +220,7 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
       <button
         ref={anchor}
         type="button"
-        className={cx("pill pill-plain permission-pill", open && "pill-open", risky && "permission-risky")}
+        className={cx("ws-pill permission-pill", open && "ws-pill-open", risky && "permission-risky")}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`Permissions: ${label}`}
@@ -299,8 +228,8 @@ export function PermissionPicker({ dropUp, chatId, deviceId, cwd }: { dropUp: bo
         data-tooltip-side={dropUp ? "top" : "bottom"}
         onClick={() => setOpen((o) => !o)}
       >
-        {risky ? <ShieldAlert size={14} aria-hidden /> : <ShieldCheck size={14} aria-hidden />}
-        {label}
+        {risky ? <ShieldAlert size={13} aria-hidden /> : <ShieldCheck size={13} aria-hidden />}
+        <span className="ws-pill-text">{label}</span>
       </button>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu effort-menu speed-menu" role="listbox" label="Permissions" fixed={dropUp ? "up" : "auto"}>
         <div className="menu-label">{name} permissions</div>
@@ -400,6 +329,8 @@ function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>>
 }
 
 const RAIL_FAV = "★";
+/** The picker's width on a wide screen: rail, list and the Reasoning column side by side. */
+const PICKER_WIDTH = 540;
 
 /** Price and size of a model, as a short line. */
 function modelFacts(m: ModelInfo) {
@@ -408,8 +339,8 @@ function modelFacts(m: ModelInfo) {
       ? `${(n / 1_000_000).toFixed(n % 1_000_000 ? 1 : 0)}M`
       : `${Math.round(n / 1000)}k`;
   return [
-    m.contextLimit ? `${k(m.contextLimit)} context` : "",
-    m.outputCost ? `$${m.outputCost}/M out` : m.outputCost === 0 ? "free" : "",
+    m.contextLimit ? `${k(m.contextLimit)} ctx` : "",
+    m.outputCost ? `$${m.outputCost}/M` : m.outputCost === 0 ? "free" : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -425,10 +356,10 @@ export function toggleFavorite(id: string) {
 }
 
 /**
- * The model picker's footer: the new thread's runtime, whose models the list above shows. Once a
- * thread has started its runtime is fixed, so the row just names it.
+ * The model picker's footer: the model's speed on the left, and the new thread's runtime, whose
+ * models the list above shows. Once a thread has started its runtime is fixed, so the row just names it.
  */
-function RuntimeRow() {
+function PickerFoot({ deviceId }: { deviceId?: string }) {
   const started = useStore((s) => s.chats.some((c) => c.id === s.activeChatId));
   const fixed = useStore((s) => runtimeOf(s, s.activeChatId));
   const updateSettings = useStore((s) => s.updateSettings);
@@ -436,10 +367,11 @@ function RuntimeRow() {
   const { options, missing, runtime } = useRuntimeOptions();
   return (
     <div className="mp-foot">
+      <SpeedToggle deviceId={deviceId} />
       <span className="mp-foot-label">Runtime</span>
       {started ? (
         <span className="mp-foot-value mp-runtime-fixed" data-tooltip="Fixed once a thread starts" data-tooltip-side="top">
-          <RuntimeIcon runtime={fixed} size={14} />
+          <RuntimeIcon runtime={fixed} size={13} />
           {RUNTIME_LABEL[fixed]}
         </span>
       ) : (
@@ -458,7 +390,7 @@ function RuntimeRow() {
                 data-tooltip-side="top"
                 onClick={() => (absent ? openSettings("runtimes") : updateSettings({ threadRuntime: o.runtime }))}
               >
-                <RuntimeIcon runtime={o.runtime} size={15} />
+                <RuntimeIcon runtime={o.runtime} size={14} />
               </button>
             );
           })}
@@ -477,6 +409,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   const favorites = useStore((s) => s.settings.favorites);
   const setSelection = useStore((s) => s.setSelection);
   const openSettings = useStore((s) => s.openSettings);
+  const effort = useEffortChoice(deviceId);
+  const speed = useSpeedChoice(deviceId);
 
   const current = isAuto(selection)
     ? undefined
@@ -518,7 +452,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     up: boolean;
     max: number;
     pos: React.CSSProperties;
-  }>({ up: dropUp, max: 560, pos: {} });
+  }>({ up: dropUp, max: 380, pos: {} });
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
@@ -537,7 +471,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
       const up = dropUp
         ? above >= 360 || above >= below
         : below < 360 && above > below;
-      const width = Math.min(420, window.innerWidth - 24);
+      const width = Math.min(PICKER_WIDTH, window.innerWidth - 24);
       const left =
         window.innerWidth <= 768
           ? 0
@@ -553,7 +487,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
       setLayout({
         up,
-        max: Math.max(220, Math.min(480, up ? above : below)),
+        max: Math.max(220, Math.min(380, up ? above : below)),
         pos,
       });
     };
@@ -606,6 +540,10 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
           ? `Set up ${plan === "hermes" ? "Hermes" : plan === "grok" ? "Grok" : plan === "opencode" ? "OpenCode" : plan === "claude" ? "Claude Code" : plan === "cursor" ? "Cursor" : plan === "codex" ? "Codex" : "fx"}`
           : "Set up Pi";
 
+  // The pill says it all: model, then reasoning level, then a bolt while a faster tier is on.
+  const effortLabel = current && !effort.note ? (effort.shown === "medium" ? effort.labelOf(effort.shown) : effort.labelOf(effort.shown, true)) : undefined;
+  const pillLabel = [label, effortLabel && `${effortLabel} reasoning`, speed.current?.name].filter(Boolean).join(", ");
+
   const choose = (id: string) => {
     setSelection({ plan, id });
     setOpen(false);
@@ -619,6 +557,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         className={cx("pill pill-plain pill-model", open && "pill-open")}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={`Model: ${pillLabel}`}
         onClick={() =>
           all.length || checking || plan === "fx" || plan === "codex" || plan === "cursor" || plan === "claude" || plan === "opencode" || (plan === "grok" || plan === "hermes") ? setOpen((o) => !o) : openSettings("keys")
         }
@@ -629,6 +568,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
           <KeyRound size={14} />
         ) : null}
         <span className="pill-text">{label}</span>
+        {effortLabel && <span className="pill-effort">{effortLabel}</span>}
+        {speed.current && <Zap size={14} className="pill-fast" aria-hidden />}
       </button>
       <Popover
         open={open}
@@ -638,139 +579,138 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         style={{ ...layout.pos, height: layout.max }}
         label="Choose a model"
       >
-        <div
-          className="mp-rail"
-          role="tablist"
-          aria-label="Providers"
-          onKeyDown={(e) => arrowNav(e)}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!q && tab === RAIL_FAV}
-            className="mp-rail-btn"
-            data-tooltip="Favorites"
-            data-tooltip-side="right"
-            onClick={() => (setTab(RAIL_FAV), setQuery(""))}
+        <div className="mp-body">
+          <div
+            className="mp-rail"
+            role="tablist"
+            aria-label="Providers"
+            onKeyDown={(e) => arrowNav(e)}
           >
-            <Star size={16} fill="currentColor" />
-          </button>
-          {/* Providers scroll on their own so Favorites stays in view. */}
-          <div className="mp-rail-scroll">
-            {providers.map((p) => (
-              <button
-                key={p}
-                type="button"
-                role="tab"
-                aria-selected={!q && tab === p}
-                className="mp-rail-btn"
-                data-tooltip={providerName(p)}
-                data-tooltip-side="right"
-                onClick={() => (setTab(p), setQuery(""))}
-              >
-                <ProviderIcon provider={p} />
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="mp-main">
-          <label className="mp-search">
-            <Search size={15} />
-            <input
-              ref={search}
-              value={query}
-              placeholder="Search models…"
-              aria-label="Search models"
-              spellCheck={false}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  list.current?.querySelector<HTMLElement>(".mp-pick")?.focus();
-                } else if (e.key === "Enter" && rows[0]) {
-                  e.preventDefault();
-                  choose(rows[0].id);
-                }
-              }}
-            />
-            {checking && <Spinner size={12} />}
-          </label>
-          {scoped && (
             <button
               type="button"
-              role="switch"
-              className="mp-scope"
-              aria-checked={showAll}
-              aria-label={`Show all ${all.length} models`}
-              onClick={() => setShowAll(!showAll)}
+              role="tab"
+              aria-selected={!q && tab === RAIL_FAV}
+              className="mp-rail-btn"
+              data-tooltip="Favorites"
+              data-tooltip-side="right"
+              onClick={() => (setTab(RAIL_FAV), setQuery(""))}
             >
-              <span>Show all {all.length} models</span>
-              <span className="toggle toggle-sm" aria-hidden data-on={showAll}>
-                <span className="toggle-knob" />
-              </span>
+              <Star size={15} fill="currentColor" />
             </button>
-          )}
-          <div ref={list} className="mp-list" onKeyDown={(e) => arrowNav(e)}>
-            {rows.map((m) => {
-              const selected =
-                !isAuto(selection) &&
-                selection?.plan === plan &&
-                selection.id === m.id;
-              const fav = favorites.indexOf(m.id);
-              return (
-                <div key={m.id} className="mp-row" aria-selected={selected}>
-                  <button
-                    type="button"
-                    className="mp-pick"
-                    title={m.id}
-                    onClick={() => choose(m.id)}
-                  >
-                    <span className="mp-name">{m.name}</span>
-                    <span className="mp-sub">
-                      <ProviderIcon provider={providerOf(m)} />
-                      <span className="mp-sub-text">
-                        {providerName(providerOf(m))}
-                        {modelFacts(m) && ` · ${modelFacts(m)}`}
-                      </span>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    className={cx("mp-star", fav >= 0 && "mp-star-on")}
-                    aria-label={
-                      fav >= 0 ? `Unstar ${m.name}` : `Star ${m.name}`
-                    }
-                    aria-pressed={fav >= 0}
-                    onClick={() => toggleFavorite(m.id)}
-                  >
-                    <Star size={15} fill={fav >= 0 ? "currentColor" : "none"} />
-                  </button>
-                </div>
-              );
-            })}
-            {!rows.length &&
-              (q ? (
-                <div className="model-empty">
-                  <p>No models match “{q}”.</p>
-                </div>
-              ) : tab === RAIL_FAV && shown.length ? (
-                <div className="model-empty">
-                  <Star size={18} />
-                  <p>Star the models you use most.</p>
-                </div>
-              ) : !scoped ? (
-                <PiStatus detection={detection} />
-              ) : (
-                <div className="model-empty">
-                  <p>
-                    {showAll
-                      ? "No models here."
-                      : "No models from this device's Pi scope here."}
-                  </p>
-                </div>
+            {/* Providers scroll on their own so Favorites stays in view. */}
+            <div className="mp-rail-scroll">
+              {providers.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  role="tab"
+                  aria-selected={!q && tab === p}
+                  className="mp-rail-btn"
+                  data-tooltip={providerName(p)}
+                  data-tooltip-side="right"
+                  onClick={() => (setTab(p), setQuery(""))}
+                >
+                  <ProviderIcon provider={p} />
+                </button>
               ))}
+            </div>
           </div>
-          <RuntimeRow />
+          <div className="mp-main">
+            <label className="mp-search">
+              <Search size={14} />
+              <input
+                ref={search}
+                value={query}
+                placeholder="Search models…"
+                aria-label="Search models"
+                spellCheck={false}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    list.current?.querySelector<HTMLElement>(".mp-pick")?.focus();
+                  } else if (e.key === "Enter" && rows[0]) {
+                    e.preventDefault();
+                    choose(rows[0].id);
+                  }
+                }}
+              />
+              {checking && <Spinner size={12} />}
+            </label>
+            {scoped && (
+              <button
+                type="button"
+                role="switch"
+                className="mp-scope"
+                aria-checked={showAll}
+                aria-label={`Show all ${all.length} models`}
+                onClick={() => setShowAll(!showAll)}
+              >
+                <span>Show all {all.length} models</span>
+                <span className="toggle toggle-sm" aria-hidden data-on={showAll}>
+                  <span className="toggle-knob" />
+                </span>
+              </button>
+            )}
+            {/* ↑/↓ go from model to model; a row's star is a Tab away. */}
+            <div ref={list} className="mp-list" onKeyDown={(e) => arrowNav(e, ".mp-pick")}>
+              {rows.map((m) => {
+                const selected =
+                  !isAuto(selection) &&
+                  selection?.plan === plan &&
+                  selection.id === m.id;
+                const fav = favorites.indexOf(m.id);
+                return (
+                  <div key={m.id} className="mp-row" aria-selected={selected}>
+                    <button
+                      type="button"
+                      className="mp-pick"
+                      title={`${providerName(providerOf(m))} · ${m.id}`}
+                      onClick={() => choose(m.id)}
+                    >
+                      <ProviderIcon provider={providerOf(m)} />
+                      <span className="mp-name">{m.name}</span>
+                      {modelFacts(m) && <span className="mp-facts">{modelFacts(m)}</span>}
+                    </button>
+                    <button
+                      type="button"
+                      className={cx("mp-star", fav >= 0 && "mp-star-on")}
+                      aria-label={
+                        fav >= 0 ? `Unstar ${m.name}` : `Star ${m.name}`
+                      }
+                      aria-pressed={fav >= 0}
+                      onClick={() => toggleFavorite(m.id)}
+                    >
+                      <Star size={13} fill={fav >= 0 ? "currentColor" : "none"} />
+                    </button>
+                  </div>
+                );
+              })}
+              {!rows.length &&
+                (q ? (
+                  <div className="model-empty">
+                    <p>No models match “{q}”.</p>
+                  </div>
+                ) : tab === RAIL_FAV && shown.length ? (
+                  <div className="model-empty">
+                    <Star size={18} />
+                    <p>Star the models you use most.</p>
+                  </div>
+                ) : !scoped ? (
+                  <PiStatus detection={detection} />
+                ) : (
+                  <div className="model-empty">
+                    <p>
+                      {showAll
+                        ? "No models here."
+                        : "No models from this device's Pi scope here."}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          </div>
+          <ReasoningSection deviceId={deviceId} />
+          <PickerFoot deviceId={deviceId} />
         </div>
       </Popover>
     </div>
