@@ -11,7 +11,7 @@ async function run(script: string) {
   try {
     const child = Bun.spawn([process.execPath, "-e", script], {
       cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi") },
+      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") },
       stdout: "pipe",
       stderr: "pipe",
     });
