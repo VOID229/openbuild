@@ -64,43 +64,47 @@ export function fakeRelay(opts: { target: number; cert: string; key: string; idl
     port: 0,
     tls: { cert: opts.cert, key: opts.key },
     socket: {
-      open(client) {
-        opened++;
-        const pair: Pair = { client, early: [], out: new Map() };
-        client.data = pair;
-        pairs.add(pair);
-        touch(pair);
-        Bun.connect<Pair>({
-          hostname: "127.0.0.1",
-          port: opts.target,
-          data: pair,
-          socket: {
-            open(upstream) {
-              pair.upstream = upstream;
-              for (const bytes of pair.early) write(pair, upstream, bytes);
-              pair.early = [];
-            },
-            data(_upstream, bytes) {
-              touch(pair);
-              write(pair, pair.client, new Uint8Array(bytes));
-            },
-            drain: (upstream) => flush(pair, upstream),
-            close: () => reset(pair),
-            error: () => reset(pair),
-          },
-        }).catch(() => reset(pair));
-      },
+      open: (client) => void connect(client),
       data(client, bytes) {
-        const pair = client.data;
+        const pair = connect(client);
         touch(pair);
         if (pair.upstream) write(pair, pair.upstream, new Uint8Array(bytes));
         else pair.early.push(new Uint8Array(bytes));
       },
-      drain: (client) => flush(client.data, client),
+      drain: (client) => client.data && flush(client.data, client),
       close: (client) => client.data && reset(client.data),
       error: (client) => client.data && reset(client.data),
     },
   });
+  // On the first of open and data: Bun 1.3.8 can hand a TLS socket its first bytes before it opens it.
+  function connect(client: Socket<Pair>): Pair {
+    if (client.data) return client.data;
+    opened++;
+    const pair: Pair = { client, early: [], out: new Map() };
+    client.data = pair;
+    pairs.add(pair);
+    touch(pair);
+    Bun.connect<Pair>({
+      hostname: "127.0.0.1",
+      port: opts.target,
+      data: pair,
+      socket: {
+        open(upstream) {
+          pair.upstream = upstream;
+          for (const bytes of pair.early) write(pair, upstream, bytes);
+          pair.early = [];
+        },
+        data(_upstream, bytes) {
+          touch(pair);
+          write(pair, pair.client, new Uint8Array(bytes));
+        },
+        drain: (upstream) => flush(pair, upstream),
+        close: () => reset(pair),
+        error: () => reset(pair),
+      },
+    }).catch(() => reset(pair));
+    return pair;
+  }
   return {
     port: server.port,
     /** Connections the relay has carried, all told. */
