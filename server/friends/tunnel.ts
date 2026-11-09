@@ -16,9 +16,9 @@
 // peer. So a tunneled request looks local, and anyone may find the URL: neither is proof of anything.
 // The friend protocol proves who's on the other end, as it does everywhere.
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import * as store from "./store";
 import { TransportError } from "./errors";
 import type { Transport } from "./transport";
@@ -60,7 +60,45 @@ export function customRelay(): string | undefined {
 /** The relay this server's tunnel uses. */
 export const relay = () => customRelay() ?? HOSTED;
 
-export const bin = () => process.env.OPENBUILD_FRIEND_TUNNEL_BIN?.trim() || Bun.which("opentunnel") || undefined;
+/** Whether a file is OpenTunnel's npm launcher (`#!/usr/bin/env node`) rather than the client itself. */
+function isLauncher(file: string): boolean {
+  if (/\.c?js$/.test(file)) return true;
+  const head = Buffer.alloc(128);
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const line = head.subarray(0, readSync(fd, head, 0, head.length, 0)).toString("utf8").split("\n")[0]!;
+    return line.startsWith("#!") && /\bnode\b/.test(line);
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/**
+ * The client to run: OPENBUILD_FRIEND_TUNNEL_BIN, or `opentunnel` on PATH. `npm install -g opentunnel`
+ * puts a Node launcher there, which runs the native client from its platform's package
+ * (@opentunnel/cli-<platform>-<arch>). The client runs with no PATH, where `env node` finds nothing,
+ * so OpenBuild finds that native client the way the launcher does, and runs it itself.
+ */
+export function bin(): string | undefined {
+  const found = process.env.OPENBUILD_FRIEND_TUNNEL_BIN?.trim() || Bun.which("opentunnel");
+  if (!found) return undefined;
+  let file: string;
+  try {
+    file = realpathSync(found);
+  } catch {
+    return found;
+  }
+  if (!isLauncher(file)) return file;
+  const native = join("node_modules", "@opentunnel", `cli-${process.platform}-${process.arch}`, "bin", "opentunnel");
+  for (let dir = dirname(file); ; dir = dirname(dir)) {
+    if (existsSync(join(dir, native))) return join(dir, native);
+    if (dirname(dir) === dir) break;
+  }
+  throw new TransportError(`${found} is OpenTunnel's npm launcher, but its client for this computer (@opentunnel/cli-${process.platform}-${process.arch}) isn't installed with it. Reinstall with \`npm install -g opentunnel\`, or set OPENBUILD_FRIEND_TUNNEL_BIN to the \`opentunnel\` client itself.`);
+}
 export const tunnelDir = () => join(store.friendsDir(), "tunnel");
 const home = () => join(tunnelDir(), "home");
 const configHome = () => join(tunnelDir(), "config");

@@ -1,9 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keyId } from "../server/friends/protocol";
-import { certificate, fakeClientBin, fakeRelay, freePort, identities, peer, until, type Peer } from "./fakeTunnel";
+import { certificate, fakeClientBin, fakeNpmInstall, fakeRelay, freePort, identities, peer, until, type Peer } from "./fakeTunnel";
 
 // Friends through a tunnel, with a fake relay in OpenTunnel's place (friendsTunnelLive.test.ts runs the
 // same through the real client and relay when asked to). The host starts the tunnel client the way an
@@ -38,6 +38,7 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   const friendPort = freePort();
   const appPort = freePort();
   const tunnelDir = join(hostDir, "friends", "tunnel");
+  const npm = fakeNpmInstall(join(directory, "npm"));
   const runs = () => readFileSync(join(tunnelDir, "home", "runs.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
 
   const host = peer({
@@ -49,8 +50,9 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
     PORT: String(appPort),
     OPENBUILD_FRIEND_HOST: "127.0.0.1",
     OPENBUILD_FRIEND_PORT: String(friendPort),
-    // No OPENBUILD_FRIEND_TUNNEL_API: the hosted relay.
-    OPENBUILD_FRIEND_TUNNEL_BIN: fakeClientBin(directory),
+    // No OPENBUILD_FRIEND_TUNNEL_API: the hosted relay. The client as `npm install -g opentunnel`
+    // leaves it: a Node launcher, which can't run with the client's empty PATH.
+    OPENBUILD_FRIEND_TUNNEL_BIN: npm.launcher,
     // The owner's own tunnel settings, which friends' tunnel mustn't pick up.
     OPENTUNNEL_API: "https://tunnel.someone-else.test",
     OPENTUNNEL_PROFILE: "default",
@@ -60,6 +62,7 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
   peers.push(host);
   const placed = (await host.next((e) => e.placed || e.placeError)).placed;
   expect(placed).toBeDefined();
+  expect(runs().every((run) => run.native === npm.native)).toBe(true);
   // The invite would give the route under the tunnel's hostname, served by the listener on loopback.
   expect(placed.listen).toBe("127.0.0.1");
   expect(placed.urls).toHaveLength(1);
@@ -206,4 +209,31 @@ test("the tunnel uses the hosted relay unless OPENBUILD_FRIEND_TUNNEL_API names 
   expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "http://tunnel.example.com" }).error).toContain("has to be https://");
   expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "not a url" }).error).toContain("isn't a URL");
   expect(run({ OPENBUILD_FRIEND_TUNNEL_CA: "/etc/ca.pem" }).args).toEqual(["--profile", "openbuild-friends", "--ca-cert", "/etc/ca.pem"]);
+});
+
+// The npm launcher is resolved to the native client beside it, wherever npm or bun put it, and a
+// launcher whose native client is missing is said so, rather than run to fail with no PATH.
+test("an `env node` launcher from npm is resolved to its native client", () => {
+  const resolveBin = (bin: string) => {
+    const child = Bun.spawnSync([process.execPath, "-e", `
+      const t = await import('./server/friends/tunnel.ts');
+      let out;
+      try { out = { bin: t.bin() }; } catch (err) { out = { error: err.message }; }
+      console.log(JSON.stringify(out));
+    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(directory, "bin-check"), OPENBUILD_FRIEND_TUNNEL_BIN: bin }, stdout: "pipe", stderr: "pipe" });
+    return JSON.parse(child.stdout.toString());
+  };
+  const nested = fakeNpmInstall(join(directory, "npm-nested"));
+  expect(resolveBin(nested.launcher)).toEqual({ bin: nested.native });
+  const hoisted = fakeNpmInstall(join(directory, "npm-hoisted"), { hoisted: true });
+  expect(resolveBin(hoisted.launcher)).toEqual({ bin: hoisted.native });
+  // The native client named directly, or any other client that isn't a Node script, runs as it is.
+  expect(resolveBin(nested.native)).toEqual({ bin: nested.native });
+  const plain = fakeClientBin(join(directory));
+  expect(resolveBin(plain)).toEqual({ bin: realpathSync(plain) });
+  const broken = fakeNpmInstall(join(directory, "npm-broken"), { native: false });
+  expect(resolveBin(broken.launcher).error).toContain(`@opentunnel/cli-${process.platform}-${process.arch}`);
+  // Run as it is with no PATH, as the client is, the launcher can't even start.
+  const run = Bun.spawnSync([nested.launcher, "--version"], { env: { PATH: join(directory, "empty-path") }, stdout: "pipe", stderr: "pipe" });
+  expect(run.exitCode).toBe(127);
 });

@@ -5,8 +5,8 @@
 // guest makes a TLS connection to it, and the host's friend listener gets the plain bytes from a
 // loopback peer, copied unchanged. Like the real relay, it resets a connection that's been idle (no
 // bytes either way) too long, and it can be cut, as if the relay restarted.
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { chmodSync, mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import type { Socket } from "bun";
 import { newKeyPair } from "../server/friends/protocol";
 
@@ -136,6 +136,33 @@ export function fakeClientBin(dir: string): string {
   writeFileSync(file, `#!/bin/sh\nexec "${process.execPath}" "${resolve(import.meta.dir, "fakeOpentunnel.ts")}" "$@"\n`);
   chmodSync(file, 0o755);
   return file;
+}
+
+/**
+ * `npm install -g opentunnel`, as it lays things out: on PATH, a symlink to the package's Node launcher
+ * (`#!/usr/bin/env node`, which only finds node on a PATH), and the native client in the platform
+ * package beside it: nested in the package's own node_modules, or `hoisted` next to it (bun's layout).
+ * The native client here is the stand-in, fakeClientBin's.
+ */
+export function fakeNpmInstall(dir: string, opts: { hoisted?: boolean; native?: boolean } = {}): { launcher: string; native: string } {
+  const modules = join(dir, "lib", "node_modules");
+  const pkg = join(modules, "opentunnel");
+  mkdirSync(join(pkg, "bin"), { recursive: true });
+  // As 0.6.2 publishes it: `bin/opentunnel`, a Node script with no extension.
+  const script = join(pkg, "bin", "opentunnel");
+  writeFileSync(script, `#!/usr/bin/env node\n\nconst childProcess = require("child_process")\n`);
+  chmodSync(script, 0o755);
+  const platformDir = join(opts.hoisted ? modules : join(pkg, "node_modules"), "@opentunnel", `cli-${process.platform}-${process.arch}`, "bin");
+  mkdirSync(platformDir, { recursive: true });
+  const native = join(platformDir, "opentunnel");
+  if (opts.native !== false) {
+    writeFileSync(native, `#!/bin/sh\nFAKE_OPENTUNNEL_SELF="$0" exec "${process.execPath}" "${resolve(import.meta.dir, "fakeOpentunnel.ts")}" "$@"\n`);
+    chmodSync(native, 0o755);
+  }
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  const launcher = join(dir, "bin", "opentunnel");
+  symlinkSync(script, launcher);
+  return { launcher, native: realpathSync(dirname(native)) + "/opentunnel" };
 }
 
 export type Peer = ReturnType<typeof peer>;

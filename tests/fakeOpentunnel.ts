@@ -15,7 +15,9 @@ try {
   routes = readFileSync(join(process.env.XDG_CONFIG_HOME!, "opentunnel", `${profile}.toml`), "utf8");
 } catch {}
 const socket = join(process.env.XDG_RUNTIME_DIR!, "opentunnel", `${profile}.sock`);
-appendFileSync(join(process.env.HOME!, "runs.jsonl"), JSON.stringify({ command, pid: process.pid, args, env: process.env, routes, serviceRunning: existsSync(socket) }) + "\n");
+// The wrapper OpenBuild ran: its path is how a test tells the native client from the npm launcher.
+const native = process.env.FAKE_OPENTUNNEL_SELF ?? "";
+appendFileSync(join(process.env.HOME!, "runs.jsonl"), JSON.stringify({ command, pid: process.pid, args, env: process.env, routes, serviceRunning: existsSync(socket), native }) + "\n");
 
 if (command === "serve") {
   mkdirSync(join(process.env.XDG_RUNTIME_DIR!, "opentunnel"), { recursive: true, mode: 0o700 });
