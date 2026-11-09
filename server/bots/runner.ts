@@ -548,14 +548,22 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (delta) {
     mind.acted = true;
     commit(mind);
+    // Kept back while it streams: text before a tool call is the bot thinking aloud between steps,
+    // not a reply, and shown as one it would flash up in the chat and vanish when the tool starts.
     mind.draft += delta;
+  }
+  // A message that ends without calling a tool is the reply: shown at once, while the turn settles.
+  if (ended?.role === "assistant" && (ended.stopReason === "stop" || ended.stopReason === "length") && !callsTool(ended)) {
     const conversationId = getFocus(botId);
-    if (conversationId && !mind.sent && !"[silent]".startsWith(mind.draft.trim().toLowerCase())) {
+    const text = replyBubbles(mind.draft.trim()).join("\n\n");
+    if (conversationId && !mind.sent && text) {
       setTyping(botId, mind, true);
-      svc.setDraft({ conversationId, botId, text: mind.draft.slice(-4000) }, { conversationId, botId });
+      svc.setDraft({ conversationId, botId, text: text.slice(-4000) }, { conversationId, botId });
     }
   }
 }
+
+const callsTool = (message: PiRecord) => Array.isArray(message.content) && message.content.some((block: PiRecord) => block?.type === "toolCall");
 
 /** What a failed model call says. A lapsed sign-in leads with the fix, which is all the chat shows of it. */
 export function modelError(message: unknown): string {
