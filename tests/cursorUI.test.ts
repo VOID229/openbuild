@@ -65,7 +65,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
   test("Cursor selector and sidebar use Cursor branding without a redundant footer label", () => {
     reset();
     const html = markup(createElement(WorkspaceTop));
-    expect(html).toContain('aria-label="Thread runtime: Cursor"');
+    expect(html).toContain('aria-label="Thread harness: Cursor"');
     expect(html).toContain("Native Cursor");
     expect(providerSvg("cursor")).toContain("M11.93 2");
     // Runtime marks use Cursor's current filled symbol; the provider catalog keeps its own asset.
@@ -79,7 +79,7 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
     expect(locked).not.toContain('aria-haspopup="listbox"');
     // The thread is under "Closed", whose rows exist only while it's open.
     useStore.setState((s) => ({ view: { ...s.view, runtime: "cursor" }, sections: { ...s.sections, closed: true } }));
-    expect(markup(createElement(Sidebar))).toContain('title="Native Cursor runtime"');
+    expect(markup(createElement(Sidebar))).toContain('title="Native Cursor harness"');
   });
 
   test("Permission picker lists the runtime's own modes, remembers the last choice and is hidden for other runtimes", () => {

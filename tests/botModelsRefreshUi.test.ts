@@ -19,7 +19,7 @@ const { useWorkspace } = await import("../src/lib/bots/workspace");
 useWorkspace.setState({ localId: "srv", localName: "Studio" });
 enterWorkspace("srv");
 const { BotModelSelect } = await import("../src/components/bots/BotAdvanced");
-const { BotExtensions } = await import("../src/components/bots/BotExtensions");
+const { BotExtensions, useExtensionsSummary } = await import("../src/components/bots/BotExtensions");
 type Bot = import("../src/lib/bots/types").Bot;
 
 const mock = { id: "mock/m", name: "Mock", provider: "mock" };
@@ -70,7 +70,9 @@ const alert = () => host.querySelector('[role="alert"]')?.textContent ?? "";
 async function mount() {
   const View = () => {
     const bot = useBots((s) => s.bots[0]!);
-    return createElement("div", null, createElement(BotExtensions), createElement(BotModelSelect, { label: "Scout model", value: bot.model, onChange() {} }));
+    // Settings → Bots' row for the page says what's set, models left unavailable first.
+    const Summary = () => createElement("span", { className: "extensions-summary" }, useExtensionsSummary());
+    return createElement("div", null, createElement(Summary), createElement(BotExtensions), createElement(BotModelSelect, { label: "Scout model", value: bot.model, onChange() {} }));
   };
   await act(async () => root.render(createElement(View)));
   await frames();
@@ -87,7 +89,7 @@ test("switching an extension off refreshes an open picker and names the bot left
   expect(asked.at(-1)).toBe("/api/bots/models?fresh=1");
   expect(picker().textContent).toContain("bridge/x (unavailable)");
   expect(alert()).toContain("Bots can't use bridge/x (Scout) with the extensions loaded now");
-  expect(host.querySelector(".pi-subhead-note")!.textContent).toBe("1 model unavailable");
+  expect(host.querySelector(".extensions-summary")!.textContent).toBe("1 model unavailable");
 
   // Back on, it's offered again and the warning goes.
   await click(document.querySelector('[role="switch"][aria-label="Load Bridge"]')!);

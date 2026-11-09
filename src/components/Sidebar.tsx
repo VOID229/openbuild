@@ -427,7 +427,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             </span>
           )}
           {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} />}
-          <span className="history-runtime" title={`${runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}${model ? ` · ${model.name}` : ""}`}>
+          <span className="history-runtime" title={`${runtime === "hermes" ? "Hermes harness" : runtime === "grok" ? "Native Grok harness" : runtime === "opencode" ? "Native OpenCode harness" : runtime === "claude" ? "Native Claude Code harness" : runtime === "cursor" ? "Native Cursor harness" : runtime === "durable" ? "Durable harness" : runtime === "fx" ? "fx harness" : runtime === "codex" ? "Native Codex harness" : "Pi harness"}${model ? ` · ${model.name}` : ""}`}>
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
@@ -1156,7 +1156,7 @@ type Sub = "sort" | "model" | "runtime";
 
 /** Runtime choices in the filter menu, where Pi keeps its own name. */
 const RUNTIME_FILTERS = [
-  ["all", "All runtimes"],
+  ["all", "All harnesses"],
   ["pi", "Pi"],
   ["durable", "Durable"],
   ["fx", "fx"],
@@ -1308,10 +1308,10 @@ function FilterMenu() {
           )}
           {row(
             "runtime",
-            "Runtime",
+            "Harness",
             view.runtime === "all" ? "All" : view.runtime === "hermes" ? "Hermes" : view.runtime === "grok" ? "Grok" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
             <>
-              <div className="menu-label">Runtime</div>
+              <div className="menu-label">Harness</div>
               {RUNTIME_FILTERS.map(([value, label]) => (
                 <button key={value} type="button" role="menuitemradio" aria-checked={view.runtime === value} className="menu-item" onClick={() => setView({ runtime: value })}>
                   {value === "hermes" ? <HermesMark size={15} /> : value === "grok" ? <GrokMark size={15} /> : value === "opencode" ? <OpencodeMark size={15} /> : value === "claude" ? <ClaudeMark size={15} /> : value === "cursor" ? <CursorMark size={15} /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
@@ -1690,15 +1690,13 @@ export function Sidebar() {
               type="button"
               className={`usage-toggle${usageOpen ? " active" : ""}`}
               aria-label="Usage"
-              aria-pressed={usageOpen}
+              aria-current={usageOpen ? "page" : undefined}
               data-tooltip="Usage and limits"
               data-tooltip-side="top"
               onPointerEnter={() => prefetchUsage()}
               onFocus={() => prefetchUsage()}
-              onClick={() => {
-                setUsageOpen(!usageOpen);
-                if (mobile && !usageOpen) setSidebarOpen(false);
-              }}
+              // A page with its own way back, not a switch: it opens Usage (on a phone, over the list).
+              onClick={() => setUsageOpen(true)}
             >
               <ChartNoAxesColumn size={16} />
             </button>

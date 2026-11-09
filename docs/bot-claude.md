@@ -19,8 +19,8 @@ which subscription it runs on:
 | The default | `claude-code` ("Claude") | `CLAUDE_CONFIG_DIR`, else `~/.claude` |
 | Another one | `claude-code-2` ("Claude (2)"), `claude-code-work`, … | its own directory |
 
-Other logins are the Claude Code accounts OpenBuild already knows: ones added with **Add runtime**
-in Settings → Runtimes, a `claude2` wrapper or alias that sets `CLAUDE_CONFIG_DIR`, or a signed-in
+Other logins are the Claude Code accounts OpenBuild already knows: ones added with **Add harness**
+in Settings → Harnesses, a `claude2` wrapper or alias that sets `CLAUDE_CONFIG_DIR`, or a signed-in
 sibling such as `~/.claude-2`. The provider ids match the pi-claude-code package's, so a bot set to
 `claude-code-2/…` keeps its model.
 
@@ -57,6 +57,6 @@ Pi threads (not bots) are unchanged. They load whatever the user's Pi settings l
 
 - Claude Code must be installed on the server that runs the bots, and paired devices sign in on
   their own machine. Signing in uses Claude's copy-the-code page, so it also works from a phone.
-- Adding a new Claude login (another config directory) is done in Settings → Runtimes, not here.
+- Adding a new Claude login (another config directory) is done in Settings → Harnesses, not here.
 - The bridge is experimental upstream. If Anthropic changes how Claude Code's non-interactive use
   is billed, it may cost more or stop working.

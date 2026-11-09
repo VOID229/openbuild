@@ -1,46 +1,59 @@
-import { ArrowLeft, ArrowUp, Bell, Boxes, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, X, type LucideIcon } from "lucide-react";
+import { ArrowUp, Bell, Cable, ChevronRight, MonitorSmartphone, CircleUser, FolderGit2, Key, Keyboard, Palette, Pencil, Plus, Puzzle, Settings2, Shield, SquareTerminal, Trash2, UserRound, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type TextRuntime, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
 import { fastTarget } from "../lib/models";
+import { leaveSettings, openSettingsSection, settingsUp } from "../lib/pages";
 import { UPDATABLE_RUNTIMES, runtimeEnabled, runtimeName } from "../lib/runtimes";
 import { cachedRuntimeStatuses, loadRuntimeStatuses } from "../lib/runtimeStatus";
+import { isShortcutRecording } from "../lib/shortcuts";
 import { loadPlanModels, planDetection, useStore, type SettingsSection } from "../lib/store";
 import type { FontStyle, NamingModel, Theme } from "../lib/types";
-import { arrowNav, cx, usePresence } from "../lib/ui";
+import { arrowNav, cx, useMediaQuery } from "../lib/ui";
 import { AccountSection } from "./Account";
 import { DevicesSection } from "./DeviceSettings";
 import { DictationSettings } from "./DictationSettings";
 import { PiSection, ProjectsSection, ProvidersSection } from "./PiSettings";
+import { useLightbox } from "./Lightbox";
 import { EffortSelect, ModelSelect, OptionSelect } from "./ModelSelect";
 import { Avatar, IconButton, SettingsBackContext, SettingsHeading, Toggle, type SettingsBackTarget } from "./primitives";
 import { ShortcutsSection } from "./ShortcutSettings";
 import { PluginSettingsPage, PluginSlot, usePluginSettingsSections } from "../lib/plugins";
 import { PluginsSection } from "./PluginSettings";
 import { RuntimesSection } from "./RuntimeSettings";
+import { NavRow, PageHeader, SettingRow, SettingsGroup, SubPage } from "./SettingsUI";
 import { RuntimeIcon } from "./Workspace";
 import { BotsGlyph } from "./bots/BotAvatar";
 import { BotsSettingsSection } from "./bots/BotSettings";
 
 /** A section's icon: Lucide's, or one drawn to match them (OpenBots' bot). */
 type NavIcon = LucideIcon | ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
+type NavSection = { id: SettingsSection; label: string; icon: NavIcon };
 
-/** On phones these are a row of named tabs that scrolls sideways: there are too many to fit, even as icons. */
-const SECTIONS: { id: SettingsSection; label: string; icon: NavIcon }[] = [
-  { id: "profile", label: "Profile", icon: UserRound },
-  { id: "general", label: "General", icon: Settings2 },
-  { id: "bots", label: "Bots", icon: BotsGlyph },
-  { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
-  { id: "pi", label: "Pi agent", icon: SquareTerminal },
-  { id: "keys", label: "Providers", icon: Key },
-  { id: "runtimes", label: "Runtimes", icon: Boxes },
-  { id: "projects", label: "Projects", icon: FolderGit2 },
-  { id: "devices", label: "Devices", icon: MonitorSmartphone },
-  { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "notifications", label: "Notifications", icon: Bell },
-  { id: "plugins", label: "Plugins", icon: Puzzle },
-  { id: "security", label: "Security", icon: Shield },
-  { id: "account", label: "Account", icon: CircleUser },
+/** The sections, in groups: you and the app; models and agents; where work happens; access. */
+const GROUPS: NavSection[][] = [
+  [
+    { id: "profile", label: "Profile", icon: UserRound },
+    { id: "general", label: "General", icon: Settings2 },
+    { id: "appearance", label: "Appearance", icon: Palette },
+    { id: "notifications", label: "Notifications", icon: Bell },
+    { id: "shortcuts", label: "Shortcuts", icon: Keyboard },
+  ],
+  [
+    { id: "keys", label: "Providers", icon: Key },
+    { id: "runtimes", label: "Harnesses", icon: Cable },
+    { id: "pi", label: "Pi agent", icon: SquareTerminal },
+    { id: "bots", label: "Bots", icon: BotsGlyph },
+  ],
+  [
+    { id: "projects", label: "Projects", icon: FolderGit2 },
+    { id: "devices", label: "Devices", icon: MonitorSmartphone },
+    { id: "plugins", label: "Plugins", icon: Puzzle },
+  ],
+  [
+    { id: "security", label: "Security", icon: Shield },
+    { id: "account", label: "Account", icon: CircleUser },
+  ],
 ];
 
 const Heading = SettingsHeading;
@@ -77,9 +90,9 @@ function ProfileSection() {
     <>
       <Heading>Profile</Heading>
       <div className="avatar-edit">
-        <Avatar src={profile.avatar} name={profile.name} size={88} />
+        <Avatar src={profile.avatar} name={profile.name} size={72} />
         <button type="button" className="avatar-pencil" aria-label="Change photo" data-tooltip="Change photo" onClick={() => file.current?.click()}>
-          <Pencil size={14} />
+          <Pencil size={13} />
         </button>
         {profile.avatar && (
           <button type="button" className="link-btn" onClick={() => updateProfile({ avatar: undefined })}>
@@ -102,22 +115,17 @@ function ProfileSection() {
         <input id="profile-name" className="input" value={profile.name} autoComplete="name" onChange={(e) => updateProfile({ name: e.target.value })} />
       </Field>
       <Field label="Instructions" htmlFor="profile-bio">
-        <textarea
-          id="profile-bio"
-          className="input textarea"
-          rows={4}
-          value={profile.bio}
-         
-          onChange={(e) => updateProfile({ bio: e.target.value })}
-        />
+        <textarea id="profile-bio" className="input textarea" rows={4} value={profile.bio} onChange={(e) => updateProfile({ bio: e.target.value })} />
         <p className="field-help">Shared with the model as context.</p>
       </Field>
-      <Field label="Location" htmlFor="profile-location">
-        <input id="profile-location" className="input" value={profile.location} onChange={(e) => updateProfile({ location: e.target.value })} />
-      </Field>
-      <Field label="Language" htmlFor="profile-language">
-        <input id="profile-language" className="input" value={profile.language} onChange={(e) => updateProfile({ language: e.target.value })} />
-      </Field>
+      <div className="field-pair">
+        <Field label="Location" htmlFor="profile-location">
+          <input id="profile-location" className="input" value={profile.location} onChange={(e) => updateProfile({ location: e.target.value })} />
+        </Field>
+        <Field label="Language" htmlFor="profile-language">
+          <input id="profile-language" className="input" value={profile.language} onChange={(e) => updateProfile({ language: e.target.value })} />
+        </Field>
+      </div>
     </>
   );
 }
@@ -126,6 +134,7 @@ function ProfileSection() {
 
 function NotificationsSection() {
   const n = useStore((st) => st.settings.notifications);
+  const page = useStore((st) => st.settingsPage);
   const update = useStore((st) => st.updateSettings);
   const chosen = UPDATABLE_RUNTIMES.filter((runtime) => !n.updateRuntimes || n.updateRuntimes.includes(runtime));
   const toggleRuntime = (runtime: ThreadRuntime, on: boolean) =>
@@ -135,46 +144,39 @@ function NotificationsSection() {
         updateRuntimes: UPDATABLE_RUNTIMES.filter((r) => (r === runtime ? on : chosen.includes(r))),
       },
     });
+  if (page === "harnesses" && n.runtimeUpdates)
+    return (
+      <SubPage title="Harness updates" trail={["Notifications"]}>
+        <ul className="pi-list" aria-label="Harnesses to announce updates for">
+          {UPDATABLE_RUNTIMES.map((runtime) => {
+            const on = chosen.includes(runtime);
+            const name = runtimeName(runtime);
+            return (
+              <li key={runtime} className={cx("pi-row", !on && "pi-row-off")}>
+                <span className="rt-icon" aria-hidden>
+                  <RuntimeIcon runtime={runtime} size={16} />
+                </span>
+                <span className="pi-row-text">
+                  <span className="pi-row-name">{name}</span>
+                </span>
+                <Toggle checked={on} label={`Announce ${name} updates`} onChange={(next) => toggleRuntime(runtime, next)} />
+              </li>
+            );
+          })}
+        </ul>
+      </SubPage>
+    );
   return (
     <>
       <Heading>Notifications</Heading>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">New builds</div>
-          <p className="setting-desc">Notify when an OpenBuild update is available.</p>
-        </div>
+      <SettingRow label="New builds" desc="When an OpenBuild update is available.">
         <Toggle checked={n.builds} onChange={(builds) => update({ notifications: { ...n, builds } })} label="New builds" />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Runtime updates</div>
-          <p className="setting-desc">Notify when an installed runtime has a new version.</p>
-        </div>
-        <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Runtime updates" />
-      </div>
+      </SettingRow>
+      <SettingRow label="Harness updates" desc="When an installed harness has a new version.">
+        <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Harness updates" />
+      </SettingRow>
       {n.runtimeUpdates && (
-        <div className="setting-group">
-          <div className="setting-text">
-            <div className="setting-label">Notify for</div>
-          </div>
-          <ul className="pi-list" aria-label="Runtimes to announce updates for">
-            {UPDATABLE_RUNTIMES.map((runtime) => {
-              const on = chosen.includes(runtime);
-              const name = runtimeName(runtime);
-              return (
-                <li key={runtime} className={cx("pi-row", !on && "pi-row-off")}>
-                  <span className="rt-icon" aria-hidden>
-                    <RuntimeIcon runtime={runtime} size={16} />
-                  </span>
-                  <span className="pi-row-text">
-                    <span className="pi-row-name">{name}</span>
-                  </span>
-                  <Toggle checked={on} label={`Announce ${name} updates`} onChange={(next) => toggleRuntime(runtime, next)} />
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        <NavRow label="Harnesses to watch" value={chosen.length === UPDATABLE_RUNTIMES.length ? "All" : chosen.length ? `${chosen.length} of ${UPDATABLE_RUNTIMES.length}` : "None"} to="harnesses" />
       )}
     </>
   );
@@ -184,15 +186,15 @@ function NotificationsSection() {
 
 function GeneralSection() {
   const s = useStore((st) => st.settings);
+  const page = useStore((st) => st.settingsPage);
   const update = useStore((st) => st.updateSettings);
+  const naming = s.naming;
+  if (page === "text-generation") return <TextGeneration />;
+  const names = naming.models.map((m) => planDetection(useStore.getState(), m.plan)?.models.find((x) => x.id === m.id)?.name ?? m.id);
   return (
     <>
       <Heading>General</Heading>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Default workspace</div>
-          <p className="setting-desc">Where new threads start.</p>
-        </div>
+      <SettingRow label="Default workspace" desc="Where new threads start.">
         <OptionSelect
           label="Default workspace for new threads"
           value={s.workspace.defaultMode ?? "worktree"}
@@ -203,48 +205,43 @@ function GeneralSection() {
           ]}
           onChange={(defaultMode) => update({ workspace: { ...s.workspace, defaultMode } })}
         />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Close threads when their PR merges</div>
-          <p className="setting-desc">Pinned, snoozed or active threads stay open. Worktrees are removed only when nothing would be lost.</p>
-        </div>
+      </SettingRow>
+      <SettingRow label="Close threads when their PR merges" hint="Pinned, snoozed and active threads stay open. A worktree is removed only when nothing would be lost.">
         <Toggle checked={s.workspace.closeMerged ?? true} onChange={(closeMerged) => update({ workspace: { ...s.workspace, closeMerged } })} label="Close threads when their PR merges" />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Auto-delete worktrees</div>
-          <p className="setting-desc">Delete a thread’s worktree when it closes. Uncommitted changes are kept.</p>
-        </div>
+      </SettingRow>
+      <SettingRow label="Delete worktrees of closed threads" hint="Uncommitted changes are kept.">
         <Toggle checked={s.autoDeleteWorktrees ?? false} onChange={(autoDeleteWorktrees) => update({ autoDeleteWorktrees })} label="Auto-delete worktrees" />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Cross-stashing</div>
-          <p className="setting-desc">Share one stash between OpenBuild and OpenBots.</p>
-        </div>
+      </SettingRow>
+      <SettingRow label="Share the stash with OpenBots">
         <Toggle checked={s.crossStash ?? false} onChange={(crossStash) => update({ crossStash })} label="Cross-stashing" />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Auto scroll</div>
-          <p className="setting-desc">Follow new output as it streams in.</p>
-        </div>
+      </SettingRow>
+      <SettingRow label="Follow new output">
         <Toggle checked={s.autoScroll} onChange={(v) => update({ autoScroll: v })} label="Auto scroll" />
-      </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Confirm before deleting threads</div>
-        </div>
+      </SettingRow>
+      <SettingRow label="Confirm before deleting threads">
         <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm before deleting threads" />
-      </div>
-      <DictationSettings />
-      <TextGeneration />
+      </SettingRow>
+
+      <SettingsGroup title="Text generation" className="sgroup-rows">
+        <SettingRow label="Name threads automatically" desc="After their first prompt.">
+          <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Name threads automatically" />
+        </SettingRow>
+        <NavRow
+          label="Models"
+          desc="For thread names and commit messages."
+          value={names.length ? (names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0]) : "Thread’s model"}
+          to="text-generation"
+        />
+      </SettingsGroup>
+
+      <SettingsGroup title="Dictation" className="sgroup-rows">
+        <DictationSettings />
+      </SettingsGroup>
     </>
   );
 }
 
-/** Settings → General: the models that write thread names and commit messages (stored as `naming`). */
+/** Settings → General → Text generation models: the models that write thread names and commit messages (stored as `naming`), tried in order. */
 function TextGeneration() {
   const naming = useStore((s) => s.settings.naming);
   const detection = useStore((s) => s.detection);
@@ -291,13 +288,8 @@ function TextGeneration() {
   };
 
   return (
-    <>
-      <div className="setting-row setting-row-top setting-row-divided">
-        <div className="setting-text">
-          <div className="setting-label">Text generation models</div>
-          <p className="setting-desc">Write thread names and commit messages. Tried in order.</p>
-        </div>
-      </div>
+    <SubPage title="Text generation models" trail={["General"]}>
+      <p className="subpage-desc">Write thread names and commit messages, tried in order.</p>
       <div className="naming-list">
         {!naming.models.length && <p className="naming-empty">Uses the thread’s own model.</p>}
         {naming.models.map((entry, i) => {
@@ -321,7 +313,7 @@ function TextGeneration() {
                 onChange={(effort) => setModels(naming.models.map((m, j) => (j === i ? { ...m, effort } : m)))}
               />
               <OptionSelect
-                label={`Runtime for text generation model ${i + 1}`}
+                label={`Harness for text generation model ${i + 1}`}
                 value={entry.plan as TextRuntime}
                 options={runtimeOptions(entry.plan as TextRuntime)}
                 onChange={(plan) => void setRuntime(i, plan)}
@@ -349,14 +341,7 @@ function TextGeneration() {
         </button>
         {!usable.length && <p className="naming-empty">Sign in to a provider to choose models.</p>}
       </div>
-      <div className="setting-row">
-        <div className="setting-text">
-          <div className="setting-label">Name threads automatically</div>
-          <p className="setting-desc">Title each thread after its first prompt.</p>
-        </div>
-        <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Name threads automatically" />
-      </div>
-    </>
+    </SubPage>
   );
 }
 
@@ -504,24 +489,18 @@ function SecuritySection() {
               <button type="button" className="link-btn" onClick={() => open("remove")}>
                 Remove
               </button>
-              <button type="button" className="btn" onClick={() => open("current")}>
+              <button type="button" className="btn btn-sm" onClick={() => open("current")}>
                 Change password
               </button>
             </div>
           ) : (
-            <button type="button" className="btn" onClick={() => open("new")}>
+            <button type="button" className="btn btn-sm" onClick={() => open("new")}>
               Set password
             </button>
           )
         )}
       </div>
-      {step === "closed" ? (
-        <p className="field-help security-cli">
-          {configured && "Changing it signs out every other browser. "}
-          On the host: <code>openbuild set pass &lt;password&gt;</code>
-          {configured && <> · <code>openbuild unset pass</code></>}
-        </p>
-      ) : (
+      {step !== "closed" && (
         <div className="field">
           <form className="account-form" onSubmit={submit}>
             {step === "current" || step === "remove" ? (
@@ -546,7 +525,7 @@ function SecuritySection() {
               </p>
             )}
             <div className="account-actions">
-              <button type="submit" className="btn" disabled={busy || (step === "current" || step === "remove" ? !current : !next || !confirm)}>
+              <button type="submit" className="btn btn-sm" disabled={busy || (step === "current" || step === "remove" ? !current : !next || !confirm)}>
                 {step === "current" ? "Continue" : step === "remove" ? "Remove password" : "Confirm"}
               </button>
               <button type="button" className="link-btn" onClick={() => reset()}>
@@ -560,125 +539,140 @@ function SecuritySection() {
   );
 }
 
-// ------------------------------------------------------------------ Modal
+// ------------------------------------------------------------------ Page
 
-export function SettingsModal() {
-  const open = useStore((s) => s.settingsOpen);
+const PHONE = "(max-width: 768px)";
+
+/**
+ * Settings, a page in the main pane with its own URL (/settings/<section>[/<page>]): the sections
+ * beside it on a wide screen, or as its first screen on a phone. Back in its header, Esc and the
+ * browser's back all go back the same way: up from a page inside a section, and out of Settings to
+ * wherever it was opened from (a thread, OpenBots, Usage).
+ */
+export function SettingsPage() {
   const requestedSection = useStore((s) => s.settingsSection);
+  const page = useStore((s) => s.settingsPage);
+  const index = useStore((s) => s.settingsIndex);
+  const phone = useMediaQuery(PHONE);
   const hasCloud = cloudConfigured();
   const pluginSections = usePluginSettingsSections();
-  const sections: { id: SettingsSection; label: string; icon: NavIcon }[] = [
-    ...SECTIONS.filter((s) => s.id !== "account" || hasCloud),
-    ...pluginSections.map((p) => ({ id: p.id as SettingsSection, label: p.label, icon: Puzzle })),
+  const groups: NavSection[][] = [
+    ...GROUPS.map((g) => g.filter((s) => s.id !== "account" || hasCloud)),
+    ...(pluginSections.length ? [pluginSections.map((p) => ({ id: p.id as SettingsSection, label: p.label, icon: Puzzle }))] : []),
   ];
+  const all = groups.flat();
   const section = requestedSection === "account" && !hasCloud ? "profile" : requestedSection;
-  const close = useStore((s) => s.closeSettings);
-  const { mounted, visible } = usePresence(open, 220);
-  const dialog = useRef<HTMLDivElement>(null);
-  const restoreFocus = useRef<HTMLElement | null>(null);
-  // Set by the page inside a section that is open, if any (see SettingsBack).
+  const label = all.find((s) => s.id === section)?.label ?? "Settings";
+  const root = useRef<HTMLDivElement>(null);
+  // Set by the page inside a section that is open, if any (SubPage).
   const [back, setBack] = useState<SettingsBackTarget>();
   const content = useRef<HTMLDivElement>(null);
+  const showIndex = phone && index;
+
+  // On a wide screen the list is always beside the section, so a link to the list alone opens the section.
+  useEffect(() => {
+    if (!phone && index) useStore.setState({ settingsIndex: false });
+  }, [phone, index]);
+
+  /** One level back: out of a page inside a section, then (on a phone) to the list, then out of Settings. */
+  const goBack = () => {
+    if (back) back.onBack();
+    else if (phone && !index) settingsUp();
+    else leaveSettings();
+  };
+  const latest = useRef(goBack);
+  latest.current = goBack;
 
   useEffect(() => {
-    if (!open) return;
-    restoreFocus.current = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-      if (e.key === "Tab" && dialog.current) {
-        // Keep focus inside the dialog.
-        const items = dialog.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not([type="hidden"]), textarea, a[href], [tabindex]:not([tabindex="-1"])');
-        const first = items[0];
-        const last = items[items.length - 1];
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing || isShortcutRecording()) return;
+      // Whatever is over the page (a dialog, a menu, a lightbox) takes its own Escape.
+      if (useLightbox.getState().open || document.querySelector("dialog[open], .modal-root, .popover-portal, .context-menu")) return;
+      const el = document.activeElement;
+      if (el && el !== document.body && el.closest("[role='menu'], [role='listbox'], [role='dialog']")) return;
+      e.preventDefault();
+      latest.current();
     };
     window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      restoreFocus.current?.focus?.();
-    };
-  }, [open, close]);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
-    if (open && mounted) dialog.current?.focus({ preventScroll: true });
-  }, [open, mounted]);
+    if (!root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true });
+  }, []);
 
-  // Going back removes the arrow that had focus: keep focus in the dialog rather than lose it to the page.
+  // Going back removes the arrow that had focus: keep focus on the page rather than lose it.
   useLayoutEffect(() => {
-    if (!back && open && document.activeElement === document.body) dialog.current?.focus({ preventScroll: true });
-  }, [back, open]);
+    if (document.activeElement === document.body) root.current?.focus({ preventScroll: true });
+  }, [back, section, index]);
 
   // Into a page or back out of it, what shows next starts at its top, not at the offset the last one was scrolled to.
-  const nested = !!back;
   useLayoutEffect(() => {
     if (content.current) content.current.scrollTop = 0;
-  }, [nested]);
+  }, [section, page, !!back]);
 
-  if (!mounted) return null;
+  const title = phone ? (back?.title ?? (showIndex ? "Settings" : label)) : "Settings";
+  const backLabel = phone ? (back ? back.label : index ? "Back" : "Back to Settings") : "Back";
+
   return (
-    <div className="modal-root" data-state={visible ? "open" : "closed"}>
-      <div className="modal-backdrop" onClick={close} aria-hidden />
-      <div ref={dialog} className={cx("modal settings", back && "has-back")} role="dialog" aria-modal="true" aria-labelledby="settings-title" tabIndex={-1}>
-        <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>
-          {sections.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              className="settings-nav-item"
-              aria-current={section === s.id}
-              ref={section === s.id ? (el) => el?.scrollIntoView({ block: "nearest", inline: "center" }) : undefined}
-              aria-label={s.label}
-              onClick={() => useStore.setState({ settingsSection: s.id })}
-            >
-              <s.icon size={20} className="settings-nav-icon" aria-hidden />
-              <span className="settings-nav-label">{s.label}</span>
-            </button>
-          ))}
-        </nav>
-        {back && (
-          <IconButton label={back.label} tooltip={false} className="modal-back" onClick={back.onBack}>
-            <ArrowLeft size={18} />
-          </IconButton>
+    <div ref={root} className={cx("spage", showIndex && "spage-index", back && "has-back")} role="region" aria-label="Settings" tabIndex={-1}>
+      <PageHeader title={title} backLabel={backLabel} onBack={phone ? goBack : leaveSettings} />
+      <div className="spage-body">
+        {(!phone || showIndex) && (
+          <nav className="settings-nav" aria-label="Settings sections" onKeyDown={(e) => arrowNav(e)}>
+            {groups.map((group, i) => (
+              <div key={i} className="settings-nav-group">
+                {group.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="settings-nav-item"
+                    aria-current={!showIndex && section === s.id}
+                    aria-label={s.label}
+                    onClick={() => openSettingsSection(s.id)}
+                  >
+                    <s.icon size={20} className="settings-nav-icon" aria-hidden />
+                    <span className="settings-nav-label">{s.label}</span>
+                    {showIndex && <ChevronRight size={16} className="settings-nav-chevron" aria-hidden />}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
         )}
-        <SettingsBackContext.Provider value={setBack}>
-          <div ref={content} className="settings-content" key={section}>
-            {section === "profile" && <ProfileSection />}
-            {section === "security" && <SecuritySection />}
-            {hasCloud && section === "account" && (
-              <>
-                <Heading>Account</Heading>
-                <AccountSection />
-              </>
-            )}
-            {section === "general" && <GeneralSection />}
-            {section === "bots" && <BotsSettingsSection />}
-            {section === "shortcuts" && <ShortcutsSection />}
-            {section === "pi" && <PiSection />}
-            {section === "keys" && <ProvidersSection />}
-            {section === "runtimes" && <RuntimesSection />}
-            {section === "projects" && <ProjectsSection />}
-            {section === "devices" && <DevicesSection />}
-            {section === "appearance" && (
-              <>
-                <AppearanceSection />
-                <PluginSlot name="settings:appearance:after" />
-              </>
-            )}
-            {section === "notifications" && <NotificationsSection />}
-            {section === "plugins" && <PluginsSection />}
-            {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
-          </div>
-        </SettingsBackContext.Provider>
-        <IconButton label="Close settings" tooltip={false} className="modal-close" onClick={close}>
-          <X size={18} />
-        </IconButton>
+        {!showIndex && (
+          <SettingsBackContext.Provider value={setBack}>
+            <div ref={content} className="settings-content">
+              <div className="settings-inner" key={section}>
+                {section === "profile" && <ProfileSection />}
+                {section === "security" && <SecuritySection />}
+                {hasCloud && section === "account" && (
+                  <>
+                    <Heading>Account</Heading>
+                    <AccountSection />
+                  </>
+                )}
+                {section === "general" && <GeneralSection />}
+                {section === "bots" && <BotsSettingsSection />}
+                {section === "shortcuts" && <ShortcutsSection />}
+                {section === "pi" && <PiSection />}
+                {section === "keys" && <ProvidersSection />}
+                {section === "runtimes" && <RuntimesSection />}
+                {section === "projects" && <ProjectsSection />}
+                {section === "devices" && <DevicesSection />}
+                {section === "appearance" && (
+                  <>
+                    <AppearanceSection />
+                    <PluginSlot name="settings:appearance:after" />
+                  </>
+                )}
+                {section === "notifications" && <NotificationsSection />}
+                {section === "plugins" && <PluginsSection />}
+                {pluginSections.some((p) => p.id === section) && <PluginSettingsPage section={section} />}
+              </div>
+            </div>
+          </SettingsBackContext.Provider>
+        )}
       </div>
     </div>
   );

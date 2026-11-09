@@ -1107,10 +1107,16 @@
   --bm-them: color-mix(in srgb, var(--text) 6%, var(--surface));
 }
 
-/* Switching between OpenBuild and OpenBots: the window holds still, and each pane crossfades into
-   its counterpart in place. Only opacity moves; the panes' edges snap to where they end up. */
-.world-switch .sidebar {
-  view-transition-name: world-sidebar;
+/* Switching between OpenBuild and OpenBots. The two sidebars are different things (a thread list,
+   a rail of bots), so neither morphs into the other: the outgoing one is gone at once and the
+   incoming one slides in from the left edge. The main pane's edge slides to its new place while its
+   old content fades off the new, so the old world never lingers once the switch has started. */
+.world-switch .sidebar:not(.bots-sidebar) {
+  view-transition-name: world-threads;
+}
+
+.world-switch .bots-sidebar {
+  view-transition-name: world-bots;
 }
 
 .world-switch .main {
@@ -1119,28 +1125,52 @@
 
 ::view-transition-old(root),
 ::view-transition-new(root),
-::view-transition-group(world-sidebar),
-::view-transition-group(world-main) {
+::view-transition-group(world-threads),
+::view-transition-group(world-bots) {
   animation: none;
 }
 
-::view-transition-old(world-sidebar),
-::view-transition-new(world-sidebar),
-::view-transition-old(world-main),
-::view-transition-new(world-main) {
-  animation-duration: var(--fast);
-  animation-timing-function: var(--ease-out);
+::view-transition-old(world-threads),
+::view-transition-old(world-bots) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(world-threads),
+::view-transition-new(world-bots) {
+  animation: world-side-in 220ms var(--ease-out) both;
+}
+
+@keyframes world-side-in {
+  from { opacity: 0; transform: translateX(-12px); }
+}
+
+::view-transition-group(world-main) {
+  animation-duration: 240ms;
+  animation-timing-function: var(--ease-panel);
 }
 
 /* Cropped as the edge slides, not stretched. */
-::view-transition-old(world-sidebar),
-::view-transition-new(world-sidebar),
 ::view-transition-old(world-main),
 ::view-transition-new(world-main) {
   width: 100%;
   height: 100%;
   object-fit: none;
   object-position: left top;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(world-main) {
+  animation: world-out 140ms var(--ease) both;
+}
+
+::view-transition-new(world-main) {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes world-out {
+  to { opacity: 0; }
 }
 
 .main-bots {
@@ -3718,15 +3748,12 @@ a.bots-btn.bots-btn-primary {
    OpenBots — Settings → Bots (src/components/bots/BotSettings.tsx)
    ========================================================================== */
 
-.bots-set-intro {
-  margin: -4px 0 0;
-  font-size: 13.5px;
-  line-height: 1.5;
-  color: var(--text-2);
+.bots-set-row {
+  padding-left: 12px;
 }
 
-.bots-set-row {
-  padding-left: 8px;
+.bots-set-row-main {
+  align-self: stretch;
 }
 
 .bots-set-row-main {
@@ -3760,15 +3787,6 @@ a.bots-btn.bots-btn-primary {
   white-space: nowrap;
 }
 
-.bots-set-editor {
-  animation: fade var(--fast) var(--ease-out) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .bots-set-editor {
-    animation: none;
-  }
-}
 
 .bots-set-hero {
   display: flex;
@@ -4794,4 +4812,261 @@ a.bots-btn.bots-btn-primary {
 
 .bots-small-dialog .bots-poll-check {
   margin: 0 0 14px;
+}
+
+/* ==========================================================================
+   Pages and tasks
+   ========================================================================== */
+
+/* A page a bot showed (html_render): the thread's own page frame, on a card as wide as the bubble column. */
+.bm-bubble.bm-card.bm-page {
+  width: 620px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px 8px 14px;
+}
+
+.bm-page .html-render {
+  margin: 0;
+}
+
+.bm-page .html-render-bar {
+  margin-bottom: 2px;
+}
+
+/* The page's height follows what it measures, at once: a transition here would animate layout. */
+.bm-page .html-render-page {
+  transition: none;
+}
+
+/* A conversation's to-do list, in the details panel. */
+.bots-todos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bots-pane + .bots-todos {
+  margin-top: 20px;
+}
+
+.bots-todos-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  margin: 0 2px;
+}
+
+.bots-todos-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.bots-todos-count {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.bots-todos-clear {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-todos-clear:hover {
+    color: var(--text);
+  }
+}
+
+.bots-todos-bar {
+  height: 2px;
+  margin: 0 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.bots-todos-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--text-2);
+  transform-origin: left;
+  transition: transform var(--med) var(--ease-out);
+}
+
+.bots-todos-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.bots-todo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+@media (hover: hover) {
+  .bots-todo:not(.bots-todo-add):hover {
+    background: var(--hover);
+  }
+}
+
+.bots-todo-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--surface);
+  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  button.bots-todo-check:hover {
+    border-color: var(--text-3);
+  }
+}
+
+/* Under way: a dot in the circle. */
+.bots-todo-doing .bots-todo-check {
+  border-color: var(--text-2);
+  background: radial-gradient(circle, var(--text-2) 0 3px, transparent 3.5px);
+}
+
+.bots-todo-done .bots-todo-check {
+  border-color: var(--text-2);
+  background: var(--text-2);
+}
+
+.bots-todo-text {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.bots-todo-done .bots-todo-text {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+
+.bots-todo-bot {
+  display: inline-flex;
+  flex: none;
+}
+
+.bots-todo-x {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+.bots-todo:hover .bots-todo-x,
+:where([data-keyboard-nav]) .bots-todo-x:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .bots-todo-x {
+    opacity: 1;
+  }
+}
+
+.bots-todo-plus {
+  border-style: dashed;
+  color: var(--text-3);
+}
+
+.bots-todo-input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--text);
+  font: inherit;
+}
+
+.bots-todo-input::placeholder {
+  color: var(--text-3);
+}
+
+/* The header's progress: a small ring and the count, beside the name. */
+.bots-head-tasks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-head-tasks:hover {
+    background: var(--hover);
+    color: var(--text-2);
+  }
+}
+
+.bots-head-tasks svg {
+  display: block;
+  flex: none;
+}
+
+.bots-head-tasks circle {
+  fill: none;
+  stroke-width: 1.75;
+}
+
+.bots-head-tasks-track {
+  stroke: var(--border-strong);
+}
+
+.bots-head-tasks-fill {
+  stroke: var(--text-2);
+  stroke-linecap: round;
+}
+
+.bots-head-tasks-done .bots-head-tasks-fill {
+  stroke-linecap: butt;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-todos-bar > span {
+    transition: none;
+  }
 }

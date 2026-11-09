@@ -55,6 +55,7 @@ beforeEach(() => {
       runtimeAccounts: [{ id: "work", name: "Work", runtime: "claude", configDir: "/tmp/claude-work" }],
     } as any,
   });
+  useStore.setState({ settingsPage: undefined });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -80,17 +81,26 @@ async function choose(label: string, option: string) {
   await frames();
 }
 
-test("shows the device picker and Pi's providers, with no runtime picker or runtime accounts", async () => {
+test("shows the device picker and Pi's providers, with no harness picker or harness accounts", async () => {
   await mount();
   expect(pickers()).toEqual(["Device whose Pi providers to manage"]);
   const text = host.textContent ?? "";
   expect(text).toContain("Providers & accounts");
   expect(text).toContain("Ready to use");
   expect(text).toContain("xAI");
+  // The providers to add are a page of their own, with a search: the list is long.
   expect(text).toContain("Add a provider");
-  expect(text).toContain("Amazon Bedrock");
+  expect(text).not.toContain("Amazon Bedrock");
+  expect(host.querySelector('input[placeholder="Search providers…"]')).toBeNull();
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button.nav-row")].find((b) => b.textContent?.includes("Add a provider"))!.click());
+  await frames();
+  expect(useStore.getState().settingsPage).toBe("add");
+  const page = host.textContent ?? "";
+  expect(page).toContain("Amazon Bedrock");
+  expect(page).not.toContain("Ready to use");
   expect(host.querySelector('input[placeholder="Search providers…"]')).not.toBeNull();
-  for (const other of ["claude auth login", "codex login", "cursor-agent login", "Add account", "Work"]) expect(text).not.toContain(other);
+  expect(pickers()).toEqual(["Device whose Pi providers to manage"]);
+  for (const other of ["claude auth login", "codex login", "cursor-agent login", "Add account", "Work"]) expect(text + page).not.toContain(other);
   expect(calls.every((c) => c.url.startsWith("/api/pi/"))).toBe(true);
 });
 

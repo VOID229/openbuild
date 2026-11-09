@@ -14,7 +14,7 @@ import { RuntimeIcon } from "./Workspace";
 
 type AccountRuntime = RuntimeAccount["runtime"];
 const CHOICES: AccountRuntime[] = ["claude", "codex", "cursor"];
-const STEPS = ["Runtime", "Identity", "Config"];
+const STEPS = ["Harness", "Identity", "Config"];
 const VARIABLES = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 
 function Field({ label, hint, value, onChange, placeholder, autoFocus }: { label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean }) {
@@ -131,8 +131,8 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
       <div className="modal ar" role="dialog" aria-modal="true" aria-labelledby="ar-title">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}><X size={16} /></button>
         <header className="ar-head">
-          <h2 id="ar-title">{account ? `Edit ${account.name}` : "Add runtime"}</h2>
-          <p>{account ? `Change this account for a runtime on ${where}.` : `Add another account for a runtime on ${where}.`}</p>
+          <h2 id="ar-title">{account ? `Edit ${account.name}` : "Add harness"}</h2>
+          <p>{account ? `Change this account for a harness on ${where}.` : `Add another account for a harness on ${where}.`}</p>
           <ol className="ar-steps">
             {STEPS.map((label, i) => (
               <li key={label} className={cx(i === step && "ar-step-on")} aria-current={i === step ? "step" : undefined}>
@@ -143,7 +143,7 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
         </header>
         <div className="ar-body">
           {step === 0 && (
-            <div className="ar-grid" role="radiogroup" aria-label="Runtime">
+            <div className="ar-grid" role="radiogroup" aria-label="Harness">
               {CHOICES.map((r) => (
                 <button key={r} type="button" role="radio" aria-checked={runtime === r} className="ar-choice" onClick={() => setRuntime(r)}>
                   <RuntimeIcon runtime={r} size={18} />
@@ -176,7 +176,7 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
         </div>
         <footer className="ar-foot">
           {step > 0 && <button type="button" className="btn" onClick={() => { setError(""); setStep(step - 1); }}>Back</button>}
-          <button type="button" className="btn btn-primary" onClick={step < 2 ? next : add}>{step < 2 ? "Next" : account ? "Save" : "Add runtime"}</button>
+          <button type="button" className="btn btn-primary" onClick={step < 2 ? next : add}>{step < 2 ? "Next" : account ? "Save" : "Add harness"}</button>
         </footer>
       </div>
     </div>,

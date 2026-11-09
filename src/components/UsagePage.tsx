@@ -1,5 +1,5 @@
 // Usage: tokens and cost across the agents on this machine, and their plans' limits (server/usage/).
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import claudeSvg from "../assets/brands/claude-color.svg" with { type: "text" };
 import grokSvg from "../assets/brands/grok.svg" with { type: "text" };
@@ -10,7 +10,9 @@ import { createRedemptionClient } from "../../shared/redemptionClient";
 import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
 import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport, type UsageScope } from "../lib/usageStats";
+import { leaveUsage } from "../lib/pages";
 import { IconButton, PiMark, Popover, Spinner } from "./primitives";
+import { PageHeader } from "./SettingsUI";
 import { useLightbox } from "./Lightbox";
 
 type Tab = "cost" | "tokens" | "limits";
@@ -63,9 +65,9 @@ export function UsagePage() {
   const report = useUsageReport(range, machine);
   const lim = useUsageLimits();
   const mobile = useMediaQuery("(max-width: 768px)");
-  const close = () => useStore.getState().setUsageOpen(false);
-  // Escape goes back to the thread/home, like it closes Settings. Leave Escape to whatever is on
-  // top (the settings dialog, a lightbox, a menu) and only take it when Usage itself has focus.
+  // Back, Esc and the browser's back all return to wherever Usage was opened from.
+  const close = leaveUsage;
+  // Leave Escape to whatever is on top (a lightbox, a menu) and only take it when Usage itself has focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
@@ -105,13 +107,7 @@ export function UsagePage() {
 
   return (
     <div className="ustats">
-      <header className="ustats-bar">
-        {mobile ? (
-          <IconButton label="Back" onClick={close}>
-            <ArrowLeft size={18} />
-          </IconButton>
-        ) : null}
-        <h1 className="ustats-title">Usage</h1>
+      <PageHeader title="Usage" onBack={close} className="ustats-bar">
         {machines.length > 1 && <MachinePicker machines={machines} value={tab === "limits" ? "all" : machine} onChange={setMachine} disabled={tab === "limits"} />}
         <div className="ustats-controls">
           <div className="ustats-seg" role="tablist" aria-label="View">
@@ -132,7 +128,7 @@ export function UsagePage() {
             <RefreshCw size={15} />
           </IconButton>
         </div>
-      </header>
+      </PageHeader>
       <div className="ustats-scroll">
         <div className="ustats-body">
           {tab === "limits" ? <LimitsView {...lim} /> : <SpendView tab={tab} {...report} />}
@@ -212,7 +208,7 @@ function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageR
     return (
       <div className="ustats-empty">
         <p>No usage in this range.</p>
-        <p className="ustats-dim">Sessions from every runtime on this machine show up here.</p>
+        <p className="ustats-dim">Sessions from every harness on this machine show up here.</p>
       </div>
     );
   }
@@ -722,24 +718,22 @@ function LimitRow({ account, w, now }: { account: UsageLimits; w: UsageWindow; n
           }
         }}
       >
-        <div className="ustats-limit-fill" style={{ width: `${left}%` }}>
-          {left >= 8 && <span>{Math.round(left)}%</span>}
-        </div>
+        <div className="ustats-limit-fill" style={{ width: `${left}%` }} />
         {projected !== undefined && projected <= 100 && (
           <div className="ustats-limit-pace" style={{ left: `${Math.max(0, 100 - projected)}%` }} data-tooltip={trend} data-tooltip-side="top" />
         )}
-        <div className="ustats-limit-meta">
-          {w.resetsAt && (
-            <span data-tooltip={`Resets ${new Date(w.resetsAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`} data-tooltip-side="top">
-              <RotateCcw size={11} /> {until(w.resetsAt, now)}
-            </span>
-          )}
-          {!!credits?.available && (
-            <span data-tooltip={`${credits.available} banked reset${credits.available === 1 ? "" : "s"}`} data-tooltip-side="top">
-              <Ticket size={11} /> {credits.available}
-            </span>
-          )}
-        </div>
+      </div>
+      <div className="ustats-limit-meta">
+        {w.resetsAt && (
+          <span data-tooltip={`Resets ${new Date(w.resetsAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`} data-tooltip-side="top">
+            <RotateCcw size={11} /> Resets in {until(w.resetsAt, now)}
+          </span>
+        )}
+        {!!credits?.available && (
+          <span data-tooltip={`${credits.available} banked reset${credits.available === 1 ? "" : "s"}`} data-tooltip-side="top">
+            <Ticket size={11} /> {credits.available} banked
+          </span>
+        )}
       </div>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="ustats-limit-pop" label={`${USAGE_PROVIDER_NAMES[account.provider]} ${w.label}`} fixed="auto" align="start">
         <LimitDetails account={account} w={w} now={now} onClose={() => setOpen(false)} />

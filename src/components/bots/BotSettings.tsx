@@ -1,26 +1,29 @@
-// Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
-// routines, model, how often it checks in; a group's members and goal), making and deleting
-// them, the Claude logins they run on, the default model and web search providers they share, and how lively bots are.
-import { MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
+// Settings → Bots: every bot and group in one list, each opening a page of its own (look, name,
+// instructions, routines, model, how often it checks in; a group's members and goal), making and
+// deleting them, and pages for what they share: their models, the Claude logins they run on, web
+// search, the harnesses they may start threads on, extra Pi extensions, and friends.
+import { ChevronRight, MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, Proactivity } from "../../lib/bots/types";
+import { useBotModels } from "../../lib/bots/models";
 import { useStore } from "../../lib/store";
 import { cx } from "../../lib/ui";
 import { OptionSelect } from "../ModelSelect";
-import { SettingsBack, SettingsHeading } from "../primitives";
+import { openSettingsPage, settingsUp } from "../../lib/pages";
+import { SettingsHeading } from "../primitives";
+import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
-import { BotExtensions } from "./BotExtensions";
+import { BotExtensions, useExtensionsSummary } from "./BotExtensions";
 import { BotFriends } from "./BotFriends";
-import { BotHarnesses, BotThreads } from "./BotThreads";
-import { BotWebSearch } from "./BotWebSearch";
+import { BotHarnesses, BotThreads, useAllowedHarnesses } from "./BotThreads";
+import { BotWebSearch, useConfiguredProviders } from "./BotWebSearch";
 
-type Editing = { kind: "bot"; id: string } | { kind: "group"; id: string };
 type Dialog = { kind: "bot" } | { kind: "group" } | { kind: "delete"; conversationId: string } | { kind: "reset" };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -48,7 +51,7 @@ const CHECK_INS: { value: Proactivity; label: string }[] = [
   { value: "high", label: "Every hour" },
 ];
 
-function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; onDelete: (conversationId: string) => void }) {
+function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: string) => void }) {
   const pulses = useBots((s) => s.pulses);
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
   const st = useBots.getState();
@@ -60,10 +63,9 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
     else setName(bot.name);
   };
   return (
-    <div className="bots-set-editor">
-      <SettingsBack label="Back to all bots" onBack={onBack} />
+    <SubPage title={bot.name} trail={["Bots"]} className="bots-set-editor">
       <div className="bots-set-hero">
-        <BotAvatar look={bot.look} size={96} lively track playful pulse={pulses[bot.id]} />
+        <BotAvatar look={bot.look} size={72} lively track playful pulse={pulses[bot.id]} />
         <div className="bots-set-hero-text">
           <input
             id="bot-name"
@@ -148,11 +150,11 @@ function BotEditor({ bot, onBack, onDelete }: { bot: Bot; onBack: () => void; on
           <Trash2 size={14} /> Delete
         </button>
       </div>
-    </div>
+    </SubPage>
   );
 }
 
-function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack: () => void; onDelete: (conversationId: string) => void }) {
+function GroupEditor({ group, onDelete }: { group: Conversation; onDelete: (conversationId: string) => void }) {
   const bots = useBots((s) => s.bots);
   const st = useBots.getState();
   const [name, setName] = useState(group.name ?? "");
@@ -165,10 +167,9 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
     else setName(group.name ?? "");
   };
   return (
-    <div className="bots-set-editor">
-      <SettingsBack label="Back to all bots" onBack={onBack} />
+    <SubPage title={group.name || "Group"} trail={["Bots"]} className="bots-set-editor">
       <div className="bots-set-hero">
-        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} />
+        <BotHuddle looks={looks} size={72} active={group.botIds.map((id) => working.includes(id))} />
         <div className="bots-set-hero-text">
           <input className="input bots-set-name" value={name} maxLength={48} aria-label="Group name" onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
           <div className="bots-details-sub">{plural(group.botIds.length, "bot")}</div>
@@ -201,17 +202,17 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
           <Trash2 size={14} /> Delete
         </button>
       </div>
-    </div>
+    </SubPage>
   );
 }
 
-function BotRow({ bot, onEdit }: { bot: Bot; onEdit: () => void }) {
+function BotRow({ bot }: { bot: Bot }) {
   const conversation = useBots((s) => directOf(s.conversations, bot.id));
   const details = bot.routines.length ? plural(bot.routines.length, "routine") : "";
   return (
     <li className="pi-row bots-set-row">
-      <button type="button" className="bots-set-row-main" onClick={onEdit}>
-        <BotAvatar look={bot.look} size={34} />
+      <button type="button" className="bots-set-row-main" aria-label={bot.name} onClick={() => openSettingsPage(`bot/${encodeURIComponent(bot.id)}`)}>
+        <BotAvatar look={bot.look} size={28} />
         <span className="pi-row-text">
           <span className="pi-row-name">
             {bot.name}
@@ -221,49 +222,76 @@ function BotRow({ bot, onEdit }: { bot: Bot; onEdit: () => void }) {
           <span className="pi-row-desc bots-set-row-desc">{bot.instructions || "No instructions yet"}</span>
         </span>
         {details && <span className="bots-set-row-meta">{details}</span>}
+        <ChevronRight size={16} className="nav-row-chevron" aria-hidden />
       </button>
-      <span className="pi-row-actions">
-        <button type="button" className="btn btn-sm" onClick={onEdit}>
-          Edit
-        </button>
-      </span>
     </li>
   );
 }
 
-function GroupRow({ group, bots, onEdit }: { group: Conversation; bots: Bot[]; onEdit: () => void }) {
+function GroupRow({ group, bots }: { group: Conversation; bots: Bot[] }) {
   const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "orb", color: "gray" });
   const names = group.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" · ")[0]).filter(Boolean);
   const working = useBusyBots(group);
   return (
     <li className="pi-row bots-set-row">
-      <button type="button" className="bots-set-row-main" onClick={onEdit}>
-        <BotHuddle looks={looks} size={34} active={group.botIds.map((id) => working.includes(id))} />
+      <button type="button" className="bots-set-row-main" aria-label={conversationName(group, bots)} onClick={() => openSettingsPage(`group/${encodeURIComponent(group.id)}`)}>
+        <BotHuddle looks={looks} size={28} active={group.botIds.map((id) => working.includes(id))} />
         <span className="pi-row-text">
           <span className="pi-row-name">{conversationName(group, bots)}</span>
           <span className="pi-row-desc bots-set-row-desc">{names.join(", ") || "No bots"}</span>
         </span>
+        <ChevronRight size={16} className="nav-row-chevron" aria-hidden />
       </button>
-      <span className="pi-row-actions">
-        <button type="button" className="btn btn-sm" onClick={onEdit}>
-          Edit
-        </button>
-      </span>
     </li>
+  );
+}
+
+/** Settings → Bots → Models: the default model and fallbacks every bot follows, and each bot's own model. */
+function BotModels({ bots }: { bots: Bot[] }) {
+  const defaultModel = useBots((s) => s.defaultModel);
+  const st = useBots.getState();
+  return (
+    <SubPage title="Models" trail={["Bots"]}>
+      <div className="setting-row setting-row-stack">
+        <div className="setting-text">
+          <div className="setting-label">Default model</div>
+          <p className="setting-desc">Used by every bot set to Default.</p>
+        </div>
+        <BotModelSelect label="Default model" value={defaultModel} unset="Pi's default" onChange={st.setDefaultModel} />
+      </div>
+      <DefaultFallbacks />
+      <SettingsGroup title="Per bot">
+        {bots.map((b) => (
+          <div key={b.id} className="setting-row bots-set-model-row">
+            <div className="setting-text bots-set-model-name">
+              <BotAvatar look={b.look} size={22} />
+              <span className="setting-label">{b.name}</span>
+            </div>
+            <BotModelSelect label={`Model for ${b.name}`} value={b.model} unset="Default" inherited={defaultModel} onChange={(model) => st.updateBot(b.id, { model })} />
+          </div>
+        ))}
+      </SettingsGroup>
+      <p className="field-help">A bot's effort and its own fallbacks are on its page.</p>
+    </SubPage>
   );
 }
 
 export function BotsSettingsSection() {
   const bots = useBots((s) => s.bots);
   const conversations = useBots((s) => s.conversations);
+  const loaded = useBots((s) => s.loaded);
   const defaultModel = useBots((s) => s.defaultModel);
   const error = useBots((s) => s.error);
+  const page = useStore((s) => s.settingsPage);
+  const searching = useConfiguredProviders();
+  const harnesses = useAllowedHarnesses();
+  const extensions = useExtensionsSummary();
+  const { listing } = useBotModels();
   // Saves show no progress; only a failed one is worth interrupting for.
   const syncStatus = error && <div className="bots-sync-status" role="alert">
     <span>{error}</span>
     <button type="button" className="btn bots-btn" onClick={() => useBots.getState().clearError()}>Dismiss</button>
   </div>;
-  const [editing, setEditing] = useState<Editing>();
   const [dialog, setDialog] = useState<Dialog>();
   const st = useBots.getState();
   useEffect(() => st.ensureSeeded(), [st]);
@@ -271,15 +299,18 @@ export function BotsSettingsSection() {
   const groups = conversations.filter((c) => c.kind === "group").sort((a, b) => b.updatedAt - a.updatedAt);
   // Primary first, then oldest first: the order they were made in.
   const sorted = [...bots].sort((a, b) => Number(!!b.primary) - Number(!!a.primary) || a.createdAt - b.createdAt);
-  const editingBot = editing?.kind === "bot" ? bots.find((b) => b.id === editing.id) : undefined;
-  const editingGroup = editing?.kind === "group" ? groups.find((g) => g.id === editing.id) : undefined;
+  // A bot's or a group's page: settings/bots/bot/<id>, settings/bots/group/<id>.
+  const [kind, rawId] = page?.split("/") ?? [];
+  const id = rawId && decodeURIComponent(rawId);
+  const editingBot = kind === "bot" ? bots.find((b) => b.id === id) : undefined;
+  const editingGroup = kind === "group" ? groups.find((g) => g.id === id) : undefined;
   const deleting = dialog?.kind === "delete" ? conversations.find((c) => c.id === dialog.conversationId) : undefined;
   const closeDialog = () => setDialog(undefined);
 
   // Something that was being edited went away (deleted here or from the sidebar).
   useEffect(() => {
-    if (editing && !editingBot && !editingGroup) setEditing(undefined);
-  }, [editing, editingBot, editingGroup]);
+    if (loaded && (kind === "bot" || kind === "group") && !editingBot && !editingGroup) useStore.setState({ settingsPage: undefined });
+  }, [loaded, kind, editingBot, editingGroup]);
 
   const dialogs = (
     <>
@@ -288,11 +319,11 @@ export function BotsSettingsSection() {
           onClose={closeDialog}
           onCreated={(id) => {
             const botId = useBots.getState().conversations.find((c) => c.id === id)?.botIds[0];
-            if (botId) setEditing({ kind: "bot", id: botId });
+            if (botId) openSettingsPage(`bot/${encodeURIComponent(botId)}`);
           }}
         />
       )}
-      {dialog?.kind === "group" && <CreateGroupDialog onClose={closeDialog} onCreated={(id) => setEditing({ kind: "group", id })} />}
+      {dialog?.kind === "group" && <CreateGroupDialog onClose={closeDialog} onCreated={(id) => openSettingsPage(`group/${encodeURIComponent(id)}`)} />}
       {deleting && (
         <ConfirmDeleteDialog
           title={`Delete “${conversationName(deleting, bots)}”?`}
@@ -300,7 +331,7 @@ export function BotsSettingsSection() {
           onClose={closeDialog}
           onConfirm={() => {
             st.deleteConversation(deleting.id);
-            setEditing(undefined);
+            if (useStore.getState().settingsPage) settingsUp();
           }}
         />
       )}
@@ -312,110 +343,95 @@ export function BotsSettingsSection() {
           onClose={closeDialog}
           onConfirm={() => {
             st.reset();
-            setEditing(undefined);
           }}
         />
       )}
     </>
   );
+  const onDelete = (conversationId: string) => setDialog({ kind: "delete", conversationId });
 
-  if (editingBot)
+  const shared: Record<string, [string, React.ReactNode]> = {
+    models: ["Models", null],
+    claude: ["Claude", <BotClaude />],
+    search: ["Web search", <BotWebSearch />],
+    harnesses: ["Harnesses", <BotHarnesses />],
+    extensions: ["Custom extensions", <BotExtensions />],
+    friends: ["Friends", <BotFriends />],
+  };
+  const body = editingBot ? (
+    <BotEditor key={editingBot.id} bot={editingBot} onDelete={onDelete} />
+  ) : editingGroup ? (
+    <GroupEditor key={editingGroup.id} group={editingGroup} onDelete={onDelete} />
+  ) : page === "models" ? (
+    <BotModels bots={sorted} />
+  ) : page && shared[page] ? (
+    <SubPage title={shared[page][0]} trail={["Bots"]}>{shared[page][1]}</SubPage>
+  ) : undefined;
+  if (body)
     return (
       <>
-        <SettingsHeading>Bots</SettingsHeading>
         {syncStatus}
-        <BotEditor key={editingBot.id} bot={editingBot} onBack={() => setEditing(undefined)} onDelete={(conversationId) => setDialog({ kind: "delete", conversationId })} />
+        {body}
         {dialogs}
       </>
     );
-  if (editingGroup)
-    return (
-      <>
-        <SettingsHeading>Bots</SettingsHeading>
-        {syncStatus}
-        <GroupEditor key={editingGroup.id} group={editingGroup} onBack={() => setEditing(undefined)} onDelete={(conversationId) => setDialog({ kind: "delete", conversationId })} />
-        {dialogs}
-      </>
-    );
 
+  const modelName = defaultModel ? (listing?.models.find((m) => m.id === defaultModel)?.name ?? defaultModel) : "Pi's default";
   return (
     <>
       <SettingsHeading>Bots</SettingsHeading>
       {syncStatus}
-      <p className="bots-set-intro">Each bot keeps its own instructions, memory and chat. Groups put several bots in one chat.</p>
 
-      <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Your bots</h3>
+      <SettingsGroup
+        title="Your bots"
+        action={
           <button type="button" className="btn btn-sm" onClick={() => setDialog({ kind: "bot" })}>
             <Plus size={14} /> New bot
           </button>
-        </div>
+        }
+      >
         <ul className="pi-list">
           {sorted.map((b) => (
-            <BotRow key={b.id} bot={b} onEdit={() => setEditing({ kind: "bot", id: b.id })} />
+            <BotRow key={b.id} bot={b} />
           ))}
-          {!sorted.length && <li className="pi-empty">No bots yet. Make one with New bot.</li>}
+          {!sorted.length && <li className="pi-empty">No bots yet.</li>}
         </ul>
-      </section>
+      </SettingsGroup>
 
-      <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Groups</h3>
+      <SettingsGroup
+        title="Groups"
+        action={
           <button type="button" className="btn btn-sm" disabled={bots.length < 2} title={bots.length < 2 ? "A group needs at least two bots" : undefined} onClick={() => setDialog({ kind: "group" })}>
             <UsersRound size={14} /> New group
           </button>
-        </div>
+        }
+      >
         <ul className="pi-list">
           {groups.map((g) => (
-            <GroupRow key={g.id} group={g} bots={bots} onEdit={() => setEditing({ kind: "group", id: g.id })} />
+            <GroupRow key={g.id} group={g} bots={bots} />
           ))}
           {!groups.length && <li className="pi-empty">No groups yet.</li>}
         </ul>
-      </section>
+      </SettingsGroup>
 
-      <section className="pi-block">
-        <BotClaude />
-      </section>
+      <SettingsGroup title="Shared by every bot" className="sgroup-rows">
+        <NavRow label="Models" value={modelName} to="models" />
+        <NavRow label="Claude" desc="Run bots on your Claude plan." to="claude" />
+        <NavRow label="Web search" value={searching.length ? searching.join(", ") : "No keys yet"} to="search" />
+        <NavRow label="Harnesses" desc="Where bots may start OpenBuild threads." value={harnesses.length ? harnesses.join(", ") : "None allowed"} to="harnesses" />
+        <NavRow label="Custom extensions" value={extensions} to="extensions" />
+        <NavRow label="Friends" desc="People who share group chats with you." to="friends" />
+      </SettingsGroup>
 
-      <section className="pi-block">
-        <div className="setting-row setting-row-stack">
-          <div className="setting-text">
-            <div className="setting-label">Default model</div>
-            <p className="setting-desc">Used by every bot set to Default.</p>
-          </div>
-          <BotModelSelect label="Default model" value={defaultModel} unset="Pi's default" onChange={st.setDefaultModel} />
+      <div className={cx("setting-row", "bots-set-danger")}>
+        <div className="setting-text">
+          <div className="setting-label">Reset OpenBots</div>
+          <p className="setting-desc">Delete every bot, group and conversation, and start again.</p>
         </div>
-        <DefaultFallbacks />
-      </section>
-
-      <section className="pi-block">
-        <BotWebSearch />
-      </section>
-
-      <section className="pi-block">
-        <BotHarnesses />
-      </section>
-
-      <section className="pi-block">
-        <BotExtensions />
-      </section>
-
-      <section className="pi-block">
-        <BotFriends />
-      </section>
-
-      <section className="pi-block">
-        <div className={cx("setting-row", "bots-set-danger")}>
-          <div className="setting-text">
-            <div className="setting-label">Reset OpenBots</div>
-            <p className="setting-desc">Delete every bot, group and conversation, and start again from the starter bots.</p>
-          </div>
-          <button type="button" className="btn btn-sm btn-danger" onClick={() => setDialog({ kind: "reset" })}>
-            <RotateCcw size={14} /> Reset
-          </button>
-        </div>
-      </section>
+        <button type="button" className="btn btn-sm btn-danger" onClick={() => setDialog({ kind: "reset" })}>
+          <RotateCcw size={14} /> Reset
+        </button>
+      </div>
       {dialogs}
     </>
   );

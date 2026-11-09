@@ -19,6 +19,7 @@ import {
 } from "../lib/shortcuts";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
+import { Hint } from "./SettingsUI";
 import { SettingsHeading } from "./primitives";
 
 const Heading = SettingsHeading;
@@ -110,8 +111,10 @@ export function ShortcutsSection() {
           return (
             <div className="setting-row shortcut-row" key={def.id}>
               <div className="setting-text">
-                <div className="setting-label">{def.label}</div>
-                <p className="setting-desc">{def.description}</p>
+                <div className="setting-label">
+                  {def.label}
+                  {def.description.toLowerCase() !== def.label.toLowerCase() && <Hint text={def.description} />}
+                </div>
                 {!recording && note && <p className="setting-desc shortcut-hint">{note}</p>}
                 {notice?.id === def.id && (
                   <p className="setting-desc shortcut-warning" role="status">

@@ -101,7 +101,7 @@ export function ModelMenu({ selected, onPick, piDetection, scopedOnly = false, l
                 ? "No models from this device's Pi scope."
                 : plan === "pi"
                   ? "Sign in to a provider in Settings → Providers to choose a model."
-                  : "This runtime has no models to choose from."}
+                  : "This harness has no models to choose from."}
           </p>
         )}
       </div>

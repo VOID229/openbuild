@@ -95,7 +95,9 @@
   --fast: 120ms;
   --med: 180ms;
 
-  --sidebar-w: clamp(300px, 26vw, 420px);
+  --sidebar-w: clamp(272px, 21vw, 340px);
+  /* OpenBuild's thread list is wider: a row's project, worktree and device sit side by side. */
+  --threads-sidebar-w: clamp(300px, 26vw, 420px);
   --content-w: 768px;
   color-scheme: light;
 }
@@ -889,6 +891,17 @@ select.input {
   width: var(--sidebar-w);
   height: 100%;
   padding: 8px 8px 8px 10px;
+}
+
+@media (min-width: 769px) {
+  .sidebar:not(.bots-sidebar),
+  .sidebar:not(.bots-sidebar) > .sidebar-inner {
+    width: var(--threads-sidebar-w);
+  }
+
+  .sidebar.sidebar-closed:not(.bots-sidebar) {
+    width: 0;
+  }
 }
 
 /* Desktop only: on a phone the drawer slides in whole. */
@@ -3456,6 +3469,14 @@ select.input {
   transform: none;
 }
 
+/* Zooming out of (and back into) the clicked thumbnail: the image itself moves, so the stage
+   doesn't fade or scale on top of it. */
+.lightbox[data-zoom] .lightbox-stage {
+  opacity: 1;
+  transform: none;
+  transition: none;
+}
+
 .lightbox-slide {
   position: absolute;
   inset: 0;
@@ -3621,11 +3642,6 @@ select.input {
   transform: none;
 }
 
-/* Settings is a page more than a popup: the main surface, with its section list on the chrome's. */
-.modal.settings {
-  background: var(--surface);
-}
-
 .modal:focus {
   outline: none;
 }
@@ -3641,30 +3657,93 @@ select.input {
   color: var(--text-2);
 }
 
-/* A page inside a Settings section (a bot's editor, say) goes back with an arrow that mirrors the
-   close button: at the content's top left, outside the scroller so it stays put as the page scrolls. */
-.modal-back {
-  position: absolute;
-  top: 14px;
-  /* Past the 200px section list, as far in as close is from the right. */
-  left: 214px;
-  z-index: 3;
+/* --- Pages in the main pane: Settings and Usage. A 48px header with the way back and the title. --- */
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  /* As tall as the sidebar's header beside it, so the two titles line up. */
+  min-height: 56px;
+  padding: 12px calc(16px + var(--tools-over, 0px)) 12px 16px;
+}
+
+/* The sidebar's open and new-thread buttons float at the top left when it's closed. */
+.main-full .page-head {
+  padding-left: 96px;
+}
+
+.page-back {
+  flex: none;
   width: 32px;
   height: 32px;
   border-radius: var(--radius);
+  border: 1px solid var(--border);
   color: var(--text-2);
+}
+
+@media (hover: hover) {
+  .page-back:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+}
+
+.page-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 24px;
+  letter-spacing: -0.015em;
+}
+
+.spage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+}
+
+.spage:focus {
+  outline: none;
+}
+
+/* The sections beside the section, centred together under the header; the content scrolls on its own. */
+.spage-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
 }
 
 .settings-nav {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  width: 200px;
+  gap: 12px;
+  width: 216px;
   flex-shrink: 0;
-  padding: 16px 12px;
+  padding: 12px 12px 32px 16px;
   overflow-y: auto;
-  border-right: 1px solid var(--border);
-  background: var(--bg);
+  overscroll-behavior: contain;
+}
+
+.settings-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-nav-group + .settings-nav-group {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
 
 .settings-nav-item {
@@ -3690,6 +3769,11 @@ select.input {
   transition: color var(--fast) var(--ease);
 }
 
+.settings-nav-chevron {
+  margin-left: auto;
+  color: var(--text-3);
+}
+
 .settings-nav-item[aria-current="true"] .settings-nav-icon {
   color: var(--text);
 }
@@ -3704,31 +3788,300 @@ select.input {
 .settings-nav-item[aria-current="true"] {
   background: var(--active);
   color: var(--text);
+  font-weight: 500;
 }
 
 .settings-content {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  /* No rubber-band: pulling past the top or bottom leaves everything still. */
-  overscroll-behavior: none;
-  /* The right side leaves the close button a lane of its own, so rows never pass under it. */
-  padding: 28px 64px 40px 40px;
-  /* Rows fade out at the panel's edges instead of being cut off there. */
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 20px, #000 calc(100% - 20px), transparent);
-  mask-image: linear-gradient(to bottom, transparent, #000 20px, #000 calc(100% - 20px), transparent);
-  animation: fade var(--fast) var(--ease-out) both;
+  overscroll-behavior: contain;
+  padding: 12px 32px 72px;
 }
 
-/* The back arrow gets a lane of its own on the left, the same as the close button's. */
-.settings.has-back .settings-content {
-  padding-left: 64px;
+.settings-inner {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* A section, or a page inside one, comes in with a quick fade: opacity and 4px, nothing that moves layout. */
+.settings-inner,
+.subpage {
+  animation: page-in var(--fast) var(--ease-out) both;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 @keyframes fade {
   from {
     opacity: 0;
   }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-inner,
+  .subpage {
+    animation: none;
+  }
+}
+
+/* A section's title, with an action beside it (Check for updates). */
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-head .md-h1 {
+  margin: 0;
+}
+
+.settings-head-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* A page inside a section: back arrow, then the trail to it ("Bots / Models"). It stays at the top
+   as the page scrolls, so the way back is always where it was. */
+.subpage-head {
+  position: sticky;
+  top: -12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  margin: -12px 0 8px -8px;
+  padding: 12px 0 8px;
+  background: var(--surface);
+}
+
+.subpage-back {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  color: var(--text-2);
+}
+
+.subpage-trail {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  flex: 1;
+  min-width: 0;
+  font-size: 20px;
+  line-height: 32px;
+  letter-spacing: -0.02em;
+}
+
+.subpage-crumb {
+  display: inline-flex;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.subpage-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+  font-weight: 600;
+}
+
+.subpage-action {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.subpage-desc {
+  margin: -8px 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+/* A row that opens a page inside the section: label · current value · chevron. */
+.nav-row {
+  width: 100%;
+  gap: 12px;
+  text-align: left;
+  color: var(--text);
+}
+
+.nav-row .setting-text,
+.nav-row .setting-label,
+.nav-row .setting-desc {
+  display: block;
+}
+
+.nav-row-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  color: var(--text-2);
+}
+
+.nav-row-value {
+  flex: 0 1 auto;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.nav-row-chevron {
+  flex: none;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease), transform var(--fast) var(--ease-out);
+}
+
+@media (hover: hover) {
+  .nav-row:hover .nav-row-chevron {
+    color: var(--text);
+    transform: translateX(2px);
+  }
+
+  .nav-row:hover .nav-row-value {
+    color: var(--text);
+  }
+}
+
+/* A titled group of rows inside a section. */
+.sgroup {
+  margin-top: 32px;
+}
+
+/* The first group sits closer under the section's title. */
+.md-h1 + .sgroup,
+.settings-head + .sgroup {
+  margin-top: 16px;
+}
+
+.sgroup-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  margin-bottom: 4px;
+}
+
+.sgroup-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* A setting's details, behind a small info mark beside its label. */
+.setting-hint {
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: -2px;
+  color: var(--text-3);
+  cursor: help;
+}
+
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* A list row that opens a page of its own (a device, a plugin): the whole row is the button. */
+.device-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  align-self: stretch;
+  text-align: left;
+  color: inherit;
+}
+
+.device-row:has(> .device-link) {
+  padding-right: 12px;
+}
+
+@media (hover: hover) {
+  .device-link:hover .nav-row-chevron,
+  .bots-set-row-main:hover .nav-row-chevron {
+    color: var(--text);
+    transform: translateX(2px);
+  }
+}
+
+.plugin-row:has(> .device-link) {
+  align-items: center;
+  padding: 8px 12px 8px 14px;
+  background: transparent;
+}
+
+.plugin-row .plugin-mark {
+  width: 28px;
+  height: 28px;
+}
+
+.plugin-row .plugin-version {
+  margin-left: 6px;
+}
+
+.plugin-page-meta {
+  margin: -6px 0 8px;
+}
+
+.plugin-page-meta .plugin-id {
+  margin-left: 4px;
+}
+
+.plugin-dir {
+  margin-top: 10px;
+}
+
+/* A page's one line of description, beside its action (New skill). */
+.pi-subhead .subpage-desc {
+  margin: 0;
+}
+
+.pi-subhead-end {
+  justify-content: flex-end;
+}
+
+.providers-add {
+  margin-top: 4px;
+}
+
+.providers-add .nav-row-icon {
+  width: 28px;
+  height: 28px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+}
+
+/* Settings → Bots → Models: each bot beside the model it runs on. */
+.bots-set-model-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 /* Section headings. The "#" of the old markdown look stays in the markup but no longer shows. */
@@ -3765,18 +4118,6 @@ select.input {
 }
 
 .security-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
-.security-cli {
-  margin-top: 12px;
-  line-height: 1.55;
-}
-
-.security-cli code {
-  font-family: var(--mono);
-  font-size: 0.92em;
-  color: var(--text-2);
-  white-space: nowrap;
-}
-
 .field-help a {
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -3801,8 +4142,8 @@ select.input {
 
 .avatar-pencil {
   position: absolute;
-  left: 62px;
-  top: 62px;
+  left: 48px;
+  top: 48px;
   display: grid;
   place-items: center;
   width: 30px;
@@ -3839,14 +4180,6 @@ select.input {
 }
 
 /* A setting whose control is a list under its label (Notifications → Notify for). */
-.setting-group {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--border);
-}
-.setting-group .pi-list {
-  margin-top: 12px;
-}
-
 /* A setting that can't change until another one is on: greyed out, still showing what's saved. */
 .setting-row-disabled .setting-text {
   opacity: 0.5;
@@ -4137,9 +4470,8 @@ select.input {
 /* A row whose control is more than a single toggle: stacked and aligned to the row's right edge. */
 .setting-control {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
@@ -4825,40 +5157,6 @@ p.key-status svg {
     transition: opacity var(--med) var(--ease-out), transform 220ms var(--ease-out);
   }
 
-  /* The sections scroll sideways, each with its name: 13 icons alone don't fit, or say enough. */
-  .settings-nav {
-    grid-row: 1;
-    grid-column: 1;
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: 4px;
-    width: auto;
-    min-width: 0;
-    padding: 10px 8px 10px max(12px, env(safe-area-inset-left));
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior: contain;
-    scrollbar-width: none;
-    border-right: 0;
-    background: transparent;
-    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
-  }
-
-  .settings-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .settings-nav-item {
-    flex: none;
-    gap: 6px;
-    height: 40px;
-    padding: 0 12px 0 10px;
-    border-radius: var(--radius);
-    font-size: 14px;
-    white-space: nowrap;
-  }
-
   .modal .modal-close {
     position: static;
     grid-row: 1;
@@ -4870,44 +5168,85 @@ p.key-status svg {
     border-radius: var(--radius);
   }
 
-  /* Back sits at the header's start, before the tabs, as close sits at its end. */
-  .modal.has-back {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+  /* Settings and Usage take the whole screen, their header standing in for the top bar. */
+  .main-page .floating-tools,
+  .main-page .thread-tools {
+    display: none;
   }
 
-  .modal.has-back .settings-nav {
-    grid-column: 2;
-    padding-left: 4px;
+  .page-head,
+  .main-full .page-head {
+    min-height: 52px;
+    padding: max(6px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left));
   }
 
-  .modal.has-back .modal-close {
-    grid-column: 3;
-  }
-
-  .modal .modal-back {
-    position: static;
-    grid-row: 1;
-    grid-column: 1;
-    align-self: center;
+  .page-back {
     width: 40px;
     height: 40px;
-    margin-left: max(8px, env(safe-area-inset-left));
+    border-color: transparent;
+  }
+
+  .page-title {
+    font-size: 17px;
+  }
+
+  /* A phone's first screen in Settings: the sections as a list, each opening its own screen. */
+  .settings-nav {
+    width: 100%;
+    gap: 16px;
+    padding: 8px max(16px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  .settings-nav-group + .settings-nav-group {
+    padding-top: 16px;
+  }
+
+  .settings-nav-item {
+    gap: 12px;
+    height: 48px;
+    padding: 0 8px 0 12px;
     border-radius: var(--radius);
+    font-size: 15px;
   }
 
   .settings-content {
-    grid-row: 2;
-    grid-column: 1 / -1;
-    padding: 20px max(16px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
-    border-top: 1px solid var(--border);
-    overscroll-behavior: none;
-    /* Rows already end cleanly at the border line here. */
-    -webkit-mask-image: none;
-    mask-image: none;
+    padding: 4px max(16px, env(safe-area-inset-right)) calc(40px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
   }
 
-  .settings.has-back .settings-content {
-    padding-left: max(16px, env(safe-area-inset-left));
+  /* The page's header names the section or page and goes back from it, so the content doesn't repeat them. */
+  .settings-content .md-h1,
+  .subpage-head {
+    display: none;
+  }
+
+  .settings-head {
+    justify-content: flex-end;
+  }
+
+  .settings-head:not(:has(.settings-head-action)) {
+    display: none;
+  }
+
+  .settings-content .md-h1 + .sgroup {
+    margin-top: 4px;
+  }
+
+  /* A row's actions keep to their own width on a phone, so the name beside them has room. */
+  .settings-content .pi-row-actions .btn {
+    min-width: 0;
+  }
+
+  .settings-content .pi-row:has(.pi-row-actions .btn + .btn) {
+    flex-wrap: wrap;
+  }
+
+  .settings-content .pi-row:has(.pi-row-actions .btn + .btn) .pi-row-text {
+    flex-basis: 100%;
+  }
+
+  .field-pair {
+    grid-template-columns: 1fr;
+    gap: 0;
   }
 
   .md-h1 {
@@ -6669,49 +7008,6 @@ p.key-status svg {
 }
 
 /* A section heading that folds its body away, with a one-line summary of what's inside. */
-.pi-subhead-toggle {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  margin-left: -6px;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  text-align: left;
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  .pi-subhead-toggle:hover {
-    background: var(--hover);
-  }
-}
-
-.pi-subhead-title {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
-
-.pi-subhead-note {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.pi-subhead-chevron {
-  flex: none;
-  align-self: center;
-  color: var(--text-3);
-  transition: transform var(--fast) var(--ease-out);
-}
-
-.pi-subhead-toggle[aria-expanded="false"] .pi-subhead-chevron {
-  transform: rotate(-90deg);
-}
-
 .pi-error {
   display: flex;
   align-items: flex-start;
@@ -7163,16 +7459,6 @@ p.pi-empty {
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.pi-editor-title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 16px;
-  font-weight: 600;
 }
 
 .pi-editor-path {
@@ -8558,22 +8844,17 @@ a.btn-primary {
    Plugins — Settings list, and small bits plugin UIs can reuse
    ========================================================================== */
 
-.settings-hint { margin: 0 0 16px; font-size: 13px; line-height: 1.5; color: var(--text-2); }
-.settings-hint code, .plugin-dir code { font-family: var(--mono); font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); overflow-wrap: anywhere; }
+.plugin-dir code { font-family: var(--mono); font-size: 12px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text-2); overflow-wrap: anywhere; }
 
 .plugin-notice { display: flex; gap: 9px; align-items: flex-start; margin: 0 0 16px; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--surface-2); color: var(--text-2); font-size: 13px; line-height: 1.5; }
 .plugin-notice svg { flex: none; margin-top: 2px; }
 .plugin-notice-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); background: var(--danger-bg); }
 
-.plugin-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: 16px; }
-.plugin-list:empty { display: none; }
 .plugin-row { display: flex; align-items: flex-start; gap: 12px; padding: 14px 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
 .plugin-row:last-child { border-bottom: 0; }
 .plugin-row-off { opacity: 0.6; }
 .plugin-mark { display: grid; place-items: center; width: 32px; height: 32px; flex: none; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); }
-.plugin-body { flex: 1; min-width: 0; }
 .plugin-title { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-.plugin-name { font-size: 14px; font-weight: 500; color: var(--text); }
 .plugin-version, .plugin-id { font-family: var(--mono); font-size: 11px; color: var(--text-3); }
 .plugin-badge { padding: 0 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); color: var(--text-2); font-size: 11px; font-weight: 500; line-height: 16px; }
 .plugin-description { margin: 5px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
@@ -8581,11 +8862,8 @@ a.btn-primary {
 .plugin-slots code { font-family: var(--mono); font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); color: var(--text-3); }
 .plugin-error { display: flex; gap: 6px; align-items: flex-start; margin-top: 7px; font-size: 12px; line-height: 1.45; color: var(--danger); overflow-wrap: anywhere; }
 .plugin-error svg { flex: none; margin-top: 1px; }
-.plugin-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
-.plugin-footer .btn { display: inline-flex; align-items: center; gap: 7px; }
 .plugin-dir { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--text-3); font-size: 12px; }
 .plugin-dir svg { flex: none; }
-.plugin-actions { display: flex; align-items: center; gap: 4px; flex: none; }
 .plugin-delete { color: var(--text-3); }
 @media (hover: hover) {
   .plugin-delete:hover:not(:disabled) { color: var(--danger); background: var(--danger-bg); }
@@ -8669,10 +8947,6 @@ a.btn-primary {
 .composer-bar > .plugin-slot-button:hover { background: var(--hover); color: var(--text); }
 
 /* The master switch: off by default, above the per-plugin list. */
-.plugin-master { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); }
-.plugin-master-copy { min-width: 0; }
-.plugin-master-title { font-size: 14px; font-weight: 500; color: var(--text); }
-.plugin-master-hint { margin: 2px 0 0; font-size: 13px; line-height: 1.5; color: var(--text-2); }
 .toggle:disabled { opacity: 0.45; cursor: default; }
 @media (hover: hover) {
   .toggle:disabled:hover { border-color: var(--border); }
@@ -9853,9 +10127,6 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
   color: var(--text-3);
 }
 
-.html-render-page {
-  transition: height var(--med) var(--ease);
-}
 
 .html-render-frame {
   display: block;
@@ -9975,12 +10246,8 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
 }
 
 .ustats { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.ustats-bar {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 12px calc(20px + var(--tools-over, 0px)) 12px 28px; min-height: 58px;
-}
-.main-full .ustats-bar { padding-left: 96px; }
-.ustats-title { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+/* The header is the pages' own (.page-head): back, title, then the machine and the views. */
+.ustats-bar { flex-wrap: wrap; row-gap: 8px; }
 .ustats-crumb { color: var(--text-3); margin: 0 -4px; }
 .ustats-machine {
   display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px 0 10px; border-radius: var(--radius);
@@ -10112,37 +10379,35 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
 .ustats-source { margin-left: auto; font-weight: 400; font-size: 13px; }
 .ustats-plan { font-size: 11.5px; font-weight: 500; padding: 0 6px; line-height: 18px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); color: var(--text-2); text-transform: capitalize; }
 .ustats-limit {
-  display: grid; grid-template-columns: 168px 1fr; gap: 4px 20px; align-items: center;
-  padding: 14px 16px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface);
+  display: grid; grid-template-columns: 168px minmax(0, 1fr); column-gap: 24px; row-gap: 8px; align-items: center;
+  padding: 16px 18px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--surface);
 }
+.ustats-limit-label { grid-row: 1 / span 3; align-self: center; }
 .ustats-limit + .ustats-limit { margin-top: 8px; }
 .ustats-section > .ustats-stack { margin-top: 4px; }
-.ustats-limit-label { font-size: 13px; }
+.ustats-limit-label { font-size: 13px; color: var(--text-2); }
 .ustats-limit-big { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .ustats-limit-big .ustats-dim { font-size: 13px; font-weight: 400; letter-spacing: 0; }
+/* A thin solid meter: how much is left. Neutral while there's room, amber then red as it runs out. */
 .ustats-limit-track {
-  position: relative; height: 28px; border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
-  background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--c) 9%, transparent) 6px 7px);
-  outline: 1px solid var(--border); outline-offset: -1px;
+  --fill: color-mix(in srgb, var(--text) 78%, transparent);
+  position: relative; grid-column: 2; height: 8px; border-radius: 999px; cursor: pointer;
+  background: var(--surface-3);
 }
-:where([data-keyboard-nav]) .ustats-limit-track:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.ustats-limit-track[aria-expanded="true"] { outline-color: var(--border-strong); }
-.ustats-limit-fill {
-  height: 100%; border-radius: var(--radius-sm); display: flex; align-items: center; padding-left: 10px;
-  background: color-mix(in srgb, var(--c) 42%, var(--surface-2)); font-size: 12px; font-weight: 500; font-variant-numeric: tabular-nums;
-}
-.ustats-limit-track[data-level="warn"] .ustats-limit-fill { background: color-mix(in srgb, var(--warn) 45%, var(--surface-2)); }
-.ustats-limit-track[data-level="danger"] .ustats-limit-fill { background: color-mix(in srgb, var(--danger) 45%, var(--surface-2)); }
-.ustats-limit-pace { position: absolute; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; border-radius: 2px; background: var(--text); opacity: 0.35; cursor: help; }
-.ustats-limit-pace::before { content: ""; position: absolute; inset: -6px -6px; }
-.ustats-limit-meta {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%); display: flex; gap: 5px;
-}
-.ustats-limit-meta > span {
-  display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border-radius: 4px;
-  background: color-mix(in srgb, var(--surface) 85%, transparent); font-size: 11.5px; font-variant-numeric: tabular-nums; color: var(--text-2);
-}
-.ustats-limit-warn { grid-column: 2; display: flex; align-items: center; gap: 6px; margin-top: 2px; font-size: 12px; color: var(--danger); }
+.ustats-limit-track::before { content: ""; position: absolute; inset: -10px 0; }
+:where([data-keyboard-nav]) .ustats-limit-track:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.ustats-limit-fill { height: 100%; min-width: 4px; border-radius: inherit; background: var(--fill); transition: width var(--med) var(--ease-out); }
+.ustats-limit-track[data-level="warn"] { --fill: var(--warn); }
+.ustats-limit-track[data-level="danger"] { --fill: var(--danger); }
+@media (hover: hover) { .ustats-limit-track:hover .ustats-limit-fill { filter: brightness(1.12); } }
+.ustats-limit-track[aria-expanded="true"] { box-shadow: 0 0 0 1px var(--border-strong); }
+/* Where today's pace lands by the reset: a small tick across the track. */
+.ustats-limit-pace { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--text); opacity: 0.5; cursor: help; }
+.ustats-limit-pace::before { content: ""; position: absolute; inset: -6px; }
+.ustats-limit-meta { grid-column: 2; display: flex; justify-content: flex-end; gap: 14px; min-height: 16px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ustats-limit-meta > span { display: inline-flex; align-items: center; gap: 5px; }
+.ustats-limit-warn { grid-column: 2; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--warn); }
+.ustats-limit-track[data-level="danger"] ~ .ustats-limit-warn { color: var(--danger); }
 .ustats-foot { margin-top: 20px; font-size: 12.5px; }
 
 /* A clicked limit bar: account, window and its banked reset. */
@@ -10180,12 +10445,16 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
   .ustats-stats { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 768px) {
-  .ustats-bar, .main-full .ustats-bar { padding: 10px 12px; }
-  .ustats-controls { margin-left: 0; width: 100%; }
+  .ustats-controls { margin-left: 0; width: 100%; padding-bottom: 4px; }
+  /* Refresh stays in the header's row, at its end, rather than wrapping onto a line of its own. */
+  .ustats-bar { position: relative; }
+  .ustats-bar .ustats-refresh { position: absolute; top: calc(max(6px, env(safe-area-inset-top)) + 4px); right: max(12px, env(safe-area-inset-right)); }
   .ustats-body { padding: 8px 16px 48px; }
   .ustats-stats { grid-template-columns: repeat(2, 1fr); }
-  .ustats-limit { grid-template-columns: 1fr; padding: 14px 16px; }
-  .ustats-limit-warn { grid-column: 1; }
+  .ustats-limit { grid-template-columns: 1fr; row-gap: 10px; padding: 14px 16px; }
+  .ustats-limit-label { grid-row: auto; }
+  .ustats-limit-track, .ustats-limit-meta, .ustats-limit-warn { grid-column: 1; }
+  .ustats-limit-meta { justify-content: flex-start; }
   .ustats-limit-pop { width: min(340px, calc(100vw - 24px)); }
   .ustats-table th:nth-child(3), .ustats-table td:nth-child(3), .ustats-table th:nth-child(6), .ustats-table td:nth-child(6) { display: none; }
   .ustats-table th, .ustats-table td { padding: 10px 8px; }
@@ -10347,7 +10616,6 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
 
 /* Settings → Runtimes → Add runtime */
 .rt-custom { margin-top: 22px; }
-.rt-add { margin-top: 10px; }
 .ar-root { z-index: 110; }
 .ar { width: min(560px, 100%); height: auto; max-height: calc(100dvh - 48px); display: flex; flex-direction: column; padding: 0; }
 .ar-head { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }

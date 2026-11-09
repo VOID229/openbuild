@@ -3,7 +3,9 @@ import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
 import { whisperRequest } from "../lib/whisper";
 import { Toggle } from "./primitives";
+import { SettingRow } from "./SettingsUI";
 
+/** Settings → General → Dictation: the browser's speech recognition, or the server's Whisper. */
 export function DictationSettings() {
   const settings = useStore((s) => s.settings.dictation);
   const update = useStore((s) => s.updateSettings);
@@ -14,18 +16,13 @@ export function DictationSettings() {
   useEffect(() => { setStatus(undefined); }, [connection, enabled]);
   return (
     <>
-      <div className="setting-row setting-row-divided">
-        <div className="setting-text">
-          <div className="setting-label">Local dictation</div>
-          <p className="setting-desc">Transcribe with your server’s Whisper instead of the browser. Up to two minutes per recording.</p>
-        </div>
+      <SettingRow label="Local dictation" desc="Transcribe with your server’s Whisper." hint="Instead of the browser’s speech recognition. Up to two minutes per recording.">
         <Toggle label="Local dictation" checked={enabled} onChange={(enabled) => update({ dictation: { enabled, connection } })} />
-      </div>
+      </SettingRow>
       {enabled && (
-        <div className="setting-row setting-row-stack setting-row-top">
+        <div className="setting-row">
           <div className="setting-text">
             <div className="setting-label">Whisper connection</div>
-            <p className="setting-desc">How the server reaches Whisper.</p>
             {status && (
               <p className={cx("setting-desc", "setting-status", status.ok ? "setting-status-ok" : "setting-status-bad")} role="status">
                 {status.text}
@@ -58,7 +55,7 @@ export function DictationSettings() {
                 }
               }}
             >
-              {checking ? "Checking…" : "Test connection"}
+              {checking ? "Checking…" : "Test"}
             </button>
           </div>
         </div>

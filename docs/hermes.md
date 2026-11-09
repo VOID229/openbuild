@@ -1,6 +1,6 @@
 # Hermes runtime
 
-Install Hermes on the device that runs your threads and run `hermes setup` to configure its providers. Enable Hermes in Settings → Runtimes, then select it for a new thread. OpenBuild discovers models through Hermes's ACP session model catalog. `HERMES_BIN` can point to a specific executable.
+Install Hermes on the device that runs your threads and run `hermes setup` to configure its providers. Enable Hermes in Settings → Harnesses, then select it for a new thread. OpenBuild discovers models through Hermes's ACP session model catalog. `HERMES_BIN` can point to a specific executable.
 
 Each thread owns a `hermes acp` process inside OpenBuild's detached agent worker. Replies continue when the OpenBuild server shuts down or restarts; output is journaled and the server reattaches without replaying prompts. This does not keep processes running through a machine shutdown or worker crash. An interrupted worker reports the interruption instead of repeating tool effects.
 

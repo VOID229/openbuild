@@ -147,7 +147,7 @@ export function Notices() {
         setFeedback(`${listPhrase(completed)} updated.`);
       }
     } catch (err) {
-      if (!controller.signal.aborted) { setError("Runtime update failed. You can retry or check Settings → Runtimes."); setDetails(err instanceof Error ? err.message : "Update failed."); }
+      if (!controller.signal.aborted) { setError("Harness update failed. You can retry or check Settings → Harnesses."); setDetails(err instanceof Error ? err.message : "Update failed."); }
     } finally {
       busy.current = false;
       if (!controller.signal.aborted) setUpdating(false);
@@ -238,7 +238,7 @@ export function Notices() {
       )}
       {showUpdates && (
         <Notice
-          text={error || feedback || (updating ? "Updating runtimes…" : `${listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} ${shown.length === 1 ? "is" : "are"} available.`)}
+          text={error || feedback || (updating ? "Updating harnesses…" : `${listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} ${shown.length === 1 ? "is" : "are"} available.`)}
           role={error ? "alert" : "status"}
           action={
             <button type="button" hidden={!shown.length && !updating} className="btn btn-sm btn-primary" disabled={updating || releaseBusy} aria-busy={updating} onClick={() => void startUpdate()}>

@@ -8,7 +8,7 @@ import { Lightbox, useLightbox } from "./components/Lightbox";
 import { HarnessSetup } from "./components/HarnessSetup";
 import { Notices } from "./components/Notices";
 import { IconButton } from "./components/primitives";
-import { SettingsModal } from "./components/Settings";
+import { SettingsPage } from "./components/Settings";
 import { FileTree } from "./components/FileTree";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { SidePanel } from "./components/SidePanel";
@@ -193,7 +193,7 @@ function Main() {
   // A thread opened from a link in OpenBots shows in place of the bot chat, with the bots' sidebar kept.
   // Usage opened over it covers it, and closing Usage comes back to it.
   // Until threads load, a thread named by the URL holds its place rather than flashing the bot chat.
-  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && (!!chat || !chatsLoaded);
+  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen && !s.settingsOpen) && (!!chat || !chatsLoaded);
   const botsChat = botsOpen && !botsThread;
   useBotsThreadEscape(botsThread);
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -337,12 +337,8 @@ function Main() {
           st.openSettings();
           break;
         case "openUsage":
+          // On a phone Usage is the pane, so it slides in over whichever list is showing (the store sees to that).
           st.setUsageOpen(true);
-          // On a phone Usage is the pane, so it slides in over whichever list is showing.
-          if (window.innerWidth <= 768) {
-            if (st.botsOpen) st.setBotsSidebarOpen(false);
-            else st.setSidebarOpen(false);
-          }
           break;
         case "focusSearch":
           if (st.sidebarOpen) shown(".search input")?.focus();
@@ -358,7 +354,7 @@ function Main() {
     };
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
-      if (e.isComposing || e.repeat || st.settingsOpen || isShortcutRecording()) return;
+      if (e.isComposing || e.repeat || isShortcutRecording()) return;
       const el = document.activeElement as HTMLElement | null;
       const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
       for (const def of SHORTCUTS) {
@@ -386,8 +382,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = usageOpen ? "Usage · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, titling, usageOpen, botsChat]);
+    document.title = settingsOpen ? "Settings · OpenBuild" : usageOpen ? "Usage · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, settingsOpen, usageOpen, botsChat]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -402,12 +398,12 @@ function Main() {
   return (
     <>
       <PluginSlot name="app:before" />
-      <div className={cx("app", (settingsOpen || harnessSetupOpen) && "app-behind-modal")} inert={settingsOpen || lightboxOpen || harnessSetupOpen}>
+      <div className={cx("app", harnessSetupOpen && "app-behind-modal")} inert={lightboxOpen || harnessSetupOpen}>
         {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
         <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
         <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
         {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
-        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under")} inert={phone && botsListShowing}>
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen) && "main-page")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
@@ -430,7 +426,7 @@ function Main() {
               </>
             )}
             {/* On a phone this is the screen's title bar, so it says which thread this is. */}
-            {phone && chat && !usageOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
+            {phone && chat && !usageOpen && !settingsOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
           </div>
           {!chatsLoaded ? (
             loadError && (
@@ -446,12 +442,14 @@ function Main() {
             )
           ) : (
             <>
-              <Activity mode={botsChat && !usageOpen ? "visible" : "hidden"}><BotsView /></Activity>
-              {botsOpen && usageOpen && <UsagePage />}
+              <Activity mode={botsChat && !usageOpen && !settingsOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              {/* Settings and Usage are pages in place of the bot chat, or of the thread below. */}
+              {botsOpen && settingsOpen && <SettingsPage />}
+              {botsOpen && usageOpen && !settingsOpen && <UsagePage />}
               <Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                    {usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
+                    {settingsOpen && !botsOpen ? <SettingsPage /> : usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
                     <TerminalPanel />
                   </div>
                   {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
@@ -464,7 +462,6 @@ function Main() {
           )}
         </main>
       </div>
-      <SettingsModal />
       <HarnessSetup />
       <Notices />
       <Lightbox />

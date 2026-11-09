@@ -83,12 +83,8 @@ export function BotFriends() {
   useEffect(load, [load, live]);
   return (
     <>
-      <div className="pi-subhead">
-        <h3>Friends</h3>
-      </div>
-      <p className="setting-desc">
-        People whose OpenBuild shares group chats with yours. They reach only those chats. Add one with <code>openbuild friend invite</code> here and{" "}
-        <code>openbuild friend add</code> on theirs.
+      <p className="subpage-desc">
+        People whose OpenBuild shares group chats with yours. They reach only those chats.
       </p>
       {error && (
         <p className="pi-error" role="alert">
@@ -97,7 +93,11 @@ export function BotFriends() {
       )}
       <ul className="pi-list">
         {friends?.map((f) => <FriendRow key={f.id} friend={f} onRemoved={load} />)}
-        {friends && !friends.length && <li className="pi-empty">No friends yet.</li>}
+        {friends && !friends.length && (
+          <li className="pi-empty">
+            No friends yet. Run <code>openbuild friend invite</code> here, then <code>openbuild friend add</code> on theirs.
+          </li>
+        )}
       </ul>
     </>
   );

@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { initialRouteState, readRoute, startRouting, threadPath } from "../src/lib/routes";
 
 function harness(url = "/new") {
-  let state = { activeChatId: undefined as string | undefined, settingsOpen: false, settingsSection: "profile" as import("../src/lib/store").SettingsSection, botsOpen: undefined as boolean | undefined, botsThread: undefined as boolean | undefined, chats: [{ id: "abc" }, { id: "def" }] };
+  let state = { activeChatId: undefined as string | undefined, settingsOpen: false, settingsSection: "profile" as import("../src/lib/store").SettingsSection, settingsPage: undefined as string | undefined, settingsIndex: false as boolean | undefined, botsOpen: undefined as boolean | undefined, botsThread: undefined as boolean | undefined, chats: [{ id: "abc" }, { id: "def" }] };
   const subscribers = new Set<() => void>();
   const listeners = new Map<string, () => void>();
   let entries = [{ url, state: null as any }];
@@ -36,16 +36,23 @@ describe("clean URLs", () => {
     expect(threadPath("a/b #")).toBe("/thread-a%2Fb%20%23");
     expect(readRoute("/thread-a%2Fb%20%23")).toEqual({ threadId: "a/b #" });
     expect(readRoute("/", "#/c/abc")).toEqual({ threadId: "abc" });
-    expect(readRoute("/settings")).toEqual({ section: "profile" });
+    // Settings alone is its list of sections (a phone's first screen); then a section, or a page inside one.
+    expect(readRoute("/settings")).toEqual({ section: "profile", index: true });
     expect(readRoute("/settings/appearance/")).toEqual({ section: "appearance" });
     expect(readRoute("/settings/shortcuts")).toEqual({ section: "shortcuts" });
+    expect(readRoute("/settings/runtimes")).toEqual({ section: "runtimes" });
+    expect(readRoute("/settings/devices")).toEqual({ section: "devices" });
+    expect(readRoute("/settings/plugin:hello")).toEqual({ section: "plugin:hello" });
+    expect(readRoute("/settings/bots/models")).toEqual({ section: "bots", page: "models" });
+    expect(readRoute("/settings/bots/bot/b%25201")).toEqual({ section: "bots", page: "bot/b%201" });
     expect(readRoute("/settings/invalid")).toEqual({ section: "profile" });
+    expect(readRoute("/settings/invalid/page")).toEqual({ section: "profile" });
     expect(readRoute("/bots/thread-abc")).toEqual({ bots: true, threadId: "abc" });
     expect(readRoute("/thread-%ZZ")).toEqual({});
   });
 
   test("canonicalizes deep links and stale ids without adding history", () => {
-    for (const [url, expected] of [["/", "/new"], ["/thread-missing", "/new"], ["/#/c/abc", "/thread-abc"], ["/settings", "/settings/profile"]]) {
+    for (const [url, expected] of [["/", "/new"], ["/thread-missing", "/new"], ["/#/c/abc", "/thread-abc"], ["/settings", "/settings"], ["/settings/nope", "/settings/profile"], ["/settings/bots/bot/b%25201", "/settings/bots/bot/b%25201"]]) {
       const h = harness(url);
       expect(h.location.pathname).toBe(expected!);
       expect(h.location.hash).toBe("");
@@ -59,17 +66,60 @@ describe("clean URLs", () => {
     h.store.setState({ activeChatId: "abc" });
     expect(h.location.pathname).toBe("/thread-abc");
     h.store.setState({ settingsOpen: true, settingsSection: "general" });
+    expect(h.count()).toBe(3);
+    // Settings was opened from the thread one entry back, so leaving it can go back there.
+    expect(h.history.state).toMatchObject({ threadId: "abc", back: 1 });
+    // Moving between sections is the same visit: the entry is replaced, not stacked.
     h.store.setState({ settingsSection: "pi" });
     expect(h.location.pathname).toBe("/settings/pi");
-    h.go(-1);
-    expect(h.store.getState().settingsSection).toBe("general");
+    expect(h.count()).toBe(3);
+    expect(h.history.state).toMatchObject({ back: 1 });
     h.go(-1);
     expect(h.store.getState().settingsOpen).toBe(false);
     expect(h.store.getState().activeChatId).toBe("abc");
     h.go(1);
-    expect(h.store.getState().settingsOpen).toBe(true);
+    expect(h.store.getState()).toMatchObject({ settingsOpen: true, settingsSection: "pi" });
     h.store.setState({ settingsOpen: false });
     expect(h.location.pathname).toBe("/thread-abc");
+    h.stop();
+  });
+
+  test("pages inside a section stack as entries that count their way back, and going up or across replaces", () => {
+    const h = harness("/thread-abc");
+    h.store.setState({ settingsOpen: true, settingsSection: "bots" });
+    h.store.setState({ settingsPage: "models" });
+    expect(h.location.pathname).toBe("/settings/bots/models");
+    expect(h.count()).toBe(3);
+    // One level deeper: Back goes up to the section, and leaving Settings is two entries back.
+    expect(h.history.state).toMatchObject({ threadId: "abc", back: 2, up: true });
+    h.store.setState({ settingsPage: "bot/b 1" });
+    expect(h.location.pathname).toBe("/settings/bots/bot/b%201");
+    // A page beside it (not inside it) takes its place.
+    expect(h.count()).toBe(3);
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ settingsOpen: true, settingsSection: "bots", settingsPage: undefined });
+    h.go(1);
+    expect(h.store.getState()).toMatchObject({ settingsSection: "bots", settingsPage: "bot/b 1" });
+    // Another section replaces the page's entry, still counting the way back.
+    h.store.setState({ settingsSection: "general", settingsPage: undefined });
+    expect(h.location.pathname).toBe("/settings/general");
+    expect(h.count()).toBe(3);
+    expect(h.history.state).toMatchObject({ back: 2 });
+    h.go(-2);
+    expect(h.store.getState()).toMatchObject({ settingsOpen: false, activeChatId: "abc" });
+    // Opened by a link, there's no entry behind it to go back to.
+    const deep = harness("/settings/pi/skills");
+    expect(deep.store.getState()).toMatchObject({ settingsOpen: true, settingsSection: "pi", settingsPage: "skills" });
+    expect(deep.history.state?.back).toBeUndefined();
+    deep.stop();
+    h.stop();
+  });
+
+  test("Usage remembers it was opened from one entry back", () => {
+    const h = harness("/thread-abc");
+    h.store.setState({ usageOpen: true } as never);
+    expect(h.location.pathname).toBe("/usage");
+    expect(h.history.state).toMatchObject({ threadId: "abc", back: 1 });
     h.stop();
   });
 
@@ -161,12 +211,13 @@ describe("clean URLs", () => {
 
 describe("initialRouteState", () => {
   test("a thread opened inside OpenBots loads as that thread, not the bot chat", () => {
-    expect(initialRouteState("/bots/thread-abc")).toEqual({ usageOpen: false, botsOpen: true, botsThread: true, activeChatId: "abc" });
+    expect(initialRouteState("/bots/thread-abc")).toEqual({ usageOpen: false, botsOpen: true, botsThread: true, activeChatId: "abc", settingsOpen: false, settingsSection: undefined, settingsPage: undefined, settingsIndex: false });
   });
   test("OpenBots, Usage and plain threads load into their own mode", () => {
     expect(initialRouteState("/bots")).toMatchObject({ botsOpen: true, botsThread: false, activeChatId: undefined });
     expect(initialRouteState("/bots/usage")).toMatchObject({ botsOpen: true, usageOpen: true, botsThread: false });
     expect(initialRouteState("/thread-abc")).toMatchObject({ botsOpen: false, botsThread: false });
-    expect(initialRouteState("/new")).toMatchObject({ botsOpen: false, usageOpen: false });
+    expect(initialRouteState("/new")).toMatchObject({ botsOpen: false, usageOpen: false, settingsOpen: false });
+    expect(initialRouteState("/settings/bots/models")).toMatchObject({ settingsOpen: true, settingsSection: "bots", settingsPage: "models", settingsIndex: false });
   });
 });

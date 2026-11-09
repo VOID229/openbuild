@@ -1,6 +1,6 @@
 # Native Codex runtime
 
-Choose **Codex** in the runtime picker before the first message. The runtime belongs to the thread and cannot change after it starts; start a new thread to switch runtimes.
+Choose **Codex** in the harness picker before the first message. The runtime belongs to the thread and cannot change after it starts; start a new thread to switch runtimes.
 
 ## Install and sign in
 

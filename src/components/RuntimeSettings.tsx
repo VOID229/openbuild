@@ -1,6 +1,6 @@
-// Settings → Runtimes: every thread runtime on a device (installed, version, updates, sign-in,
-// errors), and a switch that hides a runtime from the new-thread picker on that device. Below
-// them, the accounts added with "Add runtime", which can be edited or deleted.
+// Settings → Harnesses (stored as "runtimes"): every harness threads run on, on a device
+// (installed, version, updates, sign-in, errors), and a switch that hides one from the new-thread
+// picker on that device. A page of its own lists the accounts added with "Add harness", to edit or delete.
 import { CircleAlert, Pencil, Plus, RefreshCw, RotateCw, Trash2 } from "lucide-react";
 import { accountOnDevice, AddRuntime } from "./AddRuntime";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -11,8 +11,9 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { RUNTIMES, runtimeEnabled, runtimeName, setRuntimeEnabled } from "../lib/runtimes";
 import { useStore } from "../lib/store";
 import { cx } from "../lib/ui";
-import { DeviceRow, deviceRefusal, SubHeading, useJob, usePiDevice } from "./PiSettings";
+import { DeviceRow, deviceRefusal, useJob, usePiDevice } from "./PiSettings";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { NavRow, SubPage } from "./SettingsUI";
 import { ACCOUNT_VARIABLES } from "./RuntimeAccounts";
 import { RuntimeIcon } from "./Workspace";
 
@@ -126,7 +127,7 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
         <Toggle
           checked={enabled}
           disabled={enabled && lastOn}
-          label={`${enabled ? "Hide" : "Show"} ${name} in the runtime picker`}
+          label={`${enabled ? "Hide" : "Show"} ${name} in the harness picker`}
           onChange={onToggle}
         />
       </div>
@@ -150,7 +151,7 @@ function RuntimeRow({ runtime, label, desc, status, enabled, lastOn, onToggle, u
   );
 }
 
-/** The runtimes added with "Add runtime" on one device. */
+/** The accounts added with "Add harness" on one device. */
 function CustomRuntimes({ deviceId, onEdit }: { deviceId?: string; onEdit: (a: RuntimeAccount) => void }) {
   const saved = useStore((s) => s.settings.runtimeAccounts);
   const update = useStore((s) => s.updateSettings);
@@ -169,7 +170,6 @@ function CustomRuntimes({ deviceId, onEdit }: { deviceId?: string; onEdit: (a: R
   };
   return (
     <section className="rt-custom">
-      <SubHeading>Custom</SubHeading>
       <ul className="pi-list">
         {accounts.map((a) => (
           <li key={a.id} className="rt-row">
@@ -195,7 +195,7 @@ function CustomRuntimes({ deviceId, onEdit }: { deviceId?: string; onEdit: (a: R
             </div>
           </li>
         ))}
-        {!accounts.length && <li className="pi-empty">None yet. Add runtime saves another account of Claude Code, Codex or Cursor here.</li>}
+        {!accounts.length && <li className="pi-empty">None yet. Add another account of Claude Code, Codex or Cursor.</li>}
       </ul>
     </section>
   );
@@ -203,16 +203,12 @@ function CustomRuntimes({ deviceId, onEdit }: { deviceId?: string; onEdit: (a: R
 
 export function RuntimesSection() {
   const [deviceId, setDeviceId] = usePiDevice();
-  return (
-    <>
-      <Heading>Runtimes</Heading>
-      <DeviceRow deviceId={deviceId} onChange={setDeviceId} title="Runtimes on" label="Device whose runtimes to manage" />
-      <RuntimeList key={deviceId ?? ""} deviceId={deviceId} />
-    </>
-  );
+  return <RuntimeList key={deviceId ?? ""} deviceId={deviceId} device={<DeviceRow deviceId={deviceId} onChange={setDeviceId} title="Harnesses on" label="Device whose harnesses to manage" />} />;
 }
 
-function RuntimeList({ deviceId }: { deviceId?: string }) {
+function RuntimeList({ deviceId, device }: { deviceId?: string; device: React.ReactNode }) {
+  const page = useStore((s) => s.settingsPage);
+  const custom = useStore((s) => (s.settings.runtimeAccounts ?? []).filter((a) => accountOnDevice(a, deviceId)).length);
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
   const key = deviceId ?? "";
@@ -287,17 +283,33 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
     updateSettings(!on && sameDevice && current === runtime && fallback ? { ...patch, threadRuntime: fallback } : patch);
   };
 
+  const addDialog = <AddRuntime open={adding} deviceId={deviceId} where={where ?? "this device"} account={editing} onClose={closeAdding} />;
+  if (page === "custom")
+    return (
+      <SubPage
+        title="Custom accounts"
+        trail={["Harnesses"]}
+        action={<button type="button" className="btn btn-sm" onClick={() => { setEditing(undefined); setAdding(true); }}><Plus size={14} /> Add harness</button>}
+      >
+        {device}
+        {addDialog}
+        <CustomRuntimes deviceId={deviceId} onEdit={(a) => { setEditing(a); setAdding(true); }} />
+      </SubPage>
+    );
+
   return (
     <>
-      <div className="pi-subhead">
-        <p className="setting-desc">Turned-off runtimes are hidden from the picker for new threads.</p>
-        <div className="row-actions">
+      <Heading
+        action={
           <button type="button" className="btn btn-sm" disabled={checking || !!updating || job.running} onClick={() => void load(true)}>
             {checking ? <Spinner size={12} /> : <RefreshCw size={14} />} Check for updates
           </button>
-        </div>
-      </div>
-      <AddRuntime open={adding} deviceId={deviceId} where={where ?? "this device"} account={editing} onClose={closeAdding} />
+        }
+      >
+        Harnesses
+      </Heading>
+      {device}
+      {addDialog}
       {error && (
         <p className="pi-error" role="alert">
           <CircleAlert size={14} /> {error}
@@ -323,10 +335,8 @@ function RuntimeList({ deviceId }: { deviceId?: string }) {
           );
         })}
       </ul>
-      <CustomRuntimes deviceId={deviceId} onEdit={(a) => { setEditing(a); setAdding(true); }} />
-      <div className="rt-add">
-        <button type="button" className="btn btn-sm" onClick={() => { setEditing(undefined); setAdding(true); }}><Plus size={14} /> Add runtime</button>
-      </div>
+      <p className="field-help">Switched-off harnesses are hidden from the picker for new threads.</p>
+      <NavRow label="Custom accounts" desc="More accounts of Claude Code, Codex or Cursor." value={custom ? `${custom}` : "None"} to="custom" />
     </>
   );
 }

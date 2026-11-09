@@ -368,14 +368,14 @@ function PickerFoot({ deviceId }: { deviceId?: string }) {
   return (
     <div className="mp-foot">
       <SpeedToggle deviceId={deviceId} />
-      <span className="mp-foot-label">Runtime</span>
+      <span className="mp-foot-label">Harness</span>
       {started ? (
         <span className="mp-foot-value mp-runtime-fixed" data-tooltip="Fixed once a thread starts" data-tooltip-side="top">
           <RuntimeIcon runtime={fixed} size={13} />
           {RUNTIME_LABEL[fixed]}
         </span>
       ) : (
-        <span className="mp-levels" role="radiogroup" aria-label="Runtime" onKeyDown={(e) => arrowNav(e)}>
+        <span className="mp-levels" role="radiogroup" aria-label="Harness" onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => {
             const absent = missing(o.runtime);
             return (

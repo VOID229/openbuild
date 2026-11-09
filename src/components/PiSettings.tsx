@@ -47,7 +47,9 @@ import { cx } from "../lib/ui";
 import { OptionSelect } from "./ModelSelect";
 import { projectsDir } from "./NewProject";
 import { PathField } from "./PathField";
-import { IconButton, SettingsBack, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { openSettingsPage, settingsUp } from "../lib/pages";
+import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
+import { Hint, NavRow, SettingsGroup, SubPage } from "./SettingsUI";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
@@ -186,7 +188,7 @@ export function JobLog({ job }: { job: ReturnType<typeof useJob> }) {
 
 // ------------------------------------------------------------------ file editor
 
-function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; deviceId?: string; onClose: () => void }) {
+function FileEditor({ resource, deviceId, trail, onClose }: { resource: PiResource; deviceId?: string; trail: string[]; onClose: () => void }) {
   const [file, setFile] = useState(resource.files[0]!);
   const [content, setContent] = useState<string>();
   const [saved, setSaved] = useState<string>();
@@ -227,15 +229,20 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
     onClose();
   };
   return (
-    <div className="pi-editor">
-      <SettingsBack label="Back to Pi agent" onBack={leave} />
-      <div className="pi-editor-head">
-        <span className="pi-editor-title">{resource.name}</span>
-        {dirty && <span className="badge">unsaved</span>}
-        <button type="button" className="btn btn-sm" disabled={!dirty || saving} onClick={save}>
-          {saving ? <Spinner size={12} /> : <Save size={14} />} Save
-        </button>
-      </div>
+    <SubPage
+      title={resource.name}
+      trail={trail}
+      onBack={leave}
+      className="pi-editor"
+      action={
+        <span className="pi-editor-head">
+          {dirty && <span className="badge">unsaved</span>}
+          <button type="button" className="btn btn-sm" disabled={!dirty || saving} onClick={save}>
+            {saving ? <Spinner size={12} /> : <Save size={14} />} Save
+          </button>
+        </span>
+      }
+    >
       {resource.files.length > 1 && (
         <select className="input input-sm pi-editor-files" value={file} aria-label="File" onChange={(e) => (!dirty || confirm("Discard your unsaved changes?")) && setFile(e.target.value)}>
           {resource.files.map((f) => (
@@ -245,7 +252,7 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
           ))}
         </select>
       )}
-      <p className="field-help pi-editor-path">{tilde(file.startsWith("~") ? file : `~/.pi/agent/${file}`)} · Pi reloads it for the next message.</p>
+      <p className="field-help pi-editor-path" data-tooltip="Pi reloads it for the next message" data-tooltip-side="bottom">{tilde(file.startsWith("~") ? file : `~/.pi/agent/${file}`)}</p>
       {error && <ErrorNote>{error}</ErrorNote>}
       {content === undefined ? (
         !error && <Spinner />
@@ -271,17 +278,17 @@ function FileEditor({ resource, deviceId, onClose }: { resource: PiResource; dev
           }}
         />
       )}
-    </div>
+    </SubPage>
   );
 }
 
 // ------------------------------------------------------------------ Pi section
 
 // Extensions are listed, edited, removed and toggled here, but not created: no New button for them.
-const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: string; creatable: boolean }> = {
-  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads.", creatable: false },
-  skill: { title: "Skills", one: "skill", help: "Instructions Pi pulls in when a task needs them.", creatable: true },
-  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name.", creatable: true },
+const KIND_LABEL: Record<ResourceKind, { title: string; one: string; help: string; creatable: boolean; page: string }> = {
+  extension: { title: "Extensions", one: "extension", help: "Tools, commands and providers Pi loads.", creatable: false, page: "extensions" },
+  skill: { title: "Skills", one: "skill", help: "Instructions Pi pulls in when a task needs them.", creatable: true, page: "skills" },
+  prompt: { title: "Prompt templates", one: "prompt template", help: "Saved prompts, run as /name.", creatable: true, page: "prompts" },
 };
 
 /** A description that starts by repeating the name ("undo — Session undo") reads as just the rest. */
@@ -309,18 +316,14 @@ export function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }:
   };
   return (
     <section className="pi-block">
-      <SubHeading
-        action={
-          label.creatable && (
-            <button type="button" className="link-btn" onClick={() => setAdding((a) => !a)}>
-              <Plus size={13} /> New {label.one}
-            </button>
-          )
-        }
-      >
-        {label.title}
-      </SubHeading>
-      <p className="setting-desc">{label.help}</p>
+      <div className="pi-subhead">
+        <p className="subpage-desc">{label.help}</p>
+        {label.creatable && (
+          <button type="button" className="btn btn-sm" onClick={() => setAdding((a) => !a)}>
+            <Plus size={14} /> New {label.one}
+          </button>
+        )}
+      </div>
       {label.creatable && adding && (
         <form
           className="pi-inline-form"
@@ -348,7 +351,7 @@ export function ResourceList({ kind, items, deviceId, onChanged, onEdit, busy }:
                 {r.name}
                 {r.builtin && <span className="badge">built-in</span>}
               </span>
-              {describeResource(r) && <span className="pi-row-desc">{describeResource(r)}</span>}
+              {describeResource(r) && <span className="pi-row-desc pi-clamp" title={describeResource(r)}>{describeResource(r)}</span>}
             </div>
             <span className="pi-row-actions">
               {!r.builtin && r.files.length > 0 && (
@@ -393,8 +396,7 @@ function Packages({ packages, job, deviceId, onChanged }: { packages: string[]; 
   };
   return (
     <section className="pi-block">
-      <SubHeading>Packages</SubHeading>
-      <p className="setting-desc">Extensions, skills and prompts from npm or git.</p>
+      <p className="subpage-desc">Extensions, skills and prompts from npm or git.</p>
       <ul className="pi-list">
         {packages.map((p) => (
           <li key={p} className="pi-row">
@@ -430,17 +432,13 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
   const [open, setOpen] = useState<number>();
   return (
     <section className="pi-block">
-      <SubHeading
-        action={
-          problems.length > 0 && (
-            <button type="button" className="link-btn" onClick={onClear}>
-              Clear
-            </button>
-          )
-        }
-      >
-        Problems {problems.length > 0 && <span className="badge badge-bad">{problems.length}</span>}
-      </SubHeading>
+      {problems.length > 0 && (
+        <div className="pi-subhead pi-subhead-end">
+          <button type="button" className="btn btn-sm" onClick={onClear}>
+            Clear
+          </button>
+        </div>
+      )}
       {problems.length ? (
         <ul className="pi-list">
           {[...problems].reverse().map((p, i) => (
@@ -485,7 +483,7 @@ export function PiSection() {
   const loadPiResources = useStore((s) => s.loadPiResources);
   const setPiCache = useStore((s) => s.setPiCache);
   const [statusError, setStatusError] = useState<string>();
-  const [editing, setEditing] = useState<PiResource>();
+  const page = useStore((s) => s.settingsPage);
   const refreshDetection = useStore((s) => s.refreshDetection);
   const loadDeviceModels = useStore((s) => s.loadDeviceModels);
   const where = deviceName(deviceId);
@@ -515,15 +513,12 @@ export function PiSection() {
 
   useEffect(() => {
     setStatusError(undefined);
-    setEditing(undefined);
     // Revalidate quietly; the cached status and resources are already on screen.
     void loadStatus();
     void loadResources();
     // Pick up a job that was already running there (e.g. an update started before a reload).
     void job.follow().catch(() => {});
   }, [deviceId]);
-
-  if (editing) return <FileEditor resource={editing} deviceId={deviceId} onClose={() => (setEditing(undefined), void loadResources())} />;
 
   const start = async (fn: () => Promise<unknown>) => {
     try {
@@ -534,6 +529,41 @@ export function PiSection() {
     }
   };
   const by = (k: ResourceKind) => data?.resources.filter((r) => r.kind === k) ?? [];
+  const kinds: ResourceKind[] = ["extension", "skill", "prompt"];
+
+  // A page inside Pi agent: a kind of resource (settings/pi/skills), one's file (settings/pi/skills/<id>), packages or problems.
+  const [where_, rawId] = page?.split("/") ?? [];
+  const kind = kinds.find((k) => KIND_LABEL[k].page === where_);
+  if (kind && rawId) {
+    const id = decodeURIComponent(rawId);
+    const resource = data?.resources.find((r) => r.id === id && r.kind === kind);
+    if (!resource) return data ? <SubPage title={id} trail={["Pi agent", KIND_LABEL[kind].title]} parent={where_}><p className="pi-empty">It isn't there any more.</p></SubPage> : <Spinner />;
+    return <FileEditor key={resource.id} resource={resource} deviceId={deviceId} trail={["Pi agent", KIND_LABEL[kind].title]} onClose={() => (settingsUp(where_), void loadResources())} />;
+  }
+  if (kind)
+    return (
+      <SubPage title={KIND_LABEL[kind].title} trail={["Pi agent"]}>
+        {!data ? <Spinner /> : <ResourceList kind={kind} items={by(kind)} deviceId={deviceId} onChanged={loadResources} onEdit={(r) => openSettingsPage(`${where_}/${encodeURIComponent(r.id)}`)} busy={job.running} />}
+      </SubPage>
+    );
+  if (page === "packages")
+    return (
+      <SubPage title="Packages" trail={["Pi agent"]}>
+        {!data ? <Spinner /> : <Packages packages={data.packages} job={job} deviceId={deviceId} onChanged={loadResources} />}
+      </SubPage>
+    );
+  if (page === "problems")
+    return (
+      <SubPage title="Problems" trail={["Pi agent"]}>
+        <Problems problems={problems} onClear={() => void clearPiProblems(deviceId).then(() => setPiCache({ problems: [] }, deviceId))} />
+      </SubPage>
+    );
+
+  const count = (k: ResourceKind) => {
+    const items = by(k);
+    const on = items.filter((r) => r.enabled).length;
+    return data ? (on === items.length ? `${items.length}` : `${on} of ${items.length} on`) : "";
+  };
 
   return (
     <>
@@ -563,17 +593,13 @@ export function PiSection() {
 
       {status?.installed && (
         <>
-          <Problems problems={problems} onClear={() => void clearPiProblems(deviceId).then(() => setPiCache({ problems: [] }, deviceId))} />
-          {!data ? (
-            <Spinner />
-          ) : (
-            <>
-              <ResourceList kind="extension" items={by("extension")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <ResourceList kind="skill" items={by("skill")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <ResourceList kind="prompt" items={by("prompt")} deviceId={deviceId} onChanged={loadResources} onEdit={setEditing} busy={job.running} />
-              <Packages packages={data.packages} job={job} deviceId={deviceId} onChanged={loadResources} />
-            </>
+          {problems.length > 0 && (
+            <NavRow label="Problems" icon={<CircleAlert size={16} className="bad" />} value={<span className="badge badge-bad">{problems.length}</span>} to="problems" />
           )}
+          {kinds.map((k) => (
+            <NavRow key={k} label={KIND_LABEL[k].title} desc={KIND_LABEL[k].help} value={count(k)} to={KIND_LABEL[k].page} />
+          ))}
+          <NavRow label="Packages" desc="Extensions, skills and prompts from npm or git." value={data ? `${data.packages.length}` : ""} to="packages" />
         </>
       )}
     </>
@@ -743,16 +769,27 @@ function LoginFlow({ provider, type, deviceId, onEnd }: { provider: PiProvider; 
  */
 export function ProvidersSection() {
   const [deviceId, setDeviceId] = usePiDevice();
+  const adding = useStore((s) => s.settingsPage) === "add";
+  const device = <DeviceRow deviceId={deviceId} onChange={setDeviceId} title="Manage on" label="Device whose Pi providers to manage" />;
+  const providers = <PiProvidersSection key={deviceId ?? "local"} deviceId={deviceId} adding={adding} />;
+  // Adding one is a page of its own: the list of everything Pi can sign in to is long.
+  if (adding)
+    return (
+      <SubPage title="Add a provider" trail={["Providers"]}>
+        {device}
+        {providers}
+      </SubPage>
+    );
   return (
     <>
       <Heading>Providers & accounts</Heading>
-      <DeviceRow deviceId={deviceId} onChange={setDeviceId} title="Manage on" label="Device whose Pi providers to manage" />
-      <PiProvidersSection key={deviceId ?? "local"} deviceId={deviceId} />
+      {device}
+      {providers}
     </>
   );
 }
 
-function PiProvidersSection({ deviceId }: { deviceId?: string }) {
+function PiProvidersSection({ deviceId, adding }: { deviceId?: string; adding: boolean }) {
   const providers = useStore((s) => piCacheOn(s, deviceId).providers);
   const loadPiProviders = useStore((s) => s.loadPiProviders);
   const [error, setError] = useState<string>();
@@ -882,6 +919,8 @@ function PiProvidersSection({ deviceId }: { deviceId?: string }) {
           onEnd={(ok) => {
             setLogin(undefined);
             if (ok) {
+              // Signed in from the list of providers to add: back to the ones ready to use, where it now is.
+              if (adding) settingsUp();
               void load();
               if (deviceId) void loadDeviceModels(deviceId, true);
               else void refreshDetection();
@@ -889,17 +928,18 @@ function PiProvidersSection({ deviceId }: { deviceId?: string }) {
           }}
         />
       )}
-      <label className="search pi-search">
-        <Search size={15} />
-        <input type="text" placeholder="Search providers…" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </label>
+      {adding && (
+        <label className="search pi-search">
+          <Search size={15} />
+          <input type="text" placeholder="Search providers…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+      )}
       {error && <ErrorNote>{error}</ErrorNote>}
       {!providers ? (
         !error && <Spinner />
-      ) : (
+      ) : !adding ? (
         <>
-          <section className="pi-block">
-            <SubHeading>Ready to use</SubHeading>
+          <SettingsGroup title="Ready to use">
             <ul className="pi-list">
               {configured.map((p) => (
                 <li key={p.id} className="pi-row">
@@ -913,11 +953,14 @@ function PiProvidersSection({ deviceId }: { deviceId?: string }) {
                   {actions(p)}
                 </li>
               ))}
-              {!configured.length && <li className="pi-empty">{q ? "No match." : "No providers yet. Add one below."}</li>}
+              {!configured.length && <li className="pi-empty">No providers yet.</li>}
             </ul>
-          </section>
+          </SettingsGroup>
+          <NavRow className="providers-add" icon={<Plus size={16} />} label="Add a provider" value={others.length ? `${others.length} available` : "All set up"} to="add" />
+        </>
+      ) : (
+        <>
           <section className="pi-block">
-            <SubHeading>Add a provider</SubHeading>
             <ul className="pi-list">
               {others.map((p) => (
                 <li key={p.id} className="pi-row">
@@ -1016,10 +1059,12 @@ export function ProjectsSection() {
   return (
     <>
       <Heading>Projects</Heading>
-      <div className="pi-row">
-        <span className="pi-row-text">
-          <span className="pi-row-name">Default location</span>
-          <span className="pi-row-desc">Where new projects are made, on any device.</span>
+      <div className="setting-row">
+        <span className="setting-text">
+          <span className="setting-label">
+            Default location
+            <Hint text="Where new projects are made, on any device." />
+          </span>
         </span>
         <form
           className="pi-row-field"
@@ -1031,28 +1076,26 @@ export function ProjectsSection() {
           <PathField className="input-sm pi-mono" value={dir} label="Default project location" onChange={setDir} onBlur={saveDir} />
         </form>
       </div>
-      <section className="pi-block">
-        <SubHeading
-          action={
-            remote.length > 0 && (
-              <OptionSelect
-                label="Show projects on"
-                value={filter}
-                options={[{ value: "all", label: "All devices" }, ...devices.map((d) => ({ value: d.local ? "" : d.id, label: d.name }))]}
-                onChange={setFilter}
-              />
-            )
-          }
-        >
-          Your projects
-        </SubHeading>
+      <SettingsGroup
+        title="Your projects"
+        action={
+          remote.length > 0 && (
+            <OptionSelect
+              label="Show projects on"
+              value={filter}
+              options={[{ value: "all", label: "All devices" }, ...devices.map((d) => ({ value: d.local ? "" : d.id, label: d.name }))]}
+              onChange={setFilter}
+            />
+          )
+        }
+      >
         <ul className="pi-list">
           {shown.map((p) => (
             <ProjectRow key={p.id} project={p} onChanged={loadProjects} />
           ))}
           {!shown.length && <li className="pi-empty">{projects.length ? "No projects on this device." : "No projects yet."}</li>}
         </ul>
-      </section>
+      </SettingsGroup>
     </>
   );
 }

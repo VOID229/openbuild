@@ -18,7 +18,8 @@ test("Pi settings offer New for skills and prompts but not extensions, keeping e
   const html = JSON.parse(stdout.trim().split("\n").at(-1)!) as Record<string, string>;
 
   expect(html.extension).not.toContain("New extension");
-  expect(html.extension).toContain("Extensions");
+  // The list is a page of its own (Pi agent / Extensions): its title is the page's, the list says what they are.
+  expect(html.extension).toContain("Tools, commands and providers Pi loads.");
   expect(html.extension).toContain("my-extension");
   expect(html.extension).toContain("Edit my-extension");
   expect(html.extension).toContain("Remove my-extension");

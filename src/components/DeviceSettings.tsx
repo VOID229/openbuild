@@ -1,9 +1,9 @@
-// Settings → Devices: the devices this OpenBuild is paired with, where their servers stand, and
-// unpairing or restarting them, and pairing another (PairDevice.tsx). Each device, this one included,
-// shows whether this server's bots may use it and how they're isolated there: the device's owner
-// allows them on that device (under Using this device), and the isolation is chosen here. Also the
-// devices that use this one, so their access can be revoked or their bots allowed.
-import { Check, CircleAlert, Link2, Play, RefreshCw, RotateCw, Unlink, UserRoundCheck, UserRoundX } from "lucide-react";
+// Settings → Devices: the devices this OpenBuild is paired with and where their servers stand, and
+// pairing another (PairDevice.tsx). Each device, this one included, opens a page of its own:
+// restarting or unpairing it, whether this server's bots may use it and how they're isolated there
+// (the device's owner allows them on that device, under Using this device; the isolation is chosen
+// here). Also the devices that use this one, each with a page to revoke its access or allow its bots.
+import { Check, ChevronRight, CircleAlert, Link2, Play, RefreshCw, RotateCw, Unlink, UserRoundCheck, UserRoundX } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ComputerTarget, Isolation } from "../../shared/bots";
 import type { Device, PairedClient } from "../../shared/types";
@@ -11,6 +11,8 @@ import { deviceRowId, loadTargets, setIsolation, targetNote, targetStatus, targe
 import { listPairedClients, removeDevice, restartDevice, revokePairedClient, setDeviceExternal } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { ago, cx } from "../lib/ui";
+import { openSettingsPage } from "../lib/pages";
+import { SettingsGroup, SubPage } from "./SettingsUI";
 import { BotAccess } from "./BotAccess";
 import { OptionSelect } from "./ModelSelect";
 import { PairDevice } from "./PairDevice";
@@ -227,6 +229,26 @@ function LocalDeviceRow({ name, target, onTarget }: { name: string; target?: Com
   );
 }
 
+/** A device on Settings → Devices' list: where it stands, and what this server's bots may do there; its page has the rest. */
+function DeviceLink({ id, name, note, desc, dot, target }: { id: string; name: string; note?: string; desc?: string; dot?: string; target?: ComputerTarget }) {
+  const summary = target && [target.device === "local" ? "Bots always allowed" : targetStatus(target), targetSummary(target)].filter(Boolean).join(" · ");
+  return (
+    <li id={deviceRowId(id)} className="pi-row device-row">
+      <button type="button" className="device-link" onClick={() => openSettingsPage(`device/${encodeURIComponent(id)}`)}>
+        <span className={cx("pi-status-dot", dot)} aria-hidden />
+        <span className="pi-row-text">
+          <span className="pi-row-name">
+            {name}
+            {note && <span className="device-status">{note}</span>}
+          </span>
+          {(desc || summary) && <span className="pi-row-desc">{[desc, summary].filter(Boolean).join(" · ")}</span>}
+        </span>
+        <ChevronRight size={16} className="nav-row-chevron" aria-hidden />
+      </button>
+    </li>
+  );
+}
+
 function ClientRow({ client, onChanged }: { client: PairedClient; onChanged: () => void }) {
   const revoke = () => {
     if (!confirm(`Revoke ${client.name}? It can't use this device until it pairs again.`)) return;
@@ -275,6 +297,7 @@ export function DevicesSection() {
   const targetOf = (device: string) => targets?.find((t) => t.device === device);
   const here = targetOf("local")?.name ?? local?.name ?? "this server";
   const isolated = (device: string) => (isolation: Isolation) => setTargets((list) => list?.map((t) => (t.device === device ? { ...t, isolation } : t)));
+  const page = useStore((s) => s.settingsPage);
   // A link asked for one device: once it's been shown, the next visit opens at the top again.
   useEffect(() => () => useDeviceFocus.setState({ device: undefined }), []);
   const refresh = async () => {
@@ -304,17 +327,51 @@ export function DevicesSection() {
     closePairing();
   };
 
+  // A device's page (settings/devices/device/<id>, "local" for this one) or a client's (settings/devices/client/<id>).
+  const [kind, rawId] = page?.split("/") ?? [];
+  const id = rawId && decodeURIComponent(rawId);
+  if (kind === "device" && id) {
+    const device = id === "local" ? local : remote.find((d) => d.id === id);
+    if (!device) return <SubPage title={id} trail={["Devices"]}><p className="pi-empty">{devices.length ? "This device isn't paired anymore." : ""}</p></SubPage>;
+    return (
+      <SubPage title={device.name} trail={["Devices"]}>
+        <ul className="pi-list">
+          {device.local ? (
+            <LocalDeviceRow name={device.name} target={targetOf("local")} onTarget={isolated("local")} />
+          ) : (
+            <PairedDeviceRow device={device} target={targetOf(device.id)} here={here} onChanged={changed} onTarget={isolated(device.id)} />
+          )}
+        </ul>
+      </SubPage>
+    );
+  }
+  if (kind === "client" && id) {
+    const client = clients?.find((c) => c.id === id);
+    return (
+      <SubPage title={client?.name ?? "Device"} trail={["Devices", "Using this device"]}>
+        {client ? (
+          <ul className="pi-list">
+            <ClientRow client={client} onChanged={loadClients} />
+          </ul>
+        ) : (
+          clients && <p className="pi-empty">This device doesn't use this one anymore.</p>
+        )}
+      </SubPage>
+    );
+  }
+
+  const status = (d: Device) => STATUS[d.status ?? (d.online === false ? "offline" : "online")];
   return (
     <>
       <SettingsHeading>Devices</SettingsHeading>
       {local && (
         <ul className="pi-list">
-          <LocalDeviceRow name={local.name} target={targetOf("local")} onTarget={isolated("local")} />
+          <DeviceLink id="local" name={local.name} note="This device" target={targetOf("local")} />
         </ul>
       )}
-      <section className="pi-block">
-        <div className="pi-subhead">
-          <h3>Paired devices</h3>
+      <SettingsGroup
+        title="Paired devices"
+        action={
           <span className="device-check">
             {!pairing && (
               <button
@@ -336,7 +393,8 @@ export function DevicesSection() {
               {check === "checking" ? <Spinner size={14} /> : check === "done" ? <Check size={14} className="device-check-ok" /> : <RefreshCw size={14} />}
             </IconButton>
           </span>
-        </div>
+        }
+      >
         {pairing && <PairDevice onPaired={onPaired} onClose={closePairing} />}
         {paired && (
           <p className="pair-done" role="status">
@@ -345,7 +403,15 @@ export function DevicesSection() {
         )}
         <ul className="pi-list">
           {remote.map((d) => (
-            <PairedDeviceRow key={d.id} device={d} target={targetOf(d.id)} here={here} onChanged={changed} onTarget={isolated(d.id)} />
+            <DeviceLink
+              key={d.id}
+              id={d.id}
+              name={d.name}
+              note={[status(d).label, d.external && "External"].filter(Boolean).join(" · ")}
+              dot={status(d).dot}
+              desc={[d.mode === "tailscale" ? "Tailscale" : "LAN", host(d.urls[0])].join(" · ")}
+              target={targetOf(d.id)}
+            />
           ))}
           {!remote.length && (
             <li className="pi-empty">
@@ -354,18 +420,23 @@ export function DevicesSection() {
             </li>
           )}
         </ul>
-      </section>
+      </SettingsGroup>
       {!!clients?.length && (
-        <section className="pi-block">
-          <div className="pi-subhead">
-            <h3>Using this device</h3>
-          </div>
+        <SettingsGroup title="Using this device">
           <ul className="pi-list">
             {clients.map((c) => (
-              <ClientRow key={c.id} client={c} onChanged={loadClients} />
+              <li key={c.id} className="pi-row device-row">
+                <button type="button" className="device-link" onClick={() => openSettingsPage(`client/${encodeURIComponent(c.id)}`)}>
+                  <span className="pi-row-text">
+                    <span className="pi-row-name">{c.name}</span>
+                    <span className="pi-row-desc">{[`paired ${ago(c.createdAt)}`, c.lastSeenAt && `active ${ago(c.lastSeenAt)}`].filter(Boolean).join(" · ")}</span>
+                  </span>
+                  <ChevronRight size={16} className="nav-row-chevron" aria-hidden />
+                </button>
+              </li>
             ))}
           </ul>
-        </section>
+        </SettingsGroup>
       )}
     </>
   );

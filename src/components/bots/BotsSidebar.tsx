@@ -155,8 +155,8 @@ function useSelect() {
   return useCallback(
     (id: string) => {
       useBots.getState().select(id);
-      // Out of a thread opened from a chat, back to the chats.
-      useStore.setState({ botsThread: false });
+      // Out of a thread opened from a chat, or a page (Settings, Usage), back to the chats.
+      useStore.setState({ botsThread: false, settingsOpen: false, usageOpen: false });
       if (mobile) openBotsChat();
     },
     [mobile],
@@ -481,7 +481,10 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       aria-label={conversationName(c, bots)}
       aria-current={c.id === activeId ? "page" : undefined}
       {...peek(c.id, "right")}
-      onClick={() => useBots.getState().select(c.id)}
+      onClick={() => {
+        useBots.getState().select(c.id);
+        useStore.setState({ settingsOpen: false, usageOpen: false });
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         onMenu({ id: c.id, x: e.clientX, y: e.clientY });

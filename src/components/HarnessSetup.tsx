@@ -114,7 +114,7 @@ export function HarnessSetupView({ need, runtimes, machine, install, job, onInst
             New to Pi? <WebLink url={PI_SITE}>pi.dev</WebLink> has what it is.
             {need === "none" && (
               <>
-                {" "}Prefer another harness? <button type="button" className="link-btn" onClick={() => onSettings("runtimes")}>See Settings → Runtimes</button>.
+                {" "}Prefer another harness? <button type="button" className="link-btn" onClick={() => onSettings("runtimes")}>See Settings → Harnesses</button>.
               </>
             )}
           </p>

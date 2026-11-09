@@ -80,10 +80,10 @@ export function targetNote(t: ComputerTarget, here: string): { tone: "warn" | "b
 /** The device Settings → Devices should bring into view when it opens. */
 export const useDeviceFocus = create<{ device?: string }>(() => ({}));
 
-/** Open Settings → Devices at one device ("local" for this server). */
+/** Open Settings → Devices at one device's page ("local" for this server). */
 export function showDevice(device: string) {
   useDeviceFocus.setState({ device });
-  useStore.getState().openSettings("devices");
+  useStore.getState().openSettings("devices", `device/${encodeURIComponent(device)}`);
 }
 
 /** A device row's element id, for Settings → Devices to scroll to. */

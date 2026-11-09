@@ -6,30 +6,32 @@ import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/mod
 import { pluginBrandSvg, pluginIconsReady, pluginProviderSvg, usePlugins } from "../lib/plugins";
 import { cx, useDismiss, usePresence } from "../lib/ui";
 
-/** A Settings section's "# Title" heading. */
-export const SettingsHeading = ({ children }: { children: ReactNode }) => (
-  <h2 className="md-h1" id="settings-title">
-    <span className="md-hash">#</span> {children}
-  </h2>
-);
+/** A Settings section's title, with an action at its right if it has one (Check for updates). */
+export const SettingsHeading = ({ children, action }: { children: ReactNode; action?: ReactNode }) => {
+  const heading = (
+    <h2 className="md-h1" id="settings-title">
+      <span className="md-hash">#</span> {children}
+    </h2>
+  );
+  return action ? <div className="settings-head">{heading}<div className="settings-head-action">{action}</div></div> : heading;
+};
 
-/** The way back out of a page inside a Settings section, which the Settings dialog shows. */
-export type SettingsBackTarget = { label: string; onBack: () => void };
+/** The way back out of a page inside a Settings section, and its title, which the page's header shows on a phone. */
+export type SettingsBackTarget = { label: string; title?: string; onBack: () => void };
 export const SettingsBackContext = createContext<(back: SettingsBackTarget | undefined) => void>(() => {});
 
 /**
- * A page inside a Settings section (a bot's editor, say) renders this instead of a back link: the
- * dialog shows an arrow at its top left, opposite the close button and pinned like it while the page
- * scrolls. `label` names where it goes ("Back to all bots").
+ * A page inside a Settings section (SubPage in SettingsUI.tsx) renders this so Settings knows the way
+ * back from it: for Esc, and for the header's back on a phone. `label` names where it goes ("Back to Bots").
  */
-export function SettingsBack({ label, onBack }: SettingsBackTarget) {
+export function SettingsBack({ label, title, onBack }: SettingsBackTarget) {
   const setBack = useContext(SettingsBackContext);
   const latest = useRef(onBack);
   latest.current = onBack;
   useLayoutEffect(() => {
-    setBack({ label, onBack: () => latest.current() });
+    setBack({ label, title, onBack: () => latest.current() });
     return () => setBack(undefined);
-  }, [setBack, label]);
+  }, [setBack, label, title]);
   return null;
 }
 

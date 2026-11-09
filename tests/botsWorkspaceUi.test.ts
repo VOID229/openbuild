@@ -162,6 +162,10 @@ test("Settings → Devices has no OpenBots workspace switch for a device using t
   await act(async () => root.render(h(DevicesSection)));
   await frames();
   expect(el.textContent).toContain("Laptop");
+  // Its page, from the list of devices using this one.
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>("button.device-link")].find((b) => b.textContent?.includes("Laptop"))!.click());
+  await frames();
+  expect(document.querySelector(".subpage-title")?.textContent).toBe("Laptop");
   expect(el.textContent).not.toContain("Use OpenBots workspace");
   expect(document.querySelector('[aria-label="Let Laptop use OpenBots workspace"]')).toBeNull();
   // The bot tool grants stay, each its own switch, and saving one doesn't touch the workspace grant.
@@ -173,6 +177,7 @@ test("Settings → Devices has no OpenBots workspace switch for a device using t
   const patch = requests.filter((r) => r.method === "PATCH").at(-1)!;
   expect(patch.path).toBe("/api/paired-clients/c1");
   expect(patch.body).toEqual({ botTools: { terminal: true } });
+  useStore.setState({ settingsPage: undefined });
 });
 
 // What a tab left in this browser for the host's workspace, from when it could open it.

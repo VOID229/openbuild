@@ -211,7 +211,7 @@ export function BotClaude() {
   return (
     <>
       <div className="pi-subhead">
-        <h3>Claude</h3>
+        <p className="subpage-desc bots-claude-desc">Run bots on your Claude Pro or Max plan, through Claude Code on this server. Their use counts against its limits.</p>
         <span className="bots-claude-head">
           {state ? (connected ? `${connected} connected` : "Not connected") : ""}
           <IconButton label="Check again" onClick={() => void load()} disabled={loading}>
@@ -219,7 +219,6 @@ export function BotClaude() {
           </IconButton>
         </span>
       </div>
-      <p className="field-help keys-help">Run bots on your Claude Pro or Max plan through Claude Code on this server. Their use counts against that plan's limits.</p>
       {problem && (
         <p className="field-help key-status key-status-bad" role="alert">
           <CircleAlert size={13} className="bad" /> {problem}
@@ -236,7 +235,7 @@ export function BotClaude() {
       {state?.logins.map((login) => (
         <LoginRow key={login.id} login={login} disabled={!state.installed || state.userPackage} onChanged={changed} />
       ))}
-      {state && state.logins.length > 0 && <p className="field-help">Add another login in Settings → Runtimes.</p>}
+      {state && state.logins.length > 0 && <p className="field-help">Add another login in Settings → Harnesses.</p>}
     </>
   );
 }
