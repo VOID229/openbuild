@@ -641,6 +641,39 @@ test("send_message, models and check-ins against a real bots database", async ()
       mind.quiet = false;
       a.equal(activityFor('read', { path: '/home/x/notes.md' }), 'Reading notes.md');
 
+      // Thinking aloud between tool calls never shows as a bubble: it would flash up and vanish when the tool starts.
+      const draftNow = () => svc.snapshot().drafts.find(d => d.conversationId === conversationId && d.botId === bot.id)?.text;
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Green. Verify head…' } });
+      a.equal(draftNow(), undefined);
+      a.equal(typingNow(), false);
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'toolUse', content: [{ type: 'text', text: 'Green. Verify head…' }, { type: 'toolCall', id: 't1', name: 'bash', arguments: {} }] } });
+      a.equal(draftNow(), undefined);
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'bash', args: { command: 'git rev-parse HEAD' } });
+      a.equal(draftNow(), undefined);
+      a.equal(svc.snapshot().status[bot.id].activity, 'Running a command');
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'bash', result: {} });
+      // A message that ends without a tool call is the reply, shown while the turn settles.
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'All green, merged.' } });
+      a.equal(draftNow(), undefined);
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'All green, merged.' }] } });
+      a.equal(draftNow(), 'All green, merged.');
+      a.equal(typingNow(), true);
+      svc.setDraft(undefined, { conversationId, botId: bot.id });
+      svc.setTyping(conversationId, bot.id, false);
+      mind.typing = false;
+      // Nor does a final [silent], or anything once a message went out with send_message.
+      mind.draft = '';
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: '[silent]' } });
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: '[silent]' }] } });
+      a.equal(draftNow(), undefined);
+      mind.draft = '';
+      mind.sent = true;
+      onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'Done.' } });
+      onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Done.' }] } });
+      a.equal(draftNow(), undefined);
+      mind.sent = false;
+      mind.draft = '';
+
       // A failed model call (an xAI refresh rejected with invalid_grant) is kept, so the run can show it instead of nothing.
       onRecord(bot.id, mind, { type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: 'OAuth token refresh failed: invalid_grant' } });
       a.equal(mind.error, 'The sign-in for this model has expired. Sign in again in Settings → Providers.\\nOAuth token refresh failed: invalid_grant');
