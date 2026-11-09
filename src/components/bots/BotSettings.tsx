@@ -169,7 +169,7 @@ function GroupEditor({ group, onBack, onDelete }: { group: Conversation; onBack:
     <div className="bots-set-editor">
       <SettingsBack label="Back to all bots" onBack={onBack} />
       <div className="bots-set-hero">
-        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} />
+        <BotHuddle looks={looks} size={96} active={group.botIds.map((id) => working.includes(id))} zzz />
         <div className="bots-set-hero-text">
           <input className="input bots-set-name" value={name} maxLength={48} aria-label="Group name" onChange={(e) => setName(e.target.value)} onBlur={saveName} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} />
           <div className="bots-details-sub">{plural(group.botIds.length, "bot")}</div>
@@ -239,7 +239,7 @@ function GroupRow({ group, bots, onEdit }: { group: Conversation; bots: Bot[]; o
   return (
     <li className="pi-row bots-set-row">
       <button type="button" className="bots-set-row-main" onClick={onEdit}>
-        <BotHuddle looks={looks} size={34} active={group.botIds.map((id) => working.includes(id))} />
+        <BotHuddle looks={looks} size={34} active={group.botIds.map((id) => working.includes(id))} zzz />
         <span className="pi-row-text">
           <span className="pi-row-name">{conversationName(group, bots)}</span>
           <span className="pi-row-desc bots-set-row-desc">{names.join(", ") || "No bots"}</span>

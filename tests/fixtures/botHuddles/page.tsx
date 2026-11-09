@@ -36,7 +36,7 @@ function Places() {
     <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: 20, background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
       <div data-place="rail" style={{ display: "flex", gap: 6, background: "var(--surface)", padding: 6, borderRadius: 16 }}>
         {sizes.map((c) => (
-          <button key={c.id} type="button" className="bots-rail-item" data-group={c.botIds.length}><ConversationAvatar conversation={c} size={40} alive={false} working={[]} /></button>
+          <button key={c.id} type="button" className="bots-rail-item" data-group={c.botIds.length}><ConversationAvatar conversation={c} size={40} alive={false} working={[]} zzz /></button>
         ))}
       </div>
       <div data-place="peek" style={{ display: "flex", gap: 10 }}>
@@ -50,7 +50,7 @@ function Places() {
       {[26, 34, 96].map((size) => (
         <div key={size} data-place={`size-${size}`} style={{ display: "flex", alignItems: "center", gap: 14 }}>
           {sizes.map((c) => (
-            <span key={c.id} data-group={c.botIds.length} style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}><ConversationAvatar conversation={c} size={size} alive={false} working={[]} />{size < 40 && <b>{c.name}</b>}</span>
+            <span key={c.id} data-group={c.botIds.length} style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}><ConversationAvatar conversation={c} size={size} alive={false} working={[]} zzz />{size < 40 && <b>{c.name}</b>}</span>
           ))}
         </div>
       ))}

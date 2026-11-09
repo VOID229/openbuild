@@ -108,6 +108,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   working,
   mood,
   badge = true,
+  zzz = false,
 }: {
   conversation: Conversation;
   size: number;
@@ -119,6 +120,8 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   working?: string[];
   mood?: Mood;
   badge?: boolean;
+  /** A "zzz" over a group's dozing huddle: on in the sidebars, off beside a name or a chat's messages. */
+  zzz?: boolean;
 }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
@@ -138,8 +141,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
-  // Set beside a name (no badge either), there's no room for a "zzz": the huddle's own corner shows it elsewhere.
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={badge} />;
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} />;
 });
 
 export { conversationName };

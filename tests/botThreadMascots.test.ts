@@ -1,7 +1,7 @@
 // The mascots beside a group's coding threads (its details panel's Threads tab), and the "zzz" over
 // dozing ones, in a real Chrome: a thread at work fidgets visibly even at 28px, one waiting on the
-// user looks up wide-eyed, a finished one leaves the list, and dozing bots and huddles show a zzz big
-// enough to read in the sidebar, still while motion is reduced.
+// user looks up wide-eyed, a finished one leaves the list, and dozing bots and huddles in the sidebars
+// show a small zzz that still reads there, still while motion is reduced, and none beside the chat.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { threadActivity, threadMascot } from "../src/lib/bots/activity";
 import type { Chat, Message } from "../src/lib/types";
@@ -122,9 +122,11 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
     expect(moss).toBe(0);
     const dozing = members.filter((z) => z.opacity > 0.99);
     expect(dozing.length).toBe(3);
+    // Small, but still letters: the smallest at about 7px, the three no taller than the 28px avatar's half.
     for (const z of dozing) {
-      expect(z.font).toBeGreaterThanOrEqual(8);
-      expect(z.height).toBeGreaterThanOrEqual(14);
+      expect(z.font).toBeGreaterThanOrEqual(6.5);
+      expect(z.height).toBeGreaterThanOrEqual(12);
+      expect(z.height).toBeLessThanOrEqual(16);
       expect(z.running).toBe(3);
     }
     // A huddle in the sidebar has one, over its corner: its members, a dozen pixels across, have none.
@@ -133,12 +135,29 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
     const huddle = await page.eval<Zzz[]>(`[...(${tile}).querySelectorAll('.bot-huddle-box > .bot-zzz')].map((z) => ({ opacity: Number(getComputedStyle(z).opacity), font: parseFloat(getComputedStyle(z.firstElementChild).fontSize), height: z.getBoundingClientRect().height, running: 0 }))`);
     expect(huddle.length).toBe(1);
     expect(huddle[0]!.opacity).toBe(1);
-    expect(huddle[0]!.font).toBeGreaterThanOrEqual(8);
+    // A footnote on the big tile, not a headline: no bigger than at the members' 28px.
+    expect(huddle[0]!.font).toBeGreaterThanOrEqual(6.5);
+    expect(huddle[0]!.font).toBeLessThanOrEqual(10);
     // Everyone at work in the group: no zzz over it at all.
     await page.eval(`bots.setState({ status: Object.fromEntries(["egg", "moss", "boo", "pill"].map((id) => [id, { state: "working", conversationId: "dev" }])) })`);
     await Bun.sleep(400);
     expect(await page.eval<number>(`Number(getComputedStyle((${tile}).querySelector('.bot-huddle-box > .bot-zzz')).opacity)`)).toBe(0);
     expect((await zzzs(page, ".bots-details .bots-member .bot > .bot-zzz")).every((z) => z.opacity === 0 && z.running === 0)).toBe(true);
+  }, 20_000);
+
+  test("none beside the chat: its messages' dozing avatars and its header just shut their eyes", async () => {
+    const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
+    await Bun.sleep(1800);
+    // Pill, who wrote in the group and isn't at work, dozes beside the message: eyes shut, no zzz.
+    const pill = `[...document.querySelectorAll('.bm-avatar .bot')].find((b) => b.dataset.color === 'blue')`;
+    expect(await page.eval<boolean>(`'asleep' in (${pill}).dataset`)).toBe(true);
+    expect(await page.eval<number>(`document.querySelectorAll('.bm-avatar .bot-zzz').length`)).toBe(0);
+    // Nor in the chat's header, though its huddle dozes: every zzz on the page is in one of the sidebars.
+    expect(await page.eval<number>(`document.querySelectorAll('.bots-head-pill .bot[data-asleep]').length`)).toBeGreaterThan(0);
+    expect(await page.eval<number>(`[...document.querySelectorAll('.bot-zzz')].filter((z) => !z.closest('.bots-sidebar, .bots-details')).length`)).toBe(0);
+    // While the sidebars do show it.
+    expect(await page.eval<number>(`document.querySelectorAll('.bots-sidebar .bot-zzz').length`)).toBeGreaterThan(0);
+    expect(await page.eval<number>(`document.querySelectorAll('.bots-details .bot-zzz').length`)).toBeGreaterThan(0);
   }, 20_000);
 
   test("with reduced motion, the zzz is there but holds still", async () => {

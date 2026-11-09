@@ -145,7 +145,7 @@ function SidebarAvatar({ conversation, size }: { conversation: Conversation; siz
   }, [watches]);
   return (
     <span ref={ref} className="bots-sidebar-avatar">
-      <ConversationAvatar conversation={conversation} size={size} alive={busy || !watches} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} />
+      <ConversationAvatar conversation={conversation} size={size} alive={busy || !watches} busy={busy} working={working} track={hover && watches} mood={typing ? "thinking" : undefined} zzz />
     </span>
   );
 }
