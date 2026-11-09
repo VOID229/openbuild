@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle } from "../../shared/bots";
-import { BOT_EFFORTS, BOT_LOOP_MAX, BOT_LOOP_MIN, castVote, DEFAULT_BOT_LOOP, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -69,8 +69,6 @@ const mem = globalThis as {
   openbotsDrafts?: Draft[];
   openbotsStatus?: Map<string, BotStatus>;
   openbotsActivityTimes?: Map<string, { turnStartedAt: number | null; lastActivityAt: number }>;
-  openbotsChains?: Map<string, number>;
-  openbotsChainWarned?: Set<string>;
   openbotsSectionsSwept?: boolean;
   openbotsWaiters?: Waiter[];
   openbotsPiCheck?: PiCheck;
@@ -128,9 +126,6 @@ const typing = (mem.openbotsTyping ??= {});
 const typingSince = (mem.openbotsTypingSince ??= new Map<string, number>());
 const drafts = (mem.openbotsDrafts ??= []);
 const status = (mem.openbotsStatus ??= new Map<string, BotStatus>());
-/** Bot-to-bot replies in a row, per conversation, so two bots can't talk forever. */
-const chains = (mem.openbotsChains ??= new Map<string, number>());
-let chainWarned = (mem.openbotsChainWarned ??= new Set<string>());
 interface Waiter {
   botId: string;
   conversationId: string;
@@ -141,7 +136,9 @@ interface Waiter {
 const waiters = (mem.openbotsWaiters ??= []);
 
 function settings(): BotsSettings {
-  return { ...DEFAULT_SETTINGS, ...db.getValue<Partial<BotsSettings>>("settings") };
+  // `botLoop` was the bot-loop pause, since removed: settings saved with it read as if it was never there.
+  const { botLoop: _removed, ...stored } = db.getValue<Partial<BotsSettings> & { botLoop?: unknown }>("settings") ?? {};
+  return { ...DEFAULT_SETTINGS, ...stored };
 }
 export function getSettings(): BotsSettings {
   return settings();
@@ -165,18 +162,14 @@ function pruneSections(keep?: string) {
 }
 
 export function updateSettings(patch: Partial<BotsSettings>): BotsSettings {
-  const next: BotsSettings = { ...settings(), ...patch };
+  const { botLoop: _removed, ...rest } = patch as Partial<BotsSettings> & { botLoop?: unknown };
+  const next: BotsSettings = { ...settings(), ...rest };
   if ("defaultModel" in patch) next.defaultModel = typeof patch.defaultModel === "string" && patch.defaultModel ? patch.defaultModel.slice(0, 200) : undefined;
   if ("defaultFallbackModels" in patch) next.defaultFallbackModels = modelList(patch.defaultFallbackModels);
   if (patch.quietHours) next.quietHours = { from: num(patch.quietHours.from, 0, 23), to: num(patch.quietHours.to, 0, 23) };
   if (patch.sections) next.sections = patch.sections.filter((s) => typeof s === "string" && s.trim()).map((s) => s.trim()).slice(0, 40);
   if (patch.user) next.user = { name: clip(patch.user.name, 80), context: clip(patch.user.context, 2000) };
   if ("searxng" in patch) next.searxng = [...new Set((Array.isArray(patch.searxng) ? patch.searxng : []).filter((u) => typeof u === "string" && u.trim()).map((u) => u.trim().slice(0, 500)))].slice(0, 8);
-  if (patch.botLoop) {
-    // A limit that isn't a number keeps the saved one; anything else is held to the range.
-    const limit = Number.isFinite(Number(patch.botLoop.limit)) ? patch.botLoop.limit : (settings().botLoop ?? DEFAULT_BOT_LOOP).limit;
-    next.botLoop = { enabled: patch.botLoop.enabled !== false, limit: num(limit, BOT_LOOP_MIN, BOT_LOOP_MAX) };
-  }
   if (patch.customExtensions) next.customExtensions = { enabled: patch.customExtensions.enabled === true, ids: [...new Set((Array.isArray(patch.customExtensions.ids) ? patch.customExtensions.ids : []).filter((id) => typeof id === "string"))].slice(0, 200) };
   if (patch.harnesses) {
     const permissions = patch.harnesses.permissions ?? {};
@@ -474,8 +467,6 @@ export async function resetAll() {
   if (defaultModel || defaultFallbackModels || searxng?.length || customExtensions || claude || isolation) db.setValue("settings", { ...settings(), defaultModel, defaultFallbackModels, searxng, customExtensions, claude, isolation });
   if (apps) db.setValue("apps", apps);
   status.clear();
-  chains.clear();
-  chainWarned = mem.openbotsChainWarned = new Set();
   for (const id of Object.keys(typing)) delete typing[id];
   typingSince.clear();
   drafts.length = 0;
@@ -1068,35 +1059,15 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   }
 
   if (!message.event) {
-    if (message.author === "me") {
-      chains.set(conversationId, 0);
-      chainWarned.delete(conversationId);
-    } else chains.set(conversationId, (chains.get(conversationId) ?? 0) + 1);
-    const depth = chains.get(conversationId) ?? 0;
-    // Read on every message, so a change in Settings applies to chats already going.
-    const loop = settings().botLoop ?? DEFAULT_BOT_LOOP;
-    if (message.author !== "me" && loop.enabled && depth > loop.limit) {
-      if (!chainWarned.has(conversationId)) {
-        chainWarned.add(conversationId);
-        postMessage(conversationId, {
-          id: crypto.randomUUID(),
-          author: message.author,
-          at: Date.now(),
-          text: "",
-          event: { kind: "error", text: "Paused", detail: "The bots were replying to each other for a while, so they stopped. Send a message to continue." },
-        });
-      }
-    } else {
-      let targets = wakeTargets(c, message);
-      const groupRequest = message.author === "me" && c.kind === "group";
-      if (groupRequest && !message.poll) {
-        if (!targets.length) targets = groupRecipients(c, message);
-        db.setGroupFollow(conversationId, { ids: targets, at: message.at });
-      }
-      // Several bots asked at once: one answers, and the others add only what's theirs.
-      const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets) : undefined;
-      for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
+    let targets = wakeTargets(c, message);
+    const groupRequest = message.author === "me" && c.kind === "group";
+    if (groupRequest && !message.poll) {
+      if (!targets.length) targets = groupRecipients(c, message);
+      db.setGroupFollow(conversationId, { ids: targets, at: message.at });
     }
+    // Several bots asked at once: one answers, and the others add only what's theirs.
+    const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets) : undefined;
+    for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
   }
   return message;
 }

@@ -4,8 +4,8 @@
 // each side; everything else about a chat (its instructions, reactions, polls, which bots read what)
 // stays where it is.
 //
-// A friend's message is stored with a friend author and who wrote it, wakes only the bots it mentions
-// or replies to, and counts toward the bot-loop pause like a bot's, since it isn't the owner speaking.
+// A friend's message is stored with a friend author and who wrote it, and wakes only the bots it
+// mentions or replies to.
 import type { BotMessage } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
 import { friendAuthor, OWNER, type FriendChat, type FriendMember } from "../../shared/friends";
