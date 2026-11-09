@@ -1,6 +1,6 @@
 // Settings → Bots: every bot and group in one list, an editor for each (look, name, instructions,
 // routines, model, how often it checks in; a group's members and goal), making and deleting
-// them, the default model and web search providers they share, and how lively bots are.
+// them, the Claude logins they run on, the default model and web search providers they share, and how lively bots are.
 import { MessageCircle, Plus, RotateCcw, Star, Trash2, UsersRound } from "lucide-react";
 import { useEffect, useState } from "react";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -14,6 +14,7 @@ import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
 import { Instructions, Members, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
+import { BotClaude } from "./BotClaude";
 import { BotExtensions } from "./BotExtensions";
 import { BotFriends } from "./BotFriends";
 import { BotLoop } from "./BotLoop";
@@ -374,6 +375,10 @@ export function BotsSettingsSection() {
           ))}
           {!groups.length && <li className="pi-empty">No groups yet. A group puts a few bots in one chat to work on something together.</li>}
         </ul>
+      </section>
+
+      <section className="pi-block">
+        <BotClaude />
       </section>
 
       <section className="pi-block">

@@ -1,6 +1,7 @@
-// What a bot's Pi loads. Everything OpenBots does comes from extension.ts, shipped with OpenBuild;
-// the user's own Pi extensions and packages stay out unless they switch them on one at a time in
-// Settings → Bots. Models come from extensions too, so the bots' list is asked of Pi set up this way.
+// What a bot's Pi loads. Everything OpenBots does comes from extension.ts, shipped with OpenBuild,
+// and Claude subscriptions from the bundled pi-claude-code bridge (claude.ts); the user's own Pi
+// extensions and packages stay out unless they switch them on one at a time in Settings → Bots.
+// Models come from extensions too, so the bots' list is asked of Pi set up this way.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -10,6 +11,7 @@ import { agentDir } from "../pi/install";
 import * as resources from "../pi/resources";
 import { PiProcess } from "../pi/rpc";
 import { modelScope, settledModels, type PiModels } from "../pi/sessions";
+import { BRIDGE_PACKAGE, bridgeExtension } from "./claude";
 import * as svc from "./service";
 
 const OWN = join(import.meta.dir, "extension.ts");
@@ -35,6 +37,28 @@ export function available(): BotExtension[] {
     ...resources.packages().map((source) => ({ id: `${PACKAGE}${source}`, name: source.split("/").pop() || source, description: describePackage(source), kind: "package" as const })),
     ...scripts.map((r) => ({ id: r.id, name: r.name, description: r.description, kind: "extension" as const })),
   ];
+}
+
+/** The package's name, for a local one. */
+function packageName(target: string): string | undefined {
+  try {
+    return JSON.parse(readFileSync(join(target, "package.json"), "utf8")).name;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A user extension that is pi-claude-code: it registers the same providers, so OpenBuild's copy stays out. */
+const isUserBridge = (target: string) => (isAbsolute(target) ? packageName(target) === BRIDGE_PACKAGE : /(^|[/:@])pi-claude-code(\.git)?([@#].*)?$/.test(target));
+
+/** The user switched on their own pi-claude-code for bots. */
+export const userBridgeSelected = () => selected().some(isUserBridge);
+
+/** OpenBuild's Claude bridge, unless the user's own copy is loaded or no login is left for bots. */
+function bridge(extra: string[]): string[] {
+  if (extra.some(isUserBridge)) return [];
+  const path = bridgeExtension();
+  return path ? ["-e", path] : [];
 }
 
 /** What to pass Pi for the extensions the user switched on. Only ones that are still installed, and never a path from anywhere else. */
@@ -66,6 +90,7 @@ export function piFlags(): string[] {
     // The list keeps a bot to its own tools. An extension the user switched on brings tools of its own, so it goes.
     ...(extra.length ? [] : ["--tools", TOOLS]),
     "-e", OWN,
+    ...bridge(extra),
     ...extra.flatMap((target) => ["-e", target]),
   ];
 }
@@ -77,7 +102,8 @@ export function piFlags(): string[] {
  */
 export function friendFlags(allowTools: boolean): string[] {
   if (allowTools) return piFlags();
-  return [...BASE, "--tools", FRIEND_TOOLS.join(","), "-e", OWN, ...selected().flatMap((target) => ["-e", target])];
+  const extra = selected();
+  return [...BASE, "--tools", FRIEND_TOOLS.join(","), "-e", OWN, ...bridge(extra), ...extra.flatMap((target) => ["-e", target])];
 }
 
 let cache: { key: string; at: number; value: Promise<PiModels> } | undefined;

@@ -324,6 +324,8 @@ export interface BotsSettings {
   customExtensions?: { enabled: boolean; ids: string[] };
   /** How bots' OpenBuild threads use each harness. */
   harnesses?: BotHarnessSettings;
+  /** Claude logins bots don't use (provider ids, "claude-code-2"), and when that or a sign-in last changed. */
+  claude?: { off: string[]; changedAt?: number };
   /** Pausing a chat after this many bot messages in a row, so bots can't reply to each other forever. */
   botLoop?: BotLoopSettings;
   /**
@@ -332,6 +334,32 @@ export interface BotsSettings {
    * own Unisolated grant.
    */
   isolation?: Record<string, Isolation>;
+}
+
+/** A sign-in through Claude Code's own `claude auth login`, as Settings → Bots shows it. */
+export interface BotClaudeSignIn {
+  id: string;
+  status: "starting" | "waiting" | "verifying" | "connected" | "failed" | "cancelled";
+  /** Claude's page to approve on, while waiting for the code it shows there. */
+  url?: string;
+  error?: string;
+  startedAt: number;
+}
+
+/** One Claude Code login on this server, and whether bots use it: provider `id` ("claude-code", "claude-code-2"). */
+export interface BotClaudeLogin {
+  id: string;
+  name: string;
+  /** Where Claude Code keeps this login, with ~ for home. */
+  configDir: string;
+  signedIn: boolean;
+  /** Bots load it. Off once the user disconnects it here. */
+  enabled: boolean;
+  email?: string;
+  plan?: string;
+  method?: string;
+  error?: string;
+  signIn?: BotClaudeSignIn;
 }
 
 /** A container (Podman or Docker), or a folder on the machine with no isolation. */
