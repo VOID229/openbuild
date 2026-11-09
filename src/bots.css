@@ -129,15 +129,22 @@
 }
 
 /* A huddle's hangs from its top corner rather than rising above it, where the sidebar's list would
-   cut it off. */
+   cut it off; a little higher when it would reach the count's seat below (BotHuddle). */
 .bot-huddle-box > .bot-zzz {
-  top: -0.1em;
+  top: var(--zzz-top, -0.1em);
   bottom: auto;
   left: 86%;
 }
 
 /* In a list row the name sits right beside it, and there's room above instead. */
 .bots-row .bot-huddle-box > .bot-zzz {
+  top: auto;
+  bottom: 74%;
+  left: 64%;
+}
+
+/* With the count beside it, the huddle's rises above its corner instead, clear of the count. */
+.bot-huddle[data-more="beside"] > .bot-huddle-box > .bot-zzz {
   top: auto;
   bottom: 74%;
   left: 64%;

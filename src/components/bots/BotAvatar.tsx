@@ -404,11 +404,15 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
+  // Hanging from the top corner, its lowest letter (2.15em down, and floating 0.2em more) would reach
+  // the count's seat below in a small huddle: there it hangs that much higher.
+  const z = zzzSize(size);
+  const zzzTop = seated && active && zzz ? Math.min(-0.1 * z, 0.54 * size - 2.35 * z) : undefined;
   const label = `+${extra}`;
   const spot = ([x, y, s]: [number, number, number]) => ({ left: `${(x - s / 2) * 100}%`, top: `${(y - s / 2) * 100}%`, width: `${s * 100}%`, height: `${s * 100}%` });
   return (
     <span className="bot-huddle" data-more={over ? (seated ? "seat" : "beside") : undefined} aria-hidden>
-      <span className="bot-huddle-box" style={{ width: size, height: size }} data-dozing={dozing ? "" : undefined}>
+      <span className="bot-huddle-box" style={{ width: size, height: size, ...(zzzTop !== undefined && { "--zzz-top": `${zzzTop.toFixed(1)}px` }) } as React.CSSProperties} data-dozing={dozing ? "" : undefined}>
         {items.map(([key, item], i) => {
           const [x, y, s] = layout[i] ?? [0.5, 0.5, 0.5];
           // Dozing, heads lean in toward the middle of the huddle.

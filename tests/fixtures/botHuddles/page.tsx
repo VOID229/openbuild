@@ -1,6 +1,8 @@
 // Groups' avatars wherever they show, for tests/botHuddleLayout.test.ts to measure in Chrome: the real
 // OpenBots sidebar (rows and pinned tiles) and the other places a group's huddle goes, the rail, the
-// hover card, the chat's header and Settings, at each of their sizes. `?theme=light` for the light theme.
+// hover card, the chat's header and Settings, at each of their sizes. All of them doze, as the sidebar's
+// do with no one at work, so a "zzz" shows wherever a huddle has one; the plain sizes have it on, even
+// below a seat's size where the app sets none, to see it beside the count. `?theme=light` for the light theme.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -34,13 +36,13 @@ function Places() {
     <div style={{ display: "flex", flexDirection: "column", gap: 18, padding: 20, background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
       <div data-place="rail" style={{ display: "flex", gap: 6, background: "var(--surface)", padding: 6, borderRadius: 16 }}>
         {sizes.map((c) => (
-          <button key={c.id} type="button" className="bots-rail-item" data-group={c.botIds.length}><ConversationAvatar conversation={c} size={40} alive={false} /></button>
+          <button key={c.id} type="button" className="bots-rail-item" data-group={c.botIds.length}><ConversationAvatar conversation={c} size={40} alive={false} working={[]} /></button>
         ))}
       </div>
       <div data-place="peek" style={{ display: "flex", gap: 10 }}>
         {sizes.map((c) => (
           <div key={c.id} className="bots-peek" data-state="open" data-group={c.botIds.length} style={{ position: "static", pointerEvents: "auto" }}>
-            <span className="bots-peek-head"><ConversationAvatar conversation={c} size={18} alive={false} badge={false} /><span className="bots-peek-name">{c.name}</span></span>
+            <span className="bots-peek-head"><ConversationAvatar conversation={c} size={18} alive={false} working={[]} badge={false} /><span className="bots-peek-name">{c.name}</span></span>
             <span className="bots-peek-preview">hello</span>
           </div>
         ))}
@@ -48,7 +50,7 @@ function Places() {
       {[26, 34, 96].map((size) => (
         <div key={size} data-place={`size-${size}`} style={{ display: "flex", alignItems: "center", gap: 14 }}>
           {sizes.map((c) => (
-            <span key={c.id} data-group={c.botIds.length} style={{ display: "flex", alignItems: "center", gap: 8 }}><ConversationAvatar conversation={c} size={size} alive={false} badge={false} />{size < 40 && <b>{c.name}</b>}</span>
+            <span key={c.id} data-group={c.botIds.length} style={{ display: "flex", alignItems: "center", gap: 8, paddingTop: 12 }}><ConversationAvatar conversation={c} size={size} alive={false} working={[]} />{size < 40 && <b>{c.name}</b>}</span>
           ))}
         </div>
       ))}

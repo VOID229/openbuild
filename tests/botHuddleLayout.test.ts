@@ -1,7 +1,8 @@
 // Groups' avatars measured in a real Chrome, in both themes, wherever they show (sidebar rows and
 // tiles, the rail, the hover card, the chat's header, Settings): every member drawn is in plain view,
 // with nothing over it, and a big group's count sits in a seat of its own or beside the huddle, clear
-// of every member, inside the item it's in and big enough to read. Rows still line up.
+// of every member, inside the item it's in and big enough to read, and clear of the "zzz" over a dozing
+// huddle. Rows still line up.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -19,8 +20,9 @@ afterAll(async () => {
   await server?.stop();
 });
 
+const READY = "document.querySelectorAll('.bots-tile').length >= 3 && !!document.querySelector('[data-place=size-96] .bot-huddle')";
 const open = async (theme: "light" | "dark") => {
-  const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=${theme}`, 1100, 900, "document.querySelectorAll('.bots-tile').length >= 3 && !!document.querySelector('[data-place=size-96] .bot-huddle')");
+  const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=${theme}`, 1100, 900, READY);
   await page.settle();
   return page;
 };
@@ -63,6 +65,7 @@ const huddles = (page: Page) =>
     });
   })()`);
 
+const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 const within = (a: Box, b: Box) => a.left >= b.left - 0.5 && a.right <= b.right + 0.5 && a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5;
 
 describe.skipIf(!browser)("groups' avatars", () => {
@@ -90,6 +93,26 @@ describe.skipIf(!browser)("groups' avatars", () => {
       for (const where of ["peek", "size-26"]) expect(seven(where)?.bodies).toHaveLength(4);
     });
   }
+
+  test("the zzz over a dozing huddle stays clear of its count, in a seat or beside it", async () => {
+    // Held still, each letter where it rests; padded by about as far as it floats while it's in view.
+    const page = await Page.open(chrome!.ws, "about:blank", 1100, 900, "true");
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.send("Page.navigate", { url: server!.url.href });
+    await page.until(READY);
+    await page.settle();
+    const seen = await page.eval<{ label: string; seat: boolean; shown: boolean; letters: Box[]; more: Box }[]>(`[...document.querySelectorAll('.bot-huddle')].filter((h) => h.querySelector('.bot-zzz') && h.querySelector('.bot-huddle-more')).map((h) => {
+      const zzz = h.querySelector('.bot-zzz'), pad = parseFloat(getComputedStyle(zzz).fontSize) * 0.2;
+      const letters = [...zzz.children].map((l) => { const r = l.getBoundingClientRect(); return { left: r.left - pad, top: r.top - pad, right: r.right + pad, bottom: r.bottom + pad }; });
+      const m = h.querySelector('.bot-huddle-more').getBoundingClientRect();
+      const where = h.closest('.bots-tile') ? 'tile' : h.closest('.bots-row') ? 'row' : h.closest('[data-place]')?.dataset.place;
+      return { label: where + ' at ' + h.querySelector('.bot-huddle-box').offsetWidth + 'px', seat: h.dataset.more === 'seat', shown: getComputedStyle(zzz).opacity === '1', letters, more: { left: m.left, top: m.top, right: m.right, bottom: m.bottom } };
+    })`);
+    // Both kinds: the seat (tiles, rows, rail, Settings) and a count beside a small huddle.
+    expect(seen.some((h) => h.seat)).toBe(true);
+    expect(seen.some((h) => !h.seat)).toBe(true);
+    for (const h of seen) expect({ label: h.label, shown: h.shown, overlaps: h.letters.filter((l) => meets(l, h.more)).length }).toEqual({ label: h.label, shown: true, overlaps: 0 });
+  });
 
   test("a group's count doesn't push its row's name out of line with the others", async () => {
     const page = await open("dark");
