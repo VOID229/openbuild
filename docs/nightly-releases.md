@@ -7,7 +7,10 @@ prerelease of that exact commit. Stable releases remain manual.
 Run the same suite locally with `bun run test` (optionally followed by a test
 filename filter). Each file gets a fresh process so browser globals, fetch mocks,
 and storage modules cannot affect later files. Plain `bun test` on Bun 1.3.8
-shares that state between files and is not the release check.
+shares that state between files and is not the release check. Files run in
+parallel, half as many as there are CPUs and at most 3 with a headless Chrome;
+`TEST_JOBS` and `TEST_BROWSER_JOBS` change that, and `TEST_JOBS=1` runs them one
+at a time with live output.
 
 Tags use the highest stable version tag in the commit's history, followed by
 `-nightly.<commit-date>.<workflow-run-number>` (for example,

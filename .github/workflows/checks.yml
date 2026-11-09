@@ -27,4 +27,8 @@ jobs:
           bun-version: 1.3.8
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
+      # Two files at a time (one with a browser) on the 4-vCPU runner: at 4 a run on two cores
+      # with hyperthreads failed 7 timing-sensitive files (5 s timeouts, animation frames).
       - run: bun run test
+        env:
+          TEST_JOBS: 2
