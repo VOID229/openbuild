@@ -9,7 +9,7 @@ import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
 import { eventDetail, eventText } from "../../../shared/bots";
 import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
-import { BotAvatar, BotHuddle } from "./BotAvatar";
+import { BotAvatar, BotHuddle, BotLineup } from "./BotAvatar";
 
 /**
  * True once `busy` has lasted a moment. Saves and reconnects usually finish in a blink, and a status
@@ -109,6 +109,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   mood,
   badge = true,
   zzz = false,
+  lineup,
 }: {
   conversation: Conversation;
   size: number;
@@ -122,6 +123,8 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   badge?: boolean;
   /** A "zzz" over a group's dozing huddle: on in the sidebars, off beside a name or a chat's messages. */
   zzz?: boolean;
+  /** A group's members in a row, each its own mascot, rather than huddled together. */
+  lineup?: boolean;
 }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
@@ -141,6 +144,7 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
+  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} />;
   return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} />;
 });
 

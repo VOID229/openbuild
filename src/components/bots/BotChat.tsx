@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
@@ -2076,12 +2076,38 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
           </IconButton>
         )}
         <button type="button" className="bots-head-pill" aria-expanded={remote ? undefined : detailsOpen} disabled={remote} onClick={() => (mobile ? openBotsDetails() : useBots.getState().setDetailsOpen(!detailsOpen))}>
-          <ConversationAvatar conversation={conversation} size={mobile ? 36 : 26} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
-          <span className="bots-head-text">
-            <span className="bots-head-name">{name}</span>
-            {mobile && sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
-            {!mobile && !typing && !activity && away && <span className="bots-head-away">{away}</span>}
-          </span>
+          {mobile ? (
+            <>
+              <ConversationAvatar conversation={conversation} size={36} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
+              <span className="bots-head-text">
+                <span className="bots-head-name">{name}</span>
+                {sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+              </span>
+            </>
+          ) : (
+            <>
+              {/* At rest just the bots, one by one; hovered or focused (or with the details open), the
+                  name and a chevron slide out from behind them. */}
+              <ConversationAvatar conversation={conversation} size={22} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
+              <span className="bots-head-reveal">
+                <span className="bots-head-reveal-clip">
+                  <span className="bots-head-reveal-body">
+                    <span className="bots-head-name">{name}</span>
+                    {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+                  </span>
+                </span>
+              </span>
+              {!remote && (
+                <span className="bots-head-reveal bots-head-reveal-chevron">
+                  <span className="bots-head-reveal-clip">
+                    <span className="bots-head-reveal-body">
+                      <ChevronRight className="bots-head-chevron" size={16} strokeWidth={2.25} aria-hidden />
+                    </span>
+                  </span>
+                </span>
+              )}
+            </>
+          )}
         </button>
       </div>
       <Messages conversation={conversation} since={openedAt} onReply={setReplyTo} />

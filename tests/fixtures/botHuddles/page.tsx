@@ -1,6 +1,6 @@
 // Groups' avatars wherever they show, for tests/botHuddleLayout.test.ts to measure in Chrome: the real
-// OpenBots sidebar (rows and pinned tiles) and the other places a group's huddle goes, the rail, the
-// hover card, the chat's header and Settings, at each of their sizes. All of them doze, as the sidebar's
+// OpenBots sidebar (rows and pinned tiles) and the other places a group's huddle goes, the rail and
+// Settings, at each of their sizes, and the hover card, whose bots stand in a row. All of them doze, as the sidebar's
 // do with no one at work, so a "zzz" shows wherever a huddle has one; the plain sizes have it on, even
 // below a seat's size where the app sets none, to see it beside the count. `?theme=light` for the light theme.
 import "../../../src/styles.css";
@@ -42,7 +42,7 @@ function Places() {
       <div data-place="peek" style={{ display: "flex", gap: 10 }}>
         {sizes.map((c) => (
           <div key={c.id} className="bots-peek" data-state="open" data-group={c.botIds.length} style={{ position: "static", pointerEvents: "auto" }}>
-            <span className="bots-peek-head"><ConversationAvatar conversation={c} size={18} alive={false} working={[]} badge={false} /><span className="bots-peek-name">{c.name}</span></span>
+            <span className="bots-peek-head"><ConversationAvatar conversation={c} size={18} alive={false} working={[]} badge={false} lineup /><span className="bots-peek-name">{c.name}</span></span>
             <span className="bots-peek-preview">hello</span>
           </div>
         ))}

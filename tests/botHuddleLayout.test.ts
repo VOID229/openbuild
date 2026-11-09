@@ -1,5 +1,5 @@
 // Groups' avatars measured in a real Chrome, in both themes, wherever they show (sidebar rows and
-// tiles, the rail, the hover card, the chat's header, Settings): every member drawn is in plain view,
+// tiles, the rail, Settings; the hover card and chat header line theirs up instead): every member drawn is in plain view,
 // with nothing over it, and a big group's count sits in a seat of its own or beside the huddle, clear
 // of every member, inside the item it's in and big enough to read, and clear of the "zzz" over a dozing
 // huddle. Rows still line up.
@@ -73,7 +73,7 @@ describe.skipIf(!browser)("groups' avatars", () => {
     test(`every member shows, and the count sits clear of them (${theme})`, async () => {
       const page = await open(theme);
       const all = await huddles(page);
-      for (const where of ["tile", "row", "rail", "peek", "size-26", "size-34", "size-96"]) expect(all.some((h) => h.where === where && h.more)).toBe(true);
+      for (const where of ["tile", "row", "rail", "size-26", "size-34", "size-96"]) expect(all.some((h) => h.where === where && h.more)).toBe(true);
       for (const h of all) {
         const label = `${h.where} at ${h.size}px`;
         expect({ label, hidden: h.hidden }).toEqual({ label, hidden: 0 });
@@ -90,7 +90,7 @@ describe.skipIf(!browser)("groups' avatars", () => {
       // Seven in a group: three shown and four counted in a seat, four shown and three counted beside.
       const seven = (where: string) => all.find((h) => h.where === where && h.more?.text.endsWith(h.size >= 32 ? "4" : "3"));
       for (const where of ["tile", "row", "rail", "size-96"]) expect(seven(where)?.bodies).toHaveLength(3);
-      for (const where of ["peek", "size-26"]) expect(seven(where)?.bodies).toHaveLength(4);
+      expect(seven("size-26")?.bodies).toHaveLength(4);
     });
   }
 
