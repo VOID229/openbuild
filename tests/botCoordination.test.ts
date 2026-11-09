@@ -16,43 +16,53 @@ async function isolated(name: string, script: string) {
   }
 }
 
-test("a request to several bots picks one to answer, by role, then tag order, then the primary", async () => {
+test("a request to several bots picks one to answer: a bot it names, then whose own role fits, then the primary", async () => {
   await isolated("lead", `
     import { strict as a } from 'node:assert';
     const svc = await import('./server/bots/service.ts');
     const { render } = await import('./server/bots/runner.ts');
-    const dr = svc.createBot({ name: 'Dr Eggbot' }).bot.id;
-    const manager = svc.createBot({ name: 'Manager', instructions: 'You merge pull requests and track what has shipped.' }).bot.id;
-    const tracer = svc.createBot({ name: 'Tracer', instructions: 'You review code and hunt down bugs.' }).bot.id;
+    // Instructions as real teams write them: each says what it's for first, and then names other bots'
+    // jobs, the primary's most of all.
+    const dr = svc.createBot({ name: 'Dr Eggbot', instructions: "You're the primary and you run the team. Tracer reviews code and pull requests and hunts down bugs; Manager plans the work, watches checks and merges pull requests once they're green; Researcher looks things up. Route each request to whoever fits, review plans before they start, keep Outis posted on what shipped and what's blocked, and step in on anything nobody owns." }).bot.id;
+    const manager = svc.createBot({ name: 'Manager', instructions: "You manage the work and merge pull requests once their checks are green. Break requests into tasks, start OpenBuild threads for them, and wait for Tracer to review before merging. Keep track of what has shipped, what's blocked and who's on what, and say so plainly when asked for status." }).bot.id;
+    const tracer = svc.createBot({ name: 'Tracer', instructions: "You review code and pull requests and hunt down bugs. Read diffs line by line, run the tests, and report each finding with its file and line and why it's wrong. Be skeptical and specific. Never merge anything yourself; that's Manager's call once you've signed off." }).bot.id;
     const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [dr, manager, tracer] });
     const wakes = [];
     svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
     let at = Date.now();
     const post = text => { wakes.length = 0; return svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', at: at += 3_600_000, text }); };
+    const lead = text => { post(text); a.ok(wakes.length > 1, text); a.ok(wakes.every(w => w.lead === wakes[0].lead), text); return wakes[0].lead; };
 
-    // The role fits: "merged" is the manager's, even tagged second.
-    let m = post('@Dr Eggbot @Manager is PR #199 merged?');
-    a.deepEqual(wakes.map(w => [w.id, w.messageIds, w.lead]), [[dr, [m.id], manager], [manager, [m.id], manager]]);
-    // No role fits: whoever was tagged first.
-    m = post('@Tracer @Dr Eggbot hello there');
-    a.deepEqual(wakes.map(w => w.lead), [tracer, tracer]);
-    // @all with no fit: the primary. With one: the bot whose role it is.
-    m = post('@all quick hello');
-    a.deepEqual(wakes.map(w => w.id), [dr, manager, tracer]);
-    a.ok(wakes.every(w => w.lead === dr));
-    m = post('@all can someone review the login bug?');
-    a.ok(wakes.every(w => w.lead === tracer));
+    // Nobody named: whose own role it is, never the primary for naming everyone's.
+    a.equal(lead('@all review PR 204?'), tracer);
+    a.equal(lead('@all is 204 merged?'), manager);
+    // A bot named in it, even untagged, answers.
+    a.equal(lead('@all tracer find bugs'), tracer);
+    a.equal(lead('@all Manager, what do you think of the logo?'), manager);
+    // Several named: whose own role fits; when none does, the primary.
+    a.equal(lead('@Dr Eggbot @Manager is PR #199 merged?'), manager);
+    a.equal(lead('@Dr Eggbot @Tracer can you review the login change?'), tracer);
+    a.equal(lead('@Tracer @Dr Eggbot hello there'), dr);
+    // The primary only if it was asked: otherwise whoever was named first.
+    a.equal(lead('@Tracer @Manager hello there'), tracer);
+    // Nothing fits, or two fit as well: the primary.
+    a.equal(lead('@all quick hello'), dr);
+    a.equal(lead('@all what should we have for lunch?'), dr);
+    a.equal(lead('@all review and merge it'), dr);
     // One bot asked: no lead, as before.
     post('@Tracer thoughts?');
     a.deepEqual(wakes.map(w => [w.id, w.lead]), [[tracer, undefined]]);
     a.equal(svc.pickLead('anything', [manager]), manager);
+    // Any bot's role counts, whatever it's called; only its own first sentence does.
+    const pip = svc.createBot({ name: 'Pip', instructions: 'You test every change by hand on a real phone. Ask Tracer to review code.' }).bot.id;
+    a.equal(svc.pickLead('can someone test the new login?', [dr, manager, pip]), pip);
+    a.equal(svc.pickLead('can someone review the new login?', [dr, manager, pip]), dr);
 
     // The lead is told it answers for everyone; the others, that it does and what's still theirs.
-    m = post('@Dr Eggbot @Manager is PR #199 merged?');
-    const job = id => [{ kind: 'messages', conversationId: group.id, messageIds: [m.id], lead: manager }];
-    const mine = render(job(), manager);
-    a.match(mine, /\\[assigned request: answer this; it went to others too, and you answer for all of you\\]/);
-    const theirs = render(job(), dr);
+    const m = post('@Dr Eggbot @Manager is PR #199 merged?');
+    const job = [{ kind: 'messages', conversationId: group.id, messageIds: [m.id], lead: manager }];
+    a.match(render(job, manager), /\\[assigned request: answer this; it went to others too, and you answer for all of you\\]/);
+    const theirs = render(job, dr);
     a.match(theirs, /\\[asked of several bots; Manager answers it\\. Reply only if it asks each of you, or with what's yours alone/);
     a.doesNotMatch(theirs, /assigned request: answer this/);
     process.exit(0);

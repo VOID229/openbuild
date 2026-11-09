@@ -951,34 +951,44 @@ function groupRecipients(c: db.StoredConversation, message: BotMessage): string[
   return primary ? [primary] : [];
 }
 
-const COMMON = new Set("what that this with have from they your about there their would could should just like some then them when which will been were does into also more here know want need make tell please think each every other only very much really thing anyone everyone someone right now still again today yeah okay".split(" ").map(stem));
+const COMMON = new Set("the and for you your are can what that this with have from they about there their would could should just like some then them when which will been were does into also more here know want need make tell please think each every other only very much really thing anyone everyone someone right now still again today all".split(" ").map(stem));
 function stem(word: string) {
   return word.replace(/(?:ing|ed|es|s|e)$/, "");
 }
 const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).map(stem).filter((w) => w.length >= 3 && !COMMON.has(w)));
 
+/** What a bot says it's for: the first sentence of its own instructions, where a bot says what it does. The rest often names other bots' jobs. */
+const ownRole = (instructions: string) => instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? "";
+
+/** Where a bot's name first shows in some text, tagged or just written ("tracer, find bugs"); -1 if it doesn't. */
+function namedAt(text: string, bot: db.StoredBot): number {
+  const name = mentionName(bot.name).toLowerCase();
+  if (!name) return -1;
+  return text.toLowerCase().search(new RegExp(`(?<![\\p{L}\\d_])@?${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\d_])`, "u"));
+}
+
 /**
- * Who answers a user's group message that went to several bots, so they don't all say the same thing:
- * the one whose name and instructions share the most words with it, then whoever was tagged first by
- * name, then the primary. Decided here, with no model call; the others still get it, to add what's
- * theirs alone.
+ * Who answers a user's group message that went to several bots, so they don't all say the same thing.
+ * A bot the message names, tagged or just written ("tracer, find bugs"), answers. Otherwise, or among
+ * several named, the one whose role (the first sentence of its instructions) shares the most words with
+ * it. A tie, or nothing in common, goes to the primary if it was asked, else whoever was named first.
+ * Decided here, with no model call; the others still get it, to add what's theirs alone.
  */
 export function pickLead(text: string, ids: string[]): string | undefined {
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
   if (bots.length < 2) return bots[0]?.id;
-  const tags = findTags(text, bots);
-  let rest = text;
-  for (const t of [...tags].reverse()) rest = rest.slice(0, t.start) + " " + rest.slice(t.end);
-  const asked = words(rest);
-  const tagged = tags.flatMap((t) => (t.bot ? [t.bot.id] : []));
-  const rank = (b: db.StoredBot) => {
-    const role = words(`${mentionName(b.name)} ${b.instructions}`);
-    const at = tagged.indexOf(b.id);
-    return { fit: [...asked].filter((w) => role.has(w)).length, at: at === -1 ? Infinity : at, primary: b.primary ? 0 : 1 };
-  };
-  const ranked = bots.map((b, i) => ({ id: b.id, i, ...rank(b) }));
-  ranked.sort((a, b) => b.fit - a.fit || a.at - b.at || a.primary - b.primary || a.i - b.i);
-  return ranked[0]!.id;
+  const named = bots.map((b) => ({ b, at: namedAt(text, b) })).filter((n) => n.at >= 0).sort((x, y) => x.at - y.at).map((n) => n.b);
+  if (named.length === 1) return named[0]!.id;
+  const pool = named.length ? named : bots;
+  // The bots' own names aren't what it's about.
+  const names = new Set(bots.flatMap((b) => [...words(mentionName(b.name))]));
+  const asked = [...words(text)].filter((w) => !names.has(w));
+  const scored = pool.map((b) => {
+    const role = words(ownRole(b.instructions));
+    return { b, fit: asked.filter((w) => role.has(w)).length };
+  }).sort((x, y) => y.fit - x.fit);
+  if (scored[0]!.fit && scored[0]!.fit > (scored[1]?.fit ?? 0)) return scored[0]!.b.id;
+  return (pool.find((b) => b.primary) ?? bots.find((b) => b.primary) ?? pool[0])!.id;
 }
 
 function mentionedBots(text: string, ids: string[]): string[] {
