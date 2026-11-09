@@ -1277,6 +1277,94 @@
   margin-bottom: 4px;
 }
 
+/* A bot's mascot beside its messages is the button for its profile card (BotProfileCard.tsx). */
+.bm-profile-trigger {
+  display: flex;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.bm-profile {
+  position: fixed;
+  z-index: 160;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: max-content;
+  min-width: 232px;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  visibility: hidden;
+}
+
+.bm-profile[data-state="open"] {
+  visibility: visible;
+  animation: tip-in 140ms var(--ease) both;
+}
+
+.bm-profile[data-side="top"] { --tip-from: translateY(4px); }
+.bm-profile[data-side="bottom"] { --tip-from: translateY(-4px); }
+
+.bm-profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.bm-profile-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.bm-profile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.bm-profile-btn {
+  height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bm-profile-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--text) 12%, transparent);
+  }
+}
+
+.bm-profile-btn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 15%, transparent);
+}
+
+.bm-profile-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .bm-stack {
   display: flex;
   flex-direction: column;
@@ -3475,7 +3563,8 @@ a.bots-btn-primary {
   .bots-sidebar-inner,
   .bots-rail-inner,
   .bots-dialog,
-  .bots-send-on {
+  .bots-send-on,
+  .bm-profile[data-state="open"] {
     animation: none;
   }
 }

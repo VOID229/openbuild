@@ -32,6 +32,7 @@ import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } fr
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
 import { ConnectCard } from "./BotApps";
 import { BotAvatar } from "./BotAvatar";
+import { BotProfileHover } from "./BotProfileCard";
 
 /** A friend's bot whose look didn't come across. */
 const FRIEND_LOOK = { shape: "orb", color: "gray" };
@@ -1332,11 +1333,11 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 </div>
               )}
               <div className="bm-group-row">
-                {group && !mine && (
+                {group && !mine && <BotProfileHover bot={bot}>
                   <span className="bm-avatar">
                     {bot ? <BotAvatar look={bot.look} size={28} asleep={!busy.includes(bot.id)} pulse={pulses[bot.id]} /> : from?.owner ? <Avatar name={from.friendName} size={28} /> : from ? <BotAvatar look={from.look ?? FRIEND_LOOK} size={28} alive={false} /> : null}
                   </span>
-                )}
+                </BotProfileHover>}
                 <div className="bm-stack">
                   {b.messages.map((m, i) => {
                     const n = b.messages.length;
