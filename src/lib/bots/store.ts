@@ -16,8 +16,8 @@ import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { botModels } from "../pi";
 import { useStore } from "../store";
-import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine, TodoChange } from "./types";
-import { applyTodo, castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
+import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
+import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
@@ -147,7 +147,6 @@ interface BotsState {
   /** Replace the user's vote in a poll. No keys takes it back. */
   votePoll: (conversationId: string, messageId: string, keys: string[]) => void;
   /** Change a conversation's to-do list as the user. */
-  editTodos: (conversationId: string, change: TodoChange) => void;
   setTyping: (conversationId: string, botId: string, typing: boolean) => void;
   pulse: (botId: string, mood?: Mood) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
@@ -384,22 +383,6 @@ export const useBots = create<BotsState>()(
     votePoll: (conversationId, messageId, keys) => {
       get().patchMessage(conversationId, messageId, (m) => (m.poll ? { poll: castVote(m.poll, "me", keys) } : {}));
       void send("PATCH", messagePath(conversationId, messageId), { vote: keys }, { label: keys.length ? "Vote" : "Vote taken back", check: { kind: "vote", conversationId, messageId, keys } });
-    },
-    editTodos: (conversationId, change) => {
-      // New items get their ids here, so the list the workspace sends back is the one already shown.
-      const sent: TodoChange = change.action === "add" ? { ...change, ids: change.items.map(() => uid()) } : change;
-      const c = get().conversations.find((x) => x.id === conversationId);
-      if (!c) return;
-      let todos;
-      try {
-        const ids = sent.action === "add" ? [...(sent.ids ?? [])] : [];
-        todos = applyTodo(c.todos ?? [], sent, "me", Date.now(), () => ids.shift() ?? uid());
-      } catch (error) {
-        set({ error: error instanceof Error ? error.message : String(error) });
-        return;
-      }
-      set((s) => ({ conversations: mapConversation(s.conversations, conversationId, (x) => ({ ...x, todos: todos.length ? todos : undefined })) }));
-      void send("POST", `/api/bots/conversations/${encodeURIComponent(conversationId)}/todos`, sent);
     },
     setTyping: (conversationId, botId, typing) =>
       set((s) => {

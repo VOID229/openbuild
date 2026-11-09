@@ -18,6 +18,7 @@ import { ProjectHeading } from "./components/Workspace";
 import { expandBotsThread, Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
+import { MarketplacePage } from "./components/bots/BotApps";
 import { UsagePage } from "./components/UsagePage";
 import { adoptDiscoveredChats, adoptHistory, resumeReplies } from "./lib/chat";
 import { preloadBots } from "./lib/bots/store";
@@ -35,7 +36,7 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
-import { cx, useMediaQuery } from "./lib/ui";
+import { cx, slideSidebar, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -184,6 +185,8 @@ function Main() {
   const settingsOpen = useStore((s) => s.settingsOpen);
   const usageOpen = useStore((s) => s.usageOpen);
   const botsOpen = useStore((s) => s.botsOpen);
+  // OpenBots' Marketplace, a page in place of the bot chat; Settings and Usage opened over it cover it.
+  const marketplaceOpen = useStore((s) => s.botsOpen && s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const lightboxOpen = useLightbox((s) => s.open);
   // The startup popup for a server without Pi (HarnessSetup) sits over the app the way Settings does.
   const harnessSetupOpen = useHarnessSetupOpen((s) => s.open);
@@ -193,7 +196,7 @@ function Main() {
   // A thread opened from a link in OpenBots shows in place of the bot chat, with the bots' sidebar kept.
   // Usage opened over it covers it, and closing Usage comes back to it.
   // Until threads load, a thread named by the URL holds its place rather than flashing the bot chat.
-  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen && !s.settingsOpen) && (!!chat || !chatsLoaded);
+  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen && !s.settingsOpen && !s.marketplaceOpen) && (!!chat || !chatsLoaded);
   const botsChat = botsOpen && !botsThread;
   useBotsThreadEscape(botsThread);
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -314,8 +317,10 @@ function Main() {
           st.newChat();
           break;
         case "toggleSidebar":
-          if (st.botsOpen) st.setBotsSidebarOpen(!st.botsSidebarOpen);
-          else st.setSidebarOpen(!st.sidebarOpen);
+          slideSidebar(() => {
+            if (st.botsOpen) st.setBotsSidebarOpen(!st.botsSidebarOpen);
+            else st.setSidebarOpen(!st.sidebarOpen);
+          });
           break;
         case "toggleRightSidebar": {
           const { panel, tree, setPanel, setTree } = usePanel.getState();
@@ -382,8 +387,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = settingsOpen ? "Settings · OpenBuild" : usageOpen ? "Usage · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, titling, settingsOpen, usageOpen, botsChat]);
+    document.title = settingsOpen ? "Settings · OpenBuild" : usageOpen ? "Usage · OpenBuild" : marketplaceOpen ? "Marketplace · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, settingsOpen, usageOpen, marketplaceOpen, botsChat]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -403,7 +408,7 @@ function Main() {
         <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
         <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
         {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
-        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen) && "main-page")} inert={phone && botsListShowing}>
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen || marketplaceOpen) && "main-page")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
@@ -417,7 +422,7 @@ function Main() {
               </>
             ) : (
               <>
-                <IconButton label="Open sidebar" tooltipSide="right" onClick={() => setSidebarOpen(true)}>
+                <IconButton label="Open sidebar" tooltipSide="right" onClick={() => slideSidebar(() => setSidebarOpen(true))}>
                   <PanelLeft size={18} />
                 </IconButton>
                 <IconButton label="New thread" tooltipSide="right" onClick={newChat}>
@@ -442,10 +447,11 @@ function Main() {
             )
           ) : (
             <>
-              <Activity mode={botsChat && !usageOpen && !settingsOpen ? "visible" : "hidden"}><BotsView /></Activity>
-              {/* Settings and Usage are pages in place of the bot chat, or of the thread below. */}
+              <Activity mode={botsChat && !usageOpen && !settingsOpen && !marketplaceOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              {/* Settings, Usage and the Marketplace are pages in place of the bot chat, or of the thread below. */}
               {botsOpen && settingsOpen && <SettingsPage />}
               {botsOpen && usageOpen && !settingsOpen && <UsagePage />}
+              {marketplaceOpen && <MarketplacePage />}
               <Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>

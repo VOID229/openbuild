@@ -1,14 +1,13 @@
 // A conversation's to-do list: the steps of the work going on in a chat, which its bots keep with
-// their todo tool and the user ticks off, adds to or trims here. It sits in the details panel (a
-// group's Goal tab, a bot's Tasks tab), and its progress shows in the chat's header.
-import { Check, Plus, X } from "lucide-react";
-import { useState } from "react";
+// their todo tool. Read-only here: it shows where the work stands, and only the bots change it. It
+// sits in the details panel (a group's Goal tab, a bot's Tasks tab), and its progress shows in the
+// chat's header.
+import { Check } from "lucide-react";
 import { todoProgress } from "../../../shared/bots";
 import { useBots } from "../../lib/bots/store";
 import type { Bot, Conversation, TodoItem } from "../../lib/bots/types";
 import { openBotsDetails } from "../../lib/gestures";
 import { cx } from "../../lib/ui";
-import { IconButton } from "../primitives";
 import { BotAvatar } from "./BotAvatar";
 
 const STATUS_LABEL = { todo: "To do", doing: "In progress", done: "Done" } as const;
@@ -23,30 +22,19 @@ function Progress({ done, total }: { done: number; total: number }) {
 }
 
 function Row({ item, conversation, bots }: { item: TodoItem; conversation: Conversation; bots: Bot[] }) {
-  const st = useBots.getState();
   const bot = conversation.kind === "group" && item.bot && item.status !== "todo" ? bots.find((b) => b.id === item.bot) : undefined;
   const done = item.status === "done";
   return (
     <li className={cx("bots-todo", `bots-todo-${item.status}`)}>
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={done ? true : item.status === "doing" ? "mixed" : false}
-        aria-label={`${item.text}: ${STATUS_LABEL[item.status]}`}
-        className="bots-todo-check"
-        onClick={() => st.editTodos(conversation.id, { action: "update", id: item.id, status: done ? "todo" : "done" })}
-      >
+      <span className="bots-todo-check" role="img" aria-label={STATUS_LABEL[item.status]} data-status={item.status}>
         {done && <Check size={11} strokeWidth={3} />}
-      </button>
+      </span>
       <span className="bots-todo-text">{item.text}</span>
       {bot && (
         <span className="bots-todo-bot" data-tooltip={`${bot.name.split(" ·")[0]} ${done ? "did this" : "is on it"}`} data-tooltip-side="left">
           <BotAvatar look={bot.look} size={16} alive={false} />
         </span>
       )}
-      <IconButton label="Remove" tooltipSide="left" className="bots-todo-x" onClick={() => st.editTodos(conversation.id, { action: "remove", id: item.id })}>
-        <X size={13} />
-      </IconButton>
     </li>
   );
 }
@@ -54,13 +42,6 @@ function Row({ item, conversation, bots }: { item: TodoItem; conversation: Conve
 export function TodoList({ conversation, bots }: { conversation: Conversation; bots: Bot[] }) {
   const items = conversation.todos ?? [];
   const { done, total } = todoProgress(items);
-  const [draft, setDraft] = useState("");
-  const add = () => {
-    const text = draft.trim();
-    if (!text) return;
-    useBots.getState().editTodos(conversation.id, { action: "add", items: [text] });
-    setDraft("");
-  };
   return (
     <section className="bots-todos" aria-label="Tasks">
       <div className="bots-todos-head">
@@ -70,41 +51,17 @@ export function TodoList({ conversation, bots }: { conversation: Conversation; b
             {done}/{total}
           </span>
         )}
-        {done > 0 && (
-          <button type="button" className="bots-todos-clear" onClick={() => useBots.getState().editTodos(conversation.id, { action: "clear", which: "done" })}>
-            Clear done
-          </button>
-        )}
       </div>
       {total > 0 && <Progress done={done} total={total} />}
-      <ul className="bots-todos-list">
-        {items.map((item) => (
-          <Row key={item.id} item={item} conversation={conversation} bots={bots} />
-        ))}
-        <li className="bots-todo bots-todo-add">
-          <span className="bots-todo-check bots-todo-plus" aria-hidden>
-            <Plus size={12} />
-          </span>
-          <input
-            className="bots-todo-input"
-            value={draft}
-            placeholder="Add a task"
-            aria-label="Add a task"
-            maxLength={200}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                add();
-              }
-              if (e.key === "Escape" && draft) {
-                e.stopPropagation();
-                setDraft("");
-              }
-            }}
-          />
-        </li>
-      </ul>
+      {total > 0 ? (
+        <ul className="bots-todos-list">
+          {items.map((item) => (
+            <Row key={item.id} item={item} conversation={conversation} bots={bots} />
+          ))}
+        </ul>
+      ) : (
+        <p className="bots-todos-empty">No tasks yet. Bots add them as they work.</p>
+      )}
     </section>
   );
 }

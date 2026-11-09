@@ -1,5 +1,5 @@
 // OpenBots' to-do lists and pages, in a real Chrome: a group's list under its goal, with its progress in
-// the chat's header (a click there opens it); ticking, adding and removing items; a bot's own chat
+// the chat's header (a click there opens it); read-only for the user, since only bots change it; a bot's own chat
 // keeping its list on a Tasks tab; and a page a bot showed, drawn in OpenBuild's sandboxed frame.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
@@ -44,11 +44,11 @@ describe.skipIf(!browser)("to-do lists", () => {
       expect(await page.eval<string>("document.querySelector('.bots-todos-count').textContent")).toBe("1/5");
       expect(await page.eval<string>("document.querySelector('.bots-todos-bar').getAttribute('aria-valuenow')")).toBe("1");
       // Rows of 32px, a done one dim and struck through, each one's state on its checkbox.
-      const rows = await page.eval<{ h: number; checked: string; line: string; text: string; color: string }[]>(`[...document.querySelectorAll('.bots-todo:not(.bots-todo-add)')].map((r) => {
+      const rows = await page.eval<{ h: number; checked: string; line: string; text: string; color: string }[]>(`[...document.querySelectorAll('.bots-todo')].map((r) => {
         const t = r.querySelector('.bots-todo-text'), s = getComputedStyle(t);
-        return { h: r.getBoundingClientRect().height, checked: r.querySelector('[role=checkbox]').getAttribute('aria-checked'), line: s.textDecorationLine, text: t.textContent, color: s.color };
+        return { h: r.getBoundingClientRect().height, checked: r.querySelector('.bots-todo-check').getAttribute('aria-label'), line: s.textDecorationLine, text: t.textContent, color: s.color };
       })`);
-      expect(rows.map((r) => r.checked)).toEqual(["true", "mixed", "mixed", "false", "false"]);
+      expect(rows.map((r) => r.checked)).toEqual(["Done", "In progress", "In progress", "To do", "To do"]);
       for (const r of rows) expect(r.h).toBeGreaterThanOrEqual(32);
       expect(rows[0]!.line).toBe("line-through");
       expect(rows[3]!.line).toBe("none");
@@ -61,36 +61,18 @@ describe.skipIf(!browser)("to-do lists", () => {
     }, 30_000);
   }
 
-  test("the user ticks items off, adds and removes them, and the header follows", async () => {
+  test("the list is read-only for the user: no checkboxes, no adding, removing or clearing", async () => {
     const page = await open("theme=dark");
     await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Goal').click()");
     await page.until("!!document.querySelector('.bots-todos')");
-    // Tick "Deploy to staging".
-    await page.eval("[...document.querySelectorAll('.bots-todo')].find((r) => r.textContent.includes('Deploy')).querySelector('[role=checkbox]').click()");
+    const before = await todos(page, "crew");
+    // Nothing in it can be pressed or typed into.
+    expect(await page.eval<number>("document.querySelectorAll('.bots-todos button, .bots-todos input, .bots-todos [role=checkbox]').length")).toBe(0);
+    // Clicking an item's circle changes nothing.
+    await page.eval("[...document.querySelectorAll('.bots-todo')].find((r) => r.textContent.includes('Deploy')).querySelector('.bots-todo-check').click()");
     await page.settle();
-    expect((await todos(page, "crew")).find((t) => t.text === "Deploy to staging")?.status).toBe("done");
-    expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("2/5");
-    // And untick it.
-    await page.eval("[...document.querySelectorAll('.bots-todo')].find((r) => r.textContent.includes('Deploy')).querySelector('[role=checkbox]').click()");
-    await page.settle();
-    expect((await todos(page, "crew")).find((t) => t.text === "Deploy to staging")?.status).toBe("todo");
-    // Add one with Enter.
-    await page.eval("document.querySelector('.bots-todo-input').focus()");
-    await page.send("Input.insertText", { text: "Book the launch call" });
-    for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" && { text: "\r" }) });
-    await page.settle();
-    const added = await todos(page, "crew");
-    expect(added.at(-1)).toMatchObject({ text: "Book the launch call", status: "todo", by: "me" });
-    expect(await page.eval<string>("document.querySelector('.bots-todo-input').value")).toBe("");
-    expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("1/6");
-    // Remove it again, then clear the done ones.
-    await page.eval("[...document.querySelectorAll('.bots-todo')].find((r) => r.textContent.includes('Book the launch')).querySelector('.bots-todo-x').click()");
-    await page.settle();
-    expect((await todos(page, "crew")).some((t) => t.text === "Book the launch call")).toBe(false);
-    await page.eval("document.querySelector('.bots-todos-clear').click()");
-    await page.settle();
-    expect((await todos(page, "crew")).map((t) => t.status)).toEqual(["doing", "doing", "todo", "todo"]);
-    expect(await page.eval<boolean>("!!document.querySelector('.bots-todos-clear')")).toBe(false);
+    expect(await todos(page, "crew")).toEqual(before);
+    expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("1/5");
   }, 30_000);
 
   test("a bot's own chat keeps its list on a Tasks tab, and shows no progress until it has one", async () => {
@@ -98,9 +80,10 @@ describe.skipIf(!browser)("to-do lists", () => {
     expect(await page.eval<boolean>("!!document.querySelector('.bots-head-tasks')")).toBe(false);
     await page.eval("[...document.querySelectorAll('.bots-tab')].find((b) => b.textContent === 'Tasks').click()");
     await page.until("!!document.querySelector('.bots-todos')");
-    await page.eval("document.querySelector('.bots-todo-input').focus()");
-    await page.send("Input.insertText", { text: "Find a venue" });
-    for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" && { text: "\r" }) });
+    // Empty until the bot starts one.
+    expect(await page.eval<string>("document.querySelector('.bots-todos-empty')?.textContent")).toContain("No tasks yet");
+    // The bot adds an item (as its todo tool's sync would).
+    await page.eval(`bots.setState((s) => ({ conversations: s.conversations.map((c) => c.id === "dm" ? { ...c, todos: [{ id: "t1", text: "Find a venue", status: "todo", by: "egg", at: Date.now() }] } : c) }))`);
     await page.settle();
     expect(await page.eval<string>("document.querySelector('.bots-head-tasks').textContent")).toBe("0/1");
     // From another tab, the header's progress brings the list back.
@@ -131,7 +114,7 @@ describe.skipIf(!browser)("pages in a bot chat", () => {
     expect(probe.background).not.toBe("");
     // It fits the page's height (180px), not the default.
     await page.until("Math.abs(document.querySelector('.bm-page .html-render-page').getBoundingClientRect().height - 180) < 4");
-    expect(await page.eval<string[]>("[...document.querySelectorAll('.bm-page .html-render-action')].map((b) => b.getAttribute('aria-label'))")).toEqual(["Download HTML", "Full screen"]);
+    expect(await page.eval<string[]>("[...document.querySelectorAll('.bm-page .html-render-action')].map((b) => b.getAttribute('aria-label'))")).toEqual(["Download HTML", "Full screen", "Close preview"]);
     await page.eval("document.querySelectorAll('.bm-page .html-render-action')[1].click()");
     await page.until("!!document.querySelector('.html-render-full[data-state=open] iframe')");
     expect(await page.eval<string>("document.querySelector('.html-render-full iframe').getAttribute('sandbox')")).toBe(frame.sandbox);

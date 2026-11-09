@@ -272,6 +272,9 @@ interface State {
   settingsIndex: boolean;
   /** The usage page is showing in place of a thread. */
   usageOpen: boolean;
+  /** OpenBots' Marketplace is showing as a page in place of the bot chat, at an app's own page or the catalog. */
+  marketplaceOpen: boolean;
+  marketplaceApp?: string;
   /** OpenBots is showing: its own sidebar and chat in place of threads. */
   botsOpen: boolean;
   /** Over OpenBots, the open thread shows in place of the bot chat (opened from a link there). */
@@ -342,6 +345,8 @@ interface State {
   openSettings: (section?: SettingsSection, page?: string) => void;
   closeSettings: () => void;
   setUsageOpen: (open: boolean) => void;
+  /** Open OpenBots' Marketplace, at an app's page or the catalog. Leaving it is pages.ts's leaveMarketplace. */
+  openMarketplace: (app?: string) => void;
   setBotsOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   setBotsSidebarOpen: (open: boolean) => void;
@@ -420,6 +425,8 @@ export const useStore = create<State>()(
       settingsIndex: initialRoute.settingsIndex ?? false,
       // From the URL, so a reload paints the world it was on rather than OpenBuild until routing starts.
       usageOpen: initialRoute.usageOpen ?? false,
+      marketplaceOpen: initialRoute.marketplaceOpen ?? false,
+      marketplaceApp: initialRoute.marketplaceApp,
       botsOpen: initialRoute.botsOpen ?? false,
       botsThread: initialRoute.botsThread ?? false,
       ...(initialRoute.activeChatId ? { activeChatId: initialRoute.activeChatId } : {}),
@@ -777,12 +784,15 @@ export const useStore = create<State>()(
         settingsSection: section ?? s.settingsSection,
         settingsPage: section ? page : s.settingsOpen ? s.settingsPage : undefined,
         settingsIndex: section ? false : s.settingsOpen ? s.settingsIndex : isPhone(),
+        marketplaceOpen: false,
         ...phoneListsClosed(s),
       })),
       closeSettings: () => set({ settingsOpen: false, settingsPage: undefined }),
       // Usage opens over whichever side is showing, so closing it goes back there; switching sides closes it.
-      setUsageOpen: (open) => set((s) => (open ? { usageOpen: true, settingsOpen: false, ...phoneListsClosed(s) } : { usageOpen: false })),
-      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false, settingsOpen: false, botsThread: false }),
+      setUsageOpen: (open) => set((s) => (open ? { usageOpen: true, settingsOpen: false, marketplaceOpen: false, ...phoneListsClosed(s) } : { usageOpen: false })),
+      // A page of OpenBots' own: the sidebar and the world stay as they are (on a phone the pane slides over the list, as Settings does).
+      openMarketplace: (app) => set((s) => ({ marketplaceOpen: true, marketplaceApp: app, settingsOpen: false, usageOpen: false, ...phoneListsClosed(s) })),
+      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsThread: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 
@@ -827,6 +837,7 @@ export const useStore = create<State>()(
         draftRemoteControl: false,
         usageOpen: false,
         settingsOpen: false,
+        marketplaceOpen: false,
         botsOpen: false,
         botsThread: false,
         searchFocus: undefined,
@@ -835,11 +846,11 @@ export const useStore = create<State>()(
           : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },
       })),
       selectChat: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, botsOpen: false, botsThread: false });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsOpen: false, botsThread: false });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       openThreadInBots: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, botsOpen: true, botsThread: true });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsOpen: true, botsThread: true });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       removeChat: (id) => {

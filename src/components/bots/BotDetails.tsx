@@ -455,16 +455,21 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
             ) : (
               <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
             )}
-            <div className="bots-details-sub">
-              {bot?.primary && <span className="bots-pill">Primary</span>}
-              {bot
-                ? `Made ${new Date(bot.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
-                : conversation.friend
+            {bot ? (
+              bot.primary && (
+                <div className="bots-details-sub">
+                  <span className="bots-pill">Primary</span>
+                </div>
+              )
+            ) : (
+              <div className="bots-details-sub">
+                {conversation.friend
                   ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
                   : conversation.kind === "group"
-                  ? `${conversation.botIds.length} bots`
-                  : "Side chat between bots"}
-            </div>
+                    ? `${conversation.botIds.length} bots`
+                    : "Side chat between bots"}
+              </div>
+            )}
           </div>
           {bot ? (
             <>
@@ -496,7 +501,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               <div className="bots-details-foot">
                 <button
                   type="button"
-                  className="btn btn-sm bots-danger"
+                  className="btn btn-sm bots-danger bots-delete"
                   disabled={bot.primary}
                   title={bot.primary ? "Make another bot primary first" : undefined}
                   onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}
@@ -530,7 +535,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 </>
               )}
               <div className="bots-details-foot">
-                <button type="button" className="btn btn-sm bots-danger" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>
+                <button type="button" className="btn btn-sm bots-danger bots-delete" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>
                   <Trash size={14} /> Delete group
                 </button>
               </div>

@@ -92,6 +92,9 @@
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   /* Opening and closing the side panel and file tree: quick off the mark, long soft landing. */
   --ease-panel: cubic-bezier(0.32, 0.72, 0, 1);
+  /* A damped spring (damping 0.82, ~1% overshoot) sampled for CSS: sidebars and switching worlds. */
+  --spring: linear(0, 0.0241, 0.0847, 0.1674, 0.2614, 0.3589, 0.4544, 0.5441, 0.6259, 0.6985, 0.7617, 0.8155, 0.8605, 0.8975, 0.9273, 0.9509, 0.9692, 0.9831, 0.9933, 1.0006, 1.0055, 1.0086, 1.0103, 1.011, 1.011, 1.0105, 1.0097, 1.0087, 1.0076, 1.0065, 1.0055, 1.0046, 1.0037, 1.003, 1.0023, 1.0018, 1);
+  --spring-ms: 480ms;
   --fast: 120ms;
   --med: 180ms;
 
@@ -885,6 +888,75 @@ select.input {
   opacity: 0;
 }
 
+/* Opening and closing the sidebar (ui.ts slideSidebar): a view transition, so the browser moves
+   snapshots and nothing reflows frame by frame. The sidebar slides in from, or out to, the left edge
+   on a spring while the main pane's edge follows it; the main pane's old content fades off the new. */
+.sidebar-switch .sidebar:not(.bots-sidebar) {
+  view-transition-name: side-threads;
+}
+
+.sidebar-switch .bots-sidebar {
+  view-transition-name: side-bots;
+}
+
+.sidebar-switch .main {
+  view-transition-name: side-main;
+}
+
+::view-transition-group(side-threads),
+::view-transition-group(side-bots),
+::view-transition-group(side-main) {
+  animation-duration: var(--spring-ms);
+  animation-timing-function: var(--spring);
+}
+
+::view-transition-image-pair(side-threads),
+::view-transition-image-pair(side-bots),
+::view-transition-image-pair(side-main) {
+  isolation: auto;
+}
+
+/* The sidebar's content rides its right edge, so it slides rather than unfolds. */
+::view-transition-old(side-threads),
+::view-transition-new(side-threads),
+::view-transition-old(side-bots),
+::view-transition-new(side-bots) {
+  width: 100%;
+  height: 100%;
+  object-fit: none;
+  object-position: right top;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(side-main),
+::view-transition-new(side-main) {
+  width: 100%;
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(side-threads),
+::view-transition-new(side-bots),
+::view-transition-new(side-main) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-old(side-threads),
+::view-transition-old(side-bots) {
+  animation: side-out calc(var(--spring-ms) * 0.6) var(--ease) both;
+}
+
+::view-transition-old(side-main) {
+  animation: side-out 200ms var(--ease) both;
+}
+
+@keyframes side-out {
+  to { opacity: 0; }
+}
+
 .sidebar-inner {
   display: flex;
   flex-direction: column;
@@ -927,6 +999,7 @@ select.input {
 }
 
 .brand-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -934,15 +1007,25 @@ select.input {
   margin-bottom: 8px;
 }
 
+/* Centred across the whole row, whatever sits at either end: the buttons stay on top of it. */
 .wordmark {
-  flex: 1;
-  min-width: 0;
-  padding-left: 4px;
-  text-align: left;
-  font-size: 15px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 16px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.015em;
   color: var(--text);
+  pointer-events: none;
+}
+
+.brand-row > .wordmark + * {
+  margin-left: auto;
+}
+
+.brand-row > .icon-btn {
+  position: relative;
 }
 
 .brand-row .icon-btn {
@@ -3714,23 +3797,22 @@ select.input {
   outline: none;
 }
 
-/* The sections beside the section, centred together under the header; the content scrolls on its own. */
+/* The sections down the left, lined up with the back button above them, and the section beside them;
+   the content scrolls on its own. */
 .spage-body {
   flex: 1;
   min-height: 0;
   display: flex;
   width: 100%;
-  max-width: 1040px;
-  margin: 0 auto;
 }
 
 .settings-nav {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 216px;
+  width: 232px;
   flex-shrink: 0;
-  padding: 12px 12px 32px 16px;
+  padding: 12px 16px 32px 16px;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -3800,8 +3882,7 @@ select.input {
 }
 
 .settings-inner {
-  max-width: 720px;
-  margin: 0 auto;
+  max-width: 760px;
 }
 
 /* A section, or a page inside one, comes in with a quick fade: opacity and 4px, nothing that moves layout. */
@@ -4973,7 +5054,7 @@ p.key-status svg {
     box-shadow: var(--shadow-lg);
     transform: none;
     visibility: visible;
-    transition: transform 220ms var(--ease-out), opacity var(--med) var(--ease-out), visibility 0s;
+    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s;
   }
 
   /* Hidden once it has slid away, so Safari doesn't sample it for the status bar color. */
@@ -4982,7 +5063,7 @@ p.key-status svg {
     transform: translateX(-100%);
     box-shadow: none;
     visibility: hidden;
-    transition: transform 220ms var(--ease-out), opacity var(--med) var(--ease-out), visibility 0s 220ms;
+    transition: transform var(--spring-ms) var(--spring), opacity var(--med) var(--ease-out), visibility 0s var(--spring-ms);
   }
 
   .sidebar-inner {
@@ -10097,19 +10178,28 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
   .file-tree-inner { transform: none; transition: none; }
 }
 
-/* A page the agent shows (html_render): a frame on the thread's own background that fits the page. */
+/* A page the agent shows (html_render): a hairline card, its title and actions above a frame on the
+   thread's own background that fits the page. */
 .html-render {
   margin: 8px 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
 
 .html-render-bar {
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  margin-bottom: 4px;
-  font-size: 12.5px;
+  gap: 8px;
+  height: 40px;
+  padding: 0 4px 0 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
   color: var(--text-3);
+}
+
+.html-render-bar > svg {
+  flex: none;
 }
 
 .html-render-title {
@@ -10118,15 +10208,126 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-2);
+  font-weight: 500;
 }
 
 .html-render-action {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
+  flex: none;
   color: var(--text-3);
 }
 
+/* Inset from the card's edge; the height set on it is the page's own, so the room goes outside it. */
+.html-render-page {
+  box-sizing: content-box;
+  padding: 12px;
+}
+
+/* Closed (by the reader, or a few turns back): one row standing for the page, which isn't running.
+   The button's hit area covers the whole row; the download sits above it. */
+.html-render-chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: max-content;
+  min-width: min(260px, 100%);
+  max-width: 100%;
+  height: 36px;
+  margin: 8px 0 14px;
+  padding-right: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .html-render-chip:hover {
+    border-color: var(--border-strong);
+    background: color-mix(in srgb, var(--text) 3%, var(--surface));
+  }
+  .html-render-chip:hover .html-render-chip-show {
+    color: var(--text);
+  }
+}
+
+.html-render-chip-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px 0 11px;
+  border-radius: calc(var(--radius-lg) - 1px);
+  color: inherit;
+  text-align: left;
+}
+
+.html-render-chip-open::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+}
+
+.html-render-chip-open > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.html-render-chip-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.html-render-chip-show {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease);
+}
+
+.html-render-chip-action {
+  position: relative;
+  z-index: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+}
+
+/* Opened or closed by the reader: the card or chip that takes its place eases in. The page's own
+   height never animates. */
+.html-render-in {
+  animation: html-render-in var(--fast) var(--ease-out);
+}
+
+@keyframes html-render-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .html-render-in {
+    animation: none;
+  }
+  .html-render-chip,
+  .html-render-chip-show {
+    transition: none;
+  }
+}
 
 .html-render-frame {
   display: block;

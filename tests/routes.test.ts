@@ -146,7 +146,7 @@ describe("clean URLs", () => {
     expect(history.state?.botsLayer).toBe("details");
     // A different page is a new entry, and starts clean.
     h.store.setState({ settingsOpen: true });
-    expect(h.location.pathname).toBe("/settings/profile");
+    expect(h.location.pathname).toBe("/bots/settings/profile");
     expect(history.state?.botsLayer).toBeUndefined();
   });
 
@@ -162,6 +162,61 @@ describe("clean URLs", () => {
     h.go(-1);
     expect(h.store.getState()).toMatchObject({ botsOpen: true, usageOpen: true });
     stop();
+  });
+
+  test("Settings opened from OpenBots stays in OpenBots through its pages, and leaving goes back to OpenBots", () => {
+    expect(readRoute("/bots/settings")).toEqual({ bots: true, section: "profile", index: true });
+    expect(readRoute("/bots/settings/bots/models")).toEqual({ bots: true, section: "bots", page: "models" });
+    const h = harness("/bots");
+    h.store.setState({ botsOpen: true });
+    h.store.setState({ settingsOpen: true, settingsSection: "bots" });
+    expect(h.location.pathname).toBe("/bots/settings/bots");
+    h.store.setState({ settingsPage: "models" });
+    expect(h.location.pathname).toBe("/bots/settings/bots/models");
+    // Up a level inside Settings: still OpenBots underneath.
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, settingsOpen: true, settingsSection: "bots", settingsPage: undefined });
+    // Leaving Settings lands back in OpenBots, not OpenBuild.
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, settingsOpen: false });
+    expect(h.location.pathname).toBe("/bots");
+    // Reloaded on a Settings page opened from OpenBots, it's still OpenBots.
+    expect(initialRouteState("/bots/settings/general")).toMatchObject({ botsOpen: true, settingsOpen: true, settingsSection: "general" });
+    h.stop();
+  });
+
+  test("the Marketplace is a page of OpenBots: an app's page is a level below the catalog, and leaving goes back where it was opened", () => {
+    expect(readRoute("/bots/marketplace")).toEqual({ bots: true, marketplace: true });
+    expect(readRoute("/bots/marketplace/github")).toEqual({ bots: true, marketplace: true, app: "github" });
+    expect(initialRouteState("/bots/marketplace/github")).toMatchObject({ botsOpen: true, marketplaceOpen: true, marketplaceApp: "github", settingsOpen: false, usageOpen: false });
+    const h = harness("/bots");
+    h.store.setState({ botsOpen: true });
+    const count = h.count();
+    h.store.setState({ marketplaceOpen: true } as never);
+    expect(h.location.pathname).toBe("/bots/marketplace");
+    expect(h.history.state).toMatchObject({ back: 1 });
+    // Into an app's page: a new entry, one level down.
+    h.store.setState({ marketplaceApp: "github" } as never);
+    expect(h.location.pathname).toBe("/bots/marketplace/github");
+    expect(h.history.state).toMatchObject({ back: 2, up: true });
+    expect(h.count()).toBe(count + 2);
+    // Back from the app is the catalog, still in OpenBots.
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, marketplaceOpen: true, marketplaceApp: undefined });
+    // Back again leaves it for the bot chat.
+    h.go(-1);
+    expect(h.store.getState()).toMatchObject({ botsOpen: true, marketplaceOpen: false });
+    expect(h.location.pathname).toBe("/bots");
+    // Opened straight at an app (a bot's Connect), stepping up to the catalog replaces the entry, and leaving is one step back.
+    h.store.setState({ marketplaceOpen: true, marketplaceApp: "notion" } as never);
+    expect(h.location.pathname).toBe("/bots/marketplace/notion");
+    h.store.setState({ marketplaceApp: undefined } as never);
+    expect(h.location.pathname).toBe("/bots/marketplace");
+    expect(h.history.state).toMatchObject({ back: 1 });
+    // Settings over it covers it, at its own address.
+    h.store.setState({ settingsOpen: true, settingsSection: "bots" });
+    expect(h.location.pathname).toBe("/bots/settings/bots");
+    h.stop();
   });
 
   test("a thread opened from OpenBots stays in OpenBots, and Back returns to the bot chat", () => {
@@ -211,7 +266,7 @@ describe("clean URLs", () => {
 
 describe("initialRouteState", () => {
   test("a thread opened inside OpenBots loads as that thread, not the bot chat", () => {
-    expect(initialRouteState("/bots/thread-abc")).toEqual({ usageOpen: false, botsOpen: true, botsThread: true, activeChatId: "abc", settingsOpen: false, settingsSection: undefined, settingsPage: undefined, settingsIndex: false });
+    expect(initialRouteState("/bots/thread-abc")).toEqual({ usageOpen: false, marketplaceOpen: false, marketplaceApp: undefined, botsOpen: true, botsThread: true, activeChatId: "abc", settingsOpen: false, settingsSection: undefined, settingsPage: undefined, settingsIndex: false });
   });
   test("OpenBots, Usage and plain threads load into their own mode", () => {
     expect(initialRouteState("/bots")).toMatchObject({ botsOpen: true, botsThread: false, activeChatId: undefined });

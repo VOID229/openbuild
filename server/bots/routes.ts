@@ -7,7 +7,7 @@ import * as devices from "../devices";
 import { modelListing } from "../pi/routes";
 import { getBot, getMessage } from "./db";
 import { available, botModels } from "./extensions";
-import type { Bot, BotMessage, BotsSettings, Conversation, TodoChange } from "../../shared/bots";
+import type { Bot, BotMessage, BotsSettings, Conversation } from "../../shared/bots";
 import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
 import * as apps from "./apps";
@@ -357,17 +357,6 @@ export function botRoutes(api: Api) {
     "/api/bots/conversations/:id/messages": {
       GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => olderMessages(req, req.params.id)),
       POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => postMine(req.params.id, await readJson(req))),
-    },
-    "/api/bots/conversations/:id/todos": {
-      POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/todos">) => {
-        try {
-          const body = await readJson(req);
-          if (!body || typeof body !== "object" || typeof (body as { action?: unknown }).action !== "string") return bad("Expected a to-do change");
-          return json({ todos: svc.editTodos(req.params.id, body as TodoChange, "me") });
-        } catch (err) {
-          return fail(err);
-        }
-      }),
     },
     "/api/bots/conversations/:id/messages/:messageId": {
       PATCH: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages/:messageId">) => patchMine(req.params.id, req.params.messageId, await readJson(req))),

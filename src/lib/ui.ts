@@ -22,25 +22,45 @@ function settleMotion() {
 }
 
 let switching = 0;
+const SWITCH_CLASSES = ["world-switch", "sidebar-switch"];
 
-/** Switch the sidebar and main pane between OpenBuild and OpenBots, crossfading each where the browser can and motion is welcome. */
-export function crossfade(update: () => void) {
+/**
+ * Run a layout change as a view transition, with `className` on the root while it plays so only the
+ * panes taking part get transition names (a name makes its element a stacking context). The browser
+ * animates snapshots, so nothing reflows frame by frame however heavy the panes are. Without view
+ * transitions, or when motion isn't welcome, the change just happens.
+ */
+function viewTransition(className: string, update: () => void, when = true) {
   const change = () => {
     flushSync(update);
     settleMotion();
   };
-  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
-  // Only for the switch: a transition name makes its element a stacking context.
+  if (!when || typeof document === "undefined" || !document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
   const root = document.documentElement;
   const id = ++switching;
-  root.classList.add("world-switch");
+  root.classList.remove(...SWITCH_CLASSES);
+  root.classList.add(className);
   const done = () => {
-    if (id === switching) root.classList.remove("world-switch");
+    if (id === switching) root.classList.remove(className);
   };
   const transition = document.startViewTransition(change);
-  // A quick second switch skips this one, which is fine.
+  // A quick second change skips this one, which is fine.
   transition.ready.catch(() => {});
   transition.finished.then(done, done);
+}
+
+/** Switch the sidebar and main pane between OpenBuild and OpenBots (see bots.css, .world-switch). */
+export function crossfade(update: () => void) {
+  viewTransition("world-switch", update);
+}
+
+/**
+ * Open or close the sidebar with a spring (styles.css, .sidebar-switch): the panel slides in from or
+ * out to the left edge while the main pane's edge follows. On a phone the sidebar is a drawer with its
+ * own slide, so the change just happens there.
+ */
+export function slideSidebar(update: () => void) {
+  viewTransition("sidebar-switch", update, typeof window !== "undefined" && window.innerWidth > 768);
 }
 
 /**

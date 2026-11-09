@@ -619,11 +619,7 @@
   }
 }
 
-.bots-wordmark {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-}
+
 
 .bots-search {
   margin: 0 0 6px;
@@ -1138,16 +1134,17 @@
 
 ::view-transition-new(world-threads),
 ::view-transition-new(world-bots) {
-  animation: world-side-in 220ms var(--ease-out) both;
+  animation: world-side-in var(--spring-ms) var(--spring) both;
 }
 
 @keyframes world-side-in {
-  from { opacity: 0; transform: translateX(-12px); }
+  from { opacity: 0; transform: translateX(-24px); }
+  40% { opacity: 1; }
 }
 
 ::view-transition-group(world-main) {
-  animation-duration: 240ms;
-  animation-timing-function: var(--ease-panel);
+  animation-duration: var(--spring-ms);
+  animation-timing-function: var(--spring);
 }
 
 /* Cropped as the edge slides, not stretched. */
@@ -3274,13 +3271,30 @@ button.bots-details-name:hover {
 .bots-details-foot {
   display: flex;
   justify-content: flex-start;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
+  margin-top: 28px;
 }
 
 .bots-danger:not(:disabled) {
   color: var(--danger);
+}
+
+/* Deleting a bot or group: at the very bottom, quiet until it's meant. */
+.btn.bots-delete {
+  gap: 6px;
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn.bots-delete:disabled {
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+  .btn.bots-delete:hover:not(:disabled) {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
 }
 
 /* ==========================================================================
@@ -4003,37 +4017,25 @@ a.bots-btn.bots-btn-primary {
   }
 }
 
-/* Marketplace: the catalog, an app's own page, and the card a bot posts to offer one. A fixed size,
-   so moving between categories and pages never resizes the dialog under the pointer. */
-.apps-dialog {
-  width: min(880px, calc(100vw - 32px));
-  height: min(640px, calc(100dvh - 48px));
-  max-height: none;
-  overflow: hidden;
+/* Marketplace: a page in the main pane like Settings (the catalog, or an app's own page), and the card
+   a bot posts to offer one. The page's content lines up with its header's back button. */
+.mpage {
+  min-width: 0;
 }
 
-/* The head stays put and the catalog or app page scrolls under it, so nothing falls off the bottom. */
-.apps-dialog[open] {
-  display: flex;
-  flex-direction: column;
-}
-
-.apps-dialog .bots-dialog-head {
-  flex: none;
-  gap: 12px;
-}
-
-.apps-head h2 {
-  flex: none;
+/* The way in shows where you are while it's open. */
+.bots-apps-btn[aria-current="page"],
+.bots-rail-btn[aria-current="page"] {
+  background: var(--active);
+  color: var(--text);
 }
 
 .apps-search {
   display: flex;
-  flex: 0 1 320px;
+  flex: none;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  margin-left: auto;
+  height: 36px;
   padding: 0 10px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
@@ -4066,22 +4068,28 @@ a.bots-btn.bots-btn-primary {
   display: none;
 }
 
-/* Categories on the left, the list on the right; each scrolls on its own. */
+/* Categories down the left, as Settings' sections are, and the list beside them; each scrolls on its own,
+   the list's scrollbar at the window's edge. */
 .apps-body {
-  display: grid;
+  display: flex;
   flex: 1;
-  grid-template-columns: 200px minmax(0, 1fr);
   min-height: 0;
+}
+
+.apps-body[hidden] {
+  display: none;
 }
 
 .apps-nav {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 1px;
+  width: 232px;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 10px;
-  border-right: 1px solid var(--border);
+  overscroll-behavior: contain;
+  padding: 12px 16px 32px;
 }
 
 .apps-nav-item {
@@ -4094,7 +4102,7 @@ a.bots-btn.bots-btn-primary {
   padding: 0 10px;
   border-radius: var(--radius-sm);
   color: var(--text-2);
-  font-size: 13.5px;
+  font-size: 14px;
   text-align: left;
   white-space: nowrap;
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
@@ -4134,11 +4142,27 @@ a.bots-btn.bots-btn-primary {
 
 .apps-main {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  gap: 20px;
+  gap: 24px;
+  min-width: 0;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 16px 20px;
+  overscroll-behavior: contain;
+  padding: 12px 32px 72px 16px;
+}
+
+/* The page is 960px at most: the categories, then the list. */
+.apps-main > * {
+  width: 100%;
+  max-width: 712px;
+}
+
+/* The search lines up with the rows' logos and buttons under it. */
+.apps-main > .apps-search {
+  width: calc(100% - 16px);
+  max-width: 696px;
+  margin: 0 8px;
 }
 
 .apps-section {
@@ -4148,7 +4172,7 @@ a.bots-btn.bots-btn-primary {
 }
 
 .apps-section-title {
-  margin: 4px 8px 6px;
+  margin: 0 8px 6px;
   color: var(--text-3);
   font-size: 12px;
   font-weight: 500;
@@ -4163,7 +4187,7 @@ a.bots-btn.bots-btn-primary {
 }
 
 .apps-empty {
-  margin: 48px auto 0;
+  margin: 48px 0 0;
   color: var(--text-2);
   font-size: 13.5px;
   text-align: center;
@@ -4257,6 +4281,15 @@ a.bots-btn.bots-btn-primary {
   letter-spacing: 0;
 }
 
+/* Beside an app's name on its page: the same, in a hairline pill. */
+.app-status-pill {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+}
+
 .app-status-dot {
   width: 6px;
   height: 6px;
@@ -4298,103 +4331,400 @@ a.bots-btn.bots-btn-primary {
   font-weight: 600;
 }
 
-.apps-back {
+/* An app's page: the way back up to the catalog, then the app, in a column under the page's header. */
+.mpage-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.mpage-inner {
+  max-width: 792px;
+  padding: 4px 32px 72px 16px;
+  animation: page-in var(--fast) var(--ease-out) both;
+}
+
+/* An app page's title: the way to the catalog, then the app. */
+.mpage-trail {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 32px;
-  margin-left: -8px;
-  padding: 0 8px;
-  border-radius: var(--radius-sm);
+  gap: 8px;
+  min-width: 0;
+}
+
+.mpage-crumb {
   color: var(--text-2);
-  font-size: 13.5px;
-  font-weight: 500;
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+  font: inherit;
+  letter-spacing: inherit;
+  transition: color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
-  .apps-back:hover {
-    background: var(--hover);
+  .mpage-crumb:hover {
     color: var(--text);
   }
 }
 
-.apps-dialog .app-page {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  gap: 14px;
-  padding: 20px 24px 24px;
+.mpage-sep {
+  color: var(--text-3);
+  font-weight: 400;
 }
 
-/* The page reads as a column, not stretched across a wide dialog. */
-.app-page > * {
-  width: 100%;
-  max-width: 600px;
-}
-
-.app-page-head {
+.app-page {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.app-page-title h3 {
+/* The header: logo, name with its state, what it does and who makes it, and the main action. */
+.app-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.app-hero-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.app-hero-name {
   display: flex;
   align-items: center;
   gap: 10px;
   margin: 0;
-  font-size: 18px;
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  line-height: 28px;
+  letter-spacing: -0.02em;
 }
 
-.app-page-title p {
-  margin: 2px 0 0;
+.app-hero-desc {
+  margin: 0;
   color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app-hero-meta {
+  margin: 0;
+  color: var(--text-3);
   font-size: 13px;
 }
 
-.app-page-desc {
-  margin: 0;
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.55;
-}
-
-.app-page-title a,
-.app-guide a,
-.app-page .field-help a {
+.app-page a:not(.btn) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  color: inherit;
   text-decoration: underline;
   text-decoration-color: var(--border-strong);
   text-underline-offset: 2px;
 }
 
-/* Links styled as buttons (Open GitHub, Install on…) keep the button look. */
-.app-guide a.btn {
+@media (hover: hover) {
+  .app-page a:not(.btn):hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
+  }
+}
+
+.app-hero-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Links styled as buttons (Open GitHub, Configure, Install on…) keep the button look. */
+.app-page a.btn {
+  gap: 5px;
   text-decoration: none;
 }
 
+/* One card per concern, in hairlines: a title, rows (label left, control right), and a footer for its button. */
+.app-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.app-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+}
+
+.app-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-card-row,
+.app-card-block,
+.app-card-sub {
+  border-top: 1px solid var(--border);
+}
+
+.app-card > .app-card-row:first-child {
+  border-top: 0;
+}
+
+/* GitHub's sign-in brings rows of its own into the card. */
 .app-guide {
+  display: contents;
+}
+
+.app-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.app-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-card-label {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.app-card-label .setting-hint {
+  vertical-align: 0;
+}
+
+.app-card-desc {
+  margin: 1px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-card-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-card-block {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+}
+
+.app-card-block > .app-card-desc {
+  margin-top: -6px;
+}
+
+/* A heading inside a card (GitHub's installations), with a word on the right. */
+.app-card-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 8px;
   background: var(--surface-2);
 }
 
+.app-card-sublabel {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.app-card-subhint {
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.app-card-sub + .app-card-row {
+  border-top: 0;
+}
+
+.app-card-actions {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.app-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.app-select {
+  width: 180px;
+}
+
+.app-alert {
+  margin: 0;
+}
+
+/* An installation's owner, or the account signed in: a letter in a rounded square. */
+.app-install-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-install-repos {
+  cursor: help;
+  text-decoration: underline dotted var(--text-3);
+  text-underline-offset: 2px;
+}
+
+.app-install-suspended,
+.app-row-bad .app-card-desc {
+  color: var(--danger);
+}
+
+.app-refresh {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+/* What it gave bots, folded under its count. */
+.app-list-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.app-list-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-card-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  text-align: center;
+}
+
+.app-card-chevron {
+  margin-left: auto;
+  color: var(--text-3);
+  transition: transform var(--fast) var(--ease-out);
+}
+
+.app-list-card[open] .app-card-chevron {
+  transform: rotate(180deg);
+}
+
+.app-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.app-list li code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.app-list li span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The danger zone: a red-tinged hairline and quiet red buttons. */
+.app-card-danger {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+
+.app-card-danger .app-card-row,
+.app-card-danger .app-card-block {
+  border-top-color: color-mix(in srgb, var(--danger) 18%, var(--border));
+}
+
+.btn.app-danger-btn {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: transparent;
+  color: var(--danger);
+}
+
+@media (hover: hover) {
+  .btn.app-danger-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+}
+
+.btn.app-danger-solid {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+
+@media (hover: hover) {
+  .btn.app-danger-solid:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 88%, #000);
+  }
+}
+
+/* An OAuth client of the user's own: the steps, the redirect address to copy, the fields. */
 .app-steps {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0;
   padding-left: 20px;
-  font-size: 13.5px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .app-copy {
@@ -4427,48 +4757,8 @@ a.bots-btn.bots-btn-primary {
   gap: 8px;
 }
 
-.app-details {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.app-details summary {
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-}
-
-.app-details ul {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.app-details li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-}
-
-.app-details li code {
-  font-family: var(--mono);
-}
-
-.app-details li b {
-  font-weight: 500;
-}
-
-.app-details li span {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text-2);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.app-card-foot .app-page-actions {
+  justify-content: flex-end;
 }
 
 /* The primary bot's chat while Pi isn't ready to run it. */
@@ -4536,41 +4826,25 @@ a.bots-btn.bots-btn-primary {
   font-size: 13px;
 }
 
-/* A phone's Marketplace: nearly the whole screen, the search on its own line under the title and the
-   categories a row that scrolls sideways above the list. */
-@media (max-width: 640px) {
-  .apps-dialog {
-    width: calc(100vw - 16px);
-    height: calc(100dvh - 16px);
-  }
-
-  .apps-head {
-    flex-wrap: wrap;
-  }
-
-  .apps-head .apps-search {
-    flex: 1 1 100%;
-    order: 3;
-    height: 36px;
-    margin: 0 4px 0 0;
-  }
-
-  .apps-head h2 {
-    flex: 1;
-  }
-
+/* A phone's Marketplace: the search on its own line, the categories a row that scrolls sideways
+   above the list, and an app's page in one column with its main action under its name. */
+@media (max-width: 768px) {
   .apps-body {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
+    flex-direction: column;
+  }
+
+  .mpage-search {
+    flex: none;
+    padding: 4px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left));
   }
 
   .apps-nav {
     flex-direction: row;
     gap: 6px;
+    width: auto;
     overflow-x: auto;
     overflow-y: hidden;
-    padding: 10px 12px;
-    border-right: 0;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--border);
     scrollbar-width: none;
   }
@@ -4583,6 +4857,7 @@ a.bots-btn.bots-btn-primary {
     height: 30px;
     padding: 0 10px;
     border: 1px solid var(--border);
+    font-size: 13.5px;
   }
 
   .apps-nav-item[aria-current="true"] {
@@ -4594,7 +4869,7 @@ a.bots-btn.bots-btn-primary {
   }
 
   .apps-main {
-    padding: 8px 8px 16px;
+    padding: 12px 8px calc(32px + env(safe-area-inset-bottom));
   }
 
   .app-row-main {
@@ -4605,8 +4880,39 @@ a.bots-btn.bots-btn-primary {
     min-width: 0;
   }
 
-  .apps-dialog .app-page {
-    padding: 16px;
+  .mpage-inner {
+    padding: 4px max(16px, env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  .app-hero {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .app-hero-text {
+    flex-basis: calc(100% - 70px);
+  }
+
+  .app-hero-name {
+    font-size: 20px;
+  }
+
+  .app-hero-actions {
+    flex: 1 1 100%;
+    padding-top: 0;
+  }
+
+  .app-hero-actions .btn {
+    flex: 1;
+  }
+
+  .app-card-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .app-select {
+    width: 160px;
   }
 }
 
@@ -4629,41 +4935,131 @@ a.bots-btn.bots-btn-primary {
    OpenBots — the Advanced tab of a bot's details (src/components/bots/BotAdvanced.tsx)
    ========================================================================== */
 
-/* One line per setting, so the tab is no taller than Instructions: the descriptions live in tooltips on the labels. */
+/* Three titled groups (Model, Machines, OpenBuild access), each a hairline card of one-line rows:
+   label left, control right, the descriptions in tooltips on the labels. */
 .bots-advanced {
-  gap: 0;
+  gap: 20px;
 }
 
-.bots-advanced .setting-row,
-.bots-advanced .setting-group {
+.bots-adv-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bots-adv-title {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.bots-adv-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.bots-advanced .setting-row {
   gap: 12px;
-  min-height: 24px;
-  padding: 2px;
+  min-height: 44px;
+  padding: 6px 12px;
   border-bottom: 0;
 }
 
+.bots-adv-card > .setting-row + .setting-row {
+  border-top: 1px solid var(--border);
+}
+
 .bots-advanced .setting-label {
-  font-size: 13.5px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
   font-weight: 500;
-  color: var(--text-2);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* Model and environment, then what it may do in OpenBuild. */
-.bots-advanced .setting-row:nth-child(2) {
-  margin-bottom: 4px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+/* Labels and titles with their details in a tooltip say so on hover. */
+.bots-advanced [data-tooltip]:not(button) {
+  cursor: help;
 }
 
-.bots-advanced .select-wrap {
-  flex: 0 1 196px;
+@media (hover: hover) {
+  .bots-advanced .setting-label[data-tooltip]:hover,
+  .bots-adv-title [data-tooltip]:hover {
+    text-decoration: underline dotted var(--text-3);
+    text-underline-offset: 3px;
+  }
+}
+
+/* The controls on the right all take the same width, so their left edges line up down the card. */
+.bots-advanced .setting-row > .select-wrap {
+  flex: 0 0 156px;
 }
 
 .bots-advanced .select-trigger {
   width: 100%;
-  height: 28px;
+  height: 30px;
   font-size: 13px;
+}
+
+/* The model takes the card's width under its label. */
+.bots-advanced .bots-adv-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+
+.bots-advanced .bots-adv-stack > .select-wrap {
+  flex: none;
+  width: 100%;
+}
+
+/* A model picker reads its name with the provider under it, so neither is cut down to a few letters. */
+.bots-advanced .bots-set-model .select-trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon value chevron" "icon hint chevron";
+  align-content: center;
+  align-items: center;
+  gap: 0;
+  height: auto;
+  min-height: 40px;
+  padding: 4px 8px 4px 10px;
+}
+
+.bots-advanced .bots-set-model .select-trigger:not(:has(.select-hint)) {
+  grid-template-areas: "icon value chevron";
+  min-height: 32px;
+}
+
+.bots-advanced .bots-set-model .brand-icon {
+  grid-area: icon;
+  margin-right: 8px;
+}
+
+.bots-advanced .bots-set-model .select-value {
+  grid-area: value;
+  line-height: 17px;
+}
+
+.bots-advanced .bots-set-model .select-hint {
+  grid-area: hint;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-advanced .bots-set-model .select-chevron {
+  grid-area: chevron;
+  margin-left: 8px;
 }
 
 /* The small switch; touch screens keep the big one. */
@@ -4693,6 +5089,107 @@ a.bots-btn.bots-btn-primary {
 /* A bot on Default with no fallbacks of its own says it follows the default's. */
 .bots-fallbacks-note {
   margin: 0 0 6px;
+}
+
+.bots-advanced .bots-fallbacks-note {
+  margin: -4px 12px 10px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bots-advanced .bots-fallbacks {
+  gap: 6px;
+  padding: 0 8px 10px 12px;
+}
+
+.bots-advanced .bots-fallbacks .naming-actions {
+  width: 48px;
+}
+
+.bots-advanced .bots-fallbacks .key-icon-btn {
+  width: 24px;
+  height: 28px;
+}
+
+/* One line each, a phone too: the panel is as narrow there as on a desktop. */
+.bots-advanced .bots-fallbacks .naming-row {
+  flex-wrap: nowrap;
+}
+
+.bots-advanced .bots-fallbacks .naming-row .select-grow {
+  flex-basis: auto;
+}
+
+/* The row to add one lines up with the ones above it, which have their actions on the right. */
+.bots-advanced .bots-fallbacks .naming-row:not(:has(.naming-actions))::after {
+  content: "";
+  flex: none;
+  width: 48px;
+}
+
+/* A long model name takes a second line rather than losing its end. */
+.bots-advanced .bots-fallbacks .select-value {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The machines are a card of their own (.pi-list), with the same rows. */
+.bots-advanced .bot-machines {
+  margin: 0;
+}
+
+.bots-advanced .bot-machine {
+  min-height: 44px;
+  padding: 6px 10px 6px 12px;
+}
+
+/* One machine per row: its dot, its name with what it allows (or why not) under it, its state, a chevron. */
+.bot-machine .bot-machine-link {
+  gap: 10px;
+}
+
+.bot-machine .pi-row-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-advanced .bot-machine .pi-row-name {
+  font-size: 13px;
+}
+
+.bots-advanced .bot-machine .pi-row-desc {
+  white-space: normal;
+}
+
+.bot-machine .pi-row-desc {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-machine-status {
+  flex: none;
+  margin-left: auto;
+}
+
+/* Why a machine can't run every tool, in a few words: the whole story is in its tooltip. */
+.bot-machine-note {
+  color: var(--warn);
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.bot-machine-note-bad {
+  color: var(--danger);
 }
 
 /* A switch waiting for the current workspace's changes (WorkspaceStatus.tsx). */
@@ -4826,16 +5323,37 @@ a.bots-btn.bots-btn-primary {
   padding: 2px 8px 8px 14px;
 }
 
+/* The bubble is the card: the page's own hairline and header rule go. */
 .bm-page .html-render {
   margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
 }
 
 .bm-page .html-render-bar {
+  height: 36px;
   margin-bottom: 2px;
+  padding: 0;
+  border-bottom: 0;
 }
 
-/* The page's height follows what it measures, at once: a transition here would animate layout. */
+/* Closed, the bubble shrinks to the chip, which is the card. */
+.bm-bubble.bm-card.bm-page:has(> .html-render-chip) {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.bm-page .html-render-chip {
+  margin: 0;
+}
+
+/* The page's height follows what it measures, at once: a transition here would animate layout. The
+   bubble's own padding insets it. */
 .bm-page .html-render-page {
+  padding: 0;
   transition: none;
 }
 
@@ -4869,19 +5387,6 @@ a.bots-btn.bots-btn-primary {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
-}
-
-.bots-todos-clear {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-3);
-  transition: color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  .bots-todos-clear:hover {
-    color: var(--text);
-  }
 }
 
 .bots-todos-bar {
@@ -4921,12 +5426,6 @@ a.bots-btn.bots-btn-primary {
   line-height: 1.4;
 }
 
-@media (hover: hover) {
-  .bots-todo:not(.bots-todo-add):hover {
-    background: var(--hover);
-  }
-}
-
 .bots-todo-check {
   display: grid;
   flex: none;
@@ -4937,13 +5436,6 @@ a.bots-btn.bots-btn-primary {
   border: 1.5px solid var(--border-strong);
   border-radius: 50%;
   color: var(--surface);
-  transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  button.bots-todo-check:hover {
-    border-color: var(--text-3);
-  }
 }
 
 /* Under way: a dot in the circle. */
@@ -4976,45 +5468,11 @@ a.bots-btn.bots-btn-primary {
   flex: none;
 }
 
-.bots-todo-x {
-  width: 24px;
-  height: 24px;
-  flex: none;
-  border-radius: var(--radius-sm);
-  color: var(--text-3);
-  opacity: 0;
-  transition: opacity var(--fast) var(--ease);
-}
-
-.bots-todo:hover .bots-todo-x,
-:where([data-keyboard-nav]) .bots-todo-x:focus-visible {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .bots-todo-x {
-    opacity: 1;
-  }
-}
-
-.bots-todo-plus {
-  border-style: dashed;
-  color: var(--text-3);
-}
-
-.bots-todo-input {
-  flex: 1;
-  min-width: 0;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  outline: none;
-  background: none;
-  color: var(--text);
-  font: inherit;
-}
-
-.bots-todo-input::placeholder {
+/* No list yet: one quiet line where it will be. */
+.bots-todos-empty {
+  margin: 0;
+  padding: 8px 2px;
+  font-size: 13px;
   color: var(--text-3);
 }
 

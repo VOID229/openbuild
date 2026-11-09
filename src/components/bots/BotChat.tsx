@@ -31,6 +31,7 @@ import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
 import { HtmlRender } from "../HtmlRender";
+import { botPagesOld } from "../../lib/pagePreviews";
 import type { ToolPart } from "../../lib/types";
 import { ConnectCard } from "./BotApps";
 import { HeadTasks } from "./BotTodos";
@@ -544,10 +545,10 @@ function PollCard({ conversation, message, bots }: { conversation: Conversation;
  * A page a bot showed (its html_render): OpenBuild's own in-thread page, drawn the same way from the
  * message instead of a tool call, in the same sandbox, with its download and full-screen view.
  */
-function PageCard({ message }: { message: BotMessage }) {
+function PageCard({ message, old }: { message: BotMessage; old: boolean }) {
   const page = message.html!;
   const part = useMemo<ToolPart>(() => ({ type: "tool", id: message.id, name: "html_render", status: "done", args: { html: page.html, title: page.title, height: page.height } }), [message.id, page.html, page.title, page.height]);
-  return <HtmlRender part={part} />;
+  return <HtmlRender part={part} old={old} />;
 }
 
 function PlanCard({ message, bots }: { message: BotMessage; bots: Bot[] }) {
@@ -706,6 +707,8 @@ interface RowProps {
   seen?: React.ReactNode;
   /** Shown, but not confirmed by the workspace yet. */
   sending?: boolean;
+  /** Its page is a few turns back, so it starts collapsed (src/lib/pagePreviews.ts). */
+  oldPage?: boolean;
 }
 
 /**
@@ -720,7 +723,7 @@ const sameRow = (a: RowProps, b: RowProps) => {
   return !quoted || c.messages.find((x) => x.id === quoted) === d.messages.find((x) => x.id === quoted);
 };
 
-const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending }: RowProps) {
+const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending, oldPage }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
   const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
@@ -785,7 +788,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           {m.question && <QuestionCard conversation={conversation} message={m} />}
           {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
           {m.plan && <PlanCard message={m} bots={bots} />}
-          {m.html && <PageCard message={m} />}
+          {m.html && <PageCard message={m} old={!!oldPage} />}
           {m.connect && <ConnectCard appId={m.connect.app} />}
         </div>
         {!readonly && (
@@ -1230,6 +1233,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
   const blocks = useMemo(() => blocksOf(conversation.messages), [conversation.messages]);
+  const oldPages = useMemo(() => botPagesOld(conversation.messages), [conversation.messages]);
   const lastMine = conversation.messages.findLast((m) => m.author === "me" && !m.event);
   const last = conversation.messages.at(-1);
   const lastSeen = useRef(last?.id);
@@ -1407,6 +1411,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                         onHold={onHold}
                         onPicker={onPicker}
                         sending={mine && sending.includes(m.id)}
+                        oldPage={oldPages.has(m.id)}
                         seen={
                           seenBy && (
                             <div className="bm-seen">

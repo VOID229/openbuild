@@ -10,11 +10,10 @@ import type { Conversation } from "../../lib/bots/types";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
-import { arrowNav, canHover, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
+import { arrowNav, canHover, copyText, cx, slideSidebar, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
-import { AppsDialog } from "./BotApps";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
 import { ConversationAvatar, previewOf, shortTime, useBusyBots } from "./common";
@@ -24,8 +23,7 @@ type Dialog =
   | { kind: "group"; preset?: string[] }
   | { kind: "rename"; id: string }
   | { kind: "section"; id: string }
-  | { kind: "delete"; id: string }
-  | { kind: "apps"; app?: string };
+  | { kind: "delete"; id: string };
 
 interface MenuState {
   id: string;
@@ -156,7 +154,7 @@ function useSelect() {
     (id: string) => {
       useBots.getState().select(id);
       // Out of a thread opened from a chat, or a page (Settings, Usage), back to the chats.
-      useStore.setState({ botsThread: false, settingsOpen: false, usageOpen: false });
+      useStore.setState({ botsThread: false, settingsOpen: false, usageOpen: false, marketplaceOpen: false });
       if (mobile) openBotsChat();
     },
     [mobile],
@@ -406,7 +404,6 @@ function Dialogs({ dialog, onClose }: { dialog?: Dialog; onClose: () => void }) 
   };
   if (dialog.kind === "bot") return <CreateBotDialog onClose={onClose} onCreated={opened} />;
   if (dialog.kind === "group") return <CreateGroupDialog preset={dialog.preset} onClose={onClose} onCreated={opened} />;
-  if (dialog.kind === "apps") return <AppsDialog initial={dialog.app} onClose={onClose} />;
   if (!conversation) return null;
   const st = useBots.getState();
   const name = conversationName(conversation, bots);
@@ -454,6 +451,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   const bots = useBots((s) => s.bots);
   const remote = !!useRemoteWorkspace();
   const avatar = useStore((s) => s.settings.profile.avatar);
+  const marketplaceOpen = useStore((s) => s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const name = useStore((s) => s.settings.profile.name);
   const listRef = useRef<HTMLElement>(null);
   // Which ends of the list have more past them, so they fade out there (bots.css) instead of being cut.
@@ -483,7 +481,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       {...peek(c.id, "right")}
       onClick={() => {
         useBots.getState().select(c.id);
-        useStore.setState({ settingsOpen: false, usageOpen: false });
+        useStore.setState({ settingsOpen: false, usageOpen: false, marketplaceOpen: false });
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -496,7 +494,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   );
   return (
     <div className="bots-rail-inner">
-      <IconButton label="Open sidebar" tooltipSide="right" className="bots-rail-btn" onClick={() => useStore.getState().setBotsSidebarOpen(true)}>
+      <IconButton label="Open sidebar" tooltipSide="right" className="bots-rail-btn" onClick={() => slideSidebar(() => useStore.getState().setBotsSidebarOpen(true))}>
         <PanelLeft size={18} />
       </IconButton>
       <div className="history-wrap">
@@ -510,7 +508,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
       <div className="bots-rail-foot">
         {!remote && <NewMenu onDialog={onDialog} rail />}
         {!remote && (
-          <IconButton label="Marketplace" tooltipSide="right" className="bots-rail-btn" onClick={() => onDialog({ kind: "apps" })}>
+          <IconButton label="Marketplace" tooltipSide="right" className="bots-rail-btn" aria-current={marketplaceOpen ? "page" : undefined} onClick={() => useStore.getState().openMarketplace()}>
             <Store size={18} />
           </IconButton>
         )}
@@ -528,6 +526,7 @@ const NONE: Conversation[] = [];
 export function BotsSidebar() {
   const open = useStore((s) => s.botsSidebarOpen);
   const avatar = useStore((s) => s.settings.profile.avatar);
+  const marketplaceOpen = useStore((s) => s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const profileName = useStore((s) => s.settings.profile.name);
   const mobile = useMediaQuery("(max-width: 768px)");
   const rail = !open && !mobile;
@@ -594,7 +593,7 @@ export function BotsSidebar() {
             <div className="brand-row">
               {/* On a phone the list is a screen of its own, with the search always at hand. */}
               {!mobile && (
-                <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
+                <IconButton label="Close sidebar" onClick={() => slideSidebar(() => useStore.getState().setBotsSidebarOpen(false))}>
                   <PanelLeft size={18} />
                 </IconButton>
               )}
@@ -604,6 +603,9 @@ export function BotsSidebar() {
                   label="Search"
                   aria-pressed={searching}
                   className={cx(searching && "filter-active")}
+                  // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
+                  // it and then a click that opens it again.
+                  onMouseDown={(e) => searching && e.preventDefault()}
                   onClick={() => {
                     setSearching(!searching);
                     setQuery("");
@@ -617,7 +619,12 @@ export function BotsSidebar() {
             {(searching || mobile) && (
               <label className="search bots-search">
                 <Search size={16} />
-                <input type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))} />
+                <input type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
+                  // Clicking away from an empty search closes it; with something typed, it stays.
+                  onBlur={(e) => {
+                    if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".bots-search")?.contains(e.relatedTarget)) setSearching(false);
+                  }}
+                />
                 {query && (
                   <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
                     <X size={14} />
@@ -687,7 +694,7 @@ export function BotsSidebar() {
               </button>
               {/* The way into the marketplace sits beside the way out, as it does in the rail. */}
               {!remote && (
-                <IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" onClick={() => setDialog({ kind: "apps" })}>
+                <IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" aria-current={marketplaceOpen ? "page" : undefined} onClick={() => useStore.getState().openMarketplace()}>
                   <Store size={19} />
                 </IconButton>
               )}

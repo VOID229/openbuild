@@ -271,7 +271,9 @@ test("Apps sits in the OpenBots sidebar's footer, just left of the way back to O
   const footer = open.slice(open.indexOf('<div className="settings-row">'));
   expect(top).not.toContain('kind: "apps"');
   // Another device's workspace has no apps to manage from here, so it's left out there.
-  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*\{!remote && \(\s*<IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" onClick=\{\(\) => setDialog\(\{ kind: "apps" \}\)\}>\s*<Store size=\{19\} \/>\s*<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
+  // It opens the Marketplace page in the main pane, not a dialog over the sidebar.
+  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*\{!remote && \(\s*<IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" aria-current=\{marketplaceOpen \? "page" : undefined\} onClick=\{\(\) => useStore\.getState\(\)\.openMarketplace\(\)\}>\s*<Store size=\{19\} \/>\s*<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
+  expect(sidebar).not.toContain('kind: "apps"');
   // The rail keeps it in its foot, beside the same toggle.
   expect(sidebar).toMatch(/<IconButton label="Marketplace" tooltipSide="right" className="bots-rail-btn"[\s\S]*?<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
   // A phone's bigger targets cover it too.
