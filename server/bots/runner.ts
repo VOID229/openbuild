@@ -194,7 +194,7 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
     mind.quiet = false;
     show(botId, mind);
     // A steer Pi is slow to answer is waited out, and the turn holds on to Pi until it is.
-    return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids), ...(images.length ? { images } : {}) }, (disposition) => {
+    return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids, item.lead), ...(images.length ? { images } : {}) }, (disposition) => {
       resolve(disposition);
       record(disposition);
     }));
@@ -623,6 +623,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "use_app") return `Using ${appById(String(a.app ?? ""))?.name ?? "an app"}`;
   if (tool === "routine") return "Sorting out a routine";
   if (tool === "ask_bot") return "Asking another bot";
+  if (tool === "side_chat") return a.action === "close" ? "Wrapping up a side chat" : "Talking it over with the others";
   if (tool === "manage_bot") return "Tending to the other bots";
   return "Thinking";
 }
@@ -950,7 +951,8 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
       seen.add(job.conversationId);
       const scoped = jobs.filter(j => j.conversationId === job.conversationId);
       const assigned = scoped.every(j => j.messageIds) ? scoped.flatMap(j => j.messageIds!) : undefined;
-      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates));
+      const leads = new Map(scoped.flatMap(j => (j.lead ? (j.messageIds ?? []).map(id => [id, j.lead!] as const) : [])));
+      parts.push(transcript(job.conversationId, bots, user, botId, assigned, delivered, candidates, leads));
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
@@ -960,7 +962,7 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   return parts.filter(Boolean).join("\n\n");
 }
 
-export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>): string {
+export function transcript(conversationId: string, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], delivered?: Set<string>, candidates?: Set<string>, leads?: Map<string, string>): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const rows = db.messages(conversationId, 16);
@@ -975,8 +977,8 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     const key = deliveryIdentity(conversationId, r.message);
     candidates?.add(key);
     return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
-  }).map(line(c, bots, user, botId, assigned));
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
+  }).map(line(c, bots, user, botId, assigned, undefined, leads));
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
 }
 
 /** What a shared chat's transcript says first: who else is in it, and that they aren't the user. */
@@ -999,8 +1001,41 @@ function authorLabel(c: db.StoredConversation, author: string, bots: { id: strin
   return mentionName(bots.find((b) => b.id === author)?.name ?? "Bot");
 }
 
+/** What a huddle's transcript says first: what it's for, how much is left of it, and who reports back. */
+function huddleNote(c: db.StoredConversation, bots: { id: string; name: string }[], botId: string): string {
+  const h = c.huddle;
+  if (!h) return "";
+  const name = (id: string) => mentionName(bots.find((b) => b.id === id)?.name ?? "a bot");
+  if (h.closedAt) return `A side chat ${h.by === botId ? "you" : name(h.by)} opened. It's closed now: nothing more can be said here.\n`;
+  const left = Math.max(0, h.limit - db.messages(c.id, 60).filter((r) => r.message.author !== "me" && !r.message.event).length);
+  const reporter = h.by === botId ? "You report" : `${name(h.by)} reports`;
+  return `A temporary side chat ${h.by === botId ? "you" : name(h.by)} opened to work something out; ${left} of its ${h.limit} messages are left. Add only what's new, and agree with a reaction rather than a message. ${reporter} back to the main chat once it closes; close it with side_chat close when you have the answer.\n`;
+}
+
+/** What arrived in a conversation since this turn showed it, for send_message to hold a message on. Shown from then on. */
+export function unseen(botId: string, conversationId: string): string[] {
+  const mind = minds.get(mindKey(botId, laneOf(conversationId)));
+  const through = mind?.shown?.get(conversationId);
+  if (!mind?.shown || through === undefined || !pumping.has(botId)) return [];
+  // Requests steered into this turn were shown as they came.
+  const steered = new Set((mind.steered ?? []).flatMap((j: Wake) => (j.conversationId === conversationId ? (j.messageIds ?? []) : [])));
+  const rows = db.messagesAfter(conversationId, through, 50).filter((r) => r.message.author !== botId && !r.message.event && !steered.has(r.message.id));
+  if (!rows.length) return [];
+  mind.shown.set(conversationId, Math.max(through, db.latestSeq(conversationId)));
+  const c = db.getConversation(conversationId)!;
+  const mine = c.kind === "group" ? (pendingAssignments(botId).find((a) => a.conversationId === conversationId)?.messageIds ?? []) : undefined;
+  return rows.slice(-8).map(line(c, db.listBots(), svc.getSettings().user?.name || "User", botId, mine));
+}
+
+/** The bot's current turn answers a request of the user's in this conversation (see Hooks.userWoke). */
+export function userWoke(botId: string, conversationId: string): boolean {
+  const direct = db.getConversation(conversationId)?.kind === "direct";
+  const jobs = [...(activeAssignments.get(botId) ?? []), ...[...minds].filter(([key]) => key === botId || key.startsWith(`${botId}~`)).flatMap(([, mind]) => mind.steered ?? [])];
+  return jobs.some((j) => j.kind === "messages" && j.conversationId === conversationId && (!!j.messageIds?.length || direct));
+}
+
 /** A group request steered into a live turn: only its own lines, with a word on what to do with them. */
-export function steerNote(conversationId: string, botId: string, ids: string[]): string {
+export function steerNote(conversationId: string, botId: string, ids: string[], lead?: string): string {
   const c = db.getConversation(conversationId);
   if (!c) return "";
   const bots = db.listBots();
@@ -1008,13 +1043,17 @@ export function steerNote(conversationId: string, botId: string, ids: string[]):
     const row = db.getMessage(id);
     return row?.conversationId === conversationId ? [row] : [];
   });
-  const lines = rows.sort((a, b) => a.seq - b.seq).map(line(c, bots, svc.getSettings().user?.name || "User", botId, ids, " [new, for you]"));
+  const lines = rows.sort((a, b) => a.seq - b.seq).map(line(c, bots, svc.getSettings().user?.name || "User", botId, ids, " [new, for you]", lead ? new Map(ids.map((id) => [id, lead])) : undefined));
   return `New in conversation ${conversationId.slice(0, 8)} (“${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”) while you were working:\n${lines.join("\n")}\nFold it into what you're doing. If a quick reply or reaction would help, send one; otherwise carry on.`;
 }
 
-function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]") {
+function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]", leads?: Map<string, string>) {
   const cursor = db.cursor(botId, c.id);
   const name = (author: string) => (author === botId ? "you" : authorLabel(c, author, bots, user));
+  // Asked of several bots at once: one answers, the rest add only what's theirs alone.
+  const shared = (lead: string) => lead === botId
+    ? `${forYou.slice(0, -1)}; it went to others too, and you answer for all of you]`
+    : ` [asked of several bots; ${name(lead)} answers it. Reply only if it asks each of you, or with what's yours alone (your own task or finding, a correction); otherwise react or stay [silent]]`;
   return (r: { seq: number; message: BotMessage }) => {
     const m = r.message;
     const who = authorLabel(c, m.author, bots, user);
@@ -1025,7 +1064,8 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     // Shared event wording can embed friend-controlled names and quoted content.
     const body = (c.friend && m.event) || parseFriendAuthor(m.author) ? untrustedData(rawBody) : rawBody;
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
-    const mark = assigned ? (assigned.includes(m.id) ? forYou : " [context only: do not answer]")
+    const lead = leads?.get(m.id);
+    const mark = assigned ? (assigned.includes(m.id) ? (lead ? shared(lead) : forYou) : " [context only: do not answer]")
       : c.kind === "group" && m.author === "me" ? " [context only: do not answer]"
       : r.seq > cursor ? "" : " [already seen]";
     const quoted = m.replyTo ? db.getMessage(m.replyTo) : undefined;
@@ -1105,7 +1145,7 @@ export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
 
 export function startBots() {
   listen();
-  svc.setHooks({ wake, stop, pendingAssignments });
+  svc.setHooks({ wake, stop, pendingAssignments, unseen, userWoke });
   svc.setPiCheck(piSetup);
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();

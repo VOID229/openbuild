@@ -303,7 +303,30 @@ export interface Conversation {
   more?: boolean;
   /** A group shared with a friend's server: their bots and they are in it too. */
   friend?: FriendChat;
+  /** A side chat a bot opened to work something out with others: see SideHuddle. */
+  huddle?: SideHuddle;
 }
+
+/**
+ * A temporary side chat between several bots. The bot that opened it reports back to the chat it came
+ * from; it closes once it reaches `limit` bot messages, goes quiet, or a member closes it.
+ */
+export interface SideHuddle {
+  /** The bot that opened it, and reports back. */
+  by: string;
+  /** The conversation it reports back to. */
+  from: string;
+  /** What it's for: the opening question. */
+  topic: string;
+  /** Bot messages it allows before it closes. */
+  limit: number;
+  /** The requests in `from` it's working on, so the report answers them. */
+  request?: string[];
+  closedAt?: number;
+}
+
+/** A huddle's message cap: three each, at most twelve. */
+export const huddleLimit = (members: number) => Math.min(12, 3 * members);
 
 export interface BotsSettings {
   /** "provider/model" for bots without their own. Pi's default when unset. */
@@ -691,9 +714,10 @@ export function findTags<B extends Pick<Bot, "name">>(text: string, bots: B[]): 
  */
 export const marksUnread = (c: Pick<Conversation, "kind">, m: Pick<BotMessage, "author" | "event">) => m.author !== "me" && !(c.kind === "direct" && m.event);
 
-/** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
+/** A conversation's name: the group's, the bot's, or its bots' for a side chat (a huddle goes by its topic). */
 export function conversationTitle(c: Pick<Conversation, "kind" | "name" | "botIds">, bots: Pick<Bot, "id" | "name">[]): string {
   if (c.kind === "group") return c.name || "Untitled group";
+  if (c.kind === "side" && c.name) return c.name;
   const names = c.botIds.map((id) => bots.find((b) => b.id === id)?.name ?? "Deleted bot");
   return c.kind === "side" ? names.map((n) => n.split(" · ")[0]).join(" & ") : (names[0] ?? "Bot");
 }

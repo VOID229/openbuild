@@ -122,6 +122,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return routine(botId, p);
     case "ask_bot":
       return askBot(botId, p);
+    case "side_chat":
+      return sideChat(botId, p);
     case "manage_bot":
       return manage(botId, p);
     case "plugins":
@@ -221,6 +223,7 @@ export function contextSections(botId: string): Record<string, string> {
     "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
     "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
     "New messages can arrive while you work. Read them and fold them in.",
+    "When others are in the chat, read what they just said before you add to it. If someone already answered, don't say it again: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows you. To think something through with several bots without filling the chat, open a side chat with side_chat; whoever opens it reports back.",
     "For every tool that has a status parameter, supply a short custom status describing what this specific call is doing for the user, in a few plain words (at most 50 characters). For example: Checking why the build failed, or Updating your school notes. Avoid generic labels like Running a command. This is the live activity line, not a separate chat message.",
     "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
     "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll in the chat says you haven't voted, vote with vote_poll, going by what you honestly think. Voting shows on the poll, so you needn't announce it; add a message only if you have something more to say. A poll closes once everyone has answered. You can still change your answer after that if you truly change your mind, and whoever asked will hear about it.",
@@ -287,6 +290,7 @@ function instructionsGuide(bot: Bot): string {
 function conversationFor(botId: string, given: unknown): string {
   const id = typeof given === "string" && given ? resolveConversation(botId, given) : focus.get(botId);
   if (!id) throw new svc.BotsError("Say which conversation.");
+  stayInHuddle(botId, id);
   const c = db.getConversation(id);
   if (!c || !c.botIds.includes(botId)) throw new svc.BotsError("You aren't in that conversation.");
   return id;
@@ -304,6 +308,10 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   const text = String(p.text ?? "").slice(0, 8000);
   if (!text.trim() && !p.attach_screenshot && !asStrings(p.images).length) throw new svc.BotsError("A message needs text.");
   if (isSilent(text) && !p.attach_screenshot && !asStrings(p.images).length) return { note: "Nothing was sent. [silent] is only for your final reply, never for send_message." };
+  // Someone wrote since this turn began (another bot answering the same thing, say): the bot sees it
+  // before its message lands. Nothing is dropped: it sends again, changed or not, or decides not to.
+  const fresh = svc.unseenSince(botId, conversationId);
+  if (fresh.length) return { sent: false, new: fresh.join("\n"), note: HELD };
   const images: string[] = [];
   for (const path of asStrings(p.images).slice(0, 4)) {
     const data = await readFileSyncBase64(botId, path, p.machine);
@@ -317,6 +325,8 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   }
   return deliver(botId, conversationId, text, images, p.reply_to);
 }
+
+export const HELD = "Not sent yet: these arrived since you started. If your message still adds something, send it again, as it is or changed. If it's already covered, react or end with [silent] instead. Your own assigned work and your own findings still get sent, minus anything already said.";
 
 /** About how long a person takes to type a bubble. */
 export function typingTime(text: string): number {
@@ -519,12 +529,20 @@ export function routine(botId: string, p: Record<string, unknown>) {
   return { id: saved.id, next: saved.nextRunAt };
 }
 
+/** A turn in a huddle stays there: whoever opened it reports back, so nobody else writes or mentions anyone elsewhere. */
+function stayInHuddle(botId: string, target?: string) {
+  const here = focus.get(botId);
+  const huddle = here ? db.getConversation(here)?.huddle : undefined;
+  if (huddle && target !== here) throw new svc.BotsError(`You're in a side chat: say it there. ${huddle.by === botId ? "You report" : `${mentionName(db.getBot(huddle.by)?.name ?? "Whoever opened it")} reports`} back once it closes.`);
+}
+
 async function askBot(botId: string, p: Record<string, unknown>) {
+  stayInHuddle(botId);
   const otherId = resolveBot(String(p.bot ?? ""));
   if (otherId === botId) throw new svc.BotsError("Ask someone else.");
   const text = String(p.text ?? "").trim().slice(0, 4000);
   if (!text) throw new svc.BotsError("Say what you're asking.");
-  let side = db.listConversations().find((c) => c.kind === "side" && c.botIds.length === 2 && c.botIds.includes(botId) && c.botIds.includes(otherId));
+  let side = db.listConversations().find((c) => c.kind === "side" && !c.huddle && c.botIds.length === 2 && c.botIds.includes(botId) && c.botIds.includes(otherId));
   if (!side) {
     const created = svc.createConversation({ kind: "side", botIds: [botId, otherId] });
     side = db.getConversation(created.id)!;
@@ -534,6 +552,30 @@ async function askBot(botId: string, p: Record<string, unknown>) {
   svc.postMessage(side.id, message);
   const reply = await svc.waitForReply(botId, side.id, after, 120_000);
   return { conversation: side.id.slice(0, 8), reply: reply.text.slice(0, 4000) };
+}
+
+/** A temporary side chat with several bots: opened from the chat that needs the answer, which its opener reports back to. */
+export function sideChat(botId: string, p: Record<string, unknown>) {
+  const action = String(p.action ?? "start");
+  const me = mentionName(requireBot(botId).name);
+  if (action === "close") {
+    const id = conversationFor(botId, p.conversation);
+    const huddle = db.getConversation(id)?.huddle;
+    if (!huddle) throw new svc.BotsError("That isn't a side chat that can be closed.");
+    if (huddle.closedAt) return { note: "It's already closed." };
+    svc.closeHuddle(id, `${me} closed it.`, botId);
+    const reporter = mentionName(db.getBot(huddle.by)?.name ?? "Whoever opened it");
+    return { ok: true, note: huddle.by === botId ? "Closed. You'll be asked to report back in the chat it came from." : `Closed. ${reporter} reports back.` };
+  }
+  if (action !== "start") throw new svc.BotsError("action is start or close.");
+  const bots = asStrings(p.bots).map(resolveBot);
+  const from = conversationFor(botId, p.report_to);
+  const side = svc.openHuddle(botId, from, bots, String(p.topic ?? ""));
+  return {
+    conversation: side.id.slice(0, 8),
+    limit: side.huddle!.limit,
+    note: "Opened, and they've been asked. Don't wait for them: end this turn, with at most one short line where you are if the user should know you're on it. You'll hear their replies in the side chat. Close it with side_chat close once you have the answer, and you'll be asked to report back.",
+  };
 }
 
 function resolveBot(prefix: string): string {

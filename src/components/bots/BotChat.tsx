@@ -1292,6 +1292,8 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
             const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;
             // A message between bots names the other bot by id, so a rename shows up on old lines too.
             const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
+            // A side chat several bots went off to ("Dr is talking it over with Tracer and Manager") links to it.
+            const huddled = m.event!.kind === "message" && m.event!.conversationId && !m.event!.bot ? m.event!.conversationId : undefined;
             // A change of model names the bot and the model it moved to, with its account only when the bot has two of that model.
             const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
             const detail = eventDetail(m.event!);
@@ -1302,7 +1304,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
               // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
               <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
                 <span className="bm-event-text">
-                  {authored ? <><BotLink bot={author!} /> {authored}</> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
+                  {authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(m.event!)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
                 </span>
                 {m.event!.kind !== "model" && detail && (
                   <span className="bm-event-detail">
@@ -2087,7 +2089,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
       {conversation.kind === "side" ? (
         <div className="bots-dock">
           <div className="bots-side-note">
-            {sideBots.join(" and ")} are talking between themselves. You can read along; they'll bring anything you need to decide back to you.
+            {conversation.huddle?.closedAt
+              ? `This side chat has closed. ${sideBots[conversation.botIds.indexOf(conversation.huddle.by)] ?? "The bot that opened it"} reports back.`
+              : `${sideBots.length > 2 ? `${sideBots.slice(0, -1).join(", ")} and ${sideBots.at(-1)}` : sideBots.join(" and ")} are talking between themselves. You can read along; they'll bring anything you need to decide back to you.`}
           </div>
         </div>
       ) : (

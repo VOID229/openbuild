@@ -219,6 +219,8 @@ export default function openbots(pi: any) {
 
   pi.registerTool(tool("ask_bot", "Ask bot", "Ask another bot and wait for their reply. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p) => call("ask_bot", p)));
 
+  pi.registerTool(tool("side_chat", "Side chat", "Talk something through with other bots away from the main chat. action start (bots: one to four names, topic: the question, written to stand on its own, report_to: the short id of the chat to report back to, the one you're in if omitted) opens a temporary side chat the user can read but not write in. It closes after a few messages each, when it goes quiet, or with action close (conversation). Whoever opened it is asked to report back once it closes. For one quick question to one bot, use ask_bot.", { type: "object", properties: { action: str("start or close."), bots: { type: "array", items: { type: "string" }, description: "start: who to talk with, by name or short id." }, topic: str("start: what to work out."), report_to: str("start: short conversation id."), conversation: str("close: the side chat's short id. The one you're in if omitted.") }, required: ["action"] }, (p) => call("side_chat", p)));
+
   pi.registerTool(
     tool(
       "openbuild",
