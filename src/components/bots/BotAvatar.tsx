@@ -37,7 +37,43 @@ function follow(fn: () => void) {
 /** How far the eyes travel when looking, in the 100-unit box. */
 const REACH = 5;
 /** Further when following the pointer, which they do only while it's on their row. */
-const TRACK_REACH = 8;
+export const TRACK_REACH = 11;
+
+/**
+ * Where eyes following the pointer aim, the pointer (dx, dy) from between them on an avatar `width`
+ * across: straight at it, most of the way over within a few eye-widths and all of it by the edge
+ * (`reach` of it, on a shape with less room).
+ */
+export function aimAt(dx: number, dy: number, width: number, reach = 1): [number, number] {
+  const dist = Math.hypot(dx, dy);
+  if (!dist || !width) return [0, 0];
+  const k = Math.tanh(dist / (width * 0.3)) * reach * TRACK_REACH;
+  return [(dx / dist) * k, (dy / dist) * 0.85 * k];
+}
+
+/** The eyes' springs: snappy with a hint of overshoot onto the pointer, unhurried and flat back home. */
+const LOCK = { stiffness: 30, damping: 0.75 };
+const RETURN = { stiffness: 18, damping: 1 };
+export type Gaze = { x: number; y: number; vx: number; vy: number };
+
+/**
+ * Moves the eyes `dt` ms along a spring toward (tx, ty). Starting from rest they ease in rather than
+ * jump, and they settle onto it (true once there, so the frames can stop).
+ */
+export function gazeStep(g: Gaze, tx: number, ty: number, dt: number, locking: boolean): boolean {
+  const { stiffness: w, damping: z } = locking ? LOCK : RETURN;
+  // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the spring stays stable.
+  for (let left = Math.min(dt, 100) / 1000; left > 0; left -= 1 / 240) {
+    const h = Math.min(left, 1 / 240);
+    g.vx += (w * w * (tx - g.x) - 2 * z * w * g.vx) * h;
+    g.vy += (w * w * (ty - g.y) - 2 * z * w * g.vy) * h;
+    g.x += g.vx * h;
+    g.y += g.vy * h;
+  }
+  if (Math.hypot(tx - g.x, ty - g.y) > 0.02 || Math.hypot(g.vx, g.vy) > 0.2) return false;
+  Object.assign(g, { x: tx, y: ty, vx: 0, vy: 0 });
+  return true;
+}
 
 /** Where a busy bot faces (-1…1 each way, x right and y down), how it tilts, and how open its eyes are. */
 type Pose = { x: number; y: number; tilt?: number; eyes?: "wide" | "squint" };
@@ -260,31 +296,54 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   }, [dozing]);
 
   // Eyes that follow the pointer, written straight to the element so moving the mouse doesn't render.
-  // Aimed from the eyes themselves (shapes carry their faces off-centre), all the way over once the
-  // pointer is past the avatar's edge, in proportion closer in.
-  const { x: faceX, y: faceY } = shape.face;
+  // Aimed from the eyes themselves (shapes carry their faces off-centre), sprung onto the pointer on
+  // hover and back to looking ahead after, frame by frame. Where they are carries over, so hovering
+  // again on the way back picks up from there. A glance or thought (data-looking) wins: they let go.
+  const { x: faceX, y: faceY, reach = 1 } = shape.face;
+  const gaze = useRef({ g: { x: 0, y: 0, vx: 0, vy: 0 } as Gaze, on: false, frame: 0, last: 0 });
+  const kick = useRef(() => {});
+  kick.current = () => {
+    const el = ref.current;
+    const s = gaze.current;
+    if (!el || s.frame) return;
+    const tick = (now: number) => {
+      s.frame = 0;
+      const dt = s.last ? now - s.last : 16;
+      s.last = now;
+      let tx = 0;
+      let ty = 0;
+      const r = el.getBoundingClientRect();
+      if (s.on && r.width && !("looking" in el.dataset) && pointer.x >= 0)
+        [tx, ty] = aimAt(pointer.x - (r.left + (faceX / 100) * r.width), pointer.y - (r.top + (faceY / 100) * r.height), r.width, reach);
+      const done = gazeStep(s.g, tx, ty, dt, s.on);
+      if (done && !s.on) {
+        el.style.removeProperty("--track-x");
+        el.style.removeProperty("--track-y");
+      } else {
+        el.style.setProperty("--track-x", s.g.x.toFixed(2));
+        el.style.setProperty("--track-y", s.g.y.toFixed(2));
+      }
+      if (done) s.last = 0;
+      else s.frame = requestAnimationFrame(tick);
+    };
+    s.frame = requestAnimationFrame(tick);
+  };
   useEffect(() => {
     const el = ref.current;
     if (!track || !el || calm()) return;
+    const s = gaze.current;
     el.dataset.tracking = "";
-    const stop = follow(() => {
-      const r = el.getBoundingClientRect();
-      if (!r.width) return;
-      const dx = pointer.x - (r.left + (faceX / 100) * r.width);
-      const dy = pointer.y - (r.top + (faceY / 100) * r.height);
-      const dist = Math.hypot(dx, dy) || 1;
-      const k = Math.min(1, dist / (r.width * 0.75));
-      el.style.setProperty("--track-x", ((dx / dist) * TRACK_REACH * k).toFixed(2));
-      el.style.setProperty("--track-y", ((dy / dist) * TRACK_REACH * 0.85 * k).toFixed(2));
-    });
+    s.on = true;
+    const stop = follow(() => kick.current());
+    kick.current();
     return () => {
       stop();
-      // Look ahead again once it stops following, e.g. when hovering ends: eased back, not snapped.
       delete el.dataset.tracking;
-      el.style.removeProperty("--track-x");
-      el.style.removeProperty("--track-y");
+      s.on = false;
+      kick.current();
     };
-  }, [track, faceX, faceY]);
+  }, [track, faceX, faceY, reach]);
+  useEffect(() => () => cancelAnimationFrame(gaze.current.frame), []);
 
   const pulseKey = pulse?.key;
   const lastPulse = useRef(pulseKey);
@@ -300,6 +359,11 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // A reaction stirs a dozing bot for as long as its face shows, then it drifts off again.
   const sleeping = dozing && !flash;
   const look2 = pose ? [pose.x * REACH, pose.y * REACH * 0.8] : glance ?? (shown === "thinking" ? [REACH * 0.7, -REACH * 0.75] : undefined);
+  // Following eyes let go of the pointer for a glance or thought, and take it up again after.
+  const looking = !!look2;
+  useEffect(() => {
+    if (gaze.current.on) kick.current();
+  }, [looking]);
   // The head turning: the face slides and narrows, the body leans, the light moves the other way.
   const turn: Record<string, string | number> = pose ? { "--turn-x": pose.x, "--turn-y": pose.y, "--turn-a": Math.abs(pose.x), "--tilt": `${pose.tilt ?? 0}deg` } : {};
   const { face } = shape;
@@ -336,8 +400,10 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
             </g>
             <g className="bot-face" transform={`translate(${face.x} ${face.y})`}>
               <g className="bot-look">
-                <Eye mood={shown} x={-gap / 2} scale={eyeScale} glint={size >= 44} side="left" lid={asleep !== undefined} />
-                <Eye mood={shown} x={gap / 2} scale={eyeScale} glint={size >= 44} side="right" lid={asleep !== undefined} />
+                <g className="bot-track">
+                  <Eye mood={shown} x={-gap / 2} scale={eyeScale} glint={size >= 44} side="left" lid={asleep !== undefined} />
+                  <Eye mood={shown} x={gap / 2} scale={eyeScale} glint={size >= 44} side="right" lid={asleep !== undefined} />
+                </g>
               </g>
             </g>
           </g>
