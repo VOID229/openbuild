@@ -1,8 +1,9 @@
-// Loaded into each bot's `pi --mode rpc` process (`-e`). No OpenBuild imports: Pi runs this file
-// on its own. Every tool calls the bots service over the unix socket the process was given
+// Loaded into each bot's `pi --mode rpc` process (`-e`). No OpenBuild imports but the shared HTML
+// page guide, which has none of its own: Pi runs this file on its own. Every tool calls the bots service over the unix socket the process was given
 // (OPENBOTS_SOCKET, OPENBOTS_TOKEN). Built-in tools are off; bash/read/write/edit here run on the
 // bot's computers (one on each machine it reaches, chosen per call), not on the machine the user is sitting at.
 import { request as httpRequest } from "node:http";
+import { BOT_HTML_WIDTH, HTML_THEME_GUIDE, htmlLayoutGuide } from "../../shared/htmlRender";
 
 type Params = Record<string, unknown>;
 
@@ -46,7 +47,7 @@ const ok = (value: unknown) => ({ content: text(value), details: value });
 const fail = (err: unknown) => ({ content: text(`Error: ${err instanceof Error ? err.message : String(err)}`), details: null, isError: true });
 
 // These already show as typing or need no status line.
-const NO_STATUS = new Set(["send_message", "react", "question", "poll"]);
+const NO_STATUS = new Set(["send_message", "react", "question", "poll", "html_render", "todo"]);
 const status = { type: "string", minLength: 1, description: "Required. A short custom status (a few words, at most 50 characters) the user sees while this runs. Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
 
 /** Require a custom status in a work tool's parameters. */
@@ -135,6 +136,49 @@ export default function openbots(pi: any) {
   pi.registerTool(tool("process", "Process", "Start, read, stop or list long-running programs on your computer. action is start (command, name), read (id, input), stop (id) or list. You're told when one you started on this server exits. Processes belong to the machine they run on.", { type: "object", properties: { machine, action: str("start, read, stop or list."), command: str("For start."), name: str("A short name."), id: str("The process id."), input: str("Text to write to it.") }, required: ["action"] }, (p) => call("process", p)));
 
   pi.registerTool(tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from.", { type: "object", properties: { text: str("The message."), machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, (p) => call("send_message", p)));
+
+  pi.registerTool(
+    tool(
+      "html_render",
+      "Show page",
+      `Show a finished HTML page in the chat: a chart, diagram, demo, mockup, small interactive tool or visual summary. It's kept with the conversation like a message. ` +
+        `It runs in a sandboxed frame: inline <style> and <script> work, and libraries load from CDNs, but it can't reach the app, your computer, the user's files or a local server. ` +
+        `Don't describe the page in a message too. ${htmlLayoutGuide(BOT_HTML_WIDTH, 300, "the chat")} ${HTML_THEME_GUIDE}`,
+      {
+        type: "object",
+        properties: {
+          html: str("A complete, self-contained HTML document."),
+          title: str("A short name for the page, e.g. \"Weekly signups\"."),
+          height: { type: "integer", description: "Your best guess at its height in CSS pixels, until it has loaded; the frame then fits the page." },
+          conversation: str("Short conversation id. The one you're in if omitted."),
+        },
+        required: ["html", "title"],
+      },
+      (p) => call("html_render", p),
+    ),
+  );
+
+  pi.registerTool(
+    tool(
+      "todo",
+      "To-do list",
+      "The conversation's to-do list, which the user watches in the chat's details: the steps of the work going on here. action is add (items: the steps, in order), update (item, state todo|doing|done, or text to reword it), remove (item), clear (which: done or all) or list. item is an item's short id or its number. Each call returns the whole list.",
+      {
+        type: "object",
+        properties: {
+          action: str("add, update, remove, clear or list."),
+          items: { type: "array", items: { type: "string" }, description: "add: one short line per step." },
+          item: str("update, remove: the item's short id or number."),
+          state: str("update: todo, doing or done."),
+          text: str("update: new wording."),
+          which: str("clear: done (the default is all)."),
+          conversation: str("Short conversation id. The one you're in if omitted."),
+        },
+        required: ["action"],
+      },
+      (p) => call("todo", p),
+    ),
+  );
 
   pi.registerTool(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p) => call("react", p)));
 

@@ -4,6 +4,7 @@ export type {
   Author,
   Bot,
   BotMessage,
+  BotPage,
   BotsEvent,
   BotsSettings,
   BotStatus,
@@ -22,4 +23,7 @@ export type {
   Question,
   Reaction,
   Routine,
+  StepStatus,
+  TodoChange,
+  TodoItem,
 } from "../../../shared/bots";

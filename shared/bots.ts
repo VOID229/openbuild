@@ -231,11 +231,97 @@ export function pollWaitingOn(poll: Poll, author: Author, botIds: string[]): Aut
 
 export const pollVotesVisible = (poll: Poll, viewer: Author) => !poll.blind || !!poll.closedAt || poll.votes.some((v) => v.by === viewer);
 
+export type StepStatus = "todo" | "doing" | "done";
+
 export interface PlanStep {
   text: string;
   /** The bot doing it. */
   bot: string;
-  status: "todo" | "doing" | "done";
+  status: StepStatus;
+}
+
+/**
+ * One item of a conversation's to-do list: the steps of the work going on in a chat, kept by its bots
+ * (the todo tool) and the user (the details panel), so its progress shows at a glance. Unlike a plan
+ * message, which is a snapshot in the chat, the list belongs to the conversation and stays current.
+ */
+export interface TodoItem {
+  id: string;
+  text: string;
+  status: StepStatus;
+  /** The bot on it: whoever marked it doing (and then done). */
+  bot?: string;
+  /** Who added it. */
+  by: Author;
+  at: number;
+}
+
+export const TODO_LIMIT = 50;
+export const TODO_TEXT_LIMIT = 200;
+
+/** A change to a to-do list, from a bot's todo tool or the user's details panel. */
+export type TodoChange =
+  | { action: "add"; items: string[]; /** The new items' ids, so the app's own copy matches the server's. */ ids?: string[] }
+  | { action: "update"; id: string; status?: StepStatus; text?: string }
+  | { action: "remove"; id: string }
+  | { action: "clear"; which?: "done" | "all" };
+
+const STEP_STATUSES: readonly StepStatus[] = ["todo", "doing", "done"];
+export const isStepStatus = (s: unknown): s is StepStatus => STEP_STATUSES.includes(s as StepStatus);
+
+/** The list after `change`, by `by`. Throws, saying why, when the change doesn't apply. */
+export function applyTodo(list: TodoItem[], change: TodoChange, by: Author, now = Date.now(), newId: () => string = () => crypto.randomUUID()): TodoItem[] {
+  const clean = (text: unknown) => String(text ?? "").replace(/\s+/g, " ").trim().slice(0, TODO_TEXT_LIMIT);
+  const find = (id: string) => {
+    const item = list.find((t) => t.id === id);
+    if (!item) throw new Error("No such item on the to-do list.");
+    return item;
+  };
+  switch (change.action) {
+    case "add": {
+      const texts = (Array.isArray(change.items) ? change.items : []).map(clean).filter(Boolean);
+      if (!texts.length) throw new Error("Write the item.");
+      if (list.length + texts.length > TODO_LIMIT) throw new Error(`A to-do list holds up to ${TODO_LIMIT} items. Clear the done ones first.`);
+      const ids = Array.isArray(change.ids) ? change.ids : [];
+      const taken = new Set(list.map((t) => t.id));
+      const added = texts.map((text, i): TodoItem => {
+        const given = ids[i];
+        const id = isBotId(given) && !taken.has(given) ? given : newId();
+        taken.add(id);
+        return { id, text, status: "todo", by, at: now };
+      });
+      return [...list, ...added];
+    }
+    case "update": {
+      const item = find(change.id);
+      if (change.status !== undefined && !isStepStatus(change.status)) throw new Error("Status is todo, doing or done.");
+      const text = change.text === undefined ? item.text : clean(change.text);
+      if (!text) throw new Error("Write the item.");
+      const status = change.status ?? item.status;
+      // Whoever starts it is on it; back to to-do, nobody is.
+      const bot = status === "todo" ? undefined : status !== item.status && by !== "me" ? by : item.bot;
+      const next: TodoItem = { ...item, text, status, bot };
+      if (!next.bot) delete next.bot;
+      return list.map((t) => (t.id === item.id ? next : t));
+    }
+    case "remove":
+      return list.filter((t) => t.id !== find(change.id).id);
+    case "clear":
+      return change.which === "done" ? list.filter((t) => t.status !== "done") : [];
+    default:
+      throw new Error("Unknown to-do change.");
+  }
+}
+
+/** How far along a to-do list is. */
+export const todoProgress = (list: readonly TodoItem[] | undefined) => ({ done: list?.filter((t) => t.status === "done").length ?? 0, total: list?.length ?? 0 });
+
+/** A self-contained HTML page a bot showed in the chat (its html_render tool), drawn in a sandboxed frame. */
+export interface BotPage {
+  title: string;
+  html: string;
+  /** Its height in CSS pixels until it has loaded and measured itself. */
+  height?: number;
 }
 
 export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread" | "message" | "model";
@@ -255,6 +341,8 @@ export interface BotMessage {
   question?: Question;
   /** A bot laying out who does what. */
   plan?: { title: string; steps: PlanStep[] };
+  /** A page a bot showed: a chart, diagram, demo or small tool. */
+  html?: BotPage;
   /** A poll for the group. */
   poll?: Poll;
   /** A bot offering an app for the user to connect, by its catalog id. */
@@ -294,6 +382,8 @@ export interface Conversation {
   friend?: FriendChat;
   /** A side chat a bot opened to work something out with others: see SideHuddle. */
   huddle?: SideHuddle;
+  /** Its to-do list, which the server keeps apart from the record (db.ts) and adds to what it sends. */
+  todos?: TodoItem[];
 }
 
 /**

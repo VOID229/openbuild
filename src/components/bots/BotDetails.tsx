@@ -1,6 +1,6 @@
-// OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
-// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal and working threads;
-// who's in a side chat.
+// OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
+// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal (with its tasks)
+// and working threads; who's in a side chat.
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { threadActivity, threadMascot } from "../../lib/bots/activity";
@@ -20,6 +20,7 @@ import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
+import { TodoList } from "./BotTodos";
 import { ConversationAvatar, useBusyBots } from "./common";
 
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -373,7 +374,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const working = useBusyBots(conversation);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<"instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
   const threads = useGroupThreads(conversation);
   const st = useBots.getState();
@@ -385,6 +386,13 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setTab(conversation.kind === "direct" ? "instructions" : "members");
   }
   useEffect(() => setEditingLook(false), [conversation.id]);
+  // Asked for a tab (the header's task progress): a bot's own Tasks, or the group's Goal, where its list is.
+  const asked = useBots((s) => s.detailsTab);
+  const [askedKey, setAskedKey] = useState(asked?.key);
+  if (asked && asked.key !== askedKey) {
+    setAskedKey(asked.key);
+    if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
+  }
   // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
   const [threadId, setThreadId] = useState<string>();
   const [threadFor, setThreadFor] = useState(conversation.id);
@@ -464,6 +472,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", `Routines${bot.routines.length ? ` ${bot.routines.length}` : ""}`],
+                  ["tasks", "Tasks"],
                   ["advanced", "Advanced"],
                 ]}
                 value={tab}
@@ -478,6 +487,11 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 />
               )}
               {tab === "routines" && <Routines bot={bot} />}
+              {tab === "tasks" && (
+                <div className="bots-pane">
+                  <TodoList conversation={conversation} bots={bots} />
+                </div>
+              )}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
               <div className="bots-details-foot">
                 <button
@@ -505,12 +519,15 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
               {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               {tab === "goal" && (
-                <Instructions
-                  value={conversation.instructions ?? ""}
-                  placeholder="What is this group working on?"
-                  hint="Every bot in the group reads this alongside its own instructions."
-                  onChange={(v) => st.updateConversation(conversation.id, { instructions: v })}
-                />
+                <>
+                  <Instructions
+                    value={conversation.instructions ?? ""}
+                    placeholder="What is this group working on?"
+                    hint="Every bot in the group reads this alongside its own instructions."
+                    onChange={(v) => st.updateConversation(conversation.id, { instructions: v })}
+                  />
+                  <TodoList conversation={conversation} bots={bots} />
+                </>
               )}
               <div className="bots-details-foot">
                 <button type="button" className="btn btn-sm bots-danger" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>

@@ -30,7 +30,10 @@ import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
+import { HtmlRender } from "../HtmlRender";
+import type { ToolPart } from "../../lib/types";
 import { ConnectCard } from "./BotApps";
+import { HeadTasks } from "./BotTodos";
 import { BotAvatar } from "./BotAvatar";
 import { BotProfileHover } from "./BotProfileCard";
 
@@ -537,6 +540,16 @@ function PollCard({ conversation, message, bots }: { conversation: Conversation;
   );
 }
 
+/**
+ * A page a bot showed (its html_render): OpenBuild's own in-thread page, drawn the same way from the
+ * message instead of a tool call, in the same sandbox, with its download and full-screen view.
+ */
+function PageCard({ message }: { message: BotMessage }) {
+  const page = message.html!;
+  const part = useMemo<ToolPart>(() => ({ type: "tool", id: message.id, name: "html_render", status: "done", args: { html: page.html, title: page.title, height: page.height } }), [message.id, page.html, page.title, page.height]);
+  return <HtmlRender part={part} />;
+}
+
 function PlanCard({ message, bots }: { message: BotMessage; bots: Bot[] }) {
   const plan = message.plan!;
   const done = plan.steps.filter((s) => s.status === "done").length;
@@ -710,8 +723,8 @@ const sameRow = (a: RowProps, b: RowProps) => {
 const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
-  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
-  const card = !!(m.question || m.plan || m.poll || m.connect);
+  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
+  const card = !!(m.question || m.plan || m.poll || m.connect || m.html);
   const everyone = useMemo(() => everyoneIn(conversation, bots), [conversation.kind, conversation.botIds, bots]);
   const react = (emoji: string) => {
     const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
@@ -747,7 +760,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       <div className="bm-line">
         <div
           ref={bubble}
-          className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card")}
+          className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card", m.html && "bm-page")}
           onDoubleClick={readonly ? undefined : (e) => {
             // Two taps also make a dblclick, but useBubbleTouch has already answered them.
             if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
@@ -772,6 +785,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           {m.question && <QuestionCard conversation={conversation} message={m} />}
           {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
           {m.plan && <PlanCard message={m} bots={bots} />}
+          {m.html && <PageCard message={m} />}
           {m.connect && <ConnectCard appId={m.connect.app} />}
         </div>
         {!readonly && (
@@ -783,7 +797,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               <CornerUpLeft size={16} />
             </IconButton>
             {mine && !m.poll && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
-            <CopyAction text={m.text || messageText(m)} />
+            <CopyAction text={m.html ? m.html.html : m.text || messageText(m)} />
           </div>
         )}
       </div>
@@ -2162,6 +2176,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                 <span className="bots-head-name">{name}</span>
                 {sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
               </span>
+              {!remote && <HeadTasks conversation={conversation} mobile />}
             </>
           ) : (
             <>
@@ -2169,6 +2184,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
               <span className="bots-head-name">{name}</span>
               {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+              {!remote && <HeadTasks conversation={conversation} mobile={false} />}
               {!remote && <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />}
             </>
           )}

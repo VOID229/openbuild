@@ -59,6 +59,7 @@ export function messageText(m: BotMessage): string {
   if (m.question) return `? ${m.question.title}`;
   if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
+  if (m.html) return `📄 ${m.html.title}`;
   if (m.event) {
     const detail = eventDetail(m.event);
     return [eventText(m.event), detail && m.event.kind === "model" ? `(${accountName(detail)})` : detail].filter(Boolean).join(" ");

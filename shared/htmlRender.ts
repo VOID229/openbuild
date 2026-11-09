@@ -22,6 +22,8 @@ export const HTML_RENDER_MAX_BYTES = 512_000;
 export const HTML_RENDER_MAX_TITLE = 120;
 /** The reply column the page is drawn in. */
 export const HTML_RENDER_WIDTH = 768;
+/** A page in an OpenBots chat: the width of its card in the bubble column (src/bots.css .bm-page). */
+export const BOT_HTML_WIDTH = 620;
 
 export type Appearance = "light" | "dark";
 export interface HtmlTheme {
@@ -114,12 +116,16 @@ export const HTML_THEME_GUIDE = [
   "The base sheet already sets the text colour and font.",
 ].join(" ");
 
-export const HTML_LAYOUT_GUIDE = [
-  `The frame is the width of the reply (${HTML_RENDER_WIDTH}px on a desktop, about 360px on a phone) and sits right on the thread's background:`,
-  "leave html and body without a background, outer card, border, heading banner or side padding.",
-  "A box that needs a background of its own gets padding and var(--radius) corners. Give charts fixed pixel heights.",
-  "The frame grows to fit the page: let content set the height. Never use vh units, or height: 100% on html or body.",
-].join(" ");
+/** How to lay out a page for a frame `width` wide on a desktop (`phone` on a phone), on the background of `where`. */
+export const htmlLayoutGuide = (width = HTML_RENDER_WIDTH, phone = 360, where = "the thread") =>
+  [
+    `The frame is the width of the reply (${width}px on a desktop, about ${phone}px on a phone) and sits right on ${where}'s background:`,
+    "leave html and body without a background, outer card, border, heading banner or side padding.",
+    "A box that needs a background of its own gets padding and var(--radius) corners. Give charts fixed pixel heights.",
+    "The frame grows to fit the page: let content set the height. Never use vh units, or height: 100% on html or body.",
+  ].join(" ");
+
+export const HTML_LAYOUT_GUIDE = htmlLayoutGuide();
 
 const MSG_HEIGHT = "openbuild:html-height";
 const MSG_THEME = "openbuild:html-theme";

@@ -1,11 +1,11 @@
 // OpenBots' storage: one SQLite database in the data folder (bots/bots.sqlite), apart from
-// threads. Bots, conversations, messages, memory and routines; what each bot has read of each
-// conversation (cursors); and full-text indexes over memory and messages, which is how bots
+// threads. Bots, conversations, messages, memory and routines; each conversation's to-do list; what
+// each bot has read of each conversation (cursors); and full-text indexes over memory and messages, which is how bots
 // search everything they've ever been told.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Bot, BotMessage, Conversation, MemoryItem, Routine } from "../../shared/bots";
+import type { Bot, BotMessage, Conversation, MemoryItem, Routine, TodoItem } from "../../shared/bots";
 import { dataDir } from "../paths";
 
 export const botsDir = () => join(dataDir(), "bots");
@@ -34,8 +34,14 @@ function open(): Database {
   return db;
 }
 
+/** Tables added since: made on every load too, so a hot reload that keeps the open database gets them. */
+function migrate(db: Database): Database {
+  db.exec("CREATE TABLE IF NOT EXISTS todos (conversation_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);");
+  return db;
+}
+
 const hot = globalThis as { openbotsDb?: Database };
-export const db = (hot.openbotsDb ??= open());
+export const db = migrate((hot.openbotsDb ??= open()));
 
 const parse = <T>(s: string): T => JSON.parse(s) as T;
 
@@ -142,7 +148,7 @@ export function dueRoutines(now: number): { botId: string; routine: Routine }[] 
 
 // ------------------------------------------------------------------ conversations and messages
 
-export type StoredConversation = Omit<Conversation, "messages" | "more">;
+export type StoredConversation = Omit<Conversation, "messages" | "more" | "todos">;
 
 export function listConversations(): StoredConversation[] {
   return db.query<{ data: string }, []>("SELECT data FROM conversations ORDER BY updated_at DESC").all().map((r) => parse<StoredConversation>(r.data));
@@ -152,7 +158,8 @@ export function getConversation(id: string): StoredConversation | undefined {
   return row ? parse<StoredConversation>(row.data) : undefined;
 }
 export function putConversation(c: StoredConversation) {
-  const { messages: _m, more: _more, ...stored } = c as Conversation;
+  // The to-do list has a table of its own: a record read before a change to it can't put it back.
+  const { messages: _m, more: _more, todos: _t, ...stored } = c as Conversation;
   db.query("INSERT INTO conversations (id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(id) DO UPDATE SET data = ?2, updated_at = ?3").run(stored.id, JSON.stringify(stored), stored.updatedAt);
 }
 export function deleteConversation(id: string) {
@@ -161,6 +168,7 @@ export function deleteConversation(id: string) {
     db.query("DELETE FROM messages WHERE conversation_id = ?").run(id);
     db.query("DELETE FROM cursors WHERE conversation_id = ?").run(id);
     db.query("DELETE FROM group_follows WHERE conversation_id = ?").run(id);
+    db.query("DELETE FROM todos WHERE conversation_id = ?").run(id);
     db.query("DELETE FROM conversations WHERE id = ?").run(id);
   })();
 }
@@ -170,7 +178,7 @@ export interface StoredMessage {
   message: BotMessage;
 }
 
-const searchable = (m: BotMessage) => [m.text, m.question?.title, ...(m.question?.options.map((o) => o.label) ?? []), ...(m.poll?.options.map((o) => o.label) ?? []), m.plan?.title, ...(m.plan?.steps.map((s) => s.text) ?? [])].filter(Boolean).join("\n");
+const searchable = (m: BotMessage) => [m.text, m.html?.title, m.question?.title, ...(m.question?.options.map((o) => o.label) ?? []), ...(m.poll?.options.map((o) => o.label) ?? []), m.plan?.title, ...(m.plan?.steps.map((s) => s.text) ?? [])].filter(Boolean).join("\n");
 
 export function addMessage(conversationId: string, m: BotMessage): number {
   let seq = 0;
@@ -242,6 +250,24 @@ export function searchMessages(query: string, conversationIds: string[], limit =
   return out;
 }
 
+// ------------------------------------------------------------------ to-do lists
+
+/** A conversation's to-do list, in order; a row that doesn't read as one is empty. */
+export function todos(conversationId: string): TodoItem[] {
+  const row = db.query<{ data: string }, [string]>("SELECT data FROM todos WHERE conversation_id = ?").get(conversationId);
+  if (!row) return [];
+  try {
+    const list = parse<unknown>(row.data);
+    return Array.isArray(list) ? (list as TodoItem[]) : [];
+  } catch {
+    return [];
+  }
+}
+export function setTodos(conversationId: string, list: TodoItem[]) {
+  if (!list.length) return void db.query("DELETE FROM todos WHERE conversation_id = ?").run(conversationId);
+  db.query("INSERT INTO todos (conversation_id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET data = ?2, updated_at = ?3").run(conversationId, JSON.stringify(list), Date.now());
+}
+
 // ------------------------------------------------------------------ cursors
 
 export function cursor(botId: string, conversationId: string): number {
@@ -285,5 +311,5 @@ export function sweepGroupFollows(now: number, ttl: number, skew: number): numbe
 
 /** Everything, gone: for Reset. */
 export function wipe() {
-  db.exec("DELETE FROM bots; DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM routines; DELETE FROM conversations; DELETE FROM messages; DELETE FROM messages_fts; DELETE FROM cursors; DELETE FROM group_follows; DELETE FROM kv;");
+  db.exec("DELETE FROM bots; DELETE FROM memories; DELETE FROM memories_fts; DELETE FROM routines; DELETE FROM conversations; DELETE FROM messages; DELETE FROM messages_fts; DELETE FROM cursors; DELETE FROM group_follows; DELETE FROM todos; DELETE FROM kv;");
 }

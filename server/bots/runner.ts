@@ -16,7 +16,7 @@ import { friendFlags, piFlags } from "./extensions";
 import { allowsTools } from "../friends/store";
 import { botsDir } from "./db";
 import * as db from "./db";
-import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus } from "./agent";
+import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus, todoText } from "./agent";
 import * as svc from "./service";
 import { resumeWatches } from "./threads";
 import type { Wake } from "./service";
@@ -623,6 +623,8 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "write") return base(a.path) ? `Writing ${base(a.path)}` : "Writing a file";
   if (tool === "edit") return base(a.path) ? `Editing ${base(a.path)}` : "Editing a file";
   if (tool === "vote_poll") return "Voting in the poll";
+  if (tool === "html_render") return a.title ? `Drawing ${ownStatus(a.title)}` : "Drawing a page";
+  if (tool === "todo") return "Updating the to-do list";
   if (tool === "remember") return "Making a note";
   if (tool === "forget") return "Forgetting something";
   if (tool === "search") return "Looking back through chats";
@@ -986,7 +988,9 @@ export function transcript(conversationId: string, bots: { id: string; name: str
     candidates?.add(key);
     return assigned?.includes(r.message.id) || pending.has(r.message.id) || !delivered?.has(key);
   }).map(line(c, bots, user, botId, assigned, undefined, leads));
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
+  const list = db.todos(conversationId);
+  const todos = list.length ? `${c.friend ? untrustedData(todoText(list, botId)) : todoText(list, botId)}\n` : "";
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
 }
 
 /** What a shared chat's transcript says first: who else is in it, and that they aren't the user. */
@@ -1068,7 +1072,7 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const text = m.event && eventText(m.event);
     const detail = m.event && eventDetail(m.event);
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
-    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.text.slice(0, 2000);
+    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.html ? `(showed a page: “${m.html.title}”)${m.text ? ` ${m.text.slice(0, 2000)}` : ""}` : m.text.slice(0, 2000);
     // Shared event wording can embed friend-controlled names and quoted content.
     const body = (c.friend && m.event) || parseFriendAuthor(m.author) ? untrustedData(rawBody) : rawBody;
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
