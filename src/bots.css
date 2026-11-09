@@ -2420,13 +2420,34 @@
   height: 100%;
 }
 
+/* A thread open in the panel is as wide as it was last dragged to (BotDetails' useThreadWidth). */
 .bots-details-wide {
-  width: 480px;
+  width: var(--thread-w, 480px);
 }
 
 .bots-details-wide .bots-details-inner,
 .bots-details-threadpane {
-  width: 480px;
+  width: var(--thread-w, 480px);
+}
+
+.panel-dragging .bots-details {
+  transition: none;
+}
+
+/* Wider under a finger; the line shows for keyboard focus as it does for a hover. */
+@media (pointer: coarse) {
+  .bots-thread-grip {
+    width: 14px;
+  }
+}
+
+:where([data-keyboard-nav]) .bots-thread-grip:focus-visible {
+  outline: none;
+}
+
+:where([data-keyboard-nav]) .bots-thread-grip:focus-visible::after {
+  opacity: 1;
+  background: var(--text-2);
 }
 
 .bots-details-inner[hidden] {
@@ -2434,6 +2455,7 @@
 }
 
 .bots-details-threadpane {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -3415,6 +3437,10 @@ a.bots-btn-primary {
   .bots-details-wide .bots-details-inner,
   .bots-details-threadpane {
     width: 100%;
+  }
+
+  .bots-thread-grip {
+    display: none;
   }
 }
 
