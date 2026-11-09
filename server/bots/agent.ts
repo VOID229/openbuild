@@ -91,8 +91,11 @@ export function listen() {
 
 async function handle(botId: string, method: string, p: Record<string, unknown>): Promise<unknown> {
   switch (method) {
-    case "context":
-      return `${contextFor(botId)}\n\n${await machinesNote()}\n\n${await webSearchNote()}\n\n${apps.contextNote()}`;
+    case "context": {
+      const sections = contextSections(botId);
+      sections.openbots_machines = [sections.openbots_machines, await machinesNote(), await webSearchNote(), apps.contextNote()].join("\n\n");
+      return { sections };
+    }
     case "send_message":
       return sendMessage(botId, p);
     case "react":
@@ -153,7 +156,7 @@ async function handleFriend(botId: string, lane: string, method: string, p: Reco
   const friend = storedFriend(friendId);
   if (!friend) throw new svc.BotsError("That friend was removed, so this chat doesn't sync anymore.", 403);
   const allowed = allowsTools(friendId);
-  if (method === "context") return allowed ? `${friendNote(botId, friendId)}\n\n${contextFor(botId)}` : friendNote(botId, friendId);
+  if (method === "context") return { sections: { openbots_friend: friendNote(botId, friendId), ...(allowed ? contextSections(botId) : {}) } };
   // The chat this turn is for: a late call from a turn that's over doesn't get to write anywhere else.
   const here = focus.get(botId);
   const shared = here ? db.getConversation(here) : undefined;
@@ -186,7 +189,6 @@ export function friendNote(botId: string, friendId: string): string {
     `Bots only hear messages that mention them by name (@Name) or reply to them. To talk to one of ${name}'s bots, mention it; when nobody needs you, stay [silent].${theirs.length ? ` Their bots here: ${theirs.join(", ")}.` : ""}${ours.length ? ` ${user}'s other bots here: ${ours.join(", ")}.` : ""}`,
     "You talk like a person texting: short, warm, plain. Several short messages beat one long one: call send_message once per bubble. If there's nothing to say, end with the plain reply [silent].",
     bot.instructions.trim() ? `Your instructions from ${user}:\n${bot.instructions.trim()}` : "",
-    `The time is ${new Date().toString()}.`,
   ].filter(Boolean).join("\n\n");
 }
 
@@ -197,6 +199,15 @@ function requireBot(id: string): Bot {
 }
 
 export function contextFor(botId: string): string {
+  return Object.values(contextSections(botId)).filter(Boolean).join("\n\n");
+}
+
+/**
+ * A bot's context as named system prompt sections, steadiest first. Pi re-sends a whole section
+ * into the conversation whenever its text changes, so a new memory costs only the memory section,
+ * and nothing here may change on its own between turns: the time goes with each prompt instead.
+ */
+export function contextSections(botId: string): Record<string, string> {
   const bot = requireBot(botId);
   const settings = svc.getSettings();
   const user = settings.user?.name || "the user";
@@ -213,39 +224,50 @@ export function contextFor(botId: string): string {
     "For every tool that has a status parameter, supply a short custom status describing what this specific call is doing for the user, in a few plain words (at most 50 characters). For example: Checking why the build failed, or Updating your school notes. Avoid generic labels like Running a command. This is the live activity line, not a separate chat message.",
     "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
     "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll in the chat says you haven't voted, vote with vote_poll, going by what you honestly think. Voting shows on the poll, so you needn't announce it; add a message only if you have something more to say. A poll closes once everyone has answered. You can still change your answer after that if you truly change your mind, and whoever asked will hear about it.",
+  ];
+  const instructions = [
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
-    bot.memory.length ? `Things you remember:\n${memoryContext(bot.memory)}` : "You haven't written any memories yet.",
-    bot.routines.length
-      ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
-      : "",
+  ];
+  const memory = bot.memory.length ? `Things you remember:\n${memoryContext(bot.memory)}` : "You haven't written any memories yet.";
+  const routines = bot.routines.length
+    ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
+    : "";
+  const team = [
     others.length
       ? `Other bots:\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? " primary" : ""}: ${b.instructions || "no instructions yet"}`).join("\n")}`
       : "There are no other bots yet.",
     `Conversations you're in:\n${convos.map((c) => `- ${c.id.slice(0, 8)} ${c.kind} “${c.friend ? untrustedData(conversationTitle(c, db.listBots())) : conversationTitle(c, db.listBots())}”${c.friend ? ` (shared with ${user}'s friend ${untrustedData(c.friend.friendName)}${c.friend.ended ? ", no longer syncing" : ""}: you answer there separately, and anything you write there goes to them)` : ""}`).join("\n")}`,
     threads.guide(bot),
     plugins.guide(bot),
-    `You have a computer on each machine you can reach: a home folder, a terminal (bash), files (read, write, edit) and a browser. They stay around between chats. The time is ${new Date().toString()}.`,
   ];
   const ownChat = bot.primary ? svc.directId(botId) : undefined;
   const offered = !!ownChat && db.messages(ownChat, 20).some((r) => r.message.question?.offer === "team" && r.message.author === botId);
   const developer = bot.primary ? svc.developerAnswer() : undefined;
   if (developer?.kind === "no") {
-    lines.push(`When you asked, the user said they don't really write code. ${svc.NO_CODE_REPLY} Offer to make bots for the things they do often.`);
+    team.push(`When you asked, the user said they don't really write code. ${svc.NO_CODE_REPLY} Offer to make bots for the things they do often.`);
   } else if (developer && !offered) {
-    lines.push(
+    team.push(
       developer.kind === "own"
         ? `When you asked whether they write code, the user answered in their own words: “${developer.text}”. If that means they write code, ${svc.TEAM_OFFER} If it doesn't: ${svc.NO_CODE_REPLY}`
         : `When you asked whether they write code, the user said they write code. Now ${svc.TEAM_OFFER}`,
     );
   }
   if (offered) {
-    lines.push(
+    team.push(
       "You offered the user a starter team in your chat. If they take it, the app makes Manager, Tracer and Researcher and a Team group with you in it by itself, so don't make them with manage_bot. Once they're there, say in a message or two how to put them to work. If the user would rather not, ask what they'd like to do, and offer to make bots for the things they do often.",
     );
   }
-  return lines.filter(Boolean).join("\n\n");
+  const join = (parts: string[]) => parts.filter(Boolean).join("\n\n");
+  return {
+    openbots: join(lines),
+    openbots_instructions: join(instructions),
+    openbots_team: join(team),
+    openbots_machines: "You have a computer on each machine you can reach: a home folder, a terminal (bash), files (read, write, edit) and a browser. They stay around between chats.",
+    openbots_routines: routines,
+    openbots_memory: memory,
+  };
 }
 
 /** Bots write their own instructions; the user can edit them, so the text on file is always the starting point. */

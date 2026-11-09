@@ -940,7 +940,7 @@ function waitSettled(mind: Mind): Promise<void> {
   });
 }
 
-function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>): string {
+export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>): string {
   const bots = db.listBots();
   const user = svc.getSettings().user?.name || "User";
   const parts: string[] = [];
@@ -954,6 +954,8 @@ function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
+  // The clock rides with each prompt: in the system prompt it would re-send the whole context every turn.
+  parts.push(`The time is ${new Date().toString()}.`);
   parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another). If there's nothing to say, send nothing and end with the plain reply [silent].");
   return parts.filter(Boolean).join("\n\n");
 }

@@ -176,7 +176,10 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     a.deepEqual(runner.flagsFor('main'), piFlags());
 
     const tools = [];
-    extension({ on() {}, registerTool(t) { tools.push(t); } });
+    let startHook;
+    extension({ on(name, h) { if (name === 'before_agent_start') startHook = h; }, registerTool(t) { tools.push(t); } });
+    // What its Pi is told, through the socket: as Pi 1.4+ takes it, in sections of their own.
+    const promptFor = async () => { const opts = { sections: {}, appendSystemPrompt: '' }; await startHook({ systemPromptOptions: opts }); return opts; };
     const call = async (name, p) => {
       const out = await tools.find((t) => t.name === name).execute('t', { status: 'Testing', ...p });
       if (out.isError) throw Error(out.content[0].text);
@@ -191,6 +194,11 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     a.match(context, /they are not Gal/);
     a.match(context, /only chat: send_message and react/);
     a.ok(!context.includes('secret-memory-xyz'));
+    const chatOnly = await promptFor();
+    a.deepEqual(Object.keys(chatOnly.sections), ['openbots_friend']);
+    a.equal(chatOnly.appendSystemPrompt, '');
+    a.match(chatOnly.sections.openbots_friend, /only chat: send_message and react/);
+    a.ok(!JSON.stringify(chatOnly).includes('secret-memory-xyz'));
     a.ok(svc.messagePage(shared.id).messages.some((m) => m.author === juniper.bot.id && m.text === 'Hi Bolt!'));
     a.deepEqual(store.pending(FID).at(-1).body.message.text, 'Hi Bolt!');
     const last = svc.messagePage(shared.id).messages.at(-1);
@@ -223,6 +231,12 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     await call('remember', { text: 'Alice likes picnics' });
     a.ok(db.memories(juniper.bot.id).some((m) => m.text === 'Alice likes picnics'));
     a.match(agent.friendNote(juniper.bot.id, FID), /lets you use your usual tools/);
+    const usual = await promptFor();
+    a.equal(Object.keys(usual.sections)[0], 'openbots_friend');
+    a.match(usual.sections.openbots_friend, /lets you use your usual tools/);
+    a.match(usual.sections.openbots_memory, /Alice likes picnics/);
+    // Only the main lane's Pi hears about machines, web search and apps.
+    a.doesNotMatch(usual.sections.openbots_machines, /Machines you can reach/);
     // A removed friend's lane can't do anything.
     store.deleteFriend(FID);
     await a.rejects(call('send_message', { text: 'still here?' }), /removed/);
