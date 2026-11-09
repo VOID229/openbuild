@@ -37,6 +37,8 @@
   --font-serif: "Newsreader Variable", "Newsreader", Georgia, "Times New Roman", serif;
   --font-mono-ui: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font: var(--font-normal);
+  /* The platform's own UI face (SF Pro on Apple devices), for thread titles in the sidebar. */
+  --font-system: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 
   /* Light: white canvas, a barely-grey chrome, neutral greys with no warm cast. */
@@ -93,7 +95,7 @@
   --fast: 120ms;
   --med: 180ms;
 
-  --sidebar-w: clamp(264px, 20vw, 320px);
+  --sidebar-w: clamp(272px, 21vw, 340px);
   --content-w: 768px;
   color-scheme: light;
 }
@@ -1266,15 +1268,14 @@ select.input {
   position: relative;
   display: flex;
   align-items: flex-start;
-  margin-bottom: 1px;
-  border-radius: var(--radius);
+  border-radius: 9px;
   background: var(--row-bg);
   transition: background-color var(--fast) var(--ease);
   /* Hundreds of threads make the list most of the page: rows out of view skip style, layout and
      paint, so coming back from OpenBots (which shows the list again) costs what's on screen. The
      clip margin keeps a keyboard focus ring, which sits just outside the row. */
   content-visibility: auto;
-  contain-intrinsic-size: auto 48px;
+  contain-intrinsic-size: auto 58px;
   overflow-clip-margin: 4px;
 }
 
@@ -1284,17 +1285,17 @@ select.input {
 
 @media (hover: hover) {
   .history-row:hover {
-    --row-bg: color-mix(in srgb, var(--text) 4%, var(--bg));
+    --row-bg: color-mix(in srgb, var(--text) 5%, var(--bg));
   }
 }
 
 .history-row-active {
-  --row-bg: color-mix(in srgb, var(--text) 7%, var(--bg));
+  --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
 }
 
 @media (hover: hover) {
   .history-row-active:hover {
-    --row-bg: color-mix(in srgb, var(--text) 7%, var(--bg));
+    --row-bg: color-mix(in srgb, var(--text) 9%, var(--bg));
   }
 }
 
@@ -1303,14 +1304,15 @@ select.input {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 1px;
+  gap: 3px;
   flex: 1;
   min-width: 0;
-  min-height: 36px;
-  padding: 6px 8px 7px;
-  border-radius: var(--radius);
-  font-size: 13.5px;
-  line-height: 20px;
+  min-height: 40px;
+  padding: 9px 10px 10px;
+  border-radius: 10px;
+  font-family: var(--font-system);
+  font-size: 14px;
+  line-height: 1.4;
   text-align: left;
   color: var(--text);
 }
@@ -1356,10 +1358,10 @@ select.input {
 }
 
 .unread-dot {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--ink);
 }
 
 .history-title-text {
@@ -1564,11 +1566,11 @@ select.input {
 .history-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
   width: 100%;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 1.3;
   color: var(--text-3);
 }
 
@@ -1577,25 +1579,12 @@ select.input {
   margin-left: 0;
 }
 
-/* Pi mark or Durable shield: a quiet monochrome mark, whatever the vendor's own colour. */
+/* The harness's own mark, in its own colours: Claude's Clawd, Codex, Pi, Durable's shield… */
 .history-runtime {
   display: inline-grid;
   place-items: center;
   flex-shrink: 0;
   margin-left: auto;
-  filter: grayscale(1);
-  opacity: 0.55;
-}
-
-.history-runtime svg,
-.history-runtime img {
-  width: 12px;
-  height: 12px;
-}
-
-.history-row-active .history-runtime,
-.history-title:hover .history-runtime {
-  opacity: 0.8;
 }
 
 .history-title-line .badge {
@@ -8462,14 +8451,13 @@ a.btn-primary {
 
 .history-worktree {
   display: inline-flex;
-  flex-shrink: 12;
+  flex-shrink: 3;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
 }
 
-.history-worktree::before {
-  content: "·";
+.history-worktree svg {
   flex-shrink: 0;
 }
 

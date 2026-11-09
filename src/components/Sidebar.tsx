@@ -415,6 +415,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               {/* Branch naming leaves the checkout path stable for running sessions. */}
               {chat.workspace.worktree && (
                 <span className="history-worktree">
+                  <GitBranch size={12} />
                   <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
                 </span>
               )}

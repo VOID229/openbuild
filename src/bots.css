@@ -1029,7 +1029,7 @@
   overflow-wrap: anywhere;
 }
 
-/* Unread: a small accent dot on the avatar's corner, ringed in the rail's colour. */
+/* Unread: a small white dot on the avatar's corner, ringed in the rail's colour. */
 .bots-rail-dot {
   position: absolute;
   top: 5px;
