@@ -243,7 +243,9 @@ test("a message between bots links to the side chat and to the other bot", async
 
 test("a merge's pull request number and thread title are separate links", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain("<PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink></span> {thread}");
+  expect(chat).toContain("<PullLink url={pullUrl!}>{ref.trimEnd()}</PullLink> {thread}");
+  // Following it doesn't also toggle the activity line open.
+  expect(chat).toContain('rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}');
   expect(chat).toContain("if (event.pullUrl) return event.pullUrl;");
 });
 

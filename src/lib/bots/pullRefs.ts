@@ -26,3 +26,49 @@ const PULL_AFTER_RE = /^\s+(?:(?:is|was|has|had|been|got|just|now|also)\s+)*(?:m
 export function inPullContext(text: string, start: number, end: number): boolean {
   return PULL_BEFORE_RE.test(text.slice(Math.max(0, start - 80), start)) || PULL_AFTER_RE.test(text.slice(end, end + 40));
 }
+
+/** `https://github.com/O/R/pull/12` → `https://github.com/O/R`. */
+const repoOfPull = (url: string) => /^(https?:\/\/[^/\s]+\/[^/\s]+\/[^/\s]+)\/pull\/\d+(?:[/?#]|$)/.exec(url)?.[1];
+
+interface PullThread {
+  pullRequest?: Pick<ThreadPullRequest, "url">;
+  openedPullRequests?: string[];
+  startedBy?: { bot: string; conversation: string };
+}
+
+/**
+ * The repository a conversation's "#n" are in, from the pull requests threads opened: the threads
+ * started in this conversation, else by its bots. Two repositories at the nearest of those that has
+ * any is undecided, and a chat whose bots started no thread with one has none: nothing is guessed
+ * from other chats' threads, so "Assignment #14" in an unrelated chat stays text.
+ */
+export function conversationRepo(conversation: { id: string; botIds: string[] }, chats: PullThread[]): string | undefined {
+  const tiers = [chats.filter((c) => c.startedBy?.conversation === conversation.id), chats.filter((c) => c.startedBy && conversation.botIds.includes(c.startedBy.bot))];
+  for (const tier of tiers) {
+    const repos = new Map<string, string>();
+    for (const c of tier)
+      for (const url of [c.pullRequest?.url, ...(c.openedPullRequests ?? [])]) {
+        const repo = url ? repoOfPull(url) : undefined;
+        if (repo) repos.set(repo.toLowerCase(), repo);
+      }
+    if (repos.size) return repos.size === 1 ? [...repos.values()][0] : undefined;
+  }
+}
+
+// "color: #333", "fill=#123456": a colour, not a pull request.
+const COLOUR_BEFORE_RE = /\b(?:colou?r|background|fill|stroke|border|hex)[\w-]*\s*[:=]?\s*$/i;
+
+/**
+ * Where the "#n" at `start`..`end` of `text` links, if anywhere. With the conversation's repository
+ * known, any "#n" there, though a one-digit number ("Sol #2", "step #3") or a six-digit one (a colour)
+ * needs PR wording beside it. Without it, only "#n" with PR wording that a thread opened. A colour's
+ * "#333" stays text.
+ */
+export function pullRefHref(text: string, start: number, end: number, number: number, known: { repo?: string; pulls: Pick<ThreadPullRequest, "number" | "url">[] }): string | undefined {
+  if (COLOUR_BEFORE_RE.test(text.slice(Math.max(0, start - 40), start))) return;
+  const worded = inPullContext(text, start, end);
+  if (!known.repo) return worded ? pullRefUrl(number, known.pulls) : undefined;
+  if ((number < 10 || end - start - 1 === 6) && !worded) return;
+  const base = known.repo.toLowerCase();
+  return known.pulls.find((p) => p.number === number && repoOfPull(p.url)?.toLowerCase() === base)?.url ?? `${known.repo}/pull/${number}`;
+}
