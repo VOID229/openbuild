@@ -60,14 +60,25 @@ describe("conversationRepo", () => {
     expect(conversationRepo(crew, [thread(`${A}/pull/210`, { bot: "manager", conversation: "crew" }), thread(`${B}/pull/3`)])).toBe(A);
   });
 
-  test("else its bots' threads, else any thread's", () => {
+  test("else its bots' threads", () => {
     expect(conversationRepo(crew, [thread(`${B}/pull/3`), thread(`${A}/pull/9`, { bot: "tracer", conversation: "elsewhere" })])).toBe(A);
-    expect(conversationRepo(crew, [thread(`${A}/pull/1`), { openedPullRequests: [`${A.toLowerCase()}/pull/2`] }])?.toLowerCase()).toBe(A.toLowerCase());
+    expect(conversationRepo(crew, [{ openedPullRequests: [`${A.toLowerCase()}/pull/2`], startedBy: { bot: "manager", conversation: "other" } }, thread(`${A}/pull/1`, { bot: "tracer", conversation: "crew" })])).toBe(A);
+  });
+
+  test("an unrelated chat has none, even with every thread on the server in one repository", () => {
+    const study = { id: "study", botIds: ["tutor"] };
+    const threads = [thread(`${A}/pull/14`, { bot: "manager", conversation: "crew" }), thread(`${A}/pull/25`), thread(`${A}/pull/333`)];
+    expect(conversationRepo(study, threads)).toBeUndefined();
+    // So its "#n" keep the old rule: PR wording beside a pull request a thread opened.
+    const pulls = [pr(14), pr(25), pr(333)];
+    const text = "Assignment #14 is due friday, ranked #25, use #333. PR #333 merged.";
+    const links = [...text.matchAll(PULL_REF_RE)].map((m) => pullRefHref(text, m.index, m.index + m[0].length, Number(m[1]), { repo: conversationRepo(study, threads), pulls }));
+    expect(links).toEqual([undefined, undefined, undefined, "https://github.com/VOID229/OpenBuild/pull/333"]);
   });
 
   test("undecided between two repositories, or with none known", () => {
     expect(conversationRepo(crew, [thread(`${A}/pull/1`, { bot: "manager", conversation: "crew" }), thread(`${B}/pull/2`, { bot: "tracer", conversation: "crew" })])).toBeUndefined();
-    expect(conversationRepo(crew, [thread(`${A}/pull/1`), thread(`${B}/pull/2`)])).toBeUndefined();
+    expect(conversationRepo(crew, [thread(`${A}/pull/1`, { bot: "tracer", conversation: "x" }), thread(`${B}/pull/2`, { bot: "manager", conversation: "y" })])).toBeUndefined();
     expect(conversationRepo(crew, [{}, thread("https://example.com/not-a-pull")])).toBeUndefined();
   });
 });
@@ -92,8 +103,13 @@ describe("pullRefHref", () => {
     expect(hrefs("PR #2 and merged #100200")).toEqual([`${repo}/pull/2`, `${repo}/pull/100200`]);
   });
 
-  test("without a repository, only a pull request a thread opened", () => {
-    expect(hrefs("#213 and #74", { pulls: [pr(74)] })).toEqual([undefined, "https://github.com/VOID229/OpenBuild/pull/74"]);
-    expect(hrefs("#5", { pulls: [pr(5)] })).toEqual([undefined]);
+  test("a bare #333 links only in the chat's repository", () => {
+    expect(hrefs("use #333")).toEqual([`${repo}/pull/333`]);
+    expect(hrefs("use #333", { pulls: [pr(333)] })).toEqual([undefined]);
+  });
+
+  test("without a repository, only PR wording beside a pull request a thread opened", () => {
+    expect(hrefs("#213 and PR #74", { pulls: [pr(74)] })).toEqual([undefined, "https://github.com/VOID229/OpenBuild/pull/74"]);
+    expect(hrefs("see #74, #5", { pulls: [pr(74), pr(5)] })).toEqual([undefined, undefined]);
   });
 });
