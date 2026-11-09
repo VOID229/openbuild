@@ -228,3 +228,29 @@ test("only a turn answering the user's request can open a side chat", async () =
     process.exit(0);
   `);
 });
+
+test("a bot's reaction wakes no bot, but the bot it reacted to sees it on its next turn, even on a message it was already shown", async () => {
+  await isolated("reaction-seen", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const { render } = await import('./server/bots/runner.ts');
+    const { deliveryIdentity } = await import('./server/bots/sessionPolicy.ts');
+    const dr = svc.createBot({ name: 'Dr Eggbot' }).bot.id;
+    const manager = svc.createBot({ name: 'Manager' }).bot.id;
+    const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [dr, manager] });
+    const wakes = [];
+    svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
+    const answer = svc.postMessage(group.id, { id: crypto.randomUUID(), author: dr, at: Date.now(), text: 'Yes, we just merged it.' });
+    // Dr's last turn was shown its answer: the ledger has it as it was then.
+    const delivered = new Set(db.messages(group.id, 50).map(r => deliveryIdentity(group.id, r.message)));
+    const turn = [{ kind: 'messages', conversationId: group.id }];
+    a.doesNotMatch(render(turn, dr, delivered), /merged it/);
+    wakes.length = 0;
+    svc.toggleReaction(group.id, answer.id, '👍', manager);
+    a.deepEqual(wakes, []);
+    // Dr's next turn, whatever wakes it, shows the message again with the reaction under it.
+    a.match(render(turn, dr, delivered), /\\[[0-9a-f]{8}\\] Dr Eggbot[^\\n]*: Yes, we just merged it\\.\\n  reactions: #1 👍 from Manager/);
+    process.exit(0);
+  `);
+});
