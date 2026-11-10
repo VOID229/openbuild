@@ -92,8 +92,8 @@ function Home() {
 let preloadingProjects: Promise<void> | undefined;
 
 /**
- * Fetch settings, threads and projects together. Only settings, threads and the bots' cached copy gate the first render:
- * paired-device project discovery can wait on sleeping machines and must not delay the sidebar.
+ * Fetch settings, threads and projects together. OpenBots only waits for settings;
+ * thread routes also prefill their history. Paired-device discovery never gates paint.
  * Past the deadline, whatever's missing fills in when it arrives.
  */
 export async function preloadApp() {
@@ -127,6 +127,12 @@ export async function preloadApp() {
       if (!device.local && device.online !== false) preloadRuntimeStatuses(device.id);
     }
   }).catch(() => {}).finally(() => { preloadingProjects = undefined; });
+  // OpenBots does not consume the thread index. Its own loading state can paint while
+  // threads, usage and paired devices continue loading in the background.
+  if (readRoute(location.pathname, location.hash).bots) {
+    await hydrated;
+    return;
+  }
   await Promise.race([Promise.all([hydrated, chats, bots]), new Promise((r) => setTimeout(r, 3000))]);
 }
 
@@ -433,18 +439,16 @@ function Main() {
             {/* On a phone this is the screen's title bar, so it says which thread this is. */}
             {phone && chat && !usageOpen && !settingsOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
           </div>
-          {!chatsLoaded ? (
-            loadError && (
+          {!chatsLoaded && !botsChat && !settingsOpen && !usageOpen && !marketplaceOpen ? (
               <div className="home">
                 <div className="home-center">
-                  <p>
-                    {isHosted()
+                  <p role="status">
+                    {!loadError ? "Loading threads…" : isHosted()
                       ? `Couldn't read your threads from this browser's storage (${loadError}). If private browsing or a privacy setting blocks site storage, turn it off for this site. Retrying…`
                       : `Can't reach the OpenBuild server to load your threads (${loadError}). Retrying…`}
                   </p>
                 </div>
               </div>
-            )
           ) : (
             <>
               <Activity mode={botsChat && !usageOpen && !settingsOpen && !marketplaceOpen ? "visible" : "hidden"}><BotsView /></Activity>
