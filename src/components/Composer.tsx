@@ -946,7 +946,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
               e.target.value = "";
             }}
           />
-          <ModelPicker dropUp={variant === "dock"} deviceId={mentionDevice} />
+          <ModelPicker dropUp={variant === "dock"} chatId={chatId} deviceId={mentionDevice} />
           <PluginSlot name="composer:toolbar" context={{ variant, chatId }} />
           {notice ? (
             <span className="composer-notice">{notice}</span>
