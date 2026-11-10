@@ -143,3 +143,59 @@ test("todo keeps a conversation's list in its own table, for its bots and the us
     a.equal(db.todos(group.id).length, 0);
     process.exit(0);
   `));
+
+test("a to-do list is temporary: new work after a finished list starts over, and old lists clear by themselves", () =>
+  run("todos-expire", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    import * as svc from './server/bots/service.ts';
+    import { todo, setFocus } from './server/bots/agent.ts';
+    import { TODO_DONE_KEEP_MS, TODO_STALE_MS, todoExpired } from './shared/bots.ts';
+    svc.setHooks({ wake: () => {}, stop: () => {} });
+    const pip = svc.createBot({ name: 'Pip' });
+    const sal = svc.createBot({ name: 'Sal' });
+    const group = svc.createConversation({ kind: 'group', name: 'Crew', botIds: [pip.bot.id, sal.bot.id] });
+    const events = [];
+    svc.subscribe((e) => events.push(e));
+    setFocus(pip.bot.id, group.id);
+
+    // Adding to an unfinished list keeps it.
+    todo(pip.bot.id, { action: 'add', items: ['Write the copy', 'Deploy'] });
+    todo(pip.bot.id, { action: 'done', item: '1' });
+    todo(pip.bot.id, { action: 'add', items: ['Tell the team'] });
+    a.deepEqual(db.todos(group.id).map((t) => t.text), ['Write the copy', 'Deploy', 'Tell the team']);
+    // Once it's all done, the next steps are a new list.
+    todo(pip.bot.id, { action: 'done', item: '2' });
+    todo(pip.bot.id, { action: 'done', item: '3' });
+    todo(pip.bot.id, { action: 'add', items: ['Plan the launch'] });
+    a.deepEqual(db.todos(group.id).map((t) => [t.text, t.status]), [['Plan the launch', 'todo']]);
+
+    // When a list has had its time.
+    const done = [{ id: 'a', text: 'x', status: 'done', by: pip.bot.id, at: 0 }];
+    const open = [{ id: 'b', text: 'y', status: 'doing', by: pip.bot.id, at: 0 }];
+    a.equal(todoExpired([], 0, TODO_STALE_MS * 2), false);
+    a.equal(todoExpired(done, 0, TODO_DONE_KEEP_MS - 1), false);
+    a.equal(todoExpired(done, 0, TODO_DONE_KEEP_MS), true);
+    a.equal(todoExpired(open, 0, TODO_DONE_KEEP_MS * 4), false);
+    a.equal(todoExpired(open, 0, TODO_STALE_MS), true);
+
+    // The scheduler clears a finished list after a while, and tells the app; an unfinished one stays.
+    const direct = svc.directId(sal.bot.id);
+    setFocus(sal.bot.id, direct);
+    todo(sal.bot.id, { action: 'add', items: ['Still going'] });
+    todo(pip.bot.id, { action: 'done', item: '1' });
+    svc.clearOldTodos(Date.now() + TODO_DONE_KEEP_MS - 60_000);
+    a.equal(db.todos(group.id).length, 1);
+    events.length = 0;
+    svc.clearOldTodos(Date.now() + TODO_DONE_KEEP_MS + 1000);
+    a.deepEqual(db.todos(group.id), []);
+    a.equal(db.todos(direct).length, 1);
+    const sent = events.filter((e) => e.t === 'conversation');
+    a.equal(sent.length, 1);
+    a.equal(sent[0].conversation.id, group.id);
+    a.equal(sent[0].conversation.todos, undefined);
+    // And any list nobody has touched in hours.
+    svc.clearOldTodos(Date.now() + TODO_STALE_MS + 1000);
+    a.deepEqual(db.todos(direct), []);
+    process.exit(0);
+  `));

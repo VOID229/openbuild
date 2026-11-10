@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { applyTodo, todoExpired, BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -1136,6 +1136,15 @@ export function editTodos(conversationId: string, change: TodoChange, by: Author
   return next;
 }
 
+/** Lists that have had their time (todoExpired) clear, and the app hears. */
+export function clearOldTodos(now = Date.now()) {
+  for (const { conversationId, list, updatedAt } of db.allTodos()) {
+    if (!todoExpired(list, updatedAt, now)) continue;
+    db.setTodos(conversationId, []);
+    emitConversation(conversationId);
+  }
+}
+
 // ------------------------------------------------------------------ huddles
 
 /** How long a huddle can go without a message, with none of its bots at work, before it closes. */
@@ -1448,6 +1457,7 @@ export function tick(busy: (botId: string) => boolean) {
   reportPollChanges(now);
   db.sweepGroupFollows(now, GROUP_FOLLOW_MS, CLOCK_SKEW_MS);
   closeQuietHuddles(now, busy);
+  clearOldTodos(now);
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;

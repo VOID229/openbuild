@@ -242,8 +242,10 @@ export interface PlanStep {
 
 /**
  * One item of a conversation's to-do list: the steps of the work going on in a chat, kept by its bots
- * (the todo tool) and the user (the details panel), so its progress shows at a glance. Unlike a plan
- * message, which is a snapshot in the chat, the list belongs to the conversation and stays current.
+ * (the todo tool) and shown read-only in the chat's details, so its progress shows at a glance. Unlike a
+ * plan message, which is a snapshot in the chat, the list belongs to the conversation and stays current.
+ * It's temporary: it clears when bots clear it, when new work follows a finished list, and on its own
+ * after a while (todoExpired).
  */
 export interface TodoItem {
   id: string;
@@ -258,6 +260,14 @@ export interface TodoItem {
 
 export const TODO_LIMIT = 50;
 export const TODO_TEXT_LIMIT = 200;
+/** A to-do list is temporary: once every item is done, it clears this long after its last change. */
+export const TODO_DONE_KEEP_MS = 30 * 60_000;
+/** And a list nobody has touched for this long clears whatever state it's in. */
+export const TODO_STALE_MS = 12 * 60 * 60_000;
+
+/** Whether a list last changed at `updatedAt` has had its time, by `now`. */
+export const todoExpired = (list: readonly TodoItem[], updatedAt: number, now = Date.now()) =>
+  list.length > 0 && (now - updatedAt >= TODO_STALE_MS || (list.every((t) => t.status === "done") && now - updatedAt >= TODO_DONE_KEEP_MS));
 
 /** A change to a to-do list, from a bot's todo tool or the user's details panel. */
 export type TodoChange =
@@ -281,6 +291,8 @@ export function applyTodo(list: TodoItem[], change: TodoChange, by: Author, now 
     case "add": {
       const texts = (Array.isArray(change.items) ? change.items : []).map(clean).filter(Boolean);
       if (!texts.length) throw new Error("Write the item.");
+      // New steps after a finished list start a new one: the old work is over.
+      if (list.length && list.every((t) => t.status === "done")) list = [];
       if (list.length + texts.length > TODO_LIMIT) throw new Error(`A to-do list holds up to ${TODO_LIMIT} items. Clear the done ones first.`);
       const ids = Array.isArray(change.ids) ? change.ids : [];
       const taken = new Set(list.map((t) => t.id));

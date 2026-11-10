@@ -162,7 +162,7 @@ export default function openbots(pi: any) {
     tool(
       "todo",
       "To-do list",
-      "The conversation's to-do list, which the user watches in the chat's details: the steps of the work going on here. action is add (items: the steps, in order), update (item, state todo|doing|done, or text to reword it), remove (item), clear (which: done or all) or list. item is an item's short id or its number. Each call returns the whole list.",
+      "The conversation's to-do list, which the user watches in the chat's details: the steps of the work going on here. action is add (items: the steps, in order), update (item, state todo|doing|done, or text to reword it), remove (item), clear (which: done or all) or list. item is an item's short id or its number. Each call returns the whole list. The list is temporary: clear it when the work changes or the user asks; adding steps after a finished list starts a new one.",
       {
         type: "object",
         properties: {

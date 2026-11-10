@@ -263,6 +263,13 @@ export function todos(conversationId: string): TodoItem[] {
     return [];
   }
 }
+/** Every conversation's to-do list, with when it last changed. */
+export function allTodos(): { conversationId: string; list: TodoItem[]; updatedAt: number }[] {
+  return db
+    .query<{ conversation_id: string; updated_at: number }, []>("SELECT conversation_id, updated_at FROM todos")
+    .all()
+    .map((r) => ({ conversationId: r.conversation_id, list: todos(r.conversation_id), updatedAt: r.updated_at }));
+}
 export function setTodos(conversationId: string, list: TodoItem[]) {
   if (!list.length) return void db.query("DELETE FROM todos WHERE conversation_id = ?").run(conversationId);
   db.query("INSERT INTO todos (conversation_id, data, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(conversation_id) DO UPDATE SET data = ?2, updated_at = ?3").run(conversationId, JSON.stringify(list), Date.now());
