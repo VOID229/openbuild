@@ -4,6 +4,7 @@
 import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { cloneTarget } from "../shared/clone";
 import type { GitInfo, Project, Workspace } from "../shared/types";
 import * as storage from "./storage";
 import { temporaryWorktreeBranch, renameTemporaryBranch } from "./worktreeNaming";
@@ -103,14 +104,17 @@ export async function addProject(rawPath: string, opts: { name?: string; create?
 /** A repository URL git can clone over the network: https, ssh, or scp-style (git@host:owner/repo). */
 const CLONE_URL = /^(?:(?:https?|ssh|git):\/\/[^\s/]+\/\S+|[\w.-]+@[\w.-]+:\S+)$/;
 
-/** Clone a repository into a new folder and add it as a project. */
+/**
+ * Clone a repository and add it as a project. Into an existing folder it goes in a subfolder named
+ * after the repository (~/code + …/app.git is ~/code/app); any other path is the clone's own folder.
+ */
 export async function cloneProject(url: string, rawPath: string, name?: string, allow?: ProjectGuard): Promise<Project> {
   url = url.trim();
   if (!CLONE_URL.test(url)) throw new Error("That doesn't look like a git URL (https://…, ssh://… or git@host:owner/repo)");
-  const path = expand(rawPath);
+  const path = cloneTarget(url, expand(rawPath), isDir(expand(rawPath)));
   // Nothing is written until where it lands checks out.
   allow?.(canonicalPath(path));
-  if (existsSync(path) && (!isDir(path) || readdirSync(path).length)) throw new Error(`${tilde(path)} already exists`);
+  if (existsSync(path) && (!isDir(path) || readdirSync(path).length)) throw new Error(`${tilde(path)} already exists and isn't empty`);
   mkdirSync(dirname(path), { recursive: true });
   const r = await git(dirname(path), ["clone", "--", url, path], 10 * 60_000, {
     // Network transports only (no ext:: or file://), and ssh fails instead of waiting for a prompt.
@@ -131,9 +135,10 @@ export function renameProject(id: string, name: string) {
 
 /**
  * Subfolders of a folder (an error when there's no folder there); repositories are marked. `hidden`
- * also lists dotfolders (bar "." and ".."), for a path being typed that starts with a dot.
+ * also lists dotfolders (bar "." and ".."), for a path being typed that starts with a dot. `empty`
+ * when the folder holds nothing at all, files included.
  */
-export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = {}): { dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] } {
+export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = {}): { dir: string; parent?: string; empty: boolean; entries: { name: string; path: string; git: boolean }[] } {
   const dir = expand(rawDir || homedir());
   if (!isDir(dir)) throw new Error(`No folder at ${tilde(dir)}`);
   const entries = readdirSync(dir, { withFileTypes: true })
@@ -142,7 +147,7 @@ export function browse(rawDir: string | undefined, opts: { hidden?: boolean } = 
     .filter((e) => isDir(e.path))
     .sort((a, b) => Number(b.git) - Number(a.git) || a.name.localeCompare(b.name));
   const parent = resolve(dir, "..");
-  return { dir, parent: parent !== dir ? parent : undefined, entries };
+  return { dir, parent: parent !== dir ? parent : undefined, empty: !readdirSync(dir).length, entries };
 }
 
 export async function gitInfo(cwd: string): Promise<GitInfo> {

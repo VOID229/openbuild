@@ -4,6 +4,7 @@
 // device this browser runs on, Browse opens the system's own folder picker.
 import { ArrowLeft, Check, ChevronDown, GitBranch, Laptop, Monitor, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cloneTarget } from "../../shared/clone";
 import { addProject, browseFolders, cloneProject, folderPickerAvailable, pickFolder } from "../lib/pi";
 import { useStore } from "../lib/store";
 import { chooseProject, workspaceDevice } from "../lib/devices";
@@ -15,14 +16,6 @@ import { Popover } from "./primitives";
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 /** The default location, as a folder path ending in "/". */
 export const projectsDir = (dir: string | undefined) => (dir?.trim() || "~").replace(/\/*$/, "/");
-/** The folder a clone of `url` gets: the repository's name. */
-const repoName = (url: string) =>
-  url
-    .trim()
-    .replace(/[/\s]+$/, "")
-    .replace(/\.git$/, "")
-    .split(/[/:]/)
-    .pop() ?? "";
 
 /** Where a new project comes from: a device (no id = this server), or a repository to clone onto one. */
 export interface NewProjectStart {
@@ -123,6 +116,9 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
   const [url, setUrl] = useState("");
   const [path, setPath] = useState(base);
   const [exists, setExists] = useState<boolean>();
+  // A clone's folder as typed (is it a folder already?) and where the clone lands: whether that's taken.
+  const [folder, setFolder] = useState<{ path: string; isFolder: boolean }>();
+  const [taken, setTaken] = useState<{ path: string; taken: boolean }>();
   const [canBrowse, setCanBrowse] = useState(false);
   const [busy, setBusy] = useState<"browse" | "add">();
   const [error, setError] = useState<string>();
@@ -141,13 +137,48 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
     };
   }, [local]);
 
-  // Whether the folder is already there (then it's added as it is) or will be made.
-  // The folder. A clone left at the default location goes in a folder named after the repository there.
+  // The folder. A clone into a folder that's already there (or the default location, made if it
+  // isn't yet) goes in a subfolder named after the repository; any other path is the clone itself.
+  const typed = path.trim();
   const atBase = projectsDir(path) === base;
-  const target = clone && atBase && repoName(url) ? base + repoName(url) : path.trim();
+  const isFolder = atBase || (folder?.path === typed ? folder.isFolder : undefined);
+  const target = !clone ? typed : isFolder === undefined ? "" : cloneTarget(url, typed, isFolder);
+  useEffect(() => {
+    if (!clone || !typed) return;
+    let live = true;
+    const t = setTimeout(() => {
+      browseFolders(typed, deviceId).then(
+        () => live && setFolder({ path: typed, isFolder: true }),
+        () => live && setFolder({ path: typed, isFolder: false }),
+      );
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [clone, typed, deviceId]);
+  // Only a clone target with something in it is taken; an empty folder takes the clone as it is.
+  useEffect(() => {
+    if (!clone || !target) return;
+    let live = true;
+    const t = setTimeout(() => {
+      browseFolders(target, deviceId).then(
+        // A server from before `empty` doesn't say: then any folder counts as taken.
+        (r) => live && setTaken({ path: target, taken: r.empty !== true }),
+        () => live && setTaken({ path: target, taken: false }),
+      );
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [clone, target, deviceId]);
+  const targetTaken = taken?.path === target ? taken.taken : undefined;
+
+  // Whether the folder is already there (then it's added as it is) or will be made.
   useEffect(() => {
     setExists(undefined);
-    if (!target) return;
+    if (clone || !target) return;
     let live = true;
     const t = setTimeout(() => {
       browseFolders(target, deviceId).then(
@@ -159,7 +190,7 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
       live = false;
       clearTimeout(t);
     };
-  }, [target, deviceId]);
+  }, [clone, target, deviceId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
@@ -183,7 +214,7 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
 
   // A new project needs a name with something visible in it (not only spaces or invisible characters).
   const named = /[\p{L}\p{N}\p{P}\p{S}]/u.test(name);
-  const ready = !!target && (clone ? !!url.trim() && exists !== true : named) && !busy;
+  const ready = !!target && (clone ? !!url.trim() && targetTaken === false : named) && !busy;
   const add = async () => {
     if (!ready) return;
     setBusy("add");
@@ -274,10 +305,10 @@ function NewProject({ start, visible, onClose }: { start: NewProjectStart; visib
               (clone
                 ? busy === "add"
                   ? "Cloning… a big repository takes a while."
-                  : url.trim() && exists
-                    ? `${projectsDir(target).slice(0, -1)} already exists`
+                  : url.trim() && targetTaken
+                    ? `${projectsDir(target).slice(0, -1)} already exists and isn't empty`
                     : ready
-                      ? `Clones into ${projectsDir(target).slice(0, -1)}`
+                      ? `Will clone to ${projectsDir(target).slice(0, -1)}`
                       : " "
                 : target && exists === false
                   ? `Creates ${projectsDir(target).slice(0, -1)}`
