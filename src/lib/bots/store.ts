@@ -17,7 +17,7 @@ import type { BotLook, Mood } from "./looks";
 import { botModels } from "../pi";
 import { useStore } from "../store";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
-import { castVote, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
+import { castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import { isLocalWorkspace, localWorkspace, problemFrom, rememberWorkspace, useWorkspace, useWorkspaceName, workspaceName, workspacePath } from "./workspace";
 
@@ -122,7 +122,7 @@ interface BotsState {
   setDetailsOpen: (open: boolean) => void;
   /** Open the details on a tab. */
   showDetailsTab: (tab: "tasks") => void;
-  createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
+  createBot: (bot: { name: string; look: BotLook; instructions?: string; role?: string }) => string;
   /** `conversationId`: the chat a rename was made in, which says so there. */
   updateBot: (id: string, patch: Partial<Omit<Bot, "id">>, conversationId?: string) => void;
   makePrimary: (id: string) => void;
@@ -258,12 +258,12 @@ export const useBots = create<BotsState>()(
     setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
     showDetailsTab: (tab) => set((s) => ({ detailsOpen: true, detailsTab: { tab, key: (s.detailsTab?.key ?? 0) + 1 } })),
 
-    createBot: ({ name, look, instructions = "" }) => {
+    createBot: ({ name, look, instructions = "", role }) => {
       const now = Date.now();
-      const bot: Bot = { id: uid(), name, look, instructions, memory: [], routines: [], createdAt: now, primary: !get().bots.length || undefined };
+      const bot: Bot = { id: uid(), name, look, instructions, role: cleanRole(role), memory: [], routines: [], createdAt: now, primary: !get().bots.length || undefined };
       const conversation: Conversation = { id: uid(), kind: "direct", botIds: [bot.id], createdAt: now, updatedAt: now, messages: [] };
       set((s) => ({ bots: [...s.bots, bot], conversations: [conversation, ...s.conversations], activeId: conversation.id }));
-      void send("POST", "/api/bots", { id: bot.id, conversationId: conversation.id, name: bot.name, look: bot.look, instructions: bot.instructions });
+      void send("POST", "/api/bots", { id: bot.id, conversationId: conversation.id, name: bot.name, look: bot.look, instructions: bot.instructions, role: bot.role });
       return conversation.id;
     },
     updateBot: (id, patch, conversationId) => {

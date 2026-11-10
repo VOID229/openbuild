@@ -3297,6 +3297,20 @@ button.bots-details-name:hover {
   line-height: 1.55;
 }
 
+.bots-role-input {
+  border-radius: var(--radius);
+  font-size: 14px;
+}
+
+/* Above the instructions in the details panel's tab. */
+.bots-details-scroll .bots-role {
+  margin-bottom: 16px;
+}
+
+.bots-details-scroll .bots-role > .bots-pane-label {
+  margin-top: 0;
+}
+
 .bots-hint {
   margin: 0 2px;
   font-size: 12.5px;

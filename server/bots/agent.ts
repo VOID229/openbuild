@@ -5,7 +5,7 @@ import { untrustedData } from "./transcriptData";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, todoProgress, unavailableModels, type Bot, type BotMessage, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -223,8 +223,8 @@ export function contextSections(botId: string): Record<string, string> {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update and delete bots, their instructions included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run in a container or on the host is set per machine by the user, in Settings → Devices, not by you."
-      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions while you have none.`,
+      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update and delete bots, their instructions and roles included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run in a container or on the host is set per machine by the user, in Settings → Devices, not by you."
+      : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions and role; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions or role while you have none.`,
     "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
     "You can write to any conversation you're in at any time. You don't owe a reply to every message or reaction: with nothing to add, end your turn with the plain reply [silent]. [silent] is only that final reply: never pass it to send_message, and it isn't needed after you've sent messages.",
     "New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
@@ -235,6 +235,7 @@ export function contextSections(botId: string): Record<string, string> {
     "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll says you haven't voted, vote with vote_poll by what you honestly think; it shows on the poll, so don't announce it, and add a message only if you've more to say. A poll closes once everyone has answered; you can still change your vote after if you truly change your mind, and whoever asked will hear.",
   ];
   const instructions = [
+    bot.role ? `Your role, as your teammates see it: ${bot.role}` : "",
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
     "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
@@ -248,7 +249,7 @@ export function contextSections(botId: string): Record<string, string> {
   const shared = convos.filter((c) => c.friend);
   const team = [
     others.length
-      ? `Other bots (manage_bot team gives one's full instructions):\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? ", primary" : ""}: ${roleOf(b.instructions)}`).join("\n")}`
+      ? `Other bots (manage_bot team gives one's full instructions):\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? ", primary" : ""}: ${roleOf(b)}`).join("\n")}`
       : "There are no other bots yet.",
     `You're in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}; manage_bot conversations lists them with their short ids.${shared.length ? ` Shared with friends, where you answer separately and anything you write goes to them:\n${shared.map((c) => conversationLine(c, user)).join("\n")}` : ""}`,
     threads.brief(bot),
@@ -282,16 +283,11 @@ export function contextSections(botId: string): Record<string, string> {
   };
 }
 
-/** Longest a teammate's role runs in the roster. */
-export const ROLE_MAX = 100;
+/** Longest a teammate's role runs in the roster: as long as a role can be. */
+export { ROLE_MAX };
 
-/** A bot's role in a line: the first sentence of its instructions, cut to ROLE_MAX. */
-export function roleOf(instructions: string): string {
-  const text = instructions.replace(/\s+/g, " ").trim();
-  if (!text) return "no instructions yet";
-  const first = /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
-  return first.length > ROLE_MAX ? `${first.slice(0, ROLE_MAX - 1).trimEnd()}…` : first;
-}
+/** A teammate in the roster: its role, else its instructions' first sentence, at most ROLE_MAX. */
+export const roleOf = (bot: { role?: string; instructions: string }) => roleLine(bot) || "no instructions yet";
 
 /** One conversation as a bot reads it. Friends' names and titles are their data, marked so. */
 function conversationLine(c: db.StoredConversation, user: string): string {
@@ -299,11 +295,11 @@ function conversationLine(c: db.StoredConversation, user: string): string {
   return `- ${c.id.slice(0, 8)} ${c.kind} “${c.friend ? untrustedData(title) : title}”${c.friend ? ` (shared with ${user}'s friend ${untrustedData(c.friend.friendName)}${c.friend.ended ? ", no longer syncing" : ""}: you answer there separately, and anything you write there goes to them)` : ""}`;
 }
 
-/** manage_bot team: the other bots' full instructions, or one bot's. Read-only, for any bot: it's what their context used to carry. */
+/** manage_bot team: the other bots' roles and full instructions, or one bot's. Read-only, for any bot: it's what their context used to carry. */
 function teamDetails(botId: string, which: unknown) {
   const all = db.listBots();
   const picked = typeof which === "string" && which.trim() ? [db.getBot(resolveBot(which.trim()))!] : all.filter((b) => b.id !== botId);
-  return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), instructions: b.instructions || "no instructions yet" }));
+  return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), ...(b.role ? { role: b.role } : {}), instructions: b.instructions || "no instructions yet" }));
 }
 
 /** manage_bot conversations: every conversation the bot is in, as its context used to list them. Read-only. */
@@ -321,8 +317,11 @@ function instructionsGuide(bot: Bot): string {
   } else if (bot.primary) {
     lines.push("When the user tells you something lasting about what you're for or how to act, update your instructions with manage_bot. That replaces the whole text, and the user may have edited it, so start from what's above and keep what they wrote.");
   }
+  if (!bot.role?.trim()) {
+    lines.push("You have no role yet: once you know what you're for, set it with manage_bot update role, one short line your teammates see, like \"Plans trips and books nothing without asking.\" It shows in your chat.");
+  }
   if (bot.primary) {
-    lines.push("When you make a bot, decide whether to give it instructions: if the conversation shows what it's for, write proper ones that say so, with what you know that it'll need. If it doesn't, leave them out rather than inventing a job. You can fill them in later with manage_bot update, including for any other bot that has none.");
+    lines.push("When you make a bot, decide whether to give it instructions and a role: if the conversation shows what it's for, write proper ones that say so, with what you know that it'll need. If it doesn't, leave them out rather than inventing a job. You can fill them in later with manage_bot update, including for any other bot that has none.");
   }
   return lines.join(" ");
 }
@@ -740,13 +739,15 @@ export function manage(botId: string, p: Record<string, unknown>) {
     if (typeof p.name === "string") patch.name = p.name;
     if (p.look) patch.look = lookOf(p.look);
     if (typeof p.instructions === "string") patch.instructions = p.instructions;
+    if (typeof p.role === "string") patch.role = p.role;
     if (typeof p.proactivity === "string") patch.proactivity = p.proactivity as Proactivity;
     if (!self.primary && target !== botId) throw new svc.BotsError("You can only change yourself.");
     refuseComputer(p);
     if (!self.primary) {
       if (changesModel(p)) throw new svc.BotsError("Only the primary bot can change a bot's model.");
-      // A bot can write its own first instructions; after that they're the user's and the primary's.
+      // A bot can write its own first instructions and role; after that they're the user's and the primary's.
       if (self.instructions.trim()) delete patch.instructions;
+      if (self.role?.trim()) delete patch.role;
       delete patch.proactivity;
     }
     // A rename is said in the chat it was asked in, when the bot is in it.
@@ -772,7 +773,7 @@ function refuseComputer(p: Record<string, unknown>) {
 }
 
 function create(botId: string, p: Record<string, unknown>, settings?: Partial<Bot>) {
-  const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", look: lookOf(p.look), by: botId });
+  const created = svc.createBot({ name: String(p.name ?? ""), instructions: typeof p.instructions === "string" ? p.instructions : "", role: typeof p.role === "string" ? p.role : "", look: lookOf(p.look), by: botId });
   // Its first settings, not a change: the "New bot" line says it's here.
   const bot = settings ? svc.updateBot(created.bot.id, settings, { quiet: true }) : created.bot;
   svc.postMessage(svc.directId(botId) || created.conversationId, {

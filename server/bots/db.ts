@@ -34,9 +34,14 @@ function open(): Database {
   return db;
 }
 
-/** Tables added since: made on every load too, so a hot reload that keeps the open database gets them. */
+/**
+ * Tables and fields added since: run on every load too, so a hot reload that keeps the open database
+ * gets them. Each step does nothing the second time.
+ */
 function migrate(db: Database): Database {
   db.exec("CREATE TABLE IF NOT EXISTS todos (conversation_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);");
+  // Bots from before roles have none: an empty one, so the first sentence of their instructions stands in.
+  db.exec("UPDATE bots SET data = json_set(data, '$.role', '') WHERE json_valid(data) AND json_type(data, '$.role') IS NULL;");
   return db;
 }
 

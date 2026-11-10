@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { COLORS, SHAPES, randomLook, type BotLook } from "../../lib/bots/looks";
 import { useBots } from "../../lib/bots/store";
 import { uid } from "../../lib/id";
-import { makePoll, POLL_OPTIONS } from "../../../shared/bots";
+import { makePoll, POLL_OPTIONS, ROLE_MAX } from "../../../shared/bots";
 import { cx, useMediaQuery } from "../../lib/ui";
 import { IconButton } from "../primitives";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
@@ -89,10 +89,11 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
   const [look, setLook] = useState(randomLook);
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
+  const [role, setRole] = useState("");
   const [changes, setChanges] = useState(0);
   const create = () => {
     if (!name.trim()) return;
-    const id = useBots.getState().createBot({ name: name.trim(), look, instructions: instructions.trim() });
+    const id = useBots.getState().createBot({ name: name.trim(), look, instructions: instructions.trim(), role });
     onClose();
     onCreated?.(id);
   };
@@ -117,6 +118,10 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
               setChanges((n) => n + 1);
             }}
           />
+          <label className="bots-field">
+            <span className="bots-field-label">Role <span className="bots-field-optional">optional</span></span>
+            <input className="input bots-role-input" value={role} maxLength={ROLE_MAX} placeholder="What this bot is for, in one line." onChange={(e) => setRole(e.target.value)} />
+          </label>
           <label className="bots-field">
             <span className="bots-field-label">Instructions <span className="bots-field-optional">optional</span></span>
             <textarea

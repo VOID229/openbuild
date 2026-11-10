@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -324,13 +324,15 @@ const PRIMARY = {
   look: { shape: "puff", color: "white" },
   instructions:
     "You're the user's primary bot. You orchestrate: you make new bots when the user needs one, give them clear instructions, put them in groups and hand each the work that's theirs. Do quick things yourself; pass bigger jobs to the bot that fits.",
+  role: "Runs the team: makes bots, hands out the work and does quick things itself.",
 };
 
 /** The starter team the primary bot offers on a new install. */
-export const TEAM: { name: string; look: Bot["look"]; instructions: string; threads?: Bot["threads"] }[] = [
+export const TEAM: { name: string; look: Bot["look"]; instructions: string; role: string; threads?: Bot["threads"] }[] = [
   {
     name: "Manager",
     look: { shape: "jelly", color: "amber" },
+    role: "Runs project threads in OpenBuild, follows them and merges them once they're green.",
     instructions:
       "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green, and close threads when they're done. Ask Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
     threads: { enabled: true, scope: "all", projects: [], merge: true },
@@ -338,6 +340,7 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; thre
   {
     name: "Tracer",
     look: { shape: "pill", color: "blue" },
+    role: "Checks the work: reviews pull requests, hunts bugs and writes tests.",
     instructions:
       "You check the work. Review pull requests and point out real bugs first, style last. Spot bugs, write tests, try to reproduce a reported bug before anyone fixes it, and check a fix didn't break something else. In polls and brainstorms give your honest opinion, with your reasons.",
     threads: { enabled: true, scope: "all", projects: [] },
@@ -345,6 +348,7 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; thre
   {
     name: "Researcher",
     look: { shape: "orb", color: "green" },
+    role: "Looks things up: the web, repositories and GitHub.",
     instructions:
       "You find things out. Search the web, find things in repositories, and check GitHub and the status of the user's organisation: pull requests, issues, checks, releases. Say where each answer came from, and say so when you couldn't find something.",
   },
@@ -447,7 +451,7 @@ export function createTeam(primaryId: string) {
   const primaryChat = directId(primaryId);
   const ids: string[] = [];
   for (const member of TEAM) {
-    const { bot } = createBot({ name: member.name, look: member.look, instructions: member.instructions, by: primaryId });
+    const { bot } = createBot({ name: member.name, look: member.look, instructions: member.instructions, role: member.role, by: primaryId });
     if (member.threads) updateBot(bot.id, { threads: member.threads }, { quiet: true });
     ids.push(bot.id);
     if (primaryChat) postMessage(primaryChat, { id: crypto.randomUUID(), author: primaryId, at: Date.now(), text: "", event: { kind: "created", text: "New bot", detail: bot.name, bot: bot.id } });
@@ -484,7 +488,7 @@ export async function resetAll() {
 
 // ------------------------------------------------------------------ bots and conversations
 
-export function createBot(input: { id?: string; conversationId?: string; name: string; look?: Bot["look"]; instructions?: string; by?: string }): { bot: Bot; conversationId: string } {
+export function createBot(input: { id?: string; conversationId?: string; name: string; look?: Bot["look"]; instructions?: string; role?: string; by?: string }): { bot: Bot; conversationId: string } {
   const name = clip(input.name, 80);
   if (!name) throw new BotsError("A bot needs a name.");
   const id = input.id && isBotId(input.id) ? input.id : crypto.randomUUID();
@@ -499,6 +503,7 @@ export function createBot(input: { id?: string; conversationId?: string; name: s
     look: input.look?.shape && input.look.color ? { shape: String(input.look.shape).slice(0, 40), color: String(input.look.color).slice(0, 40) } : randomLook(),
     primary: primary || undefined,
     instructions: clip(input.instructions, 8000) ?? "",
+    role: cleanRole(input.role),
     createdAt: now,
     proactivity: "normal",
     by: input.by === "me" || (input.by && isBotId(input.by)) ? input.by : "me",
@@ -525,6 +530,7 @@ export function updateBot(id: string, patch: Partial<Bot>, opts: { by?: "me"; qu
     bot.name = name;
   }
   if (typeof patch.instructions === "string") bot.instructions = patch.instructions.slice(0, 8000);
+  if (typeof patch.role === "string") bot.role = cleanRole(patch.role);
   if (patch.look?.shape && patch.look.color) bot.look = { shape: String(patch.look.shape).slice(0, 40), color: String(patch.look.color).slice(0, 40) };
   const newPace = patch.proactivity && patch.proactivity in { off: 1, low: 1, normal: 1, high: 1 } && patch.proactivity !== (bot.proactivity ?? "normal");
   if (newPace) bot.proactivity = patch.proactivity;
@@ -570,7 +576,7 @@ export function rememberModelNames(models: { provider: string; id: string; name?
 }
 
 /** Fields read whole by settingChanges, and ones that aren't settings worth a line (or are said elsewhere). */
-const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary"]);
+const HANDLED = new Set(["model", "effort", "fallbackModels", "noFallbacks", "proactivity", "computer", "threads", "name", "primary", "role"]);
 const UNANNOUNCED = new Set(["id", "createdAt", "by", "memory", "routines", "instructions", "look"]);
 const CHECK_INS: Record<string, string> = { off: "off", low: "every 8 hours", normal: "every 3 hours", high: "every hour" };
 const THREAD_FLAGS = [
@@ -604,6 +610,9 @@ export function settingChanges(before: db.StoredBot, after: db.StoredBot): strin
   const onOff = (on: unknown) => (on ? "on" : "off");
 
   line("name", before.name, after.name);
+  // Said whole, up to ROLE_MAX, unlike instructions: it's the line every teammate reads of the bot.
+  const role = (bot: db.StoredBot) => (bot.role ? `“${bot.role}”` : "none");
+  line("role", role(before), role(after));
   line("primary", before.primary ? "yes" : "no", after.primary ? "yes" : "no");
   line("model", model(before.model, after.model), model(after.model, before.model));
   line("effort", before.effort || "default", after.effort || "default");
@@ -670,9 +679,9 @@ export interface ChangeNote {
   to: string;
   at: number;
 }
-type NoteField = "model" | "effort" | "fallbacks" | "instructions";
+type NoteField = "model" | "effort" | "fallbacks" | "instructions" | "role";
 const CHANGE_NOTES = "change-notes";
-const NOTE_FIELDS: NoteField[] = ["model", "effort", "fallbacks", "instructions"];
+const NOTE_FIELDS: NoteField[] = ["model", "effort", "fallbacks", "instructions", "role"];
 
 const changeNotes = () => db.getValue<ChangeNote[]>(CHANGE_NOTES) ?? [];
 
@@ -688,6 +697,8 @@ function describe(bot: db.StoredBot, field: NoteField): string {
     }
     case "instructions":
       return bot.instructions;
+    case "role":
+      return bot.role ? `“${bot.role}”` : "none";
   }
 }
 
@@ -986,9 +997,6 @@ function stem(word: string) {
 }
 const words = (text: string) => new Set((text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).map(stem).filter((w) => w.length >= 3 && !COMMON.has(w)));
 
-/** What a bot says it's for: the first sentence of its own instructions, where a bot says what it does. The rest often names other bots' jobs. */
-const ownRole = (instructions: string) => instructions.trim().split(/(?<=[.!?])\s|\n/)[0] ?? "";
-
 /** Where a bot's name first shows in some text, tagged or just written ("tracer, find bugs"); -1 if it doesn't. */
 function namedAt(text: string, bot: db.StoredBot): number {
   const name = mentionName(bot.name).toLowerCase();
@@ -999,8 +1007,8 @@ function namedAt(text: string, bot: db.StoredBot): number {
 /**
  * Who answers a user's group message that went to several bots, so they don't all say the same thing.
  * A bot the message names, tagged or just written ("tracer, find bugs"), answers. Otherwise, or among
- * several named, the one whose role (the first sentence of its instructions) shares the most words with
- * it. A tie, or nothing in common, goes to the primary if it was asked, else whoever was named first.
+ * several named, the one whose role shares the most words with it: the role it was given, else the first
+ * sentence of its instructions, where a bot says what it does (the rest often names other bots' jobs). A tie, or nothing in common, goes to the primary if it was asked, else whoever was named first.
  * Decided here, with no model call; the others still get it, to add what's theirs alone.
  */
 export function pickLead(text: string, ids: string[]): string | undefined {
@@ -1013,7 +1021,7 @@ export function pickLead(text: string, ids: string[]): string | undefined {
   const names = new Set(bots.flatMap((b) => [...words(mentionName(b.name))]));
   const asked = [...words(text)].filter((w) => !names.has(w));
   const scored = pool.map((b) => {
-    const role = words(ownRole(b.instructions));
+    const role = words(b.role?.trim() || firstSentence(b.instructions));
     return { b, fit: asked.filter((w) => role.has(w)).length };
   }).sort((x, y) => y.fit - x.fit);
   if (scored[0]!.fit && scored[0]!.fit > (scored[1]?.fit ?? 0)) return scored[0]!.b.id;
