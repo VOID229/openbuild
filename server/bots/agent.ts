@@ -311,13 +311,20 @@ function conversationList(botId: string): string {
 /** Bots write their own instructions; the user can edit them, so the text on file is always the starting point. */
 function instructionsGuide(bot: Bot): string {
   const lines: string[] = [];
-  if (!bot.instructions.trim()) {
-    lines.push("You don't have instructions yet. Don't ask the user to write them or announce them. Within your first few messages, as soon as you know what they want from you and how, write them yourself with manage_bot update: short, and addressed to yourself as \"you\". Until there's something real to say, leave them empty.");
+  const noInstructions = !bot.instructions.trim();
+  const noRole = !bot.role?.trim();
+  const role = 'one short line your teammates see, like "Plans trips and books nothing without asking."';
+  if (noInstructions && noRole) {
+    // A new bot writes both at once: two nudges with their own timing got one written and the other left.
+    lines.push(`You don't have instructions yet. You have no role yet either. Write both yourself on your first turn, in one manage_bot update with instructions and role together, as soon as you know what the user wants from you and how. Don't ask the user to write them or announce them. Instructions: short, and addressed to yourself as "you". Role: ${role} It shows in your chat. Until there's something real to say, leave both empty.`);
+  } else if (noInstructions) {
+    lines.push("You don't have instructions yet; your role is already set, so leave it. Don't ask the user to write them or announce them. On your first turn, as soon as you know what they want from you and how, write them yourself with manage_bot update: short, and addressed to yourself as \"you\". Until there's something real to say, leave them empty.");
   } else if (bot.primary) {
     lines.push("When the user tells you something lasting about what you're for or how to act, update your instructions with manage_bot. That replaces the whole text, and the user may have edited it, so start from what's above and keep what they wrote.");
   }
-  if (!bot.role?.trim()) {
-    lines.push("You have no role yet: once you know what you're for, set it with manage_bot update role, one short line your teammates see, like \"Plans trips and books nothing without asking.\" It shows in your chat.");
+  if (noRole && !noInstructions) {
+    // The primary may still rewrite its instructions (the line above); everyone else's are closed once set.
+    lines.push(`You have no role yet${bot.primary ? "." : "; your instructions are already set, so leave them."} Write it yourself this turn with manage_bot update role, from what your instructions say you're for: ${role} It shows in your chat.`);
   }
   if (bot.primary) {
     lines.push("When you make a bot, decide whether to give it instructions and a role: if the conversation shows what it's for, write proper ones that say so, with what you know that it'll need. If it doesn't, leave them out rather than inventing a job. You can fill them in later with manage_bot update, including for any other bot that has none.");

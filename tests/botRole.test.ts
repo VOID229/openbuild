@@ -177,6 +177,65 @@ test("a bot writes its own role once, visibly; after that it's the user's and th
   `);
 }, 30_000);
 
+test("a new bot is told to write its instructions and its role together on its first turn, and only what's still empty", async () => {
+  await run(`${SETUP}
+    const guide = (bot) => agent.contextSections(bot.id).openbots_instructions;
+    const both = /You don't have instructions yet\\. You have no role yet either\\. Write both yourself on your first turn, in one manage_bot update with instructions and role together/;
+    const boss = svc.createBot({ name: 'Boss' }).bot;
+    const fresh = svc.createBot({ name: 'Fresh' }).bot;
+
+    // Nothing set: one nudge for both, in one call, and not the user's job. Primary or not.
+    for (const bot of [boss, fresh]) {
+      a.match(guide(bot), both);
+      a.match(guide(bot), /Don't ask the user to write them or announce them/);
+      a.doesNotMatch(guide(bot), /already set/);
+    }
+    // One update writes both.
+    agent.manage(fresh.id, { action: 'update', instructions: 'You plan trips and book nothing without asking.', role: 'Plans trips; books nothing alone.' });
+    a.deepEqual([db.getBot(fresh.id).instructions, db.getBot(fresh.id).role], ['You plan trips and book nothing without asking.', 'Plans trips; books nothing alone.']);
+    agent.manage(boss.id, { action: 'update', instructions: 'You run the team.', role: 'Runs the team.' });
+    a.deepEqual([db.getBot(boss.id).instructions, db.getBot(boss.id).role], ['You run the team.', 'Runs the team.']);
+    // Done, the nudge is gone, and each field is closed to the bot on its own.
+    a.doesNotMatch(guide(fresh), /You don't have instructions yet|You have no role yet/);
+    a.doesNotMatch(guide(boss), /You don't have instructions yet|You have no role yet/);
+    a.throws(() => agent.manage(fresh.id, { action: 'update', instructions: 'Rewritten.', role: 'Rewritten.' }), /Say what to change/);
+    a.throws(() => agent.manage(fresh.id, { action: 'update', instructions: 'Rewritten.' }), /Say what to change/);
+    a.throws(() => agent.manage(fresh.id, { action: 'update', role: 'Rewritten.' }), /Say what to change/);
+    a.deepEqual([db.getBot(fresh.id).instructions, db.getBot(fresh.id).role], ['You plan trips and book nothing without asking.', 'Plans trips; books nothing alone.']);
+
+    // The user wrote its instructions when making it: it's asked for its role only, and can't touch the instructions.
+    const briefed = svc.createBot({ name: 'Briefed', instructions: 'You keep notes.' }).bot;
+    a.match(guide(briefed), /You have no role yet; your instructions are already set, so leave them\\. Write it yourself this turn with manage_bot update role/);
+    a.doesNotMatch(guide(briefed), /You don't have instructions yet|Write both/);
+    agent.manage(briefed.id, { action: 'update', instructions: 'Mine now.', role: 'Keeps the notes.' });
+    a.deepEqual([db.getBot(briefed.id).instructions, db.getBot(briefed.id).role], ['You keep notes.', 'Keeps the notes.']);
+    a.doesNotMatch(guide(briefed), /You have no role yet/);
+
+    // The primary gave it a role and no instructions: it's asked for those only, and its role stays.
+    const named = db.getBot(agent.manage(boss.id, { action: 'create', name: 'Named', role: 'Tracks runs.' }).id);
+    a.match(guide(named), /You don't have instructions yet; your role is already set, so leave it\\./);
+    a.match(guide(named), /On your first turn, as soon as you know what they want from you and how, write them yourself with manage_bot update/);
+    a.doesNotMatch(guide(named), /You have no role yet|Write both/);
+    agent.manage(named.id, { action: 'update', instructions: 'You track runs.', role: 'Mine now.' });
+    a.deepEqual([db.getBot(named.id).instructions, db.getBot(named.id).role], ['You track runs.', 'Tracks runs.']);
+    a.doesNotMatch(guide(named), /You don't have instructions yet/);
+
+    // The primary with instructions and no role is asked for its role, and isn't told its instructions are closed: they aren't.
+    await patch(boss.id, { role: '' });
+    a.match(guide(boss), /You have no role yet\\. Write it yourself this turn with manage_bot update role/);
+    a.doesNotMatch(guide(boss), /so leave them/);
+    a.match(guide(boss), /update your instructions with manage_bot/);
+
+    // The user's own edit in the app closes a field the same way.
+    const half = svc.createBot({ name: 'Half' }).bot;
+    await patch(half.id, { role: 'Answers mail.' });
+    a.match(guide(half), /You don't have instructions yet; your role is already set/);
+    await patch(half.id, { role: '', instructions: 'You answer mail.' });
+    a.match(guide(half), /You have no role yet; your instructions are already set/);
+    process.exit(0);
+  `);
+}, 30_000);
+
 test("the app's new bot carries its role through the API, as one line", async () => {
   await run(`${SETUP}
     svc.createBot({ name: 'Boss' });
