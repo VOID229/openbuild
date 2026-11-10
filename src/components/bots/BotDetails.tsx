@@ -8,6 +8,7 @@ import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
 import type { Bot, Conversation } from "../../lib/bots/types";
+import { cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
@@ -73,6 +74,52 @@ function Tabs<T extends string>({ tabs, value, onChange }: { tabs: readonly (rea
           {label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A bot's role: one line teammates see of it in their roster. Saved when the field is left or Enter is
+ * pressed, not on every key: each change is a line in the bot's chat.
+ */
+export function RoleField({ bot, label }: { bot: Bot; label?: boolean }) {
+  const saved = bot.role ?? "";
+  const [draft, setDraft] = useState(saved);
+  const focused = useRef(false);
+  useEffect(() => {
+    if (!focused.current) setDraft(saved);
+  }, [saved]);
+  const commit = () => {
+    const role = cleanRole(draft);
+    setDraft(role);
+    if (role !== saved) useBots.getState().updateBot(bot.id, { role });
+  };
+  return (
+    <div className="bots-pane bots-role">
+      {label && <span className="bots-pane-label">Role</span>}
+      <input
+        className="input bots-role-input"
+        value={draft}
+        maxLength={ROLE_MAX}
+        placeholder="What this bot is for, in one line."
+        aria-label="Role"
+        onFocus={() => (focused.current = true)}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          focused.current = false;
+          commit();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            e.currentTarget.blur();
+          } else if (e.key === "Escape" && draft !== saved) {
+            e.stopPropagation();
+            setDraft(saved);
+          }
+        }}
+      />
+      <p className="bots-hint">Teammates see this in their roster. Left empty, the first sentence of the instructions stands in.</p>
     </div>
   );
 }
@@ -486,12 +533,15 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 onChange={setTab}
               />
               {tab === "instructions" && (
-                <Instructions
-                  value={bot.instructions}
-                  placeholder="What is this bot for, and how should it act?"
-                  hint="Read before every reply. The bot updates these as it learns, and you can edit them any time."
-                  onChange={(v) => st.updateBot(bot.id, { instructions: v })}
-                />
+                <>
+                  <RoleField key={bot.id} bot={bot} label />
+                  <Instructions
+                    value={bot.instructions}
+                    placeholder="What is this bot for, and how should it act?"
+                    hint="Read before every reply. The bot updates these as it learns, and you can edit them any time."
+                    onChange={(v) => st.updateBot(bot.id, { instructions: v })}
+                  />
+                </>
               )}
               {tab === "routines" && <Routines bot={bot} />}
               {tab === "tasks" && (

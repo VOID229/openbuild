@@ -180,6 +180,7 @@ export function botRoutes(api: Api) {
             name: String(body?.name ?? ""),
             look: body?.look,
             instructions: typeof body?.instructions === "string" ? body.instructions : "",
+            role: typeof body?.role === "string" ? body.role : "",
             by: "me",
           });
           return json(created);

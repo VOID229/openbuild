@@ -82,6 +82,91 @@ test("a bot's system prompt is the same turn after turn, and a new memory change
   `);
 }, 30_000);
 
+test("the team section is a short roster, with teammates' instructions and the chat list behind manage_bot", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    const svc = await import('./server/bots/service.ts');
+    const agent = await import('./server/bots/agent.ts');
+    const db = await import('./server/bots/db.ts');
+    svc.setHooks({ wake() {}, stop() {} });
+    svc.updateSettings({ onboarding: 'done', user: { name: 'Gal' } });
+    const tail = ' Check the calendar every morning and flag clashes early, and keep a running list of open loops.'.repeat(8);
+    const boss = svc.createBot({ name: 'Boss' }).bot;
+    const planner = svc.createBot({ name: 'Planner', instructions: 'You plan the user\\'s days and weeks, and nothing gets booked without a check with them first, ever, whatever the time.' + tail }).bot;
+    const scout = svc.createBot({ name: 'Scout', instructions: 'Research prices.' + tail }).bot;
+    const quiet = svc.createBot({ name: 'Quiet' }).bot;
+    svc.createConversation({ kind: 'group', name: 'Weekend trip', botIds: [boss.id, planner.id, scout.id] });
+    svc.createConversation({ kind: 'group', name: 'Studio admin', botIds: [boss.id, scout.id] });
+
+    const team = agent.contextSections(boss.id).openbots_team;
+    a.doesNotMatch(team, /calendar every morning/, 'no full teammate instructions');
+    a.doesNotMatch(team, /Weekend trip|Studio admin|Conversations you're in/, 'no dumped conversation list');
+    a.match(team, /You're in 3 chats; manage_bot conversations lists them/);
+    a.match(team, /manage_bot team/);
+    const roster = team.split('\\n').filter((l) => l.startsWith('- '));
+    a.equal(roster.length, 3);
+    for (const line of roster) a.ok(line.split(': ').slice(1).join(': ').length <= agent.ROLE_MAX, line);
+    a.match(team, new RegExp('- Planner \\\\(' + planner.id.slice(0, 8) + '\\\\): You plan the user.{10,}…$', 'm'));
+    a.match(team, /- Scout \\(\\w{8}\\): Research prices\\.$/m);
+    a.match(team, /- Quiet \\(\\w{8}\\): no instructions yet$/m);
+    a.match(agent.contextSections(scout.id).openbots_team, /- Boss \\(\\w{8}\\), primary: /);
+
+    // The details are a tool call away, for every bot, and still read-only for the others.
+    for (const asker of [boss.id, scout.id]) {
+      const all = agent.manage(asker, { action: 'team' });
+      a.equal(all.find((b) => b.name === 'Planner').instructions, db.getBot(planner.id).instructions);
+      a.ok(!all.some((b) => b.id === asker.slice(0, 8)), 'the others, not yourself');
+    }
+    a.deepEqual(agent.manage(scout.id, { action: 'team', bot: 'Planner' }).map((b) => b.name), ['Planner']);
+    a.equal(agent.manage(scout.id, { action: 'team', bot: 'Boss' })[0].primary, true);
+    const listed = agent.manage(scout.id, { action: 'conversations' });
+    a.match(listed, /^Conversations you're in:\\n/);
+    for (const title of ['Weekend trip', 'Studio admin', 'Scout']) a.ok(listed.includes('“' + title + '”'), title);
+    a.doesNotMatch(agent.manage(planner.id, { action: 'conversations' }), /Studio admin/);
+    a.throws(() => agent.manage(scout.id, { action: 'update', bot: 'Planner', instructions: 'x' }), /only change yourself/);
+    a.equal(db.getBot(planner.id).instructions.startsWith('You plan'), true);
+    process.exit(0);
+  `);
+}, 30_000);
+
+test("a bot's Pi gets OpenBots' own short system prompt instead of Pi's coding-assistant one", async () => {
+  await run(`
+    import { strict as a } from 'node:assert';
+    const { BOT_SYSTEM_PROMPT, piFlags, friendFlags } = await import('./server/bots/extensions.ts');
+    for (const flags of [piFlags(), friendFlags(false)]) {
+      // Any value stops Pi reading SYSTEM.md and APPEND_SYSTEM.md; a non-empty one also replaces its default preamble.
+      a.equal(flags[flags.indexOf('--system-prompt') + 1], BOT_SYSTEM_PROMPT);
+      a.equal(flags[flags.indexOf('--append-system-prompt') + 1], '');
+    }
+    a.match(BOT_SYSTEM_PROMPT, /OpenBots/);
+    a.doesNotMatch(BOT_SYSTEM_PROMPT, /coding assistant|inside pi/);
+    a.ok(BOT_SYSTEM_PROMPT.length < 400);
+    process.exit(0);
+  `);
+}, 30_000);
+
+test("other extensions' tool guidelines survive the bot's own system prompt, and none means no section", async () => {
+  const { toolRules } = await import("../server/bots/extension");
+  // Pi's default rules section listed these; with OpenBots' preamble they come back on their own.
+  expect(toolRules({ selectedTools: ["bash", "theirs", "hidden"], hiddenTools: ["hidden"], toolGuidelines: { theirs: ["Use theirs for X", " Use theirs for X "], hidden: ["Secret"] }, promptGuidelines: ["Be kind"] })).toEqual({ openbots_tool_rules: "- Use theirs for X\n- Be kind" });
+  // OpenBots' own tools register none, so the usual prompt gains no section.
+  expect(toolRules({ selectedTools: ["bash", "send_message"], toolGuidelines: {} })).toEqual({});
+  expect(toolRules({})).toEqual({});
+});
+
+test("the size report shows the always-on prompt text smaller than on main", async () => {
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "scripts", "bot-prompt-size.ts")], { stdout: "pipe", stderr: "pipe" });
+  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  if (code !== 0) console.error(err);
+  expect(code).toBe(0);
+  const report = JSON.parse(out);
+  expect(report.before.total).toBe(18634);
+  expect(report.after.total).toBeLessThan(report.before.total * 0.6);
+  expect(report.after.context).toBeLessThan(report.before.context);
+  expect(report.after.apps).toBeLessThan(report.before.apps / 2);
+  expect(report.after.approxTokens).toBe(Math.round(report.after.total / 4.28));
+}, 30_000);
+
 test("the context audit counts clock-only system patches and compaction usage apart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-context-audit-"));
   try {

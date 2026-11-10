@@ -67,7 +67,7 @@ const storage = await import("../server/storage");
 const threads = await import("../server/bots/threads");
 const { serverId } = await import("../server/devices");
 const { coversProject } = await import("../shared/bots");
-const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide } = threads;
+const { handle, answerRefusal, assertWithinDefaults, replyFor, resolvePermission, waitingAsks, guide, brief } = threads;
 
 const project = await projects.addProject(repo);
 const { bot } = svc.createBot({ name: "Juniper" });
@@ -97,6 +97,7 @@ test("a bot has no access until the user gives it some, and can't give itself an
   svc.updateBot(bot.id, { threads: { enabled: false, projects: [] } });
   await expect(call("options")).rejects.toThrow(/hasn't given you access/);
   expect(guide({ threads: undefined })).toBe("");
+  expect(brief({ threads: undefined })).toBe("");
   const { manage } = await import("../server/bots/agent");
   manage(bot.id, { action: "update", name: "Juniper", threads: { enabled: true, projects: [project.id] } });
   expect(svc.fullBot(bot.id)!.threads?.enabled).toBe(false);
@@ -395,6 +396,11 @@ test("threads it didn't start are only its to control with the grant", async () 
   grant({ merge: true, others: true });
   expect((await call("options")).you_may.control_threads_you_didnt_start).toBe(true);
   expect(guide(svc.fullBot(bot.id)!)).toContain("including ones the user or other bots started");
+  // The full guidance comes with options; the context keeps only the essentials and the pointer.
+  expect((await call("options")).guide).toBe(guide(svc.fullBot(bot.id)!));
+  expect(brief(svc.fullBot(bot.id)!)).toContain("Start with action options");
+  expect(brief(svc.fullBot(bot.id)!)).toContain("waits forever");
+  expect(brief(svc.fullBot(bot.id)!).length).toBeLessThan(guide(svc.fullBot(bot.id)!).length / 2);
   await call("send", { thread: theirs.id, text: "Hey" });
   expect(admitted.at(-1).threadId).toBe(theirs.id);
   expect((storage.getChat(theirs.id) as any).messages.at(-2).sentByBot).toBe(bot.id);

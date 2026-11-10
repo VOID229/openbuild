@@ -76,11 +76,18 @@ function selected(): string[] {
     .filter((target) => !isAbsolute(target) || existsSync(target));
 }
 
+/**
+ * A bot's whole preamble, in place of Pi's default "coding assistant running inside pi" one and the
+ * tools, rules and docs sections Pi only adds with it. Who the bot is comes from extension.ts's sections.
+ */
+export const BOT_SYSTEM_PROMPT =
+  "You are a bot in OpenBots: you talk with the user, and sometimes their other bots and friends, through your tools. The sections below say who you are and how to act. If you have bash, use it for file operations like ls, rg and find.";
+
 const BASE = [
   "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",
-  // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery.
-  // Empty CLI values suppress both while retaining Pi's default prompt and extension hooks.
-  "--system-prompt", "", "--append-system-prompt", "",
+  // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery: any CLI
+  // value suppresses each, so the bot's own preamble goes in and the addendum stays empty.
+  "--system-prompt", BOT_SYSTEM_PROMPT, "--append-system-prompt", "",
 ];
 
 export function piFlags(): string[] {

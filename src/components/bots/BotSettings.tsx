@@ -16,7 +16,7 @@ import { NavRow, SettingsGroup, SubPage } from "../SettingsUI";
 import { BotMachines, BotModel, BotModelSelect, DefaultFallbacks } from "./BotAdvanced";
 import { BotAvatar, BotHuddle } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, LookPicker } from "./BotDialogs";
-import { Instructions, Members, Routines } from "./BotDetails";
+import { Instructions, Members, RoleField, Routines } from "./BotDetails";
 import { useBusyBots } from "./common";
 import { BotClaude } from "./BotClaude";
 import { BotExtensions, useExtensionsSummary } from "./BotExtensions";
@@ -106,6 +106,10 @@ function BotEditor({ bot, onDelete }: { bot: Bot; onDelete: (conversationId: str
             st.pulse(bot.id, "happy");
           }}
         />
+      </section>
+      <section className="bots-set-block">
+        <Label>Role</Label>
+        <RoleField key={bot.id} bot={bot} />
       </section>
       <section className="bots-set-block">
         <Label>Instructions</Label>
@@ -220,7 +224,7 @@ function BotRow({ bot }: { bot: Bot }) {
             {bot.primary && <span className="bots-pill">Primary</span>}
             {conversation?.hidden && <span className="badge">hidden</span>}
           </span>
-          <span className="pi-row-desc bots-set-row-desc">{bot.instructions || "No instructions yet"}</span>
+          <span className="pi-row-desc bots-set-row-desc">{bot.role || bot.instructions || "No instructions yet"}</span>
         </span>
         {details && <span className="bots-set-row-meta">{details}</span>}
         <ChevronRight size={16} className="nav-row-chevron" aria-hidden />

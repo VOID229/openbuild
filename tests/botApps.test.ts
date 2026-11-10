@@ -88,9 +88,12 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
           return new URL(back.headers.get("location")).searchParams;
         };
 
-        // Not connected yet: a bot gets told how to offer it.
+        // Not connected yet: a bot gets told how to offer it. The catalog stays out of its context, behind apps list.
         await assert.rejects(apps.useApp({ app: "fake", tool: "whoami" }), /isn't connected/);
-        assert.match(apps.contextNote(), /Not connected:.*Fake \\(fake\\)/);
+        assert.doesNotMatch(apps.contextNote(), /Fake|Not connected:/);
+        assert.match(apps.contextNote(), /No apps are connected yet/);
+        assert.match(apps.contextNote(), /apps action list shows .* the apps that aren't connected; .*action connect/);
+        assert.ok((await apps.appsTool({ action: "list" })).not_connected.includes("fake: A test."));
 
         // Signing in, with the token staying out of everything the browser and bots can see.
         const params = await signIn();
@@ -111,10 +114,20 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
         assert.match((await apps.finish(params)).error, /expired or was already used/);
         assert.match((await apps.finish(new URLSearchParams({ state: "made-up", code: "x" }))).error, /expired or was already used/);
 
-        // What bots get.
-        assert.match(apps.contextNote(), /Fake \\(fake\\), 2 tools: /);
+        // What bots get: the connected app by name in their context, its tools through the apps tool.
+        const note = apps.contextNote();
+        assert.match(note, /Connected:\\n- Fake \\(fake\\)$/m);
+        assert.doesNotMatch(note, /echo|whoami|tools:/, "no tool-name dump");
+        assert.doesNotMatch(note, /Not connected|Open \\(fake-open\\)|Keyed \\(fake-keyed\\)|GitHub \\(github\\)/, "no catalog of what isn't connected");
+        const all = await apps.appsTool({ action: "list" });
+        const fakeListed = all.connected.find((a) => a.app === "fake");
+        assert.equal(fakeListed.status, "connected");
+        assert.deepEqual(fakeListed.tools.map((t) => t.split(":")[0]).sort(), ["echo", "whoami"]);
+        assert.ok(!all.not_connected.some((a) => a.startsWith("fake:")));
+        assert.ok(all.not_connected.includes("fake-open: A test."));
         const listed = await apps.appsTool({ action: "tools", app: "fake", names: ["echo"] });
         assert.equal(listed[0].name, "echo");
+        assert.deepEqual((await apps.appsTool({ action: "tools", app: "fake" })).map((t) => t.name).sort(), ["echo", "whoami"]);
         assert.equal((await apps.useApp({ app: "fake", tool: "echo", arguments: { text: "hello" } })).text, "hello");
         assert.equal((await apps.useApp({ app: "fake", tool: "echo", arguments: '{"text":"as a string"}' })).text, "as a string");
         await assert.rejects(apps.useApp({ app: "fake", tool: "echo", arguments: [1] }), /must be an object/);
@@ -132,6 +145,7 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
         await assert.rejects(apps.useApp({ app: "fake", tool: "echo", arguments: { text: "x" } }), /signed out/);
         assert.equal(apps.storedApps().fake.status, "needs-auth");
         assert.match(apps.contextNote(), /Fake \\(fake\\): signed out/);
+        assert.equal((await apps.appsTool({ action: "list" })).connected.find((a) => a.app === "fake").status, "needs-auth");
 
         // Signing in again doesn't register a second client.
         const { registered: once } = await control({});

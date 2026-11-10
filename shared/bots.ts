@@ -125,6 +125,12 @@ export interface Bot {
   primary?: boolean;
   /** What the bot is for and how it should behave. */
   instructions: string;
+  /**
+   * What the bot is for, in one short line (at most ROLE_MAX): what its teammates see of it in their
+   * always-on roster, and what group lead-picking matches on. Empty or missing (bots from before it
+   * existed): the first sentence of its instructions stands in (see roleLine).
+   */
+  role?: string;
   /** Things the bot keeps across conversations. */
   memory: MemoryItem[];
   routines: Routine[];
@@ -627,6 +633,38 @@ export const isBotId = (id: unknown): id is string => typeof id === "string" && 
 
 /** A bot's first name: "Juniper · notes" → "Juniper". */
 export const firstName = (name: string) => name.split(" · ")[0]!.split(/\s+/)[0]!;
+
+/** Longest a bot's role runs: what's stored, and what teammates' rosters show of it. */
+export const ROLE_MAX = 100;
+
+/** A role as it's stored: one line, spaces collapsed, at most ROLE_MAX. Anything but text is empty. */
+export const cleanRole = (role: unknown): string => (typeof role === "string" ? role.replace(/\s+/g, " ").trim().slice(0, ROLE_MAX).trimEnd() : "");
+
+/** Abbreviations whose dot doesn't end a sentence ("for trips, e.g. Lisbon"). Lowercase. */
+const ABBREVIATIONS = new Set(["e.g.", "eg.", "i.e.", "ie.", "etc.", "vs.", "cf.", "viz.", "approx.", "incl.", "esp.", "mr.", "mrs.", "ms.", "dr.", "st.", "no."]);
+
+/**
+ * The first sentence of some text, on its first line: up to the first ., ! or ? that a space or the end
+ * follows, but not an abbreviation's dot (e.g., i.e., etc.). Spaces collapsed.
+ */
+export function firstSentence(text: string): string {
+  const line = (text.trim().split("\n")[0] ?? "").replace(/\s+/g, " ").trim();
+  const end = /[.!?](?= |$)/g;
+  for (let m: RegExpExecArray | null; (m = end.exec(line)); ) {
+    const word = /\S*$/.exec(line.slice(0, m.index + 1))![0].replace(/^[^\p{L}]+/u, "").toLowerCase();
+    if (m[0] === "." && ABBREVIATIONS.has(word)) continue;
+    return line.slice(0, m.index + 1);
+  }
+  return line;
+}
+
+/** What a bot is for, in a line: its role when it has one, else its instructions' first sentence, cut to ROLE_MAX. Empty with neither. */
+export function roleLine(bot: { role?: string; instructions: string }): string {
+  const role = cleanRole(bot.role);
+  if (role) return role;
+  const first = firstSentence(bot.instructions);
+  return first.length > ROLE_MAX ? `${first.slice(0, ROLE_MAX - 1).trimEnd()}…` : first;
+}
 
 /**
  * An activity line's text. Older follow-ups were saved as "Wrote to a thread" or "Wrote a prompt"; they
