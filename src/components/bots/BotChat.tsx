@@ -1265,8 +1265,18 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     const el = scroller.current;
     // Hidden (behind a thread, say), there's no layout to read a place from.
     if (!el?.clientHeight) return;
-    spot.current = spotIn(el, "bottom");
+    // A run opening or folding holds its toggle still until it has finished moving.
+    if (!(pin.current && performance.now() < pin.current.until)) spot.current = spotIn(el, "bottom");
     top.current = spotIn(el, "top");
+  };
+  /** A toggle being held still on screen while its run opens or folds, and until when. */
+  const pin = useRef<{ until: number }>(undefined);
+  /** Room kept below the chat after a run folds near its end, so the view doesn't drop with it. */
+  const spacer = useRef<HTMLDivElement>(null);
+  const slack = useRef(0);
+  const setSlack = (px: number) => {
+    slack.current = px;
+    if (spacer.current) spacer.current.style.height = px ? `${px}px` : "";
   };
   useEffect(() => () => void places.set(place, { stick: stick.current, top: top.current }), [place]);
   // Opening or folding a run of activity (EventRun) keeps the view where it is, even at the bottom:
@@ -1274,9 +1284,16 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    keepViews.set(el, () => {
+    keepViews.set(el, (toggle, folding, body) => {
       stick.current = false;
-      remember();
+      // Not the line at the bottom of the view (it may be in the run that's folding away), but the toggle.
+      if (el.clientHeight) {
+        spot.current = { id: toggle.dataset.id!, offset: contentTop(toggle, el) - (el.scrollTop + el.clientHeight) };
+        pin.current = { until: performance.now() + 700 };
+      }
+      // Folding near the end would leave the view nothing to stand on, and the browser would pull it up:
+      // keep that room until the reader scrolls (onScroll trims it).
+      if (folding && body) setSlack(slack.current + body.offsetHeight);
     });
     return () => void keepViews.delete(el);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1388,6 +1405,12 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         // The chat's own moves only ever keep the view where it was, so they decide neither.
         if (!ours && gap <= 2) stick.current = true;
         else if (!ours && delta < 0) stick.current = false;
+        // The room kept after a fold goes as the reader moves: never more than holds the view where it is,
+        // and none once they're at the end.
+        if (slack.current && !ours && !(pin.current && performance.now() < pin.current.until)) {
+          const need = gap <= 2 ? 0 : Math.max(0, Math.ceil(el.scrollTop + el.clientHeight - (el.scrollHeight - slack.current)));
+          if (need < slack.current) setSlack(need);
+        }
         remember();
         setAway(gap > 400);
       }}
@@ -1484,6 +1507,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         {setup && primary && <PiSetupNotice setup={setup} bot={primary} />}
         <Working conversationId={conversation.id} direct={conversation.kind === "direct"} botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
+        <div ref={spacer} className="bm-slack" aria-hidden />
       </div>
       {away && (
         <button type="button" className="bm-jump" aria-label="Jump to latest" onClick={() => {
@@ -1593,7 +1617,9 @@ function repeats(messages: BotMessage[]): { m: BotMessage; times: number }[] {
 export const ERROR_SHOWN_MS = 60_000;
 
 /** Each chat's way to hold its view still, for a run's toggle to call as it opens or folds (Messages). */
-const keepViews = new WeakMap<HTMLElement, () => void>();
+const keepViews = new WeakMap<HTMLElement, (toggle: HTMLElement, folding: boolean, body: HTMLElement | null) => void>();
+/** How long a run takes to fold away (bots.css, .bm-events-body). */
+const RUN_FOLD_MS = 260;
 
 /**
  * Activity lines in a row, folded into one: the bots behind them and how many things they did. Opened,
@@ -1602,10 +1628,18 @@ const keepViews = new WeakMap<HTMLElement, () => void>();
  */
 function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot[]; since: number }) {
   const [open, setOpen] = useState(false);
+  // Folding, the lines stay for as long as they take to fold away (bots.css), then hide.
+  const [folding, setFolding] = useState(false);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!folding) return;
+    const timer = setTimeout(() => setFolding(false), RUN_FOLD_MS);
+    return () => clearTimeout(timer);
+  }, [folding]);
   const who = [...new Set(messages.map((m) => m.author))].flatMap((id) => bots.find((b) => b.id === id) ?? []);
   const fresh = messages.every((m) => m.at > since);
   return (
-    <div className={cx("bm-events", fresh && "bm-recv")} data-open={open || undefined}>
+    <div className={cx("bm-events", fresh && "bm-recv")} data-open={open || undefined} data-folding={folding || undefined}>
       <button
         type="button"
         className="bm-events-toggle"
@@ -1613,7 +1647,8 @@ function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot
         data-id={`run-${messages[0]!.id}`}
         onClick={(e) => {
           const chat = e.currentTarget.closest<HTMLElement>(".bots-messages");
-          if (chat) keepViews.get(chat)?.();
+          if (chat) keepViews.get(chat)?.(e.currentTarget, open, body.current);
+          setFolding(open && !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
           setOpen(!open);
         }}
       >
@@ -1623,13 +1658,17 @@ function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot
       </button>
       {/* The same thing done again and again, with nothing between, shows once with how many times. The
           repeats stay in the page, hidden, so finding a line by its id still works. */}
-      {repeats(messages).map(({ m, times }, i) =>
-        times === 0 ? (
-          <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden />
-        ) : (
-          <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open} index={i} times={times} />
-        ),
-      )}
+      <div ref={body} className="bm-events-body">
+        <div>
+          {repeats(messages).map(({ m, times }, i) =>
+            times === 0 ? (
+              <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden />
+            ) : (
+              <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open && !folding} index={i} times={times} />
+            ),
+          )}
+        </div>
+      </div>
     </div>
   );
 }

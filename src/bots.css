@@ -2059,12 +2059,38 @@
   margin: 14px 0 2px;
 }
 
-.bm-events > .bm-event:first-of-type {
+/* The lines under the toggle. Their height eases open and shut (0fr ↔ 1fr), so whatever is below
+   moves smoothly, while the toggle above stays put on screen (BotChat holds it there). */
+.bm-events-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  align-self: stretch;
+  transition: grid-template-rows 260ms var(--sidebar-ease);
+}
+
+.bm-events[data-open] .bm-events-body {
+  grid-template-rows: 1fr;
+}
+
+.bm-events-body > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bm-events-body .bm-event:first-of-type {
   margin-top: 6px;
 }
 
-.bm-events > .bm-event {
+.bm-events-body .bm-event {
   margin-top: 4px;
+}
+
+/* Under the fixed composer, room kept after a run folds near the end (BotChat's slack). */
+.bm-slack {
+  flex: none;
 }
 
 .bm-events-toggle {
@@ -2105,11 +2131,22 @@
   transform: rotate(90deg);
 }
 
-/* Opened, the lines fade in and drift down into place, one after another. */
+/* Opened, the lines fade in and drift down into place, one after another; folded, they fade and lift
+   away together as their height closes. */
 @media (prefers-reduced-motion: no-preference) {
-  .bm-events[data-open] > .bm-event:not(.bm-recv) {
+  .bm-events[data-open] .bm-events-body .bm-event:not(.bm-recv) {
     animation: bm-events-reveal 240ms var(--ease-out) both;
     animation-delay: calc(min(var(--i, 0), 12) * 18ms);
+  }
+
+  .bm-events[data-folding] .bm-events-body .bm-event {
+    animation: bm-events-fold 180ms var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bm-events-body {
+    transition: none;
   }
 }
 
@@ -2117,6 +2154,13 @@
   from {
     opacity: 0;
     translate: 0 -6px;
+  }
+}
+
+@keyframes bm-events-fold {
+  to {
+    opacity: 0;
+    translate: 0 -4px;
   }
 }
 
@@ -4419,9 +4463,11 @@ a.bots-btn.bots-btn-primary {
   overscroll-behavior: contain;
 }
 
+/* An app's page: one column, centred in the pane. */
 .mpage-inner {
   max-width: 792px;
-  padding: 4px 32px 72px 16px;
+  margin: 0 auto;
+  padding: 4px 32px 72px;
   animation: page-in var(--fast) var(--ease-out) both;
 }
 
@@ -4650,12 +4696,11 @@ a.bots-btn.bots-btn-primary {
   padding-bottom: 10px;
 }
 
+/* A card's button (Save, Connect) sits in the card under what it acts on: no band of its own. */
 .app-card-foot {
   display: flex;
   justify-content: flex-end;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--surface-2);
+  padding: 2px 16px 14px;
 }
 
 .app-select {

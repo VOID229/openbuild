@@ -313,7 +313,7 @@ test("opened, the same line again and again in a row shows once with how many ti
   const toggle = document.querySelector<HTMLButtonElement>(".bm-events-toggle")!;
   expect(toggle.textContent).toBe("7 background actions");
   await act(async () => toggle.click());
-  const shown = [...document.querySelectorAll<HTMLElement>(".bm-events > .bm-event")].filter((l) => !l.hidden);
+  const shown = [...document.querySelectorAll<HTMLElement>(".bm-events .bm-event")].filter((l) => !l.hidden);
   expect(shown.map((l) => [l.dataset.id, l.querySelector(".bm-event-times")?.textContent ?? null])).toEqual([
     ["e2", null],
     ["e3", null],
