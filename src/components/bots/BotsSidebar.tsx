@@ -522,6 +522,9 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
 }
 
 const NONE: Conversation[] = [];
+/** How long the sidebar takes to open or close (--sidebar-ms in styles.css). */
+const SIDEBAR_MS = 320;
+const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 export function BotsSidebar() {
   const open = useStore((s) => s.botsSidebarOpen);
@@ -529,7 +532,21 @@ export function BotsSidebar() {
   const marketplaceOpen = useStore((s) => s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const profileName = useStore((s) => s.settings.profile.name);
   const mobile = useMediaQuery("(max-width: 768px)");
-  const rail = !open && !mobile;
+  // Closing to the rail keeps the list for as long as the sidebar takes to narrow (bots.css,
+  // .bots-sidebar-closing), so it slides away instead of the rail replacing it at once. Set as the
+  // change renders, so the list is never swapped out and back.
+  const [closing, setClosing] = useState(false);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    setClosing(!open && !mobile && !reducedMotion());
+  }
+  useEffect(() => {
+    if (!closing) return;
+    const timer = setTimeout(() => setClosing(false), SIDEBAR_MS);
+    return () => clearTimeout(timer);
+  }, [closing]);
+  const rail = !open && !mobile && !closing;
   // Another device's workspace is used, not managed, from here: no new bots, apps or conversation menu.
   const remote = !!useRemoteWorkspace();
   // A workspace that isn't here anymore shows nothing of its own or anyone else's.
@@ -585,7 +602,7 @@ export function BotsSidebar() {
   return (
     <>
       <div className={cx("sidebar-scrim", open && mobile && "sidebar-scrim-visible")} onClick={() => useStore.getState().setBotsSidebarOpen(false)} aria-hidden />
-      <aside className={cx("sidebar bots-sidebar", rail ? "bots-sidebar-rail" : open ? "sidebar-open" : "sidebar-closed")} aria-label="OpenBots" aria-hidden={!open && !rail} inert={!open && !rail}>
+      <aside className={cx("sidebar bots-sidebar", rail || closing ? "bots-sidebar-rail" : open ? "sidebar-open" : "sidebar-closed", closing && "bots-sidebar-closing")} aria-label="OpenBots" aria-hidden={!open && !rail && !closing} inert={!open && !rail}>
         {rail ? (
           <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
         ) : (
