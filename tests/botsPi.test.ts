@@ -40,7 +40,10 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
         a.ok(!prompt.includes('USER_SYSTEM_CANARY'), prompt);
         a.ok(!prompt.includes('USER_APPEND_CANARY'), prompt);
         a.ok(prompt.includes("one of the user's bots in OpenBots"), prompt);
-        a.ok(prompt.includes('For every tool that has a status parameter'), prompt);
+        a.ok(prompt.includes('Every tool with a status parameter needs a short custom status'), prompt);
+        // OpenBots' own preamble, not Pi's coding-assistant one with its tools, rules and docs.
+        a.ok(prompt.includes('You are a bot in OpenBots'), prompt);
+        a.ok(!prompt.includes('coding assistant') && !prompt.includes('Pi documentation'), prompt);
         // The clock rides with the prompt, so the system prompt stays the same turn after turn.
         a.ok(!prompt.includes('The time is'), prompt);
         a.match(JSON.stringify(body.messages.find((m) => m.role === 'user').content), /The time is /);

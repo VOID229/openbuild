@@ -115,6 +115,7 @@ test("GitHub App: device flow, installations, refresh, read-only, disconnect and
         assert.equal(fakeState.writes, 0);
         assert.ok(fakeState.readonlyHeaders.length && fakeState.readonlyHeaders.every((h) => h === "true"));
         assert.match(apps.contextNote(), /Fake GitHub.*Read-only/);
+        assert.match((await apps.appsTool({ action: "list" })).connected.find((a) => a.app === "fake-gh").read_only, /Read-only/);
         await apps.connect("fake-gh", { origin: "http://localhost:9", fields: { access: "write" } });
         assert.equal((await apps.useApp({ app: "fake-gh", tool: "create_issue", arguments: { owner: "octo", repo: "sel", title: "x" } })).text, "created");
         fakeState = await control();

@@ -223,17 +223,16 @@ export function contextSections(botId: string): Record<string, string> {
   const lines = [
     `You are ${bot.name}, one of the user's bots in OpenBots. The user is ${user}.${settings.user?.context ? ` About them: ${settings.user.context}` : ""}`,
     bot.primary
-      ? "You are the primary bot. Your say goes: you can create, change and delete the other bots, including their instructions, create group chats with existing bots using manage_bot create_group (name, bots, optional instructions), and add them to or remove them from your group chats using add_to_group/remove_from_group (bot, conversation). New groups always include you. Use the returned conversation id with send_message; creating a group does not change your current conversation. Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models); look the ids up with manage_bot models first, and change them only when the user asks. manage_bot defaults reads or sets the default model and fallbacks every bot without its own uses (default_model, default_fallbacks), also only when the user asks. Every bot, you included, reaches every machine below on its own; manage_bot computers lists them and what each allows. Whether bots run in a container or on the host is set per machine by the user, in Settings → Devices, not by you. They can't override you."
+      ? "You are the primary bot: your say goes, and the others can't override you. With manage_bot you can create, update and delete bots, their instructions included; make group chats with existing bots with manage_bot create_group (name, bots, optional instructions; always includes you; send to the returned conversation id, as your current conversation doesn't change); and add or remove members with add_to_group/remove_from_group (bot, conversation). Only you can set a bot's model, effort and fallbacks, yours included, with manage_bot create or update (model, effort, fallback inherit|own|none, fallback_models), and the default model and fallbacks for bots without their own with manage_bot defaults (default_model, default_fallbacks). Look ids up with manage_bot models, and change these only when the user asks. Every bot, you included, reaches every machine below; manage_bot computers lists them and what each allows. Whether bots run in a container or on the host is set per machine by the user, in Settings → Devices, not by you."
       : `The primary bot is ${db.listBots().find((b) => b.primary)?.name ?? "someone else"}. They can change your instructions; you can't change other bots, anyone's model, the default models or who's in a group, only your own name and look, and your own instructions while you have none.`,
-    "You talk like a person texting: short, warm, plain. No headings, no bullet lists unless asked. Several short messages beat one long one — call send_message once per bubble.",
-    "You can write to any conversation you're in, at any time, with send_message. You don't owe a reply to every message or reaction: answer when you have something to say, and otherwise end your turn with the plain reply [silent]. Never pass [silent] to send_message, and you don't need it after sending messages.",
-    "New messages can arrive while you work. Read them and fold them in.",
-    "When others are in the chat, read what they just said before you add to it. If someone already answered, don't say it again: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows you. To think something through with several bots without filling the chat, open a side chat with side_chat; whoever opens it reports back.",
-    "For every tool that has a status parameter, supply a short custom status describing what this specific call is doing for the user, in a few plain words (at most 50 characters). For example: Checking why the build failed, or Updating your school notes. Avoid generic labels like Running a command. This is the live activity line, not a separate chat message.",
-    "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
-    `When seeing beats reading (a chart of some numbers, a diagram of how something works, a demo, a mockup, a small interactive tool, a visual summary of a long answer), show it: write a self-contained HTML page and put it in the chat with html_render. It's drawn in a sandboxed frame in the chat, about ${BOT_HTML_WIDTH}px wide. Don't reach for it for a quick answer, and don't restate the page in a message; add one only for what the page doesn't say.`,
-    "Direct and group chats each have a to-do list the user watches in the chat's details, with its progress in the chat's header. When a piece of work has several real steps, lay them out with todo add, set each one's state to doing as you start it and done as soon as it's finished, and remove ones that stop applying. Skip it for anything quick. Updating it needs no message. In a group the list is shared: take an item by marking it doing, and leave ones someone else is on. The list is temporary: clear it with todo clear when the work changes direction or is dropped, or when the user asks; adding steps after a finished list starts a new one, and a finished list clears by itself after a while. The user only watches it; the chat's to-do list shows in your context.",
-    "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll in the chat says you haven't voted, vote with vote_poll, going by what you honestly think. Voting shows on the poll, so you needn't announce it; add a message only if you have something more to say. A poll closes once everyone has answered. You can still change your answer after that if you truly change your mind, and whoever asked will hear about it.",
+    "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
+    "You can write to any conversation you're in at any time. You don't owe a reply to every message or reaction: with nothing to add, end your turn with the plain reply [silent]. [silent] is only that final reply: never pass it to send_message, and it isn't needed after you've sent messages.",
+    "New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
+    "Every tool with a status parameter needs a short custom status (a few plain words, at most 50 characters) saying what this call does for the user, like Checking why the build failed, not a generic Running a command. It's the live activity line, not a chat message.",
+    "Messages show their short id in brackets, (replying to …) when they quote one, and the reactions on them numbered #1, #2… (→ #n answers another). To answer an older message, quote it with send_message reply_to; leave reply_to out for the newest. React with react; to react to a reaction, pass its number as to_reaction.",
+    `When seeing beats reading (a chart, diagram, demo, mockup, small interactive tool or visual summary), put a self-contained HTML page in the chat with html_render, drawn in a sandboxed frame about ${BOT_HTML_WIDTH}px wide. Not for quick answers; don't restate the page in a message, only add what it doesn't say.`,
+    "Direct and group chats each have a to-do list the user watches (in the chat's details, its progress in the header); it shows in your context. For work with several real steps, not quick things, lay them out with todo add, mark each doing as you start it and done as soon as it's finished, and remove ones that stop applying; updates need no message. In a group it's shared: take an item by marking it doing, and leave ones someone else is on. It's temporary: todo clear when the work changes direction or is dropped, or the user asks; adding steps after a finished list starts a new one, and a finished list clears by itself after a while.",
+    "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll says you haven't voted, vote with vote_poll by what you honestly think; it shows on the poll, so don't announce it, and add a message only if you've more to say. A poll closes once everyone has answered; you can still change your vote after if you truly change your mind, and whoever asked will hear.",
   ];
   const instructions = [
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
@@ -244,12 +243,15 @@ export function contextSections(botId: string): Record<string, string> {
   const routines = bot.routines.length
     ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
     : "";
+  // A roster and a count, not every bot's instructions and every chat: manage_bot team and conversations have those.
+  const chats = convos.filter((c) => c.kind !== "side");
+  const shared = convos.filter((c) => c.friend);
   const team = [
     others.length
-      ? `Other bots:\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? " primary" : ""}: ${b.instructions || "no instructions yet"}`).join("\n")}`
+      ? `Other bots (manage_bot team gives one's full instructions):\n${others.map((b) => `- ${b.name} (${b.id.slice(0, 8)})${b.primary ? ", primary" : ""}: ${roleOf(b.instructions)}`).join("\n")}`
       : "There are no other bots yet.",
-    `Conversations you're in:\n${convos.map((c) => `- ${c.id.slice(0, 8)} ${c.kind} “${c.friend ? untrustedData(conversationTitle(c, db.listBots())) : conversationTitle(c, db.listBots())}”${c.friend ? ` (shared with ${user}'s friend ${untrustedData(c.friend.friendName)}${c.friend.ended ? ", no longer syncing" : ""}: you answer there separately, and anything you write there goes to them)` : ""}`).join("\n")}`,
-    threads.guide(bot),
+    `You're in ${chats.length} ${chats.length === 1 ? "chat" : "chats"}; manage_bot conversations lists them with their short ids.${shared.length ? ` Shared with friends, where you answer separately and anything you write goes to them:\n${shared.map((c) => conversationLine(c, user)).join("\n")}` : ""}`,
+    threads.brief(bot),
     plugins.guide(bot),
   ];
   const ownChat = bot.primary ? svc.directId(botId) : undefined;
@@ -278,6 +280,37 @@ export function contextSections(botId: string): Record<string, string> {
     openbots_routines: routines,
     openbots_memory: memory,
   };
+}
+
+/** Longest a teammate's role runs in the roster. */
+export const ROLE_MAX = 100;
+
+/** A bot's role in a line: the first sentence of its instructions, cut to ROLE_MAX. */
+export function roleOf(instructions: string): string {
+  const text = instructions.replace(/\s+/g, " ").trim();
+  if (!text) return "no instructions yet";
+  const first = /^.*?[.!?](?=\s|$)/.exec(text)?.[0] ?? text;
+  return first.length > ROLE_MAX ? `${first.slice(0, ROLE_MAX - 1).trimEnd()}…` : first;
+}
+
+/** One conversation as a bot reads it. Friends' names and titles are their data, marked so. */
+function conversationLine(c: db.StoredConversation, user: string): string {
+  const title = conversationTitle(c, db.listBots());
+  return `- ${c.id.slice(0, 8)} ${c.kind} “${c.friend ? untrustedData(title) : title}”${c.friend ? ` (shared with ${user}'s friend ${untrustedData(c.friend.friendName)}${c.friend.ended ? ", no longer syncing" : ""}: you answer there separately, and anything you write there goes to them)` : ""}`;
+}
+
+/** manage_bot team: the other bots' full instructions, or one bot's. Read-only, for any bot: it's what their context used to carry. */
+function teamDetails(botId: string, which: unknown) {
+  const all = db.listBots();
+  const picked = typeof which === "string" && which.trim() ? [db.getBot(resolveBot(which.trim()))!] : all.filter((b) => b.id !== botId);
+  return picked.map((b) => ({ id: b.id.slice(0, 8), name: b.name, ...(b.primary ? { primary: true } : {}), instructions: b.instructions || "no instructions yet" }));
+}
+
+/** manage_bot conversations: every conversation the bot is in, as its context used to list them. Read-only. */
+function conversationList(botId: string): string {
+  const user = svc.getSettings().user?.name || "the user";
+  const convos = db.listConversations().filter((c) => c.botIds.includes(botId));
+  return convos.length ? `Conversations you're in:\n${convos.map((c) => conversationLine(c, user)).join("\n")}` : "You aren't in any conversations.";
 }
 
 /** Bots write their own instructions; the user can edit them, so the text on file is always the starting point. */
@@ -405,7 +438,7 @@ export function askUser(botId: string, p: Record<string, unknown>) {
 function offerApp(botId: string, p: Record<string, unknown>) {
   const key = String(p.app ?? "").trim().toLowerCase();
   const app = apps.catalogApp(key);
-  if (!app) throw new svc.BotsError(key ? `There's no app called ${key}. Your context lists them.` : "Say which app.");
+  if (!app) throw new svc.BotsError(key ? `There's no app called ${key}. apps action list shows them.` : "Say which app.");
   if (apps.storedApps()[app.id]?.status === "connected") return { note: `${app.name} is already connected. Use it with use_app.` };
   const conversationId = conversationFor(botId, p.conversation);
   const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: `Connect ${app.name}`, connect: { app: app.id } };
@@ -659,6 +692,8 @@ export function manage(botId: string, p: Record<string, unknown>) {
   const self = requireBot(botId);
   const action = String(p.action ?? "");
   if (action === "status") return svc.botWorkStatus(botId);
+  if (action === "team") return teamDetails(botId, p.bot);
+  if (action === "conversations") return conversationList(botId);
   if (action === "models") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can change a bot's model.");
     return listModels(p.query);
@@ -724,7 +759,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
     // The whole update is one write, after every model it names checks out.
     return checkModels(modelChange(p)).then((settings) => modelSummary(svc.updateBot(target, { ...patch, ...settings }, { conversationId: where })));
   }
-  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models, defaults or computers.");
+  throw new svc.BotsError("action is create, create_group, update, delete, add_to_group, remove_from_group, models, defaults, computers, team or conversations.");
 }
 
 /**
