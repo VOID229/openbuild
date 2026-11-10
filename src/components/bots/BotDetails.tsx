@@ -3,7 +3,7 @@
 // and working threads; who's in a side chat.
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { threadActivity, threadMascot } from "../../lib/bots/activity";
+import { actingOn, threadActivity, threadHarness, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -226,6 +226,7 @@ function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string 
 
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
 function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
+  const status = useBots((s) => s.status);
   if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads running. Threads the bots here start show up until they finish.</p></div>;
   return (
     <div className="bots-pane">
@@ -236,11 +237,12 @@ function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }
           return (
             <li key={chat.id} className="bots-card-row bots-member">
               <button type="button" className="bots-member-main" onClick={() => open(chat.id)} data-tooltip="Open thread" data-tooltip-side="left">
-                {bot && <BotAvatar look={bot.look} size={28} {...threadMascot(activity)} zzz />}
+                {bot && <BotAvatar look={bot.look} size={28} {...threadMascot(actingOn(status[id], chat.id))} zzz />}
                 <span className="bots-card-text">
                   <span className="bots-routine-title">{chat.title}</span>
                   <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName, activity === "waiting" && "Waiting for you"].filter(Boolean).join(" · ")}</span>
                 </span>
+                <span className="bots-thread-harness">{threadHarness(chat)}</span>
               </button>
             </li>
           );

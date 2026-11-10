@@ -623,7 +623,14 @@ test("send_message, models and check-ins against a real bots database", async ()
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'openbuild', args: { action: 'list' } });
       a.equal(svc.snapshot().status[bot.id].quiet, undefined);
       a.equal(svc.snapshot().status[bot.id].activity, 'Checking on threads');
+      a.equal(svc.snapshot().status[bot.id].thread, undefined);
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'openbuild', result: {} });
+      // A call about one thread names it in the status while it runs, so that thread's mascot wakes; then it dozes again.
+      onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'openbuild', args: { action: 'send', thread: ' 1a2b3c4d ', text: 'go on' } });
+      a.equal(svc.snapshot().status[bot.id].thread, '1a2b3c4d');
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'openbuild', result: {} });
+      a.equal(svc.snapshot().status[bot.id].state, 'working');
+      a.equal(svc.snapshot().status[bot.id].thread, undefined);
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'bash', args: { command: 'gh pr checks', status: 'Watching CI on #115' } });
       a.equal(svc.snapshot().status[bot.id].quiet, undefined);
       a.equal(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');

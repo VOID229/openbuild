@@ -3399,6 +3399,17 @@ button.bots-details-name:hover {
   text-align: left;
 }
 
+/* A thread row's harness and account, at its right: a quiet label, not a badge. */
+.bots-thread-harness {
+  flex: none;
+  max-width: 40%;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bots-details-foot {
   display: flex;
   justify-content: flex-start;
