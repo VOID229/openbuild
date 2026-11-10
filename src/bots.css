@@ -5070,8 +5070,9 @@ a.bots-btn.bots-btn-primary {
    OpenBots — the Advanced tab of a bot's details (src/components/bots/BotAdvanced.tsx)
    ========================================================================== */
 
-/* Three titled groups (Model, Machines, OpenBuild access), each a hairline card of one-line rows:
-   label left, control right, the descriptions in tooltips on the labels. */
+/* Three titled groups (Model, Machines, OpenBuild access), each a hairline card of rows, the
+   descriptions in tooltips on the labels: one line each (label left, control right) but the model's,
+   which stack. */
 .bots-advanced {
   gap: 20px;
 }
@@ -5140,8 +5141,9 @@ a.bots-btn.bots-btn-primary {
   font-size: 13px;
 }
 
-/* The model takes the card's width under its label. */
-.bots-advanced .bots-adv-stack {
+/* The model's settings stack, as on a phone: each label over a control that takes the card's width,
+   so the model, its effort and its fallbacks all line up, edge to edge. */
+.bots-adv-model .setting-row {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
@@ -5149,12 +5151,13 @@ a.bots-btn.bots-btn-primary {
   padding-bottom: 12px;
 }
 
-.bots-advanced .bots-adv-stack > .select-wrap {
+.bots-adv-model .setting-row > .select-wrap {
   flex: none;
   width: 100%;
 }
 
-/* A model picker reads its name with the provider under it, so neither is cut down to a few letters. */
+/* A model picker reads its name with the provider under it, so a second account ("Codex 2") still
+   reads apart in a narrow row. Every one is the same height, its name on one line. */
 .bots-advanced .bots-set-model .select-trigger {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -5162,14 +5165,12 @@ a.bots-btn.bots-btn-primary {
   align-content: center;
   align-items: center;
   gap: 0;
-  height: auto;
-  min-height: 40px;
-  padding: 4px 8px 4px 10px;
+  height: 40px;
+  padding: 0 8px 0 10px;
 }
 
 .bots-advanced .bots-set-model .select-trigger:not(:has(.select-hint)) {
   grid-template-areas: "icon value chevron";
-  min-height: 32px;
 }
 
 .bots-advanced .bots-set-model .brand-icon {
@@ -5179,7 +5180,11 @@ a.bots-btn.bots-btn-primary {
 
 .bots-advanced .bots-set-model .select-value {
   grid-area: value;
+  min-width: 0;
+  overflow: hidden;
   line-height: 17px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bots-advanced .bots-set-model .select-hint {
@@ -5281,49 +5286,45 @@ a.bots-btn.bots-btn-primary {
 }
 
 .bots-advanced .bots-fallbacks-note {
-  margin: -4px 12px 10px;
+  margin: -6px 12px 12px;
   color: var(--text-3);
   font-size: 12px;
   line-height: 1.45;
 }
 
+/* The fallbacks under their select, one per line in the same columns: its number, the picker, then its
+   buttons (try earlier, remove) in a column every row keeps, so the pickers line up and the remove
+   buttons end at the card's edge like the selects above. */
 .bots-advanced .bots-fallbacks {
   gap: 6px;
-  padding: 0 8px 10px 12px;
+  padding: 0 6px 12px 12px;
 }
 
-.bots-advanced .bots-fallbacks .naming-actions {
-  width: 48px;
-}
-
-.bots-advanced .bots-fallbacks .key-icon-btn {
-  width: 24px;
-  height: 28px;
-}
-
-/* One line each, a phone too: the panel is as narrow there as on a desktop. */
 .bots-advanced .bots-fallbacks .naming-row {
   flex-wrap: nowrap;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.bots-advanced .bots-fallbacks .naming-index {
+  margin-right: 2px;
 }
 
 .bots-advanced .bots-fallbacks .naming-row .select-grow {
-  flex-basis: auto;
+  flex: 1 1 0;
 }
 
-/* The row to add one lines up with the ones above it, which have their actions on the right. */
+.bots-advanced .bots-fallbacks .naming-actions {
+  width: 56px;
+}
+
+.bots-advanced .bots-fallbacks .key-icon-btn {
+  width: 28px;
+  height: 28px;
+}
+
 .bots-advanced .bots-fallbacks .naming-row:not(:has(.naming-actions))::after {
-  content: "";
-  flex: none;
-  width: 48px;
-}
-
-/* A long model name takes a second line rather than losing its end. */
-.bots-advanced .bots-fallbacks .select-value {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  width: 56px;
 }
 
 /* The machines are a card of their own (.pi-list), with the same rows. */
