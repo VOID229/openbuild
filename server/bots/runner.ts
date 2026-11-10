@@ -639,6 +639,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "vote_poll") return "Voting in the poll";
   if (tool === "html_render") return a.title ? `Drawing ${ownStatus(a.title)}` : "Drawing a page";
   if (tool === "todo") return "Updating the to-do list";
+  if (tool === "load_tools") return "Getting tools ready";
   if (tool === "memory") return a.action === "forget" ? "Forgetting something" : "Making a note";
   if (tool === "search") return a.what === "messages" ? "Looking back through chats" : "Thinking back";
   if (tool === "bot_web_search") return "Searching the web";

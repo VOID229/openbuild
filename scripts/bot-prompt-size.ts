@@ -5,6 +5,7 @@
 // Runs on sample data in a throwaway data directory of its own, never the live one:
 //   bun scripts/bot-prompt-size.ts           prints before/after as JSON
 //   bun scripts/bot-prompt-size.ts --memory  the per-turn memory context of a bot with many memories
+//   bun scripts/bot-prompt-size.ts --tools   the tool declarations every request carries
 //
 // "before" is the same sample measured at origin/main 19cc40b, where Pi's default coding-assistant
 // prompt (preamble, tools, rules and docs sections, as Pi 1.5.1 builds them for a bot's tool list)
@@ -133,6 +134,28 @@ export async function measureMemory(): Promise<{ memories: number; profile: numb
   return { memories: stored.length, profile: stored.filter((m) => m.kind === "profile").length, journal: stored.filter((m) => m.kind === "journal").length, before: memorySectionBefore(stored), after: agent.contextSections(bot.id).openbots_memory ?? "" };
 }
 
+// ------------------------------------------------------------------ tool declarations
+//
+// What a request declares, as each provider gets it: every active tool's name, description and JSON
+// schema. "before" is origin/main 6e31329, where all 24 OpenBots tools were declared on every request.
+// "after" is the core set (CORE_TOOLS, load_tools' catalog included) a request carries until the bot
+// loads more; each tool it loads then costs its own declaration, from the next request on.
+
+/** All 24 tools' declarations at origin/main 6e31329, in characters, measured as declaration() does. */
+export const TOOLS_BEFORE = 29660;
+
+const declaration = (t: { name: string; description: string; parameters: unknown }) => JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters });
+
+export async function measureTools(): Promise<{ core: Record<string, number>; catalog: number; loadable: Record<string, number> }> {
+  const { default: openbots, CORE_TOOLS } = await import("../server/bots/extension.ts");
+  const tools: any[] = [];
+  openbots({ on() {}, registerTool(t: any) { tools.push(t); } });
+  const load = tools.find((t) => t.name === "load_tools");
+  const core = Object.fromEntries(tools.filter((t) => CORE_TOOLS.includes(t.name)).map((t) => [t.name, declaration(t).length]));
+  const loadable = Object.fromEntries(tools.filter((t) => !CORE_TOOLS.includes(t.name)).map((t) => [t.name, declaration(t).length]).sort((a, b) => b[1] - a[1]));
+  return { core, catalog: load.description.length - load.description.indexOf("\n"), loadable };
+}
+
 const tokens = (chars: number) => Math.round(chars / BYTES_PER_TOKEN);
 const sum = (m: { systemPrompt: number; context: number; apps: number }) => m.systemPrompt + m.context + m.apps;
 
@@ -140,6 +163,20 @@ if (import.meta.main) {
   const dir = mkdtempSync(join(tmpdir(), "openbots-prompt-size-"));
   Object.assign(process.env, { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
   try {
+    if (process.argv.includes("--tools")) {
+      const m = await measureTools();
+      const after = Object.values(m.core).reduce((a, b) => a + b, 0);
+      const sizes = Object.values(m.loadable).sort((a, b) => a - b);
+      const size = (chars: number) => ({ chars, approxTokens: tokens(chars) });
+      console.log(JSON.stringify({
+        before: { tools: 24, ...size(TOOLS_BEFORE) },
+        after: { tools: Object.keys(m.core), ...size(after), catalog: size(m.catalog) },
+        saved: { chars: TOOLS_BEFORE - after, approxTokens: tokens(TOOLS_BEFORE) - tokens(after), percent: Math.round((1 - after / TOOLS_BEFORE) * 100) },
+        loadOne: { median: size(sizes[Math.floor(sizes.length / 2)]!), smallest: size(sizes[0]!), largest: size(sizes.at(-1)!), each: Object.fromEntries(Object.entries(m.loadable).map(([k, v]) => [k, tokens(v)])) },
+        estimate: `chars / ${BYTES_PER_TOKEN}`,
+      }, null, 1));
+      process.exit(0);
+    }
     if (process.argv.includes("--memory")) {
       const m = await measureMemory();
       if (process.argv.includes("--print")) console.error(`--- before\n${m.before}\n--- after\n${m.after}`);
