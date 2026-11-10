@@ -108,17 +108,17 @@ describe.skipIf(!browser)("sidebar motion", () => {
     await page.eval("store.setState({ botsOpen: true, botsSidebarOpen: true })");
     await page.settle();
     const frames = await sample(page, `document.querySelector('.bots-sidebar [aria-label="Close sidebar"]').click()`, 800);
-    const early = frames.filter((f) => f.t > 40 && f.t < 150);
-    expect(early.length).toBeGreaterThan(0);
     // One motion: from the first frames the rail is there under the list, which fades out over it as
-    // the sidebar narrows. The sidebar never goes blank in between.
+    // the sidebar narrows. The sidebar never goes blank in between. Checked by frame, not by time: a busy
+    // machine (CI) draws fewer of them, later.
     expect(frames.every((f) => f.rail)).toBe(true);
-    expect(early.every((f) => f.list)).toBe(true);
-    // Some frame while the list is still there shows the sidebar part-way between its widths (by frame,
-    // not by time: a busy machine draws fewer of them).
+    expect(frames[0]!.list).toBe(true);
+    expect(frames.filter((f) => f.t < 150).every((f) => f.list)).toBe(true);
+    // Some frame while the list is still there shows the sidebar part-way between its widths, and the
+    // list part-way faded.
     const full = Math.max(...frames.map((f) => f.width));
     expect(frames.some((f) => f.list && f.width > 100 && f.width < full - 8)).toBe(true);
-    expect(early.some((f) => f.listOpacity < 1)).toBe(true);
+    expect(frames.some((f) => f.list && f.listOpacity > 0 && f.listOpacity < 1)).toBe(true);
     expect(frames.every((f) => f.opacity > 0.3)).toBe(true);
     // Then the rail, at its own width.
     const last = frames.at(-1)!;
