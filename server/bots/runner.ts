@@ -56,6 +56,8 @@ interface Mind {
    */
   quiet: false | "reaction" | "sent";
   activity: string;
+  /** The OpenBuild thread its current openbuild call is about (BotStatus.thread). */
+  thread?: string;
   /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
   steerable?: boolean;
   /** Per conversation, the last message this turn has put in front of the bot, images and all. */
@@ -500,7 +502,13 @@ const WRITING = new Set(["send_message", "question", "poll"]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
-  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, since: Date.now() });
+  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, thread: mind.thread, since: Date.now() });
+}
+
+/** The thread an openbuild call names (read, send, answer, stop, close, pr, merge), as the bot wrote it. */
+export function threadOf(tool: string, args: unknown): string | undefined {
+  const thread = tool === "openbuild" && args && typeof args === "object" ? (args as Record<string, unknown>).thread : undefined;
+  return typeof thread === "string" && thread.trim() ? thread.trim() : undefined;
 }
 
 function setTyping(botId: string, mind: Mind, on: boolean) {
@@ -539,6 +547,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     mind.draft = "";
     const conversationId = getFocus(botId);
     if (conversationId) svc.setDraft(undefined, { conversationId, botId });
+    mind.thread = threadOf(tool, record.args);
     if (WRITING.has(tool)) setTyping(botId, mind, true);
     else if (tool !== "react") {
       setTyping(botId, mind, false);
@@ -546,6 +555,11 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
       if (mind.quiet === "sent") mind.quiet = false;
       show(botId, mind, activityFor(tool, record.args));
     }
+  }
+  if (record.type === "tool_execution_end" && mind.thread) {
+    // Done with the thread: its mascot goes back to sleep.
+    mind.thread = undefined;
+    show(botId, mind);
   }
   if (record.type === "tool_execution_end" && WRITING.has(tool)) {
     // Sent. Whatever it does next stays out of the chat until it types again or picks up real work.
@@ -673,6 +687,8 @@ async function runTurn(botId: string, all: Wake[]) {
   try {
     mind = await ensureMind(botId, lane);
     mind.busy = true;
+    // A turn cut off mid-call doesn't leave the next one on that thread.
+    mind.thread = undefined;
     mind.usage = {};
     rmSync(join(mind.sessionPath!, "settled"), { force: true });
     mind.quiet = quiet && "reaction";

@@ -1,7 +1,8 @@
 // Who is busy, and where. The sidebar, the chat's header and its list all read from here, so a bot
 // never looks busy in one place and idle in another, and work in another chat isn't shown as work here.
+import { providerName } from "../models";
+import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import type { Mood } from "./looks";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -48,12 +49,28 @@ export function threadActivity(chat: Pick<Chat, "messages">): ThreadActivity {
   return last.parts?.some((p) => p.type === "ask" && p.answer === undefined) ? "waiting" : "working";
 }
 
+/** Whether the bot is acting on this thread right now: in an openbuild call that names it (see BotStatus.thread). */
+export function actingOn(st: BotStatus | undefined, threadId: string): boolean {
+  return st?.state === "working" && !!st.thread && threadId.startsWith(st.thread);
+}
+
 /**
- * How the mascot beside a thread shows it: at work it fidgets like a busy bot anywhere else, waiting
- * on the user it's awake and looking up wide-eyed, and once the thread is done it dozes.
+ * How the mascot beside a thread shows it: awake and fidgeting while its bot is acting on the thread
+ * (reading it, messaging it, stopping or closing it), and dozing otherwise, however busy the thread is.
  */
-export function threadMascot(activity: ThreadActivity): { busy: boolean; asleep: boolean; mood: Mood } {
-  if (activity === "working") return { busy: true, asleep: false, mood: "idle" };
-  if (activity === "waiting") return { busy: false, asleep: false, mood: "surprised" };
-  return { busy: false, asleep: true, mood: "idle" };
+export function threadMascot(acting: boolean): { busy: boolean; asleep: boolean } {
+  return acting ? { busy: true, asleep: false } : { busy: false, asleep: true };
+}
+
+const HARNESS: Record<ThreadRuntime, string> = { pi: "Pi", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude", opencode: "OpenCode", hermes: "Hermes", grok: "Grok" };
+
+/**
+ * The harness a thread runs on and the account or provider behind it, briefly: "Codex · codex2",
+ * "Claude · claude2", "Pi · Anthropic". Just the harness when neither is known.
+ */
+export function threadHarness(chat: Pick<Chat, "runtime" | "runtimeAccount" | "messages">): string {
+  const runtime = chat.runtime ?? "pi";
+  const model = chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
+  const provider = runtime === "pi" && model?.plan === "pi" && model.id.includes("/") ? providerName(model.id.split("/")[0]!) : undefined;
+  return [HARNESS[runtime] ?? runtime, chat.runtimeAccount?.name ?? provider].filter(Boolean).join(" · ");
 }

@@ -1,12 +1,13 @@
 // The mascots beside a group's coding threads (its details panel's Threads tab), and the "zzz" over
-// dozing ones, in a real Chrome: a thread at work fidgets visibly even at 28px, one waiting on the
-// user looks up wide-eyed, a finished one leaves the list, and dozing bots and huddles in the sidebars
+// dozing ones, in a real Chrome: a mascot sleeps unless its bot is acting on that very thread, when it
+// fidgets visibly even at 28px; each row names its harness and account; a finished thread leaves the
+// list; and dozing bots and huddles in the sidebars
 // show a small zzz that still reads there, still while motion is reduced, and none beside the chat.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BotAvatar, BotHuddle } from "../src/components/bots/BotAvatar";
-import { threadActivity, threadMascot } from "../src/lib/bots/activity";
+import { actingOn, threadActivity, threadHarness, threadMascot } from "../src/lib/bots/activity";
 import type { Chat, Message } from "../src/lib/types";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -28,10 +29,27 @@ describe("a thread's mascot", () => {
     expect(threadActivity(thread(reply("streaming"), { id: "u", role: "user", content: "!ls", createdAt: 2 } as Message))).toBe("working");
   });
 
-  test("fidgets at work, looks up waiting, and dozes when done", () => {
-    expect(threadMascot("working")).toEqual({ busy: true, asleep: false, mood: "idle" });
-    expect(threadMascot("waiting")).toEqual({ busy: false, asleep: false, mood: "surprised" });
-    expect(threadMascot("idle")).toEqual({ busy: false, asleep: true, mood: "idle" });
+  test("is awake only while its bot acts on that thread", () => {
+    const id = "1a2b3c4d-0000-4000-8000-000000000000";
+    expect(actingOn({ state: "working", thread: "1a2b3c4d" }, id)).toBe(true);
+    expect(actingOn({ state: "working", thread: id }, id)).toBe(true);
+    // Busy elsewhere, on another thread, or not at all: asleep.
+    expect(actingOn({ state: "working", activity: "Browsing" }, id)).toBe(false);
+    expect(actingOn({ state: "working", thread: "99999999" }, id)).toBe(false);
+    expect(actingOn({ state: "idle", thread: "1a2b3c4d" }, id)).toBe(false);
+    expect(actingOn(undefined, id)).toBe(false);
+    expect(threadMascot(true)).toEqual({ busy: true, asleep: false });
+    expect(threadMascot(false)).toEqual({ busy: false, asleep: true });
+  });
+
+  test("names the thread's harness and its account or provider", () => {
+    const account = (name: string, runtime: "codex" | "claude") => ({ id: name, name, runtime, configDir: "/x" });
+    expect(threadHarness({ runtime: "codex", runtimeAccount: account("codex2", "codex"), messages: [] })).toBe("Codex · codex2");
+    expect(threadHarness({ runtime: "claude", runtimeAccount: account("claude2", "claude"), messages: [] })).toBe("Claude · claude2");
+    expect(threadHarness({ runtime: "claude", messages: [] })).toBe("Claude");
+    const answered = { ...reply("done"), model: { plan: "pi" as const, id: "anthropic/claude-opus", name: "Opus" } };
+    expect(threadHarness({ messages: [answered] })).toBe("Pi · Anthropic");
+    expect(threadHarness({ messages: [] })).toBe("Pi");
   });
 });
 
@@ -70,7 +88,7 @@ const READY = "document.querySelectorAll('.bots-tile').length >= 5 && !!document
 
 /** Coding threads Moss and Boo started from the "OpenBuild Dev" group: one at work, one asking the user, one done. */
 const THREADS = `[
-  { id: "t-work", title: "Fix the flaky test", startedBy: { conversation: "dev", bot: "moss" }, workspace: { projectName: "openbuild" }, messages: [{ id: "t1", role: "assistant", content: "", status: "streaming", createdAt: 1 }] },
+  { id: "t-work", title: "Fix the flaky test", runtime: "codex", runtimeAccount: { id: "c2", name: "codex2", runtime: "codex", configDir: "/x" }, startedBy: { conversation: "dev", bot: "moss" }, workspace: { projectName: "openbuild" }, messages: [{ id: "t1", role: "assistant", content: "", status: "streaming", createdAt: 1 }] },
   { id: "t-ask", title: "Migrate the database", startedBy: { conversation: "dev", bot: "boo" }, messages: [{ id: "t2", role: "assistant", content: "", status: "streaming", createdAt: 1, parts: [{ type: "ask", id: "q", method: "confirm", title: "Run it?" }] }] },
   { id: "t-done", title: "Bump the version", startedBy: { conversation: "dev", bot: "pill" }, messages: [{ id: "t3", role: "assistant", content: "Done", status: "done", createdAt: 1 }] },
 ]`;
@@ -86,22 +104,34 @@ const openThreads = async (page: Page) => {
 const rowBot = (title: string) => `[...document.querySelectorAll('.bots-details .bots-member')].find((r) => r.textContent.includes(${JSON.stringify(title)})).querySelector('.bot')`;
 
 describe.skipIf(!browser)("mascots in the Threads tab", () => {
-  test("lists the threads at work or waiting, each mascot showing which", async () => {
+  test("lists the threads at work or waiting, each mascot asleep unless its bot is acting on that thread", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
     await openThreads(page);
     const rows = await page.eval<string[]>(`[...document.querySelectorAll('.bots-details .bots-member')].map((r) => r.textContent)`);
-    expect(rows).toEqual(["Fix the flaky testMoss · openbuild", "Migrate the databaseBoo · Waiting for you"]);
-    const state = (title: string) => page.eval<object>(`(() => { const b = ${rowBot(title)}; return { alive: b.classList.contains('bot-alive'), busy: 'busy' in b.dataset, asleep: 'asleep' in b.dataset, mood: b.dataset.mood }; })()`);
-    expect(await state("Fix the flaky test")).toEqual({ alive: true, busy: true, asleep: false, mood: "idle" });
-    expect(await state("Migrate the database")).toEqual({ alive: true, busy: false, asleep: false, mood: "surprised" });
+    expect(rows).toEqual(["Fix the flaky testMoss · openbuildCodex · codex2", "Migrate the databaseBoo · Waiting for youPi"]);
+    // The harness sits at the row's right edge, on one line.
+    const harness = await page.eval<{ right: number; row: number; height: number }>(`(() => { const h = document.querySelector('.bots-details .bots-thread-harness'); const r = h.getBoundingClientRect(); return { right: r.right, row: h.parentElement.getBoundingClientRect().right, height: r.height }; })()`);
+    expect(harness.row - harness.right).toBeLessThan(16);
+    expect(harness.height).toBeLessThan(20);
+    const state = (title: string) => page.eval<object>(`(() => { const b = ${rowBot(title)}; return { busy: 'busy' in b.dataset, asleep: 'asleep' in b.dataset }; })()`);
+    // Moss is at work in the group, but not on its thread: both rows doze, though both threads are running.
+    expect(await state("Fix the flaky test")).toEqual({ busy: false, asleep: true });
+    expect(await state("Migrate the database")).toEqual({ busy: false, asleep: true });
+    // Moss reads its thread: that row wakes, the other sleeps on.
+    await page.eval(`bots.setState((s) => ({ status: { ...s.status, moss: { state: "working", conversationId: "dev", thread: "t-wo" } } }))`);
+    await page.until(`'busy' in (${rowBot("Fix the flaky test")}).dataset`);
+    expect(await state("Fix the flaky test")).toEqual({ busy: true, asleep: false });
+    expect(await state("Migrate the database")).toEqual({ busy: false, asleep: true });
     // Done, the thread leaves the list.
     await page.eval(`store.setState((s) => ({ chats: s.chats.map((c) => c.id === "t-work" ? { ...c, messages: [{ ...c.messages[0], status: "done" }] } : c) }))`);
     await page.until("document.querySelectorAll('.bots-details .bots-member .bot').length === 1");
   }, 20_000);
 
-  test("a thread at work visibly moves at 28px, not just a blink", async () => {
+  test("a thread its bot is acting on visibly moves at 28px, not just a blink", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
     await openThreads(page);
+    await page.eval(`bots.setState((s) => ({ status: { ...s.status, moss: { state: "working", conversationId: "dev", thread: "t-work" } } }))`);
+    await page.until(`'busy' in (${rowBot("Fix the flaky test")}).dataset`);
     // Where its eyes are and how its head is tilted, on screen, every 100ms for a few seconds.
     const samples = await page.eval<{ x: number; y: number; tilt: string }[]>(`new Promise((done) => {
       const bot = ${rowBot("Fix the flaky test")};

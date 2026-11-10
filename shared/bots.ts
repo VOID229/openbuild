@@ -65,6 +65,8 @@ export interface BotStatus {
   activity?: string;
   /** The conversation it's working in. */
   conversationId?: string;
+  /** The OpenBuild thread it's acting on right now (reading, messaging, stopping, closing…), by id or the prefix it named. */
+  thread?: string;
   /** Working, but nothing to show in the chat yet (a reaction it may let be, or tidying up after a reply). */
   quiet?: boolean;
   /** Other conversations with messages it'll get to once it's free. They show it holding on, not silence. */
