@@ -5,8 +5,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Bot, BotMessage, Conversation, MemoryItem, Routine, TodoItem } from "../../shared/bots";
+import { MEMORY_TEXT_MAX, PROFILE_MAX_BYTES, type Bot, type BotMessage, type Conversation, type MemoryItem, type MemoryKind, type Routine, type TodoItem } from "../../shared/bots";
 import { dataDir } from "../paths";
+import { memoryKey, profileBytes } from "./sessionPolicy";
 
 export const botsDir = () => join(dataDir(), "bots");
 
@@ -18,7 +19,7 @@ function open(): Database {
   db.run("PRAGMA busy_timeout = 5000");
   db.exec(`
     CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, data TEXT NOT NULL, created_at INTEGER NOT NULL);
-    CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL, by TEXT);
+    CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL, by TEXT, kind TEXT NOT NULL DEFAULT 'journal');
     CREATE INDEX IF NOT EXISTS memories_bot ON memories(bot_id, at);
     CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(id UNINDEXED, bot_id UNINDEXED, text);
     CREATE TABLE IF NOT EXISTS routines (id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, data TEXT NOT NULL, next_run_at INTEGER);
@@ -42,7 +43,53 @@ function migrate(db: Database): Database {
   db.exec("CREATE TABLE IF NOT EXISTS todos (conversation_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at INTEGER NOT NULL);");
   // Bots from before roles have none: an empty one, so the first sentence of their instructions stands in.
   db.exec("UPDATE bots SET data = json_set(data, '$.role', '') WHERE json_valid(data) AND json_type(data, '$.role') IS NULL;");
+  migrateMemories(db);
   return db;
+}
+
+/**
+ * Memory from before the profile/journal split has no kind. It was all in the prompt then, standing
+ * rules included, so each bot's newest facts go into its profile, as many as its cap holds; only what
+ * doesn't fit (and any fact too long to be one) becomes a journal entry, still searchable, and still
+ * there for the bot to promote. This happens once, when the kind column is added. Then the search
+ * index is put back in step with the rows, both ways. Running it again finds nothing to do.
+ *
+ * Memory is each bot's own (bot_id). If some of it is ever shared between bots, that's a scope beside
+ * kind, with `by` already saying which bot learned a fact.
+ */
+export function migrateMemories(db: Database) {
+  db.transaction(() => {
+    const columns = db.query<{ name: string }, []>("PRAGMA table_info(memories)").all();
+    if (!columns.some((c) => c.name === "kind")) {
+      db.exec("ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'journal'");
+      promoteLegacyMemories(db);
+    }
+    db.exec("UPDATE memories SET kind = 'journal' WHERE kind NOT IN ('profile', 'journal')");
+    db.exec("CREATE INDEX IF NOT EXISTS memories_kind ON memories(bot_id, kind, at)");
+    db.exec("DELETE FROM memories_fts WHERE id NOT IN (SELECT id FROM memories)");
+    db.exec("DELETE FROM memories_fts WHERE rowid NOT IN (SELECT MIN(rowid) FROM memories_fts GROUP BY id)");
+    db.exec("DELETE FROM memories_fts WHERE rowid IN (SELECT f.rowid FROM memories_fts f JOIN memories m ON m.id = f.id WHERE f.text <> m.text OR f.bot_id <> m.bot_id)");
+    db.exec("INSERT INTO memories_fts (id, bot_id, text) SELECT id, bot_id, text FROM memories WHERE id NOT IN (SELECT id FROM memories_fts)");
+  })();
+}
+
+/** Fills each bot's profile from its newest legacy facts down, skipping any that would overrun the cap. */
+function promoteLegacyMemories(db: Database) {
+  const rows = db.query<{ id: string; bot_id: string; text: string; at: number }, []>("SELECT id, bot_id, text, at FROM memories ORDER BY bot_id, at DESC, rowid DESC").all();
+  const profiles = new Map<string, { items: { id: string; text: string; at: number }[]; keys: Set<string> }>();
+  const promote = db.query("UPDATE memories SET kind = 'profile' WHERE id = ?1");
+  for (const row of rows) {
+    if (row.text.trim().length > MEMORY_TEXT_MAX) continue;
+    const profile = profiles.get(row.bot_id) ?? { items: [], keys: new Set<string>() };
+    profiles.set(row.bot_id, profile);
+    const key = memoryKey(row.text);
+    // The same fact twice: the newer copy is in the profile already, the older stays in the journal.
+    if (profile.keys.has(key)) continue;
+    if (profileBytes([...profile.items, row]) > PROFILE_MAX_BYTES) continue;
+    profile.items.push(row);
+    profile.keys.add(key);
+    promote.run(row.id);
+  }
 }
 
 const hot = globalThis as { openbotsDb?: Database };
@@ -94,17 +141,23 @@ export function deleteBot(id: string) {
 
 // ------------------------------------------------------------------ memory
 
+type MemoryRow = { id: string; kind: string; text: string; at: number; by: string | null };
+const MEMORY_COLUMNS = "m.id, m.kind, m.text, m.at, m.by";
+const memoryItem = (r: MemoryRow): MemoryItem => ({ id: r.id, kind: r.kind === "profile" ? "profile" : "journal", text: r.text, at: r.at, by: r.by ?? undefined });
+
+/** All of a bot's memory, newest first. */
 export function memories(botId: string): MemoryItem[] {
-  return db
-    .query<{ id: string; text: string; at: number; by: string | null }, [string]>("SELECT id, text, at, by FROM memories WHERE bot_id = ? ORDER BY at DESC")
-    .all(botId)
-    .map((r) => ({ id: r.id, text: r.text, at: r.at, by: r.by ?? undefined }));
+  return db.query<MemoryRow, [string]>(`SELECT ${MEMORY_COLUMNS} FROM memories m WHERE m.bot_id = ? ORDER BY m.at DESC, m.rowid DESC`).all(botId).map(memoryItem);
 }
 export function addMemory(botId: string, item: MemoryItem) {
   db.transaction(() => {
-    db.query("INSERT INTO memories (id, bot_id, text, at, by) VALUES (?1, ?2, ?3, ?4, ?5)").run(item.id, botId, item.text, item.at, item.by ?? null);
+    db.query("INSERT INTO memories (id, bot_id, text, at, by, kind) VALUES (?1, ?2, ?3, ?4, ?5, ?6)").run(item.id, botId, item.text, item.at, item.by ?? null, item.kind);
     db.query("INSERT INTO memories_fts (id, bot_id, text) VALUES (?1, ?2, ?3)").run(item.id, botId, item.text);
   })();
+}
+/** Writing a fact that's already there: its date moves up and it takes the kind it's given. The text, and so the index, stays. */
+export function touchMemory(botId: string, id: string, kind: MemoryKind, at: number) {
+  db.query("UPDATE memories SET kind = ?3, at = ?4 WHERE id = ?1 AND bot_id = ?2").run(id, botId, kind, at);
 }
 export function removeMemory(botId: string, id: string): boolean {
   let removed = false;
@@ -114,15 +167,30 @@ export function removeMemory(botId: string, id: string): boolean {
   })();
   return removed;
 }
+/**
+ * Recall: a bot's memory of either kind, best matches first (full-text rank, newer first on a tie).
+ * Then what the index can't find, newest first: text that only contains the query (part of a word or
+ * a number, as in "230" for "#1230"), and entries whose id starts with it. No query: the newest.
+ */
 export function searchMemory(botId: string, query: string, limit = 12): MemoryItem[] {
-  const q = ftsQuery(query);
-  if (!q) return [];
-  return db
-    .query<{ id: string }, [string, string, number]>("SELECT id FROM memories_fts WHERE bot_id = ?1 AND memories_fts MATCH ?2 ORDER BY rank LIMIT ?3")
-    .all(botId, q, limit)
-    .map((r) => db.query<{ id: string; text: string; at: number; by: string | null }, [string]>("SELECT id, text, at, by FROM memories WHERE id = ?").get(r.id))
-    .filter((r): r is NonNullable<typeof r> => !!r)
-    .map((r) => ({ id: r.id, text: r.text, at: r.at, by: r.by ?? undefined }));
+  const text = query.trim();
+  if (!text) return memories(botId).slice(0, limit);
+  const out = new Map<string, MemoryItem>();
+  // Each word both whole and as a prefix, so an entry with the word itself outranks one that only starts with it.
+  const q = ftsQuery(text)?.replace(/("[^"]+")\*/g, "$1 OR $1*");
+  if (q) {
+    const ranked = db
+      .query<MemoryRow, [string, string, number]>(`SELECT ${MEMORY_COLUMNS} FROM memories_fts JOIN memories m ON m.id = memories_fts.id WHERE memories_fts.bot_id = ?1 AND memories_fts MATCH ?2 ORDER BY memories_fts.rank, m.at DESC LIMIT ?3`)
+      .all(botId, q, limit);
+    for (const r of ranked) out.set(r.id, memoryItem(r));
+  }
+  if (out.size < limit && text.length >= 2 && text.length <= 64) {
+    const part = db
+      .query<MemoryRow, [string, string, number]>(`SELECT ${MEMORY_COLUMNS} FROM memories m WHERE m.bot_id = ?1 AND (instr(lower(m.text), lower(?2)) > 0 OR instr(m.id, lower(?2)) = 1) ORDER BY m.at DESC, m.rowid DESC LIMIT ?3`)
+      .all(botId, text, limit);
+    for (const r of part) if (out.size < limit && !out.has(r.id)) out.set(r.id, memoryItem(r));
+  }
+  return [...out.values()];
 }
 
 // ------------------------------------------------------------------ routines

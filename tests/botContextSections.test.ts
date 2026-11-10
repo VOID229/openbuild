@@ -167,6 +167,21 @@ test("the size report shows the always-on prompt text smaller than on main", asy
   expect(report.after.approxTokens).toBe(Math.round(report.after.total / 4.28));
 }, 30_000);
 
+test("the size report's memory mode shows a many-memory bot's per-turn memory context well under main's", async () => {
+  const child = Bun.spawn([process.execPath, join(import.meta.dir, "..", "scripts", "bot-prompt-size.ts"), "--memory"], { stdout: "pipe", stderr: "pipe" });
+  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  if (code !== 0) console.error(err);
+  expect(code).toBe(0);
+  const report = JSON.parse(out);
+  expect(report.sample).toEqual({ memories: 120, profile: 12, journal: 108 });
+  // origin/main 5356490: the newest 40 of the 120, and none of the lasting facts among them.
+  expect(report.before).toEqual({ chars: 5035, approxTokens: 1176, lines: 41 });
+  // Now: all 12 lasting facts and the latest 5 entries, each under a heading.
+  expect(report.after.lines).toBe(12 + 5 + 2);
+  expect(report.after.chars).toBeLessThan(report.before.chars / 2);
+  expect(report.after.approxTokens).toBe(Math.round(report.after.chars / 4.28));
+}, 30_000);
+
 test("the context audit counts clock-only system patches and compaction usage apart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-context-audit-"));
   try {

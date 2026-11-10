@@ -1,11 +1,11 @@
-import { memoryContext } from "./sessionPolicy";
+import { memoryDate, memorySection } from "./sessionPolicy";
 import { untrustedData } from "./transcriptData";
 // What a bot's Pi extension can do. The extension talks to a unix socket (see listen()); every
 // request is one bot, identified by the token minted for its process, so a bot can't act as another.
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -111,10 +111,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return showPage(botId, p);
     case "todo":
       return todo(botId, p);
-    case "remember":
-      return remember(botId, p);
-    case "forget":
-      return forget(botId, p);
+    case "memory":
+      return memory(botId, p);
     case "search":
       return search(botId, p);
     case "bot_web_search":
@@ -238,9 +236,10 @@ export function contextSections(botId: string): Record<string, string> {
     bot.role ? `Your role, as your teammates see it: ${bot.role}` : "",
     bot.instructions.trim() ? `Your instructions:\n${bot.instructions.trim()}` : "",
     instructionsGuide(bot),
-    "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. Use remember without being asked for anything that should outlast this chat, and whenever the user asks you to remember something. Use forget for what's stopped being true or when they ask you to. If they ask what you remember, tell them. Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
+    "Your memory is private to you: the user never sees it, and nothing shows in the chat when you save something. It has a profile (a few lasting facts about the user and how to work with them, all below) and a journal (dated notes; only the latest are below, and search finds the rest). Use memory write unasked for whatever should outlast this chat, and whenever the user asks: one self-contained sentence per fact. Newer wins: when a fact changes, replace or forget the old one. Search your memory before saying you don't know. If they ask what you remember, tell them.",
+    "Routines are yours to run too; the user sees them but doesn't add them by hand. Use routine when the user wants something done on a schedule or later, or when your instructions call for it. You can have any number of routines active at once and each runs on its own, so add a new one rather than folding jobs together. Pause or remove the ones that are no longer needed.",
   ];
-  const memory = bot.memory.length ? `Things you remember:\n${memoryContext(bot.memory)}` : "You haven't written any memories yet.";
+  const memory = memorySection(bot.memory);
   const routines = bot.routines.length
     ? `Your routines:\n${bot.routines.map((r) => `- [${r.id.slice(0, 8)}] ${r.title} (${r.schedule})${r.enabled ? "" : " [paused]"}${r.task ? `: ${r.task}` : ""}`).join("\n")}`
     : "";
@@ -312,13 +311,20 @@ function conversationList(botId: string): string {
 /** Bots write their own instructions; the user can edit them, so the text on file is always the starting point. */
 function instructionsGuide(bot: Bot): string {
   const lines: string[] = [];
-  if (!bot.instructions.trim()) {
-    lines.push("You don't have instructions yet. Don't ask the user to write them or announce them. Within your first few messages, as soon as you know what they want from you and how, write them yourself with manage_bot update: short, and addressed to yourself as \"you\". Until there's something real to say, leave them empty.");
+  const noInstructions = !bot.instructions.trim();
+  const noRole = !bot.role?.trim();
+  const role = 'one short line your teammates see, like "Plans trips and books nothing without asking."';
+  if (noInstructions && noRole) {
+    // A new bot writes both at once: two nudges with their own timing got one written and the other left.
+    lines.push(`You don't have instructions yet. You have no role yet either. Write both yourself on your first turn, in one manage_bot update with instructions and role together, as soon as you know what the user wants from you and how. Don't ask the user to write them or announce them. Instructions: short, and addressed to yourself as "you". Role: ${role} It shows in your chat. Until there's something real to say, leave both empty.`);
+  } else if (noInstructions) {
+    lines.push("You don't have instructions yet; your role is already set, so leave it. Don't ask the user to write them or announce them. On your first turn, as soon as you know what they want from you and how, write them yourself with manage_bot update: short, and addressed to yourself as \"you\". Until there's something real to say, leave them empty.");
   } else if (bot.primary) {
     lines.push("When the user tells you something lasting about what you're for or how to act, update your instructions with manage_bot. That replaces the whole text, and the user may have edited it, so start from what's above and keep what they wrote.");
   }
-  if (!bot.role?.trim()) {
-    lines.push("You have no role yet: once you know what you're for, set it with manage_bot update role, one short line your teammates see, like \"Plans trips and books nothing without asking.\" It shows in your chat.");
+  if (noRole && !noInstructions) {
+    // The primary may still rewrite its instructions (the line above); everyone else's are closed once set.
+    lines.push(`You have no role yet${bot.primary ? "." : "; your instructions are already set, so leave them."} Write it yourself this turn with manage_bot update role, from what your instructions say you're for: ${role} It shows in your chat.`);
   }
   if (bot.primary) {
     lines.push("When you make a bot, decide whether to give it instructions and a role: if the conversation shows what it's for, write proper ones that say so, with what you know that it'll need. If it doesn't, leave them out rather than inventing a job. You can fill them in later with manage_bot update, including for any other bot that has none.");
@@ -528,22 +534,33 @@ export function votePoll(botId: string, p: Record<string, unknown>) {
   return { ok: true };
 }
 
-export function remember(botId: string, p: Record<string, unknown>) {
-  const item = svc.addMemory(botId, String(p.text ?? ""), botId);
-  return { id: item.id };
+/** A memory as a bot gets it back: short id, kind and the day it was written. */
+const recalled = (m: MemoryItem) => ({ id: m.id.slice(0, 8), kind: m.kind, date: memoryDate(m.at), text: m.text });
+
+/** The memory tool: write one fact to the profile or the journal, or forget one. */
+export function memory(botId: string, p: Record<string, unknown>) {
+  const action = String(p.action ?? "write");
+  if (action === "forget") {
+    const which = [p.id, p.text].find((v): v is string => typeof v === "string" && !!v.trim());
+    if (!which) throw new svc.BotsError("Say which memory: its exact text, or its id.");
+    return { ok: true, forgot: recalled(svc.forgetMemory(botId, which)) };
+  }
+  if (action !== "write") throw new svc.BotsError("action is write or forget.");
+  if (p.kind !== undefined && p.kind !== "profile" && p.kind !== "journal") throw new svc.BotsError("kind is profile or journal.");
+  const wrote = svc.addMemory(botId, String(p.text ?? ""), { by: botId, kind: p.kind, replaces: typeof p.replaces === "string" ? p.replaces : undefined });
+  return {
+    id: wrote.item.id.slice(0, 8),
+    kind: wrote.item.kind,
+    ...(wrote.duplicate ? { note: "You already had this, so there's still one copy, dated today." } : {}),
+    ...(wrote.replaced ? { replaced: recalled(wrote.replaced) } : {}),
+    ...(wrote.similar.length ? { similar: wrote.similar.map(recalled), check: "These are about the same thing. Newer wins: forget any that this makes wrong." } : {}),
+  };
 }
-function forget(botId: string, p: Record<string, unknown>) {
-  const id = String(p.id ?? "");
-  const item = db.memories(botId).find((m) => m.id === id || m.id.startsWith(id));
-  if (!item) throw new svc.BotsError("No such memory.");
-  svc.removeMemory(botId, item.id);
-  return { ok: true };
-}
-function search(botId: string, p: Record<string, unknown>) {
+export function search(botId: string, p: Record<string, unknown>) {
   const query = String(p.query ?? "").slice(0, 200);
-  // Chats shared with friends hold their words, which never come into the bot's own work.
-  const ids = db.listConversations().filter((c) => c.botIds.includes(botId) && !c.friend).map((c) => c.id);
   if (p.what === "messages") {
+    // Chats shared with friends hold their words, which never come into the bot's own work.
+    const ids = db.listConversations().filter((c) => c.botIds.includes(botId) && !c.friend).map((c) => c.id);
     return db.searchMessages(query, ids, 12).map((r) => ({
       conversation: r.conversationId.slice(0, 8),
       id: r.message.id.slice(0, 8),
@@ -551,7 +568,7 @@ function search(botId: string, p: Record<string, unknown>) {
       text: r.message.text.slice(0, 400),
     }));
   }
-  return db.searchMemory(botId, query).map((m) => ({ id: m.id.slice(0, 8), text: m.text }));
+  return db.searchMemory(botId, query).map(recalled);
 }
 
 // ------------------------------------------------------------------ the web

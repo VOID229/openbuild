@@ -7,9 +7,26 @@ import type { BotToolGrants } from "./types";
 
 export type { BotLook };
 
+/**
+ * A bot's memory comes in two kinds. Its profile is a small, capped set of lasting facts about the
+ * user and how to work with them, and is always in its prompt. Its journal is dated history: only the
+ * latest few entries are in the prompt, and search finds the rest.
+ */
+export type MemoryKind = "profile" | "journal";
+export const MEMORY_KINDS: readonly MemoryKind[] = ["profile", "journal"];
+
+/** Longest one fact runs: a sentence or two, not a document. */
+export const MEMORY_TEXT_MAX = 500;
+/** The profile's hard cap, in bytes of its prompt lines: a write past it is refused, not trimmed. */
+export const PROFILE_MAX_BYTES = 1500;
+/** How many of the newest journal entries are in the prompt. */
+export const JOURNAL_RECENT = 5;
+
 export interface MemoryItem {
   id: string;
+  kind: MemoryKind;
   text: string;
+  /** When it was written, or last confirmed by being written again. */
   at: number;
   /** "me" when the user added it; otherwise the bot that did (itself, or the primary). */
   by?: string;

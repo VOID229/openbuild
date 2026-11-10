@@ -4,6 +4,7 @@
 //
 // Runs on sample data in a throwaway data directory of its own, never the live one:
 //   bun scripts/bot-prompt-size.ts           prints before/after as JSON
+//   bun scripts/bot-prompt-size.ts --memory  the per-turn memory context of a bot with many memories
 //
 // "before" is the same sample measured at origin/main 19cc40b, where Pi's default coding-assistant
 // prompt (preamble, tools, rules and docs sections, as Pi 1.5.1 builds them for a bot's tool list)
@@ -46,7 +47,7 @@ export async function measure(): Promise<{ systemPrompt: number; context: number
   svc.createConversation({ kind: "group", name: "Weekend trip", botIds: all });
   svc.createConversation({ kind: "group", name: "Studio admin", botIds: all });
   svc.createConversation({ kind: "group", name: "House move", botIds: [boss.bot.id, planner.bot.id] });
-  for (const text of ["Likes tea", "Works Tuesday to Saturday", "Prefers short answers"]) svc.addMemory(boss.bot.id, text);
+  for (const text of ["Likes tea", "Works Tuesday to Saturday", "Prefers short answers"]) svc.addMemory(boss.bot.id, text, { kind: "profile" });
 
   const tool = (app: string, i: number) => ({ name: `${app}_${["list", "get", "create", "update", "delete", "search"][i % 6]}_${["issues", "pull_requests", "files", "comments", "branches", "pages", "databases"][i % 7]}_${i}`, description: "Does one thing in the service." });
   db.setValue("apps", {
@@ -67,6 +68,71 @@ export async function measure(): Promise<{ systemPrompt: number; context: number
   return { systemPrompt: system.length, context: context.length, apps: note.length, text: [system, context, note].filter(Boolean).join("\n\n") };
 }
 
+// ------------------------------------------------------------------ memory context
+//
+// What a bot with a lot of memory pays for it on every turn. "before" is origin/main 5356490, where
+// the memory section was every memory, newest first, up to 40 of them and 6000 bytes, as
+// "- [id8] text" lines under "Things you remember:". "after" is the profile and the latest journal
+// entries (memorySection). Both are measured on the same sample, written in the same order.
+
+const PROFILE_FACTS = [
+  "Gal runs a small design studio with four people and codes on weekends.",
+  "Prefers short answers; no bullet lists unless asked.",
+  "Works Tuesday to Saturday; Monday is off, so nothing is scheduled then.",
+  "Is vegetarian, and allergic to hazelnuts.",
+  "Lives in Lisbon; home time zone is Europe/Lisbon.",
+  "Ask before booking or cancelling anything that costs money.",
+  "Invoices go out on the 1st through the accounting app, never by email.",
+  "The studio's main client is Northwind; Carla is the contact there.",
+  "Wants a one-line summary first, details only when asked.",
+  "Flies from LIS and prefers a morning aisle seat.",
+  "Partner is Noa; their anniversary is on 14 June.",
+  "Uses the calendar called Studio for work and Home for everything else.",
+];
+const JOURNAL_SUBJECTS = ["the Northwind rebrand", "the studio's lease renewal", "the Porto offsite", "Q3 invoices", "the new portfolio site", "hiring a junior designer", "the accountant's questions", "the weekend trip to Sintra", "the type licence audit"];
+const JOURNAL_EVENTS = [
+  "Gal approved the second round of concepts and asked for a darker palette before Friday.",
+  "sent the draft to Carla; she'll answer after her board meets on Thursday.",
+  "moved the review to next Wednesday at 10:00 because two people were out sick.",
+  "found the quote was 12% over budget, and Gal chose the cheaper of the two options.",
+  "booked nothing yet: waiting on Noa's dates before picking the hotel.",
+  "the first candidate declined; two more interviews are set for the week after.",
+  "closed out the open questions and filed the notes in Notes/Studio.md.",
+];
+/** The many-memory sample, oldest first: the lasting facts a bot learns early, then months of notes. */
+export function manyMemories(): { kind: "profile" | "journal"; text: string }[] {
+  const journal = Array.from({ length: 108 }, (_, i) => ({ kind: "journal" as const, text: `Day ${i + 1}, on ${JOURNAL_SUBJECTS[i % JOURNAL_SUBJECTS.length]}: ${JOURNAL_EVENTS[i % JOURNAL_EVENTS.length]}` }));
+  return [...PROFILE_FACTS.map((text) => ({ kind: "profile" as const, text })), ...journal];
+}
+
+/** The memory section as origin/main 5356490 built it (sessionPolicy.memoryContext under agent.contextSections), from memories newest first. */
+export function memorySectionBefore(items: { id: string; text: string }[]): string {
+  let budget = 6000;
+  const lines: string[] = [];
+  for (const item of items.slice(0, 40)) {
+    const line = `- [${item.id.slice(0, 8)}] ${item.text}`;
+    const bytes = Buffer.byteLength(line + "\n");
+    if (bytes > budget) continue;
+    lines.push(line);
+    budget -= bytes;
+  }
+  return items.length ? `Things you remember:\n${lines.join("\n")}` : "You haven't written any memories yet.";
+}
+
+export async function measureMemory(): Promise<{ memories: number; profile: number; journal: number; before: string; after: string }> {
+  const svc = await import("../server/bots/service.ts");
+  const db = await import("../server/bots/db.ts");
+  const agent = await import("../server/bots/agent.ts");
+  svc.setHooks({ wake() {}, stop() {} });
+  svc.updateSettings({ onboarding: "done", user: { name: "Gal" } });
+  const bot = svc.createBot({ name: "Boss", instructions: "You are the user's main assistant." }).bot;
+  const sample = manyMemories();
+  for (const m of sample) svc.addMemory(bot.id, m.text, { kind: m.kind, by: bot.id });
+  const stored = db.memories(bot.id);
+  if (stored.length !== sample.length) throw new Error(`The sample has ${sample.length} memories and ${stored.length} were stored.`);
+  return { memories: stored.length, profile: stored.filter((m) => m.kind === "profile").length, journal: stored.filter((m) => m.kind === "journal").length, before: memorySectionBefore(stored), after: agent.contextSections(bot.id).openbots_memory ?? "" };
+}
+
 const tokens = (chars: number) => Math.round(chars / BYTES_PER_TOKEN);
 const sum = (m: { systemPrompt: number; context: number; apps: number }) => m.systemPrompt + m.context + m.apps;
 
@@ -74,6 +140,14 @@ if (import.meta.main) {
   const dir = mkdtempSync(join(tmpdir(), "openbots-prompt-size-"));
   Object.assign(process.env, { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
   try {
+    if (process.argv.includes("--memory")) {
+      const m = await measureMemory();
+      if (process.argv.includes("--print")) console.error(`--- before\n${m.before}\n--- after\n${m.after}`);
+      const size = (text: string) => ({ chars: text.length, approxTokens: tokens(text.length), lines: text.split("\n").length });
+      const [before, after] = [size(m.before), size(m.after)];
+      console.log(JSON.stringify({ sample: { memories: m.memories, profile: m.profile, journal: m.journal }, before, after, saved: { chars: before.chars - after.chars, approxTokens: before.approxTokens - after.approxTokens, percent: Math.round((1 - after.chars / before.chars) * 100) }, estimate: `chars / ${BYTES_PER_TOKEN}` }, null, 1));
+      process.exit(0);
+    }
     const after = await measure();
     if (process.argv.includes("--print")) console.error(after.text);
     const row = (m: { systemPrompt: number; context: number; apps: number }) => ({ ...m, total: sum(m), approxTokens: tokens(sum(m)) });

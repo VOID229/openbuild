@@ -38,12 +38,12 @@ export function seedBots(): { bots: Bot[]; conversations: Conversation[] } {
 
   const pip = bot("Pip", "puff", "white", "You're the user's general helper. Keep answers short and friendly, and hand work to the other bots when it's theirs.", {
     primary: true,
-    memory: [{ id: uid(), text: "Prefers short answers, no bullet lists unless asked", at: now - 2 * 24 * 60 * MIN }],
+    memory: [{ id: uid(), kind: "profile", text: "Prefers short answers, no bullet lists unless asked", at: now - 2 * 24 * 60 * MIN }],
   });
   const juniper = bot("Juniper · notes", "tile", "blue", "Look after the user's notes: reading list, reminders, the odd to-do. Write things down before saying they're done.", {
     memory: [
-      { id: uid(), text: "Reading list lives in Notes/Reading.md", at: at(1, 18, 5) },
-      { id: uid(), text: "Waters the plants every other evening", at: today(30) },
+      { id: uid(), kind: "profile", text: "Reading list lives in Notes/Reading.md", at: at(1, 18, 5) },
+      { id: uid(), kind: "journal", text: "Waters the plants every other evening", at: today(30) },
     ],
     routines: [
       { id: uid(), title: "Water the plants", schedule: "Every other day at 20:00", enabled: true },
