@@ -89,7 +89,7 @@ export function BotsView() {
       {!isGone && <NotConfirmed />}
       {!isGone && <KeptElsewhere />}
       <div className="bots-view-content">
-        {isGone ? <WorkspaceProblem /> : conversation ? <BotChat key={`${workspace}:${conversation.id}`} conversation={conversation} /> : loaded && <NoConversation />}
+        {isGone ? <WorkspaceProblem /> : conversation ? <BotChat key={`${workspace}:${conversation.id}`} conversation={conversation} /> : loaded ? <NoConversation /> : <div className="bots-hello" role="status"><p>Loading OpenBots…</p></div>}
         {!isGone && conversation && !remote && <BotDetails conversation={conversation} open={detailsOpen} />}
       </div>
       <WorkspaceSwitchDialog />
