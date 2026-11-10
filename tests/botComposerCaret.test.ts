@@ -8,7 +8,8 @@ let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 beforeAll(async () => {
   if (!browser) return;
-  // The app's own font, which joins "-->" into an arrow; the fixture doesn't load it otherwise.
+  // Geist, a font that joins "-->" into an arrow (Inter, the default, keeps its width); the fixture doesn't load it otherwise.
+  // It's set untracked too, as the other font settings are: letter-spacing turns ligatures off by itself.
   const geist = Bun.file(`${import.meta.dir}/../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2`);
   server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`, { "/geist.woff2": () => new Response(geist) });
   chrome = await launchChrome();
@@ -156,6 +157,8 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
     await page.eval(`(async () => {
       const font = new FontFace("Geist Variable", "url(/geist.woff2)", { weight: "100 900" });
       document.fonts.add(await font.load());
+      document.documentElement.style.setProperty("--font-normal", '"Geist Variable"');
+      document.documentElement.style.setProperty("--tracking", "0");
     })()`);
     // One key at a time, as typed: Chrome shapes the textarea's text as it goes.
     for (const key of "cd --> ~/Efforts/active") await page.type(key);
