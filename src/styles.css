@@ -3702,6 +3702,20 @@ select.input {
   padding-left: 96px;
 }
 
+/* Settings takes the whole window, sidebar and all, so nothing floats over its header. */
+.main.main-settings {
+  border-left: 0;
+}
+.main-settings .floating-tools,
+.main-settings .thread-tools {
+  display: none;
+}
+@media (min-width: 769px) {
+  .main.main-settings .page-head {
+    padding-left: 16px;
+  }
+}
+
 .page-back {
   flex: none;
   width: 32px;

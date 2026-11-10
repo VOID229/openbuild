@@ -180,7 +180,7 @@ function Main() {
   // Threads found in a runtime's own sessions get names like the ones started here.
   useEffect(() => watchDiscoveredTitles(), []);
   const phone = useMediaQuery("(max-width: 768px)");
-  const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen);
+  const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen && !s.settingsOpen);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const usageOpen = useStore((s) => s.usageOpen);
@@ -402,11 +402,12 @@ function Main() {
     <>
       <PluginSlot name="app:before" />
       <div className={cx("app", harnessSetupOpen && "app-behind-modal")} inert={lightboxOpen || harnessSetupOpen}>
-        {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
-        <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
-        <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
+        {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. Settings
+            takes the whole window: neither shows, and each keeps whether it was open for when Settings closes. */}
+        <Activity mode={botsOpen || settingsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
+        <Activity mode={botsOpen && !settingsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
         {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
-        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen || marketplaceOpen) && "main-page")} inert={phone && botsListShowing}>
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen || marketplaceOpen) && "main-page", settingsOpen && "main-settings")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
