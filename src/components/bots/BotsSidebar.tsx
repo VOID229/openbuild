@@ -11,6 +11,7 @@ import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
 import { arrowNav, canHover, copyText, cx, OPEN_SEARCH, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
+import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
@@ -454,6 +455,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   const marketplaceOpen = useStore((s) => s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const name = useStore((s) => s.settings.profile.name);
   const listRef = useRef<HTMLElement>(null);
+  useScrollRestore(listRef, "bots:rail");
   // Which ends of the list have more past them, so they fade out there (bots.css) instead of being cut.
   useEffect(() => {
     const el = listRef.current;
@@ -601,6 +603,8 @@ export function BotsSidebar() {
   }, [conversations, sections]);
 
   const q = query.trim().toLowerCase();
+  // A reload keeps the list where it was (search results start at the top).
+  useScrollRestore(listRef, rail || q ? undefined : "bots:list");
   const results = useMemo(
     () => (q ? conversations.filter((c) => conversationName(c, bots).toLowerCase().includes(q) || c.messages.some((m) => m.text.toLowerCase().includes(q))) : []),
     [q, conversations, bots],
