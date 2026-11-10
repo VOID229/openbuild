@@ -334,6 +334,22 @@ const PICKER_WIDTH = 540;
 /** The model picker's height: room for about seven models, the reasoning levels and the footer. */
 const PICKER_HEIGHT = 320;
 
+/**
+ * The stretch of the screen a popover inside `el` can show in: the window, less what any ancestor that
+ * clips its overflow cuts off (a side pane, for one): 12px in from the window's edges, `gap` from a pane's.
+ */
+function visibleSpan(el: Element, gap: number) {
+  let left = 12;
+  let right = window.innerWidth - 12;
+  for (let node = el.parentElement; node && node !== document.body; node = node.parentElement) {
+    if (getComputedStyle(node).overflowX === "visible") continue;
+    const r = node.getBoundingClientRect();
+    left = Math.max(left, r.left + gap);
+    right = Math.min(right, r.right - gap);
+  }
+  return { left, right };
+}
+
 /** Price and size of a model, as a short line. */
 function modelFacts(m: ModelInfo) {
   const k = (n: number) =>
@@ -464,29 +480,27 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     if (!open) return;
     const place = () => {
       const pill = anchor.current?.getBoundingClientRect();
-      const wrap = anchor.current
-        ?.closest(".composer-wrap")
-        ?.getBoundingClientRect();
+      const wrapEl = anchor.current?.closest(".composer-wrap");
+      const wrap = wrapEl?.getBoundingClientRect();
       if (!pill || !wrap) return;
       const below = window.innerHeight - pill.bottom - 16;
       const above = pill.top - 16;
       const up = dropUp
         ? above >= 360 || above >= below
         : below < 360 && above > below;
-      const width = Math.min(PICKER_WIDTH, window.innerWidth - 24);
-      const left =
-        window.innerWidth <= 768
-          ? 0
-          : Math.max(
-              Math.min(
-                pill.left - wrap.left,
-                window.innerWidth - 12 - width - wrap.left,
-              ),
-              12 - wrap.left,
-            );
+      // A phone shows it as a sheet along the bottom (styles.css), whatever is set here.
+      const phone = window.innerWidth <= 768;
+      // Inside what's on screen of the composer's container: a narrow pane at the side of the window
+      // (a thread in the OpenBots panel) clips its overflow, which would cut off the list on the left.
+      const span = visibleSpan(wrapEl!, 8);
+      const width = Math.min(PICKER_WIDTH, span.right - span.left);
+      const left = phone
+        ? 0
+        : Math.max(Math.min(pill.left, span.right - width), span.left) - wrap.left;
       const pos: React.CSSProperties = up
         ? { left, top: "auto", bottom: wrap.bottom - pill.top + 6 }
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
+      if (!phone) pos.width = width;
       setLayout({
         up,
         max: Math.max(220, Math.min(PICKER_HEIGHT, up ? above : below)),

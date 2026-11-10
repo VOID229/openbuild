@@ -190,6 +190,43 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
     expect(widths.input).toBe("none");
   }, 60_000);
 
+  // The UI's tracking is tighter than a field's own (`letter-spacing: normal`): unless the textarea takes it
+  // too, the drawn text runs short of the caret, a little more each character and much more once lines wrap apart.
+  test("with an image pasted, the caret sits where the drawn text ends, on every line", async () => {
+    const page = await open();
+    await page.eval(`document.documentElement.style.setProperty("--tracking", "-0.03em")`);
+    await page.pasteImage();
+    const line = "bug where if i paste an image the input cursor is like one or two chars ahead, way more if i go down a line ";
+    await page.type(line.repeat(3).trim());
+    const geometry = await page.eval<{ field: string; drawn: string; fieldHeight: number; drawnHeight: number; end: number; caret: number }>(`(() => {
+      const el = ${FIELD};
+      const draft = document.querySelector('.bots-draft');
+      // Where the textarea's caret is: the end of the same text laid out with the textarea's own styles.
+      const mirror = document.createElement('div');
+      const cs = getComputedStyle(el);
+      for (const p of ["font", "letterSpacing", "wordSpacing", "fontVariantLigatures", "whiteSpace", "overflowWrap", "wordBreak", "padding", "boxSizing", "lineHeight"]) mirror.style[p] = cs[p];
+      mirror.style.cssText += ";position:absolute;visibility:hidden;width:" + el.clientWidth + "px";
+      const mark = document.createElement('span');
+      mark.textContent = "|";
+      mirror.append(el.value, mark);
+      el.parentElement.append(mirror);
+      const caret = mark.getBoundingClientRect().left - mirror.getBoundingClientRect().left;
+      mirror.remove();
+      // Where the drawn text ends.
+      const range = document.createRange();
+      const text = draft.lastChild;
+      range.setStart(text, text.length - 1);
+      range.setEnd(text, text.length);
+      const end = range.getBoundingClientRect().left - draft.getBoundingClientRect().left;
+      return { field: cs.letterSpacing, drawn: getComputedStyle(draft).letterSpacing, fieldHeight: el.scrollHeight, drawnHeight: draft.scrollHeight, end, caret };
+    })()`);
+    expect(geometry.field).toBe(geometry.drawn);
+    // Both wrap into the same lines...
+    expect(geometry.fieldHeight).toBe(geometry.drawnHeight);
+    // ...and the last one ends where the caret is.
+    expect(Math.abs(geometry.end - geometry.caret)).toBeLessThan(1);
+  }, 60_000);
+
   test("on a touch screen, switching back doesn't focus the field", async () => {
     const page = await open(390, 800);
     await page.type(A);

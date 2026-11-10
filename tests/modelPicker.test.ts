@@ -121,6 +121,22 @@ describe.skipIf(!browser)("model picker", () => {
     await page.shoot("picker-dark-fast");
   }, 30_000);
 
+  test("in a narrow pane at the right of the window, it stays inside the pane instead of being cut off", async () => {
+    // Narrower than the picker, and well away from the window's left edge.
+    const page = await open("desktop", "pane=420");
+    await page.openPicker();
+    const at = await page.eval<any>(`(() => {
+      const r = (el) => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, width: b.width }; };
+      return { mp: r(document.querySelector('.mp')), pane: r(document.querySelector('.side-pane')), list: r(document.querySelector('.mp-list')) };
+    })()`);
+    await page.shoot("desktop-pane");
+    expect(at.mp.left).toBeGreaterThanOrEqual(at.pane.left);
+    expect(at.mp.right).toBeLessThanOrEqual(at.pane.right);
+    // The model list is in view, not just the reasoning column.
+    expect(at.list.left).toBeGreaterThanOrEqual(at.pane.left);
+    expect(at.list.width).toBeGreaterThan(150);
+  }, 60_000);
+
   test("one compact height whatever it shows: a short list leaves room, a long one scrolls", async () => {
     const page = await open("desktop");
     await page.openPicker();

@@ -29,6 +29,7 @@ const models = [
 ];
 const listing = { "": { plan: "claude" as const, status: "valid" as const, models, defaultModel: models[0]!.id, checkedAt: Date.now() } };
 const home = params.get("home") === "1";
+const pane = Number(params.get("pane")) || 0;
 useStore.setState({
   settings: { ...useStore.getState().settings, threadRuntime: "claude", workspace: { mode: "local" }, favorites: [models[0]!.id, models[1]!.id] },
   claudeModels: listing as any,
@@ -46,6 +47,13 @@ createRoot(document.getElementById("root")!).render(
       <div className="home-center">
         <h1 className="home-title">What should we build?</h1>
         <Composer variant="home" streaming={false} />
+      </div>
+    </div>
+  ) : pane ? (
+    // A thread in the OpenBots details panel: a narrow pane on the right that clips what spills out of it.
+    <div style={{ width: "100%", display: "flex", justifyContent: "flex-end" }}>
+      <div className="side-pane" style={{ width: pane, overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: "flex-end", padding: 16 }}>
+        <Composer variant="dock" chatId="t" streaming={false} />
       </div>
     </div>
   ) : (
