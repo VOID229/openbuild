@@ -352,10 +352,11 @@ interface State {
   setSidebarOpen: (open: boolean) => void;
   setBotsSidebarOpen: (open: boolean) => void;
   /** Point the composer at a model: for the open chat only, or (on the new-chat screen) for new chats. */
-  setSelection: (selection: Selection) => void;
-  setEffort: (effort: Effort, selection?: Selection) => void;
+  /** `chatId` is the thread whose composer picked it; omitted = the active chat (or the new-thread draft). */
+  setSelection: (selection: Selection, chatId?: string) => void;
+  setEffort: (effort: Effort, selection?: Selection, chatId?: string) => void;
   /** Pick a service tier for the selected model (undefined = standard). */
-  setSpeed: (speed: string | undefined, selection?: Selection) => void;
+  setSpeed: (speed: string | undefined, selection?: Selection, chatId?: string) => void;
   newChat: () => void;
   selectChat: (id: string) => void;
   /** Open a thread inside OpenBots, keeping its sidebar, with a way back to the bot chat. */
@@ -813,8 +814,8 @@ export const useStore = create<State>()(
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 
-      setSelection: (selection) => {
-        const id = get().activeChatId;
+      setSelection: (selection, chatId) => {
+        const id = chatId ?? get().activeChatId;
         if (id) set((s) => ({ selections: { ...s.selections, [id]: selection } }));
         else if (["fx", "codex", "cursor", "claude", "opencode", "grok", "hermes"].includes(runtimeOf(get()))) {
           const runtime = runtimeOf(get()) as "fx" | "codex" | "cursor" | "claude" | "opencode" | "grok" | "hermes";
@@ -824,9 +825,10 @@ export const useStore = create<State>()(
         }
         else get().updateSettings({ selection });
       },
-      setEffort: (effort, selection = selectionFor(get())) => {
+      setEffort: (effort, selection, chatId) => {
+        const s = atChat(get(), chatId ?? get().activeChatId);
+        selection ??= selectionFor(s);
         if (!selection) return;
-        const s = get();
         const key = effortKey(selection);
         const chat = s.chats.find((c) => c.id === s.activeChatId);
         if (chat) {
@@ -837,9 +839,10 @@ export const useStore = create<State>()(
           s.updateSettings({ modelEfforts: { ...s.settings.modelEfforts, [key]: effort } });
         }
       },
-      setSpeed: (speed, selection = selectionFor(get())) => {
+      setSpeed: (speed, selection, chatId) => {
+        const s = atChat(get(), chatId ?? get().activeChatId);
+        selection ??= selectionFor(s);
         if (!selection || isAuto(selection)) return;
-        const s = get();
         const key = effortKey(selection);
         const chat = s.chats.find((c) => c.id === s.activeChatId);
         if (chat) {
@@ -1050,6 +1053,15 @@ export const useStore = create<State>()(
     },
   ),
 );
+
+/**
+ * The store as the composer of thread `chatId` sees it. A thread can show its composer without being
+ * the active chat (a thread open in the OpenBots panel), and the composer selectors all read
+ * `activeChatId`: pointing that at the composer's own thread keeps its pickers on its own model, effort
+ * and harness rather than the new-thread draft's.
+ */
+export const atChat = <S extends { activeChatId?: string }>(s: S, chatId: string | undefined): S =>
+  s.activeChatId === chatId ? s : { ...s, activeChatId: chatId };
 
 export function composerEffort(s: Pick<State, "activeChatId" | "chats" | "selections" | "settings" | "detection">): Effort {
   return effortFor(s.settings, s.chats.find((c) => c.id === s.activeChatId), selectionFor(s));

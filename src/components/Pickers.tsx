@@ -11,7 +11,7 @@ import {
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { codexDetection, claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
+import { atChat, codexDetection, claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
@@ -53,16 +53,16 @@ const planOf = (detection: Partial<Record<PlanId, Detection>>): "pi" | "fx" | "c
  * The models the composer can use: this server's, or those of the paired device the thread works
  * on (fetched once its first turn needs them, and re-asked when they're old).
  */
-function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection>> {
+function useDeviceDetection(chatId: string | undefined, deviceId?: string): Partial<Record<PlanId, Detection>> {
   const local = useStore((s) => s.detection);
   const remote = useStore((s) => (deviceId ? s.remoteModels[deviceId] : undefined));
   const load = useStore((s) => s.loadDeviceModels);
   // Native runtimes list their own models, not Pi provider models.
-  const runtime = useStore((s) => runtimeOf(s, s.activeChatId));
+  const runtime = useStore((s) => runtimeOf(s, chatId));
   const native = runtime === "fx" || runtime === "codex" || runtime === "cursor" || runtime === "claude" || runtime === "opencode" || runtime === "grok" || runtime === "hermes";
   const list = useStore((s) => runtime === "hermes" ? s.hermesModels[deviceId ?? ""] : runtime === "grok" ? s.grokModels[deviceId ?? ""] : runtime === "opencode" ? s.opencodeModels[deviceId ?? ""] : runtime === "claude" ? s.claudeModels[deviceId ?? ""] : runtime === "cursor" ? s.cursorModels[deviceId ?? ""] : runtime === "codex" ? s.codexModels[deviceId ?? ""] : runtime === "fx" ? s.fxModels[deviceId ?? ""] : undefined);
   const loadNative = useStore((s) => runtime === "hermes" ? s.loadHermesModels : runtime === "grok" ? s.loadGrokModels : runtime === "opencode" ? s.loadOpencodeModels : runtime === "claude" ? s.loadClaudeModels : runtime === "cursor" ? s.loadCursorModels : runtime === "codex" ? s.loadCodexModels : s.loadFxModels);
-  const chat = useStore((s) => s.chats.find((c) => c.id === s.activeChatId));
+  const chat = useStore((s) => (chatId ? s.chats.find((c) => c.id === chatId) : undefined));
   const detection = useMemo(
     () => (native ? { [runtime]: (runtime === "claude" && list ? claudeDetection(list, chat) : runtime === "codex" && list ? codexDetection(list, chat) : list) ?? (runtime === "hermes" ? PENDING_HERMES : runtime === "grok" ? PENDING_GROK : runtime === "opencode" ? PENDING_OPENCODE : runtime === "claude" ? PENDING_CLAUDE : runtime === "cursor" ? PENDING_CURSOR : runtime === "codex" ? PENDING_CODEX : PENDING_FX) } : deviceId ? { pi: remote ?? PENDING } : local),
     [native, runtime, list, chat, deviceId, remote, local],
@@ -86,10 +86,10 @@ function useDeviceDetection(deviceId?: string): Partial<Record<PlanId, Detection
 }
 
 /** The selected model's reasoning levels and the one in use, for the picker's Reasoning section and the pill. */
-function useEffortChoice(deviceId?: string) {
-  const effort = useStore(composerEffort);
-  const selection = useStore(selectionFor);
-  const detection = useDeviceDetection(deviceId);
+function useEffortChoice(chatId: string | undefined, deviceId?: string) {
+  const effort = useStore((s) => composerEffort(atChat(s, chatId)));
+  const selection = useStore((s) => selectionFor(atChat(s, chatId)));
+  const detection = useDeviceDetection(chatId, deviceId);
   const auto = isAuto(selection);
   const model = auto ? undefined : findModel(detection, selection);
   // Availability comes from the model's metadata; the auto router applies the level wherever supported.
@@ -110,10 +110,10 @@ function useEffortChoice(deviceId?: string) {
 }
 
 /** The selected model's faster service tiers (ModelInfo.speeds) and the one in use; none listed means no choice. */
-function useSpeedChoice(deviceId?: string) {
-  const selection = useStore(selectionFor);
-  const detection = useDeviceDetection(deviceId);
-  const wanted = useStore(composerSpeed);
+function useSpeedChoice(chatId: string | undefined, deviceId?: string) {
+  const selection = useStore((s) => selectionFor(atChat(s, chatId)));
+  const detection = useDeviceDetection(chatId, deviceId);
+  const wanted = useStore((s) => composerSpeed(atChat(s, chatId)));
   const model = isAuto(selection) ? undefined : findModel(detection, selection);
   const speeds = model?.speeds ?? [];
   const shown = supportedSpeed(speeds, wanted);
@@ -124,8 +124,8 @@ function useSpeedChoice(deviceId?: string) {
  * The model picker's Reasoning section: a column beside the list on a wide picker, a row of levels
  * under it on a narrow one (CSS decides). Picking a level keeps the picker open.
  */
-export function ReasoningSection({ deviceId }: { deviceId?: string }) {
-  const { model, levels, shown, labelOf, note } = useEffortChoice(deviceId);
+export function ReasoningSection({ chatId, deviceId }: { chatId?: string; deviceId?: string }) {
+  const { model, levels, shown, labelOf, note } = useEffortChoice(chatId, deviceId);
   const setEffort = useStore((s) => s.setEffort);
   return (
     <section className="mp-effort" aria-label="Reasoning effort">
@@ -137,7 +137,7 @@ export function ReasoningSection({ deviceId }: { deviceId?: string }) {
       ) : (
         <div className="mp-effort-levels" role="radiogroup" aria-label="Reasoning effort" onKeyDown={(e) => arrowNav(e, undefined, { horizontal: true })}>
           {levels.map((level) => (
-            <button key={level} type="button" role="radio" aria-checked={shown === level} tabIndex={shown === level ? 0 : -1} className="mp-effort-level" onClick={() => setEffort(level)}>
+            <button key={level} type="button" role="radio" aria-checked={shown === level} tabIndex={shown === level ? 0 : -1} className="mp-effort-level" onClick={() => setEffort(level, undefined, chatId)}>
               <span className="mp-effort-long">{labelOf(level)}</span>
               <span className="mp-effort-short" aria-hidden>{labelOf(level, true)}</span>
               {shown === level && <Check size={14} className="mp-effort-check" aria-hidden />}
@@ -150,8 +150,8 @@ export function ReasoningSection({ deviceId }: { deviceId?: string }) {
 }
 
 /** Standard or one of the model's faster tiers, at the foot of the model picker. Hidden when the model lists none. */
-export function SpeedToggle({ deviceId }: { deviceId?: string }) {
-  const { speeds, current } = useSpeedChoice(deviceId);
+export function SpeedToggle({ chatId, deviceId }: { chatId?: string; deviceId?: string }) {
+  const { speeds, current } = useSpeedChoice(chatId, deviceId);
   const setSpeed = useStore((s) => s.setSpeed);
   if (!speeds.length) return null;
   const options: { id?: string; name: string; description?: string }[] = [{ name: "Standard", description: "Default speed and usage" }, ...speeds];
@@ -167,7 +167,7 @@ export function SpeedToggle({ deviceId }: { deviceId?: string }) {
           className="mp-speed-opt"
           data-tooltip={o.description}
           data-tooltip-side="top"
-          onClick={() => setSpeed(o.id)}
+          onClick={() => setSpeed(o.id, undefined, chatId)}
         >
           {o.id && <Zap size={13} aria-hidden />}
           {o.name}
@@ -377,15 +377,15 @@ export function toggleFavorite(id: string) {
  * The model picker's footer: the model's speed on the left, and the new thread's runtime, whose
  * models the list above shows. Once a thread has started its runtime is fixed, so the row just names it.
  */
-function PickerFoot({ deviceId }: { deviceId?: string }) {
-  const started = useStore((s) => s.chats.some((c) => c.id === s.activeChatId));
-  const fixed = useStore((s) => runtimeOf(s, s.activeChatId));
+export function PickerFoot({ chatId, deviceId }: { chatId?: string; deviceId?: string }) {
+  const started = useStore((s) => !!chatId && s.chats.some((c) => c.id === chatId));
+  const fixed = useStore((s) => runtimeOf(s, chatId));
   const updateSettings = useStore((s) => s.updateSettings);
   const openSettings = useStore((s) => s.openSettings);
   const { options, missing, runtime } = useRuntimeOptions();
   return (
     <div className="mp-foot">
-      <SpeedToggle deviceId={deviceId} />
+      <SpeedToggle chatId={chatId} deviceId={deviceId} />
       <span className="mp-foot-label">Harness</span>
       {started ? (
         <span className="mp-foot-value mp-runtime-fixed" data-tooltip="Fixed once a thread starts" data-tooltip-side="top">
@@ -418,17 +418,21 @@ function PickerFoot({ deviceId }: { deviceId?: string }) {
   );
 }
 
-export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: string }) {
+/**
+ * `chatId` is the thread whose composer this is (none for a new thread). It isn't always the active
+ * chat: a thread open in the OpenBots panel shows its composer while another view is active.
+ */
+export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; chatId?: string; deviceId?: string }) {
   const pluginVersion = usePlugins((s) => s.version);
   const [open, setOpen] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  const selection = useStore(selectionFor);
-  const detection = useDeviceDetection(deviceId);
+  const selection = useStore((s) => selectionFor(atChat(s, chatId)));
+  const detection = useDeviceDetection(chatId, deviceId);
   const favorites = useStore((s) => s.settings.favorites);
   const setSelection = useStore((s) => s.setSelection);
   const openSettings = useStore((s) => s.openSettings);
-  const effort = useEffortChoice(deviceId);
-  const speed = useSpeedChoice(deviceId);
+  const effort = useEffortChoice(chatId, deviceId);
+  const speed = useSpeedChoice(chatId, deviceId);
 
   const current = isAuto(selection)
     ? undefined
@@ -561,7 +565,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   const pillLabel = [label, effortLabel && `${effortLabel} reasoning`, speed.current?.name].filter(Boolean).join(", ");
 
   const choose = (id: string) => {
-    setSelection({ plan, id });
+    setSelection({ plan, id }, chatId);
     setOpen(false);
   };
 
@@ -725,8 +729,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
                 ))}
             </div>
           </div>
-          <ReasoningSection deviceId={deviceId} />
-          <PickerFoot deviceId={deviceId} />
+          <ReasoningSection chatId={chatId} deviceId={deviceId} />
+          <PickerFoot chatId={chatId} deviceId={deviceId} />
         </div>
       </Popover>
     </div>
