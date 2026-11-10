@@ -706,7 +706,9 @@ async function runTurn(botId: string, all: Wake[]) {
     if (!delivered.size) { try { handoff = readFileSync(join(mind.sessionPath!, "handoff.txt"), "utf8"); } catch {} }
     // A new name is told to its bot in any chat: it's how everyone there will call it.
     const renames = svc.pendingRenameNotes(botId);
-    const message = [handoff, svc.renameNoteText(renames), svc.changeNoteText(botId, notes), rendered].filter(Boolean).join("\n\n");
+    // Memory from before the split, for the bot to sort once: its own lane only, never a friend's, and taken for good now.
+    const review = lane === "main" ? svc.memoryReviewNote(botId) : "";
+    const message = [handoff, svc.renameNoteText(renames), svc.changeNoteText(botId, notes), review, rendered].filter(Boolean).join("\n\n");
     const assigned = db.getConversation(conversationId!)?.kind === "group" || jobs.every(j => j.messageIds)
       ? new Set(jobs.flatMap(j => j.messageIds ?? [])) : undefined;
     const images = assigned ? [...assigned].flatMap(id => {

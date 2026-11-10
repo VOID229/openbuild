@@ -14,7 +14,7 @@ import { isPermissionId } from "../../shared/types";
 import { HTML_RENDER_MAX_TITLE, htmlProblem } from "../../shared/htmlRender";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
-import { findMemory, memoryKey, profileBytes, similarMemories } from "./sessionPolicy";
+import { findMemory, JOURNAL_LINE_MAX, memoryContext, memoryKey, profileBytes, similarMemories } from "./sessionPolicy";
 
 const MESSAGE_LIMIT = 200;
 
@@ -765,6 +765,33 @@ export function settleRenameNotes(shown: RenameNote[]) {
       return [{ ...n, from: seen.to }];
     }),
   );
+}
+
+// ------------------------------------------------------------------ memory from before the split
+
+/** How much of its old memory that one look lists: the newest 40 entries, at most 6000 bytes of lines. Search finds the rest. */
+const MEMORY_REVIEW_LISTED = 40;
+const MEMORY_REVIEW_BYTES = 6000;
+
+/**
+ * The one look a bot gets through the memory it had before the profile/journal split: the migration
+ * filled its profile by date, not by what lasts, and put the rest in its journal. With its next turn
+ * of its own, and never again, whether or not it got to everything (it can still promote a fact any
+ * time). A bot with nothing from before in its journal is never shown this.
+ */
+export function memoryReviewNote(botId: string): string {
+  const since = db.takeMemoryReview(botId);
+  if (since === undefined) return "";
+  const old = db.memories(botId).filter((m) => m.kind === "journal" && m.at <= since);
+  const listed = memoryContext(old.slice(0, MEMORY_REVIEW_LISTED), MEMORY_REVIEW_BYTES, JOURNAL_LINE_MAX);
+  if (!listed) return "";
+  const more = old.length - listed.split("\n").length;
+  const user = settings().user?.name || "the user";
+  return [
+    `Your memory now has a profile and a journal. Your newest memories from before filled your profile, and the older ones went to your journal. Just this once: make your profile hold only lasting facts: who ${user} is, their standing preferences, and your own role and way of working. Move one-off notes out of it by writing them again with memory write kind journal, and lasting facts from the older ones below into it with kind profile (or reworded, with replaces). It's capped at ${PROFILE_MAX_BYTES} bytes: make room before adding. Don't mention this in the chat.`,
+    `Your older entries from before, newest first${more ? ` (${more} more: search finds them)` : ""}:`,
+    listed,
+  ].join("\n");
 }
 
 /** What the user changed since the primary last heard, for its next turn. Only the primary's. */
