@@ -21,6 +21,9 @@ function settleMotion() {
   }
 }
 
+/** Sent by the search shortcut: the sidebar showing opens its search and puts the cursor in it. */
+export const OPEN_SEARCH = "openbuild:open-search";
+
 let entering: ReturnType<typeof setTimeout> | undefined;
 
 /**

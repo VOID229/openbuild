@@ -33,6 +33,10 @@ const { BotsView } = await import("../src/components/bots/BotsView");
 
 let root: ReturnType<typeof createRoot>;
 const frames = (ms = 40) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+// The chat's clock, a moment after these fixtures' times: a bot's error shows for a minute after it
+// happened (ERROR_SHOWN_MS), so the errors here are fresh. The test that lets one expire moves it on.
+let clock = 10_000;
+Date.now = () => clock;
 const event = (id: string, author: string, e: Record<string, unknown>) => ({ id, author, at: Number(id.slice(1)), text: "", event: e });
 const lines = () => [...document.querySelectorAll(".bm-event")];
 const line = (id: string) => document.querySelector<HTMLElement>(`.bm-event[data-id="${id}"]`)!;
@@ -57,6 +61,7 @@ beforeEach(() => {
   root = createRoot(el);
 });
 afterEach(() => {
+  clock = 10_000;
   act(() => root.unmount());
   document.body.innerHTML = "";
   enterWorkspace("away");
@@ -273,4 +278,48 @@ test("a mention followed by the rest of the bot's full name reads as the name al
   // Outside the chip, only the message's own words.
   expect(document.querySelector(".bm-text")!.textContent).toBe("@Scout · Primary hey");
   expect(mention.nextSibling?.textContent).toBe(" hey");
+});
+
+test("a bot's error shows for a minute after it happened, then leaves the chat", async () => {
+  // Opened a second before its minute is up.
+  clock = 2 + 59_000;
+  await show([
+    { id: "m1", author: "scout", at: 1, text: "On it." },
+    event("e2", "scout", { kind: "error", text: "Couldn't reply", detail: "Codex error: The usage limit has been reached" }),
+    { id: "m3", author: "scout", at: 3, text: "Back." },
+  ]);
+  expect(line("e2")).not.toBeNull();
+  // The minute passes: it goes on its own, and the messages around it stay.
+  clock = 2 + 60_000;
+  await act(async () => void (await new Promise((r) => setTimeout(r, 1_300))));
+  await frames();
+  expect(line("e2")).toBeNull();
+  expect(document.querySelector('[data-id="m1"]')).not.toBeNull();
+  expect(document.querySelector('[data-id="m3"]')).not.toBeNull();
+}, 10_000);
+
+test("opened, the same line again and again in a row shows once with how many times; one in between splits them", async () => {
+  const ran = (id: string, author: string, detail: string) => event(id, author, { kind: "routine", text: "Ran a routine", detail });
+  await show([
+    { id: "m1", author: "scout", at: 1, text: "On it." },
+    ran("e2", "scout", "Check bots aren't ghosting"),
+    ran("e3", "juniper", "Check threads and PRs"),
+    ran("e4", "scout", "Check bots aren't ghosting"),
+    ran("e5", "scout", "Check bots aren't ghosting"),
+    ran("e6", "scout", "Check bots aren't ghosting"),
+    ran("e7", "scout", "Check bots aren't ghosting"),
+    ran("e8", "juniper", "Check threads and PRs"),
+  ]);
+  const toggle = document.querySelector<HTMLButtonElement>(".bm-events-toggle")!;
+  expect(toggle.textContent).toBe("7 background actions");
+  await act(async () => toggle.click());
+  const shown = [...document.querySelectorAll<HTMLElement>(".bm-events > .bm-event")].filter((l) => !l.hidden);
+  expect(shown.map((l) => [l.dataset.id, l.querySelector(".bm-event-times")?.textContent ?? null])).toEqual([
+    ["e2", null],
+    ["e3", null],
+    ["e4", "×4"],
+    ["e8", null],
+  ]);
+  // The repeats stay in the page, hidden, so a line can still be found by its id.
+  for (const id of ["e5", "e6", "e7"]) expect(line(id).hidden).toBe(true);
 });

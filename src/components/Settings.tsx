@@ -25,6 +25,7 @@ import { NavRow, PageHeader, SettingRow, SettingsGroup, SubPage } from "./Settin
 import { RuntimeIcon } from "./Workspace";
 import { BotsGlyph } from "./bots/BotAvatar";
 import { BotsSettingsSection } from "./bots/BotSettings";
+import { leaveSettingsAt, takeSettingsScroll } from "../lib/settingsPlace";
 
 /** A section's icon: Lucide's, or one drawn to match them (OpenBots' bot). */
 type NavIcon = LucideIcon | ComponentType<{ size?: number; className?: string; "aria-hidden"?: boolean }>;
@@ -134,7 +135,6 @@ function ProfileSection() {
 
 function NotificationsSection() {
   const n = useStore((st) => st.settings.notifications);
-  const page = useStore((st) => st.settingsPage);
   const update = useStore((st) => st.updateSettings);
   const chosen = UPDATABLE_RUNTIMES.filter((runtime) => !n.updateRuntimes || n.updateRuntimes.includes(runtime));
   const toggleRuntime = (runtime: ThreadRuntime, on: boolean) =>
@@ -144,28 +144,6 @@ function NotificationsSection() {
         updateRuntimes: UPDATABLE_RUNTIMES.filter((r) => (r === runtime ? on : chosen.includes(r))),
       },
     });
-  if (page === "harnesses" && n.runtimeUpdates)
-    return (
-      <SubPage title="Harness updates" trail={["Notifications"]}>
-        <ul className="pi-list" aria-label="Harnesses to announce updates for">
-          {UPDATABLE_RUNTIMES.map((runtime) => {
-            const on = chosen.includes(runtime);
-            const name = runtimeName(runtime);
-            return (
-              <li key={runtime} className={cx("pi-row", !on && "pi-row-off")}>
-                <span className="rt-icon" aria-hidden>
-                  <RuntimeIcon runtime={runtime} size={16} />
-                </span>
-                <span className="pi-row-text">
-                  <span className="pi-row-name">{name}</span>
-                </span>
-                <Toggle checked={on} label={`Announce ${name} updates`} onChange={(next) => toggleRuntime(runtime, next)} />
-              </li>
-            );
-          })}
-        </ul>
-      </SubPage>
-    );
   return (
     <>
       <Heading>Notifications</Heading>
@@ -175,8 +153,27 @@ function NotificationsSection() {
       <SettingRow label="Harness updates" desc="When an installed harness has a new version.">
         <Toggle checked={n.runtimeUpdates} onChange={(runtimeUpdates) => update({ notifications: { ...n, runtimeUpdates } })} label="Harness updates" />
       </SettingRow>
+      {/* A handful of harnesses: listed right here, not a page of their own. */}
       {n.runtimeUpdates && (
-        <NavRow label="Harnesses to watch" value={chosen.length === UPDATABLE_RUNTIMES.length ? "All" : chosen.length ? `${chosen.length} of ${UPDATABLE_RUNTIMES.length}` : "None"} to="harnesses" />
+        <SettingsGroup title="Harnesses to watch">
+          <ul className="pi-list" aria-label="Harnesses to announce updates for">
+            {UPDATABLE_RUNTIMES.map((runtime) => {
+              const on = chosen.includes(runtime);
+              const name = runtimeName(runtime);
+              return (
+                <li key={runtime} className={cx("pi-row", !on && "pi-row-off")}>
+                  <span className="rt-icon" aria-hidden>
+                    <RuntimeIcon runtime={runtime} size={16} />
+                  </span>
+                  <span className="pi-row-text">
+                    <span className="pi-row-name">{name}</span>
+                  </span>
+                  <Toggle checked={on} label={`Announce ${name} updates`} onChange={(next) => toggleRuntime(runtime, next)} />
+                </li>
+              );
+            })}
+          </ul>
+        </SettingsGroup>
       )}
     </>
   );
@@ -606,10 +603,43 @@ export function SettingsPage() {
     if (document.activeElement === document.body) root.current?.focus({ preventScroll: true });
   }, [back, section, index]);
 
-  // Into a page or back out of it, what shows next starts at its top, not at the offset the last one was scrolled to.
+  // Into a page or back out of it, what shows next starts at its top, not at the offset the last one was
+  // scrolled to; opened again where it was left (settingsPlace.ts), it goes back to how far down it was.
+  // That page may still be filling in (a list loading), so it keeps trying for a moment until it fits.
+  const restoring = useRef<{ section: SettingsSection; page?: string; scroll: number; until: number }>(undefined);
   useLayoutEffect(() => {
-    if (content.current) content.current.scrollTop = 0;
+    const el = content.current;
+    if (!el) return;
+    const want = takeSettingsScroll(section, page);
+    if (want !== undefined) restoring.current = { section, page, scroll: want, until: performance.now() + 1500 };
+    const r = restoring.current;
+    if (!r || r.section !== section || r.page !== page || performance.now() > r.until) {
+      restoring.current = undefined;
+      el.scrollTop = 0;
+      return;
+    }
+    let frame = 0;
+    const put = () => {
+      if (restoring.current !== r) return;
+      el.scrollTop = r.scroll;
+      if (Math.abs(el.scrollTop - r.scroll) > 1 && performance.now() < r.until) frame = requestAnimationFrame(put);
+    };
+    // Scrolling meanwhile is the user's: stop putting it back.
+    const stop = () => (restoring.current = undefined);
+    el.addEventListener("wheel", stop, { once: true, passive: true });
+    el.addEventListener("touchstart", stop, { once: true, passive: true });
+    put();
+    return () => {
+      cancelAnimationFrame(frame);
+      el.removeEventListener("wheel", stop);
+      el.removeEventListener("touchstart", stop);
+    };
   }, [section, page, !!back]);
+
+  // Closing, it notes where it was, for opening again soon after.
+  const here = useRef({ section, page, index });
+  here.current = { section, page, index };
+  useLayoutEffect(() => () => leaveSettingsAt({ ...here.current, scroll: content.current?.scrollTop ?? 0 }), []);
 
   const title = phone ? (back?.title ?? (showIndex ? "Settings" : label)) : "Settings";
   const backLabel = phone ? (back ? back.label : index ? "Back" : "Back to Settings") : "Back";

@@ -15,6 +15,7 @@ import { initialRouteState } from "./routes";
 import { serverStorage, skipUnchanged } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
+import { reopenSettingsScroll, settingsPlace } from "./settingsPlace";
 
 export type SettingsSection = "security" | "account" | "profile" | "general" | "bots" | "shortcuts" | "pi" | "keys" | "runtimes" | "projects" | "devices" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
@@ -779,14 +780,30 @@ export const useStore = create<State>()(
       },
 
       // Settings and Usage are pages in the main pane: on a phone that pane slides in over whichever list is showing.
-      openSettings: (section, page) => set((s) => ({
-        settingsOpen: true,
-        settingsSection: section ?? s.settingsSection,
-        settingsPage: section ? page : s.settingsOpen ? s.settingsPage : undefined,
-        settingsIndex: section ? false : s.settingsOpen ? s.settingsIndex : isPhone(),
-        marketplaceOpen: false,
-        ...phoneListsClosed(s),
-      })),
+      openSettings: (section, page) => {
+        // Opened again without a place to go: back where it was left, if that was a moment ago (scroll
+        // and all, settingsPlace.ts), else Profile from its top.
+        if (!section && !get().settingsOpen) {
+          const place = settingsPlace();
+          reopenSettingsScroll(place);
+          return set((s) => ({
+            settingsOpen: true,
+            settingsSection: place?.section ?? "profile",
+            settingsPage: place?.page,
+            settingsIndex: place ? place.index : isPhone(),
+            marketplaceOpen: false,
+            ...phoneListsClosed(s),
+          }));
+        }
+        set((s) => ({
+          settingsOpen: true,
+          settingsSection: section ?? s.settingsSection,
+          settingsPage: section ? page : s.settingsOpen ? s.settingsPage : undefined,
+          settingsIndex: section ? false : s.settingsOpen ? s.settingsIndex : isPhone(),
+          marketplaceOpen: false,
+          ...phoneListsClosed(s),
+        }));
+      },
       closeSettings: () => set({ settingsOpen: false, settingsPage: undefined }),
       // Usage opens over whichever side is showing, so closing it goes back there; switching sides closes it.
       setUsageOpen: (open) => set((s) => (open ? { usageOpen: true, settingsOpen: false, marketplaceOpen: false, ...phoneListsClosed(s) } : { usageOpen: false })),

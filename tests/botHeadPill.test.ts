@@ -184,7 +184,7 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
   };
 
   for (const theme of ["light", "dark"] as const) {
-    test(`lines a group's bots up side by side, counting the same hidden bots as its own avatar (${theme})`, async () => {
+    test(`lines a group's bots up side by side, four and then a count of the rest (${theme})`, async () => {
       const page = await open(theme);
       // The collapsed sidebar's rail, where the card shows over a group's avatar, once it has folded away.
       await page.eval("store.setState({ botsSidebarOpen: false })");
@@ -192,7 +192,8 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
       await page.settle();
       await page.eval(`Promise.all(document.getAnimations().filter((a) => a instanceof CSSTransition).map((a) => a.finished.catch(() => {}))).then(() => true)`);
 
-      for (const [name, shown, count] of [["OpenBuild Dev", 4, null], ["Everyone", 3, "+3"]] as const) {
+      // A line has room for four mascots and then a count; the rail's huddle, two by two, for three.
+      for (const [name, shown, count, railCount] of [["OpenBuild Dev", 4, null, null], ["Everyone", 4, "+2", "+3"]] as const) {
         const card = await peek(page, name);
         expect(card.huddles).toBe(0);
         expect(card.bots).toHaveLength(shown);
@@ -200,20 +201,20 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
           expect(card.bots[i]!.left).toBeGreaterThanOrEqual(card.bots[i - 1]!.right - 0.5);
           expect(Math.abs(card.bots[i]!.top - card.bots[0]!.top)).toBeLessThan(1);
         }
-        // The avatar in the rail is still a huddle, and its count of the hidden bots is the card's.
+        // The avatar in the rail is still a huddle, with its own count.
         expect(card.railHuddles).toBe(1);
         expect({ name, count: card.count }).toEqual({ name, count });
-        expect({ name, count: card.railCount }).toEqual({ name, count });
+        expect({ name, count: card.railCount }).toEqual({ name, count: railCount });
       }
     }, 30_000);
   }
 
-  test("the chat's header counts the same hidden bots as the sidebar", async () => {
+  test("the chat's header shows four of a group's bots and a count of the rest", async () => {
     const page = await open("dark");
     await page.eval("bots.getState().select('crowd')");
     await page.until(`document.querySelector('.bots-head-name')?.textContent === 'Everyone'`);
-    const [head, tile] = await page.eval<[string | null, string | null]>(`[document.querySelector('.bots-head-pill .bot-lineup-more')?.textContent ?? null, [...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Everyone')).querySelector('.bot-huddle-more')?.textContent ?? null]`);
-    expect(head).toBe("+3");
-    expect(tile).toBe(head);
+    const [head, shown] = await page.eval<[string | null, number]>(`[document.querySelector('.bots-head-pill .bot-lineup-more')?.textContent ?? null, document.querySelectorAll('.bots-head-pill .bot-lineup .bot').length]`);
+    expect(shown).toBe(4);
+    expect(head).toBe("+2");
   });
 });

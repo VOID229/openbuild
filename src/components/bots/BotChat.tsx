@@ -1208,13 +1208,16 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   // The chat is keyed by its workspace too (see BotsView), so this one's is fixed for its life.
   const [place] = useState(() => `${useBots.getState().workspace ?? ""}:${conversation.id}`);
   const [left] = useState(() => places.get(place));
-  /** Keep to the bottom as things arrive. Off once the user scrolls up, on again when they're back down. */
+  /** Attached: keep to the bottom as things arrive. Any scroll up by the user detaches, and from then on
+   *  only they move the view; scrolling all the way back down attaches it again. */
   const stick = useRef(left?.stick ?? true);
+  /** Where the chat last moved the view itself, so that scroll isn't taken for the user's. */
+  const moved = useRef(-1);
+  const lastTop = useRef(0);
   /** Off the bottom, the message the view keeps in place as content above or below it changes. */
   const spot = useRef<Spot>(undefined);
   /** And the one at the top of the view, for opening the chat here again. */
   const top = useRef(left?.stick === false ? left.top : undefined);
-  const userScrolled = useRef(0);
   const [away, setAway] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const anchor = useRef<HTMLElement | null>(null);
@@ -1232,13 +1235,32 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const touchY = useRef(0);
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
-  const blocks = useMemo(() => blocksOf(conversation.messages), [conversation.messages]);
+  // A bot's error ("couldn't reply") is news, not history: it shows for a minute, then goes.
+  const [now, setNow] = useState(Date.now);
+  const shown = useMemo(() => conversation.messages.filter((m) => !(m.event?.kind === "error" && now - m.at >= ERROR_SHOWN_MS)), [conversation.messages, now]);
+  useEffect(() => {
+    const due = conversation.messages.filter((m) => m.event?.kind === "error" && now - m.at < ERROR_SHOWN_MS).map((m) => m.at + ERROR_SHOWN_MS);
+    if (!due.length) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(...due) - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [conversation.messages, now]);
+  const blocks = useMemo(() => blocksOf(shown), [shown]);
   const oldPages = useMemo(() => botPagesOld(conversation.messages), [conversation.messages]);
   const lastMine = conversation.messages.findLast((m) => m.author === "me" && !m.event);
   const last = conversation.messages.at(-1);
   const lastSeen = useRef(last?.id);
 
-  const restore = () => !!scroller.current && putBack(scroller.current, spot.current, "bottom");
+  const restore = () => {
+    const el = scroller.current;
+    if (!el) return false;
+    const back = putBack(el, spot.current, "bottom");
+    moved.current = el.scrollTop;
+    return back;
+  };
+  const detach = () => {
+    if (stick.current) remember();
+    stick.current = false;
+  };
   const remember = () => {
     const el = scroller.current;
     // Hidden (behind a thread, say), there's no layout to read a place from.
@@ -1247,6 +1269,18 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     top.current = spotIn(el, "top");
   };
   useEffect(() => () => void places.set(place, { stick: stick.current, top: top.current }), [place]);
+  // Opening or folding a run of activity (EventRun) keeps the view where it is, even at the bottom:
+  // the lines open under their toggle, which stays put, rather than the chat following them down.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    keepViews.set(el, () => {
+      stick.current = false;
+      remember();
+    });
+    return () => void keepViews.delete(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Follow new messages while at the bottom, and always after the user's own. New bubbles animate
   // in, so the jump itself can be instant. Scrolled up, what's in view stays there, whatever comes in
@@ -1263,6 +1297,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       if (!el.clientHeight) return;
       opened.current = true;
       if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
+      moved.current = el.scrollTop;
     } else if (!stick.current) restore();
     if (stick.current) el.scrollTop = el.scrollHeight;
     // Held from here on by what's now in view, so the resize observer's first look doesn't undo it.
@@ -1326,24 +1361,33 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     <div
       ref={scroller}
       className="bots-messages"
-      onWheel={() => (userScrolled.current = Date.now())}
+      // Detach on intent, before the browser's own smooth scrolling starts, so following never fights it.
+      onWheel={(e) => e.deltaY < 0 && detach()}
       onTouchStart={(e) => (touchY.current = e.touches[0]!.clientY)}
       onTouchMove={(e) => {
-        userScrolled.current = Date.now();
+        const y = e.touches[0]!.clientY;
+        // A finger moving down scrolls the chat up.
+        if (y > touchY.current) detach();
         // Dragging the conversation down puts the keyboard away, to read more of it.
-        if (e.touches[0]!.clientY - touchY.current > 24) composerField()?.blur();
+        if (y - touchY.current > 24) composerField()?.blur();
       }}
       // So does tapping somewhere in it that isn't a control. Only touch screens have a keyboard to put away.
       onClick={(e) => {
         if (window.matchMedia("(pointer: coarse)").matches && !(e.target as Element).closest("button, a, input, textarea")) composerField()?.blur();
       }}
-      onKeyDown={() => (userScrolled.current = Date.now())}
+      onKeyDown={(e) => (["ArrowUp", "PageUp", "Home"].includes(e.key) || (e.key === " " && e.shiftKey)) && detach()}
       onScroll={(e) => {
         const el = e.currentTarget;
         if (!el.clientHeight) return;
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if (gap < 60) stick.current = true;
-        else if (Date.now() - userScrolled.current < 600) stick.current = false;
+        const ours = Math.abs(el.scrollTop - moved.current) < 1;
+        moved.current = -1;
+        const delta = el.scrollTop - lastTop.current;
+        lastTop.current = el.scrollTop;
+        // All the way down attaches; any way up detaches (a scrollbar drag too, which sends nothing else).
+        // The chat's own moves only ever keep the view where it was, so they decide neither.
+        if (!ours && gap <= 2) stick.current = true;
+        else if (!ours && delta < 0) stick.current = false;
         remember();
         setAway(gap > 400);
       }}
@@ -1486,7 +1530,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
 }
 
 /** One activity line: who did what, and what it was about. */
-function EventLine({ message: m, bots, fresh, hidden }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean }) {
+function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
   const event = m.event!;
   // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
   // PR or thread title, not a mention, so a bot name inside it stays plain text.
@@ -1507,7 +1551,7 @@ function EventLine({ message: m, bots, fresh, hidden }: { message: BotMessage; b
   const changed = event.kind === "changed" && eventBot ? settingsChange(event.text) : undefined;
   return (
     // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
-    <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
+    <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
       <span className="bm-event-text">
         {authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
       </span>
@@ -1516,9 +1560,40 @@ function EventLine({ message: m, bots, fresh, hidden }: { message: BotMessage; b
           {event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
         </span>
       )}
+      {times > 1 && (
+        <span className="bm-event-times" aria-label={`${times} times`}>
+          ×{times}
+        </span>
+      )}
     </div>
   );
 }
+
+/**
+ * A run's lines with repeats folded: each line that does just what the one before it did (same bot, same
+ * words, same detail) gets times 0, and the first of them how many there are in a row.
+ */
+function repeats(messages: BotMessage[]): { m: BotMessage; times: number }[] {
+  const key = (m: BotMessage) => JSON.stringify([m.author, m.event?.kind, m.event?.text, m.event?.detail, m.event?.bot, m.event?.threadId, m.event?.conversationId]);
+  const out: { m: BotMessage; times: number }[] = [];
+  let first: { m: BotMessage; times: number } | undefined;
+  for (const m of messages) {
+    if (first && key(first.m) === key(m)) {
+      first.times++;
+      out.push({ m, times: 0 });
+    } else {
+      first = { m, times: 1 };
+      out.push(first);
+    }
+  }
+  return out;
+}
+
+/** How long a bot's error line stays in the chat. */
+export const ERROR_SHOWN_MS = 60_000;
+
+/** Each chat's way to hold its view still, for a run's toggle to call as it opens or folds (Messages). */
+const keepViews = new WeakMap<HTMLElement, () => void>();
 
 /**
  * Activity lines in a row, folded into one: the bots behind them and how many things they did. Opened,
@@ -1531,14 +1606,30 @@ function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot
   const fresh = messages.every((m) => m.at > since);
   return (
     <div className={cx("bm-events", fresh && "bm-recv")} data-open={open || undefined}>
-      <button type="button" className="bm-events-toggle" aria-expanded={open} data-id={`run-${messages[0]!.id}`} onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className="bm-events-toggle"
+        aria-expanded={open}
+        data-id={`run-${messages[0]!.id}`}
+        onClick={(e) => {
+          const chat = e.currentTarget.closest<HTMLElement>(".bots-messages");
+          if (chat) keepViews.get(chat)?.();
+          setOpen(!open);
+        }}
+      >
         {who.length > 0 && <Mascots bots={who.slice(0, 3)} size={14} />}
         <span>{messages.length} background actions</span>
         <ChevronRight className="bm-events-chevron" size={13} strokeWidth={2} aria-hidden />
       </button>
-      {messages.map((m) => (
-        <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open} />
-      ))}
+      {/* The same thing done again and again, with nothing between, shows once with how many times. The
+          repeats stay in the page, hidden, so finding a line by its id still works. */}
+      {repeats(messages).map(({ m, times }, i) =>
+        times === 0 ? (
+          <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden />
+        ) : (
+          <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open} index={i} times={times} />
+        ),
+      )}
     </div>
   );
 }
@@ -2185,12 +2276,23 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
             </>
           ) : (
             <>
-              {/* The bots one by one, the name, and a chevron to the details. */}
+              {/* The bots one by one; their name and a chevron to the details open out from them on hover
+                  (bots.css, .bots-head-reveal), and stay while the details are open. */}
               <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
-              <span className="bots-head-name">{name}</span>
-              {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+              <span className="bots-head-reveal">
+                <span>
+                  <span className="bots-head-name">{name}</span>
+                  {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+                </span>
+              </span>
               {!remote && <HeadTasks conversation={conversation} mobile={false} />}
-              {!remote && <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />}
+              {!remote && (
+                <span className="bots-head-reveal bots-head-reveal-chevron">
+                  <span>
+                    <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />
+                  </span>
+                </span>
+              )}
             </>
           )}
         </button>

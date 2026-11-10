@@ -10,7 +10,7 @@ import type { Conversation } from "../../lib/bots/types";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
-import { arrowNav, canHover, copyText, cx, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
+import { arrowNav, canHover, copyText, cx, OPEN_SEARCH, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { Avatar, IconButton, Popover } from "../primitives";
 import { BotsToggle, ScrollThumb } from "../Sidebar";
 import { place, type Side } from "../Tooltip";
@@ -561,6 +561,16 @@ export function BotsSidebar() {
   const [dialog, setDialog] = useState<Dialog>();
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
+  const searchField = useRef<HTMLInputElement>(null);
+  // The search shortcut opens it (App.tsx).
+  useEffect(() => {
+    const open = () => {
+      setSearching(true);
+      requestAnimationFrame(() => searchField.current?.focus());
+    };
+    window.addEventListener(OPEN_SEARCH, open);
+    return () => window.removeEventListener(OPEN_SEARCH, open);
+  }, []);
   const listRef = useRef<HTMLElement>(null);
   const closeMenu = useCallback(() => setMenu(undefined), []);
   const { peek, bind: bindPeek, hide: hidePeek } = usePeek();
@@ -603,9 +613,12 @@ export function BotsSidebar() {
     <>
       <div className={cx("sidebar-scrim", open && mobile && "sidebar-scrim-visible")} onClick={() => useStore.getState().setBotsSidebarOpen(false)} aria-hidden />
       <aside className={cx("sidebar bots-sidebar", rail || closing ? "bots-sidebar-rail" : open ? "sidebar-open" : "sidebar-closed", closing && "bots-sidebar-closing")} aria-label="OpenBots" aria-hidden={!open && !rail && !closing} inert={!open && !rail}>
-        {rail ? (
+        {/* Closing, the rail is there from the start and the list fades away over it as the sidebar
+            narrows: one sheet collapsing, not a list leaving and a rail arriving after. */}
+        {(rail || closing) && (
           <Rail pinned={pinned} rest={[...rest, ...shared, ...filed.flatMap(([, list]) => list)].sort((a, b) => b.updatedAt - a.updatedAt)} activeId={activeId} onMenu={setMenu} onDialog={setDialog} peek={bindPeek} />
-        ) : (
+        )}
+        {!rail && (
           <div className="sidebar-inner bots-sidebar-inner">
             <div className="brand-row">
               {/* On a phone the list is a screen of its own, with the search always at hand. */}
@@ -636,14 +649,14 @@ export function BotsSidebar() {
             {(searching || mobile) && (
               <label className="search bots-search">
                 <Search size={16} />
-                <input type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
+                <input ref={searchField} type="text" value={query} placeholder={mobile ? "Search" : "Search bots and messages…"} aria-label="Search bots and messages" autoFocus={!mobile} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
                   // Clicking away from an empty search closes it; with something typed, it stays.
                   onBlur={(e) => {
                     if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".bots-search")?.contains(e.relatedTarget)) setSearching(false);
                   }}
                 />
                 {query && (
-                  <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
+                  <button type="button" className="search-clear" aria-label="Clear search" onClick={() => (setQuery(""), searchField.current?.focus())}>
                     <X size={14} />
                   </button>
                 )}

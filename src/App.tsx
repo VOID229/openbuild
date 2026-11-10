@@ -36,7 +36,7 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
-import { cx, useMediaQuery } from "./lib/ui";
+import { cx, OPEN_SEARCH, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -344,7 +344,8 @@ function Main() {
           st.setUsageOpen(true);
           break;
         case "focusSearch":
-          if (st.sidebarOpen) shown(".search input")?.focus();
+          // The sidebar showing opens its search, which sits behind a button.
+          if (st.botsOpen ? st.botsSidebarOpen : st.sidebarOpen) window.dispatchEvent(new Event(OPEN_SEARCH));
           else focusComposer();
           break;
         case "stashDraft":

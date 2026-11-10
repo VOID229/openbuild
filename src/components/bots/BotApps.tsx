@@ -11,6 +11,7 @@ import { leaveMarketplace, marketplaceBack, marketplaceUp, openMarketplaceApp } 
 import { useStore } from "../../lib/store";
 import { copyText, cx, useMediaQuery } from "../../lib/ui";
 import { useLightbox } from "../Lightbox";
+import { OptionSelect } from "../ModelSelect";
 import { IconButton, Spinner } from "../primitives";
 import { Hint, PageHeader } from "../SettingsUI";
 import { GithubSignIn } from "./GithubSignIn";
@@ -281,9 +282,13 @@ export function AppPage({ app, onDone }: { app: CatalogApp; onDone: () => void }
   // GitHub's own sign-in has its own button until it's signed in; a connected open server has nothing to send.
   const hasAction = !(connected && c.kind === "open") && !(app.githubAuth && !showPat && githubMode !== "app");
   const saves = connected && !!app.githubAuth;
+  // Saving only does something when a setting differs from what's saved, or a new key is typed in:
+  // changing one and back again is no change.
+  const valueOf = (f: NonNullable<CatalogApp["fields"]>[number], from?: Record<string, string>) => from?.[f.id] ?? f.options?.[0]?.value ?? "";
+  const changed = (app.fields ?? []).some((f) => (f.secret ? !!fields[f.id]?.trim() : valueOf(f, fields) !== valueOf(f, savedFields)));
   const reconnects = connected || view?.status === "needs-auth" || view?.status === "error";
   const action = (
-    <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy} onClick={connect}>
+    <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy || (saves && !changed)} onClick={connect}>
       {busy ? <Spinner size={13} /> : saves ? "Save" : reconnects ? "Reconnect" : "Connect"}
     </button>
   );
@@ -437,13 +442,7 @@ export function AppPage({ app, onDone }: { app: CatalogApp; onDone: () => void }
         <AppCard title={choices.some((f) => f.id === "access") ? "Permissions" : "Settings"} foot={saves && hasAction ? <div className="app-page-actions">{action}</div> : undefined}>
           {choices.map((field) => (
             <AppRowLine key={field.id} label={field.label} hint={field.help}>
-              <select className="input input-sm app-select" aria-label={field.label} value={fields[field.id] ?? field.options![0]!.value} onChange={(e) => setField(field.id, e.target.value)}>
-                {field.options!.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
+              <OptionSelect className="app-select" label={field.label} value={fields[field.id] ?? field.options![0]!.value} options={field.options!} onChange={(value) => setField(field.id, value)} />
             </AppRowLine>
           ))}
         </AppCard>

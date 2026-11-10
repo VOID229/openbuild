@@ -208,6 +208,39 @@ describe.skipIf(!browser)("Settings as a page", () => {
     await page.until("store.getState().settingsOpen === false");
   }, 60_000);
 
+  test("opened again within 10 seconds it's where it was left, scrolled as it was; later it starts at Profile's top", async () => {
+    const page = await Page.open(chrome!.ws, server!.url.href, 1000, 360, "!!window.store");
+    const content = ".spage .settings-content";
+    const scrollOf = () => page.eval<number>(`Math.round(document.querySelector(${JSON.stringify(content)}).scrollTop)`);
+    await page.eval("store.getState().openSettings()");
+    await page.until("!!document.querySelector('.spage .settings-content')");
+    expect(await page.eval<string>("store.getState().settingsSection")).toBe("profile");
+    // Into Bots, and down it.
+    await page.eval(`document.querySelector('.settings-nav-item[aria-label="Bots"]').click()`);
+    await page.until("store.getState().settingsSection === 'bots'");
+    await page.settle();
+    await page.eval(`document.querySelector(${JSON.stringify(content)}).scrollTop = 150`);
+    await page.settle();
+    expect(await scrollOf()).toBe(150);
+    // Out, and straight back in from the sidebar's button: Bots, 150px down.
+    await page.eval("store.getState().closeSettings()");
+    await page.until("!document.querySelector('.spage')");
+    await page.eval("store.getState().openSettings()");
+    await page.until("!!document.querySelector('.spage .settings-content')");
+    await page.settle();
+    expect(await page.eval<string>("store.getState().settingsSection")).toBe("bots");
+    expect(await scrollOf()).toBe(150);
+    // Out again, and back after more than 10 seconds: Profile, at its top.
+    await page.eval("store.getState().closeSettings()");
+    await page.until("!document.querySelector('.spage')");
+    await page.eval("(() => { const real = Date.now; Date.now = () => real() + 11_000; return true; })()");
+    await page.eval("store.getState().openSettings()");
+    await page.until("!!document.querySelector('.spage .settings-content')");
+    await page.settle();
+    expect(await page.eval<string>("store.getState().settingsSection")).toBe("profile");
+    expect(await scrollOf()).toBe(0);
+  }, 60_000);
+
   test("Bots → Models on a phone: each fallback on one line, lined up, and each bot's picker under its name", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 390, 900, "!!window.store");
     await page.eval("bots.setState({ defaultFallbackModels: ['openai-codex/gpt-6.1-sol', 'opencode-go/glm-5.3-flash', 'openrouter/deepseek/deepseek-v4.1-flash-1017-a-very-long-name'] })");

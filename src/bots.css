@@ -613,16 +613,30 @@
   animation: bots-fade-in var(--med) var(--ease-out) both;
 }
 
-/* Closing to the rail: the list stays while the sidebar narrows, sliding and fading out, and the rail
-   fades in once it's gone (BotsSidebar's closing), the way opening fades the list in as it widens. */
+/* Closing to the rail is one motion (BotsSidebar's closing): the rail is in place from the first frame,
+   fading up underneath, while the list lies over it and fades out quickly as the sidebar narrows. */
+.bots-sidebar-closing {
+  position: relative;
+}
+
 .bots-sidebar-closing .bots-sidebar-inner {
-  animation: bots-list-out var(--sidebar-ms) var(--sidebar-ease) both;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  pointer-events: none;
+  animation: bots-list-out calc(var(--sidebar-ms) * 0.6) var(--ease-out) both;
+}
+
+.bots-sidebar-closing .bots-rail-inner {
+  animation: bots-fade-in var(--sidebar-ms) var(--ease-out) both;
 }
 
 @keyframes bots-list-out {
   to {
     opacity: 0;
-    translate: -24px 0;
   }
 }
 
@@ -1233,6 +1247,71 @@
 
 .bots-head-pill:disabled {
   cursor: default;
+}
+
+/* At rest the header is just the mascots. Hovered (or focused, or with the details open) the name and
+   the chevron open out beside them: their column widens to fit (0fr → 1fr) while they sharpen from a
+   blur, fade up and settle in from the left, the chevron a beat behind the name. */
+.bots-head-reveal {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  min-width: 0;
+  margin-left: -8px;
+  transition:
+    grid-template-columns 420ms var(--sidebar-ease),
+    margin-left 420ms var(--sidebar-ease);
+}
+
+.bots-head-reveal > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0;
+  filter: blur(6px);
+  translate: -10px 0;
+  transition:
+    opacity 260ms var(--ease-out),
+    filter 360ms var(--ease-out),
+    translate 420ms var(--sidebar-ease);
+}
+
+.bots-head-reveal-chevron > span {
+  transition-delay: 60ms;
+}
+
+.bots-head-pill:is(:hover, :focus-visible, [aria-expanded="true"]) .bots-head-reveal {
+  grid-template-columns: 1fr;
+  margin-left: 0;
+}
+
+.bots-head-pill:is(:hover, :focus-visible, [aria-expanded="true"]) .bots-head-reveal > span {
+  opacity: 1;
+  filter: none;
+  translate: 0 0;
+}
+
+/* Without a mouse there's no hover to wait for: it's all there. */
+@media (hover: none) {
+  .bots-head-reveal {
+    grid-template-columns: 1fr;
+    margin-left: 0;
+  }
+
+  .bots-head-reveal > span {
+    opacity: 1;
+    filter: none;
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-head-reveal,
+  .bots-head-reveal > span {
+    transition: none;
+  }
 }
 
 .bot-lineup {
@@ -1923,6 +2002,19 @@
   text-align: center;
 }
 
+/* How many times in a row a line in a run happened (EventRun): a small count after it. */
+.bm-event-times {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
+}
+
 .bm-event-detail {
   display: inline-flex;
   align-items: center;
@@ -2011,6 +2103,21 @@
 
 .bm-events[data-open] .bm-events-chevron {
   transform: rotate(90deg);
+}
+
+/* Opened, the lines fade in and drift down into place, one after another. */
+@media (prefers-reduced-motion: no-preference) {
+  .bm-events[data-open] > .bm-event:not(.bm-recv) {
+    animation: bm-events-reveal 240ms var(--ease-out) both;
+    animation-delay: calc(min(var(--i, 0), 12) * 18ms);
+  }
+}
+
+@keyframes bm-events-reveal {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
 }
 
 /* A button that reads as a link, inside an activity line. */
@@ -3535,6 +3642,13 @@ button.bots-details-name:hover {
   border-color: transparent;
   background: var(--ink);
   color: var(--ink-fg);
+}
+
+/* Nothing to do yet (Save with nothing changed): plainly grey, not a dimmed white. */
+.bots-btn.bots-btn-primary:disabled {
+  opacity: 1;
+  background: var(--surface-3);
+  color: var(--text-3);
 }
 
 /* An anchor too (Open GitHub): `a.btn`'s inherited colour would otherwise win over the button's. */

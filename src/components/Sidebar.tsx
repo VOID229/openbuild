@@ -10,6 +10,7 @@ import { runtimeName } from "../lib/runtimes";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
+import { OPEN_SEARCH } from "../lib/ui";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
@@ -1388,6 +1389,17 @@ export function Sidebar() {
   const { setSidebarOpen, newChat, selectChat, openSettings, setSearchFocus } = useStore.getState();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [query, setQuery] = useState("");
+  // The search is behind a button, as in OpenBots: open while it's wanted, always on a phone.
+  const [searching, setSearching] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const open = () => {
+      setSearching(true);
+      requestAnimationFrame(() => searchField.current?.focus());
+    };
+    window.addEventListener(OPEN_SEARCH, open);
+    return () => window.removeEventListener(OPEN_SEARCH, open);
+  }, []);
   const deferredQuery = useDeferredValue(query.trim());
   const [menu, setMenu] = useState<MenuState>();
   const [renamingId, setRenamingId] = useState<string>();
@@ -1586,6 +1598,22 @@ export function Sidebar() {
               <PanelLeft size={18} />
             </IconButton>
             <span className="wordmark">OpenBuild</span>
+            {!mobile && (
+              <IconButton
+                label="Search"
+                aria-pressed={searching}
+                className={cx(searching && "filter-active")}
+                // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
+                // it and then a click that opens it again.
+                onMouseDown={(e) => searching && e.preventDefault()}
+                onClick={() => {
+                  setSearching(!searching);
+                  setQuery("");
+                }}
+              >
+                <Search size={18} />
+              </IconButton>
+            )}
             <FilterMenu />
           </div>
           <PluginSlot name="sidebar:header" />
@@ -1604,22 +1632,39 @@ export function Sidebar() {
             New thread
           </button>
 
-          <label className="search">
-            <Search size={14} />
-            <input
-              type="text"
-              value={query}
-              placeholder="Search threads…"
-              aria-label="Search threads"
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            />
-            {query && (
-              <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
-                <X size={14} />
-              </button>
-            )}
-          </label>
+          {(searching || mobile) && (
+            <label className="search">
+              <Search size={14} />
+              <input
+                ref={searchField}
+                type="text"
+                value={query}
+                placeholder="Search threads…"
+                aria-label="Search threads"
+                autoFocus={!mobile}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
+                // Clicking away from an empty search closes it; with something typed, it stays.
+                onBlur={(e) => {
+                  if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".search")?.contains(e.relatedTarget)) setSearching(false);
+                }}
+              />
+              {query && (
+                // Clearing it leaves you in it, to type again; clicking away from it empty then closes it.
+                <button
+                  type="button"
+                  className="search-clear"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setQuery("");
+                    searchField.current?.focus();
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </label>
+          )}
 
           <div className="sidebar-divider" />
 

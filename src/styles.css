@@ -925,13 +925,15 @@ select.input {
   padding: 8px 8px 8px 10px;
 }
 
+/* On a desktop both sidebars are one width, so switching between OpenBuild and OpenBots moves
+   nothing, and their wordmarks sit in the same place. OpenBots' rail keeps its own. */
 @media (min-width: 769px) {
-  .sidebar:not(.bots-sidebar),
-  .sidebar:not(.bots-sidebar) > .sidebar-inner {
+  .sidebar,
+  .sidebar > .sidebar-inner {
     width: var(--threads-sidebar-w);
   }
 
-  .sidebar.sidebar-closed:not(.bots-sidebar) {
+  .sidebar.sidebar-closed {
     width: 0;
   }
 }
@@ -958,9 +960,9 @@ select.input {
   left: 0;
   right: 0;
   text-align: center;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
   color: var(--text);
   pointer-events: none;
 }
@@ -3773,7 +3775,7 @@ select.input {
   flex-shrink: 0;
   padding: 12px 16px 32px 16px;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
 }
 
 .settings-nav-group {
@@ -3836,7 +3838,8 @@ select.input {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
+  overscroll-behavior: none;
+  /* Not even the elastic bounce at either end (macOS): every section's top and bottom stay still. */
   padding: 12px 32px 72px;
 }
 
@@ -5865,6 +5868,14 @@ p.key-status svg {
 
 .bad {
   color: var(--danger);
+}
+
+/* Nothing to go on with yet (Next before a label is typed): plainly grey, not a dimmed white. */
+.btn.btn-primary:disabled {
+  opacity: 1;
+  border-color: transparent;
+  background: var(--surface-3);
+  color: var(--text-3);
 }
 
 .btn-primary {
