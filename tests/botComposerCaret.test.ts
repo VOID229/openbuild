@@ -8,7 +8,9 @@ let server: Awaited<ReturnType<typeof serveFixture>> | undefined;
 
 beforeAll(async () => {
   if (!browser) return;
-  server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`);
+  // The app's own font, which joins "-->" into an arrow; the fixture doesn't load it otherwise.
+  const geist = Bun.file(`${import.meta.dir}/../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2`);
+  server = await serveFixture(`${import.meta.dir}/fixtures/botScroll/index.html`, { "/geist.woff2": () => new Response(geist) });
   chrome = await launchChrome();
 }, 60_000);
 
@@ -147,6 +149,42 @@ describe.skipIf(!browser)("an OpenBots draft's caret", () => {
     // The mentions drawn behind the text line up with it.
     expect(back.backdrop).toBe(back.scroll);
     expect(await page.eval<number>("document.querySelectorAll('.bots-composer-image-open').length")).toBe(1);
+  }, 60_000);
+
+  test("an arrow typed as \"-->\" stays three characters, in the field and in the backdrop that draws it", async () => {
+    const page = await open();
+    await page.eval(`(async () => {
+      const font = new FontFace("Geist Variable", "url(/geist.woff2)", { weight: "100 900" });
+      document.fonts.add(await font.load());
+    })()`);
+    // One key at a time, as typed: Chrome shapes the textarea's text as it goes.
+    for (const key of "cd --> ~/Efforts/active") await page.type(key);
+    const widths = await page.eval<{ drawn: number; plain: number; joined: number; field: string; input: string }>(`(() => {
+      const draft = document.querySelector('.bots-draft');
+      const range = document.createRange();
+      range.selectNodeContents(draft);
+      const width = (ligatures) => {
+        const span = document.createElement('span');
+        span.style.cssText = "position: absolute; white-space: pre; font-variant-ligatures: " + ligatures;
+        span.textContent = ${FIELD}.value;
+        draft.append(span);
+        const w = span.getBoundingClientRect().width;
+        span.remove();
+        return w;
+      };
+      const input = document.createElement('input');
+      document.body.append(input);
+      const other = getComputedStyle(input).fontVariantLigatures;
+      input.remove();
+      return { drawn: range.getBoundingClientRect().width, plain: width("none"), joined: width("normal"), field: getComputedStyle(${FIELD}).fontVariantLigatures, input: other };
+    })()`);
+    // The font does join them, so the check below means something.
+    expect(widths.joined).not.toBeCloseTo(widths.plain, 0);
+    // Both the textarea and the text drawn behind it leave them apart, so the caret lands where the text ends.
+    expect(widths.drawn).toBeCloseTo(widths.plain, 0);
+    expect(widths.field).toBe("none");
+    // As does every other field.
+    expect(widths.input).toBe("none");
   }, 60_000);
 
   test("on a touch screen, switching back doesn't focus the field", async () => {

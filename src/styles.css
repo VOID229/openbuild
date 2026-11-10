@@ -202,6 +202,14 @@ textarea {
   color: inherit;
 }
 
+/* Geist joins "->", "-->" and the like into arrows. In a field that's being typed into, Chrome shapes the
+   arrow differently as each key lands, so the caret ends up partway into a glyph: keep fields to plain
+   characters. */
+input,
+textarea {
+  font-variant-ligatures: none;
+}
+
 button {
   cursor: pointer;
   background: none;
