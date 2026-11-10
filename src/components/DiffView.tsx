@@ -5,6 +5,8 @@ import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, RotateCcw, W
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiUrl } from "../lib/devices";
 import type { TerminalFolder } from "../lib/terminal";
+import { folderKey } from "../lib/panel";
+import { useScrollRestore } from "../lib/scrollRestore";
 import { cx } from "../lib/ui";
 import { FileIcon } from "./FileTree";
 import { IconButton, Spinner } from "./primitives";
@@ -177,6 +179,8 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
   const [wrap, toggleWrap] = useDiffWrap();
   const { files, isOpen, toggle, allFolded, toggleAll, reset, adds, dels } = useDiffFiles(data?.patch);
   const last = useRef<string>(undefined);
+  const body = useRef<HTMLDivElement>(null);
+  useScrollRestore(body, folder.cwd ? `diff:${folderKey(folder)}` : undefined);
 
   const load = useCallback(
     async (manual = false) => {
@@ -249,7 +253,7 @@ export function DiffView({ folder }: { folder: TerminalFolder }) {
           <RotateCcw size={13} />
         </IconButton>
       </div>
-      <div className={cx("dv-body", wrap && "dv-wrap")}>
+      <div ref={body} className={cx("dv-body", wrap && "dv-wrap")}>
         {!folder.cwd ? (
           <p className="fv-note">No project folder</p>
         ) : error && !data ? (

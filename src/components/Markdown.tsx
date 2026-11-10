@@ -12,9 +12,14 @@ import { copyText, cx } from "../lib/ui";
 // Only ~~double~~ tildes strike through: models write a lone "~" to mean "about" ("~10 GB"), and
 // GFM's default would strike everything between two of them.
 const remarkPlugins: ComponentProps<typeof ReactMarkdown>["remarkPlugins"] = [[remarkGfm, { singleTilde: false }], remarkMath];
+// react-markdown builds a processor for every block it renders, and rehype-highlight registers (and
+// later compiles) all its languages anew for each one: most of a long thread's first render. The
+// transform keeps no state but its highlighter, so every block shares one.
+let highlight: ReturnType<typeof rehypeHighlight> | undefined;
+const sharedHighlight = () => (highlight ??= rehypeHighlight({ detect: false }));
 const rehypePlugins: ComponentProps<typeof ReactMarkdown>["rehypePlugins"] = [
   [rehypeKatex, { throwOnError: false, strict: false }],
-  [rehypeHighlight, { detect: false }],
+  sharedHighlight,
 ];
 
 function CodeBlock({ children, ...props }: ComponentProps<"pre">) {

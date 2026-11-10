@@ -9,6 +9,7 @@ import { loadEntries, matchEntries } from "../lib/fileMentions";
 import { folderKey, usePanel } from "../lib/panel";
 import type { TerminalFolder } from "../lib/terminal";
 import { cx, trackDrag } from "../lib/ui";
+import { useScrollRestore } from "../lib/scrollRestore";
 import { FileError, listDir } from "../lib/workspaceFiles";
 import { IconButton } from "./primitives";
 
@@ -30,8 +31,27 @@ const STATUS_LABEL: Record<string, string> = { M: "Changed", A: "Added", "?": "N
 
 type Listing = { entries: TreeEntry[]; error?: undefined } | { entries?: undefined; error: string };
 
-// Which folders were open, per folder this browser has browsed: back to the same tree on returning.
-const openDirs = new Map<string, Set<string>>();
+// Which folders were open, per folder this browser has browsed: back to the same tree on returning,
+// and for the tab's session, so a reload lands on the same tree (and the place in it) too.
+const OPEN_DIRS_KEY = "openbuild:open-dirs";
+const openDirs = new Map<string, Set<string>>(
+  (() => {
+    try {
+      return (JSON.parse(sessionStorage.getItem(OPEN_DIRS_KEY) ?? "[]") as [string, string[]][]).map(([key, dirs]) => [key, new Set(dirs)]);
+    } catch {
+      return [];
+    }
+  })(),
+);
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", () => {
+    try {
+      sessionStorage.setItem(OPEN_DIRS_KEY, JSON.stringify([...openDirs].filter(([, dirs]) => dirs.size).map(([key, dirs]) => [key, [...dirs]])));
+    } catch {
+      // Storage blocked or full: the tree just opens shut.
+    }
+  });
+}
 
 /** A whole index, as the folders of a tree (the fallback for a device too old to list one folder at a time). */
 function treeFrom(entries: WorkspaceEntry[]): Record<string, TreeEntry[]> {
@@ -208,6 +228,8 @@ export function FileTree({ folder }: { folder: TerminalFolder }) {
   useEffect(() => setQuery(""), [key]);
   const { listings, reload } = useListings(folder, expanded, open);
   const search = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  useScrollRestore(list, open && !query.trim() ? `files:${key}` : undefined);
   const drag = useEdgeDrag(width, setWidth, "panel-dragging");
 
   const update = (next: Set<string>) => {
@@ -262,7 +284,7 @@ export function FileTree({ folder }: { folder: TerminalFolder }) {
             <RefreshCw size={14} />
           </IconButton>
         </div>
-        <div className="ft-list" role="tree" aria-label={folder.label}>
+        <div ref={list} className="ft-list" role="tree" aria-label={folder.label}>
           {query.trim() ? (
             <SearchResults folder={folder} query={query} open={openFile} reveal={reveal} />
           ) : (

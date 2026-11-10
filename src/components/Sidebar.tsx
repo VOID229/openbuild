@@ -11,6 +11,7 @@ import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
 import { OPEN_SEARCH } from "../lib/ui";
+import { useScrollRestore } from "../lib/scrollRestore";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
@@ -1428,6 +1429,8 @@ export function Sidebar() {
     };
   }, []);
   const historyRef = useRef<HTMLElement>(null);
+  // A reload keeps the list where it was (search results start at the top).
+  useScrollRestore(historyRef, deferredQuery ? undefined : closedView ? "threads:closed" : "threads");
   const updateChat = useStore((s) => s.updateChat);
   const today = useToday();
 
