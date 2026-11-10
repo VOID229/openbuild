@@ -121,6 +121,42 @@ describe.skipIf(!browser)("model picker", () => {
     await page.shoot("picker-dark-fast");
   }, 30_000);
 
+  test("as tall as what it shows, up to a cap past which the list scrolls; it only grows while open", async () => {
+    const page = await open("desktop");
+    await page.openPicker();
+    const measure = () =>
+      page.eval<{ height: number; listScroll: number; listClient: number; names: number }>(`(() => {
+        const mp = document.querySelector('.mp'), list = document.querySelector('.mp-list');
+        return { height: Math.round(mp.getBoundingClientRect().height), listScroll: list.scrollHeight, listClient: list.clientHeight, names: document.querySelectorAll('.mp-name').length };
+      })()`);
+    // Two favorites: no tall empty panel, and nothing to scroll.
+    const favorites = await measure();
+    expect(favorites.names).toBe(2);
+    expect(favorites.height).toBeLessThan(320);
+    expect(favorites.listScroll).toBeLessThanOrEqual(favorites.listClient + 1);
+    // The provider's two dozen models: as tall as it gets, and the list scrolls.
+    await page.click(".mp-rail-scroll .mp-rail-btn");
+    await page.until("document.querySelectorAll('.mp-name').length > 20");
+    await page.settle();
+    const all = await measure();
+    expect(all.height).toBe(380);
+    expect(all.listScroll).toBeGreaterThan(all.listClient + 100);
+    // Back to the favorites, or narrowing a search, keeps the height: nothing moves under the pointer.
+    await page.click('.mp-rail-btn[aria-label="Favorites"], .mp-rail > .mp-rail-btn');
+    await page.until("document.querySelectorAll('.mp-name').length === 2");
+    await page.settle();
+    expect((await measure()).height).toBe(all.height);
+    await page.eval("document.querySelector('.mp-search input').focus()");
+    await page.send("Input.insertText", { text: "haiku" });
+    await page.settle();
+    expect((await measure()).height).toBe(all.height);
+    // Opened again, it fits what it shows again.
+    await page.key("Escape", "Escape", 27);
+    await page.until(`document.querySelector('.mp') === null || document.querySelector('.mp').getAttribute('data-state') !== 'open'`);
+    await page.openPicker();
+    expect((await measure()).height).toBe(favorites.height);
+  }, 30_000);
+
   test("search, favorites and the keyboard still work", async () => {
     const page = await open("desktop");
     await page.openPicker();

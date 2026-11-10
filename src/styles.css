@@ -5449,8 +5449,8 @@ p.key-status svg {
   }
 }
 
-/* Phones: the model picker is a tall sheet along the bottom of the screen. Dropping from the pill
-   left it only the few hundred pixels around the composer, too short to scroll comfortably. */
+/* Phones: the model picker is a sheet along the bottom of the screen, up to a tall one. Dropping from
+   the pill left it only the few hundred pixels around the composer, too short to scroll comfortably. */
 @media (max-width: 768px) {
   .mp.popover {
     position: fixed;
@@ -5461,8 +5461,9 @@ p.key-status svg {
     z-index: 60;
     width: auto;
     max-width: none;
-    height: min(480px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
-    max-height: none !important;
+    /* As tall as what it shows, up to a tall sheet (Pickers.tsx keeps it from shrinking while open). */
+    height: auto !important;
+    max-height: min(480px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
     border-radius: var(--radius-xl);
     transform: translateY(12px);
     transform-origin: bottom center;
@@ -8255,6 +8256,8 @@ a.btn-primary {
    it. The footer, across the whole picker, holds the speed toggle and the runtime. */
 
 .mp {
+  display: flex;
+  flex-direction: column;
   width: min(540px, calc(100vw - 24px));
   overflow: hidden;
   padding: 0;
@@ -8276,7 +8279,10 @@ a.btn-primary {
   grid-template:
     "rail main effort" minmax(0, 1fr)
     "foot foot foot" auto / 40px minmax(0, 1fr) 132px;
-  height: 100%;
+  /* As tall as its tallest column, down to what the popover's max-height leaves (the list scrolls),
+     and filling the height it's held at once it has grown (Pickers.tsx). */
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 @container mp (max-width: 479px) {

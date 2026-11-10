@@ -456,8 +456,26 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
-  // Open right at the pill, toward whichever side has room. The height is fixed (not sized to the
-  // list) so switching providers or searching doesn't make the panel jump.
+  // As tall as what it shows, up to the room there is (then the list scrolls). While it's open it only
+  // grows: switching to a shorter provider or narrowing a search keeps it as it was, so the rail and
+  // the search field never move under the pointer. It fits its content again each time it opens.
+  const tallest = useRef(0);
+  const fitAgain = () => {
+    tallest.current = 0;
+    const pop = list.current?.closest<HTMLElement>(".mp");
+    if (pop) pop.style.minHeight = "";
+  };
+  useLayoutEffect(() => {
+    const pop = list.current?.closest<HTMLElement>(".mp");
+    if (!open || !pop) return fitAgain();
+    const h = pop.getBoundingClientRect().height;
+    if (h > tallest.current) {
+      tallest.current = h;
+      pop.style.minHeight = `${h}px`;
+    }
+  });
+
+  // Open right at the pill, toward whichever side has room.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -485,6 +503,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
       const pos: React.CSSProperties = up
         ? { left, top: "auto", bottom: wrap.bottom - pill.top + 6 }
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
+      fitAgain();
       setLayout({
         up,
         max: Math.max(220, Math.min(380, up ? above : below)),
@@ -499,6 +518,8 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   // Open on the favorites (if any), else on the selected model's provider.
   useEffect(() => {
     if (!open) return;
+    // It opened showing the last tab it had; fit to the one it opens on instead.
+    fitAgain();
     setQuery("");
     if (window.matchMedia("(pointer: fine)").matches)
       requestAnimationFrame(() => search.current?.focus());
@@ -576,7 +597,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         onClose={() => setOpen(false)}
         anchor={anchor}
         className={cx("mp", layout.up ? "drop-up" : "drop-down")}
-        style={{ ...layout.pos, height: layout.max }}
+        style={{ ...layout.pos, maxHeight: layout.max }}
         label="Choose a model"
       >
         <div className="mp-body">
