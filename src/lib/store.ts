@@ -15,12 +15,13 @@ import { initialRouteState } from "./routes";
 import { serverStorage, skipUnchanged } from "./stateStorage";
 import { clearLegacyKeys, fetchKeys, readLegacyKeys, saveKeys, stashLegacyKeys } from "./keyStore";
 import type { Chat, Detection, KeyStatus, Message, ModelRef, Selection, Settings } from "./types";
+import { reopenSettingsScroll, settingsPlace } from "./settingsPlace";
 
 export type SettingsSection = "security" | "account" | "profile" | "general" | "bots" | "shortcuts" | "pi" | "keys" | "runtimes" | "projects" | "devices" | "search" | "appearance" | "notifications" | "plugins" | `plugin:${string}`;
 
 const DEFAULT_SETTINGS: Settings = {
   theme: "system",
-  font: "fun",
+  font: "normal",
   autoScroll: true,
   confirmDelete: true,
   autoDeleteWorktrees: false,
@@ -263,10 +264,18 @@ interface State {
   /** Expanded state of the collapsible sidebar sections. */
   sections: SidebarSections;
   view: SidebarView;
+  /** Settings is showing as a page in place of the thread (or OpenBots), with its own URL. */
   settingsOpen: boolean;
   settingsSection: SettingsSection;
+  /** A page inside the section ("models", "bot/<id>"), or none for the section itself. */
+  settingsPage?: string;
+  /** On a phone, the list of sections rather than one of them. */
+  settingsIndex: boolean;
   /** The usage page is showing in place of a thread. */
   usageOpen: boolean;
+  /** OpenBots' Marketplace is showing as a page in place of the bot chat, at an app's own page or the catalog. */
+  marketplaceOpen: boolean;
+  marketplaceApp?: string;
   /** OpenBots is showing: its own sidebar and chat in place of threads. */
   botsOpen: boolean;
   /** Over OpenBots, the open thread shows in place of the bot chat (opened from a link there). */
@@ -333,9 +342,12 @@ interface State {
   refreshDetection: (plan?: PlanId) => Promise<void>;
   /** Check a search provider's keys: the given ones, or else those not checked yet. */
   verifySearch: (provider: SearchProviderId, only?: string[]) => Promise<void>;
-  openSettings: (section?: SettingsSection) => void;
+  /** Open Settings: at a section (and a page inside it), or where it was left; on a phone, at its list of sections. */
+  openSettings: (section?: SettingsSection, page?: string) => void;
   closeSettings: () => void;
   setUsageOpen: (open: boolean) => void;
+  /** Open OpenBots' Marketplace, at an app's page or the catalog. Leaving it is pages.ts's leaveMarketplace. */
+  openMarketplace: (app?: string) => void;
   setBotsOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   setBotsSidebarOpen: (open: boolean) => void;
@@ -360,6 +372,11 @@ interface State {
 
 const detectControllers: Partial<Record<PlanId, AbortController>> = {};
 const searchControllers = new Map<string, AbortController>();
+
+const PHONE = "(max-width: 768px)";
+const isPhone = () => typeof window !== "undefined" && !!window.matchMedia?.(PHONE).matches;
+/** On a phone a page in the main pane covers the lists: close whichever one is showing so it's seen. */
+const phoneListsClosed = (s: { botsOpen: boolean }) => (!isPhone() ? {} : s.botsOpen ? { botsSidebarOpen: false } : { sidebarOpen: false });
 
 const initialRoute: Partial<ReturnType<typeof initialRouteState>> = typeof window === "undefined" || !window.location ? {} : initialRouteState(window.location.pathname, window.location.hash);
 
@@ -403,10 +420,14 @@ export const useStore = create<State>()(
       botsSidebarOpen: typeof window === "undefined" || window.innerWidth > 768,
       sections: { pinned: true, attention: true, limits: true, subagents: true, woke: true, done: true, working: true, snoozed: false, closed: false },
       view: DEFAULT_VIEW,
-      settingsOpen: false,
-      settingsSection: "profile",
+      settingsOpen: initialRoute.settingsOpen ?? false,
+      settingsSection: initialRoute.settingsSection ?? "profile",
+      settingsPage: initialRoute.settingsPage,
+      settingsIndex: initialRoute.settingsIndex ?? false,
       // From the URL, so a reload paints the world it was on rather than OpenBuild until routing starts.
       usageOpen: initialRoute.usageOpen ?? false,
+      marketplaceOpen: initialRoute.marketplaceOpen ?? false,
+      marketplaceApp: initialRoute.marketplaceApp,
       botsOpen: initialRoute.botsOpen ?? false,
       botsThread: initialRoute.botsThread ?? false,
       ...(initialRoute.activeChatId ? { activeChatId: initialRoute.activeChatId } : {}),
@@ -758,11 +779,37 @@ export const useStore = create<State>()(
         ensureSelection();
       },
 
-      openSettings: (section) => set((s) => ({ settingsOpen: true, settingsSection: section ?? s.settingsSection })),
-      closeSettings: () => set({ settingsOpen: false }),
+      // Settings and Usage are pages in the main pane: on a phone that pane slides in over whichever list is showing.
+      openSettings: (section, page) => {
+        // Opened again without a place to go: back where it was left, if that was a moment ago (scroll
+        // and all, settingsPlace.ts), else Profile from its top.
+        if (!section && !get().settingsOpen) {
+          const place = settingsPlace();
+          reopenSettingsScroll(place);
+          return set((s) => ({
+            settingsOpen: true,
+            settingsSection: place?.section ?? "profile",
+            settingsPage: place?.page,
+            settingsIndex: place ? place.index : isPhone(),
+            marketplaceOpen: false,
+            ...phoneListsClosed(s),
+          }));
+        }
+        set((s) => ({
+          settingsOpen: true,
+          settingsSection: section ?? s.settingsSection,
+          settingsPage: section ? page : s.settingsOpen ? s.settingsPage : undefined,
+          settingsIndex: section ? false : s.settingsOpen ? s.settingsIndex : isPhone(),
+          marketplaceOpen: false,
+          ...phoneListsClosed(s),
+        }));
+      },
+      closeSettings: () => set({ settingsOpen: false, settingsPage: undefined }),
       // Usage opens over whichever side is showing, so closing it goes back there; switching sides closes it.
-      setUsageOpen: (open) => set({ usageOpen: open }),
-      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false, botsThread: false }),
+      setUsageOpen: (open) => set((s) => (open ? { usageOpen: true, settingsOpen: false, marketplaceOpen: false, ...phoneListsClosed(s) } : { usageOpen: false })),
+      // A page of OpenBots' own: the sidebar and the world stay as they are (on a phone the pane slides over the list, as Settings does).
+      openMarketplace: (app) => set((s) => ({ marketplaceOpen: true, marketplaceApp: app, settingsOpen: false, usageOpen: false, ...phoneListsClosed(s) })),
+      setBotsOpen: (open) => set({ botsOpen: open, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsThread: false }),
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
       setBotsSidebarOpen: (open) => set({ botsSidebarOpen: open }),
 
@@ -806,6 +853,8 @@ export const useStore = create<State>()(
         activeChatId: undefined,
         draftRemoteControl: false,
         usageOpen: false,
+        settingsOpen: false,
+        marketplaceOpen: false,
         botsOpen: false,
         botsThread: false,
         searchFocus: undefined,
@@ -814,11 +863,11 @@ export const useStore = create<State>()(
           : { ...s.settings, workspace: { ...s.settings.workspace, mode: s.settings.workspace.defaultMode ?? "worktree", branch: undefined } },
       })),
       selectChat: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: false, botsThread: false });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsOpen: false, botsThread: false });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       openThreadInBots: (id) => {
-        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, botsOpen: true, botsThread: true });
+        set({ activeChatId: id, searchFocus: undefined, usageOpen: false, settingsOpen: false, marketplaceOpen: false, botsOpen: true, botsThread: true });
         if (get().chats.find((c) => c.id === id)?.unread) get().updateChat(id, { unread: false });
       },
       removeChat: (id) => {
@@ -871,7 +920,7 @@ export const useStore = create<State>()(
       name: "openchat",
       // Saved by the local server on disk, so every port and browser sees the same settings.
       storage: skipUnchanged(createJSONStorage(() => serverStorage)),
-      version: 5,
+      version: 6,
       migrate: (persisted, version) => {
         const state = persisted as Partial<State>;
         // v1 shipped sample router chips and the auto router on; reset those to the new defaults.
@@ -918,6 +967,9 @@ export const useStore = create<State>()(
             },
           };
         }
+        // v6: the playful Comic Neue default gave way to Geist. Everyone still on it moves to the new
+        // default; the old face stays available in Appearance.
+        if (version < 6 && state.settings?.font === "fun") state.settings = { ...state.settings, font: "normal" };
         return state as State;
       },
       partialize: (s) => ({

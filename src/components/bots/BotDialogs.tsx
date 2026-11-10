@@ -169,7 +169,7 @@ export function CreateGroupDialog({ onClose, onCreated, preset = [] }: { onClose
             {members.length ? (
               <BotHuddle key={picked.join()} looks={members.map((b) => b.look)} size={112} />
             ) : (
-              <div className="bots-hero-empty">Pick at least two bots</div>
+              <div className="bots-hero-empty">Pick two or more bots</div>
             )}
           </div>
           <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your group" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />

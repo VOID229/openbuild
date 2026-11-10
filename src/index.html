@@ -23,15 +23,15 @@
       // Apply the saved theme before first paint to avoid a light/dark flash.
       (function () {
         var theme = "system";
-        document.documentElement.dataset.font = "fun";
+        document.documentElement.dataset.font = "normal";
         try {
           var saved = JSON.parse(localStorage.getItem("openchat") || "{}").state.settings;
           theme = saved.theme || "system";
-          document.documentElement.dataset.font = saved.font || "fun";
+          document.documentElement.dataset.font = saved.font || "normal";
         } catch (e) {}
         var dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.dataset.theme = dark ? "dark" : "light";
-        document.querySelector('meta[name="theme-color"]').content = dark ? "#1a1a1a" : "#ffffff";
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#000000" : "#ffffff";
       })();
     </script>
   </head>

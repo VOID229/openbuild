@@ -30,7 +30,11 @@ import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../../lib/draftSelection";
+import { HtmlRender } from "../HtmlRender";
+import { botPagesOld } from "../../lib/pagePreviews";
+import type { ToolPart } from "../../lib/types";
 import { ConnectCard } from "./BotApps";
+import { HeadTasks } from "./BotTodos";
 import { BotAvatar } from "./BotAvatar";
 import { BotProfileHover } from "./BotProfileCard";
 
@@ -69,7 +73,7 @@ function BotLink({ bot }: { bot: Bot }) {
   if (!thread) return <>{bot.name}</>;
   return (
     <button type="button" className="bm-bot-link" onClick={() => useBots.getState().select(thread)}>
-      <BotAvatar look={bot.look} size={16} alive={false} />
+      <BotAvatar look={bot.look} size={14} alive={false} />
       <span>{bot.name}</span>
     </button>
   );
@@ -145,14 +149,19 @@ function MentionAll({ everyone, text }: { everyone: Bot[]; text: string }) {
   );
 }
 
-/** An @mention in the bot's colour, opening its thread. */
-function Mention({ bot, text }: { bot: Bot; text: string }) {
+/**
+ * An @mention in the bot's colour, opening its thread. `tail` is the rest of the bot's full name
+ * (" · notes") when the message spelled it out after the mention: it stays in the text for copying,
+ * but the chip reads as the name alone.
+ */
+function Mention({ bot, text, tail }: { bot: Bot; text: string; tail?: string }) {
   const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
   const style = { "--mention": colorOf(bot.look).hex } as React.CSSProperties;
   const body = (
     <>
       <MentionAt bot={bot} />
       {text.slice(1)}
+      {tail && <span className="bm-mention-tail">{tail}</span>}
     </>
   );
   if (!thread) return <span className="bm-mention" style={style}>{body}</span>;
@@ -306,14 +315,22 @@ function LocalThreadReferences({ text, fileHref, withPulls }: { text: string; fi
   return <>{parts}</>;
 }
 
+/** What follows a bot's mention name in its full name ("Dr Eggbot · notes" → " · notes"), if the text goes on with it at `at`. */
+function nameTail(text: string, at: number, bot: Bot): string | undefined {
+  const tail = bot.name.slice(mentionName(bot.name).length);
+  if (!tail.trim() || text.slice(at, at + tail.length).toLowerCase() !== tail.toLowerCase()) return;
+  return text.slice(at, at + tail.length);
+}
+
 /** Plain text with @mentions and links. */
 function WithMentions({ text, bots, everyone, fileHref }: { text: string; bots: Bot[]; everyone: Bot[]; fileHref?: (url: string) => string }) {
   const parts: React.ReactNode[] = [];
   let last = 0;
   for (const { start, end, bot } of tagsIn(text, bots, everyone)) {
     if (start > last) parts.push(<ThreadReferences key={last} text={text.slice(last, start)} fileHref={fileHref} />);
-    parts.push(bot ? <Mention key={start} bot={bot} text={text.slice(start, end)} /> : <MentionAll key={start} everyone={everyone} text={text.slice(start, end)} />);
-    last = end;
+    const tail = bot && nameTail(text, end, bot);
+    parts.push(bot ? <Mention key={start} bot={bot} text={text.slice(start, end)} tail={tail} /> : <MentionAll key={start} everyone={everyone} text={text.slice(start, end)} />);
+    last = end + (tail?.length ?? 0);
   }
   if (last < text.length) parts.push(<ThreadReferences key={last} text={text.slice(last)} fileHref={fileHref} />);
   return <>{parts}</>;
@@ -340,7 +357,10 @@ const RichText = memo(function RichText({ text, bots, everyone, botId }: { text:
   return <>{parts}</>;
 });
 
-type Block = { kind: "divider"; at: number; key: string } | { kind: "event"; message: BotMessage } | { kind: "group"; author: string; messages: BotMessage[] };
+type Block = { kind: "divider"; at: number; key: string } | { kind: "events"; messages: BotMessage[] } | { kind: "group"; author: string; messages: BotMessage[] };
+
+/** An activity line that stands on its own rather than folding into a run: an error is news. */
+const standsAlone = (m: BotMessage) => m.event?.kind === "error";
 
 function blocksOf(all: BotMessage[]): Block[] {
   // Memory happens in the background; older chats can still hold these.
@@ -349,7 +369,13 @@ function blocksOf(all: BotMessage[]): Block[] {
   messages.forEach((m, i) => {
     const prev = messages[i - 1];
     if (!prev || m.at - prev.at > DIVIDER_GAP || !sameDay(prev.at, m.at)) blocks.push({ kind: "divider", at: m.at, key: `d-${m.id}` });
-    if (m.event) return blocks.push({ kind: "event", message: m });
+    if (m.event) {
+      // Activity lines in a row fold into one run, between the messages around them.
+      const run = blocks.at(-1);
+      if (run?.kind === "events" && !standsAlone(m) && !standsAlone(run.messages.at(-1)!)) run.messages.push(m);
+      else blocks.push({ kind: "events", messages: [m] });
+      return;
+    }
     const group = blocks.at(-1);
     if (group?.kind === "group" && group.author === m.author && m.at - group.messages.at(-1)!.at < GROUP_GAP) group.messages.push(m);
     else blocks.push({ kind: "group", author: m.author, messages: [m] });
@@ -492,7 +518,7 @@ function PollCard({ conversation, message, bots }: { conversation: Conversation;
               role={poll.multiple ? "checkbox" : "radio"}
               aria-checked={on}
               className={cx("bm-option", "bm-poll-option", on && "bm-option-on")}
-              style={{ "--share": `${poll.votes.length ? (by.length / poll.votes.length) * 100 : 0}%` } as React.CSSProperties}
+              style={{ "--share-x": poll.votes.length ? by.length / poll.votes.length : 0 } as React.CSSProperties}
               data-tooltip={by.length ? by.map((id) => authorName(id, bots).split(" ·")[0]).join(", ") : undefined}
               onClick={() => vote(o.key)}
             >
@@ -513,6 +539,16 @@ function PollCard({ conversation, message, bots }: { conversation: Conversation;
       <div className="bm-poll-foot">{foot.filter(Boolean).join(" · ")}</div>
     </div>
   );
+}
+
+/**
+ * A page a bot showed (its html_render): OpenBuild's own in-thread page, drawn the same way from the
+ * message instead of a tool call, in the same sandbox, with its download and full-screen view.
+ */
+function PageCard({ message, old }: { message: BotMessage; old: boolean }) {
+  const page = message.html!;
+  const part = useMemo<ToolPart>(() => ({ type: "tool", id: message.id, name: "html_render", status: "done", args: { html: page.html, title: page.title, height: page.height } }), [message.id, page.html, page.title, page.height]);
+  return <HtmlRender part={part} old={old} />;
 }
 
 function PlanCard({ message, bots }: { message: BotMessage; bots: Bot[] }) {
@@ -671,6 +707,8 @@ interface RowProps {
   seen?: React.ReactNode;
   /** Shown, but not confirmed by the workspace yet. */
   sending?: boolean;
+  /** Its page is a few turns back, so it starts collapsed (src/lib/pagePreviews.ts). */
+  oldPage?: boolean;
 }
 
 /**
@@ -685,11 +723,11 @@ const sameRow = (a: RowProps, b: RowProps) => {
   return !quoted || c.messages.find((x) => x.id === quoted) === d.messages.find((x) => x.id === quoted);
 };
 
-const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending }: RowProps) {
+const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending, oldPage }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
-  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
-  const card = !!(m.question || m.plan || m.poll || m.connect);
+  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
+  const card = !!(m.question || m.plan || m.poll || m.connect || m.html);
   const everyone = useMemo(() => everyoneIn(conversation, bots), [conversation.kind, conversation.botIds, bots]);
   const react = (emoji: string) => {
     const had = m.reactions?.some((r) => r.by === "me" && r.emoji === emoji && !r.to);
@@ -725,7 +763,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
       <div className="bm-line">
         <div
           ref={bubble}
-          className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card")}
+          className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card", m.html && "bm-page")}
           onDoubleClick={readonly ? undefined : (e) => {
             // Two taps also make a dblclick, but useBubbleTouch has already answered them.
             if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
@@ -750,6 +788,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           {m.question && <QuestionCard conversation={conversation} message={m} />}
           {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
           {m.plan && <PlanCard message={m} bots={bots} />}
+          {m.html && <PageCard message={m} old={!!oldPage} />}
           {m.connect && <ConnectCard appId={m.connect.app} />}
         </div>
         {!readonly && (
@@ -761,7 +800,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               <CornerUpLeft size={16} />
             </IconButton>
             {mine && !m.poll && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
-            <CopyAction text={m.text || messageText(m)} />
+            <CopyAction text={m.html ? m.html.html : m.text || messageText(m)} />
           </div>
         )}
       </div>
@@ -1137,7 +1176,8 @@ const edgeOf = (scroller: HTMLElement, edge: Edge) => scroller.scrollTop + (edge
 /** The last message starting above the bottom of the view, or the first still showing at its top. */
 function spotIn(scroller: HTMLElement, edge: Edge): Spot | undefined {
   const at = edgeOf(scroller, edge);
-  const rows = [...scroller.querySelectorAll<HTMLElement>(".bm-row[data-id], .bm-event[data-id]")];
+  // A folded run of activity holds its lines hidden, with no place of their own: its toggle stands for them.
+  const rows = [...scroller.querySelectorAll<HTMLElement>(".bm-row[data-id], .bm-event[data-id], .bm-events-toggle[data-id]")].filter((r) => r.offsetParent);
   const row = edge === "bottom" ? rows.findLast((r) => contentTop(r, scroller) < at) : rows.find((r) => contentTop(r, scroller) + r.offsetHeight > at);
   return row && { id: row.dataset.id!, offset: contentTop(row, scroller) - at };
 }
@@ -1168,13 +1208,16 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   // The chat is keyed by its workspace too (see BotsView), so this one's is fixed for its life.
   const [place] = useState(() => `${useBots.getState().workspace ?? ""}:${conversation.id}`);
   const [left] = useState(() => places.get(place));
-  /** Keep to the bottom as things arrive. Off once the user scrolls up, on again when they're back down. */
+  /** Attached: keep to the bottom as things arrive. Any scroll up by the user detaches, and from then on
+   *  only they move the view; scrolling all the way back down attaches it again. */
   const stick = useRef(left?.stick ?? true);
+  /** Where the chat last moved the view itself, so that scroll isn't taken for the user's. */
+  const moved = useRef(-1);
+  const lastTop = useRef(0);
   /** Off the bottom, the message the view keeps in place as content above or below it changes. */
   const spot = useRef<Spot>(undefined);
   /** And the one at the top of the view, for opening the chat here again. */
   const top = useRef(left?.stick === false ? left.top : undefined);
-  const userScrolled = useRef(0);
   const [away, setAway] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const anchor = useRef<HTMLElement | null>(null);
@@ -1192,20 +1235,84 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   const touchY = useRef(0);
   const readonly = conversation.kind === "side";
   const group = conversation.kind !== "direct";
-  const blocks = useMemo(() => blocksOf(conversation.messages), [conversation.messages]);
+  // A bot's error ("couldn't reply") is news, not history: it shows for a minute, then goes.
+  const [now, setNow] = useState(Date.now);
+  const shown = useMemo(() => conversation.messages.filter((m) => !(m.event?.kind === "error" && now - m.at >= ERROR_SHOWN_MS)), [conversation.messages, now]);
+  useEffect(() => {
+    const due = conversation.messages.filter((m) => m.event?.kind === "error" && now - m.at < ERROR_SHOWN_MS).map((m) => m.at + ERROR_SHOWN_MS);
+    if (!due.length) return;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, Math.min(...due) - Date.now()) + 50);
+    return () => clearTimeout(timer);
+  }, [conversation.messages, now]);
+  const blocks = useMemo(() => blocksOf(shown), [shown]);
+  const oldPages = useMemo(() => botPagesOld(conversation.messages), [conversation.messages]);
   const lastMine = conversation.messages.findLast((m) => m.author === "me" && !m.event);
   const last = conversation.messages.at(-1);
   const lastSeen = useRef(last?.id);
 
-  const restore = () => !!scroller.current && putBack(scroller.current, spot.current, "bottom");
+  const restore = () => {
+    const el = scroller.current;
+    if (!el) return false;
+    const back = putBack(el, spot.current, "bottom");
+    moved.current = el.scrollTop;
+    return back;
+  };
+  const detach = () => {
+    if (stick.current) remember();
+    stick.current = false;
+  };
   const remember = () => {
     const el = scroller.current;
     // Hidden (behind a thread, say), there's no layout to read a place from.
     if (!el?.clientHeight) return;
-    spot.current = spotIn(el, "bottom");
+    // A run opening or folding holds its toggle still until it has finished moving.
+    if (!(pin.current && performance.now() < pin.current.until)) spot.current = spotIn(el, "bottom");
     top.current = spotIn(el, "top");
   };
+  /** A toggle being held still on screen while its run opens or folds, and until when. */
+  const pin = useRef<{ until: number }>(undefined);
+  /** Room kept below the chat after a run folds near its end, so the view doesn't drop with it. */
+  const spacer = useRef<HTMLDivElement>(null);
+  const slack = useRef(0);
+  const setSlack = (px: number) => {
+    slack.current = px;
+    if (spacer.current) spacer.current.style.height = px ? `${px}px` : "";
+  };
+  /** Following the bottom: the room kept after a fold isn't needed any more. */
+  const followBottom = (el: HTMLElement) => {
+    if (slack.current) setSlack(0);
+    el.scrollTop = el.scrollHeight;
+  };
+  /** Down to just the room the view stands on now: nothing on screen moves, and none is left to scroll into. */
+  const trimSlack = () => {
+    const el = scroller.current;
+    if (!el || !slack.current || (pin.current && performance.now() < pin.current.until)) return;
+    const need = Math.max(0, Math.ceil(el.scrollTop + el.clientHeight - (el.scrollHeight - slack.current)));
+    if (need < slack.current) setSlack(need);
+  };
   useEffect(() => () => void places.set(place, { stick: stick.current, top: top.current }), [place]);
+  // Opening or folding a run of activity (EventRun) keeps the view where it is, even at the bottom:
+  // the lines open under their toggle, which stays put, rather than the chat following them down.
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    keepViews.set(el, (toggle, folding, body) => {
+      stick.current = false;
+      // Not the line at the bottom of the view (it may be in the run that's folding away), but the toggle.
+      if (el.clientHeight) {
+        spot.current = { id: toggle.dataset.id!, offset: contentTop(toggle, el) - (el.scrollTop + el.clientHeight) };
+        pin.current = { until: performance.now() + 700 };
+      }
+      // Folding near the end would leave the view nothing to stand on, and the browser would pull it up:
+      // keep that room, down to what the view needs once the fold is done, and less as the reader scrolls up.
+      if (folding && body) {
+        setSlack(slack.current + body.offsetHeight);
+        setTimeout(trimSlack, 720);
+      }
+    });
+    return () => void keepViews.delete(el);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Follow new messages while at the bottom, and always after the user's own. New bubbles animate
   // in, so the jump itself can be instant. Scrolled up, what's in view stays there, whatever comes in
@@ -1222,8 +1329,9 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       if (!el.clientHeight) return;
       opened.current = true;
       if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
+      moved.current = el.scrollTop;
     } else if (!stick.current) restore();
-    if (stick.current) el.scrollTop = el.scrollHeight;
+    if (stick.current) followBottom(el);
     // Held from here on by what's now in view, so the resize observer's first look doesn't undo it.
     remember();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1242,7 +1350,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
       windowHeight = window.innerHeight;
-      if (stick.current) el.scrollTop = el.scrollHeight;
+      if (stick.current) followBottom(el);
       // The keyboard coming up, or the composer growing and shrinking with the draft, keeps the last line
       // you could see above it, as it does in any messaging app. A desktop window resized keeps its top.
       else if (changed && resized && !coarse.matches) remember();
@@ -1285,24 +1393,36 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     <div
       ref={scroller}
       className="bots-messages"
-      onWheel={() => (userScrolled.current = Date.now())}
+      // Detach on intent, before the browser's own smooth scrolling starts, so following never fights it.
+      onWheel={(e) => e.deltaY < 0 && detach()}
       onTouchStart={(e) => (touchY.current = e.touches[0]!.clientY)}
       onTouchMove={(e) => {
-        userScrolled.current = Date.now();
+        const y = e.touches[0]!.clientY;
+        // A finger moving down scrolls the chat up.
+        if (y > touchY.current) detach();
         // Dragging the conversation down puts the keyboard away, to read more of it.
-        if (e.touches[0]!.clientY - touchY.current > 24) composerField()?.blur();
+        if (y - touchY.current > 24) composerField()?.blur();
       }}
       // So does tapping somewhere in it that isn't a control. Only touch screens have a keyboard to put away.
       onClick={(e) => {
         if (window.matchMedia("(pointer: coarse)").matches && !(e.target as Element).closest("button, a, input, textarea")) composerField()?.blur();
       }}
-      onKeyDown={() => (userScrolled.current = Date.now())}
+      onKeyDown={(e) => (["ArrowUp", "PageUp", "Home"].includes(e.key) || (e.key === " " && e.shiftKey)) && detach()}
       onScroll={(e) => {
         const el = e.currentTarget;
         if (!el.clientHeight) return;
         const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
-        if (gap < 60) stick.current = true;
-        else if (Date.now() - userScrolled.current < 600) stick.current = false;
+        const ours = Math.abs(el.scrollTop - moved.current) < 1;
+        moved.current = -1;
+        const delta = el.scrollTop - lastTop.current;
+        lastTop.current = el.scrollTop;
+        // All the way down attaches; any way up detaches (a scrollbar drag too, which sends nothing else).
+        // The chat's own moves only ever keep the view where it was, so they decide neither. The end of the
+        // room kept after a fold isn't the bottom of the chat: it doesn't attach until that room is gone.
+        if (!ours && gap <= 2 && !slack.current) stick.current = true;
+        else if (!ours && delta < 0) stick.current = false;
+        // The room kept after a fold goes as the reader moves up, a pixel for a pixel: never all at once.
+        trimSlack();
         remember();
         setAway(gap > 400);
       }}
@@ -1324,39 +1444,10 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                 {dividerTime(b.at)}
               </div>
             );
-          if (b.kind === "event") {
-            const m = b.message;
-            // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
-            // PR or thread title, not a mention, so a bot name inside it stays plain text.
-            const eventBot = m.event!.bot ? bots.find((x) => x.id === m.event!.bot) : undefined;
-            // A bot's own activity names it first, looked up by author so a rename shows up on old lines
-            // too. A line that already names a bot ("Juniper left", a message, a model switch) keeps its words.
-            const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);
-            const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;
-            // A message between bots names the other bot by id, so a rename shows up on old lines too.
-            const messaged = m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined;
-            // A side chat several bots went off to ("Dr is talking it over with Tracer and Manager") links to it.
-            const huddled = m.event!.kind === "message" && m.event!.conversationId && !m.event!.bot ? m.event!.conversationId : undefined;
-            // A change of model names the bot and the model it moved to, with its account only when the bot has two of that model.
-            const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
-            const detail = eventDetail(m.event!);
-            const switchedTo = eventText(m.event!).replace(/^Switched to /, "") + (m.event!.kind === "model" && detail ? ` (${accountName(detail)})` : "");
-            // A change of settings ("Juniper's model: A → B") names its bot by id too, so a rename shows up on old lines.
-            const changed = m.event!.kind === "changed" && eventBot ? settingsChange(m.event!.text) : undefined;
-            return (
-              // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
-              <div key={m.id} className={cx("bm-event", m.at > since && "bm-recv")} data-id={m.id} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
-                <span className="bm-event-text">
-                  {authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(m.event!)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}
-                </span>
-                {m.event!.kind !== "model" && detail && (
-                  <span className="bm-event-detail">
-                    {m.event!.kind === "routine" && <ClockGlyph />}
-                    {m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
-                  </span>
-                )}
-              </div>
-            );
+          if (b.kind === "events") {
+            const key = b.messages[0]!.id;
+            if (b.messages.length === 1) return <EventLine key={key} message={b.messages[0]!} bots={bots} fresh={b.messages[0]!.at > since} />;
+            return <EventRun key={key} messages={b.messages} bots={bots} since={since} />;
           }
           const mine = b.author === "me";
           const bot = mine ? undefined : bots.find((x) => x.id === b.author);
@@ -1365,7 +1456,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
           return (
             <div key={b.messages[0]!.id} className={cx("bm-group", mine ? "bm-mine" : "bm-theirs")}>
               {group && !mine && (
-                <div className="bm-name" style={{ "--who": bot ? colorOf(bot.look).hex : from?.look ? colorOf(from.look).hex : undefined } as React.CSSProperties}>
+                <div className="bm-name">
                   {from ? (
                     <>
                       {from.owner ? from.friendName : from.name}
@@ -1399,6 +1490,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
                         onHold={onHold}
                         onPicker={onPicker}
                         sending={mine && sending.includes(m.id)}
+                        oldPage={oldPages.has(m.id)}
                         seen={
                           seenBy && (
                             <div className="bm-seen">
@@ -1427,6 +1519,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         {setup && primary && <PiSetupNotice setup={setup} bot={primary} />}
         <Working conversationId={conversation.id} direct={conversation.kind === "direct"} botIds={working} bots={bots} />
         <Typing conversation={conversation} botIds={typing} bots={bots} />
+        <div ref={spacer} className="bm-slack" aria-hidden />
       </div>
       {away && (
         <button type="button" className="bm-jump" aria-label="Jump to latest" onClick={() => {
@@ -1472,12 +1565,123 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
   );
 }
 
-function ClockGlyph() {
+/** One activity line: who did what, and what it was about. */
+function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
+  const event = m.event!;
+  // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
+  // PR or thread title, not a mention, so a bot name inside it stays plain text.
+  const eventBot = event.bot ? bots.find((x) => x.id === event.bot) : undefined;
+  // A bot's own activity names it first, looked up by author so a rename shows up on old lines
+  // too. A line that already names a bot ("Juniper left", a message, a model switch) keeps its words.
+  const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);
+  const authored = author && !namesBot(eventText(event), bots) ? authoredEventText(event) : undefined;
+  // A message between bots names the other bot by id, so a rename shows up on old lines too.
+  const messaged = event.kind === "message" && event.conversationId ? eventBot : undefined;
+  // A side chat several bots went off to ("Dr is talking it over with Tracer and Manager") links to it.
+  const huddled = event.kind === "message" && event.conversationId && !event.bot ? event.conversationId : undefined;
+  // A change of model names the bot and the model it moved to, with its account only when the bot has two of that model.
+  const switcher = event.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;
+  const detail = eventDetail(event);
+  const switchedTo = eventText(event).replace(/^Switched to /, "") + (event.kind === "model" && detail ? ` (${accountName(detail)})` : "");
+  // A change of settings ("Juniper's model: A → B") names its bot by id too, so a rename shows up on old lines.
+  const changed = event.kind === "changed" && eventBot ? settingsChange(event.text) : undefined;
   return (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
+    // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
+    <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
+      <span className="bm-event-text">
+        {authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
+      </span>
+      {event.kind !== "model" && detail && (
+        <span className="bm-event-detail">
+          {event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
+        </span>
+      )}
+      {times > 1 && (
+        <span className="bm-event-times" aria-label={`${times} times`}>
+          ×{times}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A run's lines with repeats folded: each line that does just what the one before it did (same bot, same
+ * words, same detail) gets times 0, and the first of them how many there are in a row.
+ */
+function repeats(messages: BotMessage[]): { m: BotMessage; times: number }[] {
+  const key = (m: BotMessage) => JSON.stringify([m.author, m.event?.kind, m.event?.text, m.event?.detail, m.event?.bot, m.event?.threadId, m.event?.conversationId]);
+  const out: { m: BotMessage; times: number }[] = [];
+  let first: { m: BotMessage; times: number } | undefined;
+  for (const m of messages) {
+    if (first && key(first.m) === key(m)) {
+      first.times++;
+      out.push({ m, times: 0 });
+    } else {
+      first = { m, times: 1 };
+      out.push(first);
+    }
+  }
+  return out;
+}
+
+/** How long a bot's error line stays in the chat. */
+export const ERROR_SHOWN_MS = 60_000;
+
+/** Each chat's way to hold its view still, for a run's toggle to call as it opens or folds (Messages). */
+const keepViews = new WeakMap<HTMLElement, (toggle: HTMLElement, folding: boolean, body: HTMLElement | null) => void>();
+/** How long a run takes to fold away (bots.css, .bm-events-body). */
+const RUN_FOLD_MS = 260;
+
+/**
+ * Activity lines in a row, folded into one: the bots behind them and how many things they did. Opened,
+ * each line shows as it would on its own. Folded, they're still there (hidden), so finding a line by
+ * its id, or reading its words, works either way.
+ */
+function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot[]; since: number }) {
+  const [open, setOpen] = useState(false);
+  // Folding, the lines stay for as long as they take to fold away (bots.css), then hide.
+  const [folding, setFolding] = useState(false);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!folding) return;
+    const timer = setTimeout(() => setFolding(false), RUN_FOLD_MS);
+    return () => clearTimeout(timer);
+  }, [folding]);
+  const who = [...new Set(messages.map((m) => m.author))].flatMap((id) => bots.find((b) => b.id === id) ?? []);
+  const fresh = messages.every((m) => m.at > since);
+  return (
+    <div className={cx("bm-events", fresh && "bm-recv")} data-open={open || undefined} data-folding={folding || undefined}>
+      <button
+        type="button"
+        className="bm-events-toggle"
+        aria-expanded={open}
+        data-id={`run-${messages[0]!.id}`}
+        onClick={(e) => {
+          const chat = e.currentTarget.closest<HTMLElement>(".bots-messages");
+          if (chat) keepViews.get(chat)?.(e.currentTarget, open, body.current);
+          setFolding(open && !window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+          setOpen(!open);
+        }}
+      >
+        {who.length > 0 && <Mascots bots={who.slice(0, 3)} size={14} />}
+        <span>{messages.length} background actions</span>
+        <ChevronRight className="bm-events-chevron" size={13} strokeWidth={2} aria-hidden />
+      </button>
+      {/* The same thing done again and again, with nothing between, shows once with how many times. The
+          repeats stay in the page, hidden, so finding a line by its id still works. */}
+      <div ref={body} className="bm-events-body">
+        <div>
+          {repeats(messages).map(({ m, times }, i) =>
+            times === 0 ? (
+              <EventLine key={m.id} message={m} bots={bots} fresh={false} hidden />
+            ) : (
+              <EventLine key={m.id} message={m} bots={bots} fresh={open && m.at > since} hidden={!open && !folding} index={i} times={times} />
+            ),
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -2087,6 +2291,8 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
     const where = there && !there.hidden ? `Busy in ${conversationName(there, s.bots)}` : "Busy in another chat";
     if (conversation.kind === "direct") return where;
     const bot = s.bots.find((b) => b.id === first.botId);
+    // In a group, a bot busy in its own 1:1 would read "Researcher: busy in Researcher".
+    if (there?.kind === "direct") return `${bot ? firstName(bot) : "A bot"} is busy in another chat`;
     return `${bot ? firstName(bot) : "A bot"}: ${where[0]!.toLowerCase()}${where.slice(1)}`;
   });
   // Waiting elsewhere, on the back button.
@@ -2117,25 +2323,27 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                 <span className="bots-head-name">{name}</span>
                 {sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
               </span>
+              {!remote && <HeadTasks conversation={conversation} mobile />}
             </>
           ) : (
             <>
-              {/* At rest just the bots, one by one; hovered or focused (or with the details open), the
-                  name and a chevron slide out from behind them. */}
-              <ConversationAvatar conversation={conversation} size={22} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
+              {/* The bots one by one; their name and a chevron to the details open out from them on hover
+                  (bots.css, .bots-head-reveal), and stay while the details are open. */}
+              <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
               <span className="bots-head-reveal">
-                <span className="bots-head-reveal-clip">
-                  <span className="bots-head-reveal-body">
+                <span>
+                  <span>
                     <span className="bots-head-name">{name}</span>
                     {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
                   </span>
                 </span>
               </span>
+              {!remote && <HeadTasks conversation={conversation} mobile={false} />}
               {!remote && (
                 <span className="bots-head-reveal bots-head-reveal-chevron">
-                  <span className="bots-head-reveal-clip">
-                    <span className="bots-head-reveal-body">
-                      <ChevronRight className="bots-head-chevron" size={16} strokeWidth={2.25} aria-hidden />
+                  <span>
+                    <span>
+                      <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />
                     </span>
                   </span>
                 </span>

@@ -571,7 +571,7 @@
   height: var(--badge, 16px);
   border-radius: 50%;
   border: 2px solid var(--bg);
-  background: #f2a03c;
+  background: var(--warn);
   color: #fff;
 }
 
@@ -587,10 +587,10 @@
 .bots-toggle {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex: none;
-  border-radius: 10px;
+  border-radius: var(--radius);
   color: var(--text-2);
   transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
@@ -604,25 +604,49 @@
 
 /* Marketplace, in the footer beside the toggle, at the toggle's size. */
 .bots-apps-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
 }
 
 .bots-sidebar-inner {
-  animation: bots-fade-in 240ms var(--ease) both;
+  animation: bots-fade-in var(--med) var(--ease-out) both;
+}
+
+/* Closing to the rail is one motion (BotsSidebar's closing): the rail is in place from the first frame,
+   fading up underneath, while the list lies over it and fades out quickly as the sidebar narrows. */
+.bots-sidebar-closing {
+  position: relative;
+}
+
+.bots-sidebar-closing .bots-sidebar-inner {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  background: var(--bg);
+  pointer-events: none;
+  animation: bots-list-out calc(var(--sidebar-ms) * 0.6) var(--ease-out) both;
+}
+
+.bots-sidebar-closing .bots-rail-inner {
+  animation: bots-fade-in var(--sidebar-ms) var(--ease-out) both;
+}
+
+@keyframes bots-list-out {
+  to {
+    opacity: 0;
+  }
 }
 
 @keyframes bots-fade-in {
   from {
     opacity: 0;
-    transform: translateX(-6px);
   }
 }
 
-.bots-wordmark {
-  font-size: 21px;
-}
+
 
 .bots-search {
   margin: 0 0 6px;
@@ -637,29 +661,31 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
+/* A pinned chat: its mascot over its name. Selected, a quiet surface on a hairline. */
 .bots-tile {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   min-width: 0;
-  padding: 14px 6px 10px;
-  border-radius: 16px;
+  padding: 12px 6px 9px;
+  border-radius: var(--radius-lg);
   transition: background-color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .bots-tile:hover {
-    background: color-mix(in srgb, var(--text) 5%, var(--bg));
+    background: var(--hover);
   }
 }
 
 .bots-tile-active,
 .bots-tile-active:hover {
-  background: color-mix(in srgb, var(--text) 9%, var(--bg));
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 :where([data-keyboard-nav]) .bots-tile:focus-visible {
@@ -671,22 +697,22 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 64px;
-  height: 64px;
+  width: 52px;
+  height: 52px;
 }
 
 /* A group's huddle is bigger than the box (see Tile), spilling into the tile's padding, a little more
    above than below, so the tile and its name stay where they were. */
 .bots-tile-avatar .bot-huddle {
-  margin: -9px -8px -7px;
+  margin: -7px -6px -5px;
 }
 
 .bots-tile-dot {
   position: absolute;
-  top: 0;
-  right: -4px;
-  width: 9px;
-  height: 9px;
+  top: 1px;
+  right: -3px;
+  width: 7px;
+  height: 7px;
   border: 2px solid var(--bg);
   box-sizing: content-box;
 }
@@ -701,28 +727,28 @@
 }
 
 .bots-row {
-  border-radius: 12px;
+  border-radius: var(--radius);
   transition: background-color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .bots-row:hover {
-    background: color-mix(in srgb, var(--text) 5%, var(--bg));
+    background: var(--hover);
   }
 }
 
 .bots-row-active,
 .bots-row-active:hover {
-  background: color-mix(in srgb, var(--text) 9%, var(--bg));
+  background: var(--active);
 }
 
 .bots-row-main {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
-  padding: 8px 10px 8px 8px;
+  padding: 7px 10px 7px 8px;
   border-radius: inherit;
   text-align: left;
 }
@@ -744,8 +770,9 @@
   display: flex;
   gap: 4px;
   min-width: 0;
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 500;
+  line-height: 20px;
   white-space: nowrap;
 }
 
@@ -786,11 +813,12 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
+  line-height: 18px;
   color: var(--text-3);
 }
 
 .bots-row-unread .bots-row-title {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .bots-row-unread .bots-row-preview {
@@ -819,7 +847,7 @@
 }
 
 .bots-row-time {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -870,8 +898,8 @@
 }
 
 /* Closed on a desktop, the sidebar keeps a rail of avatars. */
-.bots-sidebar-rail {
-  width: 76px;
+.sidebar.bots-sidebar-rail {
+  width: 84px;
   opacity: 1;
 }
 
@@ -879,11 +907,11 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  width: 76px;
+  gap: 6px;
+  width: 84px;
   height: 100%;
   padding: 10px 0 12px;
-  animation: bots-fade-in 240ms var(--ease) both;
+  animation: bots-fade-in var(--med) var(--ease-out) both;
 }
 
 .bots-rail-inner .history-wrap {
@@ -895,7 +923,7 @@
   flex: 1;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-height: 0;
   overflow-y: auto;
   padding: 4px 0;
@@ -935,14 +963,15 @@
   --rail-fade-bottom: 36px;
 }
 
+/* A chat in the rail. Selected, a quiet surface on a hairline. */
 .bots-rail-item {
   position: relative;
   display: grid;
   flex: none;
   place-items: center;
-  width: 54px;
-  height: 54px;
-  border-radius: 16px;
+  width: 58px;
+  height: 58px;
+  border-radius: 14px;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -955,6 +984,7 @@
 .bots-rail-item-active,
 .bots-rail-item-active:hover {
   background: var(--active);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 :where([data-keyboard-nav]) .bots-rail-item:focus-visible {
@@ -972,9 +1002,9 @@
   width: max-content;
   max-width: 280px;
   padding: 9px 12px 10px;
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
-  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
   color: var(--text);
   box-shadow: var(--shadow-md);
   pointer-events: none;
@@ -1002,8 +1032,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
 }
 
 .bots-peek-tag {
@@ -1016,12 +1046,13 @@
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-  font-size: 13px;
-  line-height: 1.4;
-  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-2);
   overflow-wrap: anywhere;
 }
 
+/* Unread: a small white dot on the avatar's corner, ringed in the rail's colour. */
 .bots-rail-dot {
   position: absolute;
   top: 6px;
@@ -1034,28 +1065,35 @@
 
 .bots-rail-sep {
   flex: none;
-  width: 30px;
+  width: 40px;
   height: 1px;
-  margin: 6px 0;
-  background: var(--border-strong);
+  margin: 4px 0;
+  background: var(--border);
 }
 
+/* New, Marketplace, back to OpenBuild and you: monochrome tools of one size, one under the other. */
 .bots-rail-foot {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
+  padding-top: 6px;
 }
 
 .bots-rail-foot .bots-rail-btn:not(:hover),
 .bots-rail-foot .bots-toggle:not(:hover) {
-  color: color-mix(in srgb, var(--text) 78%, transparent);
+  color: var(--text-2);
 }
 
 .bots-rail-btn {
   width: 40px;
   height: 40px;
-  border-radius: 11px;
+  border-radius: var(--radius);
+}
+
+.bots-rail-foot .bots-toggle {
+  width: 40px;
+  height: 40px;
 }
 
 .bots-rail-me {
@@ -1063,7 +1101,7 @@
   place-items: center;
   width: 44px;
   height: 44px;
-  margin-top: 4px;
+  margin-top: 6px;
   border-radius: 50%;
   transition: background-color var(--fast) var(--ease);
 }
@@ -1078,52 +1116,38 @@
    OpenBots — conversation (src/components/bots/BotChat.tsx)
    ========================================================================== */
 
+/* A bot's message sits on the faintest fill, the user's on the chat bubble's; neither has a border. */
 :root {
-  --bm-them: color-mix(in srgb, var(--text) 4%, var(--surface));
-  --bm-them-border: var(--border);
-  --bm-me: color-mix(in srgb, var(--text) 12%, var(--surface));
+  --bm-them: color-mix(in srgb, var(--text) 3%, var(--surface));
+  --bm-them-border: transparent;
+  --bm-me: var(--bubble);
   --bm-w: 760px;
+  --bm-head-h: 52px;
 }
 
 :root[data-theme="dark"] {
-  --bm-them: color-mix(in srgb, var(--text) 5.5%, var(--surface));
-  --bm-me: color-mix(in srgb, var(--text) 17%, var(--surface));
+  --bm-them: color-mix(in srgb, var(--text) 6%, var(--surface));
 }
 
-/* Switching between OpenBuild and OpenBots: the window holds still, and each pane crossfades into
-   its counterpart, sliding its edge if the sidebars differ in width. */
-.world-switch .sidebar {
-  view-transition-name: world-sidebar;
+/* Switching between OpenBuild and OpenBots (ui.ts crossfade): the layout changes at once and the
+   incoming sidebar and pane fade in, the sidebar drifting in a few pixels from the left. On the sidebar
+   and the pane themselves, never their content: content with a fade of its own (the OpenBots list, the
+   rail) would start that fade over again when this one ends, and flicker. Opacity and translate only
+   (not transform, which a phone's drawer slides on), so it costs nothing however heavy the panes are. */
+.world-enter .sidebar:not(.sidebar-closed) {
+  animation: world-side-in 220ms var(--ease-out) both;
 }
 
-.world-switch .main {
-  view-transition-name: world-main;
+.world-enter .main {
+  animation: world-main-in 180ms var(--ease-out) both;
 }
 
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
+@keyframes world-side-in {
+  from { opacity: 0; translate: -8px 0; }
 }
 
-::view-transition-group(world-sidebar),
-::view-transition-group(world-main),
-::view-transition-old(world-sidebar),
-::view-transition-new(world-sidebar),
-::view-transition-old(world-main),
-::view-transition-new(world-main) {
-  animation-duration: var(--fast);
-  animation-timing-function: var(--ease);
-}
-
-/* Cropped as the edge slides, not stretched. */
-::view-transition-old(world-sidebar),
-::view-transition-new(world-sidebar),
-::view-transition-old(world-main),
-::view-transition-new(world-main) {
-  width: 100%;
-  height: 100%;
-  object-fit: none;
-  object-position: left top;
+@keyframes world-main-in {
+  from { opacity: 0; }
 }
 
 .main-bots {
@@ -1149,10 +1173,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
-  color: var(--text);
+  color: var(--text-2);
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -1165,42 +1189,139 @@
   min-width: 0;
 }
 
+/* The chat's bar: a solid strip above the conversation, never over it. What scrolls up under its
+   edge fades into it rather than being cut at a line. Phones lay it over the list instead (below). */
 .bots-head {
-  position: absolute;
+  position: relative;
   z-index: 6;
-  top: 10px;
-  left: 0;
-  right: 0;
   display: flex;
+  flex: none;
+  align-items: center;
   justify-content: center;
+  height: var(--bm-head-h);
+  padding: 0 16px;
+  background: var(--surface);
+}
+
+.bots-head::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 12px;
+  height: 14px;
+  background: linear-gradient(var(--surface), transparent);
   pointer-events: none;
 }
 
-.bots-head > * {
-  pointer-events: auto;
-}
-
-/* At rest a compact pill of the bots alone. Hovered, focused from the keyboard, or with the details
-   open, it widens to show the name and a chevron; a touch screen, with no hover to find it by, keeps
-   them out. The width eases with the panels' curve while the words fade in and slide out from behind
-   the bots, so the pill grows as one piece. */
+/* Who the chat is with: their mascots, the name and a chevron to the details. Quiet until hovered. */
 .bots-head-pill {
-  --head-ease: var(--ease-panel);
-  --head-open: 420ms;
   display: flex;
   align-items: center;
-  max-width: min(420px, calc(100% - 120px));
-  height: 36px;
-  padding: 0 9px 0 8px;
-  border-radius: 18px;
-  border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface) 82%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  box-shadow: var(--shadow-sm);
-  font-size: 14.5px;
+  gap: 8px;
+  min-width: 0;
+  max-width: min(480px, calc(100% - 96px));
+  height: 34px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 14px;
   font-weight: 500;
-  transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+  letter-spacing: -0.01em;
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-head-pill:hover:not(:disabled) {
+    background: var(--hover);
+  }
+
+  .bots-head-pill:hover .bots-head-chevron {
+    color: var(--text-2);
+  }
+}
+
+.bots-head-pill[aria-expanded="true"] {
+  background: var(--hover);
+}
+
+.bots-head-pill:disabled {
+  cursor: default;
+}
+
+/* At rest the header is just the mascots. Hovered (or focused from the keyboard) the name and the
+   chevron open out beside them. Their window widens (0fr → 1fr) over the name at its full width, so it
+   is uncovered whole rather than squeezed letter by letter, and it fades up and settles in just behind
+   the widening, the chevron a beat later. Moving away, it fades first, then the window closes. */
+.bots-head-reveal {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  min-width: 0;
+  margin-left: -8px;
+  transition:
+    grid-template-columns 320ms var(--sidebar-ease) 60ms,
+    margin-left 320ms var(--sidebar-ease) 60ms;
+}
+
+/* The window: as wide as the column lets it be, showing what fits of the line inside. */
+.bots-head-reveal > span {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The line itself, always at its full width (so it's uncovered, never squeezed). */
+.bots-head-reveal > span > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: 300px;
+  white-space: nowrap;
+  opacity: 0;
+  translate: -6px 0;
+  transition:
+    opacity 140ms var(--ease-out),
+    translate 200ms var(--ease-out);
+}
+
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal {
+  grid-template-columns: 1fr;
+  margin-left: 0;
+  transition:
+    grid-template-columns 380ms var(--sidebar-ease),
+    margin-left 380ms var(--sidebar-ease);
+}
+
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal > span > span {
+  opacity: 1;
+  translate: 0 0;
+  transition:
+    opacity 260ms var(--ease-out) 110ms,
+    translate 380ms var(--sidebar-ease) 60ms;
+}
+
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal-chevron > span > span {
+  transition-delay: 170ms, 120ms;
+}
+
+/* On a touch screen there's no hover to wait for: it's all there. */
+@media (hover: none) and (pointer: coarse) {
+  .bots-head-reveal {
+    grid-template-columns: 1fr;
+    margin-left: 0;
+  }
+
+  .bots-head-reveal > span > span {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-head-reveal,
+  .bots-head-reveal > span > span {
+    transition: none;
+  }
 }
 
 .bot-lineup {
@@ -1214,128 +1335,17 @@
   padding-left: 3px;
   color: var(--text-2);
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
   line-height: 1;
-}
-
-/* Each part (the name, then the chevron) sits in a track that goes from nothing to its full width (0fr
-   to 1fr), so the pill sizes itself to the name without a guessed width. The words keep their full
-   width inside, never squeezed into an ellipsis on the way, and the clip shows them through a soft
-   right edge: it falls in the padding once open, and fades a name too long for the pill. */
-.bots-head-reveal {
-  display: grid;
-  grid-template-columns: 0fr;
-  min-width: 0;
-  transition: grid-template-columns var(--head-open) var(--head-ease);
-}
-
-.bots-head-reveal-clip {
-  min-width: 0;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 10px), transparent);
-}
-
-.bots-head-reveal-body {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: max-content;
-  padding: 0 10px 0 9px;
-  white-space: nowrap;
-  opacity: 0;
-  transform: translateX(-10px);
-  filter: blur(3px);
-  transition:
-    opacity 180ms var(--ease),
-    transform var(--head-open) var(--head-ease),
-    filter 240ms var(--ease);
-}
-
-/* The chevron's own track, which a long name never squeezes. */
-.bots-head-reveal-chevron {
-  flex: none;
-}
-
-.bots-head-reveal-chevron .bots-head-reveal-clip {
-  -webkit-mask-image: none;
-  mask-image: none;
-}
-
-.bots-head-reveal-chevron .bots-head-reveal-body {
-  padding: 0 1px 0 0;
-  transform: translateX(-8px);
 }
 
 .bots-head-chevron {
   display: block;
+  flex: none;
+  margin-left: -2px;
   color: var(--text-3);
   transition: color var(--fast) var(--ease);
-}
-
-.bots-head-pill:is(:focus-visible, [aria-expanded="true"]) .bots-head-reveal {
-  grid-template-columns: 1fr;
-}
-
-.bots-head-pill:is(:focus-visible, [aria-expanded="true"]) .bots-head-reveal-body {
-  opacity: 1;
-  transform: none;
-  filter: none;
-  transition-delay: 40ms, 0ms, 40ms;
-}
-
-@media (hover: hover) {
-  .bots-head-pill:hover {
-    background: color-mix(in srgb, var(--surface-2) 92%, transparent);
-  }
-
-  .bots-head-pill:hover .bots-head-chevron {
-    color: var(--text-2);
-  }
-}
-
-/* Opening isn't behind (hover: hover): a touch screen's sticky hover after a tap only opens what the
-   rule below already keeps open there. */
-.bots-head-pill:hover .bots-head-reveal {
-  grid-template-columns: 1fr;
-}
-
-.bots-head-pill:hover .bots-head-reveal-body {
-  opacity: 1;
-  transform: none;
-  filter: none;
-  transition-delay: 40ms, 0ms, 40ms;
-}
-
-@media (hover: none) and (pointer: coarse) {
-  .bots-head-reveal {
-    grid-template-columns: 1fr;
-  }
-
-  .bots-head-reveal-body {
-    opacity: 1;
-    transform: none;
-    filter: none;
-  }
-}
-
-/* Reduced motion: it opens at once, the words only fading in. */
-@media (prefers-reduced-motion: reduce) {
-  .bots-head-reveal {
-    transition: none;
-  }
-
-  .bots-head-reveal-body {
-    transform: none;
-    filter: none;
-    transition: opacity 120ms linear;
-  }
-}
-
-.bots-head-pill:active {
-  transform: scale(0.98);
 }
 
 /* Only a phone's bar has a second line to stack the name with. */
@@ -1349,8 +1359,10 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 0 1 auto;
   font-size: 13px;
   font-weight: 400;
+  letter-spacing: 0;
   color: var(--text-3);
 }
 
@@ -1359,6 +1371,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 .bots-head-side {
@@ -1385,29 +1398,26 @@
   width: 100%;
   max-width: var(--bm-w);
   margin: 0 auto;
-  padding: 70px 0 18px;
+  padding: 16px 0 24px;
 }
 
 /* A group: one author's messages in a row, under their name (groups) with their face at the bottom. */
 .bm-group {
   display: flex;
   flex-direction: column;
-  margin-top: 14px;
+  margin-top: 16px;
 }
 
 .bm-mine {
   align-items: flex-end;
 }
 
-/* In the bot's colour, pulled a little toward the text so light colours still read on a light page. */
+/* The name over a bot's run of messages: small and plain. The mascot beside it says who it is. */
 .bm-name {
-  margin: 0 0 4px 50px;
+  margin: 0 0 4px 44px;
   font-size: 12.5px;
-  font-weight: 600;
-  color: color-mix(in srgb, var(--who, var(--text-2)) 82%, var(--text));
-}
-
-.bm-group:has(.bot[data-color="white"]) .bm-name {
+  font-weight: 500;
+  line-height: 16px;
   color: var(--text-2);
 }
 
@@ -1420,7 +1430,7 @@
 .bm-group-row {
   display: flex;
   align-items: flex-end;
-  gap: 10px;
+  gap: 12px;
   max-width: 100%;
 }
 
@@ -1432,9 +1442,9 @@
   display: grid;
   flex: none;
   place-items: center;
-  width: 40px;
+  width: 32px;
   min-height: 1px;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
 /* A bot's mascot beside its messages is the button for its profile card (BotProfileCard.tsx). */
@@ -1443,7 +1453,7 @@
   flex: none;
   padding: 0;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: none;
   color: inherit;
   cursor: pointer;
@@ -1459,9 +1469,9 @@
   min-width: 232px;
   max-width: min(300px, calc(100vw - 16px));
   padding: 14px;
-  border: 1px solid var(--border-strong);
-  border-radius: 16px;
-  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
   color: var(--text);
   box-shadow: var(--shadow-lg);
   visibility: hidden;
@@ -1488,6 +1498,7 @@
   white-space: nowrap;
   font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .bm-profile-actions {
@@ -1497,13 +1508,13 @@
 }
 
 .bm-profile-btn {
-  height: 34px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--text) 7%, transparent);
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: transparent;
   color: var(--text);
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -1512,12 +1523,12 @@
 
 @media (hover: hover) {
   .bm-profile-btn:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--text) 12%, transparent);
+    background: var(--hover);
   }
 }
 
 .bm-profile-btn:active:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 15%, transparent);
+  background: var(--active);
 }
 
 .bm-profile-btn:disabled {
@@ -1528,7 +1539,7 @@
 .bm-stack {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
   max-width: 100%;
 }
@@ -1547,7 +1558,7 @@
 .bm-line {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   max-width: 100%;
 }
 
@@ -1556,17 +1567,18 @@
 }
 
 .bm-bubble {
-  max-width: min(580px, calc(var(--bm-w) * 0.78));
-  padding: 9px 15px;
-  border-radius: 20px;
+  max-width: min(620px, calc(var(--bm-w) * 0.82));
+  padding: 10px 16px;
+  border-radius: var(--radius-bubble);
   border: 1px solid var(--bm-them-border);
   background: var(--bm-them);
+  color: var(--text);
   font-size: 15px;
-  line-height: 1.47;
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   outline: none;
-  transition: box-shadow var(--fast) var(--ease), opacity 160ms var(--ease);
+  transition: opacity var(--med) var(--ease);
 }
 
 .bm-mine .bm-bubble {
@@ -1576,29 +1588,29 @@
 
 /* Bubbles in a run lean on each other: the corners where they meet tighten. */
 .bm-theirs .bm-row[data-pos="first"] .bm-bubble {
-  border-bottom-left-radius: 7px;
+  border-bottom-left-radius: 6px;
 }
 
 .bm-theirs .bm-row[data-pos="middle"] .bm-bubble {
-  border-top-left-radius: 7px;
-  border-bottom-left-radius: 7px;
+  border-top-left-radius: 6px;
+  border-bottom-left-radius: 6px;
 }
 
 .bm-theirs .bm-row[data-pos="last"] .bm-bubble {
-  border-top-left-radius: 7px;
+  border-top-left-radius: 6px;
 }
 
 .bm-mine .bm-row[data-pos="first"] .bm-bubble {
-  border-bottom-right-radius: 7px;
+  border-bottom-right-radius: 6px;
 }
 
 .bm-mine .bm-row[data-pos="middle"] .bm-bubble {
-  border-top-right-radius: 7px;
-  border-bottom-right-radius: 7px;
+  border-top-right-radius: 6px;
+  border-bottom-right-radius: 6px;
 }
 
 .bm-mine .bm-row[data-pos="last"] .bm-bubble {
-  border-top-right-radius: 7px;
+  border-top-right-radius: 6px;
 }
 
 /* A message of only emoji stands on its own, big. */
@@ -1611,39 +1623,44 @@
 }
 
 .bm-text strong {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .bm-text code {
   padding: 1px 5px;
-  border-radius: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
   background: var(--code-bg);
   font-family: var(--mono);
   font-size: 0.86em;
 }
 
-/* Links in bot chat are blue as well as underlined, so they read as clickable at a glance. */
-.bm-text .link,
-.bm-event-detail .link,
-.bm-event-text .bm-conversation-link {
+/* Links in a message are blue as well as underlined, so they read as clickable at a glance. */
+.bm-text .link {
   color: var(--file-link);
-  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  text-underline-offset: 2px;
 }
 
 @media (hover: hover) {
-  .bm-text .link:hover,
-  .bm-event-detail .link:hover,
-  .bm-event-text .bm-conversation-link:hover {
+  .bm-text .link:hover {
     text-decoration-color: currentColor;
   }
 }
 
+/* An @mention: the bot's mascot for the @, then its name, on a faint wash of its colour. */
 .bm-mention {
-  padding: 0 4px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--mention) 16%, transparent);
-  color: color-mix(in srgb, var(--mention) 80%, var(--text));
-  font-weight: 600;
+  padding: 1px 5px 1px 3px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--mention) 13%, transparent);
+  color: color-mix(in srgb, var(--mention) 45%, var(--text));
+  font-weight: 500;
+}
+
+/* The rest of a bot's full name ("· notes"), when a message spelled it out after the mention: kept
+   in the text for copying, but not shown. */
+.bm-mention-tail {
+  font-size: 0;
 }
 
 /* The mascot sits over the @, which stays (invisibly) in the text so widths and copying are unchanged. */
@@ -1693,19 +1710,22 @@
 .bm-mention-link {
   border: 0;
   font: inherit;
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color var(--fast) var(--ease);
 }
 
-.bm-mention-link:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .bm-mention-link:hover {
+    background: color-mix(in srgb, var(--mention) 20%, transparent);
+  }
 }
 
 .bm-images {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin: -4px -10px 6px;
+  margin: -4px -12px 8px;
 }
 
 .bm-bubble:has(.bm-images):not(:has(.bm-text)) {
@@ -1719,7 +1739,7 @@
 .bm-image {
   display: block;
   overflow: hidden;
-  border-radius: 16px;
+  border-radius: 14px;
   cursor: zoom-in;
 }
 
@@ -1735,7 +1755,7 @@
   display: flex;
   flex: none;
   gap: 0;
-  padding: 0 4px;
+  padding: 0 2px;
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--fast) var(--ease);
@@ -1748,9 +1768,9 @@
 }
 
 .bm-action {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
   color: var(--text-3);
 }
 
@@ -1761,19 +1781,20 @@
   }
 }
 
-/* Reactions sit just under the bubble, overlapping its edge. */
+/* Reactions sit just under their bubble, lined up with its edge, so they read as its own and never
+   as the start of the next message. */
 .bm-reactions {
   position: relative;
   z-index: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  margin: -7px 0 0 10px;
+  margin: 4px 0 2px 6px;
 }
 
 .bm-reactions-mine {
   justify-content: flex-end;
-  margin: -7px 10px 0 0;
+  margin: 4px 6px 2px 0;
 }
 
 /* A reaction and the chain answering it stay together, each answer hooked back to the one before. */
@@ -1796,33 +1817,32 @@
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
-  animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
+  animation: bm-pop var(--med) var(--ease-out) both;
 }
 
 /* The button is the pill and the mascots of the bots that reacted, so both toggle it and show who. */
 .bm-reaction {
   display: inline-flex;
-  animation: bm-pop 320ms cubic-bezier(0.3, 1.5, 0.5, 1) both;
-  transition: transform var(--fast) var(--ease);
+  animation: bm-pop var(--med) var(--ease-out) both;
 }
 
 .bm-reaction-pill {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
   height: 24px;
-  padding: 0 7px;
+  padding: 0 8px;
   border-radius: 12px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border);
   background: var(--surface);
-  box-shadow: var(--shadow-sm);
   font-size: 13px;
   transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-  .bm-reaction:hover {
-    transform: scale(1.06);
+@media (hover: hover) {
+  .bm-reaction:hover .bm-reaction-pill {
+    border-color: var(--border-strong);
+    background: var(--surface-2);
   }
 }
 
@@ -1902,7 +1922,7 @@
 
 .bm-reaction-count {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -1910,7 +1930,7 @@
 @keyframes bm-pop {
   from {
     opacity: 0;
-    transform: scale(0.4);
+    transform: scale(0.92);
   }
 }
 
@@ -1919,7 +1939,7 @@
   align-items: center;
   gap: 5px;
   max-width: min(420px, 80%);
-  margin: 4px 10px 3px;
+  margin: 4px 8px 4px;
   font-size: 12.5px;
   color: var(--text-3);
   text-align: left;
@@ -1938,7 +1958,7 @@
 
 .bm-quote-who {
   flex: none;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .bm-quote-text {
@@ -1952,9 +1972,9 @@
   align-items: center;
   gap: 4px;
   margin: 4px 8px 0;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-3);
-  animation: bots-fade 300ms var(--ease) both;
+  animation: bots-fade var(--med) var(--ease) both;
 }
 
 @keyframes bots-fade {
@@ -1963,35 +1983,195 @@
   }
 }
 
+/* The day and time, where a conversation picks up again after a while. */
 .bm-divider {
-  margin: 26px 0 6px;
+  margin: 28px 0 4px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .bm-divider:first-child {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
+/* Activity: what bots did in the background (a follow-up, a routine, a thread), in one quiet line
+   between the messages. Its links are as quiet as the line until pointed at. */
 .bm-event {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 4px 8px;
-  margin: 16px 0 2px;
-  font-size: 12.5px;
+  gap: 2px 6px;
+  margin: 14px 0 2px;
+  font-size: 12px;
+  line-height: 18px;
   color: var(--text-3);
   text-align: center;
+}
+
+/* How many times in a row a line in a run happened (EventRun): a small count after it. */
+.bm-event-times {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  line-height: 17px;
 }
 
 .bm-event-detail {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-3);
+}
+
+/* A dot between what happened and what it was about, unless that's just the bot it was done to ("Added Juniper"). */
+.bm-event-detail:not(:has(> .bm-bot-link:only-child))::before {
+  content: "·";
+  margin-right: 2px;
+}
+
+.bm-event-detail svg {
+  flex: none;
+}
+
+.bm-event .link,
+.bm-event .bm-conversation-link {
   color: var(--text-2);
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 2px;
+  transition: color var(--fast) var(--ease), text-decoration-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bm-event .link:hover,
+  .bm-event .bm-conversation-link:hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
+  }
+}
+
+/* A run of activity lines folds into one: the bots behind it, how many things they did, and a
+   chevron. Opened, the lines show under it as they would on their own. */
+.bm-events {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 14px 0 2px;
+}
+
+/* The lines under the toggle. Their height eases open and shut (0fr ↔ 1fr), so whatever is below
+   moves smoothly, while the toggle above stays put on screen (BotChat holds it there). */
+.bm-events-body {
+  display: grid;
+  grid-template-rows: 0fr;
+  align-self: stretch;
+  transition: grid-template-rows 260ms var(--sidebar-ease);
+}
+
+.bm-events[data-open] .bm-events-body {
+  grid-template-rows: 1fr;
+}
+
+.bm-events-body > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.bm-events-body .bm-event:first-of-type {
+  margin-top: 6px;
+}
+
+.bm-events-body .bm-event {
+  margin-top: 4px;
+}
+
+/* Under the fixed composer, room kept after a run folds near the end (BotChat's slack). */
+.bm-slack {
+  flex: none;
+}
+
+.bm-events-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 8px 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bm-events-toggle:hover {
+    background: var(--hover);
+    color: var(--text-2);
+  }
+}
+
+.bm-events-toggle .bm-mascots {
+  display: inline-flex;
+}
+
+.bm-events-toggle .bm-mascot + .bm-mascot {
+  margin-left: -3px;
+}
+
+.bm-events-chevron {
+  flex: none;
+  transition: transform var(--fast) var(--ease);
+}
+
+.bm-events[data-open] .bm-events-chevron {
+  transform: rotate(90deg);
+}
+
+/* Opened, the lines fade in and drift down into place, one after another; folded, they fade and lift
+   away together as their height closes. */
+@media (prefers-reduced-motion: no-preference) {
+  .bm-events[data-open] .bm-events-body .bm-event:not(.bm-recv) {
+    animation: bm-events-reveal 240ms var(--ease-out) both;
+    animation-delay: calc(min(var(--i, 0), 12) * 18ms);
+  }
+
+  .bm-events[data-folding] .bm-events-body .bm-event {
+    animation: bm-events-fold 180ms var(--ease-out) both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bm-events-body {
+    transition: none;
+  }
+}
+
+@keyframes bm-events-reveal {
+  from {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+}
+
+@keyframes bm-events-fold {
+  to {
+    opacity: 0;
+    translate: 0 -4px;
+  }
 }
 
 /* A button that reads as a link, inside an activity line. */
@@ -2002,38 +2182,46 @@
   font: inherit;
 }
 
+/* A bot named in an activity line: its mascot and name, linking to its chat. */
 .bm-bot-link {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   vertical-align: middle;
   padding: 0;
   border: 0;
   background: none;
   font: inherit;
-  color: var(--file-link);
+  color: var(--text-2);
   cursor: pointer;
+  transition: color var(--fast) var(--ease);
 }
 
 .bm-bot-link > span {
   text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-decoration-color: transparent;
   text-underline-offset: 2px;
+  transition: text-decoration-color var(--fast) var(--ease);
 }
 
-.bm-bot-link:hover > span {
-  text-decoration-color: currentColor;
+@media (hover: hover) {
+  .bm-bot-link:hover {
+    color: var(--text);
+  }
+
+  .bm-bot-link:hover > span {
+    text-decoration-color: currentColor;
+  }
 }
 
-/* Sending: the user's bubble rises in from the composer; a bot's settles in from its side. */
+/* Arriving: a new message fades up into place, from the composer for the user's own. Short, so a
+   quick exchange never queues up motion. */
 .bm-send {
-  animation: bm-send 380ms cubic-bezier(0.2, 0.9, 0.3, 1.15) both;
-  transform-origin: 100% 100%;
+  animation: bm-send var(--med) var(--ease-out) both;
 }
 
 .bm-recv {
-  animation: bm-recv 320ms var(--ease) both;
-  transform-origin: 0 100%;
+  animation: bm-recv var(--med) var(--ease-out) both;
 }
 
 /* Not confirmed by the workspace yet: dimmed only once that takes a moment, so a quick send doesn't flicker. */
@@ -2045,28 +2233,26 @@
 @keyframes bm-send {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.9);
-  }
-  45% {
-    opacity: 1;
+    transform: translateY(4px);
   }
 }
 
 @keyframes bm-recv {
   from {
     opacity: 0;
-    transform: translateY(6px) scale(0.95);
+    transform: translateY(4px);
   }
 }
 
+/* A quote followed to its message: the bubble lights up for a moment. */
 .bm-flash .bm-bubble {
-  animation: bm-flash 1.5s var(--ease);
+  animation: bm-flash 1.2s var(--ease);
 }
 
 @keyframes bm-flash {
   0%,
   40% {
-    box-shadow: 0 0 0 3px color-mix(in srgb, #3f87f5 45%, transparent);
+    box-shadow: 0 0 0 2px var(--focus);
   }
 }
 
@@ -2074,9 +2260,9 @@
 .bm-working {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-  animation: bm-working-in 260ms var(--ease-out, ease-out) both;
+  gap: 12px;
+  margin-top: 16px;
+  animation: bm-working-in var(--med) var(--ease-out) both;
 }
 
 .bm-working .bm-avatar {
@@ -2084,8 +2270,9 @@
 }
 
 .bm-working-text {
-  font-size: 14px;
-  animation: shimmer 1.6s linear infinite, bm-working-in 240ms ease-out both;
+  font-size: 13.5px;
+  color: var(--text-2);
+  animation: shimmer 1.6s linear infinite, bm-working-in var(--med) var(--ease-out) both;
 }
 
 @keyframes bm-working-in {
@@ -2111,8 +2298,7 @@
   border-radius: 50%;
   background: var(--text-2);
   opacity: 0.3;
-  animation: bm-dot 1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-  will-change: transform, opacity;
+  animation: bm-dot 1.2s var(--ease) infinite;
 }
 
 /* Negative delays: the wave is already moving on mount, no dot waits frozen for its first beat. */
@@ -2132,8 +2318,8 @@
     opacity: 0.3;
   }
   30% {
-    transform: translateY(-4px);
-    opacity: 1;
+    transform: translateY(-2px);
+    opacity: 0.9;
   }
 }
 
@@ -2145,21 +2331,21 @@
   flex: none;
   place-items: center;
   align-self: flex-end;
-  width: 36px;
-  height: 36px;
-  margin: -50px 4px 0 0;
+  width: 32px;
+  height: 32px;
+  margin: -46px 4px 0 0;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-md);
   color: var(--text-2);
-  animation: bm-pop 240ms var(--ease) both;
+  animation: bm-pop var(--med) var(--ease-out) both;
 }
 
 /* The reaction picker: six quick ones, and more on request. */
 .bm-react-pop {
-  padding: 5px;
-  border-radius: 24px;
+  padding: 4px;
+  border-radius: var(--radius-lg);
   overflow-y: auto;
   /* Wide enough for 8 a row, fewer on a narrow screen. */
   width: max-content;
@@ -2188,59 +2374,71 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
-  font-size: 21px;
+  border-radius: var(--radius);
+  font-size: 20px;
   line-height: 1;
   color: var(--text-2);
-  transition: transform 140ms var(--ease), background-color var(--fast) var(--ease);
+  transition: background-color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .bm-react-btn:hover {
     background: var(--hover);
-    transform: scale(1.18);
   }
 }
 
 .bm-react-btn-on {
-  background: color-mix(in srgb, #3f87f5 18%, transparent);
+  background: var(--accent-bg);
 }
 
 /* A bot asking the user to pick. */
+/* A card in the chat (a question, a poll, a plan): the bubble's fill on a hairline, with its
+   choices as tidy rows. */
 .bm-bubble.bm-card {
   width: min(480px, 100%);
-  padding: 15px 16px 12px;
-  border-radius: 22px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
   white-space: normal;
 }
 
+.bm-mine .bm-bubble.bm-card {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
 .bm-question-title {
-  font-size: 15.5px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
 }
 
 .bm-question-hint {
-  margin-top: 3px;
-  font-size: 13.5px;
-  color: var(--text-3);
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
 }
 
 .bm-options {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  margin: 12px -8px 0;
+  margin: 10px -8px 0;
 }
 
 .bm-option {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 42px;
+  gap: 10px;
+  min-height: 38px;
   padding: 6px 8px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   text-align: left;
-  font-size: 14.5px;
+  font-size: 14px;
+  line-height: 1.4;
   transition: background-color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
@@ -2254,13 +2452,14 @@
   display: grid;
   flex: none;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-2);
 }
 
@@ -2271,7 +2470,7 @@
 }
 
 .bm-option-on {
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .bm-option-off {
@@ -2283,7 +2482,7 @@
   align-items: center;
   gap: 6px;
   min-width: 240px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .bm-own .input {
@@ -2308,9 +2507,10 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  width: var(--share, 0%);
   background: color-mix(in srgb, var(--text) 8%, transparent);
-  transition: width 320ms var(--ease);
+  transform: scaleX(var(--share-x, 0));
+  transform-origin: left;
+  transition: transform var(--med) var(--ease-out);
 }
 
 .bm-poll-key-multi {
@@ -2333,7 +2533,7 @@
   min-width: 18px;
   text-align: right;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
@@ -2353,8 +2553,9 @@
 }
 
 .bm-plan-title {
-  font-size: 15.5px;
-  font-weight: 650;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .bm-plan-count {
@@ -2392,7 +2593,7 @@
 
 .bm-step-done .bm-step-icon {
   background: var(--ok);
-  color: #fff;
+  color: var(--surface);
 }
 
 .bm-step-done .bm-step-text {
@@ -2402,7 +2603,7 @@
 }
 
 .bm-step-doing .bm-step-icon {
-  color: #3f87f5;
+  color: var(--accent);
 }
 
 .bm-step-text {
@@ -2417,15 +2618,15 @@
   gap: 5px;
   height: 24px;
   padding: 0 8px 0 4px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: var(--hover);
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-2);
 }
 
 /* The composer. */
 .bots-dock {
-  padding: 0 24px max(18px, env(safe-area-inset-bottom));
+  padding: 0 24px max(16px, env(safe-area-inset-bottom));
 }
 
 /* The stash's tab sits on the composer's top edge, inside its rounded corners. */
@@ -2435,33 +2636,34 @@
   margin: 0 auto;
 }
 
+/* A raised field on a hairline, its tools in monochrome on either side of the text. */
 .bots-composer {
   position: relative;
   max-width: var(--bm-w);
   margin: 0 auto;
-  border-radius: 26px;
+  border-radius: var(--radius-xl);
   border: 1px solid var(--border-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--composer-shadow);
   transition: border-color var(--fast) var(--ease);
 }
 
 .bots-composer:focus-within {
-  border-color: color-mix(in srgb, var(--text) 26%, transparent);
+  border-color: color-mix(in srgb, var(--text) 24%, transparent);
 }
 
 .bots-composer-row {
   display: flex;
   align-items: flex-end;
-  gap: 4px;
-  padding: 6px;
+  gap: 2px;
+  padding: 8px;
 }
 
 .bots-composer-btn {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  color: var(--text-3);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius);
+  color: var(--text-2);
 }
 
 .bots-mic {
@@ -2469,17 +2671,17 @@
 }
 
 .bots-composer-notice {
-  padding: 6px 14px 0;
+  padding: 8px 14px 0;
   font-size: 12.5px;
   color: var(--danger);
-  animation: rise 200ms var(--ease) both;
+  animation: bots-fade var(--fast) var(--ease-out) both;
 }
 
 .bots-composer-input {
   flex: 1;
   min-width: 0;
   max-height: 180px;
-  padding: 8px 4px;
+  padding: 6px 6px;
   border: 0;
   outline: none;
   background: transparent;
@@ -2527,10 +2729,10 @@
 }
 
 .bots-draft-mention {
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--mention) 16%, transparent);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mention) 16%, transparent);
-  color: color-mix(in srgb, var(--mention) 80%, var(--text));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--mention) 13%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mention) 13%, transparent);
+  color: color-mix(in srgb, var(--mention) 45%, var(--text));
 }
 
 .bots-draft-all {
@@ -2558,45 +2760,46 @@
   flex: none;
 }
 
+/* Send: the ink button once there's something to send, a quiet one until then. */
 .bots-send {
   display: grid;
   flex: none;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
+  margin-left: 2px;
   border-radius: 50%;
   background: var(--surface-3);
   color: var(--text-3);
-  transition: background-color var(--med) var(--ease), color var(--med) var(--ease), transform var(--fast) var(--ease);
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
 .bots-send-on {
   background: var(--ink);
   color: var(--ink-fg);
-  animation: bots-send-ready 260ms cubic-bezier(0.3, 1.6, 0.5, 1);
+}
+
+@media (hover: hover) {
+  .bots-send-on:hover {
+    background: var(--ink-hover);
+  }
 }
 
 .bots-send-on:active {
-  transform: scale(0.9);
-}
-
-@keyframes bots-send-ready {
-  from {
-    transform: scale(0.82);
-  }
+  transform: scale(0.96);
 }
 
 .bots-reply-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 6px 6px 0;
-  padding: 7px 6px 7px 12px;
-  border-radius: 18px;
+  margin: 8px 8px 0;
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--radius-lg);
   background: var(--hover);
   font-size: 13px;
   color: var(--text-3);
-  animation: bm-recv 220ms var(--ease) both;
+  animation: bm-recv var(--med) var(--ease-out) both;
 }
 
 .bots-reply-bar svg {
@@ -2605,7 +2808,7 @@
 
 .bots-reply-who {
   flex: none;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
 }
 
@@ -2619,7 +2822,7 @@
 
 /* A question's mark in previews and reply quotes: muted, not the red emoji that reads as an error. */
 .bots-question-mark {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-3);
 }
 
@@ -2640,7 +2843,7 @@
   position: relative;
   width: 64px;
   height: 64px;
-  animation: bm-pop 260ms var(--ease) both;
+  animation: bm-pop var(--med) var(--ease-out) both;
 }
 
 .bots-composer-image-open {
@@ -2649,7 +2852,7 @@
   height: 100%;
   padding: 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: none;
   cursor: zoom-in;
 }
@@ -2657,7 +2860,8 @@
 .bots-composer-image img {
   width: 100%;
   height: 100%;
-  border-radius: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
   object-fit: cover;
 }
 
@@ -2678,15 +2882,15 @@
 .bots-mentions {
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 12px;
+  left: 8px;
   z-index: 10;
   min-width: 200px;
-  padding: 6px;
-  border-radius: 14px;
+  padding: 4px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
-  animation: bm-recv 160ms var(--ease) both;
+  animation: bm-recv var(--fast) var(--ease-out) both;
 }
 
 .bots-mentions .menu-item[aria-selected="true"] {
@@ -2696,10 +2900,11 @@
 .bots-side-note {
   max-width: var(--bm-w);
   margin: 0 auto;
-  padding: 13px 18px;
-  border-radius: 20px;
-  border: 1px dashed var(--border-strong);
-  font-size: 13.5px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  font-size: 13px;
   line-height: 1.5;
   color: var(--text-2);
   text-align: center;
@@ -2717,7 +2922,7 @@
   margin: 0 auto;
   padding: 80px 24px 24px;
   text-align: center;
-  animation: rise 360ms var(--ease) both;
+  animation: bots-fade var(--med) var(--ease-out) both;
 }
 
 .bots-hello > .bot {
@@ -2726,14 +2931,14 @@
 
 .bots-hello h2 {
   margin: 0;
-  font-size: 22px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 
 .bots-hello p {
   margin: 0 0 8px;
-  font-size: 14.5px;
+  font-size: 14px;
   line-height: 1.55;
   color: var(--text-2);
 }
@@ -2742,17 +2947,39 @@
    OpenBots — details panel (src/components/bots/BotDetails.tsx)
    ========================================================================== */
 
+/* The panel takes its width at once (animating a width relays the whole chat out on every frame);
+   only what's in it fades and slides in, a few pixels. */
 .bots-details {
   flex: none;
   width: 0;
   overflow: hidden;
   border-left: 1px solid transparent;
-  transition: width 300ms var(--ease-panel), border-color 300ms var(--ease-panel);
 }
 
 .bots-details-open {
   width: 356px;
   border-left-color: var(--border);
+}
+
+.bots-details-inner,
+.bots-details-threadpane {
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity var(--med) var(--ease-out), transform var(--med) var(--ease-out);
+}
+
+.bots-details-open .bots-details-inner,
+.bots-details-open .bots-details-threadpane {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-details-inner,
+  .bots-details-threadpane {
+    transform: none;
+    transition: opacity var(--fast) linear;
+  }
 }
 
 .bots-details-inner {
@@ -2817,7 +3044,8 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .bots-details-thread {
@@ -2846,17 +3074,17 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 18px;
+  gap: 4px;
+  margin-bottom: 20px;
 }
 
 .bots-details-avatar {
   position: relative;
   display: grid;
   place-items: center;
-  width: 124px;
-  height: 124px;
-  border-radius: 28px;
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius-xl);
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -2874,11 +3102,11 @@ button.bots-details-avatar:hover {
   height: 28px;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--text-2);
   box-shadow: var(--shadow-sm);
   opacity: 0;
-  transform: scale(0.8);
+  transform: scale(0.96);
   transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
@@ -2902,12 +3130,18 @@ button.bots-details-avatar:hover {
   right: -8px;
   z-index: 8;
   padding: 12px 12px 14px;
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: var(--surface);
+  background: var(--surface-raised);
   box-shadow: var(--shadow-lg);
-  animation: bm-recv 200ms var(--ease) both;
+  animation: bots-dialog-in var(--fast) var(--ease-out) both;
   transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-look-editor {
+    animation: none;
+  }
 }
 
 .bots-look-editor-head {
@@ -2916,8 +3150,13 @@ button.bots-details-avatar:hover {
   justify-content: space-between;
   margin: 0 4px 10px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
+}
+
+/* The panel is narrow: the shapes go four by four. */
+.bots-look-editor .bots-shapes {
+  grid-template-columns: repeat(4, 1fr);
 }
 
 .bots-look-editor .bots-shape {
@@ -2948,13 +3187,13 @@ button.bots-details-avatar:hover {
 .bots-details-name {
   max-width: 100%;
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 19px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   transition: background-color var(--fast) var(--ease);
 }
 
@@ -2963,9 +3202,9 @@ button.bots-details-name:hover {
 }
 
 .bots-details-name-input {
-  height: 34px;
+  height: 32px;
   max-width: 260px;
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   text-align: center;
 }
@@ -2978,58 +3217,80 @@ button.bots-details-name:hover {
   color: var(--text-3);
 }
 
+/* Primary: a quiet tag, the same grey as any other. */
 .bots-pill {
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: color-mix(in srgb, #f2a03c 20%, transparent);
-  color: color-mix(in srgb, #f2a03c 80%, var(--text));
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-2);
   font-size: 11.5px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
+/* Tabs: a plain underlined row. */
 .bots-tabs {
   display: flex;
-  gap: 2px;
-  margin-bottom: 14px;
-  padding: 3px;
-  border-radius: 12px;
-  background: var(--hover);
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--border);
 }
 
 .bots-tab {
-  flex: 1;
-  height: 30px;
-  border-radius: 9px;
-  font-size: 13px;
+  position: relative;
+  flex: none;
+  height: 36px;
+  padding: 0 8px;
+  font-size: 13.5px;
   font-weight: 500;
   color: var(--text-2);
   white-space: nowrap;
-  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease), box-shadow var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease);
+}
+
+.bots-tab::after {
+  content: "";
+  position: absolute;
+  inset: auto 8px -1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-tab:hover {
+    color: var(--text);
+  }
 }
 
 .bots-tab[aria-selected="true"] {
-  background: var(--surface);
   color: var(--text);
-  box-shadow: var(--shadow-sm);
+}
+
+.bots-tab[aria-selected="true"]::after {
+  opacity: 1;
 }
 
 .bots-pane {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  animation: bots-fade 200ms var(--ease) both;
 }
 
 .bots-pane-label {
   margin: 8px 2px 0;
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--text-3);
 }
 
 .bots-instructions {
   min-height: 160px;
+  border-radius: var(--radius);
   font-size: 14px;
+  line-height: 1.55;
 }
 
 .bots-hint {
@@ -3043,10 +3304,9 @@ button.bots-details-name:hover {
   display: flex;
   flex-direction: column;
   margin: 0;
-  padding: 4px;
-  border-radius: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border);
-  background: var(--surface-2);
   list-style: none;
 }
 
@@ -3054,14 +3314,16 @@ button.bots-details-name:hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 42px;
-  padding: 6px 8px 6px 10px;
-  border-radius: 12px;
+  min-height: 44px;
+  padding: 6px 4px 6px 8px;
 }
 
 .bots-card-row + .bots-card-row {
   border-top: 1px solid var(--border);
-  border-radius: 0 0 12px 12px;
+}
+
+.bots-cards > .bots-hint {
+  padding: 12px 8px;
 }
 
 .bots-card-text {
@@ -3135,12 +3397,31 @@ button.bots-details-name:hover {
 
 .bots-details-foot {
   display: flex;
-  justify-content: center;
-  margin-top: 22px;
+  justify-content: flex-start;
+  margin-top: 28px;
 }
 
 .bots-danger:not(:disabled) {
   color: var(--danger);
+}
+
+/* Deleting a bot or group: at the very bottom, quiet until it's meant. */
+.btn.bots-delete {
+  gap: 6px;
+  margin-left: -10px;
+  border-color: transparent;
+  background: transparent;
+}
+
+.btn.bots-delete:disabled {
+  color: var(--text-3);
+}
+
+@media (hover: hover) {
+  .btn.bots-delete:hover:not(:disabled) {
+    border-color: transparent;
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
 }
 
 /* ==========================================================================
@@ -3148,28 +3429,41 @@ button.bots-details-name:hover {
    ========================================================================== */
 
 .bots-dialog {
-  width: min(470px, calc(100vw - 24px));
+  width: min(460px, calc(100vw - 24px));
   max-height: calc(100dvh - 32px);
   padding: 0;
   overflow-y: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 24px;
-  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--surface-raised);
   color: var(--text);
   box-shadow: var(--shadow-lg);
-  animation: bots-dialog-in 260ms cubic-bezier(0.2, 0.9, 0.3, 1.1) both;
+  animation: bots-dialog-in var(--med) var(--ease-out) both;
 }
 
+/* A solid scrim: a blurred one repaints everything behind it on every frame of the opening. */
 .bots-dialog::backdrop {
   background: var(--scrim);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
+  animation: bots-scrim-in var(--med) var(--ease-out) both;
 }
 
 @keyframes bots-dialog-in {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.97);
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@keyframes bots-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-dialog,
+  .bots-dialog::backdrop {
+    animation: none;
   }
 }
 
@@ -3177,21 +3471,29 @@ button.bots-details-name:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 14px 14px 24px;
+  min-height: 56px;
+  padding: 12px 12px 12px 20px;
   border-bottom: 1px solid var(--border);
 }
 
 .bots-dialog-head h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.bots-dialog-head .icon-btn {
+  width: 32px;
+  height: 32px;
+  color: var(--text-2);
 }
 
 .bots-dialog-body {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 18px 24px 22px;
+  gap: 16px;
+  padding: 20px;
 }
 
 .bots-dialog-hero {
@@ -3200,27 +3502,28 @@ button.bots-details-name:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 132px;
+  height: 120px;
 }
 
 .bots-hero-empty {
   display: grid;
   place-items: center;
-  width: 112px;
-  height: 112px;
+  width: 104px;
+  height: 104px;
   padding: 12px;
   border-radius: 50%;
-  border: 1.5px dashed var(--border-strong);
-  font-size: 12.5px;
+  border: 1px dashed var(--border-strong);
+  font-size: 12px;
   line-height: 1.4;
   color: var(--text-3);
   text-align: center;
 }
 
 .bots-name-input {
-  height: 46px;
-  border-radius: 14px;
+  height: 40px;
+  border-radius: var(--radius);
   font-size: 15px;
+  font-weight: 500;
   text-align: center;
 }
 
@@ -3230,9 +3533,10 @@ button.bots-details-name:hover {
   gap: 16px;
 }
 
+/* Two even rows of eight shapes, then the colours in one row under them. */
 .bots-shapes {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(8, 1fr);
   justify-items: center;
   gap: 4px;
 }
@@ -3240,56 +3544,56 @@ button.bots-details-name:hover {
 .bots-shape {
   display: grid;
   place-items: center;
-  width: 60px;
-  height: 60px;
-  border-radius: 50%;
-  transition: background-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), transform 160ms var(--ease);
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  transition: background-color var(--fast) var(--ease), transform var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
   .bots-shape:hover {
     background: var(--hover);
-    transform: scale(1.06);
   }
 }
 
 .bots-shape:active {
-  transform: scale(0.94);
+  transform: scale(0.97);
 }
 
 .bots-shape-on,
 .bots-shape-on:hover {
-  background: var(--hover);
-  box-shadow: inset 0 0 0 2px var(--border-strong);
+  background: var(--active);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* Two even rows: six swatches, then five. */
 .bots-colors {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 12px 14px;
-  max-width: 276px;
+  gap: 10px;
   margin: 0 auto;
 }
 
 .bots-color {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   background: var(--swatch);
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12);
-  transition: transform 160ms var(--ease), box-shadow var(--fast) var(--ease);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  transition: transform var(--fast) var(--ease);
 }
 
-@media (hover: hover) {
-  .bots-color:hover {
-    transform: scale(1.1);
-  }
+.bots-color:active {
+  transform: scale(0.94);
 }
 
+/* The ring sits off the swatch on whatever it's drawn on: a dialog, a popover or the page. */
 .bots-color-on {
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 0 0 3px var(--surface), 0 0 0 5px var(--text-3);
+  box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--surface-raised), 0 0 0 4px var(--text);
+}
+
+.bots-set-block .bots-color-on {
+  box-shadow: inset 0 0 0 1px var(--border-strong), 0 0 0 2px var(--surface), 0 0 0 4px var(--text);
 }
 
 .bots-field {
@@ -3300,8 +3604,8 @@ button.bots-details-name:hover {
 
 .bots-field-label {
   font-size: 13px;
-  font-weight: 600;
-  color: var(--text-2);
+  font-weight: 500;
+  color: var(--text);
 }
 
 .bots-field-optional {
@@ -3311,26 +3615,28 @@ button.bots-details-name:hover {
 
 .bots-textarea {
   min-height: 76px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   font-size: 14px;
 }
 
+/* A group's members: a tidy grid of rows, each a bot with its own checkbox. */
 .bots-pick-list {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .bots-pick {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
-  height: 42px;
+  gap: 10px;
+  min-width: 0;
+  height: 40px;
   padding: 0 10px 0 6px;
-  border-radius: 21px;
-  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
   font-size: 13.5px;
+  text-align: left;
   transition: background-color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
 
@@ -3341,12 +3647,13 @@ button.bots-details-name:hover {
 }
 
 .bots-pick-on {
-  border-color: var(--text-2);
-  background: var(--hover);
+  border-color: var(--border-strong);
+  background: var(--active);
 }
 
 .bots-pick-name {
-  max-width: 150px;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3354,11 +3661,12 @@ button.bots-details-name:hover {
 
 .bots-pick-check {
   display: grid;
+  flex: none;
   place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 1.5px solid var(--border-strong);
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border-strong);
 }
 
 .bots-pick-on .bots-pick-check {
@@ -3371,30 +3679,39 @@ button.bots-details-name:hover {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 14px 18px;
+  padding: 12px 16px;
   border-top: 1px solid var(--border);
 }
 
 .bots-btn {
-  height: 40px;
-  padding: 0 20px;
-  border-radius: 20px;
-  font-size: 14px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  font-weight: 500;
 }
 
-.bots-btn-primary {
+/* Doubled up so the colours hold over `.btn` whichever stylesheet loads last. */
+.bots-btn.bots-btn-primary {
   border-color: transparent;
   background: var(--ink);
   color: var(--ink-fg);
 }
 
-/* An anchor too (Open GitHub): `a.btn`'s inherited colour would otherwise win over the pill's. */
-a.bots-btn-primary {
+/* Nothing to do yet (Save with nothing changed): plainly grey, not a dimmed white. */
+.bots-btn.bots-btn-primary:disabled {
+  opacity: 1;
+  background: var(--surface-3);
+  color: var(--text-3);
+}
+
+/* An anchor too (Open GitHub): `a.btn`'s inherited colour would otherwise win over the button's. */
+a.bots-btn.bots-btn-primary {
   color: var(--ink-fg);
 }
 
 @media (hover: hover) {
-  .bots-btn-primary:hover:not(:disabled) {
+  .bots-btn.bots-btn-primary:hover:not(:disabled) {
     background: var(--ink-hover);
   }
 }
@@ -3403,7 +3720,7 @@ a.bots-btn-primary {
 @media (max-height: 860px) {
   .bots-dialog-body {
     gap: 14px;
-    padding: 14px 24px 18px;
+    padding: 16px 20px 18px;
   }
 
   .bots-dialog-hero {
@@ -3416,7 +3733,7 @@ a.bots-btn-primary {
   }
 
   .bots-name-input {
-    height: 42px;
+    height: 38px;
   }
 
   .bots-dialog .bots-look-picker {
@@ -3424,8 +3741,8 @@ a.bots-btn-primary {
   }
 
   .bots-dialog .bots-shape {
-    width: 52px;
-    height: 52px;
+    width: 44px;
+    height: 44px;
   }
 
   .bots-dialog .bots-shape .bot,
@@ -3435,13 +3752,12 @@ a.bots-btn-primary {
   }
 
   .bots-dialog .bots-colors {
-    gap: 10px 12px;
-    max-width: 230px;
+    gap: 8px 10px;
   }
 
   .bots-dialog .bots-color {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
   }
 
   .bots-textarea {
@@ -3455,12 +3771,13 @@ a.bots-btn-primary {
   }
 
   .bots-dialog-head {
+    min-height: 48px;
     padding: 8px 10px 8px 20px;
   }
 
   .bots-dialog-body {
     gap: 10px;
-    padding: 10px 20px 14px;
+    padding: 12px 20px 14px;
   }
 
   .bots-dialog-hero {
@@ -3472,7 +3789,7 @@ a.bots-btn-primary {
   }
 
   .bots-name-input {
-    height: 38px;
+    height: 36px;
   }
 
   .bots-dialog .bots-look-picker {
@@ -3484,8 +3801,8 @@ a.bots-btn-primary {
   }
 
   .bots-dialog .bots-shape {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
   }
 
   .bots-dialog .bots-shape .bot,
@@ -3495,8 +3812,7 @@ a.bots-btn-primary {
   }
 
   .bots-dialog .bots-colors {
-    gap: 8px 10px;
-    max-width: 200px;
+    gap: 8px;
   }
 
   .bots-dialog .bots-color {
@@ -3510,10 +3826,6 @@ a.bots-btn-primary {
 
   .bots-dialog-foot {
     padding: 10px 16px;
-  }
-
-  .bots-btn {
-    height: 36px;
   }
 }
 
@@ -3546,7 +3858,7 @@ a.bots-btn-primary {
   height: 32px;
   margin-top: 4px;
   padding: 0 10px 0 6px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text-2);
@@ -3584,15 +3896,12 @@ a.bots-btn-primary {
    OpenBots — Settings → Bots (src/components/bots/BotSettings.tsx)
    ========================================================================== */
 
-.bots-set-intro {
-  margin: -4px 0 0;
-  font-size: 13.5px;
-  line-height: 1.55;
-  color: var(--text-2);
+.bots-set-row {
+  padding-left: 12px;
 }
 
-.bots-set-row {
-  padding-left: 8px;
+.bots-set-row-main {
+  align-self: stretch;
 }
 
 .bots-set-row-main {
@@ -3626,15 +3935,12 @@ a.bots-btn-primary {
   white-space: nowrap;
 }
 
-.bots-set-editor {
-  animation: fade 200ms var(--ease) both;
-}
 
 .bots-set-hero {
   display: flex;
   align-items: center;
   gap: 20px;
-  margin-bottom: 26px;
+  margin-bottom: 28px;
 }
 
 .bots-set-hero > .bot,
@@ -3652,9 +3958,11 @@ a.bots-btn-primary {
 
 .bots-set-name {
   max-width: 340px;
-  height: 40px;
+  height: 36px;
+  border-radius: var(--radius);
   font-size: 16px;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .bots-set-hero-actions {
@@ -3692,9 +4000,13 @@ a.bots-btn-primary {
 
 /* In Settings the picker lines up on the left, all the colours in one row. */
 .bots-set-block .bots-shapes {
-  grid-template-columns: repeat(auto-fill, 60px);
+  grid-template-columns: repeat(8, 56px);
   justify-items: start;
-  max-width: 340px;
+}
+
+.bots-set-block .bots-shape {
+  width: 56px;
+  height: 56px;
 }
 
 .bots-set-block .bots-colors {
@@ -3721,8 +4033,19 @@ a.bots-btn-primary {
    ========================================================================== */
 
 @media (max-width: 768px) {
-  .bots-sidebar-rail {
+  .sidebar.bots-sidebar-rail {
     width: min(300px, 84vw);
+  }
+
+  /* A phone's bar lies over the top of the conversation, which starts below it (mobile.css). */
+  .bots-head {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+
+  .bots-head::after {
+    display: none;
   }
 
   .bots-messages {
@@ -3734,11 +4057,11 @@ a.bots-btn-primary {
   }
 
   .bm-name {
-    margin-left: 46px;
+    margin-left: 40px;
   }
 
   .bm-avatar {
-    width: 36px;
+    width: 32px;
   }
 
   .bm-bubble {
@@ -3756,7 +4079,7 @@ a.bots-btn-primary {
     width: 100%;
     background: var(--surface);
     transform: translateX(100%);
-    transition: transform 300ms var(--ease-panel);
+    transition: transform 220ms var(--ease-out);
   }
 
   .bots-details-open {
@@ -3789,8 +4112,21 @@ a.bots-btn-primary {
   .bots-rail-inner,
   .bots-dialog,
   .bots-send-on,
+  .bm-seen,
+  .bm-jump,
+  .bm-events,
+  .bots-reply-bar,
+  .bots-mentions,
+  .bots-composer-image,
+  .bots-composer-notice,
+  .bots-hello,
   .bm-profile[data-state="open"] {
     animation: none;
+  }
+
+  .bm-events-chevron,
+  .bm-poll-option::before {
+    transition: none;
   }
 }
 
@@ -3815,127 +4151,187 @@ a.bots-btn-primary {
   }
 }
 
-/* Marketplace: the catalog, an app's own page, and the card a bot posts to offer one. */
-.apps-dialog {
-  width: min(720px, calc(100vw - 24px));
-  max-height: min(680px, calc(100dvh - 48px));
-  overflow: hidden;
-}
-
-/* The head stays put and the catalog or app page scrolls under it, so nothing falls off the bottom. */
-.apps-dialog[open] {
-  display: flex;
-  flex-direction: column;
-}
-
-.apps-dialog .bots-dialog-head {
-  flex: none;
-  padding: 10px 10px 10px 20px;
-}
-
-.apps-dialog .bots-dialog-head h2 {
-  font-size: 16px;
-}
-
-.apps-dialog .bots-dialog-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  gap: 12px;
-  padding: 14px 20px 18px;
-}
-
-.apps-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.apps-search {
-  flex: 1;
+/* Marketplace: a page in the main pane like Settings (the catalog, or an app's own page), and the card
+   a bot posts to offer one. The page's content lines up with its header's back button. */
+.mpage {
   min-width: 0;
 }
 
-.apps-connected {
+/* The way in shows where you are while it's open. */
+.bots-apps-btn[aria-current="page"],
+.bots-rail-btn[aria-current="page"] {
+  background: var(--active);
+  color: var(--text);
+}
+
+.apps-search {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 4px;
-  color: var(--text-2);
-  font-size: 13px;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text-3);
+  cursor: text;
+  transition: border-color var(--fast) var(--ease);
 }
 
-.apps-connected:disabled {
-  cursor: default;
-  opacity: 0.7;
+.apps-search:focus-within {
+  border-color: var(--text-3);
 }
 
-.apps-connected .app-logo + .app-logo {
-  margin-left: -8px;
+.apps-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
 }
 
-.apps-connected span:not(.app-logo) {
-  margin-left: 4px;
+.apps-search input::placeholder {
+  color: var(--text-3);
 }
 
-.apps-chips {
+.apps-search input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Categories down the left, as Settings' sections are, and the list beside them; each scrolls on its own,
+   the list's scrollbar at the window's edge. */
+.apps-body {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex: 1;
+  min-height: 0;
 }
 
-.apps-chip {
-  display: inline-flex;
+.apps-body[hidden] {
+  display: none;
+}
+
+.apps-nav {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 1px;
+  width: 232px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px 32px;
+}
+
+.apps-nav-item {
+  display: flex;
+  flex: none;
   align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  font-size: 13px;
-  transition: background-color var(--fast) var(--ease);
-}
-
-.apps-chip-on {
-  border-color: transparent;
-  background: var(--text);
-  color: var(--surface);
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-2);
+  font-size: 14px;
+  text-align: left;
+  white-space: nowrap;
+  transition: background-color var(--fast) var(--ease), color var(--fast) var(--ease);
 }
 
 @media (hover: hover) {
-  .apps-chip:hover:not(.apps-chip-on) {
+  .apps-nav-item:hover {
     background: var(--hover);
+    color: var(--text);
   }
+}
+
+.apps-nav-item[aria-current="true"] {
+  background: var(--active);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.apps-nav-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.apps-nav-count {
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.apps-nav-sep {
+  flex: none;
+  height: 1px;
+  margin: 6px 10px;
+  background: var(--border);
+}
+
+.apps-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 32px 72px 16px;
+}
+
+/* The page is 960px at most: the categories, then the list. */
+.apps-main > * {
+  width: 100%;
+  max-width: 712px;
+}
+
+/* The search lines up with the rows' logos and buttons under it. */
+.apps-main > .apps-search {
+  width: calc(100% - 16px);
+  max-width: 696px;
+  margin: 0 8px;
 }
 
 .apps-section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
-.apps-section-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-}
-
-.apps-section-head h3 {
-  margin: 0;
-  font-size: 13.5px;
+.apps-section-title {
+  margin: 0 8px 6px;
+  color: var(--text-3);
+  font-size: 12px;
   font-weight: 500;
 }
 
-.apps-view-all,
+.apps-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.apps-empty {
+  margin: 48px 0 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  text-align: center;
+}
+
 .apps-link {
   color: var(--text-2);
   font-size: 13px;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-.apps-view-all {
-  text-decoration: none;
 }
 
 @media (hover: hover) {
@@ -3945,60 +4341,106 @@ a.bots-btn-primary {
   }
 }
 
-.apps-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 20px;
-}
-
+/* One app per row: logo, name and what it does, then its one action, all on one line. */
 .app-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+  padding: 0 8px 0 0;
+  border-radius: var(--radius);
+  transition: background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .app-row:hover {
+    background: var(--hover);
+  }
 }
 
 .app-row-main {
   display: flex;
   flex: 1;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
-  padding: 4px 6px;
-  border-radius: 10px;
+  padding: 8px;
+  border-radius: var(--radius);
   text-align: left;
-  transition: background-color var(--fast) var(--ease);
-}
-
-@media (hover: hover) {
-  .app-row-main:hover {
-    background: var(--hover);
-  }
 }
 
 .app-row-text {
   display: flex;
   flex-direction: column;
+  gap: 1px;
   min-width: 0;
 }
 
 .app-row-name {
-  overflow: hidden;
-  font-size: 13.5px;
-  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
 }
 
-.app-row-status {
+.app-row-desc {
   overflow: hidden;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.app-row-status-on {
-  color: var(--text);
+.app-row-problem {
+  color: var(--danger);
+}
+
+.app-row-action {
+  flex: none;
+  min-width: 84px;
+}
+
+/* A connection's state: a small dot carries the colour, the word stays quiet. */
+.app-status {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+/* Beside an app's name on its page: the same, in a hairline pill. */
+.app-status-pill {
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+}
+
+.app-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.app-status-ok .app-status-dot {
+  background: var(--ok);
+}
+
+.app-status-warn .app-status-dot {
+  background: var(--warn);
+}
+
+.app-status-bad .app-status-dot {
+  background: var(--danger);
 }
 
 /* Logos are made for a light background, whichever theme the app is in. */
@@ -4008,80 +4450,416 @@ a.bots-btn-primary {
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 24%;
+  border-radius: 22%;
   background: #fff;
 }
 
 .app-logo img {
-  width: 76%;
-  height: 76%;
+  width: 70%;
+  height: 70%;
   object-fit: contain;
 }
 
 .app-logo-letter {
-  color: #222;
+  color: #171717;
   font-weight: 600;
 }
 
-.apps-back {
+/* An app's page: the way back up to the catalog, then the app, in a column under the page's header. */
+.mpage-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* An app's page: one column, centred in the pane. */
+.mpage-inner {
+  max-width: 792px;
+  margin: 0 auto;
+  padding: 4px 32px 72px;
+  animation: page-in var(--fast) var(--ease-out) both;
+}
+
+/* An app page's title: the way to the catalog, then the app. */
+.mpage-trail {
   display: inline-flex;
   align-items: center;
-  align-self: flex-start;
-  gap: 6px;
-  color: var(--text-2);
-  font-size: 13px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.app-page-head {
+.mpage-crumb {
+  color: var(--text-2);
+  font: inherit;
+  letter-spacing: inherit;
+  transition: color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .mpage-crumb:hover {
+    color: var(--text);
+  }
+}
+
+.mpage-sep {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+.app-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* The header: logo, name with its state, what it does and who makes it, and the main action. */
+.app-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.app-hero-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.app-hero-name {
   display: flex;
   align-items: center;
-  gap: 14px;
-}
-
-.app-page-title h3 {
+  gap: 10px;
   margin: 0;
-  font-size: 16px;
+  font-size: 22px;
   font-weight: 600;
+  line-height: 28px;
+  letter-spacing: -0.02em;
 }
 
-.app-page-title p,
-.app-page-desc {
+.app-hero-desc {
   margin: 0;
   color: var(--text-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.app-hero-meta {
+  margin: 0;
+  color: var(--text-3);
   font-size: 13px;
 }
 
-.app-page-title a,
-.app-guide a,
-.app-page .field-help a {
+.app-page a:not(.btn) {
   display: inline-flex;
   align-items: center;
   gap: 3px;
+  color: inherit;
   text-decoration: underline;
+  text-decoration-color: var(--border-strong);
   text-underline-offset: 2px;
 }
 
-/* Links styled as buttons (Open GitHub, Install on…) keep the button look. */
-.app-guide a.btn {
+@media (hover: hover) {
+  .app-page a:not(.btn):hover {
+    color: var(--text);
+    text-decoration-color: currentColor;
+  }
+}
+
+.app-hero-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* Links styled as buttons (Open GitHub, Configure, Install on…) keep the button look. */
+.app-page a.btn {
+  gap: 5px;
   text-decoration: none;
 }
 
+/* One card per concern, in hairlines: a title, rows (label left, control right), and a footer for its button. */
+.app-card {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.app-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+}
+
+.app-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.app-card-row,
+.app-card-block,
+.app-card-sub {
+  border-top: 1px solid var(--border);
+}
+
+.app-card > .app-card-row:first-child {
+  border-top: 0;
+}
+
+/* GitHub's sign-in brings rows of its own into the card. */
 .app-guide {
+  display: contents;
+}
+
+.app-card-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 10px 16px;
+}
+
+.app-card-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.app-card-label {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+
+.app-card-label .setting-hint {
+  vertical-align: 0;
+}
+
+.app-card-desc {
+  margin: 1px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.app-card-control {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-card-block {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
+  padding: 14px 16px;
 }
 
+.app-card-block > .app-card-desc {
+  margin-top: -6px;
+}
+
+/* A heading inside a card (GitHub's installations), with a word on the right. */
+.app-card-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px 8px;
+  background: var(--surface-2);
+}
+
+.app-card-sublabel {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.app-card-subhint {
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.app-card-sub + .app-card-row {
+  border-top: 0;
+}
+
+.app-card-actions {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* A card's button (Save, Connect) sits in the card under what it acts on: no band of its own. */
+.app-card-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 16px 14px;
+}
+
+.app-select {
+  width: 180px;
+}
+
+.app-alert {
+  margin: 0;
+}
+
+/* An installation's owner, or the account signed in: a letter in a rounded square. */
+.app-install-avatar {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.app-install-repos {
+  cursor: help;
+  text-decoration: underline dotted var(--text-3);
+  text-underline-offset: 2px;
+}
+
+.app-install-suspended,
+.app-row-bad .app-card-desc {
+  color: var(--danger);
+}
+
+.app-refresh {
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+/* What it gave bots, folded under its count. */
+.app-list-card summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.app-list-card summary::-webkit-details-marker {
+  display: none;
+}
+
+.app-card-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  text-align: center;
+}
+
+.app-card-chevron {
+  margin-left: auto;
+  color: var(--text-3);
+  transition: transform var(--fast) var(--ease-out);
+}
+
+.app-list-card[open] .app-card-chevron {
+  transform: rotate(180deg);
+}
+
+.app-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.app-list li code {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.app-list li span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-2);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The danger zone: a red-tinged hairline and quiet red buttons. */
+.app-card-danger {
+  border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+
+.app-card-danger .app-card-row,
+.app-card-danger .app-card-block {
+  border-top-color: color-mix(in srgb, var(--danger) 18%, var(--border));
+}
+
+.btn.app-danger-btn {
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+  background: transparent;
+  color: var(--danger);
+}
+
+@media (hover: hover) {
+  .btn.app-danger-btn:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+  }
+}
+
+.btn.app-danger-solid {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+
+@media (hover: hover) {
+  .btn.app-danger-solid:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--danger) 88%, #000);
+  }
+}
+
+/* An OAuth client of the user's own: the steps, the redirect address to copy, the fields. */
 .app-steps {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 0;
   padding-left: 20px;
-  font-size: 13.5px;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .app-copy {
@@ -4089,19 +4867,21 @@ a.bots-btn-primary {
   align-items: center;
   gap: 6px;
   padding-left: 10px;
-  border-radius: 10px;
-  background: var(--hover);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
 }
 
 .app-copy code {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+  font-family: var(--mono);
   font-size: 12.5px;
 }
 
 .app-copy-status {
-  color: var(--ok);
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -4112,33 +4892,8 @@ a.bots-btn-primary {
   gap: 8px;
 }
 
-.app-details summary {
-  cursor: pointer;
-  font-size: 13.5px;
-}
-
-.app-details ul {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 10px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.app-details li {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12.5px;
-}
-
-.app-details li span {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--text-2);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.app-card-foot .app-page-actions {
+  justify-content: flex-end;
 }
 
 /* The primary bot's chat while Pi isn't ready to run it. */
@@ -4206,14 +4961,101 @@ a.bots-btn-primary {
   font-size: 13px;
 }
 
-@media (max-width: 640px) {
-  .apps-grid {
-    grid-template-columns: minmax(0, 1fr);
+/* A phone's Marketplace: the search on its own line, the categories a row that scrolls sideways
+   above the list, and an app's page in one column with its main action under its name. */
+@media (max-width: 768px) {
+  .apps-body {
+    flex-direction: column;
   }
 
-  .apps-tools {
-    flex-direction: column;
-    align-items: stretch;
+  .mpage-search {
+    flex: none;
+    padding: 4px max(16px, env(safe-area-inset-right)) 4px max(16px, env(safe-area-inset-left));
+  }
+
+  .apps-nav {
+    flex-direction: row;
+    gap: 6px;
+    width: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+
+  .apps-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .apps-nav-item {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+
+  .apps-nav-item[aria-current="true"] {
+    border-color: transparent;
+  }
+
+  .apps-nav-sep {
+    display: none;
+  }
+
+  .apps-main {
+    padding: 12px 8px calc(32px + env(safe-area-inset-bottom));
+  }
+
+  .app-row-main {
+    gap: 10px;
+  }
+
+  .app-row-action {
+    min-width: 0;
+  }
+
+  .mpage-inner {
+    padding: 4px max(16px, env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  }
+
+  .app-hero {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .app-hero-text {
+    flex-basis: calc(100% - 70px);
+  }
+
+  .app-hero-name {
+    font-size: 20px;
+  }
+
+  .app-hero-actions {
+    flex: 1 1 100%;
+    padding-top: 0;
+  }
+
+  .app-hero-actions .btn {
+    flex: 1;
+  }
+
+  .app-card-row {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .app-select {
+    width: 160px;
+  }
+}
+
+/* A narrow screen: the shapes four by four. */
+@media (max-width: 480px) {
+  .bots-shapes,
+  .bots-set-block .bots-shapes {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 
@@ -4228,40 +5070,131 @@ a.bots-btn-primary {
    OpenBots — the Advanced tab of a bot's details (src/components/bots/BotAdvanced.tsx)
    ========================================================================== */
 
-/* One line per setting, so the tab is no taller than Instructions: the descriptions live in tooltips on the labels. */
+/* Three titled groups (Model, Machines, OpenBuild access), each a hairline card of one-line rows:
+   label left, control right, the descriptions in tooltips on the labels. */
 .bots-advanced {
-  gap: 0;
+  gap: 20px;
 }
 
-.bots-advanced .setting-row,
-.bots-advanced .setting-group {
+.bots-adv-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bots-adv-title {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.bots-adv-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.bots-advanced .setting-row {
   gap: 12px;
-  min-height: 24px;
-  padding: 2px;
+  min-height: 44px;
+  padding: 6px 12px;
   border-bottom: 0;
 }
 
+.bots-adv-card > .setting-row + .setting-row {
+  border-top: 1px solid var(--border);
+}
+
 .bots-advanced .setting-label {
-  font-size: 13.5px;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
   font-weight: 500;
-  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Model and environment, then what it may do in OpenBuild. */
-.bots-advanced .setting-row:nth-child(2) {
-  margin-bottom: 4px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--border);
+/* Labels and titles with their details in a tooltip say so on hover. */
+.bots-advanced [data-tooltip]:not(button) {
+  cursor: help;
 }
 
-.bots-advanced .select-wrap {
-  flex: 0 1 196px;
+@media (hover: hover) {
+  .bots-advanced .setting-label[data-tooltip]:hover,
+  .bots-adv-title [data-tooltip]:hover {
+    text-decoration: underline dotted var(--text-3);
+    text-underline-offset: 3px;
+  }
+}
+
+/* The controls on the right all take the same width, so their left edges line up down the card. */
+.bots-advanced .setting-row > .select-wrap {
+  flex: 0 0 156px;
 }
 
 .bots-advanced .select-trigger {
   width: 100%;
-  height: 28px;
+  height: 30px;
   font-size: 13px;
+}
+
+/* The model takes the card's width under its label. */
+.bots-advanced .bots-adv-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding-top: 10px;
+  padding-bottom: 12px;
+}
+
+.bots-advanced .bots-adv-stack > .select-wrap {
+  flex: none;
+  width: 100%;
+}
+
+/* A model picker reads its name with the provider under it, so neither is cut down to a few letters. */
+.bots-advanced .bots-set-model .select-trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon value chevron" "icon hint chevron";
+  align-content: center;
+  align-items: center;
+  gap: 0;
+  height: auto;
+  min-height: 40px;
+  padding: 4px 8px 4px 10px;
+}
+
+.bots-advanced .bots-set-model .select-trigger:not(:has(.select-hint)) {
+  grid-template-areas: "icon value chevron";
+  min-height: 32px;
+}
+
+.bots-advanced .bots-set-model .brand-icon {
+  grid-area: icon;
+  margin-right: 8px;
+}
+
+.bots-advanced .bots-set-model .select-value {
+  grid-area: value;
+  line-height: 17px;
+}
+
+.bots-advanced .bots-set-model .select-hint {
+  grid-area: hint;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  line-height: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-advanced .bots-set-model .select-chevron {
+  grid-area: chevron;
+  margin-left: 8px;
 }
 
 /* The small switch; touch screens keep the big one. */
@@ -4288,9 +5221,164 @@ a.bots-btn-primary {
   min-width: 0;
 }
 
+/* Every fallback is one line, a phone too: its number, the picker, then a column for its buttons that
+   is there on every row (the add row included), so the pickers line up. */
+.bots-fallbacks .naming-row {
+  flex-wrap: nowrap;
+  min-height: 40px;
+}
+.bots-fallbacks .naming-row .select-grow {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 0;
+}
+.bots-fallbacks .naming-actions {
+  width: 64px;
+  margin-left: 0;
+  gap: 0;
+}
+.bots-fallbacks .naming-row:not(:has(.naming-actions))::after {
+  content: "";
+  flex: none;
+  width: 64px;
+}
+.bots-fallbacks .naming-row .select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Bots → Models: a bot's name keeps to one line beside its picker. */
+.bots-set-model-name {
+  min-width: 0;
+}
+.bots-set-model-name .setting-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bots-set-model-name .bot-avatar,
+.bots-set-model-name > :first-child {
+  flex: none;
+}
+
+/* On a phone the name goes above, and its picker spans the row. */
+@media (max-width: 480px) {
+  .setting-row.bots-set-model-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .bots-set-model-row .bots-set-model {
+    width: 100%;
+  }
+}
+
 /* A bot on Default with no fallbacks of its own says it follows the default's. */
 .bots-fallbacks-note {
   margin: 0 0 6px;
+}
+
+.bots-advanced .bots-fallbacks-note {
+  margin: -4px 12px 10px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.bots-advanced .bots-fallbacks {
+  gap: 6px;
+  padding: 0 8px 10px 12px;
+}
+
+.bots-advanced .bots-fallbacks .naming-actions {
+  width: 48px;
+}
+
+.bots-advanced .bots-fallbacks .key-icon-btn {
+  width: 24px;
+  height: 28px;
+}
+
+/* One line each, a phone too: the panel is as narrow there as on a desktop. */
+.bots-advanced .bots-fallbacks .naming-row {
+  flex-wrap: nowrap;
+}
+
+.bots-advanced .bots-fallbacks .naming-row .select-grow {
+  flex-basis: auto;
+}
+
+/* The row to add one lines up with the ones above it, which have their actions on the right. */
+.bots-advanced .bots-fallbacks .naming-row:not(:has(.naming-actions))::after {
+  content: "";
+  flex: none;
+  width: 48px;
+}
+
+/* A long model name takes a second line rather than losing its end. */
+.bots-advanced .bots-fallbacks .select-value {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* The machines are a card of their own (.pi-list), with the same rows. */
+.bots-advanced .bot-machines {
+  margin: 0;
+}
+
+.bots-advanced .bot-machine {
+  min-height: 44px;
+  padding: 6px 10px 6px 12px;
+}
+
+/* One machine per row: its dot, its name with what it allows (or why not) under it, its state, a chevron. */
+.bot-machine .bot-machine-link {
+  gap: 10px;
+}
+
+.bot-machine .pi-row-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bots-advanced .bot-machine .pi-row-name {
+  font-size: 13px;
+}
+
+.bots-advanced .bot-machine .pi-row-desc {
+  white-space: normal;
+}
+
+.bot-machine .pi-row-desc {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bot-machine-status {
+  flex: none;
+  margin-left: auto;
+}
+
+/* Why a machine can't run every tool, in a few words: the whole story is in its tooltip. */
+.bot-machine-note {
+  color: var(--warn);
+  cursor: help;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.bot-machine-note-bad {
+  color: var(--danger);
 }
 
 /* A switch waiting for the current workspace's changes (WorkspaceStatus.tsx). */
@@ -4405,9 +5493,227 @@ a.bots-btn-primary {
 .bots-claude-code .input {
   flex: 1 1 220px;
   min-width: 0;
-  font-family: var(--font-mono, monospace);
+  font-family: var(--mono);
 }
 
 .bots-small-dialog .bots-poll-check {
   margin: 0 0 14px;
+}
+
+/* ==========================================================================
+   Pages and tasks
+   ========================================================================== */
+
+/* A page a bot showed (html_render): the thread's own page frame, on a card as wide as the bubble column. */
+.bm-bubble.bm-card.bm-page {
+  width: 620px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 8px 8px 14px;
+}
+
+/* The bubble is the card: the page's own hairline and header rule go. */
+.bm-page .html-render {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: visible;
+}
+
+.bm-page .html-render-bar {
+  height: 36px;
+  margin-bottom: 2px;
+  padding: 0;
+  border-bottom: 0;
+}
+
+/* Closed, the bubble shrinks to the chip, which is the card. */
+.bm-bubble.bm-card.bm-page:has(> .html-render-chip) {
+  width: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+}
+
+.bm-page .html-render-chip {
+  margin: 0;
+}
+
+/* The page's height follows what it measures, at once: a transition here would animate layout. The
+   bubble's own padding insets it. */
+.bm-page .html-render-page {
+  padding: 0;
+  transition: none;
+}
+
+/* A conversation's to-do list, in the details panel. */
+.bots-todos {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.bots-pane + .bots-todos {
+  margin-top: 20px;
+}
+
+.bots-todos-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  margin: 0 2px;
+}
+
+.bots-todos-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.bots-todos-count {
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+
+.bots-todos-bar {
+  height: 2px;
+  margin: 0 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.bots-todos-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--text-2);
+  transform-origin: left;
+  transition: transform var(--med) var(--ease-out);
+}
+
+.bots-todos-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  list-style: none;
+}
+
+.bots-todo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  padding: 0 2px 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.bots-todo-check {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--surface);
+}
+
+/* Under way: a dot in the circle. */
+.bots-todo-doing .bots-todo-check {
+  border-color: var(--text-2);
+  background: radial-gradient(circle, var(--text-2) 0 3px, transparent 3.5px);
+}
+
+.bots-todo-done .bots-todo-check {
+  border-color: var(--text-2);
+  background: var(--text-2);
+}
+
+.bots-todo-text {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.bots-todo-done .bots-todo-text {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+
+.bots-todo-bot {
+  display: inline-flex;
+  flex: none;
+}
+
+/* No list yet: one quiet line where it will be. */
+.bots-todos-empty {
+  margin: 0;
+  padding: 8px 2px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+/* The header's progress: a small ring and the count, beside the name. */
+.bots-head-tasks {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease), background-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .bots-head-tasks:hover {
+    background: var(--hover);
+    color: var(--text-2);
+  }
+}
+
+.bots-head-tasks svg {
+  display: block;
+  flex: none;
+}
+
+.bots-head-tasks circle {
+  fill: none;
+  stroke-width: 1.75;
+}
+
+.bots-head-tasks-track {
+  stroke: var(--border-strong);
+}
+
+.bots-head-tasks-fill {
+  stroke: var(--text-2);
+  stroke-linecap: round;
+}
+
+.bots-head-tasks-done .bots-head-tasks-fill {
+  stroke-linecap: butt;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bots-todos-bar > span {
+    transition: none;
+  }
 }

@@ -161,8 +161,8 @@ function useSurfaceKeys(open: boolean, launcher: boolean, surfaces: Surface[], c
 function Launcher({ surfaces, files }: { surfaces: Surface[]; files: boolean }) {
   return (
     <div className="side-launcher">
-      <h2 className="side-launch-title">Open a surface</h2>
-      <div className="side-launch-list" role="menu" aria-label="Open a surface">
+      <h2 className="side-launch-title">Open a tab</h2>
+      <div className="side-launch-list" role="menu" aria-label="Open a tab">
         {surfaces.map((s) => (
           <button key={s.id} type="button" role="menuitem" className="side-launch" disabled={s.disabled} onClick={s.open}>
             {s.icon}
@@ -171,7 +171,7 @@ function Launcher({ surfaces, files }: { surfaces: Surface[]; files: boolean }) 
           </button>
         ))}
       </div>
-      {files && <p className="side-launch-hint">Open files from the file tree.</p>}
+      {files && <p className="side-launch-hint">Open files from the file tree</p>}
     </div>
   );
 }

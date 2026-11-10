@@ -99,7 +99,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     expect(await page.eval<unknown>(`${row("Fix the flaky")}.querySelector('svg').outerHTML !== ${row("Trace the slow")}.querySelector('svg').outerHTML`)).toBe(true);
     // Rows look like the Members tab's.
     const style = await page.eval(`(() => { const s = getComputedStyle(document.querySelector('.bots-details .bots-cards')); return [s.borderRadius, s.borderStyle]; })()`);
-    expect(style).toEqual(["16px", "solid"]);
+    expect(style).toEqual(["12px", "solid"]);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
     await shoot(page, "threads-tab");
   }, 60_000);
@@ -118,7 +118,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     // And the rest.
     await serve(page, `serverChats.map((c) => thread(c.id, c.title, c.startedBy.bot, c.startedBy.conversation, c.workspace.projectName, true))`);
     await page.until(`!document.querySelector('.bots-details .bots-cards')`);
-    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads working right now. When a bot here starts one, it shows up until it finishes.");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details .bots-hint').textContent`)).toBe("No threads running. Threads the bots here start show up until they finish.");
     expect(await page.eval<unknown>(`${TAB}.textContent`)).toBe("Threads");
     await shoot(page, "threads-empty");
   }, 60_000);
@@ -185,6 +185,8 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
   }, 60_000);
 
   describe("resizing a thread open in the panel", () => {
+    // Wide enough that dragging out to 580px still leaves the bot chat its room beside the sidebar.
+    const WIDE = 1440;
     const GRIP = ".bots-details-threadpane .bots-thread-grip";
     const KEY = "openbuild:bots-thread-width";
     /** The thread's width, the bot chat's beside it, and the row they share. */
@@ -218,7 +220,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     }
 
     test("drags by the left edge, between a smallest width and one that leaves the chat room", async () => {
-      const page = await open();
+      const page = await open(WIDE);
       await openThread(page);
       expect((await widths(page)).thread).toBe(480);
       const grip = await page.eval<Record<string, string | null>>(`(() => { const g = document.querySelector(${JSON.stringify(GRIP)}); return Object.fromEntries(['role', 'aria-orientation', 'aria-label', 'aria-valuenow', 'aria-valuemin', 'tabindex'].map((a) => [a, g.getAttribute(a)])); })()`);
@@ -254,7 +256,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     }, 60_000);
 
     test("works from the keyboard", async () => {
-      const page = await open();
+      const page = await open(WIDE);
       await openThread(page);
       // Tabbed to: it comes just before the thread's Back button.
       await page.eval(`document.querySelector('.bots-details-threadpane [aria-label="Back to threads"]').focus()`);
@@ -287,7 +289,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     }, 60_000);
 
     test("follows a finger, with a wider edge to catch", async () => {
-      const page = await open();
+      const page = await open(WIDE);
       await page.send("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 5 });
       await page.settle();
       await openThread(page);
@@ -302,14 +304,14 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     }, 60_000);
 
     test("keeps its width across a reload, held to what a narrower window has room for", async () => {
-      const page = await open();
+      const page = await open(WIDE);
       await openThread(page);
       await drag(page, -100);
       expect((await widths(page)).thread).toBe(580);
 
       await page.send("Page.reload");
       await page.until("window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
-      await showTab(page, 1280);
+      await showTab(page, WIDE);
       await openThread(page);
       expect((await widths(page)).thread).toBe(580);
 
@@ -321,14 +323,14 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
       expect(w.thread).toBe(w.room - 420);
       expect(w.chat).toBeGreaterThanOrEqual(420 - 1);
       expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
-      await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
+      await page.send("Emulation.setDeviceMetricsOverride", { width: WIDE, height: 860, deviceScaleFactor: 1, mobile: false });
       await rest();
       await page.settle();
       expect((await widths(page)).thread).toBe(580);
     }, 60_000);
 
     test("in the light theme too", async () => {
-      const page = await open(1280, 860, "light");
+      const page = await open(WIDE, 860, "light");
       await openThread(page);
       await drag(page, -80);
       expect((await widths(page)).thread).toBe(560);

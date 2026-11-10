@@ -1,7 +1,7 @@
 // A page the agent showed in the thread with html_render (a chart, diagram, mockup or small tool):
 // drawn from the call's own arguments in a sandboxed frame that fits the page's height and follows
 // the app's theme, with a full-screen view and a download. See shared/htmlRender.ts.
-import { Download, Maximize2, PanelTop, X } from "lucide-react";
+import { ChevronDown, Download, Maximize2, PanelTop, X } from "lucide-react";
 import { memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -228,15 +228,73 @@ function FullScreen({ html, title, open, onClose }: { html: string; title: strin
 
 const kb = (chars: number) => (chars < 1000 ? `${chars} characters` : `${(chars / 1000).toFixed(chars < 10_000 ? 1 : 0)} KB`);
 
-/** An html_render call in the reply: the page, or while the agent is still writing it, that it's coming. */
-export const HtmlRender = memo(function HtmlRender({ part, block }: { part: ToolPart; block?: number }) {
+/**
+ * Whether the reader opened (true) or closed (false) each page, by its call's (or bot message's) id,
+ * and the height each one last measured, so a page closed and opened again, or redrawn, comes back
+ * at its size. Choices are kept for the tab's session, so reloading doesn't undo them.
+ */
+const CHOICES_KEY = "openbuild:page-previews";
+const CHOICES_KEPT = 500;
+const choices = new Map<string, boolean>(
+  (() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(CHOICES_KEY) ?? "[]");
+      return Array.isArray(saved) ? (saved.filter((e) => Array.isArray(e) && typeof e[0] === "string" && typeof e[1] === "boolean") as [string, boolean][]) : [];
+    } catch {
+      return [];
+    }
+  })(),
+);
+const heights = new Map<string, number>();
+
+function choose(id: string, open: boolean) {
+  // Latest last, so the oldest choices are the ones dropped.
+  choices.delete(id);
+  choices.set(id, open);
+  try {
+    sessionStorage.setItem(CHOICES_KEY, JSON.stringify([...choices].slice(-CHOICES_KEPT)));
+  } catch {
+    // Storage blocked or full: the choice holds until the page reloads.
+  }
+}
+
+/**
+ * An html_render call in the reply: the page, or while the agent is still writing it, that it's coming.
+ * `old`: the page is a few turns back (src/lib/pagePreviews.ts), so unless the reader opened it, it
+ * shows as a chip instead of running. Closed, the frame is gone: its scripts stop and its memory is freed.
+ */
+export const HtmlRender = memo(function HtmlRender({ part, block, old = false }: { part: ToolPart; block?: number; old?: boolean }) {
   const args = part.args ?? {};
   const html = typeof args.html === "string" ? args.html : undefined;
   const title = (typeof args.title === "string" && args.title.trim()) || "Page";
   const hint = typeof args.height === "number" && Number.isFinite(args.height) ? args.height : undefined;
-  const [measured, setMeasured] = useState<number>();
+  const [measured, setMeasured] = useState<number | undefined>(() => heights.get(part.id));
   const [full, setFull] = useState(false);
+  const [choice, setChoice] = useState(() => choices.get(part.id));
+  // Opened or closed by the reader, the card or chip that replaces it eases in; a page that just
+  // aged into a chip, or is drawn as the thread opens, doesn't.
+  const [toggled, setToggled] = useState(false);
+  const refocus = useRef(false);
+  const chip = useRef<HTMLButtonElement>(null);
+  const close = useRef<HTMLButtonElement>(null);
   const theme = useHtmlTheme();
+  const open = choice ?? !old;
+  // The control that was used is gone: keep the keyboard where the reader is, on its counterpart.
+  useLayoutEffect(() => {
+    if (!refocus.current) return;
+    refocus.current = false;
+    (open ? close : chip).current?.focus({ preventScroll: true });
+  }, [open]);
+  const toggle = (next: boolean, control: HTMLElement) => {
+    refocus.current = document.activeElement === control;
+    choose(part.id, next);
+    setChoice(next);
+    setToggled(true);
+  };
+  const onHeight = (h: number) => {
+    heights.set(part.id, h);
+    setMeasured(h);
+  };
   if (html === undefined) {
     const written = typeof args.written === "number" ? args.written : 0;
     return (
@@ -249,13 +307,31 @@ export const HtmlRender = memo(function HtmlRender({ part, block }: { part: Tool
       </div>
     );
   }
+  if (!open) {
+    // The whole row opens it (the button's hit area covers the chip); the download sits above that.
+    return (
+      <div className={cx("html-render-chip", toggled && "html-render-in")} data-block={block}>
+        <button ref={chip} type="button" className="html-render-chip-open" aria-expanded={false} onClick={(e) => toggle(true, e.currentTarget)}>
+          <PanelTop size={14} aria-hidden />
+          <span className="html-render-chip-title">{title}</span>
+          <span className="html-render-chip-show">
+            Show
+            <ChevronDown size={14} aria-hidden />
+          </span>
+        </button>
+        <IconButton label="Download HTML" tooltipSide="top" className="html-render-action html-render-chip-action" onClick={() => download(html, title, theme)}>
+          <Download size={14} />
+        </IconButton>
+      </div>
+    );
+  }
   const height = clampHeight(measured ?? hint ?? HTML_RENDER_DEFAULT_HEIGHT);
   // The actions sit above the page, not over it: a frame takes the pointer, so a hover toolbar on
   // top of it would never show, and would cover the page's own controls when it did.
   return (
-    <figure className="html-render" data-block={block}>
+    <figure className={cx("html-render", toggled && "html-render-in")} data-block={block}>
       <figcaption className="html-render-bar">
-        <PanelTop size={13} />
+        <PanelTop size={14} aria-hidden />
         <span className="html-render-title">{title}</span>
         <IconButton label="Download HTML" tooltipSide="top" className="html-render-action" onClick={() => download(html, title, theme)}>
           <Download size={14} />
@@ -263,9 +339,13 @@ export const HtmlRender = memo(function HtmlRender({ part, block }: { part: Tool
         <IconButton label="Full screen" tooltipSide="top" className="html-render-action" onClick={() => setFull(true)}>
           <Maximize2 size={14} />
         </IconButton>
+        {/* aria-expanded: a disclosure, so the thread holds the reader's place as it closes (ChatView). */}
+        <IconButton ref={close} label="Close preview" tooltipSide="top" className="html-render-action" aria-expanded onClick={(e) => toggle(false, e.currentTarget)}>
+          <X size={14} />
+        </IconButton>
       </figcaption>
       <div className="html-render-page" style={{ height }}>
-        <PageFrame html={html} title={title} onHeight={setMeasured} fits={!measured || measured <= HTML_RENDER_MAX_HEIGHT} />
+        <PageFrame html={html} title={title} onHeight={onHeight} fits={!measured || measured <= HTML_RENDER_MAX_HEIGHT} />
       </div>
       <FullScreen html={html} title={title} open={full} onClose={() => setFull(false)} />
     </figure>

@@ -96,11 +96,11 @@ if (process.env.OPENBUILD_HARNESS_SETUP_CHILD !== "1") {
     expect(html).toMatch(/aria-label="Close"/);
     expect(html).toContain('<code class="hs-command">install pi</code>');
     expect(html).toContain("https://pi.dev");
-    // Another harness is there, so the Settings → Runtimes way out is only for "none".
-    expect(html).not.toContain("Settings → Runtimes");
+    // Another harness is there, so the Settings → Harnesses way out is only for "none".
+    expect(html).not.toContain("Settings → Harnesses");
     const none = view({ need: "none", runtimes: only() });
     expect(none).toContain("No coding harness is installed");
-    expect(none).toContain("See Settings → Runtimes");
+    expect(none).toContain("See Settings → Harnesses");
   });
 
   test("while installing: busy, the button locked, and progress announced", () => {

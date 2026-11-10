@@ -24,6 +24,8 @@ const models = [
   model("opus-4-8", "Claude Opus 4.8"),
   model("opus-4-7", "Claude Opus 4.7"),
   model("legacy", "Claude Legacy (no reasoning levels)", { reasoning: { efforts: [], mode: "none", toggle: false } }),
+  // Enough that the provider's list runs past the picker's height and scrolls.
+  ...Array.from({ length: 16 }, (_, i) => model(`archive-${i + 1}`, `Claude Archive ${i + 1}`)),
 ];
 const listing = { "": { plan: "claude" as const, status: "valid" as const, models, defaultModel: models[0]!.id, checkedAt: Date.now() } };
 const home = params.get("home") === "1";

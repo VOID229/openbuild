@@ -1,4 +1,4 @@
-// Settings → Bots' machine list and Settings → Devices, inside the Settings dialog's own frame, for
+// Settings → Bots' machine list and Settings → Devices, inside the Settings page's own frame, for
 // tests/botMachinesChrome.test.ts to click through in Chrome. The server is faked here: the machines
 // a bot reaches, the paired devices, and the isolation saves, which are kept in `window.saved`.
 import "../../../src/styles.css";
@@ -31,6 +31,7 @@ const devices = [
   { id: "old", name: "Old Mini", mode: "lan", urls: ["http://10.0.0.9:8787"], status: "offline", online: false },
 ];
 (window as any).saved = [];
+Object.assign(window, { store: useStore });
 window.fetch = (async (input: string, init?: RequestInit) => {
   const path = String(input).replace(location.origin, "");
   const isolation = /^\/api\/bots\/targets\/([^/]+)$/.exec(path);
@@ -56,27 +57,32 @@ document.documentElement.dataset.theme = params.get("theme") === "dark" ? "dark"
 
 function Page() {
   const section = useStore((s) => s.settingsSection);
+  const phone = matchMedia("(max-width: 768px)").matches;
   return (
-    <div className="modal-root" data-state="open">
-      <div className="modal settings" role="dialog" aria-modal="true" aria-label="Settings">
-        <nav className="settings-nav" aria-label="Settings sections">
-          {(["bots", "devices"] as const).map((id) => (
-            <button key={id} type="button" className="settings-nav-item" aria-current={section === id} onClick={() => useStore.setState({ settingsSection: id })}>
-              <span className="settings-nav-label">{id === "bots" ? "Bots" : "Devices"}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="settings-content" key={section}>
-          {section === "devices" ? (
-            <DevicesSection />
-          ) : (
-            <section className="bots-set-block">
-              <label className="md-label bots-set-label">
-                <span className="md-hash">#</span>Machines
-              </label>
-              <BotMachines />
-            </section>
-          )}
+    <div className="spage" role="region" aria-label="Settings">
+      <div className="spage-body">
+        {!phone && (
+          <nav className="settings-nav" aria-label="Settings sections">
+            {(["bots", "devices"] as const).map((id) => (
+              <button key={id} type="button" className="settings-nav-item" aria-current={section === id} onClick={() => useStore.setState({ settingsSection: id, settingsPage: undefined })}>
+                <span className="settings-nav-label">{id === "bots" ? "Bots" : "Devices"}</span>
+              </button>
+            ))}
+          </nav>
+        )}
+        <div className="settings-content">
+          <div className="settings-inner" key={section}>
+            {section === "devices" ? (
+              <DevicesSection />
+            ) : (
+              <section className="bots-set-block">
+                <label className="md-label bots-set-label">
+                  <span className="md-hash">#</span>Machines
+                </label>
+                <BotMachines />
+              </section>
+            )}
+          </div>
         </div>
       </div>
     </div>

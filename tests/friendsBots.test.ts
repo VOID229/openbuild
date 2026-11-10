@@ -92,7 +92,7 @@ test("a friend's chat arrives attributed, wakes only the bots it addresses, rela
     const sent = store.pending(FID).filter((o) => o.kind === 'chat.message').map((o) => o.body.message);
     a.deepEqual(sent.map((m) => [m.member, m.name, m.text]), [['owner', 'Gal', 'Hi Alice!'], [juniper.bot.id, 'Juniper', 'Hello Bolt']]);
     a.throws(() => svc.postMessage(shared.id, { id: crypto.randomUUID(), author: scout.bot.id, at: Date.now(), text: 'not a member' }), /isn't in this conversation/);
-    a.throws(() => svc.postMessage(shared.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'look', images: ['data:image/png;base64,AAAA'] }), /Photos and polls/);
+    a.throws(() => svc.postMessage(shared.id, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'look', images: ['data:image/png;base64,AAAA'] }), /Photos, polls and pages/);
     // A friend author is only good in that friend's chat.
     const group = svc.createConversation({ kind: 'group', name: 'Ours', botIds: [primary.bot.id, juniper.bot.id] });
     a.throws(() => svc.postMessage(group.id, { id: crypto.randomUUID(), author: friendAuthor(FID, BOLT), at: Date.now(), text: 'sneaky' }), /isn't in this conversation/);

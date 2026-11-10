@@ -11,6 +11,7 @@ import { useStore } from "../../lib/store";
 import type { KeyStatus } from "../../lib/types";
 import { cx } from "../../lib/ui";
 import { IconButton, Spinner } from "../primitives";
+import { Hint } from "../SettingsUI";
 
 const MASK = "*".repeat(34);
 
@@ -145,11 +146,11 @@ function KeyField({ provider, value, index, total, autoFocus, status, onRetry, o
         <div className="key-actions">
           {editing ? (
             <button type="button" className="btn btn-sm" data-key-action={actionId} disabled={!draft.trim()} onClick={save}>
-              save
+              Save
             </button>
           ) : (
             <button type="button" className="btn btn-sm" data-key-action={actionId} onClick={replace}>
-              {isUrl ? "edit" : "replace"}
+              {isUrl ? "Edit" : "Replace"}
             </button>
           )}
           {onRemove && !editing && (
@@ -237,7 +238,7 @@ function KeyList({ provider, keys, setKeys, statusOf, onRetry }: KeyListProps) {
         )}
         {open && keys.length > 0 && !adding && (
           <button type="button" className="add-key" onClick={() => setAdding(true)}>
-            <Plus size={13} /> add more
+            <Plus size={13} /> Add another
           </button>
         )}
       </div>
@@ -270,43 +271,31 @@ function SearxngKeys() {
 }
 
 /** Providers with a key or address saved, named in the order they're tried. */
-function useConfiguredProviders() {
+/** The search providers with a key, by name: what Settings → Bots says Web search is set to. */
+export function useConfiguredProviders() {
   const search = useStore((s) => s.settings.search);
   const searxng = useBots((s) => s.searxng);
   return SEARCH_ORDER.filter((p) => (SEARCH_PROVIDERS[p].credential === "url" ? searxng.length > 0 : (search[p]?.length ?? 0) > 0)).map((p) => SEARCH_PROVIDERS[p].label);
 }
 
+/** Settings → Bots → Web search: keys for the search providers every bot can use. */
 export function BotWebSearch() {
   const backend = useStore((s) => s.keyBackend);
   const error = useStore((s) => s.keysError);
-  // Collapsed by default: the list is long, and the header already says which providers are set up.
-  const [open, setOpen] = useState(false);
-  const configured = useConfiguredProviders();
   return (
     <>
-      <div className="pi-subhead">
-        <button type="button" className="pi-subhead-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          <span className="pi-subhead-title">Web search</span>
-          <span className="pi-subhead-note">{configured.length ? configured.join(", ") : "No keys yet"}</span>
-          <ChevronDown size={15} className="pi-subhead-chevron" />
-        </button>
-      </div>
-      <div className={cx("collapse", open && "collapse-open")} inert={!open}>
-        <div className="collapse-inner">
-          <p className="setting-desc">Add your own key for any provider and every bot can search with it, picking whichever suits the question. Searches are billed to your account with that provider, including ones a bot runs during routines and check-ins.</p>
-          {error && (
-            <p className="field-help key-status key-status-bad" role="alert">
-              <CircleAlert size={13} className="bad" /> {error}
-            </p>
-          )}
-          {backend === "file" && <p className="field-help key-status">This server has no OS keychain, so keys are saved in a private file in its config folder.</p>}
-          <div className="key-list">
-            {SEARCH_ORDER.map((p) => (SEARCH_PROVIDERS[p].credential === "url" ? <SearxngKeys key={p} /> : <ProviderKeys key={p} provider={p} />))}
-          </div>
-          <p className="field-help keys-help">
-            With more than one key, the next is used if one is rejected, out of credit or rate limited. Keys stay on the server: they aren't sent back to the browser or shown to bots. For SearXNG, enter the address of an instance you already run, with the JSON format turned on.
-          </p>
-        </div>
+      <p className="subpage-desc">
+        Every bot can search with any provider that has a key. Billed to your account there.
+        <Hint text="With more than one key, the next takes over when one is rejected or rate limited. Keys stay on this server and are never shown to bots. SearXNG needs an instance with JSON output turned on." />
+      </p>
+      {error && (
+        <p className="field-help key-status key-status-bad" role="alert">
+          <CircleAlert size={13} className="bad" /> {error}
+        </p>
+      )}
+      {backend === "file" && <p className="field-help key-status">No OS keychain here: keys are saved in a private file in the server's config folder.</p>}
+      <div className="key-list">
+        {SEARCH_ORDER.map((p) => (SEARCH_PROVIDERS[p].credential === "url" ? <SearxngKeys key={p} /> : <ProviderKeys key={p} provider={p} />))}
       </div>
     </>
   );

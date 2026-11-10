@@ -65,7 +65,7 @@ beforeEach(() => {
     if (path.startsWith("/api/paired-clients/")) return Response.json({ botTools: { ...none, ...body.botTools } });
     return Response.json({});
   }) as unknown as typeof fetch;
-  useStore.setState({ devices, devicesLoaded: true, settingsOpen: false, settingsSection: "profile" } as any);
+  useStore.setState({ devices, devicesLoaded: true, settingsOpen: false, settingsSection: "profile", settingsPage: undefined } as any);
   useDeviceFocus.setState({ device: undefined });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -81,6 +81,12 @@ const click = (el: Element) => act(async () => { el.dispatchEvent(new win.MouseE
 const patches = () => requests.filter((r) => r.method === "PATCH");
 const machineRows = () => [...host.querySelectorAll<HTMLElement>(".bot-machine")];
 const rowText = (name: string) => machineRows().find((r) => r.querySelector(".pi-row-name")?.firstChild?.textContent === name)?.textContent ?? "";
+/** Why a machine can't run every tool: a few words in the row, the whole of it in their tooltip (and the row's label). */
+const noteOf = (name: string) => {
+  const row = machineRows().find((r) => r.querySelector(".pi-row-name")?.firstChild?.textContent === name);
+  const note = row?.querySelector<HTMLElement>(".bot-machine-note");
+  return { short: note?.textContent ?? "", full: note?.dataset.tooltip ?? "", label: row?.querySelector("button")?.getAttribute("aria-label") ?? "" };
+};
 
 async function mount(surface: "settings" | "advanced", computer?: Bot["computer"]) {
   useBots.setState({ bots: [{ id: "b1", name: "Scout", look: {} as Bot["look"], instructions: "", createdAt: 1, computer } as Bot] });
@@ -99,11 +105,17 @@ for (const surface of ["settings", "advanced"] as const) {
     expect(rowText("Studio iMac")).toContain("This server");
     expect(rowText("Studio iMac")).toContain("Files, terminal and browser · Container");
     expect(rowText("MacBook")).toContain("Doesn't allow bots");
-    expect(rowText("MacBook")).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+    expect(noteOf("MacBook").short).toBe("How to allow");
+    expect(noteOf("MacBook").full).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+    expect(noteOf("MacBook").label).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
     expect(rowText("Cloud VM")).toContain("Files and terminal · Container");
-    expect(rowText("Cloud VM")).toContain("Cloud VM doesn't allow browser");
+    expect(noteOf("Cloud VM").short).toBe("How to allow browser");
+    expect(noteOf("Cloud VM").full).toContain("Cloud VM doesn't allow browser");
     expect(rowText("Old Mini")).toContain("Unreachable");
-    expect(rowText("Old Mini")).toContain("nothing runs elsewhere instead");
+    expect(noteOf("Old Mini").full).toContain("nothing runs elsewhere instead");
+    // The long explanation stays out of the row itself.
+    expect(rowText("MacBook")).not.toContain("Using this device");
+    expect(noteOf("Studio iMac").full).toBe("");
     // Nothing here to pick: no device or isolation select, and nothing saved.
     expect(host.querySelector('button[aria-haspopup="listbox"][aria-label="Runs on"], button[aria-haspopup="listbox"][aria-label="Isolation"]')).toBeNull();
     expect(patches()).toEqual([]);
@@ -121,23 +133,41 @@ for (const surface of ["settings", "advanced"] as const) {
     await click(machineRows()[2]!.querySelector("button.bot-machine-link")!);
     expect(useStore.getState().settingsOpen).toBe(true);
     expect(useStore.getState().settingsSection).toBe("devices");
+    // Straight to that device's own page.
+    expect(useStore.getState().settingsPage).toBe("device/vm");
     expect(useDeviceFocus.getState().device).toBe("vm");
   });
 }
 
-test("Settings → Devices: each device shows this server's bots there, and the linked one is brought into view", async () => {
+/** Settings → Devices at its list, or at one device's page. */
+const devicePage = (id?: string) => act(async () => useStore.setState({ settingsPage: id && `device/${id}` }));
+
+test("Settings → Devices: each device says what this server's bots may do there, and its page has the details, the linked one marked", async () => {
   useDeviceFocus.setState({ device: "vm" });
   await act(async () => root.render(createElement(DevicesSection)));
   await frames();
   const row = (id: string) => host.querySelector<HTMLElement>(`#device-${id}`)!;
-  expect(row("local").textContent).toContain("This server's bots · always allowed");
-  expect(row("mbp").textContent).toContain("Studio iMac's bots · Doesn't allow bots");
-  expect(row("mbp").textContent).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+  // The list: one line each.
+  expect(row("local").textContent).toContain("Bots always allowed");
+  expect(row("mbp").textContent).toContain("Doesn't allow bots");
   expect(row("vm").textContent).toContain("Allows bots · Files and terminal · Container");
   expect(row("old").textContent).toContain("Unreachable");
+  expect(host.querySelector(".bot-on-device")).toBeNull();
+  // Each device's page.
+  await devicePage("vm");
+  await frames();
+  expect(host.querySelectorAll(".device-row")).toHaveLength(1);
+  expect(row("vm").textContent).toContain("Studio iMac's bots · Allows bots · Files and terminal · Container");
   expect(row("vm").classList.contains("device-row-focused")).toBe(true);
   expect(document.activeElement).toBe(row("vm"));
-  expect(host.querySelectorAll(".device-row-focused")).toHaveLength(1);
+  await devicePage("mbp");
+  expect(row("mbp").textContent).toContain("Studio iMac's bots · Doesn't allow bots");
+  expect(row("mbp").textContent).toContain("On MacBook, open Settings → Devices → Using this device → Studio iMac");
+  await devicePage("local");
+  expect(row("local").textContent).toContain("This server's bots · always allowed");
+  await devicePage("old");
+  expect(row("old").textContent).toContain("Unreachable");
+  await devicePage();
 });
 
 test("Settings → Devices: isolation is per machine, host asks first, and a device without Unisolated offers only a container", async () => {
@@ -146,12 +176,16 @@ test("Settings → Devices: isolation is per machine, host asks first, and a dev
   const trigger = (name: string) => document.querySelector<HTMLButtonElement>(`button[aria-haspopup="listbox"][aria-label="Isolation on ${name}"]`)!;
   const options = (name: string) => [...document.querySelectorAll<HTMLButtonElement>(`[role="listbox"][aria-label="Isolation on ${name}"] [role="option"]`)];
   // The Cloud VM hasn't allowed Unisolated: there's nothing else to choose.
+  await devicePage("vm");
   expect(trigger("Cloud VM").disabled).toBe(true);
   expect(host.querySelector("#device-vm")!.textContent).toContain("Container only: Cloud VM hasn't allowed Unisolated");
   // A device that hasn't answered or allowed anything has no grants to go by yet: nothing to choose there.
+  await devicePage("old");
   expect(trigger("Old Mini")).toBeNull();
+  await devicePage("mbp");
   expect(trigger("MacBook")).toBeNull();
 
+  await devicePage("local");
   let asked = "";
   g.confirm = (text: string) => ((asked = text), false);
   await click(trigger("Studio iMac"));
@@ -167,14 +201,18 @@ test("Settings → Devices: isolation is per machine, host asks first, and a dev
   expect(patches()).toEqual([{ path: "/api/bots/targets/local", method: "PATCH", body: { isolation: "host" } }]);
   expect(trigger("Studio iMac").textContent).toBe("Host (unisolated)");
   // Only that machine changed.
+  await devicePage("vm");
   expect(trigger("Cloud VM").textContent).toBe("Container");
+  await devicePage();
 });
 
 test("Settings → Devices: this server without a container engine says its bots' tools fail until there's one or Host", async () => {
   targets[0] = { ...targets[0]!, engines: [] };
   await act(async () => root.render(createElement(DevicesSection)));
   await frames();
+  await devicePage("local");
   expect(host.querySelector("#device-local")!.textContent).toContain("There's no container engine here");
+  await devicePage();
 });
 
 test("Settings → Devices: each grant is its own switch, all off after pairing, and unisolated asks first", async () => {

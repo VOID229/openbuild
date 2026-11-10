@@ -85,6 +85,8 @@ interface BotsState {
   folded: string[];
   activeId?: string;
   detailsOpen: boolean;
+  /** A tab the details panel was asked to show (the header's to-do progress opens its list), new `key` each time. */
+  detailsTab?: { tab: "tasks"; key: number };
   /** The starter bots were added (once per browser). */
   seeded: boolean;
   /** "provider/model" for bots without their own. Pi's default when unset. */
@@ -118,6 +120,8 @@ interface BotsState {
   setHarnesses: (harnesses: BotHarnessSettings) => void;
   select: (id: string) => void;
   setDetailsOpen: (open: boolean) => void;
+  /** Open the details on a tab. */
+  showDetailsTab: (tab: "tasks") => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string }) => string;
   /** `conversationId`: the chat a rename was made in, which says so there. */
   updateBot: (id: string, patch: Partial<Omit<Bot, "id">>, conversationId?: string) => void;
@@ -142,6 +146,7 @@ interface BotsState {
   toggleReaction: (conversationId: string, messageId: string, emoji: string, by: Author, to?: string) => void;
   /** Replace the user's vote in a poll. No keys takes it back. */
   votePoll: (conversationId: string, messageId: string, keys: string[]) => void;
+  /** Change a conversation's to-do list as the user. */
   setTyping: (conversationId: string, botId: string, typing: boolean) => void;
   pulse: (botId: string, mood?: Mood) => void;
   focusMessage: (conversationId: string, messageId: string) => void;
@@ -251,6 +256,7 @@ export const useBots = create<BotsState>()(
       void send("POST", `/api/bots/conversations/${encodeURIComponent(id)}/read`, undefined, {});
     },
     setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
+    showDetailsTab: (tab) => set((s) => ({ detailsOpen: true, detailsTab: { tab, key: (s.detailsTab?.key ?? 0) + 1 } })),
 
     createBot: ({ name, look, instructions = "" }) => {
       const now = Date.now();

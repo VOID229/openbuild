@@ -3,14 +3,15 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle } from "../../shared/bots";
-import { BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
+import { applyTodo, todoExpired, BOT_EFFORTS, castVote, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
 import { readDevices } from "../devices";
 import { findProject } from "../projects";
 import { isPermissionId } from "../../shared/types";
+import { HTML_RENDER_MAX_TITLE, htmlProblem } from "../../shared/htmlRender";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
 
@@ -208,7 +209,13 @@ export function conversationView(id: string): Conversation | undefined {
   const c = db.getConversation(id);
   if (!c) return;
   const rows = db.messages(id, MESSAGE_LIMIT);
-  return { ...c, messages: rows.map((r) => r.message), more: rows.length > 0 && db.countBefore(id, rows[0]!.seq) > 0 };
+  return { ...withTodos(c), messages: rows.map((r) => r.message), more: rows.length > 0 && db.countBefore(id, rows[0]!.seq) > 0 };
+}
+
+/** A conversation as the app gets it: with its to-do list, which db.ts keeps apart. */
+function withTodos<T extends db.StoredConversation>(c: T): T & { todos?: TodoItem[] } {
+  const todos = db.todos(c.id);
+  return todos.length ? { ...c, todos } : c;
 }
 
 /** Page by a stable message identity rather than exposing database sequences. */
@@ -302,7 +309,7 @@ export function pulse(botId: string, mood?: string) {
 
 function emitConversation(id: string) {
   const c = db.getConversation(id);
-  if (c) emit({ t: "conversation", conversation: c });
+  if (c) emit({ t: "conversation", conversation: withTodos(c) });
 }
 
 export function directId(botId: string): string | undefined {
@@ -910,6 +917,16 @@ function checkMessage(m: BotMessage) {
   if (m.text.length > 20_000) throw new BotsError("That message is too long.");
   if ((m.images?.length ?? 0) > 4) throw new BotsError("Up to 4 images.");
   for (const img of m.images ?? []) if (img.length > 2_500_000) throw new BotsError("An image is too large.");
+  if (m.html !== undefined) {
+    if (m.author === "me") throw new BotsError("Pages are shown by bots.");
+    const page = m.html as Partial<BotMessage["html"] & object>;
+    if (typeof page?.html !== "string") throw new BotsError("A page needs its HTML.");
+    const problem = htmlProblem(page.html);
+    if (problem) throw new BotsError(problem);
+    const title = typeof page.title === "string" ? page.title.replace(/\s+/g, " ").trim().slice(0, HTML_RENDER_MAX_TITLE) : "";
+    const height = typeof page.height === "number" && Number.isFinite(page.height) && page.height > 0 ? Math.round(page.height) : undefined;
+    m.html = { title: title || "Page", html: page.html, ...(height ? { height } : {}) };
+  }
 }
 
 /** A poll as a new message: whatever it came with, it starts with no votes. */
@@ -1029,7 +1046,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
   }
   // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
-  if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.poll)) throw new BotsError("Photos and polls aren't shared with friends yet.");
+  if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.poll || message.html)) throw new BotsError("Photos, polls and pages aren't shared with friends yet.");
   if (message.poll) {
     if (c.kind !== "group") throw new BotsError("Polls are for group chats.");
     const poll = cleanPoll(message.poll);
@@ -1095,6 +1112,37 @@ function noteSideMessage(side: db.StoredConversation, from: string) {
 /** What arrived in a conversation since the bot's turn there showed it (see Hooks.unseen). */
 export function unseenSince(botId: string, conversationId: string): string[] {
   return hooks.unseen?.(botId, conversationId) ?? [];
+}
+
+// ------------------------------------------------------------------ to-do lists
+
+/**
+ * Change a conversation's to-do list, as the user (`me`) or one of its bots, and tell the app. Direct
+ * and group chats have one; a side chat's work is reported back where it came from.
+ */
+export function editTodos(conversationId: string, change: TodoChange, by: Author): TodoItem[] {
+  const c = db.getConversation(conversationId);
+  if (!c) throw new BotsError("No such conversation.", 404);
+  if (c.kind === "side") throw new BotsError("Side chats don't have a to-do list. Keep it in the chat you report back to.");
+  if (by !== "me" && !c.botIds.includes(by)) throw new BotsError("That bot isn't in this conversation.");
+  let next: TodoItem[];
+  try {
+    next = applyTodo(db.todos(conversationId), change, by);
+  } catch (err) {
+    throw new BotsError(err instanceof Error ? err.message : String(err));
+  }
+  db.setTodos(conversationId, next);
+  emitConversation(conversationId);
+  return next;
+}
+
+/** Lists that have had their time (todoExpired) clear, and the app hears. */
+export function clearOldTodos(now = Date.now()) {
+  for (const { conversationId, list, updatedAt } of db.allTodos()) {
+    if (!todoExpired(list, updatedAt, now)) continue;
+    db.setTodos(conversationId, []);
+    emitConversation(conversationId);
+  }
 }
 
 // ------------------------------------------------------------------ huddles
@@ -1409,6 +1457,7 @@ export function tick(busy: (botId: string) => boolean) {
   reportPollChanges(now);
   db.sweepGroupFollows(now, GROUP_FOLLOW_MS, CLOCK_SKEW_MS);
   closeQuietHuddles(now, busy);
+  clearOldTodos(now);
   for (const { botId, routine } of db.dueRoutines(now)) {
     const conversationId = routine.conversationId || directId(botId);
     const conversation = conversationId ? db.getConversation(conversationId) : undefined;

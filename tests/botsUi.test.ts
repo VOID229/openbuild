@@ -206,15 +206,15 @@ test("routine/memory actions do not fabricate bot events", async () => {
 
 test("thread activity details are titles, so bot names inside them don't become bot links", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('m.event!.threadId || m.event!.kind === "thread" ? <EventThread event={m.event!} /> : eventBot');
+  expect(chat).toContain('event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot');
   expect(chat).toContain("id ? <ThreadLink id={id}>{title}</ThreadLink> : <>{title}</>");
 });
 
 test("a bot's activity line names the bot that did it, by author id; the user's lines keep their wording", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
   expect(chat).toContain('const author = m.author === "me" ? undefined : bots.find((x) => x.id === m.author);');
-  expect(chat).toContain("const authored = author && !namesBot(eventText(m.event!), bots) ? authoredEventText(m.event!) : undefined;");
-  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(m.event!)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={m.event!} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(m.event!)} bots={bots} />}");
+  expect(chat).toContain("const authored = author && !namesBot(eventText(event), bots) ? authoredEventText(event) : undefined;");
+  expect(chat).toContain("{authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}");
   const { authoredEventText } = await import("../shared/bots");
   expect(authoredEventText({ kind: "thread", text: "Merged a pull request" })).toBe("merged a pull request");
   expect(authoredEventText({ kind: "thread", text: "Wrote a prompt" })).toBe("wrote a prompt in");
@@ -237,7 +237,7 @@ test("older follow-up prompts read with the current wording", async () => {
 
 test("a message between bots links to the side chat and to the other bot", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('m.event!.kind === "message" && m.event!.conversationId ? eventBot : undefined');
+  expect(chat).toContain('event.kind === "message" && event.conversationId ? eventBot : undefined');
   expect(chat).toContain("<ConversationLink id={event.conversationId!}>");
 });
 
@@ -271,7 +271,9 @@ test("Apps sits in the OpenBots sidebar's footer, just left of the way back to O
   const footer = open.slice(open.indexOf('<div className="settings-row">'));
   expect(top).not.toContain('kind: "apps"');
   // Another device's workspace has no apps to manage from here, so it's left out there.
-  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*\{!remote && \(\s*<IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" onClick=\{\(\) => setDialog\(\{ kind: "apps" \}\)\}>\s*<Store size=\{19\} \/>\s*<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
+  // It opens the Marketplace page in the main pane, not a dialog over the sidebar.
+  expect(footer).toMatch(/<\/button>\s*\{\/\*[^}]*\*\/\}\s*\{!remote && \(\s*<IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" aria-current=\{marketplaceOpen \? "page" : undefined\} onClick=\{\(\) => useStore\.getState\(\)\.openMarketplace\(\)\}>\s*<Store size=\{19\} \/>\s*<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
+  expect(sidebar).not.toContain('kind: "apps"');
   // The rail keeps it in its foot, beside the same toggle.
   expect(sidebar).toMatch(/<IconButton label="Marketplace" tooltipSide="right" className="bots-rail-btn"[\s\S]*?<\/IconButton>\s*\)\}\s*<BotsToggle \/>/);
   // A phone's bigger targets cover it too.
@@ -292,7 +294,7 @@ test("memory stays out of sight, and routines are the bots' to write: people can
   expect(settings).not.toContain("<Memory");
   expect(settings).not.toContain("bot.memory");
   expect(details).not.toContain("<form");
-  expect(details).toContain('r.enabled ? "Working" : "Paused"');
+  expect(details).toContain('{r.schedule}{r.enabled ? "" : " · Paused"}');
   expect(details).toContain("<textarea");
   expect(routes).not.toContain("/api/bots/:id/memory");
   expect(routes).not.toContain('"/api/bots/:id/routines":');
@@ -324,7 +326,7 @@ test("bot settings only list machines, and each machine's isolation is chosen wi
   expect(settings + devices).not.toContain("<select");
 });
 
-test("the OpenBots switch lands entrance motion, keeps looping motion and outlasts a skipped switch", async () => {
+test("the OpenBots switch happens at once, lands entrance motion, keeps looping motion, and fades the new panes in", async () => {
   const script = `
     import { resolve } from "node:path";
     import assert from "node:assert/strict";
@@ -341,40 +343,39 @@ test("the OpenBots switch lands entrance motion, keeps looping motion and outlas
     const loop = new CSSAnimation(inApp, Infinity);
     const toast = new CSSAnimation(outside, 1);
     const classes = new Set();
-    const finishes = [];
     let reduced = false;
+    let snapshots = 0;
     Object.assign(globalThis, {
       CSSAnimation,
       CSSTransition,
       window: { matchMedia: () => ({ matches: reduced }) },
       document: {
-        documentElement: { classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
+        documentElement: { offsetWidth: 0, classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c) } },
         getAnimations: () => [entrance, edge, loop, toast],
-        startViewTransition(update) {
-          update();
-          return { ready: Promise.resolve(), finished: new Promise((r) => finishes.push(r)) };
-        },
+        // No snapshots of the page: the switch is a plain change plus a CSS fade.
+        startViewTransition() { snapshots++; },
       },
     });
     const { crossfade } = await import(resolve("src/lib/ui.ts"));
     let updates = 0;
     crossfade(() => updates++);
     assert.equal(updates, 1);
+    assert.equal(snapshots, 0);
     assert.deepEqual([entrance.finished, edge.finished, loop.finished, toast.finished], [true, true, false, false]);
-    assert.ok(classes.has("world-switch"));
+    assert.ok(classes.has("world-enter"));
+    // A second switch restarts the fade rather than cutting it short.
+    await new Promise((r) => setTimeout(r, 150));
     crossfade(() => updates++);
-    finishes[0]();
-    await new Promise((r) => setTimeout(r, 0));
-    assert.ok(classes.has("world-switch"), "a skipped switch must not end the one that replaced it");
-    finishes[1]();
-    await new Promise((r) => setTimeout(r, 0));
-    assert.ok(!classes.has("world-switch"));
+    await new Promise((r) => setTimeout(r, 150));
+    assert.ok(classes.has("world-enter"));
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(!classes.has("world-enter"));
     reduced = true;
     entrance.finished = false;
     crossfade(() => updates++);
     assert.equal(updates, 3);
     assert.equal(entrance.finished, true);
-    assert.ok(!classes.has("world-switch"));
+    assert.ok(!classes.has("world-enter"));
   `;
   const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -389,7 +390,7 @@ test("a long thread doesn't slow the OpenBots switch: messages out of view skip 
 
 test("a model switch names the bot and its model, and the account only to tell two of a model apart", async () => {
   const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('const switcher = m.event!.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
+  expect(chat).toContain('const switcher = event.kind === "model" ? bots.find((x) => x.id === m.author) : undefined;');
   expect(chat).toContain("<BotLink bot={switcher} /> switched to {switchedTo}");
   const { eventDetail, eventText } = await import("../shared/bots");
   // Lines saved before said where in the chain the model sat, and always named its provider.
@@ -428,7 +429,7 @@ test("Settings → Bots lists the default fallbacks, which every bot follows unt
   // No wording left that says a bot with its own model skips the defaults.
   expect(advanced).not.toContain("keeps its own fallbacks");
   expect(advanced).not.toMatch(/bot\.model \|\| bot\.fallbackModels/);
-  expect(advanced).toContain("Every bot uses these, on Default or on a model of its own, unless it lists its own or is set to No fallback.");
+  expect(advanced).toContain("Every bot uses these, whatever its model, unless it has its own list or No fallback.");
   const store = await Bun.file("src/lib/bots/store.ts").text();
   expect(store).toContain('void send("PATCH", "/api/bots/settings", { defaultFallbackModels });');
 });

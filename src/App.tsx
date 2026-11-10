@@ -8,7 +8,7 @@ import { Lightbox, useLightbox } from "./components/Lightbox";
 import { HarnessSetup } from "./components/HarnessSetup";
 import { Notices } from "./components/Notices";
 import { IconButton } from "./components/primitives";
-import { SettingsModal } from "./components/Settings";
+import { SettingsPage } from "./components/Settings";
 import { FileTree } from "./components/FileTree";
 import { TerminalPanel } from "./components/TerminalPanel";
 import { SidePanel } from "./components/SidePanel";
@@ -18,6 +18,7 @@ import { ProjectHeading } from "./components/Workspace";
 import { expandBotsThread, Sidebar, toggleBots } from "./components/Sidebar";
 import { BotsSidebar } from "./components/bots/BotsSidebar";
 import { BotsView } from "./components/bots/BotsView";
+import { MarketplacePage } from "./components/bots/BotApps";
 import { UsagePage } from "./components/UsagePage";
 import { adoptDiscoveredChats, adoptHistory, resumeReplies } from "./lib/chat";
 import { preloadBots } from "./lib/bots/store";
@@ -35,7 +36,7 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
-import { cx, useMediaQuery } from "./lib/ui";
+import { cx, OPEN_SEARCH, useMediaQuery } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -48,7 +49,7 @@ function useTheme() {
       const dark = theme === "dark" || (theme === "system" && mq.matches);
       document.documentElement.dataset.theme = dark ? "dark" : "light";
       // Tints the browser's toolbar / status bar on phones to match the page.
-      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", dark ? "#1a1a1a" : "#ffffff");
+      document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute("content", dark ? "#000000" : "#ffffff");
     };
     apply();
     mq.addEventListener("change", apply);
@@ -59,7 +60,7 @@ function useTheme() {
 function useFont() {
   const font = useStore((s) => s.settings.font);
   useEffect(() => {
-    document.documentElement.dataset.font = font ?? "fun";
+    document.documentElement.dataset.font = font ?? "normal";
   }, [font]);
 }
 
@@ -179,11 +180,13 @@ function Main() {
   // Threads found in a runtime's own sessions get names like the ones started here.
   useEffect(() => watchDiscoveredTitles(), []);
   const phone = useMediaQuery("(max-width: 768px)");
-  const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen);
+  const botsListShowing = useStore((s) => s.botsOpen && s.botsSidebarOpen && !s.settingsOpen);
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const settingsOpen = useStore((s) => s.settingsOpen);
   const usageOpen = useStore((s) => s.usageOpen);
   const botsOpen = useStore((s) => s.botsOpen);
+  // OpenBots' Marketplace, a page in place of the bot chat; Settings and Usage opened over it cover it.
+  const marketplaceOpen = useStore((s) => s.botsOpen && s.marketplaceOpen && !s.settingsOpen && !s.usageOpen);
   const lightboxOpen = useLightbox((s) => s.open);
   // The startup popup for a server without Pi (HarnessSetup) sits over the app the way Settings does.
   const harnessSetupOpen = useHarnessSetupOpen((s) => s.open);
@@ -193,7 +196,7 @@ function Main() {
   // A thread opened from a link in OpenBots shows in place of the bot chat, with the bots' sidebar kept.
   // Usage opened over it covers it, and closing Usage comes back to it.
   // Until threads load, a thread named by the URL holds its place rather than flashing the bot chat.
-  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen) && (!!chat || !chatsLoaded);
+  const botsThread = useStore((s) => s.botsOpen && s.botsThread && !s.usageOpen && !s.settingsOpen && !s.marketplaceOpen) && (!!chat || !chatsLoaded);
   const botsChat = botsOpen && !botsThread;
   useBotsThreadEscape(botsThread);
   const { setSidebarOpen, newChat } = useStore.getState();
@@ -337,15 +340,12 @@ function Main() {
           st.openSettings();
           break;
         case "openUsage":
+          // On a phone Usage is the pane, so it slides in over whichever list is showing (the store sees to that).
           st.setUsageOpen(true);
-          // On a phone Usage is the pane, so it slides in over whichever list is showing.
-          if (window.innerWidth <= 768) {
-            if (st.botsOpen) st.setBotsSidebarOpen(false);
-            else st.setSidebarOpen(false);
-          }
           break;
         case "focusSearch":
-          if (st.sidebarOpen) shown(".search input")?.focus();
+          // The sidebar showing opens its search, which sits behind a button.
+          if (st.botsOpen ? st.botsSidebarOpen : st.sidebarOpen) window.dispatchEvent(new Event(OPEN_SEARCH));
           else focusComposer();
           break;
         case "stashDraft":
@@ -358,7 +358,7 @@ function Main() {
     };
     const onKey = (e: KeyboardEvent) => {
       const st = useStore.getState();
-      if (e.isComposing || e.repeat || st.settingsOpen || isShortcutRecording()) return;
+      if (e.isComposing || e.repeat || isShortcutRecording()) return;
       const el = document.activeElement as HTMLElement | null;
       const typing = !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
       for (const def of SHORTCUTS) {
@@ -386,8 +386,8 @@ function Main() {
   }, []);
 
   useEffect(() => {
-    document.title = usageOpen ? "Usage · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
-  }, [chat?.title, titling, usageOpen, botsChat]);
+    document.title = settingsOpen ? "Settings · OpenBuild" : usageOpen ? "Usage · OpenBuild" : marketplaceOpen ? "Marketplace · OpenBuild" : botsChat ? "OpenBots · OpenBuild" : chat ? `${titling ? "New thread" : chat.title} · OpenBuild` : "OpenBuild";
+  }, [chat?.title, titling, settingsOpen, usageOpen, marketplaceOpen, botsChat]);
 
   // The server serves the app at every client route, including on reload.
   useEffect(() => {
@@ -402,12 +402,13 @@ function Main() {
   return (
     <>
       <PluginSlot name="app:before" />
-      <div className={cx("app", (settingsOpen || harnessSetupOpen) && "app-behind-modal")} inert={settingsOpen || lightboxOpen || harnessSetupOpen}>
-        {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. */}
-        <Activity mode={botsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
-        <Activity mode={botsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
+      <div className={cx("app", harnessSetupOpen && "app-behind-modal")} inert={lightboxOpen || harnessSetupOpen}>
+        {/* Both stay mounted, effects off while hidden, so switching doesn't rebuild either side. Settings
+            takes the whole window: neither shows, and each keeps whether it was open for when Settings closes. */}
+        <Activity mode={botsOpen || settingsOpen ? "hidden" : "visible"}><Sidebar /></Activity>
+        <Activity mode={botsOpen && !settingsOpen ? "visible" : "hidden"}><BotsSidebar /></Activity>
         {/* On a phone OpenBots is a stack: this pane slides in over its list, and off it again. */}
-        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under")} inert={phone && botsListShowing}>
+        <main className={cx("main", !sidebarOpen && !botsOpen && "main-full", botsOpen && "main-bots", botsListShowing && "main-bots-under", (settingsOpen || usageOpen || marketplaceOpen) && "main-page", settingsOpen && "main-settings")} inert={phone && botsListShowing}>
           {/* OpenBots keeps a rail of avatars when its sidebar is closed, and its own button on a phone. */}
           <div className={cx("floating-tools", ((!sidebarOpen && !botsOpen) || botsThread) && "floating-tools-visible", botsThread && "floating-tools-bots")} inert={botsThread ? undefined : sidebarOpen || botsOpen} style={{ "--tools-w": `${toolsWidth}px` } as React.CSSProperties}>
             {botsThread ? (
@@ -430,7 +431,7 @@ function Main() {
               </>
             )}
             {/* On a phone this is the screen's title bar, so it says which thread this is. */}
-            {phone && chat && !usageOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
+            {phone && chat && !usageOpen && !settingsOpen && <span className="topbar-title">{titling ? "New thread" : chat.title}</span>}
           </div>
           {!chatsLoaded ? (
             loadError && (
@@ -446,12 +447,15 @@ function Main() {
             )
           ) : (
             <>
-              <Activity mode={botsChat && !usageOpen ? "visible" : "hidden"}><BotsView /></Activity>
-              {botsOpen && usageOpen && <UsagePage />}
+              <Activity mode={botsChat && !usageOpen && !settingsOpen && !marketplaceOpen ? "visible" : "hidden"}><BotsView /></Activity>
+              {/* Settings, Usage and the Marketplace are pages in place of the bot chat, or of the thread below. */}
+              {botsOpen && settingsOpen && <SettingsPage />}
+              {botsOpen && usageOpen && !settingsOpen && <UsagePage />}
+              {marketplaceOpen && <MarketplacePage />}
               <Activity mode={botsOpen && !botsThread ? "hidden" : "visible"}>
                 <div className="main-row">
                   <div className={cx("main-col", panelOpen && expanded && "main-col-hidden")} style={{ "--tools-over": `${toolsOver}px` } as React.CSSProperties}>
-                    {usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
+                    {settingsOpen && !botsOpen ? <SettingsPage /> : usageOpen && !botsOpen ? <UsagePage /> : chat ? <LoadedChat key={chat.id} chat={chat} /> : <Home />}
                     <TerminalPanel />
                   </div>
                   {folder && <SidePanel folder={folder} toolsWidth={toolsWidth} />}
@@ -464,7 +468,6 @@ function Main() {
           )}
         </main>
       </div>
-      <SettingsModal />
       <HarnessSetup />
       <Notices />
       <Lightbox />

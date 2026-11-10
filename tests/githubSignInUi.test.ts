@@ -1,6 +1,6 @@
 // The GitHub sign-in panel's styling, in a real Chrome: the Open GitHub link reads as the primary
 // pill it is, the sign-in spinner lines up with the buttons beside it, the token link answers a
-// hover, and the access select's chevron sits inside its padding. On a desktop and on a phone.
+// hover, and the access choice is the app's own dropdown, its chevron inside it. On a desktop and on a phone.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -32,7 +32,7 @@ class Page {
     const page = new Page(ws, sessionId);
     await page.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile });
     await page.send("Page.navigate", { url });
-    await page.until("!!document.querySelector('.app-guide .app-page-actions') && !!document.querySelector('select.input')");
+    await page.until("!!document.querySelector('.app-guide .app-page-actions') && !!document.querySelector('.app-select .select-trigger')");
     return page;
   }
   send(method: string, params: object = {}): Promise<any> {
@@ -122,7 +122,7 @@ for (const [name, width, height, mobile] of sizes) {
     expect(Math.abs(look.cancel - look.link)).toBeLessThanOrEqual(1);
   }, 20_000);
 
-  test.skipIf(!browser)(`on ${name}, the token link has a hover and the select's chevron sits inside its padding`, async () => {
+  test.skipIf(!browser)(`on ${name}, the token link has a hover and the access choice is the app's own dropdown`, async () => {
     const page = await Page.open(ws, `${server!.url}?state=idle`, width, height, mobile);
     // Headless Chrome can't hover (and a phone doesn't), so the hover rule is read from the page's own sheets.
     const hover = await page.eval<{ rest: string; hover?: string; decoration?: string; media?: string }>(`(() => {
@@ -132,14 +132,13 @@ for (const [name, width, height, mobile] of sizes) {
       return { rest: getComputedStyle(el).color, hover: rule?.style.color, decoration: rule?.style.textDecorationThickness, media: rule?.parentRule?.conditionText };
     })()`);
     expect(hover).toMatchObject({ hover: "var(--text)", decoration: "2px", media: "(hover: hover)" });
-    const select = await page.eval<{ appearance: string; paddingRight: string; position: string; font: string; body: string }>(`(() => {
-      const s = getComputedStyle(document.querySelector('select.input'));
-      return { appearance: s.appearance, paddingRight: s.paddingRight, position: s.backgroundPositionY, font: s.fontFamily, body: getComputedStyle(document.body).fontFamily };
+    // Not the system's menu: the page's own trigger, in the page's font, its chevron inside it and centred.
+    const select = await page.eval<{ native: number; inside: boolean; centred: boolean; font: string; body: string }>(`(() => {
+      const t = document.querySelector('.app-select .select-trigger'), c = t.querySelector('.select-chevron');
+      const tr = t.getBoundingClientRect(), cr = c.getBoundingClientRect();
+      return { native: document.querySelectorAll('.app-page select').length, inside: cr.left > tr.left && cr.right <= tr.right - 6, centred: Math.abs(cr.top + cr.height / 2 - (tr.top + tr.height / 2)) < 1, font: getComputedStyle(t).fontFamily, body: getComputedStyle(document.body).fontFamily };
     })()`);
-    expect(select.appearance).toBe("none");
-    expect(parseFloat(select.paddingRight)).toBeGreaterThanOrEqual(30);
-    expect(select.position.split(",").every((p) => p.trim() === "50%")).toBe(true);
-    expect(select.font).toBe(select.body);
+    expect(select).toEqual({ native: 0, inside: true, centred: true, font: select.body, body: select.body });
   }, 20_000);
 }
 
@@ -165,18 +164,39 @@ test.skipIf(!browser)("when copying fails, it says so and selects the code to co
   expect(await page.eval<unknown>(`document.querySelector('.app-copy-status').textContent`)).toBe("");
 }, 20_000);
 
-test.skipIf(!browser)("Save on a connected app saves its settings and closes the dialog", async () => {
+/** Picks `label` in the access dropdown. */
+async function choose(page: Page, label: string) {
+  await page.eval(`document.querySelector('.app-select .select-trigger').click()`);
+  await page.until(`!!document.querySelector('.select-menu [role=option]')`);
+  await page.eval(`[...document.querySelectorAll('.select-menu [role=option]')].find((o) => o.textContent.trim() === ${JSON.stringify(label)}).click()`);
+  await page.until(`!document.querySelector('.select-menu[data-state="open"]') && document.querySelector('.app-select .select-value').textContent === ${JSON.stringify(label)}`);
+}
+const saveOff = (page: Page) => page.eval<boolean>(`${button("Save")}.disabled`);
+
+test.skipIf(!browser)("Save waits for a real change: greyed until a setting differs from what's saved, and again once it's put back", async () => {
   const page = await Page.open(ws, `${server!.url}?state=connected`, 1280, 900, false);
   await page.until(`!!${button("Save")}`);
-  await page.eval(`(() => { const s = document.querySelector('select.input'); s.value = 'write'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  expect(await saveOff(page)).toBe(true);
+  await choose(page, "Read and write");
+  expect(await saveOff(page)).toBe(false);
+  // Changed back to what's saved: nothing to save.
+  await choose(page, "Read only");
+  expect(await saveOff(page)).toBe(true);
+}, 20_000);
+
+test.skipIf(!browser)("Save on a connected app saves its settings and leaves the page", async () => {
+  const page = await Page.open(ws, `${server!.url}?state=connected`, 1280, 900, false);
+  await page.until(`!!${button("Save")}`);
+  await choose(page, "Read and write");
   await page.eval(`${button("Save")}.click()`);
   await page.until(`!!document.getElementById('closed')`);
   expect(await page.eval<unknown>(`window.saved`)).toEqual({ fields: { access: "write" } });
 }, 20_000);
 
-test.skipIf(!browser)("a Save that fails keeps the dialog open with the error", async () => {
+test.skipIf(!browser)("a Save that fails stays on the page with the error", async () => {
   const page = await Page.open(ws, `${server!.url}?state=connected&save=fail`, 1280, 900, false);
   await page.until(`!!${button("Save")}`);
+  await choose(page, "Read and write");
   await page.eval(`${button("Save")}.click()`);
   await page.until(`[...document.querySelectorAll('.app-page [role=alert]')].some((e) => e.textContent.includes("GitHub didn't answer."))`);
   expect(await page.eval<unknown>(`!!document.getElementById('closed')`)).toBe(false);

@@ -29,10 +29,10 @@ function DisconnectDialog({ login, onClose, onConfirm }: { login: BotClaudeLogin
   return (
     <dialog {...modal} className="confirm-dialog bots-small-dialog" aria-label={`Disconnect ${login.name}`}>
       <h2>Disconnect {login.name} from bots?</h2>
-      <p>Bots stop using this login, and a bot set to one of its models moves on to a fallback. Claude Code stays signed in, so Claude Code threads and your terminal keep working.</p>
+      <p>Bots stop using this login and switch to a fallback model. Claude Code stays signed in.</p>
       <label className="bots-poll-check">
         <input type="checkbox" checked={signOut} onChange={(e) => setSignOut(e.target.checked)} />
-        Also sign Claude Code out of this login ({login.configDir}), everywhere on this server
+        Also sign Claude Code out of this login on this server
       </label>
       <div className="confirm-actions">
         <button type="button" className="btn btn-sm" onClick={onClose} autoFocus>
@@ -74,7 +74,7 @@ function SignIn({ login, sign, onDone }: { login: BotClaudeLogin; sign: BotClaud
   return (
     <div className="app-guide bots-claude-signin">
       <div className="bots-field-label">Signing {login.name} in with Claude Code</div>
-      <p className="field-help">Open Claude, approve, and paste the code it shows you here. The code goes straight to Claude Code on this server; OpenBuild doesn't keep it.</p>
+      <p className="field-help">Open Claude, approve, then paste the code it shows you here.</p>
       <div className="app-page-actions">
         <a className="btn bots-btn bots-btn-primary" href={sign.url} target="_blank" rel="noreferrer noopener">
           Open Claude <ExternalLink size={12} />
@@ -211,7 +211,7 @@ export function BotClaude() {
   return (
     <>
       <div className="pi-subhead">
-        <h3>Claude</h3>
+        <p className="subpage-desc bots-claude-desc">Run bots on your Claude Pro or Max plan, through Claude Code on this server. Their use counts against its limits.</p>
         <span className="bots-claude-head">
           {state ? (connected ? `${connected} connected` : "Not connected") : ""}
           <IconButton label="Check again" onClick={() => void load()} disabled={loading}>
@@ -219,9 +219,6 @@ export function BotClaude() {
           </IconButton>
         </span>
       </div>
-      <p className="field-help keys-help">
-        Bots can run on your Claude Pro or Max plan through Claude Code on this server, with no Pi extension to turn on. Each Claude Code login is its own set of models, and its use counts against that plan's limits. Bots keep running their tools themselves; Claude Code only answers.
-      </p>
       {problem && (
         <p className="field-help key-status key-status-bad" role="alert">
           <CircleAlert size={13} className="bad" /> {problem}
@@ -233,12 +230,12 @@ export function BotClaude() {
         </p>
       )}
       {state?.userPackage && (
-        <p className="field-help">Your own pi-claude-code is loaded for bots under Custom extensions, so OpenBuild's copy stays out of the way. Turn that off to use the logins below.</p>
+        <p className="field-help">Your own pi-claude-code is loaded under Custom extensions. Turn it off there to use these logins.</p>
       )}
       {state?.logins.map((login) => (
         <LoginRow key={login.id} login={login} disabled={!state.installed || state.userPackage} onChanged={changed} />
       ))}
-      {state && state.logins.length > 0 && <p className="field-help">A claude2 wrapper or a signed-in ~/.claude-2 shows up here by itself. Add another login with Add runtime in Settings → Runtimes.</p>}
+      {state && state.logins.length > 0 && <p className="field-help">Add another login in Settings → Harnesses.</p>}
     </>
   );
 }

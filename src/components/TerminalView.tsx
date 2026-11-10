@@ -9,7 +9,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "re
 import { editingSequence } from "../../shared/terminal";
 import { newTerminalTab, restartTerminalTab, TerminalConnection, terminalStoreFor, type TerminalFolder, type TerminalPlace, type TerminalTab } from "../lib/terminal";
 
-const FONT = '"JetBrains Mono Variable", "JetBrains Mono", SFMono-Regular, Menlo, Consolas, monospace';
+const FONT = '"Geist Mono Variable", "Geist Mono", SFMono-Regular, Menlo, Consolas, monospace';
 /** Long enough to tell two shells in the same folder apart, short enough for the tab strip. */
 const TAB_TITLE = 28;
 

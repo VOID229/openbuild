@@ -14,7 +14,7 @@ import { RuntimeIcon } from "./Workspace";
 
 type AccountRuntime = RuntimeAccount["runtime"];
 const CHOICES: AccountRuntime[] = ["claude", "codex", "cursor"];
-const STEPS = ["Runtime", "Identity", "Config"];
+const STEPS = ["Harness", "Identity", "Config"];
 const VARIABLES = { codex: "CODEX_HOME", claude: "CLAUDE_CONFIG_DIR", cursor: "CURSOR_CONFIG_DIR" };
 
 function Field({ label, hint, value, onChange, placeholder, autoFocus }: { label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; autoFocus?: boolean }) {
@@ -87,7 +87,8 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
   ];
   useEffect(() => {
     if (!open) return;
-    setStep(0); setError("");
+    // Editing changes who it is and how it runs, not which harness it is: it starts at Identity.
+    setStep(account ? 1 : 0); setError("");
     if (account) {
       setRuntime(account.runtime); setFilledFor(account.runtime);
       setName(account.name); setPath(account.configDir);
@@ -131,19 +132,19 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
       <div className="modal ar" role="dialog" aria-modal="true" aria-labelledby="ar-title">
         <button type="button" className="modal-close" aria-label="Close" onClick={onClose}><X size={16} /></button>
         <header className="ar-head">
-          <h2 id="ar-title">{account ? `Edit ${account.name}` : "Add runtime"}</h2>
-          <p>{account ? `Change this account for a runtime on ${where}.` : `Add another account for a runtime on ${where}.`}</p>
+          <h2 id="ar-title">{account ? `Edit ${account.name}` : "Add harness"}</h2>
+          <p>{account ? `Change this account for a harness on ${where}.` : `Add another account for a harness on ${where}.`}</p>
           <ol className="ar-steps">
-            {STEPS.map((label, i) => (
+            {STEPS.map((label, i) => (i === 0 && account ? null : (
               <li key={label} className={cx(i === step && "ar-step-on")} aria-current={i === step ? "step" : undefined}>
-                <span className={cx("ar-num", i < step && "ar-num-done")}>{i < step ? <Check size={12} /> : i + 1}</span>{label}
+                <span className={cx("ar-num", i < step && "ar-num-done")}>{i < step ? <Check size={12} /> : account ? i : i + 1}</span>{label}
               </li>
-            ))}
+            )))}
           </ol>
         </header>
         <div className="ar-body">
           {step === 0 && (
-            <div className="ar-grid" role="radiogroup" aria-label="Runtime">
+            <div className="ar-grid" role="radiogroup" aria-label="Harness">
               {CHOICES.map((r) => (
                 <button key={r} type="button" role="radio" aria-checked={runtime === r} className="ar-choice" onClick={() => setRuntime(r)}>
                   <RuntimeIcon runtime={r} size={18} />
@@ -175,8 +176,14 @@ export function AddRuntime({ open, deviceId, where, account, onClose }: { open: 
           {error && <p className="pi-error" role="alert">{error}</p>}
         </div>
         <footer className="ar-foot">
-          {step > 0 && <button type="button" className="btn" onClick={() => { setError(""); setStep(step - 1); }}>Back</button>}
-          <button type="button" className="btn btn-primary" onClick={step < 2 ? next : add}>{step < 2 ? "Next" : account ? "Save" : "Add runtime"}</button>
+          {/* Editing: Cancel beside Next on Identity, and beside Save on Config. Adding: Back from the second step. */}
+          {account ? (
+            <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          ) : (
+            step > 0 && <button type="button" className="btn" onClick={() => { setError(""); setStep(step - 1); }}>Back</button>
+          )}
+          {/* A label is typed in, not taken from the example in the field. */}
+          <button type="button" className="btn btn-primary" disabled={step === 1 && !name.trim()} onClick={step < 2 ? next : add}>{step < 2 ? "Next" : account ? "Save" : "Add harness"}</button>
         </footer>
       </div>
     </div>,

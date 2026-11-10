@@ -120,12 +120,18 @@ test("a runtime update reports only on its own pill: spinner while running, a fa
   reset();
 });
 
-test("runtime settings list user-added runtimes under Custom, with edit and delete", async () => {
+test("harness settings list user-added accounts on a page of their own, with edit and delete", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => Response.json({ runtimes: {} })) as unknown as typeof fetch;
   const { RuntimesSection } = await import("../src/components/RuntimeSettings");
   try {
     reset();
+    // Settings → Harnesses links to them, saying how many there are on this device.
+    const main = markup(createElement(RuntimesSection));
+    expect(main).toContain("Custom accounts");
+    expect(main).toMatch(/class="nav-row-value">None</);
+    expect(main).not.toContain("None yet.");
+    useStore.setState({ settingsPage: "custom" });
     expect(markup(createElement(RuntimesSection))).toContain("None yet.");
     reset({ runtimeAccounts: [
       { id: "codex2", name: "codex2", runtime: "codex", configDir: "~/.codex2" },
@@ -133,7 +139,9 @@ test("runtime settings list user-added runtimes under Custom, with edit and dele
       { id: "elsewhere", name: "cursor2", runtime: "cursor", configDir: "~/.cursor2", deviceId: "cachyos" },
     ] });
     const html = markup(createElement(RuntimesSection));
-    const custom = html.slice(html.indexOf("<h3>Custom</h3>"));
+    expect(html).toContain('<h2 class="subpage-title" id="settings-title">Custom accounts</h2>');
+    expect(html).toContain("Add harness");
+    const custom = html.slice(html.indexOf('class="rt-custom"'));
     expect(custom).toContain("CODEX_HOME=~/.codex2");
     expect(custom).toContain("CLAUDE_CONFIG_DIR=~/.claude-2 · /opt/claude");
     expect(custom).toContain('aria-label="Edit codex2"');
@@ -142,7 +150,9 @@ test("runtime settings list user-added runtimes under Custom, with edit and dele
     // Another device's accounts are listed only when that device is picked.
     expect(custom).not.toContain("cursor2");
     expect(custom).not.toContain("None yet.");
-  } finally { globalThis.fetch = originalFetch; reset(); }
+    useStore.setState({ settingsPage: undefined });
+    expect(markup(createElement(RuntimesSection))).toMatch(/class="nav-row-value">2</);
+  } finally { globalThis.fetch = originalFetch; useStore.setState({ settingsPage: undefined }); reset(); }
 });
 
 test("editing a custom runtime checks it against the others but not itself", async () => {
@@ -259,7 +269,7 @@ test("an imported native session's external reply names its own runtime, not Pi"
 test("scratch threads offer a runtime picker, defaulting old settings to the Default runtime", async () => {
   reset({ threadRuntime: undefined });
   const html = markup(createElement(WorkspaceTop));
-  expect(html).toContain('aria-label="Thread runtime: Default"');
+  expect(html).toContain('aria-label="Thread harness: Default"');
   expect(html).not.toContain("Local checkout");
   const originalFetch = globalThis.fetch;
   const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
@@ -273,31 +283,31 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
     // A device with no saved runtime settings turns on what's installed there: without Durable, the picker falls back.
     await detect(["durable"]);
     reset({ threadRuntime: "durable" });
-    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread harness: Default"');
     await detect([]);
-    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread harness: Durable"');
     // A saved choice wins over detection.
     reset({ threadRuntime: "durable", disabledRuntimes: { "": ["durable"] } });
-    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Default"');
+    expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread harness: Default"');
   } finally { globalThis.fetch = originalFetch; }
   reset({ threadRuntime: "durable", disabledRuntimes: { "": [] } });
-  expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread runtime: Durable"');
+  expect(markup(createElement(WorkspaceTop))).toContain('aria-label="Thread harness: Durable"');
   reset({ threadRuntime: "codex" });
   const codex = markup(createElement(WorkspaceTop));
-  expect(codex).toContain('aria-label="Thread runtime: Codex"');
+  expect(codex).toContain('aria-label="Thread harness: Codex"');
   expect(codex).toContain("Native Codex");
   reset({ threadRuntime: "cursor" });
   const cursor = markup(createElement(WorkspaceTop));
-  expect(cursor).toContain('aria-label="Thread runtime: Cursor"');
+  expect(cursor).toContain('aria-label="Thread harness: Cursor"');
   expect(cursor).toContain("Native Cursor");
   reset({ threadRuntime: "claude" });
   const claude = markup(createElement(WorkspaceTop));
-  expect(claude).toContain('aria-label="Thread runtime: Claude Code"');
+  expect(claude).toContain('aria-label="Thread harness: Claude Code"');
   expect(claude).toContain("Native Claude Code");
   expect(claude).toContain('fill="#D97757"');
   reset({ threadRuntime: "opencode" });
   const opencode = markup(createElement(WorkspaceTop));
-  expect(opencode).toContain('aria-label="Thread runtime: OpenCode"');
+  expect(opencode).toContain('aria-label="Thread harness: OpenCode"');
   expect(opencode).toContain("Native OpenCode");
   expect(opencode).toContain('fill-rule="evenodd"');
 });
@@ -305,14 +315,16 @@ test("scratch threads offer a runtime picker, defaulting old settings to the Def
 test("bots can only be let use the harnesses installed on this server", async () => {
   const originalFetch = globalThis.fetch;
   const { loadRuntimeStatuses } = await import("../src/lib/runtimeStatus");
-  const { BotHarnesses } = await import("../src/components/bots/BotThreads");
+  const { BotHarnesses, useAllowedHarnesses } = await import("../src/components/bots/BotThreads");
   globalThis.fetch = (async () => Response.json({ runtimes: Object.fromEntries(["pi", "durable", "claude", "codex", "cursor", "fx", "opencode", "grok", "hermes"].map((id) => [id, {
     installed: ["pi", "codex"].includes(id), updateAvailable: false, install: "",
   }])) })) as unknown as typeof fetch;
   try {
     await loadRuntimeStatuses(true);
     const html = renderToStaticMarkup(createElement(BotHarnesses));
-    expect(html).toContain('<span class="pi-subhead-note">Pi, Codex</span>');
+    // Settings → Bots' row for the Harnesses page names the ones bots may use.
+    const Summary = () => createElement("span", { className: "summary" }, useAllowedHarnesses().join(", "));
+    expect(renderToStaticMarkup(createElement(Summary))).toBe('<span class="summary">Pi, Codex</span>');
     expect(html).toMatch(/aria-checked="true" aria-label="Let bots use Codex" class="toggle"/);
     expect(html).toMatch(/aria-checked="false" aria-label="Let bots use Claude Code" class="toggle toggle-disabled" disabled=""/);
   } finally { globalThis.fetch = originalFetch; }
@@ -346,8 +358,8 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   useStore.setState((s) => ({ view: { ...s.view, runtime: "all" }, sections: { ...s.sections, closed: true } }));
   let html = markup(createElement(Sidebar));
   expect(titles(html)).toEqual(["pi-thread", "durable-thread", "legacy-thread"]);
-  expect(html).toContain('title="Pi runtime"');
-  expect(html).toContain('title="Durable runtime"');
+  expect(html).toContain('title="Pi harness"');
+  expect(html).toContain('title="Durable harness"');
   // The footer's runtime switch became the usage button; the filter menu still filters by runtime.
   expect(html).not.toContain("runtime-toggle");
   expect(html).toContain('class="usage-toggle"');
@@ -360,7 +372,7 @@ test("sidebar shows each thread's runtime and filters to Pi, Durable or both", (
   useStore.setState((s) => ({ view: { ...s.view, runtime: "durable" } }));
   html = markup(createElement(Sidebar));
   expect(titles(html)).toEqual(["durable-thread"]);
-  expect(html).not.toContain('title="Pi runtime"');
+  expect(html).not.toContain('title="Pi harness"');
 });
 
 test("finished work moves into Done, except a discovered thread whose native runtime finished", () => {
@@ -395,7 +407,7 @@ test("OpenCode sidebar identity and runtime filter use the shared controls", () 
   // They're under "Closed", whose rows exist only while it's open.
   useStore.setState((s) => ({ view: { ...s.view, runtime: "opencode" }, sections: { ...s.sections, closed: true } }));
   const html = markup(createElement(Sidebar));
-  expect(html).toContain('title="Native OpenCode runtime"');
+  expect(html).toContain('title="Native OpenCode harness"');
   expect(html).toContain('history-title-text">OpenCode thread');
   expect(html).not.toContain('history-title-text">pi-only');
   useStore.setState((s) => ({ view: { ...s.view, runtime: "all" } }));

@@ -45,12 +45,12 @@ function FriendRow({ friend, onRemoved }: { friend: FriendSummary; onRemoved: ()
           {friend.name}
           <span className="device-status">{label}</span>
         </span>
-        <span className="pi-row-desc" title={friend.status === "refused" ? "Their OpenBuild turned this one away: they may have removed you." : undefined}>
-          {[friend.fingerprint, MODE_LABEL[friend.mode] ?? "LAN", friend.role === "host" ? "you connect to them" : "they connect here", friend.allowTools && "bots may use tools", seen && `seen ${seen}`].filter(Boolean).join(" · ")}
+        <span className="pi-row-desc" title={friend.status === "refused" ? "Their OpenBuild turned this one away: they may have removed you." : `Fingerprint ${friend.fingerprint}`}>
+          {[MODE_LABEL[friend.mode] ?? "LAN", friend.role === "host" ? "You connect to them" : "They connect here", friend.allowTools && "Bots may use tools", seen && `Seen ${seen}`].filter(Boolean).join(" · ")}
         </span>
         {friend.failing && (
           <span className="pi-error device-error" role="status">
-            <CircleAlert size={13} /> A message from {friend.name} couldn't be delivered here ({friend.failing.error}). Still trying; what they send next waits for it.
+            <CircleAlert size={13} /> A message from {friend.name} couldn't be delivered ({friend.failing.error}). Retrying.
           </span>
         )}
         {error && (
@@ -83,12 +83,8 @@ export function BotFriends() {
   useEffect(load, [load, live]);
   return (
     <>
-      <div className="pi-subhead">
-        <h3>Friends</h3>
-      </div>
-      <p className="setting-desc">
-        Other people's OpenBuilds your bots share group chats with. A friend reaches those chats and nothing else here, and what they write is never taken as coming from you. Add one with{" "}
-        <code>openbuild friend invite</code> on one computer and <code>openbuild friend add</code> on the other.
+      <p className="subpage-desc">
+        People whose OpenBuild shares group chats with yours. They reach only those chats.
       </p>
       {error && (
         <p className="pi-error" role="alert">
@@ -97,7 +93,11 @@ export function BotFriends() {
       )}
       <ul className="pi-list">
         {friends?.map((f) => <FriendRow key={f.id} friend={f} onRemoved={load} />)}
-        {friends && !friends.length && <li className="pi-empty">No friends yet.</li>}
+        {friends && !friends.length && (
+          <li className="pi-empty">
+            No friends yet. Run <code>openbuild friend invite</code> here, then <code>openbuild friend add</code> on theirs.
+          </li>
+        )}
       </ul>
     </>
   );

@@ -1,15 +1,19 @@
-// OpenBots' Marketplace: a catalog of official MCP servers and skills to search and browse, a page
-// for each app with whatever it takes to connect it, and the card a bot posts to offer one in a chat.
-import { ArrowLeft, Check, ChevronDown, ChevronRight, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+// OpenBots' Marketplace: a page of its own with a catalog of official MCP servers and skills to search
+// and browse, a page for each app with whatever it takes to connect it, and the card a bot posts to
+// offer one in a chat.
+import { Check, ChevronDown, CircleAlert, Copy, ExternalLink, Search } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { APP_CALLBACK_PATH, APP_CATALOG, APP_CATEGORIES, appById, OAUTH_CLIENTS, type AppCategory, type AppView, type CatalogApp } from "../../../shared/apps";
 import { isConnected, pastesSignIn, useApps, type ConnectInput } from "../../lib/bots/apps";
 import { useRemoteWorkspace } from "../../lib/bots/store";
 import { useGithub } from "../../lib/github";
-import { arrowNav, copyText, cx } from "../../lib/ui";
-import { IconButton, Popover, Spinner } from "../primitives";
-import { DialogHead, useModal } from "./BotDialogs";
-import { openBotsDialog } from "./BotsSidebar";
+import { leaveMarketplace, marketplaceBack, marketplaceUp, openMarketplaceApp } from "../../lib/pages";
+import { useStore } from "../../lib/store";
+import { copyText, cx, useMediaQuery } from "../../lib/ui";
+import { useLightbox } from "../Lightbox";
+import { OptionSelect } from "../ModelSelect";
+import { IconButton, Spinner } from "../primitives";
+import { Hint, PageHeader } from "../SettingsUI";
 import { GithubSignIn } from "./GithubSignIn";
 
 export function AppLogo({ app, size = 40 }: { app: CatalogApp; size?: number }) {
@@ -29,12 +33,24 @@ const connectsStraightAway = (app: CatalogApp, clients: string[]) => {
   return c.kind !== "client" || !!OAUTH_CLIENTS[c.client].env || clients.includes(c.client);
 };
 
-function statusText(view?: AppView) {
-  if (view?.status === "connected") return "Connected";
-  if (view?.status === "needs-auth") return "Signed out";
-  if (view?.status === "error") return "Couldn't connect";
-  if (view?.status === "connecting") return "Waiting for sign-in";
+/** Where a connection stands, beside the app's name: a dot for its state and a word for it. */
+function statusOf(view?: AppView): { label: string; tone: "ok" | "warn" | "bad" | "busy" } | undefined {
+  if (view?.status === "connected") return { label: "Connected", tone: "ok" };
+  if (view?.status === "needs-auth") return { label: "Signed out", tone: "warn" };
+  if (view?.status === "error") return { label: "Couldn't connect", tone: "bad" };
+  if (view?.status === "connecting") return { label: "Waiting for sign-in", tone: "busy" };
   return undefined;
+}
+
+function AppStatus({ view, pill }: { view?: AppView; pill?: boolean }) {
+  const status = statusOf(view);
+  if (!status) return null;
+  return (
+    <span className={cx("app-status", `app-status-${status.tone}`, pill && "app-status-pill")}>
+      <span className="app-status-dot" aria-hidden />
+      {status.label}
+    </span>
+  );
 }
 
 function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
@@ -55,46 +71,41 @@ function AppRow({ app, onOpen }: { app: CatalogApp; onOpen: () => void }) {
       setBusy(false);
     }
   };
-  const status = statusText(view);
   return (
-    <div className="app-row">
+    <li className="app-row">
       <button type="button" className="app-row-main" onClick={onOpen}>
-        <AppLogo app={app} size={32} />
+        <AppLogo app={app} size={36} />
         <span className="app-row-text">
-          <span className="app-row-name">{app.name}</span>
-          {problem ? <span className="app-row-status bad">{problem}</span> : status && <span className={cx("app-row-status", view?.status === "connected" ? "app-row-status-on" : view?.status !== "connecting" && "bad")}>{status}</span>}
+          <span className="app-row-name">
+            {app.name}
+            <AppStatus view={view} />
+          </span>
+          {problem ? <span className="app-row-desc app-row-problem">{problem}</span> : <span className="app-row-desc">{app.description}</span>}
         </span>
       </button>
       {isConnected(view) ? (
-        <button type="button" className="btn btn-sm" onClick={onOpen}>
+        <button type="button" className="btn btn-sm app-row-action" onClick={onOpen}>
           Manage
         </button>
       ) : (
-        <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void go()}>
+        <button type="button" className="btn btn-sm app-row-action" disabled={busy} onClick={() => void go()}>
           {busy ? <Spinner size={12} /> : view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
         </button>
       )}
-    </div>
+    </li>
   );
 }
 
-function Section({ title, apps, onOpen, onAll }: { title: string; apps: CatalogApp[]; onOpen: (id: string) => void; onAll?: () => void }) {
+function Section({ title, apps, onOpen }: { title?: string; apps: CatalogApp[]; onOpen: (id: string) => void }) {
   if (!apps.length) return null;
   return (
-    <section className="apps-section">
-      <div className="apps-section-head">
-        <h3>{title}</h3>
-        {onAll && (
-          <button type="button" className="apps-view-all" onClick={onAll}>
-            View all
-          </button>
-        )}
-      </div>
-      <div className="apps-grid">
+    <section className="apps-section" aria-label={title}>
+      {title && <h3 className="apps-section-title">{title}</h3>}
+      <ul className="apps-list">
         {apps.map((app) => (
           <AppRow key={app.id} app={app} onOpen={() => onOpen(app.id)} />
         ))}
-      </div>
+      </ul>
     </section>
   );
 }
@@ -132,8 +143,76 @@ export function CopyLine({ value, label }: { value: string; label: string }) {
   );
 }
 
-/** One app: what it does, what connecting it takes, and what it gave bots. */
-function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void; onDone: () => void }) {
+/** A hairline card on an app's page, one per concern: Connection, Permissions, Tools, Danger zone. */
+export function AppCard({ title, aside, foot, danger, children, className }: { title?: ReactNode; aside?: ReactNode; foot?: ReactNode; danger?: boolean; children?: ReactNode; className?: string }) {
+  return (
+    <section className={cx("app-card", danger && "app-card-danger", className)} aria-label={typeof title === "string" ? title : undefined}>
+      {title && (
+        <header className="app-card-head">
+          <h3 className="app-card-title">{title}</h3>
+          {aside}
+        </header>
+      )}
+      {children}
+      {foot && <div className="app-card-foot">{foot}</div>}
+    </section>
+  );
+}
+
+/** A row in a card: what it is on the left, with one dim line under it at most (more goes in `hint`), and its control on the right. */
+export function AppRowLine({ label, desc, hint, lead, children, className }: { label: ReactNode; desc?: ReactNode; hint?: string; lead?: ReactNode; children?: ReactNode; className?: string }) {
+  return (
+    <div className={cx("app-card-row", className)}>
+      {lead}
+      <div className="app-card-text">
+        <div className="app-card-label">
+          {label}
+          {hint && <Hint text={hint} />}
+        </div>
+        {desc && <div className="app-card-desc">{desc}</div>}
+      </div>
+      {children && <div className="app-card-control">{children}</div>}
+    </div>
+  );
+}
+
+/** A problem to show where it happened. */
+export function AppAlert({ children }: { children: ReactNode }) {
+  return (
+    <p className="app-alert key-status key-status-bad" role="alert">
+      <CircleAlert size={13} className="bad" /> {children}
+    </p>
+  );
+}
+
+/** What connecting gave bots, folded away under its count. */
+function ListCard({ title, items }: { title: string; items: { name: string; description?: string }[] }) {
+  return (
+    <details className="app-card app-list-card">
+      <summary className="app-card-head">
+        <h3 className="app-card-title">{title}</h3>
+        <span className="app-card-count">{items.length}</span>
+        <ChevronDown size={15} className="app-card-chevron" aria-hidden />
+      </summary>
+      <ul className="app-list">
+        {items.map((t) => (
+          <li key={t.name}>
+            <code>{t.name}</code>
+            {t.description && <span>{t.description}</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+const shortDate = (at: number) => new Date(at).toLocaleDateString([], { month: "short", day: "numeric", year: new Date(at).getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
+
+/**
+ * One app's page: a header (logo, name, its state, the main action), then a card for each concern:
+ * connecting it, what bots may do with it, what it gave them, and taking it away again.
+ */
+export function AppPage({ app, onDone }: { app: CatalogApp; onDone: () => void }) {
   const view = useApps((s) => s.apps[app.id]);
   const clients = useApps((s) => s.clients);
   const githubKey = useApps((s) => s.githubKey);
@@ -157,6 +236,16 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
   const showPat = !app.githubAuth || patShown || usingPat || github?.configured === false;
   const canReuseKey = !!app.githubAuth && githubKey && githubMode === "pat";
 
+  // Opened on its own (a link, a test), it fetches where the apps stand; the Marketplace has usually done that already.
+  useEffect(() => {
+    if (!useApps.getState().loaded) void useApps.getState().load().catch(() => {});
+  }, []);
+  // Its saved settings arrive with it, when that's after the page opened.
+  const savedFields = view?.fields;
+  useEffect(() => {
+    if (savedFields) setFields((now) => (Object.keys(now).length ? now : savedFields));
+  }, [savedFields]);
+
   const run = async (work: () => Promise<void>) => {
     setBusy(true);
     setProblem(undefined);
@@ -173,7 +262,7 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
     const input: ConnectInput = {};
     if (app.fields?.length) input.fields = fields;
     if (guide && clientId.trim()) input.client = { id: clientId, secret: clientSecret };
-    // Saving a connected app's settings is done once it's still connected after: the dialog closes.
+    // Saving a connected app's settings is done once it's still connected after: the page goes back.
     // A failure stays here with its error, as does a reconnect that's still signing in.
     const saving = connected;
     void run(async () => {
@@ -186,203 +275,229 @@ function AppPage({ app, onBack, onDone }: { app: CatalogApp; onBack: () => void;
   const pastes = pastesSignIn(app);
   const error = problem ?? (view?.status === "error" || view?.status === "needs-auth" ? view.error : undefined);
 
+  // Choices (GitHub's access, a Datadog site) are settings; the rest (keys, tokens) are what connecting takes.
+  const choices = app.fields?.filter((f) => f.options) ?? [];
+  const inputs = app.fields?.filter((f) => !f.options && !(app.githubAuth && f.id === "token" && !showPat)) ?? [];
+  const setField = (id: string, value: string) => setFields({ ...fields, [id]: value });
+  // GitHub's own sign-in has its own button until it's signed in; a connected open server has nothing to send.
+  const hasAction = !(connected && c.kind === "open") && !(app.githubAuth && !showPat && githubMode !== "app");
+  const saves = connected && !!app.githubAuth;
+  // Saving only does something when a setting differs from what's saved, or a new key is typed in:
+  // changing one and back again is no change.
+  const valueOf = (f: NonNullable<CatalogApp["fields"]>[number], from?: Record<string, string>) => from?.[f.id] ?? f.options?.[0]?.value ?? "";
+  const changed = (app.fields ?? []).some((f) => (f.secret ? !!fields[f.id]?.trim() : valueOf(f, fields) !== valueOf(f, savedFields)));
+  const reconnects = connected || view?.status === "needs-auth" || view?.status === "error";
+  const action = (
+    <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy || (saves && !changed)} onClick={connect}>
+      {busy ? <Spinner size={13} /> : saves ? "Save" : reconnects ? "Reconnect" : "Connect"}
+    </button>
+  );
+  // Keys and an OAuth client are typed in the Connection card, so its button sits under them; otherwise it's the header's.
+  const typesIn = inputs.length > 0 || (!!guide && !hasClient);
+  const actionInHeader = hasAction && !saves && !typesIn;
+  const setup = (c.kind === "local" || c.kind === "desktop") && !connected ? c.install : undefined;
+  // Nothing to fill in or set up: the card still says how connecting goes.
+  const plain = !setup && !guide && !app.githubAuth && !inputs.length && !pastes && !connected;
+
   return (
-    <div className="bots-dialog-body app-page">
-      <button type="button" className="apps-back" onClick={onBack}>
-        <ArrowLeft size={15} /> All apps
-      </button>
-      <div className="app-page-head">
-        <AppLogo app={app} size={44} />
-        <div className="app-page-title">
-          <h3>{app.name}</h3>
-          <p>
-            Official, by {app.by} ·{" "}
+    <div className="app-page">
+      <header className="app-hero">
+        <AppLogo app={app} size={56} />
+        <div className="app-hero-text">
+          <h2 className="app-hero-name">
+            {app.name}
+            <AppStatus view={view} pill />
+          </h2>
+          <p className="app-hero-desc">{app.description}</p>
+          <p className="app-hero-meta">
+            Official, by {app.by}
+            <span aria-hidden> · </span>
             <a href={app.docs} target="_blank" rel="noreferrer">
               Docs <ExternalLink size={11} />
             </a>
           </p>
         </div>
-      </div>
-      <p className="app-page-desc">{app.description}</p>
-
-      {c.kind === "local" && !connected && <p className="field-help">{c.install}</p>}
-      {c.kind === "desktop" && !connected && <p className="field-help">{c.install}</p>}
-
-      {guide && (
-        <div className="app-guide">
-          <div className="bots-field-label">{hasClient ? `Your ${guide.name} OAuth client` : `${app.by} needs an OAuth client of your own`}</div>
-          {hasClient ? (
-            <p className="field-help">
-              Saved. Every {guide.name} app uses it.{" "}
-              <button type="button" className="apps-link" disabled={busy} onClick={() => void run(() => useApps.getState().forgetClient(c.kind === "client" ? c.client : "google"))}>
-                Forget it
+        {(actionInHeader || connected) && (
+          <div className="app-hero-actions">
+            {connected && (
+              <button type="button" className="btn bots-btn" disabled={busy} onClick={() => void run(() => useApps.getState().check(app.id))}>
+                Test connection
               </button>
-            </p>
+            )}
+            {actionInHeader && action}
+          </div>
+        )}
+      </header>
+
+      <AppCard title="Connection" foot={hasAction && !saves && typesIn ? <div className="app-page-actions">{action}</div> : undefined}>
+        {setup && <AppRowLine label="Before connecting" desc={setup} />}
+        {plain && <AppRowLine label="Not connected" desc={c.kind === "open" ? "No sign-in needed: it connects straight away." : `Connecting opens ${app.by}'s sign-in.`} />}
+
+        {guide &&
+          (hasClient ? (
+            <AppRowLine label={`${guide.name} OAuth client`} desc={`Saved. Every ${guide.name} app uses it.`}>
+              <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void run(() => useApps.getState().forgetClient(c.kind === "client" ? c.client : "google"))}>
+                Forget
+              </button>
+            </AppRowLine>
           ) : (
-            <ol className="app-steps">
-              {guide.steps?.map((step) => (
-                <li key={step}>{step}</li>
-              ))}
-            </ol>
-          )}
-          {!hasClient && (
-            <>
+            <div className="app-card-block app-oauth">
+              <div className="app-card-label">{`${app.by} needs an OAuth client of your own`}</div>
+              <ol className="app-steps">
+                {guide.steps?.map((step) => (
+                  <li key={step}>{step}</li>
+                ))}
+              </ol>
               <CopyLine value={`${window.location.origin}${APP_CALLBACK_PATH}`} label="Copy redirect URI" />
               {c.kind === "client" && !!c.enable?.length && (
-                <p className="field-help">
+                <p className="app-card-desc">
                   APIs to enable: <code>{c.enable.join(", ")}</code>
                 </p>
               )}
-              <p className="field-help">
-                <a href={guide.console} target="_blank" rel="noreferrer">
-                  Open {guide.name} <ExternalLink size={11} />
-                </a>{" "}
-                ·{" "}
-                <a href={guide.docs} target="_blank" rel="noreferrer">
-                  Their guide <ExternalLink size={11} />
+              <div className="app-page-actions">
+                <a className="btn btn-sm" href={guide.console} target="_blank" rel="noreferrer">
+                  Open {guide.name} <ExternalLink size={12} />
                 </a>
-              </p>
+                <a className="btn btn-sm" href={guide.docs} target="_blank" rel="noreferrer">
+                  Their guide <ExternalLink size={12} />
+                </a>
+              </div>
               <label className="bots-field">
                 <span className="bots-field-label">Client ID</span>
-                <input className="input" value={clientId} autoComplete="off" spellCheck={false} onChange={(e) => setClientId(e.target.value)} />
+                <input className="input input-sm" value={clientId} autoComplete="off" spellCheck={false} onChange={(e) => setClientId(e.target.value)} />
               </label>
               <label className="bots-field">
-                <span className="bots-field-label">Client secret{guide.secret === "optional" ? " (optional)" : ""}</span>
-                <input className="input" type="password" value={clientSecret} autoComplete="off" onChange={(e) => setClientSecret(e.target.value)} />
+                <span className="bots-field-label">
+                  Client secret{guide.secret === "optional" && <span className="bots-field-optional"> · optional</span>}
+                </span>
+                <input className="input input-sm" type="password" value={clientSecret} autoComplete="off" onChange={(e) => setClientSecret(e.target.value)} />
               </label>
-            </>
-          )}
-        </div>
-      )}
+            </div>
+          ))}
 
-      {app.githubAuth && <GithubSignIn patShown={showPat} onPat={() => setPatShown(true)} onConnected={() => run(() => connectWith({ fields }))} />}
+        {app.githubAuth && <GithubSignIn part="connection" patShown={showPat} onPat={() => setPatShown(true)} onConnected={() => run(() => connectWith({ fields }))} />}
 
-      {app.fields?.filter((field) => !(app.githubAuth && field.id === "token" && !showPat)).map((field) => (
-        <label key={field.id} className="bots-field">
-          <span className="bots-field-label">{field.label}</span>
-          {field.options ? (
-            <select className="input" value={fields[field.id] ?? field.options[0]!.value} onChange={(e) => setFields({ ...fields, [field.id]: e.target.value })}>
-              {field.options.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              className="input"
-              type={field.secret ? "password" : "text"}
-              value={fields[field.id] ?? ""}
-              autoComplete="off"
-              spellCheck={false}
-              placeholder={connected && field.secret ? "Saved. Paste a new one to replace it." : canReuseKey && field.secret ? "Uses your GitHub key from Settings. Paste another to use that." : field.placeholder}
-              onChange={(e) => setFields({ ...fields, [field.id]: e.target.value })}
-            />
-          )}
-          {(field.help || field.link) && (
-            <span className="field-help">
-              {field.help}{" "}
-              {field.link && (
-                <a href={field.link} target="_blank" rel="noreferrer">
-                  Get one <ExternalLink size={11} />
-                </a>
-              )}
-            </span>
-          )}
-        </label>
-      ))}
-
-      {pastes && !connected && !view?.signingIn && <p className="field-help">{app.by} only sends sign-ins back to localhost, so connecting from this address takes one extra step: you'll copy an address back here after signing in.</p>}
-
-      {pastes && view?.signingIn && (
-        <form
-          className="app-guide"
-          onSubmit={(e) => {
-            e.preventDefault();
-            finish();
-          }}
-        >
-          <label className="bots-field">
-            <span className="bots-field-label">Finish signing in</span>
-            <input className="input" value={pasted} autoComplete="off" spellCheck={false} placeholder="http://localhost…" onChange={(e) => setPasted(e.target.value)} />
-            <span className="field-help">Once you approve {app.name}, its tab ends on a page that won't load. That's expected. Copy the whole address from that tab and paste it here.</span>
-          </label>
-          <div className="app-page-actions">
-            <button type="submit" className="btn bots-btn bots-btn-primary" disabled={busy || !pasted.trim()}>
-              {busy ? <Spinner size={13} /> : "Finish"}
-            </button>
+        {inputs.length > 0 && (
+          <div className="app-card-block">
+            {inputs.map((field) => (
+              <label key={field.id} className="bots-field">
+                <span className="bots-field-label">{field.label}</span>
+                <input
+                  className="input input-sm"
+                  type={field.secret ? "password" : "text"}
+                  value={fields[field.id] ?? ""}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder={connected && field.secret ? "Saved · paste a new one to replace it" : canReuseKey && field.secret ? "Using your GitHub key from Settings" : field.placeholder}
+                  onChange={(e) => setField(field.id, e.target.value)}
+                />
+                {(field.help || field.link) && (
+                  <span className="app-card-desc">
+                    {field.help}{" "}
+                    {field.link && (
+                      <a href={field.link} target="_blank" rel="noreferrer">
+                        Get one <ExternalLink size={11} />
+                      </a>
+                    )}
+                  </span>
+                )}
+              </label>
+            ))}
           </div>
-        </form>
-      )}
-
-      {error && (
-        <p className="field-help key-status key-status-bad" role="alert">
-          <CircleAlert size={13} className="bad" /> {error}
-        </p>
-      )}
-
-      <div className="app-page-actions">
-        {!(connected && c.kind === "open") && !(app.githubAuth && !showPat && githubMode !== "app") && (
-          <button type="button" className={cx("btn bots-btn", !(pastes && view?.signingIn) && "bots-btn-primary")} disabled={busy} onClick={connect}>
-            {busy ? <Spinner size={13} /> : connected && app.githubAuth ? "Save" : connected || view?.status === "needs-auth" || view?.status === "error" ? "Reconnect" : "Connect"}
-          </button>
         )}
-        {connected && (
-          <button type="button" className="btn bots-btn" disabled={busy} onClick={() => void run(() => useApps.getState().check(app.id))}>
-            Check it
-          </button>
-        )}
-        {view && view.status !== "off" && (
-          <button type="button" className="btn bots-btn bots-danger" disabled={busy} onClick={() => void run(() => useApps.getState().disconnect(app.id))}>
-            {/* GitHub's own sign-in has its Disconnect above; this only takes the app away from bots. */}
-            {app.githubAuth ? "Remove from bots" : "Disconnect"}
-          </button>
-        )}
-      </div>
 
-      {connected && <p className="field-help">Every bot can use this as you. Bots never see the sign-in itself.</p>}
+        {pastes && !connected && !view?.signingIn && <AppRowLine label="Sign-in" desc={`${app.by} only returns sign-ins to localhost: you'll paste the address back here.`} />}
 
-      {!!view?.tools?.length && (
-        <details className="app-details">
-          <summary>{view.tools.length === 1 ? "1 tool" : `${view.tools.length} tools`}</summary>
-          <ul>
-            {view.tools.map((t) => (
-              <li key={t.name}>
-                <code>{t.name}</code>
-                {t.description && <span>{t.description}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
+        {pastes && view?.signingIn && (
+          <form
+            className="app-card-block"
+            onSubmit={(e) => {
+              e.preventDefault();
+              finish();
+            }}
+          >
+            <label className="bots-field">
+              <span className="bots-field-label">Finish signing in</span>
+              <input className="input input-sm" value={pasted} autoComplete="off" spellCheck={false} placeholder="http://localhost…" onChange={(e) => setPasted(e.target.value)} />
+              <span className="app-card-desc">After you approve {app.name}, its tab lands on a page that won't load. Paste that tab's address here.</span>
+            </label>
+            <div className="app-page-actions">
+              <button type="submit" className="btn bots-btn bots-btn-primary" disabled={busy || !pasted.trim()}>
+                {busy ? <Spinner size={13} /> : "Finish"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {connected && !app.githubAuth && <AppRowLine label={view?.connectedAt ? `Connected ${shortDate(view.connectedAt)}` : "Connected"} desc="Bots use it as you, without seeing your sign-in." />}
+
+        {error && (
+          <div className="app-card-block">
+            <AppAlert>{error}</AppAlert>
+          </div>
+        )}
+      </AppCard>
+
+      {choices.length > 0 && (
+        <AppCard title={choices.some((f) => f.id === "access") ? "Permissions" : "Settings"} foot={saves && hasAction ? <div className="app-page-actions">{action}</div> : undefined}>
+          {choices.map((field) => (
+            <AppRowLine key={field.id} label={field.label} hint={field.help}>
+              <OptionSelect className="app-select" label={field.label} value={fields[field.id] ?? field.options![0]!.value} options={field.options!} onChange={(value) => setField(field.id, value)} />
+            </AppRowLine>
+          ))}
+        </AppCard>
       )}
-      {!!view?.skills?.length && (
-        <details className="app-details">
-          <summary>{view.skills.length === 1 ? "1 skill" : `${view.skills.length} skills`}</summary>
-          <ul>
-            {view.skills.map((k) => (
-              <li key={k.name}>
-                <code>{k.name}</code>
-                {k.description && <span>{k.description}</span>}
-              </li>
-            ))}
-          </ul>
-        </details>
+
+      {!!view?.tools?.length && <ListCard title="Tools" items={view.tools} />}
+      {!!view?.skills?.length && <ListCard title="Skills" items={view.skills} />}
+      {!view?.skills?.length && !!app.skills?.length && !connected && (
+        <AppCard>
+          <AppRowLine label="Skills" desc={`${app.by}'s skills install when you connect.`} />
+        </AppCard>
       )}
-      {!view?.skills?.length && !!app.skills?.length && !connected && <p className="field-help">Comes with {app.by}'s own skills, installed when you connect.</p>}
+
+      {((view && view.status !== "off") || (app.githubAuth && github?.mode === "app" && github.app)) && (
+        <AppCard title="Danger zone" danger>
+          {view && view.status !== "off" && (
+            <AppRowLine label={app.githubAuth ? "Remove from bots" : "Disconnect"} desc={app.githubAuth ? "Bots lose GitHub's tools. Your GitHub sign-in stays." : "Bots lose its tools. You can connect it again any time."}>
+              <button type="button" className="btn btn-sm app-danger-btn" disabled={busy} onClick={() => void run(() => useApps.getState().disconnect(app.id))}>
+                {app.githubAuth ? "Remove" : "Disconnect"}
+              </button>
+            </AppRowLine>
+          )}
+          {app.githubAuth && <GithubSignIn part="danger" patShown={showPat} onPat={() => setPatShown(true)} onConnected={() => run(() => connectWith({ fields }))} />}
+        </AppCard>
+      )}
     </div>
   );
 }
 
 type Filter = "all" | "connected" | AppCategory;
 
-export function AppsDialog({ initial, onClose }: { initial?: string; onClose: () => void }) {
-  const modal = useModal(onClose);
+function NavItem({ on, label, count, onClick }: { on: boolean; label: string; count: number; onClick: () => void }) {
+  return (
+    <button type="button" className="apps-nav-item" aria-current={on ? "true" : undefined} onClick={onClick}>
+      <span className="apps-nav-label">{label}</span>
+      <span className="apps-nav-count">{count}</span>
+    </button>
+  );
+}
+
+/**
+ * OpenBots' Marketplace, a page in the main pane like Settings: the catalog, with its categories down
+ * the left, or one app's page. Back, Esc and the browser's back step up from an app to the catalog,
+ * then out to wherever the Marketplace was opened from (pages.ts); the sidebar stays as it was.
+ */
+export function MarketplacePage() {
+  const appId = useStore((s) => s.marketplaceApp);
+  const phone = useMediaQuery("(max-width: 768px)");
   const apps = useApps((s) => s.apps);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [open, setOpen] = useState<string | undefined>(initial);
-  const [more, setMore] = useState(false);
-  const moreRef = useRef<HTMLButtonElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const page = useRef<HTMLDivElement>(null);
+  const app = appId ? appById(appId) : undefined;
 
   useEffect(() => {
     void useApps.getState().load().catch(() => {});
@@ -394,8 +509,39 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
     return () => window.removeEventListener("message", onMessage);
   }, []);
 
+  // An app that isn't in the catalog (an old link) is the catalog.
+  useEffect(() => {
+    if (appId && !app) useStore.setState({ marketplaceApp: undefined });
+  }, [appId, app]);
+
+  // An app's page starts at its top, with focus on the page so Esc and the keyboard work from there.
+  useLayoutEffect(() => {
+    if (page.current) page.current.scrollTop = 0;
+    if (app && !root.current?.contains(document.activeElement)) root.current?.focus({ preventScroll: true });
+    else if (document.activeElement === document.body) root.current?.focus({ preventScroll: true });
+  }, [app?.id]);
+
+  // One step back: from an app to the catalog it was opened from (or out, opened straight at it), then out of the Marketplace.
+  const goBack = app ? marketplaceBack : leaveMarketplace;
+  const latest = useRef(goBack);
+  latest.current = goBack;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
+      // Whatever is over the page (a dialog, a menu, a lightbox) takes its own Escape.
+      if (useLightbox.getState().open || document.querySelector("dialog[open], .modal-root, .popover-portal, .context-menu")) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && el !== document.body && el.closest("[role='menu'], [role='listbox'], [role='dialog']")) return;
+      // A field with something in it keeps it (a search clears itself); an empty one doesn't hold the page.
+      if (el instanceof HTMLInputElement && el.value) return;
+      e.preventDefault();
+      latest.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const connected = useMemo(() => APP_CATALOG.filter((a) => isConnected(apps[a.id])), [apps]);
-  const page = open ? appById(open) : undefined;
   const words = query.trim().toLowerCase();
   const matches = useMemo(() => {
     if (!words) return [];
@@ -406,89 +552,79 @@ export function AppsDialog({ initial, onClose }: { initial?: string; onClose: ()
     });
   }, [words, apps]);
   const inCategory = (id: AppCategory) => APP_CATALOG.filter((a) => a.category === id);
-  const chips = APP_CATEGORIES.filter((c) => !c.more);
-  const extras = APP_CATEGORIES.filter((c) => c.more);
-  const extraPicked = extras.find((c) => c.id === filter);
+  // Picking a category clears the search and starts its list at the top.
+  const pick = (next: Filter) => {
+    setFilter(next);
+    setQuery("");
+    list.current?.scrollTo({ top: 0 });
+  };
+
+  const search = (
+    <label className="apps-search">
+      <Search size={15} />
+      <input type="search" value={query} placeholder="Search apps and skills" aria-label="Search apps and skills" autoFocus={!phone && !app} onChange={(e) => setQuery(e.target.value)} />
+    </label>
+  );
+  // An app's page names where it sits: "Marketplace / GitHub", the first a way to the catalog.
+  const title = app && !phone ? (
+    <span className="mpage-trail">
+      <button type="button" className="mpage-crumb" onClick={marketplaceUp}>
+        Marketplace
+      </button>
+      <span className="mpage-sep" aria-hidden>
+        /
+      </span>
+      {app.name}
+    </span>
+  ) : app ? (
+    app.name
+  ) : (
+    "Marketplace"
+  );
 
   return (
-    <dialog {...modal} className="bots-dialog apps-dialog" aria-label="Marketplace">
-      <DialogHead title="Marketplace" onClose={onClose} />
-      {page ? (
-        <AppPage key={page.id} app={page} onBack={() => setOpen(undefined)} onDone={onClose} />
-      ) : (
-        <div className="bots-dialog-body apps-body">
-          <div className="apps-tools">
-            <label className="search apps-search">
-              <Search size={16} />
-              <input type="text" value={query} placeholder="Search across apps and skills" aria-label="Search across apps and skills" autoFocus onChange={(e) => setQuery(e.target.value)} />
-            </label>
-            <button type="button" className="apps-connected" disabled={!connected.length} onClick={() => setFilter(filter === "connected" ? "all" : "connected")}>
-              {connected.slice(0, 4).map((a) => (
-                <AppLogo key={a.id} app={a} size={22} />
-              ))}
-              <span>{connected.length} connected</span>
-              <ChevronRight size={14} />
-            </button>
-          </div>
-          {!words && (
-            <div className="apps-chips" role="group" aria-label="Categories">
-              <button type="button" className={cx("apps-chip", filter === "all" && "apps-chip-on")} onClick={() => setFilter("all")}>
-                All
-              </button>
-              {chips.map((c) => (
-                <button key={c.id} type="button" className={cx("apps-chip", filter === c.id && "apps-chip-on")} onClick={() => setFilter(c.id)}>
-                  {c.label}
-                </button>
-              ))}
-              {!!extras.length && (
-                <>
-                  <button ref={moreRef} type="button" className={cx("apps-chip", extraPicked && "apps-chip-on")} aria-haspopup="menu" aria-expanded={more} onClick={() => setMore(!more)}>
-                    {extraPicked?.label ?? "More"} <ChevronDown size={14} />
-                  </button>
-                  <Popover open={more} onClose={() => setMore(false)} anchor={moreRef} className="menu" role="menu" label="More categories" fixed="down">
-                    <div onKeyDown={(e) => arrowNav(e)}>
-                      {extras.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          role="menuitem"
-                          className="menu-item"
-                          onClick={() => {
-                            setMore(false);
-                            setFilter(c.id);
-                          }}
-                        >
-                          {c.label}
-                        </button>
-                      ))}
-                    </div>
-                  </Popover>
-                </>
-              )}
-            </div>
-          )}
+    <div ref={root} className="spage mpage" role="region" aria-label="Marketplace" tabIndex={-1}>
+      <PageHeader title={title} onBack={goBack} />
+      {/* The catalog stays mounted under an app's page, so coming back finds it as it was left. */}
+      <div className="apps-body mpage-body" hidden={!!app}>
+        {phone && <div className="mpage-search">{search}</div>}
+        <nav className="apps-nav" aria-label="Categories">
+          <NavItem on={!words && filter === "all"} label="All apps" count={APP_CATALOG.length} onClick={() => pick("all")} />
+          <NavItem on={!words && filter === "connected"} label="Connected" count={connected.length} onClick={() => pick("connected")} />
+          <span className="apps-nav-sep" aria-hidden />
+          {APP_CATEGORIES.map((c) => (
+            <NavItem key={c.id} on={!words && filter === c.id} label={c.label} count={inCategory(c.id).length} onClick={() => pick(c.id)} />
+          ))}
+        </nav>
+        <div ref={list} className="apps-main">
+          {!phone && search}
           {words ? (
             matches.length ? (
-              <Section title={`${matches.length} found`} apps={matches} onOpen={setOpen} />
+              <Section title={matches.length === 1 ? "1 result" : `${matches.length} results`} apps={matches} onOpen={openMarketplaceApp} />
             ) : (
-              <p className="pi-empty">Nothing matches that.</p>
+              <p className="apps-empty">No apps match “{query.trim()}”.</p>
             )
           ) : filter === "all" ? (
-            <>
-              <Section title="Recommended for you" apps={APP_CATALOG.filter((a) => a.recommended && !isConnected(apps[a.id])).slice(0, 6)} onOpen={setOpen} />
-              {APP_CATEGORIES.map((c) => {
-                const list = inCategory(c.id);
-                return <Section key={c.id} title={c.label} apps={list.slice(0, 6)} onOpen={setOpen} onAll={list.length > 6 ? () => setFilter(c.id) : undefined} />;
-              })}
-            </>
+            APP_CATEGORIES.map((c) => <Section key={c.id} title={c.label} apps={inCategory(c.id)} onOpen={openMarketplaceApp} />)
           ) : filter === "connected" ? (
-            <Section title="Connected" apps={connected} onOpen={setOpen} />
+            connected.length ? (
+              <Section title="Connected" apps={connected} onOpen={openMarketplaceApp} />
+            ) : (
+              <p className="apps-empty">Nothing connected yet.</p>
+            )
           ) : (
-            <Section title={APP_CATEGORIES.find((c) => c.id === filter)!.label} apps={inCategory(filter)} onOpen={setOpen} />
+            <Section title={APP_CATEGORIES.find((c) => c.id === filter)!.label} apps={inCategory(filter)} onOpen={openMarketplaceApp} />
           )}
         </div>
+      </div>
+      {app && (
+        <div ref={page} className="mpage-scroll">
+          <div className="mpage-inner">
+            <AppPage key={app.id} app={app} onDone={marketplaceBack} />
+          </div>
+        </div>
       )}
-    </dialog>
+    </div>
   );
 }
 
@@ -535,7 +671,7 @@ function LocalConnectCard({ app }: { app: CatalogApp }) {
       {isConnected(view) ? (
         <span className="bm-connect-done">Connected</span>
       ) : (
-        <button type="button" className="btn btn-sm" onClick={() => openBotsDialog({ kind: "apps", app: app.id })}>
+        <button type="button" className="btn btn-sm" onClick={() => useStore.getState().openMarketplace(app.id)}>
           Connect
         </button>
       )}

@@ -331,6 +331,8 @@ function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>>
 const RAIL_FAV = "★";
 /** The picker's width on a wide screen: rail, list and the Reasoning column side by side. */
 const PICKER_WIDTH = 540;
+/** The model picker's height: room for about seven models, the reasoning levels and the footer. */
+const PICKER_HEIGHT = 320;
 
 /** Price and size of a model, as a short line. */
 function modelFacts(m: ModelInfo) {
@@ -368,14 +370,14 @@ function PickerFoot({ deviceId }: { deviceId?: string }) {
   return (
     <div className="mp-foot">
       <SpeedToggle deviceId={deviceId} />
-      <span className="mp-foot-label">Runtime</span>
+      <span className="mp-foot-label">Harness</span>
       {started ? (
         <span className="mp-foot-value mp-runtime-fixed" data-tooltip="Fixed once a thread starts" data-tooltip-side="top">
           <RuntimeIcon runtime={fixed} size={13} />
           {RUNTIME_LABEL[fixed]}
         </span>
       ) : (
-        <span className="mp-levels" role="radiogroup" aria-label="Runtime" onKeyDown={(e) => arrowNav(e)}>
+        <span className="mp-levels" role="radiogroup" aria-label="Harness" onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => {
             const absent = missing(o.runtime);
             return (
@@ -452,12 +454,12 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     up: boolean;
     max: number;
     pos: React.CSSProperties;
-  }>({ up: dropUp, max: 380, pos: {} });
+  }>({ up: dropUp, max: PICKER_HEIGHT, pos: {} });
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
-  // Open right at the pill, toward whichever side has room. The height is fixed (not sized to the
-  // list) so switching providers or searching doesn't make the panel jump.
+  // Open right at the pill, toward whichever side has room. One compact height whatever it holds (less
+  // only when the window has less room), so it never grows or shrinks with the models: more of them scroll.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -487,7 +489,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
       setLayout({
         up,
-        max: Math.max(220, Math.min(380, up ? above : below)),
+        max: Math.max(220, Math.min(PICKER_HEIGHT, up ? above : below)),
         pos,
       });
     };
@@ -737,7 +739,7 @@ export function RemoteControlToggle({ chatId }: { chatId?: string }) {
     ? remote.scope === "machine" ? "Set per machine, not per thread" : `Set in your ${RUNTIME_NAME[runtime]} account`
     : chatId ? "On since this thread started" : "Needs a claude.ai sign-in";
   return (
-    <div className="remote-control-row" data-runtime={runtime}>
+    <div className="remote-control-row" data-runtime={runtime} data-tooltip={note} data-tooltip-side="bottom">
       <label htmlFor={id} className="remote-control-label">Remote control</label>
       <Toggle id={id} className="toggle-sm" checked={perThread && (chatId ? chatOn : draftOn)} disabled={!perThread || !!chatId} onChange={setDraft} label="Remote control" describedBy={`${id}-note`} />
       <span id={`${id}-note`} className="remote-control-note">{note}</span>

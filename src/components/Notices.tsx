@@ -147,7 +147,7 @@ export function Notices() {
         setFeedback(`${listPhrase(completed)} updated.`);
       }
     } catch (err) {
-      if (!controller.signal.aborted) { setError("Runtime update failed. You can retry or check Settings → Runtimes."); setDetails(err instanceof Error ? err.message : "Update failed."); }
+      if (!controller.signal.aborted) { setError("Harness update failed. You can retry or check Settings → Harnesses."); setDetails(err instanceof Error ? err.message : "Update failed."); }
     } finally {
       busy.current = false;
       if (!controller.signal.aborted) setUpdating(false);
@@ -214,12 +214,12 @@ export function Notices() {
             : releaseBusy ? "Updating OpenBuild…" : releaseResult || `OpenBuild ${release.latest} is available (${release.track}).`}
           action={restartPending
             ? (
-              <button type="button" className="btn btn-sm" disabled={restarting || updating} aria-busy={restarting} onClick={() => void restartServer()}>
+              <button type="button" className="btn btn-sm btn-primary" disabled={restarting || updating} aria-busy={restarting} onClick={() => void restartServer()}>
                 {restarting && <Spinner size={12} />}
                 {restarting ? "Restarting…" : restartFailure ? "Retry" : "Restart"}
               </button>
             )
-            : <button type="button" className="btn btn-sm" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={() => void updateRelease()}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
+            : <button type="button" className="btn btn-sm btn-primary" disabled={releaseBusy || updating} aria-busy={releaseBusy} onClick={() => void updateRelease()}>{releaseBusy ? "Updating…" : releaseDetails ? "Retry" : "Update"}</button>}
           details={restartPending ? restartFailure : releaseDetails}
           sticky={releaseBusy || restarting}
           persistent={restartPending}
@@ -231,17 +231,17 @@ export function Notices() {
       {showBuild && (
         <Notice
           text="OpenBuild was updated."
-          action={<button type="button" className="btn btn-sm" onClick={() => location.reload()}>Reload</button>}
+          action={<button type="button" className="btn btn-sm btn-primary" onClick={() => location.reload()}>Reload</button>}
           onDismiss={() => setBuildClosed(true)}
           onExpire={() => setBuildClosed(true)}
         />
       )}
       {showUpdates && (
         <Notice
-          text={error || feedback || (updating ? "Updating runtimes…" : `${listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} ${shown.length === 1 ? "is" : "are"} available.`)}
+          text={error || feedback || (updating ? "Updating harnesses…" : `${listPhrase(shown.map((u) => `${runtimeName(u.runtime)} ${u.version}`))} ${shown.length === 1 ? "is" : "are"} available.`)}
           role={error ? "alert" : "status"}
           action={
-            <button type="button" hidden={!shown.length && !updating} className="btn btn-sm" disabled={updating || releaseBusy} aria-busy={updating} onClick={() => void startUpdate()}>
+            <button type="button" hidden={!shown.length && !updating} className="btn btn-sm btn-primary" disabled={updating || releaseBusy} aria-busy={updating} onClick={() => void startUpdate()}>
               {updating && <Spinner size={12} />}
               {updating ? "Updating…" : error ? "Retry" : "Update"}
             </button>

@@ -117,8 +117,11 @@ export function LocalAccess({ load }: { load: () => Promise<ReactNode> }) {
   return (
     <main className="local-access-screen local-access-locked">
       <form className="local-access-prompt" onSubmit={unlock} aria-labelledby="local-access-title">
-        <LockKeyhole className="local-access-icon" size={20} strokeWidth={1.75} aria-hidden="true" />
+        <span className="local-access-icon" aria-hidden="true">
+          <LockKeyhole size={18} strokeWidth={1.75} />
+        </span>
         <h1 id="local-access-title">OpenBuild</h1>
+        <p className="local-access-sub">Enter this server’s password to continue.</p>
         <div className={error ? "local-access-field local-access-invalid" : "local-access-field"}>
           <input ref={input} id="local-password" type="password" autoComplete="current-password" autoFocus required maxLength={1024}
             placeholder="Password" aria-label="Password" aria-invalid={!!error} aria-describedby={error ? "local-access-error" : undefined}

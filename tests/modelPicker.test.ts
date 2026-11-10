@@ -121,6 +121,40 @@ describe.skipIf(!browser)("model picker", () => {
     await page.shoot("picker-dark-fast");
   }, 30_000);
 
+  test("one compact height whatever it shows: a short list leaves room, a long one scrolls", async () => {
+    const page = await open("desktop");
+    await page.openPicker();
+    const measure = () =>
+      page.eval<{ height: number; listScroll: number; listClient: number; names: number }>(`(() => {
+        const mp = document.querySelector('.mp'), list = document.querySelector('.mp-list');
+        return { height: Math.round(mp.getBoundingClientRect().height), listScroll: list.scrollHeight, listClient: list.clientHeight, names: document.querySelectorAll('.mp-name').length };
+      })()`);
+    // Two favorites.
+    const favorites = await measure();
+    expect(favorites.names).toBe(2);
+    expect(favorites.height).toBe(320);
+    // The provider's two dozen models: the same height, and the list scrolls.
+    await page.click(".mp-rail-scroll .mp-rail-btn");
+    await page.until("document.querySelectorAll('.mp-name').length > 20");
+    await page.settle();
+    const all = await measure();
+    expect(all.height).toBe(320);
+    expect(all.listScroll).toBeGreaterThan(all.listClient + 100);
+    // A search down to one model doesn't shrink it either.
+    await page.eval("document.querySelector('.mp-search input').focus()");
+    await page.send("Input.insertText", { text: "haiku" });
+    await page.settle();
+    expect((await measure()).height).toBe(320);
+  }, 30_000);
+
+  test("Remote control's row is as wide as its label and toggle, so its tooltip opens under them", async () => {
+    const page = await open("desktop", "home=1");
+    await page.until("!!document.querySelector('.remote-control-row')");
+    const [row, toggle, composer] = await page.eval<[number, number, number]>(`[document.querySelector('.remote-control-row').getBoundingClientRect().width, document.querySelector('.remote-control-row .toggle').getBoundingClientRect().right - document.querySelector('.remote-control-row').getBoundingClientRect().left, document.querySelector('.composer').getBoundingClientRect().width]`);
+    expect(row).toBeLessThan(composer / 2);
+    expect(row).toBeGreaterThanOrEqual(toggle);
+  }, 30_000);
+
   test("search, favorites and the keyboard still work", async () => {
     const page = await open("desktop");
     await page.openPicker();

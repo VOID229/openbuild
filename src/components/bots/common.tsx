@@ -10,6 +10,7 @@ import { eventDetail, eventText } from "../../../shared/bots";
 import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
 import { BotAvatar, BotHuddle, BotLineup } from "./BotAvatar";
+import { clock } from "../../lib/clock";
 
 /**
  * True once `busy` has lasted a moment. Saves and reconnects usually finish in a blink, and a status
@@ -34,7 +35,6 @@ export function useBusyBots(conversation: Pick<Conversation, "id" | "botIds"> | 
 
 const DAY = 24 * 60 * 60 * 1000;
 const startOfDay = (t: number) => new Date(t).setHours(0, 0, 0, 0);
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /** When a conversation last moved, as briefly as it reads: "3:04 PM", "Yesterday", "Mon", "Nov 1". */
 export function shortTime(t: number) {
@@ -59,6 +59,7 @@ export function messageText(m: BotMessage): string {
   if (m.question) return `? ${m.question.title}`;
   if (m.poll) return `📊 ${m.poll.question}`;
   if (m.plan) return `📋 Plan: ${m.plan.title}`;
+  if (m.html) return `📄 ${m.html.title}`;
   if (m.event) {
     const detail = eventDetail(m.event);
     return [eventText(m.event), detail && m.event.kind === "model" ? `(${accountName(detail)})` : detail].filter(Boolean).join(" ");

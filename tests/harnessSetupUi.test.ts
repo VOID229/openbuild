@@ -91,7 +91,7 @@ for (const [device, width, height] of sizes) {
         expect(look.dialog.width).toBeLessThanOrEqual(460);
       }
       // Each theme paints its own surface and text.
-      expect(look.background).toBe(theme === "dark" ? "rgb(26, 26, 26)" : "rgb(255, 255, 255)");
+      expect(look.background).toBe(theme === "dark" ? "rgb(15, 15, 15)" : "rgb(255, 255, 255)");
       expect(look.color).not.toBe(look.background);
     }, 30_000);
   }

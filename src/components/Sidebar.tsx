@@ -10,6 +10,7 @@ import { runtimeName } from "../lib/runtimes";
 import { threadPath } from "../lib/routes";
 import { mergeRanges, searchChats, type Range, type SearchHit } from "../lib/search";
 import { DEFAULT_VIEW, useStore } from "../lib/store";
+import { OPEN_SEARCH } from "../lib/ui";
 import { PullRequestBadge } from "./PullRequestBadge";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
@@ -22,6 +23,7 @@ import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, Code
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
+import { clock } from "../lib/clock";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
 function fitFlyout(el: HTMLElement | null) {
@@ -76,7 +78,6 @@ const wakePatch = { snoozedUntil: undefined };
 /** A snooze that runs out on its own surfaces the thread under "Woke", even if it was closed. */
 const wokePatch = { snoozedUntil: undefined, woke: true, archived: false };
 
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /** When a snooze ends, as briefly as it reads: "18:00" today, "Mon 9:00" this week, else "Nov 3, 9:00". */
 function snoozeLabel(t: number) {
@@ -194,8 +195,8 @@ function RowTitle({ title, titling }: { title: string; titling: boolean }) {
 type RowMotion = "close" | "snooze" | "open";
 
 /** How long a row takes to play out, and to settle in; both match the row-* animations in styles.css. */
-const ROW_OUT_MS = 300;
-const ROW_IN_MS = 460;
+const ROW_OUT_MS = 180;
+const ROW_IN_MS = 240;
 
 /** Threads on their way out of the list, so a quick second action doesn't pick or move them again. */
 const moving = new Set<string>();
@@ -366,9 +367,6 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         title={titling ? undefined : chat.title}
       >
         <span className="history-title-line">
-          <span className="history-icon" title={model?.name}>
-            {model ? <BrandIcon id={model.id} /> : <MessageCircle size={15} />}
-          </span>
           {hit ? (
             <span className="history-title-text">
               <Highlight text={chat.title} ranges={hit.titleRanges} />
@@ -430,7 +428,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             </span>
           )}
           {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} />}
-          <span className="history-runtime" title={runtime === "hermes" ? "Hermes runtime" : runtime === "grok" ? "Native Grok runtime" : runtime === "opencode" ? "Native OpenCode runtime" : runtime === "claude" ? "Native Claude Code runtime" : runtime === "cursor" ? "Native Cursor runtime" : runtime === "durable" ? "Durable runtime" : runtime === "fx" ? "fx runtime" : runtime === "codex" ? "Native Codex runtime" : "Pi runtime"}>
+          <span className="history-runtime" title={`${runtime === "hermes" ? "Hermes harness" : runtime === "grok" ? "Native Grok harness" : runtime === "opencode" ? "Native OpenCode harness" : runtime === "claude" ? "Native Claude Code harness" : runtime === "cursor" ? "Native Cursor harness" : runtime === "durable" ? "Durable harness" : runtime === "fx" ? "fx harness" : runtime === "codex" ? "Native Codex harness" : "Pi harness"}${model ? ` · ${model.name}` : ""}`}>
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
@@ -558,8 +556,8 @@ export function ScrollThumb({ target }: { target: React.RefObject<HTMLElement | 
 const COLLAPSE_MS = 260;
 
 /**
- * Section whose header toggles its rows with a height animation. A shut section has no rows at all,
- * only while it folds shut: "Closed" is most threads, and its rows were most of what a page load
+ * Section whose header toggles its rows. A shut section has no rows at all, except for a moment
+ * while it folds shut: "Closed" is most threads, and its rows were most of what a page load
  * built (thousands of icons) for a list nobody could see.
  */
 function Collapsible({ label, open, onToggle, chats, row }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode }) {
@@ -595,8 +593,9 @@ function Collapsible({ label, open, onToggle, chats, row }: { label: string; ope
   return (
     <section ref={ref} className="history-group">
       <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
-        {label}
-        <ChevronDown size={14} className="history-heading-chevron" />
+        {label}{" "}
+        <span className="history-count">{chats.length}</span>
+        <ChevronDown size={12} className="history-heading-chevron" />
       </button>
       <div className={cx("collapse", open && "collapse-open")} inert={!open}>
         <div className="collapse-inner">{rows && chats.map((c) => row(c))}</div>
@@ -1158,7 +1157,7 @@ type Sub = "sort" | "model" | "runtime";
 
 /** Runtime choices in the filter menu, where Pi keeps its own name. */
 const RUNTIME_FILTERS = [
-  ["all", "All runtimes"],
+  ["all", "All harnesses"],
   ["pi", "Pi"],
   ["durable", "Durable"],
   ["fx", "fx"],
@@ -1310,10 +1309,10 @@ function FilterMenu() {
           )}
           {row(
             "runtime",
-            "Runtime",
+            "Harness",
             view.runtime === "all" ? "All" : view.runtime === "hermes" ? "Hermes" : view.runtime === "grok" ? "Grok" : view.runtime === "opencode" ? "OpenCode" : view.runtime === "claude" ? "Claude Code" : view.runtime === "cursor" ? "Cursor" : view.runtime === "durable" ? "Durable" : view.runtime === "fx" ? "fx" : view.runtime === "codex" ? "Codex" : "Pi",
             <>
-              <div className="menu-label">Runtime</div>
+              <div className="menu-label">Harness</div>
               {RUNTIME_FILTERS.map(([value, label]) => (
                 <button key={value} type="button" role="menuitemradio" aria-checked={view.runtime === value} className="menu-item" onClick={() => setView({ runtime: value })}>
                   {value === "hermes" ? <HermesMark size={15} /> : value === "grok" ? <GrokMark size={15} /> : value === "opencode" ? <OpencodeMark size={15} /> : value === "claude" ? <ClaudeMark size={15} /> : value === "cursor" ? <CursorMark size={15} /> : value === "all" ? <Layers size={15} /> : value === "pi" ? <PiMark size={15} /> : value === "fx" ? <FxMark size={15} /> : value === "codex" ? <CodexMark size={15} /> : <DurableMark size={15} />}
@@ -1390,6 +1389,17 @@ export function Sidebar() {
   const { setSidebarOpen, newChat, selectChat, openSettings, setSearchFocus } = useStore.getState();
   const mobile = useMediaQuery("(max-width: 768px)");
   const [query, setQuery] = useState("");
+  // The search is behind a button, as in OpenBots: open while it's wanted, always on a phone.
+  const [searching, setSearching] = useState(false);
+  const searchField = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const open = () => {
+      setSearching(true);
+      requestAnimationFrame(() => searchField.current?.focus());
+    };
+    window.addEventListener(OPEN_SEARCH, open);
+    return () => window.removeEventListener(OPEN_SEARCH, open);
+  }, []);
   const deferredQuery = useDeferredValue(query.trim());
   const [menu, setMenu] = useState<MenuState>();
   const [renamingId, setRenamingId] = useState<string>();
@@ -1588,6 +1598,22 @@ export function Sidebar() {
               <PanelLeft size={18} />
             </IconButton>
             <span className="wordmark">OpenBuild</span>
+            {!mobile && (
+              <IconButton
+                label="Search"
+                aria-pressed={searching}
+                className={cx(searching && "filter-active")}
+                // Keeps focus in the field, so pressing this to close it isn't first a blur that closes
+                // it and then a click that opens it again.
+                onMouseDown={(e) => searching && e.preventDefault()}
+                onClick={() => {
+                  setSearching(!searching);
+                  setQuery("");
+                }}
+              >
+                <Search size={18} />
+              </IconButton>
+            )}
             <FilterMenu />
           </div>
           <PluginSlot name="sidebar:header" />
@@ -1601,27 +1627,44 @@ export function Sidebar() {
             }}
           >
             <span className="new-chat-icon">
-              <SquarePen size={15} />
+              <SquarePen size={16} />
             </span>
             New thread
           </button>
 
-          <label className="search">
-            <Search size={16} />
-            <input
-              type="text"
-              value={query}
-              placeholder="Search threads…"
-              aria-label="Search threads"
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Escape" && setQuery("")}
-            />
-            {query && (
-              <button type="button" className="search-clear" aria-label="Clear search" onClick={() => setQuery("")}>
-                <X size={14} />
-              </button>
-            )}
-          </label>
+          {(searching || mobile) && (
+            <label className="search">
+              <Search size={14} />
+              <input
+                ref={searchField}
+                type="text"
+                value={query}
+                placeholder="Search threads…"
+                aria-label="Search threads"
+                autoFocus={!mobile}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : setSearching(false))}
+                // Clicking away from an empty search closes it; with something typed, it stays.
+                onBlur={(e) => {
+                  if (!mobile && !e.currentTarget.value.trim() && !e.currentTarget.closest(".search")?.contains(e.relatedTarget)) setSearching(false);
+                }}
+              />
+              {query && (
+                // Clearing it leaves you in it, to type again; clicking away from it empty then closes it.
+                <button
+                  type="button"
+                  className="search-clear"
+                  aria-label="Clear search"
+                  onClick={() => {
+                    setQuery("");
+                    searchField.current?.focus();
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </label>
+          )}
 
           <div className="sidebar-divider" />
 
@@ -1630,41 +1673,41 @@ export function Sidebar() {
           <nav ref={historyRef} className="history" aria-label="Thread history">
             {deferredQuery ? (
               <section className="history-group history-results">
-                <h3 className="history-heading">{hits.length ? `${hits.length} result${hits.length === 1 ? "" : "s"}` : "Results"}</h3>
+                <h3 className="history-heading">{hits.length ? <>Results{" "}<span className="history-count">{hits.length}</span></> : "Results"}</h3>
                 {hits.map((h) => row(h.chat, h))}
                 {!hits.length && <p className="history-empty">No threads match “{deferredQuery}”.</p>}
               </section>
             ) : closedView ? (
               <section className="history-group">
-                <h3 className="history-heading">{`Closed (${closed.length})`}</h3>
+                <h3 className="history-heading">Closed{" "}<span className="history-count">{closed.length}</span></h3>
                 {closed.map((c) => row(c))}
                 {!closed.length && <p className="history-empty">No closed threads.</p>}
               </section>
             ) : (
               <>
                 {pinned.length > 0 && (
-                  <Collapsible label={`Pinned (${pinned.length})`} open={sections.pinned} onToggle={() => toggleSection("pinned")} chats={pinned} row={row} />
+                  <Collapsible label="Pinned" open={sections.pinned} onToggle={() => toggleSection("pinned")} chats={pinned} row={row} />
                 )}
                 {attention.length > 0 && (
-                  <Collapsible label={`Attention (${attention.length})`} open={sections.attention} onToggle={() => toggleSection("attention")} chats={attention} row={row} />
+                  <Collapsible label="Attention" open={sections.attention} onToggle={() => toggleSection("attention")} chats={attention} row={row} />
                 )}
                 {limits.length > 0 && (
-                  <Collapsible label={`Limits (${limits.length})`} open={sections.limits} onToggle={() => toggleSection("limits")} chats={limits} row={row} />
+                  <Collapsible label="Limits" open={sections.limits} onToggle={() => toggleSection("limits")} chats={limits} row={row} />
                 )}
                 {subagents.length > 0 && (
-                  <Collapsible label={`Subagents (${subagents.length})`} open={sections.subagents} onToggle={() => toggleSection("subagents")} chats={subagents} row={row} />
+                  <Collapsible label="Subagents" open={sections.subagents} onToggle={() => toggleSection("subagents")} chats={subagents} row={row} />
                 )}
                 {woke.length > 0 && (
-                  <Collapsible label={`Woke (${woke.length})`} open={sections.woke} onToggle={() => toggleSection("woke")} chats={woke} row={row} />
+                  <Collapsible label="Woke" open={sections.woke} onToggle={() => toggleSection("woke")} chats={woke} row={row} />
                 )}
                 {done.length > 0 && (
-                  <Collapsible label={`Done (${done.length})`} open={sections.done} onToggle={() => toggleSection("done")} chats={done} row={row} />
+                  <Collapsible label="Done" open={sections.done} onToggle={() => toggleSection("done")} chats={done} row={row} />
                 )}
                 {working.length > 0 && (
-                  <Collapsible label={`Working (${working.length})`} open={sections.working} onToggle={() => toggleSection("working")} chats={working} row={row} />
+                  <Collapsible label="Working" open={sections.working} onToggle={() => toggleSection("working")} chats={working} row={row} />
                 )}
                 {snoozed.length > 0 && (
-                  <Collapsible label={`Snoozed (${snoozed.length})`} open={sections.snoozed} onToggle={() => toggleSection("snoozed")} chats={snoozed} row={row} />
+                  <Collapsible label="Snoozed" open={sections.snoozed} onToggle={() => toggleSection("snoozed")} chats={snoozed} row={row} />
                 )}
                 {filtered && !pinned.length && !attention.length && !limits.length && !subagents.length && !woke.length && !done.length && !working.length && !snoozed.length && !closed.length && (
                   <p className="history-empty">
@@ -1674,7 +1717,7 @@ export function Sidebar() {
                   </p>
                 )}
                 {closed.length > 0 && (
-                  <Collapsible label={`Closed (${closed.length})`} open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
+                  <Collapsible label="Closed" open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
                 )}
               </>
             )}
@@ -1685,24 +1728,22 @@ export function Sidebar() {
 
           <div className="settings-row">
             <button type="button" className="settings-btn" onClick={() => openSettings()}>
-              <Avatar src={avatar} name={name} size={26} />
+              <Avatar src={avatar} name={name} size={22} />
               Settings
             </button>
             <button
               type="button"
               className={`usage-toggle${usageOpen ? " active" : ""}`}
               aria-label="Usage"
-              aria-pressed={usageOpen}
+              aria-current={usageOpen ? "page" : undefined}
               data-tooltip="Usage and limits"
               data-tooltip-side="top"
               onPointerEnter={() => prefetchUsage()}
               onFocus={() => prefetchUsage()}
-              onClick={() => {
-                setUsageOpen(!usageOpen);
-                if (mobile && !usageOpen) setSidebarOpen(false);
-              }}
+              // A page with its own way back, not a switch: it opens Usage (on a phone, over the list).
+              onClick={() => setUsageOpen(true)}
             >
-              <ChartNoAxesColumn size={18} />
+              <ChartNoAxesColumn size={16} />
             </button>
             <button
               type="button"
@@ -1713,7 +1754,7 @@ export function Sidebar() {
               data-tooltip-side="top"
               onClick={() => setClosedView((v) => !v)}
             >
-              <SquareCheck size={18} />
+              <SquareCheck size={16} />
             </button>
             <BotsToggle />
           </div>

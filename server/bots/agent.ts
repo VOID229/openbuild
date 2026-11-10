@@ -5,7 +5,8 @@ import { untrustedData } from "./transcriptData";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, mentionName, makePoll, reactionId, unavailableModels, type Bot, type BotMessage, type Proactivity } from "../../shared/bots";
+import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, todoProgress, unavailableModels, type Bot, type BotMessage, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
 import * as apps from "./apps";
@@ -106,6 +107,10 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return startPoll(botId, p);
     case "vote_poll":
       return votePoll(botId, p);
+    case "html_render":
+      return showPage(botId, p);
+    case "todo":
+      return todo(botId, p);
     case "remember":
       return remember(botId, p);
     case "forget":
@@ -226,6 +231,8 @@ export function contextSections(botId: string): Record<string, string> {
     "When others are in the chat, read what they just said before you add to it. If someone already answered, don't say it again: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows you. To think something through with several bots without filling the chat, open a side chat with side_chat; whoever opens it reports back.",
     "For every tool that has a status parameter, supply a short custom status describing what this specific call is doing for the user, in a few plain words (at most 50 characters). For example: Checking why the build failed, or Updating your school notes. Avoid generic labels like Running a command. This is the live activity line, not a separate chat message.",
     "Each message shows its short id in brackets. A message that quotes another shows (replying to …), and reactions people left show under it. To answer an earlier message that isn't the latest one, quote it with send_message's reply_to; answering the newest message needs no reply_to, so leave it out. React with react. Reactions are numbered under each message (#1, #2…), and one that answers another shows → #n; to react to someone's reaction instead of the message, pass its number as react's to_reaction.",
+    `When seeing beats reading (a chart of some numbers, a diagram of how something works, a demo, a mockup, a small interactive tool, a visual summary of a long answer), show it: write a self-contained HTML page and put it in the chat with html_render. It's drawn in a sandboxed frame in the chat, about ${BOT_HTML_WIDTH}px wide. Don't reach for it for a quick answer, and don't restate the page in a message; add one only for what the page doesn't say.`,
+    "Direct and group chats each have a to-do list the user watches in the chat's details, with its progress in the chat's header. When a piece of work has several real steps, lay them out with todo add, set each one's state to doing as you start it and done as soon as it's finished, and remove ones that stop applying. Skip it for anything quick. Updating it needs no message. In a group the list is shared: take an item by marking it doing, and leave ones someone else is on. The list is temporary: clear it with todo clear when the work changes direction or is dropped, or when the user asks; adding steps after a finished list starts a new one, and a finished list clears by itself after a while. The user only watches it; the chat's to-do list shows in your context.",
     "In a group, poll asks everyone to pick from a few options, when the group's view would actually help. When a poll in the chat says you haven't voted, vote with vote_poll, going by what you honestly think. Voting shows on the poll, so you needn't announce it; add a message only if you have something more to say. A poll closes once everyone has answered. You can still change your answer after that if you truly change your mind, and whoever asked will hear about it.",
   ];
   const instructions = [
@@ -413,6 +420,69 @@ export function startPoll(botId: string, p: Record<string, unknown>) {
   svc.postMessage(conversationId, message);
   svc.touchHeartbeat(botId);
   return { id: message.id, note: "Everyone in the group is asked. You'll hear when it closes, once they've all answered; don't guess the result." };
+}
+
+/** A page in the chat: the bot's html_render, kept with the message and drawn in the same sandbox as a thread's. */
+export function showPage(botId: string, p: Record<string, unknown>) {
+  const conversationId = conversationFor(botId, p.conversation);
+  const html = typeof p.html === "string" ? p.html : "";
+  const problem = htmlProblem(html);
+  if (problem) throw new svc.BotsError(problem);
+  const title = String(p.title ?? "").replace(/\s+/g, " ").trim().slice(0, HTML_RENDER_MAX_TITLE) || "Page";
+  const asked = Number(p.height);
+  const height = Number.isFinite(asked) && asked > 0 ? Math.round(Math.min(HTML_RENDER_MAX_HEIGHT, Math.max(HTML_RENDER_MIN_HEIGHT, asked))) : undefined;
+  const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", html: { title, html, ...(height ? { height } : {}) } };
+  svc.postMessage(conversationId, message);
+  svc.touchHeartbeat(botId);
+  return { id: message.id, note: "Shown in the chat. Don't describe it again; send a message only for what the page doesn't already say." };
+}
+
+/** The item a bot means: its short id, or its number on the list (1, #1). */
+function todoItem(list: TodoItem[], ref: unknown): TodoItem {
+  const key = String(ref ?? "").trim().replace(/^#/, "");
+  if (!key) throw new svc.BotsError("Say which item, by its id or number.");
+  if (/^\d{1,3}$/.test(key)) {
+    const byNumber = list[Number(key) - 1];
+    if (byNumber) return byNumber;
+  }
+  const hits = list.filter((t) => t.id === key || (key.length >= 4 && t.id.startsWith(key)));
+  if (hits.length === 1) return hits[0]!;
+  throw new svc.BotsError(hits.length ? "That id matches several items." : "No such item on the to-do list.");
+}
+
+/** A to-do list as a bot reads it: numbered, with each item's short id and who's on it. */
+export function todoText(list: TodoItem[], botId?: string): string {
+  if (!list.length) return "The to-do list is empty.";
+  const { done, total } = todoProgress(list);
+  const name = (id: string) => (id === botId ? "you" : db.getBot(id)?.name ?? "a bot");
+  const lines = list.map((t, i) => `${i + 1}. [${t.id.slice(0, 6)}] ${t.status === "done" ? "[x]" : t.status === "doing" ? "[doing]" : "[ ]"} ${t.text}${t.bot && t.status !== "todo" ? ` (${name(t.bot)})` : ""}`);
+  return `To-do list, ${done}/${total} done:\n${lines.join("\n")}`;
+}
+
+/** The conversation's to-do list: add steps, mark them doing or done, remove or clear them, or read it. */
+export function todo(botId: string, p: Record<string, unknown>) {
+  const conversationId = conversationFor(botId, p.conversation);
+  const action = String(p.action ?? "list");
+  const list = db.todos(conversationId);
+  let change: TodoChange | undefined;
+  if (action === "add") {
+    const items = [...asStrings(p.items), ...(typeof p.text === "string" && p.text.trim() ? [p.text] : [])];
+    change = { action: "add", items };
+  } else if (action === "update" || action === "done" || action === "doing" || action === "start") {
+    // "state", not "status": that's the line every work tool's caller sees (extension.ts).
+    const status = action === "done" ? "done" : action === "update" ? p.state : "doing";
+    if (status !== undefined && !isStepStatus(status)) throw new svc.BotsError("state is todo, doing or done.");
+    if (status === undefined && typeof p.text !== "string") throw new svc.BotsError("Give the item a state (todo, doing or done) or new text.");
+    change = { action: "update", id: todoItem(list, p.item).id, status, text: typeof p.text === "string" ? p.text : undefined };
+  } else if (action === "remove") {
+    change = { action: "remove", id: todoItem(list, p.item).id };
+  } else if (action === "clear") {
+    change = { action: "clear", which: p.which === "done" ? "done" : "all" };
+  } else if (action !== "list") {
+    throw new svc.BotsError("action is add, update, remove, clear or list.");
+  }
+  const next = change ? svc.editTodos(conversationId, change, botId) : list;
+  return todoText(next, botId);
 }
 
 export function votePoll(botId: string, p: Record<string, unknown>) {

@@ -5,7 +5,7 @@ import "@fontsource-variable/inter";
 import "@fontsource/comic-neue/400.css";
 import "@fontsource/comic-neue/700.css";
 import "@fontsource-variable/newsreader";
-import "@fontsource-variable/jetbrains-mono";
+import "@fontsource-variable/geist-mono";
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";

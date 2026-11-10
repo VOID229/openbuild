@@ -1,7 +1,7 @@
 // What Pi did while answering: each run of tool calls folded into one line ("Read 3 files, ran 2
 // commands") that opens to a row per call and its output or diff, with what Pi is doing right now
 // under it; and the questions Pi extensions ask on the way.
-import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Eye, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, PanelTop, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
+import { Bot, Brain, Check, ChevronDown, ChevronRight, CircleAlert, Clock, Eye, FilePen, FilePlus, FileText, FolderSearch, Globe, MessageCircleQuestion, PanelTop, Search, SquareTerminal, Wrench, X, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { answerQuestion } from "../lib/chat";
 import type { AskPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -27,36 +27,71 @@ const firstLine = (s: string) => {
   return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 };
 
+/**
+ * A shell command as it reads in one line: without the `bash -lc "…"` wrapper some harnesses add, or
+ * the `cd <folder> &&` it opens with to get to where it works. The full command stays in the title.
+ */
+export function commandLine(command: string) {
+  let c = command.trim();
+  const wrapped = /^(?:\/(?:usr\/)?bin\/)?(?:ba|z)?sh -l?c (["'])([\s\S]*)\1$/.exec(c);
+  if (wrapped) c = wrapped[2]!.trim();
+  const cd = /^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/.exec(c);
+  if (cd && c.length > cd[0].length) c = c.slice(cd[0].length);
+  return firstLine(c);
+}
+
+/** A tool's own name in words: "comms_send" → "Comms send", "mcp__github__get_file" → "Get file". */
+function toolName(name: string) {
+  const bare = name.replace(/^mcp__.+?__/, "").replace(/^custom-tools_/, "");
+  const words = bare.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[._\-\s]+/g, " ").trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/** The argument that says what a call is about, skipping ids and raw payloads. */
+const SUBJECT_KEYS = ["description", "title", "query", "search_term", "prompt", "task", "text", "message", "summary", "command", "url", "path", "file_path", "pattern", "name", "skill"];
+function subjectOf(args: Record<string, unknown>) {
+  for (const k of SUBJECT_KEYS) {
+    const v = str(args[k]);
+    if (v?.trim()) return firstLine(v);
+  }
+  return "";
+}
+
 /** How a tool call reads in one line, and its icon. */
 function describe(part: ToolPart, cwd?: string): { icon: LucideIcon; verb: string; target: string; mono?: boolean } {
   const a = part.args ?? {};
-  const path = shortPath(str(a.path) ?? str(a.file_path) ?? str(a.filePath), cwd);
+  const path = shortPath(str(a.path) ?? str(a.file_path) ?? str(a.filePath) ?? str(a.target_directory), cwd);
   const running = part.status === "running";
-  switch (part.name) {
+  // Some harnesses prefix their own tools ("custom-tools_bash"): they read as the tool they are.
+  const name = part.name.replace(/^custom-tools_/, "");
+  switch (name) {
     case "read":
-      return { icon: FileText, verb: running ? "Reading" : "Read", target: path };
+      return { icon: FileText, verb: running ? "Reading" : "Read", target: path, mono: true };
     case "bash":
-      return { icon: SquareTerminal, verb: running ? "Running" : "", target: firstLine(str(a.command) ?? ""), mono: true };
+      return { icon: SquareTerminal, verb: running ? "Running" : "", target: commandLine(str(a.command) ?? ""), mono: true };
     case "edit":
-      return { icon: FilePen, verb: running ? "Editing" : "Edited", target: path };
+      return { icon: FilePen, verb: running ? "Editing" : "Edited", target: path, mono: true };
     case "write":
-      return { icon: FilePlus, verb: running ? "Writing" : "Wrote", target: path };
+      return { icon: FilePlus, verb: running ? "Writing" : "Wrote", target: path, mono: true };
     case "grep":
-      return { icon: Search, verb: running ? "Searching for" : "Searched for", target: str(a.pattern) ?? "" };
+      return { icon: Search, verb: running ? "Searching for" : "Searched for", target: str(a.pattern) ?? "", mono: true };
     case "find":
     case "ls":
-      return { icon: FolderSearch, verb: running ? "Looking in" : "Looked in", target: path || str(a.pattern) || "." };
+    case "glob":
+      return { icon: FolderSearch, verb: running ? "Looking in" : "Looked in", target: path || str(a.pattern) || str(a.glob_pattern) || ".", mono: true };
     case "web_search":
     case "fetch":
-      return { icon: Globe, verb: running ? "Searching the web for" : "Searched the web for", target: str(a.query) ?? str(a.url) ?? "" };
+    case "web_fetch":
+      return { icon: Globe, verb: running ? "Searching the web for" : "Searched the web for", target: str(a.query) ?? str(a.search_term) ?? str(a.url) ?? "" };
     case "html_render":
       return { icon: PanelTop, verb: running ? "Showing" : "Showed", target: str(a.title) ?? "a page" };
     case "html_preview":
       return { icon: Eye, verb: running ? "Previewing" : "Previewed", target: `a page${typeof a.width === "number" ? ` at ${a.width}px` : ""}` };
+    case "sleep":
+      return { icon: Clock, verb: running ? "Waiting" : "Waited", target: "" };
     default: {
-      if (/subagent|agent/.test(part.name)) return { icon: Bot, verb: part.name.replace(/_/g, " "), target: firstLine(str(a.task) ?? str(a.prompt) ?? "") };
-      const first = Object.values(a).find((v) => typeof v === "string") as string | undefined;
-      return { icon: Wrench, verb: part.name.replace(/_/g, " "), target: first ? firstLine(first) : "" };
+      if (/subagent|agent/i.test(name)) return { icon: Bot, verb: toolName(name), target: firstLine(str(a.description) ?? str(a.task) ?? str(a.prompt) ?? "") };
+      return { icon: Wrench, verb: toolName(name), target: subjectOf(a) };
     }
   }
 }
@@ -131,8 +166,10 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
   const Icon = d.icon;
   const patch = patchOf(part);
   const stat = patch ? diffStat(patch) : undefined;
-  const command = part.name === "bash" ? str(part.args?.command) : undefined;
-  const hasBody = !!(patch || part.output?.trim() || (command && command.includes("\n")));
+  const command = part.name.replace(/^custom-tools_/, "") === "bash" ? str(part.args?.command) : undefined;
+  // The whole command shows in the body when the line above shortened it (a wrapper, a cd, more lines).
+  const fullCommand = !!command && d.target !== command.trim();
+  const hasBody = !!(patch || part.output?.trim() || fullCommand);
   return (
     <div className={cx("tool", open && "tool-open", part.status === "error" && "tool-error")}>
       <button type="button" className="tool-head" aria-expanded={open} disabled={!hasBody} onClick={() => setOpen((o) => !o)}>
@@ -162,7 +199,7 @@ export function ToolRow({ part, cwd }: { part: ToolPart; cwd?: string }) {
         {hasBody && <ChevronRight size={14} className="tool-chevron" />}
       </button>
       <Fold open={open && hasBody} className="tool-body">
-        {command && command.includes("\n") && <pre className="tool-output tool-command">{command}</pre>}
+        {fullCommand && <pre className="tool-output tool-command">{command}</pre>}
         {patch ? <Diff patch={patch} /> : part.output?.trim() ? <pre className="tool-output">{part.output.replace(/\n+$/, "")}</pre> : null}
       </Fold>
     </div>
@@ -208,8 +245,10 @@ const HOLD_MS = 900;
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 const times = (n: number) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
 /** Tools that read the same in a summary. */
-const kindOf = (name: string) =>
-  name === "grep" || name === "find" ? "search" : name === "web_search" || name === "fetch" ? "web" : /subagent|agent/.test(name) ? "agent" : name;
+const kindOf = (raw: string) => {
+  const name = raw.replace(/^custom-tools_/, "");
+  return name === "grep" || name === "find" || name === "glob" ? "search" : name === "web_search" || name === "fetch" || name === "web_fetch" ? "web" : /subagent|agent/i.test(name) ? "agent" : name;
+};
 
 /**
  * A run of work in one line: "Read 3 files, ran 2 commands, edited 1 file", with the lines its edits
@@ -262,7 +301,7 @@ export function summarize(parts: Work[]) {
         case "html_render":
           return `tried to show ${n === 1 ? "a page" : count(n, "page")}`;
         default:
-          return `used ${kind.replace(/_/g, " ")}${n > 1 ? ` ${times(n)}` : ""}`;
+          return `used ${toolName(kind).toLowerCase()}${n > 1 ? ` ${times(n)}` : ""}`;
       }
     })
     .join(", ");

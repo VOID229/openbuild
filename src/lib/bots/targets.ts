@@ -49,41 +49,42 @@ export function targetSummary(t: ComputerTarget): string {
 }
 
 /**
- * What to tell the user about a machine, or undefined when it's fine. `here` is this server's name,
- * which the other device lists under Settings → Devices → Using this device.
+ * What to tell the user about a machine, or undefined when it's fine: `text` in full, `short` for a
+ * line in a list (with `text` behind it). `here` is this server's name, which the other device lists
+ * under Settings → Devices → Using this device.
  */
-export function targetNote(t: ComputerTarget, here: string): { tone: "warn" | "bad"; text: string } | undefined {
+export function targetNote(t: ComputerTarget, here: string): { tone: "warn" | "bad"; text: string; short: string } | undefined {
   if (t.device === "local") return undefined;
   const name = t.name;
   const where = `On ${name}, open Settings → Devices → Using this device → ${here}`;
   switch (t.status) {
     case "access":
-      return { tone: "warn", text: `${name} hasn't allowed this server's bots anything yet. ${where}, and switch on Files, Terminal or Browser. Until then their tools fail there; nothing runs elsewhere instead.` };
+      return { tone: "warn", short: "How to allow", text: `${name} hasn't allowed this server's bots anything yet. ${where}, and switch on Files, Terminal or Browser. Until then their tools fail there; nothing runs elsewhere instead.` };
     case "offline":
-      return { tone: "warn", text: `${name} is unreachable. Bots' tools fail there until it's back; nothing runs elsewhere instead.` };
+      return { tone: "warn", short: "Tools fail until it's back", text: `${name} is unreachable. Bots' tools fail there until it's back; nothing runs elsewhere instead.` };
     case "revoked":
-      return { tone: "bad", text: `${name} no longer trusts this pairing. Pair it again.` };
+      return { tone: "bad", short: "Pair it again", text: `${name} no longer trusts this pairing. Pair it again.` };
     case "outdated":
-      return { tone: "bad", text: `${name} needs a newer OpenBuild before bots can use it.` };
+      return { tone: "bad", short: "Update OpenBuild there", text: `${name} needs a newer OpenBuild before bots can use it.` };
     case "mismatch":
-      return { tone: "bad", text: `${name}'s address now answers as another machine, so nothing is sent there. Pair it again.` };
+      return { tone: "bad", short: "Pair it again", text: `${name}'s address now answers as another machine, so nothing is sent there. Pair it again.` };
     case "unpaired":
-      return { tone: "bad", text: `${name} isn't paired anymore.` };
+      return { tone: "bad", short: "Pair it again", text: `${name} isn't paired anymore.` };
   }
   const g = t.grants;
-  if (t.isolation === "host" && !g?.unisolated) return { tone: "warn", text: `Host is chosen for ${name}, but it only allows a container, so bots' tools fail there. Choose Container, or ${where.charAt(0).toLowerCase() + where.slice(1)} and allow Unisolated.` };
+  if (t.isolation === "host" && !g?.unisolated) return { tone: "warn", short: "Host isn't allowed", text: `Host is chosen for ${name}, but it only allows a container, so bots' tools fail there. Choose Container, or ${where.charAt(0).toLowerCase() + where.slice(1)} and allow Unisolated.` };
   const missing = (["files", "terminal", "browser"] as const).filter((k) => !g?.[k]);
-  if (missing.length) return { tone: "warn", text: `${name} doesn't allow ${missing.join(" or ")}. Those tools fail there. ${where} to allow them.` };
+  if (missing.length) return { tone: "warn", short: `How to allow ${missing.join(" or ")}`, text: `${name} doesn't allow ${missing.join(" or ")}. Those tools fail there. ${where} to allow them.` };
   return undefined;
 }
 
 /** The device Settings → Devices should bring into view when it opens. */
 export const useDeviceFocus = create<{ device?: string }>(() => ({}));
 
-/** Open Settings → Devices at one device ("local" for this server). */
+/** Open Settings → Devices at one device's page ("local" for this server). */
 export function showDevice(device: string) {
   useDeviceFocus.setState({ device });
-  useStore.getState().openSettings("devices");
+  useStore.getState().openSettings("devices", `device/${encodeURIComponent(device)}`);
 }
 
 /** A device row's element id, for Settings → Devices to scroll to. */

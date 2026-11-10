@@ -21,26 +21,26 @@ function settleMotion() {
   }
 }
 
-let switching = 0;
+/** Sent by the search shortcut: the sidebar showing opens its search and puts the cursor in it. */
+export const OPEN_SEARCH = "openbuild:open-search";
 
-/** Switch the sidebar and main pane between OpenBuild and OpenBots, crossfading each where the browser can and motion is welcome. */
+let entering: ReturnType<typeof setTimeout> | undefined;
+
+/**
+ * Switch the sidebar and main pane between OpenBuild and OpenBots. The layout changes at once and the
+ * incoming panes fade in (bots.css, .world-enter): no snapshots of the page, nothing else moves.
+ */
 export function crossfade(update: () => void) {
-  const change = () => {
-    flushSync(update);
-    settleMotion();
-  };
-  if (!document.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return change();
-  // Only for the switch: a transition name makes its element a stacking context.
+  flushSync(update);
+  settleMotion();
+  if (typeof document === "undefined" || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   const root = document.documentElement;
-  const id = ++switching;
-  root.classList.add("world-switch");
-  const done = () => {
-    if (id === switching) root.classList.remove("world-switch");
-  };
-  const transition = document.startViewTransition(change);
-  // A quick second switch skips this one, which is fine.
-  transition.ready.catch(() => {});
-  transition.finished.then(done, done);
+  root.classList.remove("world-enter");
+  // Restart the fade if a second switch comes before the first has finished.
+  void root.offsetWidth;
+  root.classList.add("world-enter");
+  clearTimeout(entering);
+  entering = setTimeout(() => root.classList.remove("world-enter"), 260);
 }
 
 /**

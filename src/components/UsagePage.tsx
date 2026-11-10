@@ -1,5 +1,5 @@
 // Usage: tokens and cost across the agents on this machine, and their plans' limits (server/usage/).
-import { AlertTriangle, ArrowLeft, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Info, Laptop, Layers, RefreshCw, RotateCcw, Ticket } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import claudeSvg from "../assets/brands/claude-color.svg" with { type: "text" };
 import grokSvg from "../assets/brands/grok.svg" with { type: "text" };
@@ -10,8 +10,13 @@ import { createRedemptionClient } from "../../shared/redemptionClient";
 import { useStore } from "../lib/store";
 import { cx, useMediaQuery } from "../lib/ui";
 import { loadLimits, loadReport, useNow, useUsageLimits, useUsageReport, type UsageScope } from "../lib/usageStats";
+import { leaveUsage } from "../lib/pages";
 import { IconButton, PiMark, Popover, Spinner } from "./primitives";
+import { PageHeader } from "./SettingsUI";
 import { useLightbox } from "./Lightbox";
+import { formatTime } from "../lib/clock";
+
+const resetFmt = new Intl.DateTimeFormat(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
 type Tab = "cost" | "tokens" | "limits";
 const RANGE_LABEL: Record<UsageRange, string> = { "24h": "Past 24h", "7d": "7 days", "30d": "30 days", "90d": "90 days" };
@@ -63,9 +68,9 @@ export function UsagePage() {
   const report = useUsageReport(range, machine);
   const lim = useUsageLimits();
   const mobile = useMediaQuery("(max-width: 768px)");
-  const close = () => useStore.getState().setUsageOpen(false);
-  // Escape goes back to the thread/home, like it closes Settings. Leave Escape to whatever is on
-  // top (the settings dialog, a lightbox, a menu) and only take it when Usage itself has focus.
+  // Back, Esc and the browser's back all return to wherever Usage was opened from.
+  const close = leaveUsage;
+  // Leave Escape to whatever is on top (a lightbox, a menu) and only take it when Usage itself has focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented || e.isComposing) return;
@@ -105,13 +110,7 @@ export function UsagePage() {
 
   return (
     <div className="ustats">
-      <header className="ustats-bar">
-        {mobile ? (
-          <IconButton label="Back" onClick={close}>
-            <ArrowLeft size={18} />
-          </IconButton>
-        ) : null}
-        <h1 className="ustats-title">Usage</h1>
+      <PageHeader title="Usage" onBack={close} className="ustats-bar">
         {machines.length > 1 && <MachinePicker machines={machines} value={tab === "limits" ? "all" : machine} onChange={setMachine} disabled={tab === "limits"} />}
         <div className="ustats-controls">
           <div className="ustats-seg" role="tablist" aria-label="View">
@@ -132,7 +131,7 @@ export function UsagePage() {
             <RefreshCw size={15} />
           </IconButton>
         </div>
-      </header>
+      </PageHeader>
       <div className="ustats-scroll">
         <div className="ustats-body">
           {tab === "limits" ? <LimitsView {...lim} /> : <SpendView tab={tab} {...report} />}
@@ -212,7 +211,7 @@ function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageR
     return (
       <div className="ustats-empty">
         <p>No usage in this range.</p>
-        <p className="ustats-dim">Pi, Claude Code, Codex, Grok, Cursor and OpenCode sessions on this machine show up here.</p>
+        <p className="ustats-dim">Sessions from every harness on this machine show up here.</p>
       </div>
     );
   }
@@ -224,9 +223,12 @@ function SpendView({ tab, data, error }: { tab: "cost" | "tokens"; data?: UsageR
           <div className="ustats-sub">
             {plural(data.totals.sessions, "session")}
             {cost ? (
-              <span className="ustats-hint" data-tooltip="Reported cost where the agent records one, otherwise the tokens at the model's API price, including use covered by a subscription." data-tooltip-side="bottom">
-                {" "}· API estimate <Info size={13} />
-              </span>
+              <>
+                {" · "}
+                <span className="ustats-hint" data-tooltip="Reported cost where the agent records one, otherwise the tokens at the model's API price, including use covered by a subscription." data-tooltip-side="bottom">
+                  API estimate <Info size={13} />
+                </span>
+              </>
             ) : ` · ${plural(data.totals.requests, "request")}`}
             {error && <span className="ustats-stale"> · couldn't refresh</span>}
           </div>
@@ -380,7 +382,7 @@ function Breakdown({ data, metric }: { data: UsageReport; metric: "cost" | "toke
                   <tr key={d.t}>
                     <td className="ustats-dim ustats-num-col">{i + 1}</td>
                     <td>
-                      <div>{dayFmt.format(d.t)}</div>
+                      <div>{formatTime(dayFmt, d.t)}</div>
                       <div className="ustats-bar-line" style={{ width: `${max ? Math.max(2, (v / max) * 100) : 0}%` }} />
                     </td>
                     <td className="ustats-r ustats-dim">{d.sessions.toLocaleString()}</td>
@@ -496,13 +498,13 @@ function Chart({ data, metric, hidden }: { data: UsageReport; metric: "cost" | "
         <div className="ustats-xaxis">
           {ticks.map((i) => (
             <span key={i} style={{ left: `${(x(i) / W) * 100}%` }} className={i === 0 ? "ustats-x-first" : i === n - 1 ? "ustats-x-last" : undefined}>
-              {tickFmt.format(data.series[i]!.t)}
+              {formatTime(tickFmt, data.series[i]!.t)}
             </span>
           ))}
         </div>
         {h && (
           <div className={cx("ustats-tip", tipLeft > 60 && "ustats-tip-left")} style={{ left: `${tipLeft}%` }}>
-            <div className="ustats-dim">{tipFmt.format(h.t)}</div>
+            <div className="ustats-dim">{formatTime(tipFmt, h.t)}</div>
             {data.providers.map((p, i) => !hidden.has(p.id) && (
               <div key={p.id} className="ustats-tip-row">
                 <Mark provider={p.id} size={13} />
@@ -651,7 +653,7 @@ function LimitDetails({ account, w, now, onClose }: { account: UsageLimits; w: U
         <DetailRow label="Left">{Math.round(left)}%</DetailRow>
         {w.resetsAt && (
           <DetailRow label="Resets">
-            {new Date(w.resetsAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+            {formatTime(resetFmt, w.resetsAt)}
             <span className="ustats-dim"> · in {until(w.resetsAt, now)}</span>
           </DetailRow>
         )}
@@ -719,24 +721,22 @@ function LimitRow({ account, w, now }: { account: UsageLimits; w: UsageWindow; n
           }
         }}
       >
-        <div className="ustats-limit-fill" style={{ width: `${left}%` }}>
-          {left >= 8 && <span>{Math.round(left)}%</span>}
-        </div>
+        <div className="ustats-limit-fill" style={{ width: `${left}%` }} />
         {projected !== undefined && projected <= 100 && (
           <div className="ustats-limit-pace" style={{ left: `${Math.max(0, 100 - projected)}%` }} data-tooltip={trend} data-tooltip-side="top" />
         )}
-        <div className="ustats-limit-meta">
-          {w.resetsAt && (
-            <span data-tooltip={`Resets ${new Date(w.resetsAt).toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`} data-tooltip-side="top">
-              <RotateCcw size={11} /> {until(w.resetsAt, now)}
-            </span>
-          )}
-          {!!credits?.available && (
-            <span data-tooltip={`${credits.available} banked reset${credits.available === 1 ? "" : "s"}`} data-tooltip-side="top">
-              <Ticket size={11} /> {credits.available}
-            </span>
-          )}
-        </div>
+      </div>
+      <div className="ustats-limit-meta">
+        {w.resetsAt && (
+          <span data-tooltip={`Resets ${formatTime(resetFmt, w.resetsAt)}`} data-tooltip-side="top">
+            <RotateCcw size={11} /> Resets in {until(w.resetsAt, now)}
+          </span>
+        )}
+        {!!credits?.available && (
+          <span data-tooltip={`${credits.available} banked reset${credits.available === 1 ? "" : "s"}`} data-tooltip-side="top">
+            <Ticket size={11} /> {credits.available} banked
+          </span>
+        )}
       </div>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="ustats-limit-pop" label={`${USAGE_PROVIDER_NAMES[account.provider]} ${w.label}`} fixed="auto" align="start">
         <LimitDetails account={account} w={w} now={now} onClose={() => setOpen(false)} />

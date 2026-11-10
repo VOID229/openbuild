@@ -18,16 +18,16 @@ function NoConversation() {
   if (host)
     return (
       <div className="bots-hello">
-        <BotAvatar look={{ shape: "puff", color: "white" }} size={120} lively track playful />
+        <BotAvatar look={{ shape: "puff", color: "white" }} size={88} lively track playful />
         <h2>{host}'s OpenBots</h2>
-        <p>Pick a conversation to carry on. New bots and chats are started on {host} itself.</p>
+        <p>Pick a conversation. New bots and chats start on {host}.</p>
       </div>
     );
   return (
     <div className="bots-hello">
-      <BotAvatar look={{ shape: "puff", color: "white" }} size={120} lively track playful />
+      <BotAvatar look={{ shape: "puff", color: "white" }} size={88} lively track playful />
       <h2>OpenBots</h2>
-      <p>Bots with their own memory and instructions, that keep a conversation going with you and work together in groups.</p>
+      <p>Bots with their own memory that chat with you and work together in groups.</p>
       <button type="button" className="btn bots-btn bots-btn-primary" onClick={() => openBotsDialog({ kind: "bot" })}>
         <Plus size={15} /> New bot
       </button>

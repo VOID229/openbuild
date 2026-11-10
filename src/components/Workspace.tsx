@@ -213,7 +213,7 @@ function DeviceMenu() {
   );
 }
 
-/** The home heading; the underlined part opens the project picker. */
+/** The home heading; the project's name in it opens the project picker. */
 export function ProjectHeading() {
   const [open, setOpen] = useState(false);
   // The picker's step: its projects, or where a new project comes from.
@@ -355,13 +355,13 @@ function BranchMenu({ info, loading }: { info?: GitInfo; loading: boolean }) {
   );
 }
 
-const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands or extensions. Runtime is fixed once a thread starts.";
-const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions or slash commands. Steering accepts text only. Runtime is fixed once a thread starts.";
-const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
-const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Steering uses tool hooks (or a follow-up at completion). Runtime is fixed once a thread starts.";
-const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
-const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
-const GROK_LIMITATIONS = "Native Grok Build (the CLI installed on this device) with its own models, sign-in, permission mode, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Runtime is fixed once a thread starts.";
+const DURABLE_LIMITATIONS = "Durable does not support Pi slash commands or extensions. Harness is fixed once a thread starts.";
+const FX_LIMITATIONS = "fx (Vercel's coding agent, installed on this device) with its own models, sign-in, skills and MCP servers. No Pi extensions or slash commands. Steering accepts text only. Harness is fixed once a thread starts.";
+const CODEX_LIMITATIONS = "Native Codex with its own models, sign-in, skills and MCP servers, separate from Pi's OpenAI Codex provider. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
+const CURSOR_LIMITATIONS = "Native Cursor with its own models, sign-in, rules and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Steering uses tool hooks (or a follow-up at completion). Harness is fixed once a thread starts.";
+const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device, through Anthropic's Agent SDK) with its own models, sign-in, CLAUDE.md, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
+const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
+const GROK_LIMITATIONS = "Native Grok Build (the CLI installed on this device) with its own models, sign-in, permission mode, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
 export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode", hermes: "Hermes", grok: "Grok" };
 export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
   return runtime === "hermes" ? <HermesMark size={size} /> : runtime === "grok" ? <GrokMark size={size} /> : runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
@@ -401,16 +401,16 @@ function RuntimeMenu() {
   useEffect(() => {
     if (runtime !== selected) updateSettings({ threadRuntime: runtime });
   }, [runtime, selected, updateSettings]);
-  const tip = runtime === "grok" ? GROK_LIMITATIONS : runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Runtime for this new thread; fixed after the first send";
+  const tip = runtime === "grok" ? GROK_LIMITATIONS : runtime === "opencode" ? OPENCODE_LIMITATIONS : runtime === "claude" ? CLAUDE_LIMITATIONS : runtime === "cursor" ? CURSOR_LIMITATIONS : runtime === "durable" ? DURABLE_LIMITATIONS : runtime === "fx" ? FX_LIMITATIONS : runtime === "codex" ? CODEX_LIMITATIONS : "Harness for this new thread; fixed after the first send";
   return (
     <>
-      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread runtime: ${RUNTIME_LABEL[runtime]}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={tip} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
+      <button ref={anchor} type="button" className={cx("ws-pill", open && "ws-pill-open")} aria-label={`Thread harness: ${RUNTIME_LABEL[runtime]}`} aria-haspopup="listbox" aria-expanded={open} data-tooltip={tip} data-tooltip-side="top" onClick={() => setOpen((o) => !o)}>
         <RuntimeIcon runtime={runtime} size={13} />
         {/* The fx mark is its name; the word beside it just repeats the logo. */}
         {runtime !== "fx" && <span className="ws-pill-text">{RUNTIME_LABEL[runtime]}</span>}
         <ChevronDown size={13} className="pill-chevron" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread runtime" fixed="auto">
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu ws-menu" role="listbox" label="Thread harness" fixed="auto">
         <div className={cx("ws-options", `ws-options-${runtimeMenuDensity(options.length)}`)} onKeyDown={(e) => arrowNav(e)}>
           {options.map((o) => {
             const absent = missing(o.runtime);

@@ -1,13 +1,14 @@
 // The GitHub app's page with its sign-in panel, for tests/githubSignInUi.test.ts to look at in Chrome.
 // `?state=pending` shows a device sign-in under way; `?state=connected` the app signed in and
-// connected, whose Save closes the dialog (`?save=fail` makes it fail); otherwise it's the panel
+// connected, whose Save leaves the page (`?save=fail` makes it fail); otherwise it's the panel
 // before connecting. `?clipboard=fail` makes copying fail.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
 import { createRoot } from "react-dom/client";
 import { useState } from "react";
-import { AppsDialog } from "../../../src/components/bots/BotApps";
+import { AppPage } from "../../../src/components/bots/BotApps";
+import { appById } from "../../../shared/apps";
 import { useWorkspace } from "../../../src/lib/bots/workspace";
 import { useGithub } from "../../../src/lib/github";
 
@@ -39,6 +40,6 @@ document.documentElement.dataset.theme = params.get("theme") === "dark" ? "dark"
 
 function Page() {
   const [open, setOpen] = useState(true);
-  return open ? <AppsDialog initial="github" onClose={() => setOpen(false)} /> : <p id="closed">Closed</p>;
+  return open ? <AppPage app={appById("github")!} onDone={() => setOpen(false)} /> : <p id="closed">Closed</p>;
 }
 createRoot(document.getElementById("root")!).render(<Page />);

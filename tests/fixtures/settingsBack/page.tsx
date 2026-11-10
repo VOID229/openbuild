@@ -1,10 +1,10 @@
-// The real Settings dialog with a few bots, a group and a Pi skill in it, for
-// tests/settingsBack.test.ts to open the pages inside its sections in Chrome.
+// The real Settings page, in the main pane as the app shows it, with a few bots, a group and a Pi
+// skill in it, for tests/settingsBack.test.ts to open the pages inside its sections in Chrome.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
 import { createRoot } from "react-dom/client";
-import { SettingsModal } from "../../../src/components/Settings";
+import { SettingsPage } from "../../../src/components/Settings";
 import { useBots } from "../../../src/lib/bots/store";
 import type { Bot, Conversation } from "../../../src/lib/bots/types";
 import { useStore } from "../../../src/lib/store";
@@ -24,4 +24,8 @@ useBots.setState({
 
 Object.assign(window, { store: useStore, bots: useBots });
 document.documentElement.dataset.theme = "dark";
-createRoot(document.getElementById("root")!).render(<SettingsModal />);
+function Main() {
+  const open = useStore((s) => s.settingsOpen);
+  return <main className="main main-page">{open ? <SettingsPage /> : <p className="closed">Thread</p>}</main>;
+}
+createRoot(document.getElementById("root")!).render(<Main />);

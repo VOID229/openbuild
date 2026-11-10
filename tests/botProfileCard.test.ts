@@ -205,7 +205,7 @@ describe.skipIf(!browser)("a bot's profile card", () => {
       page.eval<{ bg: string; text: string; surface: string }>(`(() => {
         const s = getComputedStyle(document.querySelector('.bm-profile'));
         const probe = document.createElement('div');
-        probe.style.background = 'var(--surface-2)';
+        probe.style.background = 'var(--surface-raised)';
         document.body.append(probe);
         const surface = getComputedStyle(probe).backgroundColor;
         probe.remove();

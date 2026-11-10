@@ -1,6 +1,6 @@
-// OpenBots' details panel, beside the chat: a bot's look, name, instructions and routines, with its
-// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal and working threads;
-// who's in a side chat.
+// OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
+// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal (with its tasks)
+// and working threads; who's in a side chat.
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { threadActivity, threadMascot } from "../../lib/bots/activity";
@@ -20,6 +20,7 @@ import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
 import { LookPicker } from "./BotDialogs";
 import { openBotsDialog } from "./BotsSidebar";
+import { TodoList } from "./BotTodos";
 import { ConversationAvatar, useBusyBots } from "./common";
 
 function InlineName({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -96,7 +97,7 @@ export function Routines({ bot }: { bot: Bot }) {
               <span className="bots-card-text">
                 <span className="bots-routine-title">{r.title}</span>
                 <span className="bots-routine-when">
-                  {r.schedule} · {r.enabled ? "Working" : "Paused"}
+                  {r.schedule}{r.enabled ? "" : " · Paused"}
                 </span>
                 {r.task && <span className="bots-routine-task">{r.task}</span>}
               </span>
@@ -108,7 +109,7 @@ export function Routines({ bot }: { bot: Bot }) {
           ))}
         </ul>
       ) : (
-        <p className="bots-hint">No routines yet. {bot.name.split(" ·")[0]} sets these up itself: tell it what you'd like done and when.</p>
+        <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
       )}
     </div>
   );
@@ -152,7 +153,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
         </>
       )}
       <ul className="bots-cards">
-        {shared && !members.length && <li className="bots-hint">None of your bots are in it yet. Add one below: it hears messages that mention it.</li>}
+        {shared && !members.length && <li className="bots-hint">None of your bots yet. Add one below; it answers when mentioned.</li>}
         {members.map((b) => (
           <li key={b.id} className="bots-card-row bots-member">
             <button type="button" className="bots-member-main" onClick={() => open(b)} data-tooltip="Open chat" data-tooltip-side="left">
@@ -225,7 +226,7 @@ function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string 
 
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
 function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
-  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads working right now. When a bot here starts one, it shows up until it finishes.</p></div>;
+  if (!threads.length) return <div className="bots-pane"><p className="bots-hint">No threads running. Threads the bots here start show up until they finish.</p></div>;
   return (
     <div className="bots-pane">
       <ul className="bots-cards">
@@ -373,7 +374,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   const working = useBusyBots(conversation);
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
-  const [tab, setTab] = useState<"instructions" | "routines" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
+  const [tab, setTab] = useState<"instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
   const threads = useGroupThreads(conversation);
   const st = useBots.getState();
@@ -385,6 +386,13 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setTab(conversation.kind === "direct" ? "instructions" : "members");
   }
   useEffect(() => setEditingLook(false), [conversation.id]);
+  // Asked for a tab (the header's task progress): a bot's own Tasks, or the group's Goal, where its list is.
+  const asked = useBots((s) => s.detailsTab);
+  const [askedKey, setAskedKey] = useState(asked?.key);
+  if (asked && asked.key !== askedKey) {
+    setAskedKey(asked.key);
+    if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
+  }
   // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
   const [threadId, setThreadId] = useState<string>();
   const [threadFor, setThreadFor] = useState(conversation.id);
@@ -447,16 +455,21 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
             ) : (
               <InlineName value={conversation.friend ? (conversation.name ?? "") : name} onChange={(v) => (bot ? st.updateBot(bot.id, { name: v }, conversation.id) : st.updateConversation(conversation.id, { name: v }))} />
             )}
-            <div className="bots-details-sub">
-              {bot?.primary && <span className="bots-pill">Primary</span>}
-              {bot
-                ? `Made ${new Date(bot.createdAt).toLocaleDateString([], { month: "short", day: "numeric" })}`
-                : conversation.friend
+            {bot ? (
+              bot.primary && (
+                <div className="bots-details-sub">
+                  <span className="bots-pill">Primary</span>
+                </div>
+              )
+            ) : (
+              <div className="bots-details-sub">
+                {conversation.friend
                   ? `Shared with ${conversation.friend.friendName}${conversation.friend.ended ? " · not syncing" : ""}`
                   : conversation.kind === "group"
-                  ? `${conversation.botIds.length} bots`
-                  : "Side chat between bots"}
-            </div>
+                    ? `${conversation.botIds.length} bots`
+                    : "Side chat between bots"}
+              </div>
+            )}
           </div>
           {bot ? (
             <>
@@ -464,6 +477,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["instructions", "Instructions"],
                   ["routines", `Routines${bot.routines.length ? ` ${bot.routines.length}` : ""}`],
+                  ["tasks", "Tasks"],
                   ["advanced", "Advanced"],
                 ]}
                 value={tab}
@@ -473,16 +487,21 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 <Instructions
                   value={bot.instructions}
                   placeholder="What is this bot for, and how should it act?"
-                  hint="The bots write these as they learn what this one is for, and you can change them any time. It reads them before every reply."
+                  hint="Read before every reply. The bot updates these as it learns, and you can edit them any time."
                   onChange={(v) => st.updateBot(bot.id, { instructions: v })}
                 />
               )}
               {tab === "routines" && <Routines bot={bot} />}
+              {tab === "tasks" && (
+                <div className="bots-pane">
+                  <TodoList conversation={conversation} bots={bots} />
+                </div>
+              )}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
               <div className="bots-details-foot">
                 <button
                   type="button"
-                  className="btn btn-sm bots-danger"
+                  className="btn btn-sm bots-danger bots-delete"
                   disabled={bot.primary}
                   title={bot.primary ? "Make another bot primary first" : undefined}
                   onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}
@@ -505,15 +524,18 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
               {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               {tab === "goal" && (
-                <Instructions
-                  value={conversation.instructions ?? ""}
-                  placeholder="What is this group working on?"
-                  hint="Every bot in the group reads this alongside its own instructions."
-                  onChange={(v) => st.updateConversation(conversation.id, { instructions: v })}
-                />
+                <>
+                  <Instructions
+                    value={conversation.instructions ?? ""}
+                    placeholder="What is this group working on?"
+                    hint="Every bot in the group reads this alongside its own instructions."
+                    onChange={(v) => st.updateConversation(conversation.id, { instructions: v })}
+                  />
+                  <TodoList conversation={conversation} bots={bots} />
+                </>
               )}
               <div className="bots-details-foot">
-                <button type="button" className="btn btn-sm bots-danger" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>
+                <button type="button" className="btn btn-sm bots-danger bots-delete" onClick={() => openBotsDialog({ kind: "delete", id: conversation.id })}>
                   <Trash size={14} /> Delete group
                 </button>
               </div>

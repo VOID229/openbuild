@@ -100,8 +100,15 @@ describe.skipIf(!browser)("the OpenBots rail's fade", () => {
       const list = await box(page, `document.querySelector('${LIST}')`);
       // At the very edge it's the background, though an avatar runs on past it…
       expect(await strayFromBackground(page, list.y + list.height - 1)).toBeLessThan(10);
-      // …while further up, clear of the fade, the avatars are there in full.
-      expect(await strayFromBackground(page, list.y + list.height - 60)).toBeGreaterThan(60);
+      // …while further up, clear of the fade, the avatars are there in full: through the middle of the
+      // last avatar that sits wholly above the fade.
+      const clear = await page.eval<number>(`(() => {
+        const l = document.querySelector('${LIST}'), fadeTop = l.getBoundingClientRect().bottom - 36;
+        const above = [...l.querySelectorAll('.bots-rail-item')].filter((i) => i.getBoundingClientRect().bottom <= fadeTop).pop();
+        const r = above.getBoundingClientRect();
+        return r.y + r.height / 2;
+      })()`);
+      expect(await strayFromBackground(page, clear)).toBeGreaterThan(60);
     }, 30_000);
   }
 
