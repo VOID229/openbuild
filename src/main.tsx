@@ -1,4 +1,4 @@
-import "@fontsource-variable/geist";
+import "@fontsource-variable/inter/opsz.css";
 import "@fontsource-variable/geist-mono";
 import "@fontsource/comic-neue/400.css";
 import "@fontsource/comic-neue/700.css";

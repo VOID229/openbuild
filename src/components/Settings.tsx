@@ -352,7 +352,7 @@ const THEMES: [Theme, string][] = [
 
 /** Stored values stay as they were; the names are what the fonts are. */
 const FONTS: [FontStyle, string][] = [
-  ["normal", "Geist"],
+  ["normal", "Inter"],
   ["serif", "Serif"],
   ["fun", "Comic"],
   ["mono", "Mono"],
