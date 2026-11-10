@@ -4681,10 +4681,23 @@ select.input {
   margin-bottom: 6px;
 }
 
+/* Scrolls up and down only: a long name ends in an ellipsis rather than the list sliding sideways. */
 .select-list {
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+
+.select-list .menu-item {
+  min-width: 0;
+}
+
+.select-list .menu-item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .add-model {
@@ -5452,8 +5465,8 @@ p.key-status svg {
   }
 }
 
-/* Phones: the model picker is a sheet along the bottom of the screen, up to a tall one. Dropping from
-   the pill left it only the few hundred pixels around the composer, too short to scroll comfortably. */
+/* Phones: the model picker is a sheet along the bottom of the screen. Dropping from the pill left it
+   only the few hundred pixels around the composer, too short to scroll comfortably. */
 @media (max-width: 768px) {
   .mp.popover {
     position: fixed;
@@ -5464,9 +5477,9 @@ p.key-status svg {
     z-index: 60;
     width: auto;
     max-width: none;
-    /* As tall as what it shows, up to a tall sheet (Pickers.tsx keeps it from shrinking while open). */
-    height: auto !important;
-    max-height: min(480px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
+    /* One height whatever it holds; more models scroll. */
+    height: min(440px, calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 64px)) !important;
+    max-height: none !important;
     border-radius: var(--radius-xl);
     transform: translateY(12px);
     transform-origin: bottom center;
@@ -7690,7 +7703,18 @@ a.btn-primary {
   color: var(--text-2);
   border-radius: var(--radius);
   vertical-align: bottom;
-  transition: background-color var(--fast) var(--ease);
+  /* Underlined, so it reads as something to pick, not just a word in the sentence. */
+  text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.18em;
+  transition: background-color var(--fast) var(--ease), text-decoration-color var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .home-pick:hover {
+    text-decoration-color: var(--text-3);
+  }
 }
 
 @media (hover: hover) {
@@ -7953,8 +7977,11 @@ a.btn-primary {
 /* Under the composer: Remote Control, outside the option row. Claude Code switches it per thread;
    other harnesses show it disabled; where it's set is in its tooltip. */
 
+/* As wide as its label and toggle, so its tooltip opens under them rather than mid-composer. */
 .remote-control-row {
   display: flex;
+  width: fit-content;
+  max-width: 100%;
   flex-wrap: wrap;
   align-items: center;
   gap: 2px 8px;
@@ -8290,8 +8317,7 @@ a.btn-primary {
   grid-template:
     "rail main effort" minmax(0, 1fr)
     "foot foot foot" auto / 40px minmax(0, 1fr) 132px;
-  /* As tall as its tallest column, down to what the popover's max-height leaves (the list scrolls),
-     and filling the height it's held at once it has grown (Pickers.tsx). */
+  /* Fills the picker's fixed height (Pickers.tsx); the list scrolls within it. */
   flex: 1 1 auto;
   min-height: 0;
 }

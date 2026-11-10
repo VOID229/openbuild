@@ -121,7 +121,7 @@ describe.skipIf(!browser)("model picker", () => {
     await page.shoot("picker-dark-fast");
   }, 30_000);
 
-  test("as tall as what it shows, up to a cap past which the list scrolls; it only grows while open", async () => {
+  test("one compact height whatever it shows: a short list leaves room, a long one scrolls", async () => {
     const page = await open("desktop");
     await page.openPicker();
     const measure = () =>
@@ -129,32 +129,30 @@ describe.skipIf(!browser)("model picker", () => {
         const mp = document.querySelector('.mp'), list = document.querySelector('.mp-list');
         return { height: Math.round(mp.getBoundingClientRect().height), listScroll: list.scrollHeight, listClient: list.clientHeight, names: document.querySelectorAll('.mp-name').length };
       })()`);
-    // Two favorites: no tall empty panel, and nothing to scroll.
+    // Two favorites.
     const favorites = await measure();
     expect(favorites.names).toBe(2);
-    expect(favorites.height).toBeLessThan(320);
-    expect(favorites.listScroll).toBeLessThanOrEqual(favorites.listClient + 1);
-    // The provider's two dozen models: as tall as it gets, and the list scrolls.
+    expect(favorites.height).toBe(320);
+    // The provider's two dozen models: the same height, and the list scrolls.
     await page.click(".mp-rail-scroll .mp-rail-btn");
     await page.until("document.querySelectorAll('.mp-name').length > 20");
     await page.settle();
     const all = await measure();
-    expect(all.height).toBe(380);
+    expect(all.height).toBe(320);
     expect(all.listScroll).toBeGreaterThan(all.listClient + 100);
-    // Back to the favorites, or narrowing a search, keeps the height: nothing moves under the pointer.
-    await page.click('.mp-rail-btn[aria-label="Favorites"], .mp-rail > .mp-rail-btn');
-    await page.until("document.querySelectorAll('.mp-name').length === 2");
-    await page.settle();
-    expect((await measure()).height).toBe(all.height);
+    // A search down to one model doesn't shrink it either.
     await page.eval("document.querySelector('.mp-search input').focus()");
     await page.send("Input.insertText", { text: "haiku" });
     await page.settle();
-    expect((await measure()).height).toBe(all.height);
-    // Opened again, it fits what it shows again.
-    await page.key("Escape", "Escape", 27);
-    await page.until(`document.querySelector('.mp') === null || document.querySelector('.mp').getAttribute('data-state') !== 'open'`);
-    await page.openPicker();
-    expect((await measure()).height).toBe(favorites.height);
+    expect((await measure()).height).toBe(320);
+  }, 30_000);
+
+  test("Remote control's row is as wide as its label and toggle, so its tooltip opens under them", async () => {
+    const page = await open("desktop", "home=1");
+    await page.until("!!document.querySelector('.remote-control-row')");
+    const [row, toggle, composer] = await page.eval<[number, number, number]>(`[document.querySelector('.remote-control-row').getBoundingClientRect().width, document.querySelector('.remote-control-row .toggle').getBoundingClientRect().right - document.querySelector('.remote-control-row').getBoundingClientRect().left, document.querySelector('.composer').getBoundingClientRect().width]`);
+    expect(row).toBeLessThan(composer / 2);
+    expect(row).toBeGreaterThanOrEqual(toggle);
   }, 30_000);
 
   test("search, favorites and the keyboard still work", async () => {

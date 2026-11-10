@@ -331,6 +331,8 @@ function PiStatus({ detection }: { detection: Partial<Record<PlanId, Detection>>
 const RAIL_FAV = "★";
 /** The picker's width on a wide screen: rail, list and the Reasoning column side by side. */
 const PICKER_WIDTH = 540;
+/** The model picker's height: room for about seven models, the reasoning levels and the footer. */
+const PICKER_HEIGHT = 320;
 
 /** Price and size of a model, as a short line. */
 function modelFacts(m: ModelInfo) {
@@ -452,30 +454,12 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
     up: boolean;
     max: number;
     pos: React.CSSProperties;
-  }>({ up: dropUp, max: 380, pos: {} });
+  }>({ up: dropUp, max: PICKER_HEIGHT, pos: {} });
   const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
 
-  // As tall as what it shows, up to the room there is (then the list scrolls). While it's open it only
-  // grows: switching to a shorter provider or narrowing a search keeps it as it was, so the rail and
-  // the search field never move under the pointer. It fits its content again each time it opens.
-  const tallest = useRef(0);
-  const fitAgain = () => {
-    tallest.current = 0;
-    const pop = list.current?.closest<HTMLElement>(".mp");
-    if (pop) pop.style.minHeight = "";
-  };
-  useLayoutEffect(() => {
-    const pop = list.current?.closest<HTMLElement>(".mp");
-    if (!open || !pop) return fitAgain();
-    const h = pop.getBoundingClientRect().height;
-    if (h > tallest.current) {
-      tallest.current = h;
-      pop.style.minHeight = `${h}px`;
-    }
-  });
-
-  // Open right at the pill, toward whichever side has room.
+  // Open right at the pill, toward whichever side has room. One compact height whatever it holds (less
+  // only when the window has less room), so it never grows or shrinks with the models: more of them scroll.
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
@@ -503,10 +487,9 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
       const pos: React.CSSProperties = up
         ? { left, top: "auto", bottom: wrap.bottom - pill.top + 6 }
         : { left, bottom: "auto", top: pill.bottom - wrap.top + 6 };
-      fitAgain();
       setLayout({
         up,
-        max: Math.max(220, Math.min(380, up ? above : below)),
+        max: Math.max(220, Math.min(PICKER_HEIGHT, up ? above : below)),
         pos,
       });
     };
@@ -518,8 +501,6 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
   // Open on the favorites (if any), else on the selected model's provider.
   useEffect(() => {
     if (!open) return;
-    // It opened showing the last tab it had; fit to the one it opens on instead.
-    fitAgain();
     setQuery("");
     if (window.matchMedia("(pointer: fine)").matches)
       requestAnimationFrame(() => search.current?.focus());
@@ -597,7 +578,7 @@ export function ModelPicker({ dropUp, deviceId }: { dropUp: boolean; deviceId?: 
         onClose={() => setOpen(false)}
         anchor={anchor}
         className={cx("mp", layout.up ? "drop-up" : "drop-down")}
-        style={{ ...layout.pos, maxHeight: layout.max }}
+        style={{ ...layout.pos, height: layout.max }}
         label="Choose a model"
       >
         <div className="mp-body">

@@ -1211,6 +1211,8 @@
     max-width: none;
     max-height: calc(var(--app-h, 100dvh) - max(env(safe-area-inset-top), 12px) - 24px);
     padding: 6px;
+    /* Up and down only: nothing in a sheet is wider than it, so it never slides sideways. */
+    overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior: contain;
     border-radius: var(--radius-xl);
