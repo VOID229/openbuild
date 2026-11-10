@@ -47,12 +47,17 @@ function migrate(db: Database): Database {
   return db;
 }
 
+/** A bot owed its one look through the memory it had before the split (kv key prefix). */
+const MEMORY_REVIEW = "memory-review:";
+
 /**
  * Memory from before the profile/journal split has no kind. It was all in the prompt then, standing
  * rules included, so each bot's newest facts go into its profile, as many as its cap holds; only what
  * doesn't fit (and any fact too long to be one) becomes a journal entry, still searchable, and still
- * there for the bot to promote. This happens once, when the kind column is added. Then the search
- * index is put back in step with the rows, both ways. Running it again finds nothing to do.
+ * there for the bot to promote. This happens once, when the kind column is added, and a bot left with
+ * such journal entries is owed one look through them on its next turn (takeMemoryReview), armed only
+ * then, so a database already split never arms it again. Then the search index is put back in step
+ * with the rows, both ways. Running it again finds nothing to do.
  *
  * Memory is each bot's own (bot_id). If some of it is ever shared between bots, that's a scope beside
  * kind, with `by` already saying which bot learned a fact.
@@ -63,6 +68,8 @@ export function migrateMemories(db: Database) {
     if (!columns.some((c) => c.name === "kind")) {
       db.exec("ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'journal'");
       promoteLegacyMemories(db);
+      // Each bot left with old facts in its journal, marked with its newest date then: anything written after is dated later.
+      db.exec(`INSERT OR IGNORE INTO kv (key, value) SELECT '${MEMORY_REVIEW}' || bot_id, MAX(at) FROM memories WHERE bot_id IN (SELECT id FROM bots) GROUP BY bot_id HAVING SUM(kind = 'journal') > 0`);
     }
     db.exec("UPDATE memories SET kind = 'journal' WHERE kind NOT IN ('profile', 'journal')");
     db.exec("CREATE INDEX IF NOT EXISTS memories_kind ON memories(bot_id, kind, at)");
@@ -136,6 +143,7 @@ export function deleteBot(id: string) {
     db.query("DELETE FROM memories_fts WHERE bot_id = ?").run(id);
     db.query("DELETE FROM routines WHERE bot_id = ?").run(id);
     db.query("DELETE FROM cursors WHERE bot_id = ?").run(id);
+    db.query("DELETE FROM kv WHERE key = ?").run(MEMORY_REVIEW + id);
   })();
 }
 
@@ -166,6 +174,14 @@ export function removeMemory(botId: string, id: string): boolean {
     db.query("DELETE FROM memories_fts WHERE id = ?1 AND bot_id = ?2").run(id, botId);
   })();
   return removed;
+}
+/**
+ * The look through its memory from before the split that a bot is owed: the date of its newest entry
+ * from then, or nothing. Taking it ends it, at once and for good, so no later turn sees it again.
+ */
+export function takeMemoryReview(botId: string): number | undefined {
+  const row = db.query<{ value: string }, [string]>("DELETE FROM kv WHERE key = ? RETURNING value").get(MEMORY_REVIEW + botId);
+  return row ? Number(parse<number>(row.value)) : undefined;
 }
 /**
  * Recall: a bot's memory of either kind, best matches first (full-text rank, newer first on a tie).
