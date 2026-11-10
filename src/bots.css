@@ -1249,67 +1249,77 @@
   cursor: default;
 }
 
-/* At rest the header is just the mascots. Hovered (or focused, or with the details open) the name and
-   the chevron open out beside them: their column widens to fit (0fr → 1fr) while they sharpen from a
-   blur, fade up and settle in from the left, the chevron a beat behind the name. */
+/* At rest the header is just the mascots. Hovered (or focused from the keyboard) the name and the
+   chevron open out beside them. Their window widens (0fr → 1fr) over the name at its full width, so it
+   is uncovered whole rather than squeezed letter by letter, and it fades up and settles in just behind
+   the widening, the chevron a beat later. Moving away, it fades first, then the window closes. */
 .bots-head-reveal {
   display: inline-grid;
   grid-template-columns: 0fr;
   min-width: 0;
   margin-left: -8px;
   transition:
-    grid-template-columns 420ms var(--sidebar-ease),
-    margin-left 420ms var(--sidebar-ease);
+    grid-template-columns 320ms var(--sidebar-ease) 60ms,
+    margin-left 320ms var(--sidebar-ease) 60ms;
 }
 
+/* The window: as wide as the column lets it be, showing what fits of the line inside. */
 .bots-head-reveal > span {
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* The line itself, always at its full width (so it's uncovered, never squeezed). */
+.bots-head-reveal > span > span {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-width: 0;
-  overflow: hidden;
+  width: max-content;
+  max-width: 300px;
   white-space: nowrap;
   opacity: 0;
-  filter: blur(6px);
-  translate: -10px 0;
+  translate: -6px 0;
   transition:
-    opacity 260ms var(--ease-out),
-    filter 360ms var(--ease-out),
-    translate 420ms var(--sidebar-ease);
+    opacity 140ms var(--ease-out),
+    translate 200ms var(--ease-out);
 }
 
-.bots-head-reveal-chevron > span {
-  transition-delay: 60ms;
-}
-
-.bots-head-pill:is(:hover, :focus-visible, [aria-expanded="true"]) .bots-head-reveal {
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal {
   grid-template-columns: 1fr;
   margin-left: 0;
+  transition:
+    grid-template-columns 380ms var(--sidebar-ease),
+    margin-left 380ms var(--sidebar-ease);
 }
 
-.bots-head-pill:is(:hover, :focus-visible, [aria-expanded="true"]) .bots-head-reveal > span {
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal > span > span {
   opacity: 1;
-  filter: none;
   translate: 0 0;
+  transition:
+    opacity 260ms var(--ease-out) 110ms,
+    translate 380ms var(--sidebar-ease) 60ms;
 }
 
-/* Without a mouse there's no hover to wait for: it's all there. */
-@media (hover: none) {
+.bots-head-pill:is(:hover, :focus-visible) .bots-head-reveal-chevron > span > span {
+  transition-delay: 170ms, 120ms;
+}
+
+/* On a touch screen there's no hover to wait for: it's all there. */
+@media (hover: none) and (pointer: coarse) {
   .bots-head-reveal {
     grid-template-columns: 1fr;
     margin-left: 0;
   }
 
-  .bots-head-reveal > span {
+  .bots-head-reveal > span > span {
     opacity: 1;
-    filter: none;
     translate: 0 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .bots-head-reveal,
-  .bots-head-reveal > span {
+  .bots-head-reveal > span > span {
     transition: none;
   }
 }

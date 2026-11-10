@@ -62,6 +62,9 @@ const hover = async (page: Page) => {
 };
 const leave = (page: Page) => page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 700 });
 
+/** Whether the name's window is shut: the pill is just the mascots. */
+const folded = (page: Page) => page.eval<boolean>(`[...${PILL}.querySelectorAll('.bots-head-reveal')].every((r) => r.getBoundingClientRect().width < 1)`);
+
 /** The whole name and the chevron inside the pill. */
 const expectShown = (p: Pill, chevron = true) => {
   expect(p.nameInside).toBe(true);
@@ -71,10 +74,11 @@ const expectShown = (p: Pill, chevron = true) => {
 
 describe.skipIf(!browser)("the chat's header", () => {
   for (const theme of ["light", "dark"] as const) {
-    test(`shows the group's bots one by one in a row, the name and a chevron, and holds its size on hover (${theme})`, async () => {
+    test(`shows the group's bots one by one in a row, and on hover opens out to their name and a chevron (${theme})`, async () => {
       const page = await open(theme);
       const rest = await pill(page);
-      expectShown(rest);
+      // At rest, just the mascots.
+      expect(await folded(page)).toBe(true);
       // Each member its own mascot, side by side on one line, not a huddle.
       expect(rest.huddles).toBe(0);
       expect(rest.bots).toHaveLength(4);
@@ -91,11 +95,12 @@ describe.skipIf(!browser)("the chat's header", () => {
       await done(page);
       const hovered = await pill(page);
       expectShown(hovered);
-      expect(hovered.width).toBe(rest.width);
+      expect(hovered.width).toBeGreaterThan(rest.width + 40);
       expect(hovered.height).toBe(rest.height);
 
       await leave(page);
       await done(page);
+      expect(await folded(page)).toBe(true);
       expect((await pill(page)).width).toBe(rest.width);
     }, 20_000);
   }
@@ -106,7 +111,9 @@ describe.skipIf(!browser)("the chat's header", () => {
     // The conversation's scrolling area starts where the bar ends, so nothing readable sits under it.
     expect(messages.top).toBeGreaterThanOrEqual(head.bottom - 0.5);
     await hover(page);
-    const moving = await page.eval<string[]>(`${PILL}.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition && !a.effect.target.closest('.bot')).map((a) => a.transitionProperty)`);
+    // The name's window widening is the one layout that moves (the pill opening out to show the name);
+    // nothing else in the bar does.
+    const moving = await page.eval<string[]>(`${PILL}.getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition && !a.effect.target.closest('.bot') && !a.effect.target.matches('.bots-head-reveal')).map((a) => a.transitionProperty)`);
     for (const property of moving) expect(["grid-template-columns", "transform", "filter", "width", "padding-right", "backdrop-filter"]).not.toContain(property);
     const blur = await page.eval<string>(`getComputedStyle(${PILL}).backdropFilter`);
     expect(blur).toBe("none");
@@ -118,7 +125,9 @@ describe.skipIf(!browser)("the chat's header", () => {
       for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Tab", code: "Tab", windowsVirtualKeyCode: 9 });
     }
     expect(await page.eval<boolean>(`document.activeElement === ${PILL} && ${PILL}.matches(':focus-visible')`)).toBe(true);
+    // Focused from the keyboard, it opens out as it does on hover.
     await page.settle();
+    await done(page);
     expectShown(await pill(page));
     for (const type of ["keyDown", "keyUp"]) await page.send("Input.dispatchKeyEvent", { type, key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, ...(type === "keyDown" && { text: "\r" }) });
     await page.settle();
@@ -130,10 +139,11 @@ describe.skipIf(!browser)("the chat's header", () => {
     await page.click(".bots-head-pill");
     expect(await page.eval<boolean>("bots.getState().detailsOpen")).toBe(true);
     expect(await page.eval<string | null>(`${PILL}.getAttribute('aria-expanded')`)).toBe("true");
+    // The details staying open doesn't keep the name out: moving away folds it.
     await leave(page);
     await page.settle();
     await done(page);
-    expectShown(await pill(page));
+    expect(await folded(page)).toBe(true);
     await page.click(".bots-head-pill");
     expect(await page.eval<boolean>("bots.getState().detailsOpen")).toBe(false);
   }, 20_000);
@@ -208,6 +218,40 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
       }
     }, 30_000);
   }
+
+  test("hovered, the name opens out whole, never squeezed; moving away folds it, even after a click opened the details", async () => {
+    const page = await open("dark");
+    await page.eval("bots.getState().select('crowd')");
+    await page.until(`document.querySelector('.bots-head-name')?.textContent === 'Everyone'`);
+    await page.settle();
+    const window = () => page.eval<number>("Math.round(document.querySelector('.bots-head-reveal').getBoundingClientRect().width)");
+    // At rest: the mascots alone.
+    expect(await window()).toBe(0);
+    const pill = await page.eval<[number, number]>("(() => { const r = document.querySelector('.bots-head-pill .bot-lineup').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()");
+    // Hovered: every frame, the name is its whole width on one line, uncovered rather than cut short.
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: pill[0], y: pill[1] });
+    const opening = await page.eval<{ squeezed: boolean; shown: number }[]>(`new Promise((resolve) => {
+      const name = document.querySelector('.bots-head-name'), reveal = document.querySelector('.bots-head-reveal');
+      const frames = [];
+      const start = performance.now();
+      const tick = () => {
+        frames.push({ squeezed: name.scrollWidth > name.clientWidth + 1, shown: reveal.getBoundingClientRect().width });
+        if (performance.now() - start < 700) requestAnimationFrame(tick);
+        else resolve(frames);
+      };
+      requestAnimationFrame(tick);
+    })`);
+    expect(opening.some((f) => f.shown > 4 && f.shown < opening.at(-1)!.shown - 4)).toBe(true);
+    expect(opening.every((f) => !f.squeezed)).toBe(true);
+    expect(await window()).toBeGreaterThan(40);
+    // Clicked, the details open; the pointer leaving still folds the name away.
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x: pill[0], y: pill[1], button: "left", clickCount: 1 });
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: pill[0], y: pill[1], button: "left", clickCount: 1 });
+    await page.until("bots.getState().detailsOpen === true");
+    await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 20, y: 700 });
+    await Bun.sleep(700);
+    expect(await window()).toBe(0);
+  }, 30_000);
 
   test("the chat's header shows four of a group's bots and a count of the rest", async () => {
     const page = await open("dark");

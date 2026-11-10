@@ -2320,15 +2320,19 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={20} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} lineup />
               <span className="bots-head-reveal">
                 <span>
-                  <span className="bots-head-name">{name}</span>
-                  {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+                  <span>
+                    <span className="bots-head-name">{name}</span>
+                    {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+                  </span>
                 </span>
               </span>
               {!remote && <HeadTasks conversation={conversation} mobile={false} />}
               {!remote && (
                 <span className="bots-head-reveal bots-head-reveal-chevron">
                   <span>
-                    <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />
+                    <span>
+                      <ChevronRight className="bots-head-chevron" size={15} strokeWidth={2} aria-hidden />
+                    </span>
                   </span>
                 </span>
               )}
