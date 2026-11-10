@@ -2709,6 +2709,8 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: normal;
+  /* The backdrop must shape the draft exactly as the textarea does, ligatures off like every field. */
+  font-variant-ligatures: none;
 }
 
 .bots-composer-textarea {
