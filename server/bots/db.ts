@@ -5,8 +5,9 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { Bot, BotMessage, Conversation, MemoryItem, MemoryKind, Routine, TodoItem } from "../../shared/bots";
+import { MEMORY_TEXT_MAX, PROFILE_MAX_BYTES, type Bot, type BotMessage, type Conversation, type MemoryItem, type MemoryKind, type Routine, type TodoItem } from "../../shared/bots";
 import { dataDir } from "../paths";
+import { memoryKey, profileBytes } from "./sessionPolicy";
 
 export const botsDir = () => join(dataDir(), "bots");
 
@@ -47,10 +48,11 @@ function migrate(db: Database): Database {
 }
 
 /**
- * Memory from before the profile/journal split has no kind. Every such row becomes a journal entry,
- * the kind that loses nothing: it stays searchable, and its bot can move what's lasting into its
- * profile. Nothing here guesses which facts are lasting. Then the search index is put back in step
- * with the rows, both ways. Running it again finds nothing to do.
+ * Memory from before the profile/journal split has no kind. It was all in the prompt then, standing
+ * rules included, so each bot's newest facts go into its profile, as many as its cap holds; only what
+ * doesn't fit (and any fact too long to be one) becomes a journal entry, still searchable, and still
+ * there for the bot to promote. This happens once, when the kind column is added. Then the search
+ * index is put back in step with the rows, both ways. Running it again finds nothing to do.
  *
  * Memory is each bot's own (bot_id). If some of it is ever shared between bots, that's a scope beside
  * kind, with `by` already saying which bot learned a fact.
@@ -58,7 +60,10 @@ function migrate(db: Database): Database {
 export function migrateMemories(db: Database) {
   db.transaction(() => {
     const columns = db.query<{ name: string }, []>("PRAGMA table_info(memories)").all();
-    if (!columns.some((c) => c.name === "kind")) db.exec("ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'journal'");
+    if (!columns.some((c) => c.name === "kind")) {
+      db.exec("ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'journal'");
+      promoteLegacyMemories(db);
+    }
     db.exec("UPDATE memories SET kind = 'journal' WHERE kind NOT IN ('profile', 'journal')");
     db.exec("CREATE INDEX IF NOT EXISTS memories_kind ON memories(bot_id, kind, at)");
     db.exec("DELETE FROM memories_fts WHERE id NOT IN (SELECT id FROM memories)");
@@ -66,6 +71,25 @@ export function migrateMemories(db: Database) {
     db.exec("DELETE FROM memories_fts WHERE rowid IN (SELECT f.rowid FROM memories_fts f JOIN memories m ON m.id = f.id WHERE f.text <> m.text OR f.bot_id <> m.bot_id)");
     db.exec("INSERT INTO memories_fts (id, bot_id, text) SELECT id, bot_id, text FROM memories WHERE id NOT IN (SELECT id FROM memories_fts)");
   })();
+}
+
+/** Fills each bot's profile from its newest legacy facts down, skipping any that would overrun the cap. */
+function promoteLegacyMemories(db: Database) {
+  const rows = db.query<{ id: string; bot_id: string; text: string; at: number }, []>("SELECT id, bot_id, text, at FROM memories ORDER BY bot_id, at DESC, rowid DESC").all();
+  const profiles = new Map<string, { items: { id: string; text: string; at: number }[]; keys: Set<string> }>();
+  const promote = db.query("UPDATE memories SET kind = 'profile' WHERE id = ?1");
+  for (const row of rows) {
+    if (row.text.trim().length > MEMORY_TEXT_MAX) continue;
+    const profile = profiles.get(row.bot_id) ?? { items: [], keys: new Set<string>() };
+    profiles.set(row.bot_id, profile);
+    const key = memoryKey(row.text);
+    // The same fact twice: the newer copy is in the profile already, the older stays in the journal.
+    if (profile.keys.has(key)) continue;
+    if (profileBytes([...profile.items, row]) > PROFILE_MAX_BYTES) continue;
+    profile.items.push(row);
+    profile.keys.add(key);
+    promote.run(row.id);
+  }
 }
 
 const hot = globalThis as { openbotsDb?: Database };
@@ -131,7 +155,7 @@ export function addMemory(botId: string, item: MemoryItem) {
     db.query("INSERT INTO memories_fts (id, bot_id, text) VALUES (?1, ?2, ?3)").run(item.id, botId, item.text);
   })();
 }
-/** Writing a fact that's already there: its date moves up and it takes the kind asked for. The text, and so the index, stays. */
+/** Writing a fact that's already there: its date moves up and it takes the kind it's given. The text, and so the index, stays. */
 export function touchMemory(botId: string, id: string, kind: MemoryKind, at: number) {
   db.query("UPDATE memories SET kind = ?3, at = ?4 WHERE id = ?1 AND bot_id = ?2").run(id, botId, kind, at);
 }

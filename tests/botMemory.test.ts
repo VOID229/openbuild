@@ -121,6 +121,20 @@ test("writes are deduped, kinds can change, and the profile's cap is hard", asyn
     a.deepEqual(db.memories(boss.id).map((m) => m.kind), ['profile', 'profile']);
     a.doesNotMatch(section(), /Your journal/);
 
+    // Confirming a profile fact without a kind keeps it in the profile: only an explicit kind moves it.
+    const kept = agent.memory(boss.id, { action: 'write', text: 'prefers SHORT answers' });
+    a.equal(kept.kind, 'profile');
+    a.match(kept.note, /already had this/);
+    a.deepEqual(db.memories(boss.id).map((m) => [m.text, m.kind]), [['Prefers short answers.', 'profile'], ['Shipped the invoice export.', 'profile']]);
+    a.doesNotMatch(section(), /Your journal/);
+    // And a journal entry confirmed without a kind stays in the journal.
+    agent.memory(boss.id, { action: 'write', text: 'Deployed on Friday.' });
+    a.equal(agent.memory(boss.id, { action: 'write', text: 'deployed on friday' }).kind, 'journal');
+    // An explicit kind still moves it, both ways.
+    a.equal(agent.memory(boss.id, { action: 'write', text: 'Prefers short answers.', kind: 'journal' }).kind, 'journal');
+    a.equal(agent.memory(boss.id, { action: 'write', text: 'Prefers short answers.', kind: 'profile' }).kind, 'profile');
+    agent.memory(boss.id, { action: 'forget', text: 'Deployed on Friday.' });
+
     // Another bot's memory is its own.
     a.deepEqual(texts(scout.id), []);
     a.equal(section(scout.id), "You haven't written any memories yet.");
@@ -199,6 +213,10 @@ test("forgetting takes the exact text or an id, and a newer fact replaces the on
     a.equal(texts().length, 3);
     // The newest is on top.
     a.equal(texts()[0], 'The dentist moved to Monday.');
+    // Rewording a profile fact with replaces and no kind keeps it in the profile.
+    const tea2 = agent.memory(boss.id, { action: 'write', text: "Gal's favourite drink is oat flat whites.", replaces: "Gal's favourite drink is black coffee now." });
+    a.equal(tea2.kind, 'profile');
+    a.equal(tea2.replaced.kind, 'profile');
     process.exit(0);
   `);
 }, 30_000);
@@ -262,7 +280,7 @@ test("search recalls either kind with its date and kind: best match first, then 
   `);
 }, 30_000);
 
-test("memory from before the split becomes journal entries: nothing lost, and migrating again changes nothing", async () => {
+test("memory from before the split fills the profile newest first up to its cap, the rest becomes journal: nothing lost, and migrating again changes nothing", async () => {
   await run(`
     import { strict as a } from 'node:assert';
     import { Database } from 'bun:sqlite';
@@ -295,6 +313,20 @@ test("memory from before the split becomes journal entries: nothing lost, and mi
 
     const db = await import('./server/bots/db.ts');
     const agent = await import('./server/bots/agent.ts');
+    const { profileBytes } = await import('./server/bots/sessionPolicy.ts');
+    const { PROFILE_MAX_BYTES, MEMORY_TEXT_MAX } = await import('./shared/bots.ts');
+    // What the profile should hold: newest first, every fact that still fits under the cap; one too
+    // long to be a fact stays out. Everything else is journal.
+    const expectedProfile = (botId) => {
+      const picked = [];
+      for (const r of [...rows].filter((r) => r.botId === botId).sort((x, y) => y.at - x.at)) {
+        if (r.text.length > MEMORY_TEXT_MAX) continue;
+        if (profileBytes([...picked, r]) <= PROFILE_MAX_BYTES) picked.push(r);
+      }
+      return picked.map((r) => r.id);
+    };
+    const bossProfile = expectedProfile('boss-0001');
+    const kindOf = (id) => db.db.query('SELECT kind FROM memories WHERE id = ?').get(id).kind;
     const dump = () => JSON.stringify([
       db.db.query('SELECT id, bot_id, text, at, by, kind FROM memories ORDER BY id').all(),
       db.db.query('SELECT id, bot_id, text FROM memories_fts ORDER BY id').all(),
@@ -303,13 +335,22 @@ test("memory from before the split becomes journal entries: nothing lost, and mi
       const all = db.db.query('SELECT id, bot_id AS botId, text, at, by FROM memories ORDER BY rowid').all();
       // Every row, with its id, owner, whole text, date and author as they were.
       a.deepEqual(all, rows);
-      a.deepEqual(db.db.query('SELECT DISTINCT kind FROM memories').all(), [{ kind: 'journal' }]);
+      // The newest facts are in the profile, as many as fit; the overflow is journal.
+      a.ok(bossProfile.length >= 10 && bossProfile.length < 50, 'profile holds ' + bossProfile.length);
+      a.equal(bossProfile[0], 'mem-unindexed');
+      a.ok(!bossProfile.includes('mem-long'));
+      a.deepEqual(db.memories('boss-0001').filter((m) => m.kind === 'profile').map((m) => m.id), bossProfile);
+      a.ok(profileBytes(db.memories('boss-0001').filter((m) => m.kind === 'profile')) <= PROFILE_MAX_BYTES);
+      a.equal(kindOf('mem-long'), 'journal');
+      a.equal(kindOf('mem-0000'), 'journal');
+      a.equal(kindOf('mem-0049'), 'profile');
+      a.equal(kindOf('mem-scout'), 'profile', 'each bot fills its own profile');
       // The index has each row exactly once, and nothing else.
       a.equal(db.db.query('SELECT COUNT(*) AS n FROM memories_fts').get().n, rows.length);
       a.equal(db.db.query('SELECT COUNT(DISTINCT id) AS n FROM memories_fts').get().n, rows.length);
       a.equal(db.memories('boss-0001').length, 52);
       a.equal(db.memories('boss-0001')[0].text, 'Never reached the index: quokka');
-      a.equal(db.memories('boss-0001')[0].kind, 'journal');
+      a.equal(db.memories('boss-0001')[0].kind, 'profile');
       a.equal(db.memories('boss-0001').find((m) => m.id === 'mem-long').text.length, 2000);
       a.deepEqual(db.searchMemory('boss-0001', 'quokka').map((m) => m.id), ['mem-unindexed']);
       a.deepEqual(db.searchMemory('boss-0001', 'okapi'), []);
@@ -326,20 +367,28 @@ test("memory from before the split becomes journal entries: nothing lost, and mi
     a.equal(dump(), once);
     check();
 
-    // What the bot sees: an empty profile to fill, its latest entries, and a way to the rest.
+    // What the bot sees: its standing facts in the profile, the latest overflow, and a way to the rest.
     const section = agent.contextSections('boss-0001').openbots_memory;
-    a.match(section, /^Your profile is empty: move the lasting facts into it\\.\\nYour journal, newest first \\(47 older entries: search finds them\\):/);
-    a.equal(section.split('\\n').length, 2 + 5);
+    const older = 52 - bossProfile.length - 5;
+    a.ok(section.startsWith('Your profile:\\n- [mem-unin] '));
+    a.ok(section.split('\\n')[1].endsWith(' Never reached the index: quokka'));
+    a.ok(section.includes('Your journal, newest first (' + older + ' older entries: search finds them):'));
+    a.equal(section.split('\\n').length, 2 + bossProfile.length + 5);
+    a.ok(section.includes('Old note 49 about zebra49'), 'the newest standing rules are in the prompt');
     a.doesNotMatch(section, /Old note 3 /);
-    // It promotes an old note by writing it to the profile: moved, not copied, and migrating leaves that alone.
+    // It promotes an old note by writing it to the profile once there's room: moved, not copied, and migrating leaves that alone.
     const svc = await import('./server/bots/service.ts');
     svc.setHooks({ wake() {}, stop() {} });
+    a.throws(() => agent.memory('boss-0001', { action: 'write', kind: 'profile', text: 'Old note 3 about zebra3' }), /Your profile is full/);
+    agent.memory('boss-0001', { action: 'write', kind: 'journal', text: 'Old note 49 about zebra49' });
+    agent.memory('boss-0001', { action: 'write', kind: 'journal', text: 'Old note 48 about zebra48' });
     const promoted = agent.memory('boss-0001', { action: 'write', kind: 'profile', text: 'Old note 3 about zebra3' });
     a.equal(promoted.id, 'mem-0003');
     a.equal(db.memories('boss-0001').length, 52);
     db.migrateMemories(db.db);
     a.equal(db.memories('boss-0001').find((m) => m.id === 'mem-0003').kind, 'profile');
     a.match(agent.contextSections('boss-0001').openbots_memory, /^Your profile:\\n- \\[mem-0003\\] \\d{4}-\\d\\d-\\d\\d Old note 3 about zebra3\\n/);
+    a.equal(kindOf('mem-0049'), 'journal', 'demoting is explicit, and migrating leaves it alone');
     // New writes land in the migrated table and index.
     agent.memory('boss-0001', { action: 'write', text: 'Fresh after migrating: wombat.' });
     a.equal(db.searchMemory('boss-0001', 'wombat').length, 1);

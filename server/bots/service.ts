@@ -1393,7 +1393,7 @@ function reportPollChanges(now: number) {
 /** What a write to memory did. */
 export interface MemoryWrite {
   item: MemoryItem;
-  /** The fact was already there: no copy was made, its date moved up and it took the kind asked for. */
+  /** The fact was already there: no copy was made, its date moved up, and it took the kind asked for (or kept its own). */
   duplicate: boolean;
   /** The outdated fact this one took the place of. */
   replaced?: MemoryItem;
@@ -1410,8 +1410,7 @@ export interface MemoryWrite {
 export function addMemory(botId: string, text: string, opts: { by?: string; id?: string; kind?: MemoryKind; replaces?: string } = {}): MemoryWrite {
   if (!db.getBot(botId)) throw new BotsError("No such bot.", 404);
   const { by, id } = opts;
-  const kind = opts.kind ?? "journal";
-  if (!MEMORY_KINDS.includes(kind)) throw new BotsError("kind is profile or journal.");
+  if (opts.kind !== undefined && !MEMORY_KINDS.includes(opts.kind)) throw new BotsError("kind is profile or journal.");
   if (id && !isBotId(id)) throw new BotsError("Bad memory id.");
   const all = db.memories(botId);
   if (id) {
@@ -1427,6 +1426,9 @@ export function addMemory(botId: string, text: string, opts: { by?: string; id?:
   const rest = all.filter((m) => m.id !== replaced?.id);
   const key = memoryKey(clean);
   const same = rest.find((m) => memoryKey(m.text) === key);
+  // Only an explicit kind moves a fact: confirming it, or rewording it with `replaces`, keeps the
+  // kind it had, so a profile rule written again isn't dropped to the journal. New facts are journal.
+  const kind: MemoryKind = opts.kind ?? same?.kind ?? replaced?.kind ?? "journal";
   // Newer than everything there, even when the clock hasn't moved since the last write.
   const at = Math.max(Date.now(), (all[0]?.at ?? 0) + 1);
   const item: MemoryItem = same ? { ...same, kind, at } : { id: id ?? crypto.randomUUID(), kind, text: clean, at, by };
