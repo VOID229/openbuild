@@ -56,10 +56,15 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
         const last = body.messages.at(-1);
         const text = JSON.stringify(last.content);
         let out;
-        if (last.role === 'tool' && text.includes('pong')) out = use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' });
+        // Only the core tools are declared until the bot loads more, and then they are, in the same turn.
+        if (last.role === 'tool' && text.includes('Loaded ask_bot, bot_web_search')) out = use('ask_bot', { bot: 'Beta', text: 'ping', status: 'Checking with Beta' });
+        else if (last.role === 'tool' && text.includes('pong')) out = use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' });
         else if (last.role === 'tool' && text.includes('Tea result')) out = say('all done');
         else if (last.role === 'tool') out = say('tool failed: ' + text.slice(0, 300));
-        else if (text.includes('ASK')) out = use('ask_bot', { bot: 'Beta', text: 'ping', status: 'Checking with Beta' });
+        else if (text.includes('ASK')) {
+          a.ok(!(body.tools ?? []).some((t) => t.function.name === 'ask_bot'));
+          out = use('load_tools', { names: ['ask_bot', 'bot_web_search'] });
+        }
         else out = say('pong');
         return new Response(out, { headers: { 'content-type': 'text/event-stream' } });
       } });
@@ -86,7 +91,9 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       // Each bot's own chat notes the exchange, linking to the side chat.
       a.deepEqual(activity(alpha.conversationId), ['Sent a message to Beta']);
       a.deepEqual(activity(beta.conversationId), ['Received a message from Alpha']);
-      for (const name of ['send_message', 'ask_bot', 'bot_web_search', 'memory', 'routine']) a.ok(seenTools.has(name), 'missing ' + name);
+      for (const name of ['send_message', 'load_tools', 'ask_bot', 'bot_web_search', 'memory', 'search']) a.ok(seenTools.has(name), 'missing ' + name);
+      // Never loaded, so never declared.
+      a.ok(!seenTools.has('routine') && !seenTools.has('openbuild'));
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
@@ -181,7 +188,9 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       await talk('two');
       a.ok(tools.includes('picked_tool'));
       a.ok(lastPrompt.includes('PICKED_EXTENSION_PROMPT'));
-      for (const name of ['bash', 'send_message', 'ask_bot', 'bot_web_search']) a.ok(tools.includes(name), name);
+      for (const name of ['send_message', 'memory', 'load_tools']) a.ok(tools.includes(name), name);
+      // Without the tool list, the catalog tools still wait to be loaded.
+      for (const name of ['bash', 'ask_bot', 'bot_web_search']) a.ok(!tools.includes(name), name);
 
       // Off again takes it all back.
       svc.updateSettings({ customExtensions: { enabled: false, ids: ['extensions/picked.ts'] } });

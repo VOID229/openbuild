@@ -4,8 +4,8 @@ import openbots from "../server/bots/extension";
 test("every work tool requires a custom status and preserves its own required parameters", () => {
   const tools: any[] = [];
   openbots({ on() {}, registerTool(tool: any) { tools.push(tool); } });
-  // Tools that put something in the chat (or its to-do list) show as that, not as a status line.
-  const exempt = new Set(["send_message", "react", "question", "poll", "html_render", "todo"]);
+  // Tools that put something in the chat (or its to-do list) show as that, not as a status line, and load_tools is over at once.
+  const exempt = new Set(["send_message", "react", "question", "poll", "html_render", "todo", "load_tools"]);
   expect(tools.length).toBeGreaterThan(20);
   for (const tool of tools) {
     if (exempt.has(tool.name)) {
