@@ -119,6 +119,8 @@ interface BotsState {
   setCustomExtensions: (custom: { enabled: boolean; ids: string[] }) => Promise<unknown>;
   setHarnesses: (harnesses: BotHarnessSettings) => void;
   select: (id: string) => void;
+  /** Stop the conversation's bots: what they're doing now and anything they have going in the background. */
+  stopWork: (conversationId: string) => void;
   setDetailsOpen: (open: boolean) => void;
   /** Open the details on a tab. */
   showDetailsTab: (tab: "tasks") => void;
@@ -255,6 +257,7 @@ export const useBots = create<BotsState>()(
       }));
       void send("POST", `/api/bots/conversations/${encodeURIComponent(id)}/read`, undefined, {});
     },
+    stopWork: (conversationId) => void send("POST", `/api/bots/conversations/${encodeURIComponent(conversationId)}/stop`, {}, {}),
     setDetailsOpen: (detailsOpen) => set({ detailsOpen }),
     showDetailsTab: (tab) => set((s) => ({ detailsOpen: true, detailsTab: { tab, key: (s.detailsTab?.key ?? 0) + 1 } })),
 

@@ -53,12 +53,18 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
             a.ok(t.function.parameters.required.includes('status'), JSON.stringify(t));
           }
         }
-        const last = body.messages.at(-1);
+        // The runner's nudge to acknowledge the user can ride in with a tool's result when the machine is slow: the model carries on from the result.
+        const last = body.messages.findLast((m) => !(m.role === 'user' && JSON.stringify(m.content).includes("hasn't heard from you yet")));
         const text = JSON.stringify(last.content);
         let out;
         // Only the core tools are declared until the bot loads more, and then they are, in the same turn.
         if (last.role === 'tool' && text.includes('Loaded ask_bot, bot_web_search')) out = use('ask_bot', { bot: 'Beta', text: 'ping', status: 'Checking with Beta' });
-        else if (last.role === 'tool' && text.includes('pong')) out = use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' });
+        // ask_bot doesn't wait: the turn ends, and Beta's answer wakes Alpha in the chat it asked from.
+        else if (last.role === 'tool' && text.includes("Asked. Don't wait for Beta")) out = say('asked Beta');
+        else if (last.role === 'user' && text.includes('Beta answered what you asked')) {
+          a.match(text, /pong/);
+          out = use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' });
+        }
         else if (last.role === 'tool' && text.includes('Tea result')) out = say('all done');
         else if (last.role === 'tool') out = say('tool failed: ' + text.slice(0, 300));
         else if (text.includes('ASK')) {
@@ -82,14 +88,15 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       const activity = (id) => db.messages(id, 50).flatMap((r) => r.message.event?.kind === 'message' ? [r.message.event.text] : []);
       const until = Date.now() + 45000;
       while (Date.now() < until && !said(alpha.conversationId).includes('all done')) await Bun.sleep(100);
-      a.deepEqual(said(alpha.conversationId).filter((t) => t !== 'ASK'), ['all done']);
+      a.deepEqual(said(alpha.conversationId).filter((t) => t !== 'ASK'), ['asked Beta', 'all done']);
 
       // The two really did talk, in a side chat the user can read.
       const side = db.listConversations().find((c) => c.kind === 'side');
       a.ok(side.botIds.includes(alpha.bot.id) && side.botIds.includes(beta.bot.id));
       a.deepEqual(said(side.id), ['ping', 'pong']);
       // Each bot's own chat notes the exchange, linking to the side chat.
-      a.deepEqual(activity(alpha.conversationId), ['Sent a message to Beta']);
+      // Alpha said something in between, so Beta's answer arriving gets a line of its own there.
+      a.deepEqual(activity(alpha.conversationId), ['Sent a message to Beta', 'Received a message from Beta']);
       a.deepEqual(activity(beta.conversationId), ['Received a message from Alpha']);
       for (const name of ['send_message', 'load_tools', 'ask_bot', 'bot_web_search', 'memory', 'search']) a.ok(seenTools.has(name), 'missing ' + name);
       // Never loaded, so never declared.

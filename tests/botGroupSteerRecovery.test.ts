@@ -36,6 +36,8 @@ async function run(name: string, body: string) {
         commands.push(cmd.type);
         if (cmd.type === 'clear_queue') return { steering: piQueue.splice(0), followUp: [] };
         if (cmd.type === 'steer') {
+          // The runner's own nudge to acknowledge the user isn't one of their requests: Pi queues it like any steer.
+          if (cmd.message === runner.ACK_NUDGE) return (piQueue.push(cmd.message), { disposition: 'queued' });
           steers.push({ message: cmd.message, images: (cmd.images ?? []).map(i => i.data) });
           return pi.steer(cmd);
         }

@@ -174,9 +174,11 @@ test.skipIf(!pi)("Pi declares a loaded tool on the next request, and keeps it af
         const body = await req.json();
         const tools = (body.tools ?? []).map((t) => t.function);
         const names = tools.map((t) => t.name);
-        const last = body.messages.at(-1);
+        // The runner's nudge to acknowledge the user can ride in with a tool's result when the machine is slow: the model carries on from the result.
+        const messages = body.messages.filter((m) => !(m.role === 'user' && JSON.stringify(m.content).includes("hasn't heard from you yet")));
+        const last = messages.at(-1);
         const text = JSON.stringify(last.content);
-        const user = JSON.stringify(body.messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
+        const user = JSON.stringify(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
         requests.push(names);
         let out;
         if (last.role !== 'tool') {

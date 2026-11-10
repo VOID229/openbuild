@@ -514,12 +514,73 @@ export interface BotExtension {
 /** What a bot replies when it has nothing to say. Never shown in a chat. */
 export const isSilent = (text: string) => text.trim().toLowerCase() === "[silent]";
 
+/** What a bot's background helper session may use: reading and searching, nothing that writes to a chat or changes the bots. */
+export const HELPER_TOOLS = ["bash", "read", "search", "bot_web_search"];
+
+/** The marker anywhere in a reply: "Nothing new. [silent]" is still a bot choosing to say nothing. */
+const SILENT_MARK = /\[\s*silent\s*\]/gi;
+export const saysSilent = (text: string) => text.search(SILENT_MARK) >= 0;
+
+/** A reply that is only the marker, give or take quotes and punctuation. */
+export const onlySilent = (text: string) => saysSilent(text) && !/[\p{L}\p{N}]/u.test(text.replace(SILENT_MARK, ""));
+
+/**
+ * A line that reports nothing: "Nothing new", "No updates.", "All quiet, nothing to report". Only
+ * short lines that are nothing else: one that goes on to say something isn't empty.
+ */
+export function emptyUpdate(text: string): boolean {
+  const said = text.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, " ").replace(/\s+/g, " ").trim();
+  if (!said || said.split(" ").length > 9) return !said;
+  const part = "(?:nothing (?:new|to report|to add|to share|to say|has changed|changed|of note)(?: here| yet| so far| right now| for now| from me| on my end)?|no (?:updates?|changes?|news)(?: here| yet| so far| right now| for now| from me| on my end)?|all (?:good|quiet|clear)(?: here| on my end)?|still nothing(?: new)?|nothing)";
+  return new RegExp(`^${part}(?: (?:and )?${part})*$`).test(said);
+}
+
+const STOP_LEAD = "(?:ok|okay|hey|no|nah|oh|wait|actually|sorry|please|pls|just|hmm)";
+const STOP_TAIL = "(?:please|pls|now|right now|for now|thanks|thank you|thx|already)";
+const STOP_CORE = [
+  "stop(?: stop)*(?: (?:it|that|this|everything|all (?:of )?(?:that|this)|working(?: on (?:it|that|this))?|what (?:you're|youre|you are) doing|doing (?:that|this)))?",
+  "cancel(?: (?:it|that|this|everything|all (?:of )?(?:that|this)|the (?:task|job|request)))?",
+  "abort(?: (?:it|that|this|everything))?",
+  "halt",
+  "never ?mind",
+  "nvm",
+  "forget (?:about )?(?:it|that|this)",
+  "drop (?:it|that)",
+  "scrap (?:it|that)",
+  "kill (?:it|that)",
+  "(?:that's|thats|that is) enough",
+  "enough",
+  "quit it",
+  "don't bother|dont bother",
+].join("|");
+// One stop or several running together ("never mind, stop", "stop, please stop"), and nothing more.
+const STOP_REQUEST = new RegExp(`^(?:${STOP_LEAD} )*(?:${STOP_CORE})(?: (?:(?:and|${STOP_LEAD}) )*(?:${STOP_CORE}))*(?: ${STOP_TAIL})*$`);
+
+/**
+ * The user telling a bot to stop what it's doing, however they put it: "stop", "cancel that", "never
+ * mind", "ok forget it please". The whole message has to be that and nothing else, so "stop the dev
+ * server", "never mind the tests, do the docs" and "don't stop" are ordinary messages for the bot to
+ * read. A leading or trailing @mention doesn't count as something else.
+ */
+export function isStopRequest(text: string): boolean {
+  const said = text
+    .toLowerCase()
+    .replace(/[’‘`]/g, "'")
+    .replace(/^(?:\s*@[^\s,:]+[,:]?)+/, " ")
+    .replace(/(?:\s+@[^\s,:]+)+\s*[.!]*\s*$/, " ")
+    .replace(/[^\p{L}\p{N}' ]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return said.length <= 60 && STOP_REQUEST.test(said);
+}
+
 /** A bot's plain reply as chat bubbles, one per paragraph. */
 export const replyBubbles = (text: string) =>
   text
     .split(/\n{2,}/)
-    .map((s) => s.trim())
-    .filter((s) => s && !isSilent(s))
+    // The marker closing a paragraph ("Done.[silent]", a reply and then silence run together) goes; the words stay.
+    .map((s) => s.replace(/(?:\s*\[\s*silent\s*\])+\s*$/i, "").trim())
+    .filter((s) => s && !onlySilent(s))
     .slice(0, 6);
 
 export const DEFAULT_SETTINGS: BotsSettings = { quietHours: { from: 22, to: 8 }, sections: [] };

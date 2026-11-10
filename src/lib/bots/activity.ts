@@ -40,6 +40,17 @@ export function showWorking(conversationId: string, status: Statuses, typing: st
     .map(([id]) => id);
 }
 
+/**
+ * The conversation's bots its stop button would stop: at work here or with this chat's message next
+ * in line, and in a bot's own chat, at work anywhere. The server stops the same ones (stopConversation).
+ */
+export function stoppable(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses): string[] {
+  return conversation.botIds.filter((id) => {
+    const st = status[id];
+    return st?.state === "working" && (conversation.kind === "direct" || st.conversationId === conversation.id || !!st.waiting?.includes(conversation.id));
+  });
+}
+
 /** Where a coding thread a bot started is: replying, blocked on a question for the user, or done. */
 export type ThreadActivity = "working" | "waiting" | "idle";
 

@@ -1,11 +1,11 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, TextSelect, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, holding, showWorking, workingHere } from "../../lib/bots/activity";
+import { elsewhere, holding, showWorking, stoppable, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -1795,6 +1795,8 @@ const unsent = new Map<string, (Unsent & { id: string })[]>();
 
 function Composer({ conversation, replyTo, onReply }: { conversation: Conversation; replyTo?: string; onReply: (id?: string) => void }) {
   const bots = useBots((s) => s.bots);
+  // With nothing typed and a bot at work, the send button is the stop button.
+  const canStop = useBots((s) => stoppable(conversation, s.status).length > 0);
   // Unsent text is the workspace's, like the conversation it's for.
   const [workspace] = useState(() => useBots.getState().workspace ?? "");
   const local = isLocalWorkspace(workspace);
@@ -2251,16 +2253,22 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           />
           </div>
           <DictationButton dictation={dictation} className="icon-btn bots-composer-btn bots-mic" size={18} />
-          <button
-            type="submit"
-            className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")}
-            aria-label="Send"
-            disabled={!text.trim() && !images.length}
-            // Keep focus (and the keyboard) in the field, ready for the next message.
-            onMouseDown={(e) => e.preventDefault()}
-          >
-            <ArrowUp size={18} strokeWidth={2.4} />
-          </button>
+          {canStop && !text.trim() && !images.length ? (
+            <button type="button" className="bots-send bots-send-on bots-stop" aria-label="Stop" title="Stop" onMouseDown={(e) => e.preventDefault()} onClick={() => useBots.getState().stopWork(conversation.id)}>
+              <Square size={13} strokeWidth={0} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className={cx("bots-send", (!!text.trim() || images.length > 0) && "bots-send-on")}
+              aria-label="Send"
+              disabled={!text.trim() && !images.length}
+              // Keep focus (and the keyboard) in the field, ready for the next message.
+              onMouseDown={(e) => e.preventDefault()}
+            >
+              <ArrowUp size={18} strokeWidth={2.4} />
+            </button>
+          )}
         </div>
       </form>
     </div>

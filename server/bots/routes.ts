@@ -355,6 +355,9 @@ export function botRoutes(api: Api) {
     "/api/bots/conversations/:id/read": {
       POST: api((req: Bun.BunRequest<"/api/bots/conversations/:id/read">) => markRead(req.params.id)),
     },
+    "/api/bots/conversations/:id/stop": {
+      POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/stop">) => stopWork(req.params.id, await readJson(req))),
+    },
     "/api/bots/conversations/:id/messages": {
       GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => olderMessages(req, req.params.id)),
       POST: api(async (req: Bun.BunRequest<"/api/bots/conversations/:id/messages">) => postMine(req.params.id, await readJson(req))),
@@ -423,6 +426,16 @@ export function botsStream(req: Request, server: Bun.Server<unknown>, track?: (c
 export function markRead(conversationId: string): Response {
   svc.markRead(conversationId);
   return json({ ok: true });
+}
+
+/** The chat's stop button: its bots stop what they're doing, background jobs included. `botId` names one of a group's. */
+export function stopWork(conversationId: string, body: unknown): Response {
+  try {
+    const botId = (body as { botId?: unknown } | null)?.botId;
+    return json({ stopped: svc.stopConversation(conversationId, typeof botId === "string" && botId ? botId : undefined) });
+  } catch (err) {
+    return fail(err);
+  }
 }
 
 export function olderMessages(req: Request, conversationId: string): Response {
