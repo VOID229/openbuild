@@ -16,7 +16,7 @@
 // the pairing credentials only, never a current host.
 import { SERVER_HEADER } from "../computers/api";
 import * as devices from "../devices";
-import { botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse } from "./routes";
+import { botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse, stopWork } from "./routes";
 import * as svc from "./service";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
@@ -42,6 +42,7 @@ const ALLOWED = [
   route("PATCH", "/api/bots/conversations/:id/messages/:id", (_, [id, message], body) => patchMine(id!, message!, body)),
   route("DELETE", "/api/bots/conversations/:id/messages/:id", (_, [id, message]) => deleteMine(id!, message!)),
   route("POST", "/api/bots/conversations/:id/read", (_, [id]) => markRead(id!)),
+  route("POST", "/api/bots/conversations/:id/stop", (_, [id], body) => stopWork(id!, body)),
   route("GET", "/api/bots/:id/file", (req, [id]) => botFile(req, id!)),
 ];
 

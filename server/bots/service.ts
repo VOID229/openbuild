@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -48,6 +48,10 @@ type Hooks = {
   unseen?: (botId: string, conversationId: string) => string[];
   /** The bot's turn is answering the user in this conversation: a request of theirs, not a bot's message or a note. */
   userWoke?: (botId: string, conversationId: string) => boolean;
+  /** Stop what the bot is doing: its turn, its background jobs, and what waits for it in this conversation. False when there was nothing to stop. */
+  halt?: (botId: string, conversationId?: string) => boolean;
+  /** The bot's turn in this conversation is a wake nobody is waiting on: a note, a check-in or a reaction, with no message of the user's in it. */
+  background?: (botId: string, conversationId: string) => boolean;
 };
 /** What the friends module (server/friends/) hears about shared chats, so this file never imports it either. */
 type FriendHooks = {
@@ -1118,6 +1122,13 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
       if (!targets.length) targets = groupRecipients(c, message);
       db.setGroupFollow(conversationId, { ids: targets, at: message.at });
     }
+    // "Stop", however it's put: whoever it reaches that has something going stops, and isn't woken to
+    // answer it. One with nothing going reads it as any other message.
+    if (message.author === "me" && !message.poll && !message.images?.length && isStopRequest(message.text)) {
+      const stopped = haltBots(conversationId, targets);
+      if (stopped.length) patchMessage(conversationId, message.id, { seenBy: [...new Set([...(message.seenBy ?? []), ...stopped])] });
+      targets = targets.filter((id) => !stopped.includes(id));
+    }
     // Several bots asked at once: one answers, and the others add only what's theirs.
     const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets) : undefined;
     for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
@@ -1143,6 +1154,48 @@ function noteSideMessage(side: db.StoredConversation, from: string) {
     const text = botId === from ? `Sent a message to ${name(other)}` : `Received a message from ${name(other)}`;
     postMessage(own, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: "", event: { kind: "message", text, bot: other, conversationId: side.id } });
   }
+}
+
+/** Stops each of these bots that has something going, and says so in the chat. Returns the ones it stopped. */
+function haltBots(conversationId: string, botIds: string[]): string[] {
+  const stopped = botIds.filter((id) => db.getBot(id) && hooks.halt?.(id, conversationId));
+  for (const id of stopped) {
+    setTyping(conversationId, id, false);
+    setDraft(undefined, { conversationId, botId: id });
+    postMessage(conversationId, { id: crypto.randomUUID(), author: id, at: Date.now(), text: "", event: { kind: "changed", text: `${mentionName(db.getBot(id)!.name)} stopped` } });
+  }
+  return stopped;
+}
+
+/**
+ * The chat's stop button: stops the conversation's bots that are at work, whatever they're working on,
+ * and their background jobs. In a group, only the ones working or waited on there, or the one named.
+ */
+export function stopConversation(conversationId: string, botId?: string): string[] {
+  const c = db.getConversation(conversationId);
+  if (!c) throw new BotsError("No such conversation.", 404);
+  if (botId && !c.botIds.includes(botId)) throw new BotsError("That bot isn't in this conversation.");
+  const here = (id: string) => {
+    const now = getStatus(id);
+    return c.kind === "direct" || now?.conversationId === conversationId || !!now?.waiting?.includes(conversationId);
+  };
+  return haltBots(conversationId, botId ? [botId] : c.botIds.filter(here));
+}
+
+/** Whether the bot's turn in a conversation is one nobody is waiting on (see Hooks.background). */
+export function backgroundTurn(botId: string, conversationId: string): boolean {
+  return hooks.background?.(botId, conversationId) ?? false;
+}
+
+/** Wake a bot from outside a message: a background job's result, say. */
+export function wakeBot(botId: string, wake: Wake) {
+  if (db.getBot(botId)) hooks.wake(botId, wake);
+}
+
+/** The user's request a bot is answering in a conversation right now, for what it starts there to report back to. */
+export function requestIn(botId: string, conversationId: string): string[] | undefined {
+  const ids = hooks.pendingAssignments?.(botId).find((a) => a.conversationId === conversationId)?.messageIds;
+  return ids?.length ? ids : undefined;
 }
 
 /** What arrived in a conversation since the bot's turn there showed it (see Hooks.unseen). */
@@ -1207,7 +1260,7 @@ export function openHuddle(by: string, from: string, botIds: string[], topic: st
   if (!others.length || others.length > 4) throw new BotsError("Pick one to four other bots.");
   for (const id of others) if (!db.getBot(id)) throw new BotsError("No such bot.");
   if (db.listConversations().some((c) => c.huddle && !c.huddle.closedAt && c.botIds.includes(by))) throw new BotsError("You're already in an open side chat. Finish that one first.");
-  const request = hooks.pendingAssignments?.(by).find((a) => a.conversationId === from)?.messageIds;
+  const request = requestIn(by, from);
   const members = [by, ...others];
   const side = createConversation({
     kind: "side",
@@ -1260,17 +1313,20 @@ function closeQuietHuddles(now: number, busy: (botId: string) => boolean) {
   }
 }
 
-/** Block until another bot writes in this conversation, or the time runs out. */
-export function waitForReply(botId: string, conversationId: string, afterSeq: number, timeoutMs: number): Promise<BotMessage> {
+/** Wait until another bot writes in this conversation, the time runs out, or `signal` calls it off. */
+export function waitForReply(botId: string, conversationId: string, afterSeq: number, timeoutMs: number, signal?: AbortSignal): Promise<BotMessage> {
   return new Promise((resolve, reject) => {
     const w: Waiter = { botId, conversationId, afterSeq, resolve, reject };
     waiters.push(w);
-    const timer = setTimeout(() => {
+    const give = (why: string) => {
       const i = waiters.indexOf(w);
       if (i >= 0) waiters.splice(i, 1);
-      reject(new BotsError("No reply in time."));
-    }, timeoutMs);
+      clearTimeout(timer);
+      reject(new BotsError(why));
+    };
+    const timer = setTimeout(() => give("No reply in time."), timeoutMs);
     timer.unref?.();
+    signal?.addEventListener("abort", () => give("Stopped."), { once: true });
     const done = () => clearTimeout(timer);
     const orig = w.resolve;
     w.resolve = (m) => (done(), orig(m));

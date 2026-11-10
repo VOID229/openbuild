@@ -5,7 +5,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import type { BotExtension } from "../../shared/bots";
+import { HELPER_TOOLS, type BotExtension } from "../../shared/bots";
 import { FRIEND_TOOLS } from "../../shared/friends";
 import { agentDir } from "../pi/install";
 import * as resources from "../pi/resources";
@@ -15,7 +15,7 @@ import { BRIDGE_PACKAGE, bridgeExtension } from "./claude";
 import * as svc from "./service";
 
 const OWN = join(import.meta.dir, "extension.ts");
-const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "memory", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "side_chat", "manage_bot", "openbuild", "plugins", "load_tools"].join(",");
+const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "memory", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "background", "side_chat", "manage_bot", "openbuild", "plugins", "load_tools"].join(",");
 const PACKAGE = "package:";
 
 const isLocal = (source: string) => !/^[a-z+]+:/i.test(source);
@@ -83,12 +83,26 @@ function selected(): string[] {
 export const BOT_SYSTEM_PROMPT =
   "You are a bot in OpenBots: you talk with the user, and sometimes their other bots and friends, through your tools. The sections below say who you are and how to act. If you have bash, use it for file operations like ls, rg and find.";
 
-const BASE = [
+const base = (systemPrompt: string) => [
   "--no-extensions", "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files", "--no-mcp", "--no-builtin-tools",
   // Context-file isolation does not cover Pi's SYSTEM.md / APPEND_SYSTEM.md discovery: any CLI
   // value suppresses each, so the bot's own preamble goes in and the addendum stays empty.
-  "--system-prompt", BOT_SYSTEM_PROMPT, "--append-system-prompt", "",
+  "--system-prompt", systemPrompt, "--append-system-prompt", "",
 ];
+const BASE = base(BOT_SYSTEM_PROMPT);
+
+/** What a helper session is told it is: the prompt it's given says the rest. */
+export const HELPER_SYSTEM_PROMPT =
+  "You are a background helper session of a bot in OpenBots. Do the one thing your prompt asks, quickly, and answer in plain text: that answer is all that leaves this session. You can't message anyone.";
+
+/**
+ * A helper session's Pi (helpers.ts). The user's extensions still load, since the bot's model can
+ * come from one. With `tools` it gets HELPER_TOOLS through the bots extension; without, no tools at all.
+ */
+export function helperFlags(tools: boolean): string[] {
+  const extra = selected();
+  return [...base(HELPER_SYSTEM_PROMPT), ...(tools ? ["--tools", HELPER_TOOLS.join(","), "-e", OWN] : ["--no-tools"]), ...bridge(extra), ...extra.flatMap((target) => ["-e", target])];
+}
 
 export function piFlags(): string[] {
   const extra = selected();

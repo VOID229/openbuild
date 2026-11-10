@@ -5,7 +5,7 @@ import { untrustedData } from "./transcriptData";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { BOT_EFFORTS, conversationTitle, fallbackMode, firstName, isSilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -18,6 +18,7 @@ import * as svc from "./service";
 import * as threads from "./threads";
 import * as plugins from "./plugins";
 import { FRIEND_TOOLS } from "../../shared/friends";
+import { JobCancelled, runHelper, startJob } from "./helpers";
 import { allowsTools, friend as storedFriend } from "../friends/store";
 
 /** Whose Pi a token is: the bot, and which of its Pis (runner.ts laneOf): "main", or "friend:<id>" for a chat shared with that friend. */
@@ -77,7 +78,7 @@ export function listen() {
       try {
         const method = String(body.method ?? "");
         const params = body.params ?? {};
-        const result = lane === "main" ? await handle(botId, method, params) : await handleFriend(botId, lane, method, params);
+        const result = lane === "main" ? await handle(botId, method, params) : lane === "helper" ? await handleHelper(botId, method, params) : await handleFriend(botId, lane, method, params);
         return Response.json({ result });
       } catch (err) {
         const status = err instanceof svc.BotsError ? err.status : 500;
@@ -125,6 +126,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return routine(botId, p);
     case "ask_bot":
       return askBot(botId, p);
+    case "background":
+      return background(botId, p);
     case "side_chat":
       return sideChat(botId, p);
     case "manage_bot":
@@ -148,6 +151,19 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
     default:
       throw new svc.BotsError(`Unknown method ${method}`);
   }
+}
+
+/**
+ * A helper session of the bot's (helpers.ts): it looks things up and answers its one prompt, so it
+ * gets the tools that read and nothing that writes to a chat, remembers, or reaches other bots.
+ */
+export async function handleHelper(botId: string, method: string, p: Record<string, unknown>): Promise<unknown> {
+  if (method === "context") {
+    const bot = requireBot(botId);
+    return { sections: { openbots_helper: `You're working for ${mentionName(bot.name)}, one of ${svc.getSettings().user?.name || "the user"}'s bots${bot.role ? ` (${bot.role})` : ""}. bash and read run on its own computer.` } };
+  }
+  if (!HELPER_TOOLS.includes(method)) throw new svc.BotsError("A background helper can only look things up.", 403);
+  return handle(botId, method, p);
 }
 
 /**
@@ -352,7 +368,10 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   const conversationId = conversationFor(botId, p.conversation);
   const text = String(p.text ?? "").slice(0, 8000);
   if (!text.trim() && !p.attach_screenshot && !asStrings(p.images).length) throw new svc.BotsError("A message needs text.");
-  if (isSilent(text) && !p.attach_screenshot && !asStrings(p.images).length) return { note: "Nothing was sent. [silent] is only for your final reply, never for send_message." };
+  const bare = !p.attach_screenshot && !asStrings(p.images).length;
+  if (onlySilent(text) && bare) return { note: "Nothing was sent. [silent] is only for your final reply, never for send_message." };
+  // A wake nobody is waiting on (a thread finished, a check-in) with nothing to tell isn't a message.
+  if (bare && svc.backgroundTurn(botId, conversationId) && (emptyUpdate(text) || repeatsOwn(botId, conversationId, text))) return { sent: false, note: QUIET };
   // Someone wrote since this turn began (another bot answering the same thing, say): the bot sees it
   // before its message lands. Nothing is dropped: it sends again, changed or not, or decides not to.
   const fresh = svc.unseenSince(botId, conversationId);
@@ -369,6 +388,17 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
     return deliver(botId, conversationId, text, images, p.reply_to);
   }
   return deliver(botId, conversationId, text, images, p.reply_to);
+}
+
+/** What send_message answers on a wake with nothing new in it. */
+export const QUIET = "Not sent: nobody asked, and this says nothing new. End with [silent]. Write only when there's news the user would want.";
+
+const plain = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/** The bot's last message in a chat said just this, within the day. */
+function repeatsOwn(botId: string, conversationId: string, text: string): boolean {
+  const last = db.messages(conversationId, 12).findLast((r) => r.message.author === botId && !r.message.event);
+  return !!last && Date.now() - last.message.at < 24 * 60 * 60 * 1000 && !!plain(text) && plain(last.message.text) === plain(text);
 }
 
 export const HELD = "Not sent yet: these arrived since you started. If your message still adds something, send it again, as it is or changed. If it's already covered, react or end with [silent] instead. Your own assigned work and your own findings still get sent, minus anything already said.";
@@ -655,7 +685,16 @@ function stayInHuddle(botId: string, target?: string) {
   if (huddle && target !== here) throw new svc.BotsError(`You're in a side chat: say it there. ${huddle.by === botId ? "You report" : `${mentionName(db.getBot(huddle.by)?.name ?? "Whoever opened it")} reports`} back once it closes.`);
 }
 
-async function askBot(botId: string, p: Record<string, unknown>) {
+/** How long a question to another bot is watched for its answer before the asker is told there was none. */
+export const ASK_WAIT_MS = 10 * 60_000;
+
+/**
+ * Ask another bot, without waiting: the question goes into their side conversation and the asker's
+ * turn carries on or ends. Their reply wakes the asker where it asked from, as a background job that
+ * waits on it. Past the bot's cap on those, the reply still arrives, as any message in the side
+ * conversation does.
+ */
+export async function askBot(botId: string, p: Record<string, unknown>) {
   stayInHuddle(botId);
   const otherId = resolveBot(String(p.bot ?? ""));
   if (otherId === botId) throw new svc.BotsError("Ask someone else.");
@@ -666,11 +705,63 @@ async function askBot(botId: string, p: Record<string, unknown>) {
     const created = svc.createConversation({ kind: "side", botIds: [botId, otherId] });
     side = db.getConversation(created.id)!;
   }
-  const after = db.latestSeq(side.id);
-  const message: BotMessage = { id: crypto.randomUUID(), author: botId, at: Date.now(), text };
-  svc.postMessage(side.id, message);
-  const reply = await svc.waitForReply(botId, side.id, after, 120_000);
-  return { conversation: side.id.slice(0, 8), reply: reply.text.slice(0, 4000) };
+  const sideId = side.id;
+  const after = db.latestSeq(sideId);
+  const from = focus.get(botId);
+  const origin = from && from !== sideId && db.getConversation(from)?.botIds.includes(botId) ? from : undefined;
+  const request = origin ? svc.requestIn(botId, origin) : undefined;
+  const other = mentionName(db.getBot(otherId)?.name ?? "The other bot");
+  // Watching for the answer starts before the question lands, so a quick reply isn't missed.
+  const watched = origin
+    ? startJob(botId, "ask", async (signal) => {
+        const wake = (said: string) => svc.wakeBot(botId, { kind: "note", conversationId: origin, ...(request ? { messageIds: request } : {}), text: said });
+        try {
+          const reply = await svc.waitForReply(botId, sideId, after, ASK_WAIT_MS, signal);
+          if (signal.aborted) return;
+          wake(`${other} answered what you asked (“${text.slice(0, 200)}”) in side conversation ${sideId.slice(0, 8)}:\n${reply.text.slice(0, 4000)}\nCarry on here with it. If nobody here needs to hear anything, stay [silent].`);
+        } catch (err) {
+          if (signal.aborted) throw new JobCancelled();
+          wake(`${other} hasn't answered what you asked (“${text.slice(0, 200)}”) after ${Math.round(ASK_WAIT_MS / 60_000)} minutes. Carry on without it, and tell the user if they're waiting on it; otherwise stay [silent].`);
+        }
+      }, { queue: false })
+    : undefined;
+  svc.postMessage(sideId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text });
+  return {
+    conversation: sideId.slice(0, 8),
+    note: watched?.state === "started"
+      ? `Asked. Don't wait for ${other}: carry on, or end this turn with a short line to the user if they should know. Their reply wakes you here.`
+      : `Asked. Don't wait for ${other}: carry on or end this turn. Their reply wakes you in the side conversation.`,
+  };
+}
+
+/** How long a handed-off check may run. */
+export const LOOKUP_MS = 5 * 60_000;
+
+/**
+ * Hand a check or lookup to a helper session (the bot's own model, low reasoning) and return at once.
+ * Its answer wakes the bot in the conversation it asked from. Over the cap it waits its turn; with the
+ * line full too it's refused, and the bot does it itself.
+ */
+export function background(botId: string, p: Record<string, unknown>) {
+  const task = String(p.task ?? "").trim().slice(0, 4000);
+  if (!task) throw new svc.BotsError("Say what to check.");
+  const origin = focus.get(botId) ?? svc.directId(botId);
+  if (!origin) throw new svc.BotsError("Say which conversation.");
+  const request = svc.requestIn(botId, origin);
+  const started = startJob(botId, "lookup", async (signal) => {
+    const wake = (said: string) => svc.wakeBot(botId, { kind: "note", conversationId: origin, ...(request ? { messageIds: request } : {}), text: said });
+    const about = `the background check you started (“${task.slice(0, 200)}”)`;
+    let found: string;
+    try {
+      found = await runHelper(botId, { tools: true, signal, timeoutMs: LOOKUP_MS, prompt: `${task}\n\nAnswer with what you found, briefly and exactly: facts, numbers, paths, links. If you couldn't find it out, say so and why.` });
+    } catch (err) {
+      if (err instanceof JobCancelled || signal.aborted) throw new JobCancelled();
+      return wake(`Your helper couldn't finish ${about}: ${err instanceof Error ? err.message.slice(0, 300) : "it failed"}. Do it yourself if it still matters; otherwise stay [silent].`);
+    }
+    wake(`Your helper finished ${about}:\n${found.slice(0, 6000) || "(it came back with nothing)"}\nUse it here. If the user doesn't need to hear anything new, stay [silent].`);
+  });
+  if (started.state === "skipped") throw new svc.BotsError(`Not started: ${started.reason}. Do it yourself, or try again once one finishes.`);
+  return { started: started.state === "started", note: `${started.state === "started" ? "Started" : "Queued behind your other background jobs"}. Don't wait: carry on or end this turn, with a short line to the user if they should know. The result wakes you here.` };
 }
 
 /** A temporary side chat with several bots: opened from the chat that needs the answer, which its opener reports back to. */

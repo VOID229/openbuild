@@ -7,9 +7,10 @@ import { BOT_HTML_WIDTH, HTML_THEME_GUIDE, htmlLayoutGuide } from "../../shared/
 
 type Params = Record<string, unknown>;
 
-function call(method: string, params: Params = {}): Promise<unknown> {
+function call(method: string, params: Params = {}, signal?: AbortSignal): Promise<unknown> {
   const body = JSON.stringify({ method, params });
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new Error("Stopped."));
     const req = httpRequest(
       {
         socketPath: process.env.OPENBOTS_SOCKET,
@@ -38,6 +39,8 @@ function call(method: string, params: Params = {}): Promise<unknown> {
       },
     );
     req.on("error", reject);
+    // The turn was stopped: Pi shouldn't wait out a call nobody wants the answer to.
+    signal?.addEventListener?.("abort", () => (req.destroy(), reject(new Error("Stopped."))), { once: true });
     req.end(body);
   });
 }
@@ -76,7 +79,8 @@ export const CATALOG_BRIEF: Record<string, string> = {
   apps: "the user's connected apps (GitHub, Notion…): their tools and skills",
   use_app: "call a connected app's tool",
   routine: "your schedule: recurring and one-off routines",
-  ask_bot: "ask another bot and wait for the reply",
+  ask_bot: "ask another bot; their reply wakes you later",
+  background: "hand a slow check or lookup to a helper; the result wakes you",
   side_chat: "talk something through with other bots",
   openbuild: "run coding agents in the user's OpenBuild",
   plugins: "OpenBuild plugins",
@@ -119,7 +123,10 @@ function own(params: Params | undefined): Params {
   return rest;
 }
 
-function tool(name: string, label: string, description: string, parameters: object, run: (params: Params) => Promise<unknown>) {
+/** Pi hands a tool the turn's abort signal as its third argument. */
+const abortSignal = (value: unknown): AbortSignal | undefined => (value && typeof (value as AbortSignal).addEventListener === "function" && "aborted" in (value as object) ? (value as AbortSignal) : undefined);
+
+function tool(name: string, label: string, description: string, parameters: object, run: (params: Params, signal?: AbortSignal) => Promise<unknown>) {
   return {
     name,
     label,
@@ -127,9 +134,9 @@ function tool(name: string, label: string, description: string, parameters: obje
     parameters: withStatus(name, parameters),
     executionMode: "sequential" as const,
     exposure: "model-only" as const,
-    async execute(_id: string, params: Params) {
+    async execute(_id: string, params: Params, signal?: unknown) {
       try {
-        return ok(await run(own(params)));
+        return ok(await run(own(params), abortSignal(signal)));
       } catch (err) {
         return fail(err);
       }
@@ -174,7 +181,8 @@ export default function openbots(pi: any) {
 
   // `--tools` activates every tool it names, so a catalog tool the session hasn't loaded is put back out.
   pi.on("session_start", (_event: any, ctx: any) => {
-    if (!dynamic()) return;
+    // A helper session has only the few tools it was started with, and nothing to load more with.
+    if (!dynamic() || process.env.OPENBOTS_HELPER) return;
     const entries = typeof ctx?.sessionManager?.getBranch === "function" ? ctx.sessionManager.getBranch() : [];
     const kept = loadedTools(entries, new Set(catalog));
     if (!kept) return;
@@ -207,13 +215,13 @@ export default function openbots(pi: any) {
     }
   });
 
-  register(tool("bash", "Terminal", "Run a shell command on your computer and wait for it to finish. For something long-running, use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p) => call("bash", p)));
+  register(tool("bash", "Terminal", "Run a shell command on your computer and wait for it to finish. For something long-running, use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p, signal) => call("bash", p, signal)));
 
-  register(tool("read", "Read file", "Read a text file on your computer.", { type: "object", properties: { machine, path: str("File path."), offset: { type: "number" }, limit: { type: "number" } }, required: ["path"] }, (p) => call("read", p)));
+  register(tool("read", "Read file", "Read a text file on your computer.", { type: "object", properties: { machine, path: str("File path."), offset: { type: "number" }, limit: { type: "number" } }, required: ["path"] }, (p, signal) => call("read", p, signal)));
 
-  register(tool("write", "Write file", "Write a text file on your computer, creating it if needed.", { type: "object", properties: { machine, path: str("File path."), content: str("The whole file.") }, required: ["path", "content"] }, (p) => call("write", p)));
+  register(tool("write", "Write file", "Write a text file on your computer, creating it if needed.", { type: "object", properties: { machine, path: str("File path."), content: str("The whole file.") }, required: ["path", "content"] }, (p, signal) => call("write", p, signal)));
 
-  register(tool("edit", "Edit file", "Replace one exact occurrence of text in a file on your computer.", { type: "object", properties: { machine, path: str("File path."), old: str("The exact text to replace, including enough around it to be unique."), new: str("The replacement.") }, required: ["path", "old", "new"] }, (p) => call("edit", p)));
+  register(tool("edit", "Edit file", "Replace one exact occurrence of text in a file on your computer.", { type: "object", properties: { machine, path: str("File path."), old: str("The exact text to replace, including enough around it to be unique."), new: str("The replacement.") }, required: ["path", "old", "new"] }, (p, signal) => call("edit", p, signal)));
 
   register(
     tool(
@@ -237,13 +245,13 @@ export default function openbots(pi: any) {
         },
         required: ["action"],
       },
-      (p) => call("browser", p.action === "back" ? { ...p, action: "history", direction: "back" } : p),
+      (p, signal) => call("browser", p.action === "back" ? { ...p, action: "history", direction: "back" } : p, signal),
     ),
   );
 
-  register(tool("process", "Process", "Start, read, stop or list long-running programs on your computer. action is start (command, name), read (id, input), stop (id) or list. You're told when one you started on this server exits. Processes belong to the machine they run on.", { type: "object", properties: { machine, action: str("start, read, stop or list."), command: str("For start."), name: str("A short name."), id: str("The process id."), input: str("Text to write to it.") }, required: ["action"] }, (p) => call("process", p)));
+  register(tool("process", "Process", "Start, read, stop or list long-running programs on your computer. action is start (command, name), read (id, input), stop (id) or list. You're told when one you started on this server exits. Processes belong to the machine they run on.", { type: "object", properties: { machine, action: str("start, read, stop or list."), command: str("For start."), name: str("A short name."), id: str("The process id."), input: str("Text to write to it.") }, required: ["action"] }, (p, signal) => call("process", p, signal)));
 
-  register(tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from.", { type: "object", properties: { text: str("The message."), machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, (p) => call("send_message", p)));
+  register(tool("send_message", "Send", "Send a message. One call is one bubble; call it again for another. conversation defaults to the one you're in (pass the short id to write somewhere else). reply_to is a message's short id. images are file paths on your computer. attach_screenshot sends the current browser page. machine says which computer both come from.", { type: "object", properties: { text: str("The message."), machine, conversation: str("Short conversation id."), reply_to: str("Short message id."), images: { type: "array", items: { type: "string" } }, attach_screenshot: { type: "boolean" } }, required: ["text"] }, (p, signal) => call("send_message", p, signal)));
 
   register(
     tool(
@@ -262,7 +270,7 @@ export default function openbots(pi: any) {
         },
         required: ["html", "title"],
       },
-      (p) => call("html_render", p),
+      (p, signal) => call("html_render", p, signal),
     ),
   );
 
@@ -284,21 +292,21 @@ export default function openbots(pi: any) {
         },
         required: ["action"],
       },
-      (p) => call("todo", p),
+      (p, signal) => call("todo", p, signal),
     ),
   );
 
-  register(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p) => call("react", p)));
+  register(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p, signal) => call("react", p, signal)));
 
-  register(tool("question", "Ask", "Ask the user to pick. They can also type their own answer. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices. Don't add Other." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), conversation: str("Short conversation id.") }, required: ["title"] }, (p) => call("question", p)));
+  register(tool("question", "Ask", "Ask the user to pick. They can also type their own answer. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices. Don't add Other." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), conversation: str("Short conversation id.") }, required: ["title"] }, (p, signal) => call("question", p, signal)));
 
-  register(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p) => call("poll", p)));
+  register(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p, signal) => call("poll", p, signal)));
 
-  register(tool("vote_poll", "Vote", "Vote in a poll, by the letters of your choices. Voting again replaces your vote, even once the poll has closed.", { type: "object", properties: { message: str("The poll's short message id."), choices: { type: "array", items: { type: "string" }, description: "Option letters, e.g. [\"B\"]. Only one unless the poll takes several." }, conversation: str("Short conversation id.") }, required: ["message", "choices"] }, (p) => call("vote_poll", p)));
+  register(tool("vote_poll", "Vote", "Vote in a poll, by the letters of your choices. Voting again replaces your vote, even once the poll has closed.", { type: "object", properties: { message: str("The poll's short message id."), choices: { type: "array", items: { type: "string" }, description: "Option letters, e.g. [\"B\"]. Only one unless the poll takes several." }, conversation: str("Short conversation id.") }, required: ["message", "choices"] }, (p, signal) => call("vote_poll", p, signal)));
 
-  register(tool("memory", "Memory", "Your private memory, kept across every conversation. write saves one fact as one self-contained sentence, dated for you: kind profile for a lasting fact about the user or how to work with them (always in your prompt, capped), journal (default) for what happened or was decided (search finds older ones). A fact you already have isn't copied. Newer wins: when a fact changes, pass replaces (the old one's id or exact text) rather than keeping both. forget deletes one, by id or exact text.", { type: "object", properties: { action: str("write (default) or forget."), text: str("write: one fact, in a sentence. forget: the memory's exact text."), kind: str("write: profile or journal. A new fact defaults to journal; one you already have keeps its kind unless you pass this."), replaces: str("write: the id or exact text of the outdated fact this takes the place of."), id: str("forget: the memory's id.") }, required: ["action"] }, (p) => call("memory", p)));
+  register(tool("memory", "Memory", "Your private memory, kept across every conversation. write saves one fact as one self-contained sentence, dated for you: kind profile for a lasting fact about the user or how to work with them (always in your prompt, capped), journal (default) for what happened or was decided (search finds older ones). A fact you already have isn't copied. Newer wins: when a fact changes, pass replaces (the old one's id or exact text) rather than keeping both. forget deletes one, by id or exact text.", { type: "object", properties: { action: str("write (default) or forget."), text: str("write: one fact, in a sentence. forget: the memory's exact text."), kind: str("write: profile or journal. A new fact defaults to journal; one you already have keeps its kind unless you pass this."), replaces: str("write: the id or exact text of the outdated fact this takes the place of."), id: str("forget: the memory's id.") }, required: ["action"] }, (p, signal) => call("memory", p, signal)));
 
-  register(tool("search", "Search", "Recall: search your memory (profile and journal, with each fact's kind and date), or everything ever said in your conversations. what is memory (default) or messages. An empty memory query lists your newest.", { type: "object", properties: { query: str("Words to look for, or a short id."), what: str("memory or messages.") }, required: ["query"] }, (p) => call("search", p)));
+  register(tool("search", "Search", "Recall: search your memory (profile and journal, with each fact's kind and date), or everything ever said in your conversations. what is memory (default) or messages. An empty memory query lists your newest.", { type: "object", properties: { query: str("Words to look for, or a short id."), what: str("memory or messages.") }, required: ["query"] }, (p, signal) => call("search", p, signal)));
 
   register(
     tool(
@@ -321,7 +329,7 @@ export default function openbots(pi: any) {
         },
         required: ["query"],
       },
-      (p) => call("bot_web_search", p),
+      (p, signal) => call("bot_web_search", p, signal),
     ),
   );
 
@@ -343,7 +351,7 @@ export default function openbots(pi: any) {
         },
         required: ["action"],
       },
-      (p) => call("apps", p),
+      (p, signal) => call("apps", p, signal),
     ),
   );
 
@@ -354,9 +362,9 @@ export default function openbots(pi: any) {
     parameters: withStatus("use_app", { type: "object", properties: { app: str("The app's id, e.g. github."), tool: str("The tool's name."), arguments: { type: "object", description: "The tool's arguments." } }, required: ["app", "tool"] }),
     executionMode: "sequential" as const,
     exposure: "model-only" as const,
-    async execute(_id: string, params: Params) {
+    async execute(_id: string, params: Params, signal?: unknown) {
       try {
-        const out = (await call("use_app", own(params))) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
+        const out = (await call("use_app", own(params), abortSignal(signal))) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
         const images = (out.images ?? []).map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
         return { content: [...(out.text || !images.length ? text(out.text || "(no output)") : []), ...images], details: { app: params?.app, tool: params?.tool }, ...(out.isError ? { isError: true } : {}) };
       } catch (err) {
@@ -365,11 +373,13 @@ export default function openbots(pi: any) {
     },
   });
 
-  register(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p) => call("routine", p)));
+  register(tool("routine", "Routine", "Your schedule. You can have any number of routines active at once. action is add (title, schedule like “Weekdays at 8:00” or “in 2 hours”, task), list, remove, pause or resume. follow_up true means it runs once then goes. It reports to the conversation you're in unless you name another.", { type: "object", properties: { action: str("add, list, remove, pause or resume."), title: str("What it's called."), schedule: str("When it runs."), task: str("What to do when it runs."), follow_up: { type: "boolean" }, conversation: str("Short conversation id to report to."), id: str("For remove, pause, resume.") }, required: ["action"] }, (p, signal) => call("routine", p, signal)));
 
-  register(tool("ask_bot", "Ask bot", "Ask another bot and wait for their reply. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p) => call("ask_bot", p)));
+  register(tool("ask_bot", "Ask bot", "Ask another bot. It doesn't wait: carry on or end your turn, and their reply wakes you where you are now. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p, signal) => call("ask_bot", p, signal)));
 
-  register(tool("side_chat", "Side chat", "Talk something through with other bots away from the main chat. action start (bots: one to four names, topic: the question, written to stand on its own, report_to: the short id of the chat to report back to, the one you're in if omitted) opens a temporary side chat the user can read but not write in. It closes after a few messages each, when it goes quiet, or with action close (conversation). Whoever opened it is asked to report back once it closes. For one quick question to one bot, use ask_bot.", { type: "object", properties: { action: str("start or close."), bots: { type: "array", items: { type: "string" }, description: "start: who to talk with, by name or short id." }, topic: str("start: what to work out."), report_to: str("start: short conversation id."), conversation: str("close: the side chat's short id. The one you're in if omitted.") }, required: ["action"] }, (p) => call("side_chat", p)));
+  register(tool("background", "Background check", "Hand a slow check or lookup to a background helper and carry on: it can run commands, read files and search, but can't message anyone or change anything of yours. Its result wakes you in this conversation. task says exactly what to find out, written to stand on its own.", { type: "object", properties: { task: str("What to check or look up, and what to report back.") }, required: ["task"] }, (p, signal) => call("background", p, signal)));
+
+  register(tool("side_chat", "Side chat", "Talk something through with other bots away from the main chat. action start (bots: one to four names, topic: the question, written to stand on its own, report_to: the short id of the chat to report back to, the one you're in if omitted) opens a temporary side chat the user can read but not write in. It closes after a few messages each, when it goes quiet, or with action close (conversation). Whoever opened it is asked to report back once it closes. For one quick question to one bot, use ask_bot.", { type: "object", properties: { action: str("start or close."), bots: { type: "array", items: { type: "string" }, description: "start: who to talk with, by name or short id." }, topic: str("start: what to work out."), report_to: str("start: short conversation id."), conversation: str("close: the side chat's short id. The one you're in if omitted.") }, required: ["action"] }, (p, signal) => call("side_chat", p, signal)));
 
   register(
     tool(
@@ -377,11 +387,11 @@ export default function openbots(pi: any) {
       "Open Build",
       "Run coding agents in the user's OpenBuild, if the user gave you access. action is options (harness for its models), add_project (primary only: path, name, create for a new folder, or url to clone), list, start (project, prompt, harness, model, effort, speed, permission, remote_control, mode worktree|local, branch, title, branch_name), read (thread), send (thread, text, and optionally model, effort, speed, permission for its next turn), answer (thread, question, answer), stop (thread), close (thread, remove_worktree), pr (thread or project, number) or merge (thread or project, number, method, delete_branch). You're told when a thread you started asks something or finishes.",
       { type: "object", properties: { action: str("options, add_project, list, start, read, send, answer, stop, close, pr or merge."), project: str("Project name or id."), path: str("add_project: the project's folder on this server, like ~/code/app."), name: str("add_project: what to call it. The folder's name if omitted."), create: { type: "boolean", description: "add_project: make the folder, empty, if it isn't there." }, url: str("add_project: a git URL to clone. Into an existing folder at path it goes in a subfolder named after the repository; otherwise path is the clone."), thread: str("Short thread id."), harness: str("A harness (pi, claude, codex, cursor, opencode, grok, hermes, fx) or a saved account id/name from options."), model: str("A model id from options. send: the thread's next turn, on its own harness and account."), query: str("options: narrow the model list."), effort: str("Reasoning effort. send: omitted keeps the thread's."), speed: str("Service tier id, from the model's speeds. send: standard turns it off."), permission: str("A permission mode id from options, if you may choose. send: the thread keeps it from its next turn."), remote_control: { type: "boolean", description: "start: Claude Code only. Open a Remote Control session so the user can continue the thread from claude.ai/code or the Claude app. Off by default; only when asked. options shows each harness's Remote Control." }, mode: str("worktree (default) or local."), branch: str("worktree: the branch to start from. local: the branch to switch to."), branch_name: str("worktree: a kebab-case name for its new branch."), title: str("A short title."), image_messages: { type: "array", items: { type: "string" }, description: "start/send: source message short ids in your conversations. Forward all their actual images to the coding agent." }, prompt: str("start: what the agent should do."), text: str("send: the message."), question: str("answer: the question id."), answer: str("answer: your answer. For choices, the option's text."), closed: { type: "boolean", description: "list: closed threads instead of open ones." }, messages: { type: "number", description: "read: how many recent messages. Default 6." }, remove_worktree: { type: "boolean" }, number: { type: "number", description: "Pull request number. The thread's own if omitted." }, method: str("merge, squash or rebase."), delete_branch: { type: "boolean" } }, required: ["action"] },
-      (p) => call("openbuild", p),
+      (p, signal) => call("openbuild", p, signal),
     ),
   );
 
-  register(tool("plugins", "Plugins", "OpenBuild plugins: guide gives the existing coding-thread authoring workflow to bots with this installation's project access. Primary only: list status, set a plugin's saved switch (id, enabled), or system master switch (enabled). Trusted code can run immediately when enabled. No install, delete or file access.", { type: "object", properties: { action: str("guide, list, set or system."), id: str("set: plugin id from list."), enabled: { type: "boolean" } }, required: ["action"] }, (p) => call("plugins", p)));
+  register(tool("plugins", "Plugins", "OpenBuild plugins: guide gives the existing coding-thread authoring workflow to bots with this installation's project access. Primary only: list status, set a plugin's saved switch (id, enabled), or system master switch (enabled). Trusted code can run immediately when enabled. No install, delete or file access.", { type: "object", properties: { action: str("guide, list, set or system."), id: str("set: plugin id from list."), enabled: { type: "boolean" } }, required: ["action"] }, (p, signal) => call("plugins", p, signal)));
 
   register(
     tool(
@@ -389,7 +399,7 @@ export default function openbots(pi: any) {
       "Manage bots",
       "Primary bot only, except renaming yourself, changing your own look, listing computers, reading the team or your conversations, or writing your own instructions or role while you have none. Setting any bot's model, effort or fallbacks is primary only too, even your own. action is status (primary only, read-only: all bots working/idle, turn start, conversation id, last runner activity, exact pending assignment deliveries; handoffs are not inferred), team (read-only: the other bots' roles and full instructions, or bot for one), conversations (read-only: every conversation you're in, with short ids and titles), create (name, instructions, role, look {shape, color}, model, effort, fallback, fallback_models), update (bot, name, instructions, role, look, proactivity off|low|normal|high, model, effort, fallback, fallback_models), models (query: the model ids bots can use), computers (the machines every bot reaches, what each allows and its isolation), defaults (default_model, default_fallbacks: the default model and fallbacks for bots without their own; omitted fields stay, none given only reads), delete (bot), create_group (name, bots: existing bot names or ids, optional instructions; always includes you), add_to_group (bot, conversation), or remove_from_group (bot, conversation). conversation is a group's short id, the one you're in if omitted.",
       { type: "object", properties: { action: str("status (primary only, read-only), team, conversations, create, create_group, update, delete, add_to_group, remove_from_group, models, defaults or computers."), bots: { type: "array", items: { type: "string" }, description: "create_group: existing bot names or full/short ids. You are included automatically." }, bot: str("Name or short id. You, if omitted, except for group changes."), conversation: str("add_to_group, remove_from_group: the group's short id."), name: str("New name."), instructions: str("What the bot is for and how it should act. Replaces the whole text. Optional when creating: leave it out if the conversation doesn't say."), role: str("What the bot is for, in one short line (100 characters at most) that teammates see in their roster. Optional, like instructions."), look: { type: "object", properties: { shape: { type: "string" }, color: { type: "string" } } }, proactivity: str("off, low, normal or high."), model: str("Primary only. A provider/model id from models, or default for the OpenBots default."), effort: str("Primary only. off, minimal, low, medium, high, xhigh, max, or default."), fallback: str("Primary only. inherit (the default fallbacks), own (fallback_models) or none."), fallback_models: { type: "array", items: { type: "string" }, description: "Primary only. With fallback own: up to 8 provider/model ids from models, tried in order. A second account's ids (openai-codex-2/…) are entries of their own." }, default_model: str("defaults, primary only. A provider/model id from models for every bot without its own, or default to clear it (Pi's default)."), default_fallbacks: { type: "array", items: { type: "string" }, description: "defaults, primary only. Up to 8 provider/model ids from models, tried in order by bots that inherit fallbacks. An empty list clears them." }, query: str("models: narrow the list.") }, required: ["action"] },
-      (p) => call("manage_bot", p),
+      (p, signal) => call("manage_bot", p, signal),
     ),
   );
 

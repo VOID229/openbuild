@@ -15,6 +15,10 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
       const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
       const { holding, showWorking } = await import('./src/lib/bots/activity.ts');
+      // A bot busy in a tool answers a new message through a helper session (botResponsiveness.test.ts): a stand-in, so no real Pi starts here.
+      const helpers = await import('./server/bots/helpers.ts');
+      const quickReplies = [];
+      helpers.seams.spawn = (botId) => (quickReplies.push(botId), { send: async (cmd) => (cmd.type === 'get_available_thinking_levels' ? { levels: [] } : {}), on: () => () => {}, close() {} });
       const boss = svc.createBot({ name: 'Boss' });
       const helper = svc.createBot({ name: 'Helper' });
       const group = svc.createConversation({ kind: 'group', name: 'Pending', botIds: [boss.bot.id, helper.bot.id] });
@@ -66,6 +70,8 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       prompts[1].finish();
       await until(() => !runner.busy(boss.bot.id));
       a.equal(status(boss.bot.id)?.state ?? 'idle', 'idle');
+      // Only the message that found it inside a tool got a quick reply started.
+      a.deepEqual(quickReplies, [boss.bot.id]);
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
