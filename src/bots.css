@@ -2257,22 +2257,24 @@
 }
 
 /* A bot at work: its mascot fidgeting beside what it's doing. */
+/* A bot at work: its mascot and what it's doing, a soft highlight sweeping through the words. */
 .bm-working {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 16px;
-  animation: bm-working-in var(--med) var(--ease-out) both;
+  gap: 10px;
+  margin-top: 14px;
+  animation: bm-working-in 260ms var(--ease-out, ease-out) both;
 }
 
 .bm-working .bm-avatar {
   margin-bottom: 0;
 }
 
+/* The words are painted by the shimmer's moving gradient (styles.css, .shimmer), so they set no colour
+   of their own: one here would sit on top of the highlight and hide it. */
 .bm-working-text {
-  font-size: 13.5px;
-  color: var(--text-2);
-  animation: shimmer 1.6s linear infinite, bm-working-in var(--med) var(--ease-out) both;
+  font-size: 14px;
+  animation: shimmer 1.6s linear infinite, bm-working-in 240ms ease-out both;
 }
 
 @keyframes bm-working-in {
