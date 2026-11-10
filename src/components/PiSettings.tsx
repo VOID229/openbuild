@@ -50,6 +50,7 @@ import { PathField } from "./PathField";
 import { openSettingsPage, settingsUp } from "../lib/pages";
 import { IconButton, SettingsHeading as Heading, Spinner, Toggle } from "./primitives";
 import { Hint, NavRow, SettingsGroup, SubPage } from "./SettingsUI";
+import { clock } from "../lib/clock";
 
 const tilde = (p: string) => p.replace(/^\/Users\/[^/]+|^\/home\/[^/]+/, "~");
 
@@ -449,7 +450,7 @@ function Problems({ problems, onClear }: { problems: PiProblem[]; onClear: () =>
                   <span className="pi-row-name">{p.source === "pi" ? "Pi" : tilde(p.source).split("/").slice(-2).join("/")}</span>
                   <span className={cx("pi-row-desc", open !== i && "pi-clamp")}>{p.message}</span>
                 </span>
-                <span className="pi-time">{new Date(p.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                <span className="pi-time">{clock(p.at)}</span>
               </button>
             </li>
           ))}

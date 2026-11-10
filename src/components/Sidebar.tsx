@@ -22,6 +22,7 @@ import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, Code
 import { PluginSlot } from "../lib/plugins";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
+import { clock } from "../lib/clock";
 
 // Flip a submenu to open upward when it would run off the bottom of the window and there's more room above.
 function fitFlyout(el: HTMLElement | null) {
@@ -76,7 +77,6 @@ const wakePatch = { snoozedUntil: undefined };
 /** A snooze that runs out on its own surfaces the thread under "Woke", even if it was closed. */
 const wokePatch = { snoozedUntil: undefined, woke: true, archived: false };
 
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /** When a snooze ends, as briefly as it reads: "18:00" today, "Mon 9:00" this week, else "Nov 3, 9:00". */
 function snoozeLabel(t: number) {

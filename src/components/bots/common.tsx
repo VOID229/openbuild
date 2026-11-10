@@ -10,6 +10,7 @@ import { eventDetail, eventText } from "../../../shared/bots";
 import type { FriendFrom } from "../../../shared/friends";
 import { accountName } from "../../lib/models";
 import { BotAvatar, BotHuddle, BotLineup } from "./BotAvatar";
+import { clock } from "../../lib/clock";
 
 /**
  * True once `busy` has lasted a moment. Saves and reconnects usually finish in a blink, and a status
@@ -34,7 +35,6 @@ export function useBusyBots(conversation: Pick<Conversation, "id" | "botIds"> | 
 
 const DAY = 24 * 60 * 60 * 1000;
 const startOfDay = (t: number) => new Date(t).setHours(0, 0, 0, 0);
-const clock = (t: number) => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /** When a conversation last moved, as briefly as it reads: "3:04 PM", "Yesterday", "Mon", "Nov 1". */
 export function shortTime(t: number) {
