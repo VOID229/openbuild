@@ -3,8 +3,8 @@
 // registers hooks so this file never imports it.
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
-import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, PERMISSION_HARNESSES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
+import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
+import { applyTodo, todoExpired, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -14,6 +14,7 @@ import { isPermissionId } from "../../shared/types";
 import { HTML_RENDER_MAX_TITLE, htmlProblem } from "../../shared/htmlRender";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
+import { findMemory, memoryKey, profileBytes, similarMemories } from "./sessionPolicy";
 
 const MESSAGE_LIMIT = 200;
 
@@ -1389,23 +1390,69 @@ function reportPollChanges(now: number) {
 
 // ------------------------------------------------------------------ memory and routines
 
-export function addMemory(botId: string, text: string, by?: string, id?: string): MemoryItem {
+/** What a write to memory did. */
+export interface MemoryWrite {
+  item: MemoryItem;
+  /** The fact was already there: no copy was made, its date moved up and it took the kind asked for. */
+  duplicate: boolean;
+  /** The outdated fact this one took the place of. */
+  replaced?: MemoryItem;
+  /** Earlier facts about the same thing, for the writer to forget if this one makes them wrong. */
+  similar: MemoryItem[];
+}
+
+/**
+ * Write one fact to a bot's memory. Each bot's memory is its own. Writing a fact that's already there
+ * keeps one copy; `replaces` (an id or the exact text) drops the outdated fact in the same step, so
+ * the newer one wins rather than sitting beside it. The profile has a hard cap: a write past it is
+ * refused, never trimmed.
+ */
+export function addMemory(botId: string, text: string, opts: { by?: string; id?: string; kind?: MemoryKind; replaces?: string } = {}): MemoryWrite {
   if (!db.getBot(botId)) throw new BotsError("No such bot.", 404);
+  const { by, id } = opts;
+  const kind = opts.kind ?? "journal";
+  if (!MEMORY_KINDS.includes(kind)) throw new BotsError("kind is profile or journal.");
   if (id && !isBotId(id)) throw new BotsError("Bad memory id.");
+  const all = db.memories(botId);
   if (id) {
-    const existing = db.memories(botId).find((m) => m.id === id);
-    if (existing) return existing;
+    const existing = all.find((m) => m.id === id);
+    if (existing) return { item: existing, duplicate: true, similar: [] };
     if (db.listBots().some((b) => b.id !== botId && db.memories(b.id).some((m) => m.id === id))) throw new BotsError("That memory id already exists.");
   }
-  const item: MemoryItem = { id: id ?? crypto.randomUUID(), text: text.trim().slice(0, 2000), at: Date.now(), by };
-  if (!item.text) throw new BotsError("Write what to remember.");
-  db.addMemory(botId, item);
+  const clean = text.trim();
+  if (!clean) throw new BotsError("Write what to remember.");
+  if (clean.length > MEMORY_TEXT_MAX) throw new BotsError(`That's ${clean.length} characters: keep each fact to a sentence, ${MEMORY_TEXT_MAX} characters at most. Nothing was saved.`);
+  const replaced = opts.replaces?.trim() ? findMemory(all, opts.replaces) : undefined;
+  if (opts.replaces?.trim() && !replaced) throw new BotsError("No such memory to replace. Nothing was saved.", 404);
+  const rest = all.filter((m) => m.id !== replaced?.id);
+  const key = memoryKey(clean);
+  const same = rest.find((m) => memoryKey(m.text) === key);
+  // Newer than everything there, even when the clock hasn't moved since the last write.
+  const at = Math.max(Date.now(), (all[0]?.at ?? 0) + 1);
+  const item: MemoryItem = same ? { ...same, kind, at } : { id: id ?? crypto.randomUUID(), kind, text: clean, at, by };
+  if (kind === "profile") {
+    const profile = [...rest.filter((m) => m.kind === "profile" && m.id !== item.id), item];
+    const bytes = profileBytes(profile);
+    if (bytes > PROFILE_MAX_BYTES) throw new BotsError(`Your profile is full (this would make it ${bytes} of ${PROFILE_MAX_BYTES} bytes). Forget or merge something in it first, or write this to your journal. Nothing was saved.`);
+  }
+  db.db.transaction(() => {
+    if (replaced && replaced.id !== item.id) db.removeMemory(botId, replaced.id);
+    if (same) db.touchMemory(botId, same.id, kind, at);
+    else db.addMemory(botId, item);
+  })();
   emitBot(botId);
-  return item;
+  return { item, duplicate: !!same, replaced, similar: similarMemories(clean, rest.filter((m) => m.id !== item.id)) };
 }
 export function removeMemory(botId: string, memoryId: string) {
   if (!db.removeMemory(botId, memoryId)) throw new BotsError("No such memory.", 404);
   emitBot(botId);
+}
+/** Forget one memory, named by its id, its short id, or its exact text. */
+export function forgetMemory(botId: string, which: string): MemoryItem {
+  const item = findMemory(db.memories(botId), which);
+  if (!item) throw new BotsError("No such memory: give its exact text, or its id.", 404);
+  removeMemory(botId, item.id);
+  return item;
 }
 
 export function saveRoutine(botId: string, routine: Routine): Routine {

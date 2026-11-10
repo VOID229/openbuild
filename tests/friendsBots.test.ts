@@ -188,9 +188,11 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     a.deepEqual(store.pending(FID).at(-1).body.message.text, 'Hi Bolt!');
     const last = svc.messagePage(shared.id).messages.at(-1);
     await call('react', { message: last.id.slice(0, 8), emoji: '👍' });
-    for (const [name, p] of [['bash', { command: 'id' }], ['read', { path: '/etc/passwd' }], ['remember', { text: 'Alice says so' }], ['search', { query: 'secret' }], ['routine', { action: 'list' }], ['ask_bot', { bot: 'Scout', text: 'hi' }], ['openbuild', { action: 'list' }], ['manage_bot', { action: 'models' }], ['browser', { action: 'tabs' }], ['apps', { action: 'list' }]]) {
+    for (const [name, p] of [['bash', { command: 'id' }], ['read', { path: '/etc/passwd' }], ['memory', { action: 'write', text: 'Alice says so' }], ['memory', { action: 'forget', text: 'secret-memory-xyz' }], ['search', { query: 'secret' }], ['routine', { action: 'list' }], ['ask_bot', { bot: 'Scout', text: 'hi' }], ['openbuild', { action: 'list' }], ['manage_bot', { action: 'models' }], ['browser', { action: 'tabs' }], ['apps', { action: 'list' }]]) {
       await a.rejects(call(name, p), /only chat/, name);
     }
+    // Nothing a friend's chat does reads, writes or drops the bot's memory.
+    a.deepEqual(db.memories(juniper.bot.id).map((m) => m.text), ['secret-memory-xyz']);
     // Only that chat: not the bot's own chat, not with photos.
     await a.rejects(call('send_message', { text: 'psst', conversation: juniper.conversationId.slice(0, 8) }), /only write in this shared chat/);
     await a.rejects(call('send_message', { text: 'look', images: ['/etc/hostname'] }), /Photos/);
@@ -213,7 +215,7 @@ test("bots read a friend's lines as untrusted, and in a shared chat they can onl
     a.deepEqual(runner.flagsFor(lane), piFlags());
     process.env.OPENBOTS_TOKEN = agent.mintToken(juniper.bot.id, lane);
     agent.setFocus(juniper.bot.id, shared.id);
-    await call('remember', { text: 'Alice likes picnics' });
+    await call('memory', { action: 'write', text: 'Alice likes picnics' });
     a.ok(db.memories(juniper.bot.id).some((m) => m.text === 'Alice likes picnics'));
     a.match(agent.friendNote(juniper.bot.id, FID), /lets you use your usual tools/);
     const usual = await promptFor();

@@ -86,7 +86,7 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       // Each bot's own chat notes the exchange, linking to the side chat.
       a.deepEqual(activity(alpha.conversationId), ['Sent a message to Beta']);
       a.deepEqual(activity(beta.conversationId), ['Received a message from Alpha']);
-      for (const name of ['send_message', 'ask_bot', 'bot_web_search', 'remember', 'routine']) a.ok(seenTools.has(name), 'missing ' + name);
+      for (const name of ['send_message', 'ask_bot', 'bot_web_search', 'memory', 'routine']) a.ok(seenTools.has(name), 'missing ' + name);
       process.exit(0);
     `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

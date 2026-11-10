@@ -583,7 +583,7 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(successfulMessageTool({ ...event, result: { details: { note: 'Nothing was sent' } } }), false);
       a.equal(successfulMessageTool(event), true);
       a.equal(successfulMessageTool({ ...event, toolName: 'question' }), true);
-      a.equal(successfulMessageTool({ ...event, toolName: 'remember' }), false);
+      a.equal(successfulMessageTool({ ...event, toolName: 'memory' }), false);
 
       // A missing selector used to match the first routine via startsWith('').
       const makeRoutine = (id, title) => svc.saveRoutine(bot.id, { id, title, schedule: 'every hour', enabled: true });
@@ -984,7 +984,7 @@ test("bots write their own instructions, and only a blank slate is open to a non
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
-      import { manage, contextFor, remember, setFocus } from './server/bots/agent.ts';
+      import { manage, contextFor, memory, setFocus } from './server/bots/agent.ts';
       svc.setHooks({ wake() {}, stop() {} });
       const primary = svc.createBot({ name: 'Boss' }).bot;
       const blank = svc.createBot({ name: 'Blank' }).bot;
@@ -1007,7 +1007,7 @@ test("bots write their own instructions, and only a blank slate is open to a non
       // Remembering goes to the bot's memory without saying anything in the chat.
       const blankChat = svc.directId(blank.id);
       setFocus(blank.id, blankChat);
-      remember(blank.id, { text: 'Likes tea.' });
+      memory(blank.id, { action: 'write', text: 'Likes tea.' });
       a.equal(db.messages(blankChat, 10).length, 0);
       a.match(contextFor(blank.id), /Likes tea/);
       setFocus(blank.id, undefined);

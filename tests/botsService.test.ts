@@ -26,11 +26,11 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
       a.equal(db.getConversation(first.conversationId).section, undefined);
 
       const memoryId = crypto.randomUUID();
-      const memory = svc.addMemory(first.bot.id, 'Keep this', 'me', memoryId);
+      const memory = svc.addMemory(first.bot.id, 'Keep this', { by: 'me', id: memoryId }).item;
       a.equal(memory.id, memoryId);
-      a.equal(svc.addMemory(first.bot.id, 'Keep this', 'me', memoryId).id, memoryId);
+      a.equal(svc.addMemory(first.bot.id, 'Keep this', { by: 'me', id: memoryId }).item.id, memoryId);
       a.equal(db.memories(first.bot.id).length, 1);
-      a.throws(() => svc.addMemory(second.bot.id, 'Steal', 'me', memoryId), /already exists/);
+      a.throws(() => svc.addMemory(second.bot.id, 'Steal', { by: 'me', id: memoryId }), /already exists/);
       svc.removeMemory(first.bot.id, memoryId);
       a.equal(db.memories(first.bot.id).length, 0);
 

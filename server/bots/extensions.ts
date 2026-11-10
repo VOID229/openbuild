@@ -15,7 +15,7 @@ import { BRIDGE_PACKAGE, bridgeExtension } from "./claude";
 import * as svc from "./service";
 
 const OWN = join(import.meta.dir, "extension.ts");
-const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "remember", "forget", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "side_chat", "manage_bot", "openbuild", "plugins"].join(",");
+const TOOLS = ["bash", "read", "write", "edit", "browser", "process", "send_message", "react", "question", "poll", "vote_poll", "html_render", "todo", "memory", "search", "bot_web_search", "apps", "use_app", "routine", "ask_bot", "side_chat", "manage_bot", "openbuild", "plugins"].join(",");
 const PACKAGE = "package:";
 
 const isLocal = (source: string) => !/^[a-z+]+:/i.test(source);
