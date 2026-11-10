@@ -5,7 +5,7 @@
 //
 // Its terminals are its own (useSideTerminal), not the drawer's under the thread: ⌘J still opens and
 // hides the drawer, and both can be open at once.
-import { FileDiff, GitPullRequest, Globe, MessageSquare, Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
+import { FileDiff, GitPullRequest, Globe, Plus, RotateCcw, SquareTerminal, X } from "lucide-react";
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { deviceName } from "../lib/devices";
@@ -23,7 +23,7 @@ import { PullRequestsView } from "./PullRequestsView";
 import { tabLabel, TerminalView, useTabKeys } from "./TerminalView";
 
 interface Surface {
-  id: "browser" | "terminal" | "diff" | "pulls" | "openchat";
+  id: "browser" | "terminal" | "diff" | "pulls";
   label: string;
   icon: ReactNode;
   /** The key that opens it from the launcher. */
@@ -31,37 +31,16 @@ interface Surface {
   open(): void;
   /** Not in a folder that can have it (the diff needs a project folder). */
   disabled?: boolean;
-  /** Shown in place of the key, saying why it's unavailable. */
-  note?: string;
 }
 
-/** The OpenChat preset: a browser tab at this address. */
-const OPENCHAT_URL = "https://openchat.shade-io.com/";
-const isOpenChat = (url: string) => {
-  try {
-    return new URL(url).host === new URL(OPENCHAT_URL).host;
-  } catch {
-    return false;
-  }
-};
-
 function useSurfaces(folder: TerminalFolder): Surface[] {
-  const { openBrowser, openDiff, openPulls, activateBrowser } = usePanel.getState();
-  // Back to the OpenChat tab if one is open, else a new one.
-  const openChat = () => {
-    const tab = usePanel.getState().browsers.find((b) => isOpenChat(b.url));
-    if (tab) {
-      activateBrowser(tab.id);
-      usePanel.getState().setPanel(true);
-    } else openBrowser(OPENCHAT_URL);
-  };
+  const { openBrowser, openDiff, openPulls } = usePanel.getState();
   return [
     { id: "browser", label: "Browser", icon: <Globe size={16} />, key: "B", open: () => openBrowser() },
     // A new shell each time: the launcher and the + menu both mean "another one".
     { id: "terminal", label: "Terminal", icon: <SquareTerminal size={16} />, key: "T", open: () => (useSideTerminal.getState().tabs.length ? useSideTerminal.getState().addTab() : showSideTerminal()) },
     { id: "diff", label: "Diff", icon: <FileDiff size={16} />, key: "D", open: openDiff, disabled: !folder.cwd },
     { id: "pulls", label: "Pull requests", icon: <GitPullRequest size={16} />, key: "P", open: () => openPulls(), disabled: !folder.cwd },
-    { id: "openchat", label: "OpenChat", icon: <MessageSquare size={16} />, key: "O", open: openChat, disabled: true, note: "Maintenance" },
   ];
 }
 
@@ -98,7 +77,7 @@ function NewTabMenu({ surfaces }: { surfaces: Surface[] }) {
 
 /** With no tabs: what the panel can open, each with a key. */
 /**
- * ⌥B, ⌥T, ⌥D, ⌥P and ⌥O open a browser, terminal, diff, pull requests or OpenChat tab whenever the panel is open, whatever tab it's
+ * ⌥B, ⌥T, ⌥D and ⌥P open a browser, terminal, diff or pull requests tab whenever the panel is open, whatever tab it's
  * on and wherever focus is (the composer included). The bare letter works too on the launcher, when
  * nothing that takes typing has focus. In the panel's terminal ⌥B and ⌥D work too, while ⌥T and ⌥W
  * are its own tab keys (useTabKeys); the drawer's terminal keeps all its keys, and a page in a
@@ -115,12 +94,12 @@ function useSurfaceKeys(open: boolean, launcher: boolean, surfaces: Surface[], c
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.repeat || e.isComposing) return;
       const el = document.activeElement as HTMLElement | null;
-      // ⌥O (OpenChat) and ⌥P (pull requests) work with the panel closed too: they open the panel on it.
+      // ⌥P (pull requests) works with the panel closed too: it opens the panel on it.
       if (!open) {
-        if (!e.altKey || (e.code !== "KeyO" && e.code !== "KeyP") || el?.closest(".xterm")) return;
+        if (!e.altKey || e.code !== "KeyP" || el?.closest(".xterm")) return;
         e.preventDefault();
         e.stopPropagation();
-        latest.current.find((x) => (x.id === "openchat" || x.id === "pulls") && !x.disabled && e.code === `Key${x.key}`)?.open();
+        latest.current.find((x) => x.id === "pulls" && !x.disabled)?.open();
         return;
       }
       // The drawer's terminal keeps its keys. In the panel's own terminal, ⌥T and ⌥W are its tab
@@ -167,7 +146,7 @@ function Launcher({ surfaces, files }: { surfaces: Surface[]; files: boolean }) 
           <button key={s.id} type="button" role="menuitem" className="side-launch" disabled={s.disabled} onClick={s.open}>
             {s.icon}
             {s.label}
-            {s.note ? <span className="side-launch-note">{s.note}</span> : <kbd className="side-launch-key">⌥{s.key}</kbd>}
+            <kbd className="side-launch-key">⌥{s.key}</kbd>
           </button>
         ))}
       </div>
