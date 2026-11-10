@@ -5038,6 +5038,60 @@ a.bots-btn.bots-btn-primary {
   min-width: 0;
 }
 
+/* Every fallback is one line, a phone too: its number, the picker, then a column for its buttons that
+   is there on every row (the add row included), so the pickers line up. */
+.bots-fallbacks .naming-row {
+  flex-wrap: nowrap;
+  min-height: 40px;
+}
+.bots-fallbacks .naming-row .select-grow {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-left: 0;
+}
+.bots-fallbacks .naming-actions {
+  width: 64px;
+  margin-left: 0;
+  gap: 0;
+}
+.bots-fallbacks .naming-row:not(:has(.naming-actions))::after {
+  content: "";
+  flex: none;
+  width: 64px;
+}
+.bots-fallbacks .naming-row .select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Settings → Bots → Models: a bot's name keeps to one line beside its picker. */
+.bots-set-model-name {
+  min-width: 0;
+}
+.bots-set-model-name .setting-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bots-set-model-name .bot-avatar,
+.bots-set-model-name > :first-child {
+  flex: none;
+}
+
+/* On a phone the name goes above, and its picker spans the row. */
+@media (max-width: 480px) {
+  .setting-row.bots-set-model-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .bots-set-model-row .bots-set-model {
+    width: 100%;
+  }
+}
+
 /* A bot on Default with no fallbacks of its own says it follows the default's. */
 .bots-fallbacks-note {
   margin: 0 0 6px;

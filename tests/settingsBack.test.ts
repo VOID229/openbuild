@@ -207,6 +207,44 @@ describe.skipIf(!browser)("Settings as a page", () => {
     await page.click(".page-back");
     await page.until("store.getState().settingsOpen === false");
   }, 60_000);
+
+  test("Bots → Models on a phone: each fallback on one line, lined up, and each bot's picker under its name", async () => {
+    const page = await Page.open(chrome!.ws, server!.url.href, 390, 900, "!!window.store");
+    await page.eval("bots.setState({ defaultFallbackModels: ['openai-codex/gpt-6.1-sol', 'opencode-go/glm-5.3-flash', 'openrouter/deepseek/deepseek-v4.1-flash-1017-a-very-long-name'] })");
+    await page.eval("store.getState().openSettings('bots')");
+    await page.until("!!document.querySelector('.settings-content')");
+    await press(page, "Models");
+    await page.until("document.querySelectorAll('.bots-fallbacks .naming-row').length === 4");
+    await page.settle();
+    const rows = await page.eval<{ index: Box; picker: Box; row: Box }[]>(`[...document.querySelectorAll('.bots-fallbacks .naming-row')].map((r) => {
+      const b = (el) => { const x = el.getBoundingClientRect(); return { x: x.x, y: x.y, width: x.width, height: x.height }; };
+      return { index: b(r.querySelector('.naming-index')), picker: b(r.querySelector('.select-wrap')), row: b(r) };
+    })`);
+    for (const { index, picker, row } of rows) {
+      // One line: the number and the picker side by side, centred on each other.
+      expect(row.height).toBeLessThan(48);
+      expect(Math.abs(index.y + index.height / 2 - (picker.y + picker.height / 2))).toBeLessThan(2);
+      expect(picker.x).toBeGreaterThan(index.x + index.width);
+    }
+    // The pickers start and end in the same place on every row, the one to add another included.
+    expect(new Set(rows.map((r) => Math.round(r.picker.x))).size).toBe(1);
+    expect(new Set(rows.map((r) => Math.round(r.picker.x + r.picker.width))).size).toBe(1);
+    // Nothing runs off the screen.
+    expect(await page.eval<boolean>("[...document.querySelectorAll('.bots-fallbacks .naming-row *')].every((el) => el.getBoundingClientRect().right <= innerWidth)")).toBe(true);
+    // Each bot's name, whole, with its picker the row's width under it.
+    const bots = await page.eval<{ nameBottom: number; pickerTop: number; pickerWidth: number; rowWidth: number; clipped: boolean }[]>(`[...document.querySelectorAll('.bots-set-model-row')].map((r) => {
+      const name = r.querySelector('.bots-set-model-name').getBoundingClientRect();
+      const picker = r.querySelector('.bots-set-model').getBoundingClientRect();
+      const label = r.querySelector('.bots-set-model-name .setting-label');
+      return { nameBottom: name.bottom, pickerTop: picker.top, pickerWidth: picker.width, rowWidth: r.getBoundingClientRect().width, clipped: label.scrollWidth > label.clientWidth };
+    })`);
+    expect(bots.length).toBe(6);
+    for (const b of bots) {
+      expect(b.pickerTop).toBeGreaterThanOrEqual(b.nameBottom);
+      expect(Math.abs(b.pickerWidth - b.rowWidth)).toBeLessThan(2);
+      expect(b.clipped).toBe(false);
+    }
+  }, 60_000);
 });
 
 /** Scrolls the page inside the section far down, then reports how far it went. */
