@@ -2713,6 +2713,10 @@
   word-break: normal;
   /* The backdrop must shape the draft exactly as the textarea does, ligatures off like every field. */
   font-variant-ligatures: none;
+  /* A textarea resets letter-spacing to normal; the backdrop inherits the UI's tighter tracking. Both take
+     the page's, or the drawn text runs short of the caret, further each character and line. */
+  letter-spacing: inherit;
+  word-spacing: inherit;
 }
 
 .bots-composer-textarea {
