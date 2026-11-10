@@ -22,6 +22,8 @@ mock.module("../server/codex/accounts", () => ({ codexAccounts: (saved: unknown)
 const admitted: any[] = [];
 const answers: any[] = [];
 const steers: any[] = [];
+/** When set, the harness can't take a steer now, with this reason. */
+let steerFails = "";
 const wakes: any[] = [];
 const runs = new Map<string, Run>();
 let snapshots: any[] = [];
@@ -44,7 +46,12 @@ mock.module("../server/pi/remote", () => ({
   findRun: async (id: string) => runs.get(id),
   snapshots: async (threadId?: string) => snapshots.filter((s) => !threadId || s.threadId === threadId),
   answer: async (...args: any[]) => (answers.push(args), true),
-  steer: async (...args: any[]) => (steers.push(args), { handled: true }),
+  // Most harnesses answer a steer they took with handled: false; only a Pi extension says true.
+  steer: async (...args: any[]) => {
+    if (steerFails) throw new Error(steerFails);
+    steers.push(args);
+    return { handled: false };
+  },
   stopRun: async () => true,
 }));
 mock.module("../server/pi/routes", () => ({ modelListing: async () => ({ models, defaultModel: "acme/one" }) }));
@@ -79,6 +86,7 @@ beforeEach(() => {
   admitted.length = answers.length = steers.length = wakes.length = merged.length = 0;
   snapshots = [];
   discovered = [];
+  steerFails = "";
   storage.setValue("client-state", "{}");
   grant();
   svc.updateSettings({ harnesses: {} });
@@ -605,20 +613,108 @@ test("an invalid combination writes nothing, even with valid parts", async () =>
   expect((storage.getChat(threadId) as any).permission).toBe("safe");
 });
 
-test("settings don't change under a running turn", async () => {
+/** End the thread's running turn the way the worker would, and let the bot's follower see it. */
+async function endTurn(threadId: string, how: "done" | "aborted" | "error" = "done") {
+  const snapshot = snapshots.find((s) => s.threadId === threadId && s.status === "pending");
+  Object.assign(snapshot, { status: how === "aborted" ? "aborted" : "done", endedAt: Date.now(), events: [{ t: "text", v: "Done" }, ...(how === "error" ? [{ t: "error", message: "boom" }] : []), { t: "done", finish: how === "aborted" ? "aborted" : "stop" }] });
+  runs.get(snapshot.id)!.end();
+  await settle();
+}
+
+test("settings under a running turn are queued for its next one, and checked at once", async () => {
   grant({ choosePermission: true });
   const started = await call("start", { project: project.name, prompt: "Go", harness: "claude", permission: "safe" });
   const { threadId } = admitted[0];
   const before = JSON.stringify(storage.getChat(threadId));
-  for (const over of [{ model: "claude/two" }, { effort: "high" }, { permission: "yolo" }, { speed: "fast" }]) {
-    await expect(call("send", { thread: started.thread, text: "Now", ...over })).rejects.toThrow(/still working/);
-  }
+  // A bad pick is refused now, not when the turn ends.
+  await expect(call("send", { thread: started.thread, text: "Now", model: "nope" })).rejects.toThrow(/no model "nope"/);
+  const sent = await call("send", { thread: started.thread, text: "Harder", model: "claude/two", effort: "high", permission: "yolo" });
+  expect(sent).toMatchObject({ sent: false, queued: true, position: 1 });
+  expect(sent.note).toMatch(/can only change for its next turn/);
   expect(steers).toEqual([]);
   expect(admitted.length).toBe(1);
+  // The thread itself is untouched until the turn ends.
   expect(JSON.stringify(storage.getChat(threadId))).toBe(before);
-  // Without them, it's steered in as before.
-  await call("send", { thread: started.thread, text: "Also" });
+  expect((await call("read", { thread: started.thread })).queued).toBe(1);
+
+  await endTurn(threadId);
+  expect(admitted.length).toBe(2);
+  expect(admitted[1]).toMatchObject({ threadId, model: "claude/two", effort: "high", permission: "yolo" });
+  expect(admitted[1].message).toContain("Harder");
+  const note = wakes.find((w) => w.text.includes("finished its turn")).text;
+  expect(note).toContain("Your queued message went in as its next turn");
+  expect((await call("read", { thread: started.thread })).queued).toBeUndefined();
+});
+
+test("a steer the harness took is a steer, whatever it says about extensions", async () => {
+  // Regression: handled: false is how harnesses report an ordinary steer, and was refused as busy.
+  await call("start", { project: project.name, prompt: "Go" });
+  const sent = await call("send", { thread: admitted[0].threadId, text: "Also" });
+  expect(sent).toMatchObject({ sent: true, steered: true });
   expect(steers.length).toBe(1);
+  expect(admitted.length).toBe(1);
+});
+
+test("what a harness can't take now is queued, and sent as the next turn, one a turn, in order", async () => {
+  await call("start", { project: project.name, prompt: "Go" });
+  const { threadId } = admitted[0];
+  steerFails = "Pi hasn't started on this reply yet.";
+  const first = await call("send", { thread: threadId, text: "First" });
+  expect(first).toMatchObject({ sent: false, queued: true, position: 1 });
+  expect(first.note).toContain("Pi hasn't started on this reply yet.");
+  // Once something waits, later messages wait behind it, even if steering would work now.
+  steerFails = "";
+  const second = await call("send", { thread: threadId, text: "Second" });
+  expect(second).toMatchObject({ queued: true, position: 2 });
+  expect(steers).toEqual([]);
+  expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Queued a prompt for", threadId });
+
+  await endTurn(threadId);
+  expect(admitted.length).toBe(2);
+  expect(admitted[1].message).toContain("First");
+  expect(admitted[1].message).not.toContain("Second");
+  expect(wakes.at(-1).text).toMatch(/1 more wait/);
+  const chat = storage.getChat(threadId) as any;
+  expect(chat.messages.filter((m: any) => m.role === "user").map((m: any) => m.content)).toEqual(["Go", "First"]);
+
+  await endTurn(threadId);
+  expect(admitted.length).toBe(3);
+  expect(admitted[2].message).toContain("Second");
+  await endTurn(threadId);
+  expect(admitted.length).toBe(3);
+});
+
+for (const how of ["aborted", "error"] as const) {
+  test(`a queued message isn't sent after a turn that ${how === "aborted" ? "was stopped" : "failed"}, and the bot hears so`, async () => {
+    await call("start", { project: project.name, prompt: "Go" });
+    const { threadId } = admitted[0];
+    steerFails = "This reply is stopping.";
+    await call("send", { thread: threadId, text: "Later" });
+    await endTurn(threadId, how);
+    expect(admitted.length).toBe(1);
+    const note = wakes.at(-1).text;
+    expect(note).toContain(`wasn't sent, because the thread ${how === "aborted" ? "was stopped" : "failed"}`);
+    expect(note).toContain("Later");
+    expect((await call("read", { thread: threadId })).queued).toBeUndefined();
+  });
+}
+
+test("a queued message waits for a turn someone else started first", async () => {
+  await call("start", { project: project.name, prompt: "Go" });
+  const { threadId } = admitted[0];
+  steerFails = "Pi isn't working on this thread anymore.";
+  await call("send", { thread: threadId, text: "Mine" });
+  // The user's own queue starts a turn from the app before the bot's follower drains.
+  const theirs = crypto.randomUUID();
+  runs.set(theirs, new Run());
+  snapshots.push({ id: theirs, threadId, kind: "run", status: "pending", events: [], startedAt: Date.now() });
+  await endTurn(threadId);
+  expect(admitted.length).toBe(1);
+  expect((await call("read", { thread: threadId })).queued).toBe(1);
+  // Its turn over, the bot's message goes in.
+  await endTurn(threadId);
+  expect(admitted.length).toBe(2);
+  expect(admitted[1].message).toContain("Mine");
 });
 
 test("a bot held to the defaults can't change a thread's permission mode", async () => {
