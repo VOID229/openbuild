@@ -1278,6 +1278,18 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
     slack.current = px;
     if (spacer.current) spacer.current.style.height = px ? `${px}px` : "";
   };
+  /** Following the bottom: the room kept after a fold isn't needed any more. */
+  const followBottom = (el: HTMLElement) => {
+    if (slack.current) setSlack(0);
+    el.scrollTop = el.scrollHeight;
+  };
+  /** Down to just the room the view stands on now: nothing on screen moves, and none is left to scroll into. */
+  const trimSlack = () => {
+    const el = scroller.current;
+    if (!el || !slack.current || (pin.current && performance.now() < pin.current.until)) return;
+    const need = Math.max(0, Math.ceil(el.scrollTop + el.clientHeight - (el.scrollHeight - slack.current)));
+    if (need < slack.current) setSlack(need);
+  };
   useEffect(() => () => void places.set(place, { stick: stick.current, top: top.current }), [place]);
   // Opening or folding a run of activity (EventRun) keeps the view where it is, even at the bottom:
   // the lines open under their toggle, which stays put, rather than the chat following them down.
@@ -1292,8 +1304,11 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         pin.current = { until: performance.now() + 700 };
       }
       // Folding near the end would leave the view nothing to stand on, and the browser would pull it up:
-      // keep that room until the reader scrolls (onScroll trims it).
-      if (folding && body) setSlack(slack.current + body.offsetHeight);
+      // keep that room, down to what the view needs once the fold is done, and less as the reader scrolls up.
+      if (folding && body) {
+        setSlack(slack.current + body.offsetHeight);
+        setTimeout(trimSlack, 720);
+      }
     });
     return () => void keepViews.delete(el);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1316,7 +1331,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
       moved.current = el.scrollTop;
     } else if (!stick.current) restore();
-    if (stick.current) el.scrollTop = el.scrollHeight;
+    if (stick.current) followBottom(el);
     // Held from here on by what's now in view, so the resize observer's first look doesn't undo it.
     remember();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1335,7 +1350,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
       windowHeight = window.innerHeight;
-      if (stick.current) el.scrollTop = el.scrollHeight;
+      if (stick.current) followBottom(el);
       // The keyboard coming up, or the composer growing and shrinking with the draft, keeps the last line
       // you could see above it, as it does in any messaging app. A desktop window resized keeps its top.
       else if (changed && resized && !coarse.matches) remember();
@@ -1402,15 +1417,12 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
         const delta = el.scrollTop - lastTop.current;
         lastTop.current = el.scrollTop;
         // All the way down attaches; any way up detaches (a scrollbar drag too, which sends nothing else).
-        // The chat's own moves only ever keep the view where it was, so they decide neither.
-        if (!ours && gap <= 2) stick.current = true;
+        // The chat's own moves only ever keep the view where it was, so they decide neither. The end of the
+        // room kept after a fold isn't the bottom of the chat: it doesn't attach until that room is gone.
+        if (!ours && gap <= 2 && !slack.current) stick.current = true;
         else if (!ours && delta < 0) stick.current = false;
-        // The room kept after a fold goes as the reader moves: never more than holds the view where it is,
-        // and none once they're at the end.
-        if (slack.current && !ours && !(pin.current && performance.now() < pin.current.until)) {
-          const need = gap <= 2 ? 0 : Math.max(0, Math.ceil(el.scrollTop + el.clientHeight - (el.scrollHeight - slack.current)));
-          if (need < slack.current) setSlack(need);
-        }
+        // The room kept after a fold goes as the reader moves up, a pixel for a pixel: never all at once.
+        trimSlack();
         remember();
         setAway(gap > 400);
       }}

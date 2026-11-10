@@ -93,5 +93,18 @@ describe.skipIf(!browser)("a run of background actions holds the view", () => {
     expect(Math.max(...frames.map((f) => Math.abs(f.top - first.top)))).toBeLessThan(1);
     expect(Math.min(...frames.map((f) => f.scroll))).toBeGreaterThan(first.scroll - 2);
     expect(frames.at(-1)!.body).toBe(0);
+
+    // Once it's folded, the room kept is only what the view stands on: nothing blank to scroll down into.
+    await Bun.sleep(150);
+    expect(await page.eval<number>("(() => { const c = document.querySelector('.bots-messages'); return Math.round(c.scrollHeight - c.scrollTop - c.clientHeight); })()")).toBeLessThanOrEqual(1);
+    // Scrolling up as a trackpad does, a pixel or two at first: everything moves by just that, never a snap.
+    for (const step of [1, 1, 2, 1, 30, 60, 120, 200]) {
+      const before = await page.eval<number>(`document.querySelector(${JSON.stringify(TOGGLE)}).getBoundingClientRect().top`);
+      await page.eval(`(() => { document.querySelector('.bots-messages').scrollTop -= ${step}; return true; })()`);
+      await page.settle();
+      await page.settle();
+      const after = await page.eval<number>(`document.querySelector(${JSON.stringify(TOGGLE)}).getBoundingClientRect().top`);
+      expect({ step, moved: Math.round(after - before) }).toEqual({ step, moved: step });
+    }
   }, 60_000);
 });

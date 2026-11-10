@@ -114,8 +114,10 @@ describe.skipIf(!browser)("sidebar motion", () => {
     // the sidebar narrows. The sidebar never goes blank in between.
     expect(frames.every((f) => f.rail)).toBe(true);
     expect(early.every((f) => f.list)).toBe(true);
+    // Some frame while the list is still there shows the sidebar part-way between its widths (by frame,
+    // not by time: a busy machine draws fewer of them).
     const full = Math.max(...frames.map((f) => f.width));
-    expect(early.some((f) => f.width > 100 && f.width < full - 8)).toBe(true);
+    expect(frames.some((f) => f.list && f.width > 100 && f.width < full - 8)).toBe(true);
     expect(early.some((f) => f.listOpacity < 1)).toBe(true);
     expect(frames.every((f) => f.opacity > 0.3)).toBe(true);
     // Then the rail, at its own width.
