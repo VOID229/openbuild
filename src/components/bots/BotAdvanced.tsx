@@ -295,9 +295,9 @@ export function BotMachines({ compact }: { compact?: boolean }) {
 }
 
 /** A titled group of the Advanced tab's settings; `card` puts its rows in a hairline card of their own. */
-function Group({ title, hint, card = true, children }: { title: string; hint?: string; card?: boolean; children: ReactNode }) {
+function Group({ title, hint, card = true, className, children }: { title: string; hint?: string; card?: boolean; className?: string; children: ReactNode }) {
   return (
-    <section className="bots-adv-group" aria-label={title}>
+    <section className={cx("bots-adv-group", className)} aria-label={title}>
       <h3 className="bots-adv-title">
         <span data-tooltip={hint} data-tooltip-side="left">{title}</span>
       </h3>
@@ -308,15 +308,15 @@ function Group({ title, hint, card = true, children }: { title: string; hint?: s
 
 /**
  * The details panel's Advanced tab: the same settings as Settings → Bots, in three groups (its model,
- * the machines it reaches, what it may do in OpenBuild), one line each so they fit the panel. The
- * descriptions sit in tooltips on the labels.
+ * the machines it reaches, what it may do in OpenBuild). The model's settings stack, each label over a
+ * full-width control; the others are one line each. The descriptions sit in tooltips on the labels.
  */
 export function BotAdvanced({ bot }: { bot: Bot }) {
   const defaultModel = useBots((s) => s.defaultModel);
   return (
     <div className="bots-pane bots-advanced">
-      <Group title="Model">
-        <div className="setting-row bots-adv-stack">
+      <Group title="Model" className="bots-adv-model">
+        <div className="setting-row">
           <div className="setting-label" data-tooltip="Default uses your default model from Settings → Bots." data-tooltip-side="left">
             Model
           </div>
