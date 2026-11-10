@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 
@@ -12,6 +12,9 @@ Object.assign(g, { window: win, document: win.document, navigator: win.navigator
 g.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
 g.matchMedia = g.window.matchMedia;
 g.IS_REACT_ACT_ENVIRONMENT = true;
+// The store loads saved settings from /api/state as it's imported, retrying for a few seconds. Answer
+// it before the import, and let it finish before the tests count what they send.
+globalThis.fetch = (async () => Response.json({})) as unknown as typeof fetch;
 
 const { act, Activity, createElement: h, useRef, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
@@ -84,6 +87,10 @@ function browser() {
     removeEventListener() {},
   };
 }
+
+beforeAll(async () => {
+  if (!useStore.persist.hasHydrated()) await new Promise<void>((resolve) => useStore.persist.onFinishHydration(() => resolve()));
+});
 
 beforeEach(() => {
   fetches = [];
