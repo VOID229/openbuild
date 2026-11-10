@@ -257,7 +257,7 @@ export const removeProject = (id: string, deviceId?: DeviceId) => send(apiUrl(de
 export const projectGit = (id: string, deviceId?: DeviceId) => get<GitInfo>(apiUrl(deviceId, `/api/projects/${encodeURIComponent(id)}/git`));
 /** A folder's subfolders on `deviceId` (this server without one). `hidden` also lists dotfolders. */
 export const browseFolders = (dir?: string, deviceId?: DeviceId, hidden = false) =>
-  get<{ dir: string; parent?: string; entries: { name: string; path: string; git: boolean }[] }>(
+  get<{ dir: string; parent?: string; empty?: boolean; entries: { name: string; path: string; git: boolean }[] }>(
     apiUrl(deviceId, `/api/fs?${new URLSearchParams({ ...(dir ? { dir } : {}), ...(hidden ? { hidden: "1" } : {}) })}`),
   );
 /** Whether this browser can use the server's native folder picker (only when both are on one machine). */
