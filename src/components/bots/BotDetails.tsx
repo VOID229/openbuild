@@ -134,31 +134,48 @@ export function Instructions({ value, placeholder, hint, onChange }: { value: st
 }
 
 export function Routines({ bot }: { bot: Bot }) {
-  const st = useBots.getState();
   return (
     <div className="bots-pane">
       {bot.routines.length ? (
         <ul className="bots-cards">
           {bot.routines.map((r) => (
-            <li key={r.id} className={cx("bots-card-row bots-routine", !r.enabled && "bots-routine-off")}>
-              <span className="bots-card-text">
-                <span className="bots-routine-title">{r.title}</span>
-                <span className="bots-routine-when">
-                  {r.schedule}{r.enabled ? "" : " · Paused"}
-                </span>
-                {r.task && <span className="bots-routine-task">{r.task}</span>}
-              </span>
-              <IconButton label="Delete routine" tooltipSide="left" className="bots-card-x" onClick={() => st.removeRoutine(bot.id, r.id)}>
-                <Trash size={14} />
-              </IconButton>
-              <Toggle checked={r.enabled} label={r.enabled ? "Pause" : "Resume"} onChange={(on) => st.updateRoutine(bot.id, r.id, { enabled: on })} />
-            </li>
+            <RoutineRow key={r.id} bot={bot} routine={r} />
           ))}
         </ul>
       ) : (
         <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
       )}
     </div>
+  );
+}
+
+/** A routine, kept to one thin row: what it is and when, its switch, and Open (its task) and Delete under that. */
+function RoutineRow({ bot, routine: r }: { bot: Bot; routine: Bot["routines"][number] }) {
+  const st = useBots.getState();
+  const [open, setOpen] = useState(false);
+  return (
+    <li className={cx("bots-card-row bots-routine", !r.enabled && "bots-routine-off")}>
+      <span className="bots-card-text">
+        <span className="bots-routine-title" title={r.title}>{r.title}</span>
+        <span className="bots-routine-when">
+          {r.schedule}{r.enabled ? "" : " · Paused"}
+        </span>
+        {open && r.task && <span className="bots-routine-task">{r.task}</span>}
+      </span>
+      <span className="bots-routine-side">
+        <Toggle checked={r.enabled} label={r.enabled ? "Pause" : "Resume"} onChange={(on) => st.updateRoutine(bot.id, r.id, { enabled: on })} />
+        <span className="bots-routine-actions">
+          {r.task && (
+            <button type="button" className="bots-routine-action" aria-expanded={open} onClick={() => setOpen(!open)}>
+              {open ? "Close" : "Open"}
+            </button>
+          )}
+          <button type="button" className="bots-routine-action bots-routine-delete" onClick={() => st.removeRoutine(bot.id, r.id)}>
+            Delete
+          </button>
+        </span>
+      </span>
+    </li>
   );
 }
 
@@ -435,12 +452,15 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setTab(conversation.kind === "direct" ? "instructions" : "members");
   }
   useEffect(() => setEditingLook(false), [conversation.id]);
-  // Asked for a tab (the header's task progress): a bot's own Tasks, or the group's Goal, where its list is.
+  // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
+  // list is; a routine line in the chat opens the bot's Routines, from its own chat (EventLine).
   const asked = useBots((s) => s.detailsTab);
   const [askedKey, setAskedKey] = useState(asked?.key);
   if (asked && asked.key !== askedKey) {
     setAskedKey(asked.key);
-    if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
+    if (asked.tab === "routines") {
+      if (conversation.kind === "direct") setTab("routines");
+    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
   }
   // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
   const [threadId, setThreadId] = useState<string>();
@@ -525,7 +545,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
               <Tabs
                 tabs={[
                   ["instructions", "Instructions"],
-                  ["routines", `Routines${bot.routines.length ? ` ${bot.routines.length}` : ""}`],
+                  ["routines", "Routines"],
                   ["tasks", "Tasks"],
                   ["advanced", "Advanced"],
                 ]}

@@ -3402,14 +3402,52 @@ button.bots-details-name:hover {
   color: var(--text-3);
 }
 
+/* A routine is a thin row: title and when on the left, its switch with Open and Delete under it on the right. */
+.bots-routine {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 7px 6px 7px 10px;
+}
+
+.bots-routine .bots-card-text {
+  line-height: 1.35;
+}
+
+.bots-routine-side {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+.bots-routine-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.bots-routine-action {
+  font-size: 11.5px;
+  line-height: 1.3;
+  color: var(--text-3);
+  transition: color var(--fast) var(--ease);
+}
+
+.bots-routine-action:hover {
+  color: var(--text);
+}
+
+.bots-routine-delete:hover {
+  color: var(--danger);
+}
+
+/* Opened, the routine's task in full, as the bot will be asked it. */
 .bots-routine-task {
-  display: -webkit-box;
-  margin-top: 2px;
-  overflow: hidden;
+  margin-top: 4px;
   font-size: 12.5px;
   color: var(--text-2);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .bots-routine-off .bots-routine-title {

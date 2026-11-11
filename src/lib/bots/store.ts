@@ -85,8 +85,8 @@ interface BotsState {
   folded: string[];
   activeId?: string;
   detailsOpen: boolean;
-  /** A tab the details panel was asked to show (the header's to-do progress opens its list), new `key` each time. */
-  detailsTab?: { tab: "tasks"; key: number };
+  /** A tab the details panel was asked to show (the header's to-do progress opens its list, a routine line the bot's routines), new `key` each time. */
+  detailsTab?: { tab: "tasks" | "routines"; key: number };
   /** The starter bots were added (once per browser). */
   seeded: boolean;
   /** "provider/model" for bots without their own. Pi's default when unset. */
@@ -123,7 +123,7 @@ interface BotsState {
   stopWork: (conversationId: string) => void;
   setDetailsOpen: (open: boolean) => void;
   /** Open the details on a tab. */
-  showDetailsTab: (tab: "tasks") => void;
+  showDetailsTab: (tab: "tasks" | "routines") => void;
   createBot: (bot: { name: string; look: BotLook; instructions?: string; role?: string }) => string;
   /** `conversationId`: the chat a rename was made in, which says so there. */
   updateBot: (id: string, patch: Partial<Omit<Bot, "id">>, conversationId?: string) => void;

@@ -133,6 +133,44 @@ test("routines, other bot events and older saved wording read naturally after th
   expect(line("e6").querySelector(".bm-event-detail")!.textContent).toBe("Juniper");
 });
 
+test("a routine line opens its bot's Routines in the details panel, from its own chat or a group", async () => {
+  const routine = { id: "r1", title: "Standup", schedule: "Weekdays at 9:00", task: "Ask everyone what they did yesterday", enabled: true };
+  await show([event("e1", "scout", { kind: "routine", text: "Set a routine", detail: "Standup · Weekdays at 9:00" })], [{ ...scout, routines: [routine] }, juniper]);
+  const tab = () => document.querySelector(".bots-details [role='tab'][aria-selected='true']")?.textContent;
+  const open = async (id: string) => {
+    const link = [...lead(id).querySelectorAll("button")].find((b) => b.textContent === "set a routine")!;
+    await act(async () => link.click());
+    await frames();
+  };
+  await open("e1");
+  expect(useBots.getState().detailsOpen).toBe(true);
+  expect(tab()).toBe("Routines");
+  // Following it doesn't also toggle the row open.
+  expect(line("e1").classList.contains("bm-event-open")).toBe(false);
+  // A routine is a thin row: its title and when, with its task only once opened.
+  const row = () => document.querySelector(".bots-details .bots-routine")!;
+  expect(row().querySelector(".bots-routine-title")!.textContent).toBe("Standup");
+  expect(row().querySelector(".bots-routine-when")!.textContent).toBe("Weekdays at 9:00");
+  expect(row().querySelector(".bots-routine-task")).toBeNull();
+  expect([...row().querySelectorAll(".bots-routine-action")].map((b) => b.textContent)).toEqual(["Open", "Delete"]);
+  await act(async () => row().querySelector<HTMLElement>(".bots-routine-action")!.click());
+  expect(row().querySelector(".bots-routine-task")!.textContent).toBe("Ask everyone what they did yesterday");
+  await act(async () => row().querySelector<HTMLElement>(".bots-routine-action")!.click());
+  expect(row().querySelector(".bots-routine-task")).toBeNull();
+
+  // A group's panel has no routines, so the line goes to the bot's own chat for them.
+  await act(async () => useBots.setState((s) => ({
+    detailsOpen: false,
+    conversations: [...s.conversations, { id: "group", kind: "group" as const, botIds: ["scout", "juniper"], createdAt: 1, updatedAt: 1, messages: [event("e2", "scout", { kind: "routine", text: "Set a routine", detail: "Standup · Weekdays at 9:00" }) as any] }],
+    activeId: "group",
+  })));
+  await frames();
+  await open("e2");
+  expect(useBots.getState().activeId).toBe("chat");
+  expect(useBots.getState().detailsOpen).toBe(true);
+  expect(tab()).toBe("Routines");
+});
+
 test("a model switch links its bot and names the model, with the account only to tell two apart", async () => {
   await show([
     event("e1", "scout", { kind: "model", text: "Switched to GPT 6.1 Sol", detail: "openai-codex-2", model: "openai-codex-2/gpt-6.1-sol" }),
