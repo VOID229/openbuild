@@ -9,7 +9,7 @@ import { findProject } from "./projects";
 import { pullRequestChatSummaries } from "./storage";
 import { mergeUnsettled } from "../shared/pullReadiness";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../shared/types";
-import { checksOf, FAILED, sweep } from "./pullRequests";
+import { checksOf, FAILED, heardPullRequests, sweep } from "./pullRequests";
 import { fail, gh, MAX_VIEW_DIFF, run } from "./workspaceGit";
 
 const READ_TIMEOUT = 45_000;
@@ -201,17 +201,25 @@ async function repoOf(cwd: string): Promise<GhRepo> {
 // Reads are shared for a few seconds by everything looking at the same repository: every worktree
 // of a project asks about the same pull requests, and the panel asks again whenever it's shown.
 const READ_TTL = 15_000;
-const reads = new Map<string, { at: number; value: Promise<unknown> }>();
+/** A pull request whose checks are running is shared for less: the tab asks more often then. */
+const CHECKS_TTL = 5_000;
+const reads = new Map<string, { at: number; ttl: number; value: Promise<unknown> }>();
 
-/** `load`'s answer under `key`, reused for READ_TTL unless `fresh`; one ask at a time, and failures, or answers `keep` turns down, aren't kept. */
-function shared<T>(key: string, fresh: boolean, load: () => Promise<T>, keep?: (value: T) => boolean): Promise<T> {
+/**
+ * `load`'s answer under `key`, reused for `ttl` of it (READ_TTL by default) unless `fresh`; one ask at
+ * a time, and failures, or answers `keep` turns down, aren't kept.
+ */
+function shared<T>(key: string, fresh: boolean, load: () => Promise<T>, keep?: (value: T) => boolean, ttl?: (value: T) => number): Promise<T> {
   const known = reads.get(key);
-  if (known && !fresh && Date.now() - known.at < READ_TTL) return known.value as Promise<T>;
+  if (known && !fresh && Date.now() - known.at < known.ttl) return known.value as Promise<T>;
   const value = load();
-  const entry = { at: Date.now(), value };
+  const entry = { at: Date.now(), ttl: READ_TTL, value };
   reads.set(key, entry);
   const drop = () => reads.get(key) === entry && reads.delete(key);
-  value.then((v) => keep && !keep(v) && drop(), drop);
+  value.then((v) => {
+    if (ttl) entry.ttl = ttl(v);
+    if (keep && !keep(v)) drop();
+  }, drop);
   return value;
 }
 
@@ -255,9 +263,12 @@ export async function list(cwd: string, state: unknown, fresh = false): Promise<
   if (!path) return { gh: false, repo: true, pulls: [] };
   const wanted: PullListState = state === "merged" || state === "closed" ? state : "open";
   const prs = await shared(`${where.common}|list|${wanted}`, fresh, async () => {
+    const asked = Date.now();
     const r = await run([path, "pr", "list", "--state", wanted, "--limit", String(LIST_LIMIT), "--json", `${SUMMARY_FIELDS},isCrossRepository`], cwd, READ_TIMEOUT);
     if (r.code !== 0) fail(r, "gh pr list failed");
-    return parse<GhSummary[]>(r.out);
+    const prs = parse<GhSummary[]>(r.out);
+    heardPullRequests(prs.map(toSummary), asked);
+    return prs;
   });
   // Someone's fork can have a branch of the same name.
   const current = where.branch ? prs.find((pr) => pr.state === "OPEN" && !pr.isCrossRepository && pr.headRefName === where.branch)?.number : undefined;
@@ -293,12 +304,16 @@ export async function view(cwd: string, number: unknown, fresh = false): Promise
     `${await repoKey(cwd)}|view|${n}`,
     fresh,
     async () => {
+      const asked = Date.now();
       const [repo, r] = await Promise.all([repoOf(cwd), readPull(cwd, n, DETAIL_FIELDS)]);
       if (r.code !== 0) fail(r, `gh couldn't read pull request #${n}`);
-      return settled(cwd, toDetail(parse<GhDetail>(r.out), repo));
+      const detail = toDetail(parse<GhDetail>(r.out), repo);
+      heardPullRequests([{ ...detail, head: detail.headSha }], asked);
+      return settled(cwd, detail);
     },
     // Still undecided: the next ask should go to GitHub, not get this answer back.
     (detail) => !mergeUnsettled(detail),
+    (detail) => (detail.state === "open" && detail.checks === "pending" ? CHECKS_TTL : READ_TTL),
   );
 }
 

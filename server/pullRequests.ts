@@ -1,7 +1,9 @@
 // Follows threads' pull requests, and closes a thread once its pull request merges ("Close threads
-// when their PR merges" in Settings › Workspace, on by default). Once a minute, while some open thread
-// has one to follow, GitHub is asked about each repository's recent pull requests with one
-// `gh pr list`. A thread is matched to the one from its worktree's branch, or to one its agent opened
+// when their PR merges" in Settings › Workspace, on by default). While some open thread has one to
+// follow, GitHub is asked about each repository's recent pull requests with one `gh pr list`: every
+// 15 seconds while something is about to change (a followed thread is working, so it may push or open
+// one, or a pull request's checks are running), once a minute otherwise. The pull requests tab's
+// reads count too (`heardPullRequests`): what it shows, the sidebar shows, without waiting for a sweep. A thread is matched to the one from its worktree's branch, or to one its agent opened
 // wherever it worked (a thread in the project's own checkout, say). The chat keeps what was found
 // (`pullRequest`), so the sidebar and thread header can show it.
 //
@@ -19,6 +21,8 @@ import * as storage from "./storage";
 import { gh, run } from "./workspaceGit";
 
 const SWEEP_EVERY = 60_000;
+/** While a followed pull request is in flux: about two GraphQL points per repository per sweep. */
+const SWEEP_HOT = 15_000;
 /** Recent pull requests asked for per repository: open threads' branches are among the newest. */
 const LIST_LIMIT = 100;
 
@@ -171,6 +175,7 @@ async function sweepOnce(refresh?: () => Promise<void>) {
   }
   const closeMerged = closeMergedEnabled();
   for (const [repo, chats] of byRepo) {
+    const asked = Date.now();
     const prs = await listPullRequests(repo);
     if (!prs) continue;
     for (const summary of chats) {
@@ -180,30 +185,99 @@ async function sweepOnce(refresh?: () => Promise<void>) {
       const branch = summary.workspace?.worktree ? local?.branch ?? summary.workspace.branch : undefined;
       const found = pickPullRequest(prs, branch, summary.createdAt, summary.openedPullRequests);
       if (!found) continue;
-      const now = Date.now();
-      const pr = toThreadPullRequest(found, now);
-      const stored = storage.getChat(summary.id) as Chat | undefined;
-      if (!stored || stored.archived) continue;
-      const close = closeMerged && shouldClose(stored, pr, now);
-      const before = stored.pullRequest;
-      const changed = !before || before.number !== pr.number || before.state !== pr.state || before.checks !== pr.checks || before.draft !== pr.draft;
-      if (!changed && !close) continue;
-      storage.putChat({
-        ...stored,
-        pullRequest: pr,
-        ...(close ? { archived: true, done: false, woke: false, autoClosedAt: now } : {}),
-      } as unknown as storage.StoredChat);
-      // Its worktree goes a day later, if nothing in it would be lost (closedWorktrees.ts).
-      if (close) console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
+      save(summary.id, () => toThreadPullRequest(found, asked), closeMerged);
     }
   }
 }
 
-const hot = globalThis as { openbuildPullRequestTimer?: ReturnType<typeof setInterval> };
+/** The fields that change what a thread shows (or what its worktree's removal checks). */
+const differs = (a: ThreadPullRequest | undefined, b: ThreadPullRequest) =>
+  !a || a.number !== b.number || a.state !== b.state || a.checks !== b.checks || a.draft !== b.draft || a.head !== b.head || a.mergedAt !== b.mergedAt;
 
-/** Start the once-a-minute sweep (once, even under `bun --hot`). */
+/**
+ * Save what's now known about thread `id`'s pull request, closing the thread if it merged. Read and
+ * written without yielding, so nothing saved in between is lost. An answer GitHub gave before the one
+ * already saved is older news (a sweep and the tab can ask at once), and is dropped. Returns whether
+ * it saved.
+ */
+function save(id: string, next: (before: ThreadPullRequest | undefined) => ThreadPullRequest | undefined, closeMerged: boolean): boolean {
+  const stored = storage.getChat(id) as Chat | undefined;
+  if (!stored || stored.archived) return false;
+  const before = stored.pullRequest;
+  const pr = next(before);
+  if (!pr || (before && before.checkedAt > pr.checkedAt)) return false;
+  const now = Date.now();
+  const close = closeMerged && shouldClose(stored, pr, now);
+  if (!differs(before, pr) && !close) return false;
+  storage.putChat({
+    ...stored,
+    pullRequest: pr,
+    ...(close ? { archived: true, done: false, woke: false, autoClosedAt: now } : {}),
+  } as unknown as storage.StoredChat);
+  // Its worktree goes a day later, if nothing in it would be lost (closedWorktrees.ts).
+  if (close) console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
+  return true;
+}
+
+/** A pull request as the pull requests tab read it (server/pullRequestView.ts). */
+export interface HeardPullRequest {
+  url: string;
+  state: ThreadPullRequest["state"];
+  draft?: boolean;
+  checks?: ThreadPullRequest["checks"];
+  mergedAt?: number;
+  head?: string;
+}
+
+/**
+ * The pull requests tab asked GitHub about these at `asked`: threads already following one take it at
+ * once, so the sidebar never shows older news than the tab. A merge is left to a sweep, which knows
+ * when it happened and whether to close the thread.
+ */
+export function heardPullRequests(heard: HeardPullRequest[], asked: number) {
+  if (!heard.length) return;
+  const byUrl = new Map(heard.map((pr) => [pr.url, pr]));
+  let merged = false;
+  for (const summary of storage.pullRequestChatSummaries()) {
+    if (summary.archived || summary.workspace?.deviceId || !summary.pullRequest) continue;
+    const pr = byUrl.get(summary.pullRequest.url);
+    if (!pr) continue;
+    if (pr.state === "merged" && summary.pullRequest.state !== "merged") {
+      merged = true;
+      continue;
+    }
+    save(summary.id, (before) => {
+      if (!before || before.url !== pr.url) return undefined;
+      const { draft: _d, checks: _c, ...rest } = before;
+      return {
+        ...rest,
+        state: pr.state,
+        ...(pr.draft ? { draft: true } : {}),
+        ...(pr.checks ? { checks: pr.checks } : {}),
+        ...(pr.mergedAt !== undefined ? { mergedAt: pr.mergedAt } : {}),
+        ...(pr.head ? { head: pr.head } : {}),
+        checkedAt: asked,
+      };
+    }, false);
+  }
+  if (merged) void sweep(undefined, true);
+}
+
+/** Whether a followed pull request may change soon: its checks are running, or its thread is working. */
+export function inFlux(chats: Chat[]): boolean {
+  return chats.some((c) => !c.archived && !c.workspace?.deviceId && ((c.pullRequest?.state === "open" && c.pullRequest.checks === "pending") || working(c)));
+}
+
+const hot = globalThis as { openbuildPullRequestTimer?: ReturnType<typeof setTimeout> };
+
+/** Start sweeping: soon after starting, then every 15 seconds or every minute (once, even under `bun --hot`). */
 export function startPullRequestSweep(refresh: () => Promise<void>) {
-  if (hot.openbuildPullRequestTimer) clearInterval(hot.openbuildPullRequestTimer);
-  hot.openbuildPullRequestTimer = setInterval(() => void sweep(refresh), SWEEP_EVERY);
-  setTimeout(() => void sweep(refresh), 10_000);
+  if (hot.openbuildPullRequestTimer) clearTimeout(hot.openbuildPullRequestTimer);
+  const next = (delay: number) => {
+    hot.openbuildPullRequestTimer = setTimeout(async () => {
+      await sweep(refresh);
+      next(inFlux(storage.pullRequestChatSummaries()) ? SWEEP_HOT : SWEEP_EVERY);
+    }, delay);
+  };
+  next(10_000);
 }

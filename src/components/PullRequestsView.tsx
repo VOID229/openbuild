@@ -6,7 +6,8 @@ import { ArrowLeft, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUp
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { PullCheck, PullComment, PullCommit, PullDetail, PullList, PullListState, PullMergeMethod, PullPatch, PullSummary } from "../../shared/types";
 import { usePanel, folderKey } from "../lib/panel";
-import { actOnPull, clearPullFailure, commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, mergeUnsettled, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, setPullState, SETTLE_REFRESH, usePullActivity, usePullRead, viewPull, type Readiness } from "../lib/pulls";
+import { useStore } from "../lib/store";
+import { actOnPull, clearPullFailure, commentOnPull, DELETE_KEY, editPull, listKey, listPulls, mergePull, mergeReadiness, mergeUnsettled, METHOD_KEY, patchKey, prefetchPatch, prefetchPull, prefetchPulls, pullKey, pullPatch, RELOAD_THREADS, setPullState, SETTLE_REFRESH, usePullActivity, usePullRead, viewPull, type Readiness } from "../lib/pulls";
 import type { TerminalFolder } from "../lib/terminal";
 import { ago, copyText, cx } from "../lib/ui";
 import { FileSection, useDiffFiles, useDiffWrap } from "./DiffView";
@@ -16,6 +17,8 @@ import { pullRequestTone } from "./PullRequestBadge";
 
 const LIST_REFRESH = 30_000;
 const PULL_REFRESH = 20_000;
+/** While its checks run: the server shares such a read for 5 seconds, not 15. */
+const CHECKS_REFRESH = 8_000;
 
 const METHODS: Record<PullMergeMethod, { label: string; hint: string }> = {
   squash: { label: "Squash and merge", hint: "One commit on the base branch" },
@@ -133,7 +136,16 @@ type Tab = "overview" | "commits" | "code";
 
 function PullView({ folder, number }: { folder: TerminalFolder; number: number }) {
   const { setActivePull } = usePanel.getState();
-  const { data: pr, error, loading, reload } = usePullRead<PullDetail>(pullKey(folder, number), (fresh) => viewPull(folder, number, fresh), PULL_REFRESH);
+  const [checking, setChecking] = useState(false);
+  const { data: pr, error, loading, reload } = usePullRead<PullDetail>(pullKey(folder, number), (fresh) => viewPull(folder, number, fresh), checking ? CHECKS_REFRESH : PULL_REFRESH);
+  useEffect(() => setChecking(pr?.state === "open" && pr.checks === "pending"), [pr?.state, pr?.checks]);
+  // The server gave this news to the threads following it as it read it: the sidebar needn't wait
+  // for its next poll to show it.
+  useEffect(() => {
+    if (!pr) return;
+    const stale = useStore.getState().chats.some((c) => c.pullRequest?.url === pr.url && (c.pullRequest.state !== pr.state || c.pullRequest.checks !== pr.checks || !!c.pullRequest.draft !== !!pr.draft));
+    if (stale) window.dispatchEvent(new Event(RELOAD_THREADS));
+  }, [pr?.url, pr?.state, pr?.checks, pr?.draft]);
   // The Code tab's diff, ready before it's asked for.
   const head = pr?.headSha;
   useEffect(() => {
