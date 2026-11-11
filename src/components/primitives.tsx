@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { brandSvg, CUSTOM_PROVIDER, providerName, providerSvg } from "../lib/models";
 import { pluginBrandSvg, pluginIconsReady, pluginProviderSvg, usePlugins } from "../lib/plugins";
 import { cx, useDismiss, usePresence } from "../lib/ui";
+import type { ThreadRuntime } from "../../shared/types";
 
 /** A Settings section's title, with an action at its right if it has one (Check for updates). */
 export const SettingsHeading = ({ children, action }: { children: ReactNode; action?: ReactNode }) => {
@@ -339,6 +340,11 @@ const hermesLogoUrl = `data:image/svg+xml,${encodeURIComponent(hermesLogo)}`;
 export const HermesMark = memo(function HermesMark({ size = 14, className }: { size?: number; className?: string }) {
   return <img src={hermesLogoUrl} width={size} height={size} className={className} alt="" aria-hidden style={{ flexShrink: 0 }} />;
 });
+
+/** A thread runtime's mark: the harness's own logo. */
+export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
+  return runtime === "hermes" ? <HermesMark size={size} /> : runtime === "grok" ? <GrokMark size={size} /> : runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
+}
 
 /** A Pi provider's icon: its brand mark, or its initial on a tile. */
 export const ProviderIcon = memo(function ProviderIcon({ provider, className }: { provider: string; className?: string }) {

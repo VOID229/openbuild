@@ -3326,6 +3326,32 @@ button.bots-details-name:hover {
   opacity: 1;
 }
 
+/*
+ * Tabs past the first few, in a small menu under More that floats over the panel. Not a .menu: on a
+ * phone those become sheets rising from the bottom, and this one stays a small dropdown by its tab.
+ */
+.bots-tab-menu {
+  width: max-content;
+  min-width: 132px;
+  padding: 4px;
+}
+
+.bots-tab-menu .menu-item {
+  height: 30px;
+}
+
+@media (max-width: 768px) {
+  .bots-tab-menu {
+    min-width: 150px;
+  }
+
+  .bots-tab-menu .menu-item {
+    height: 40px;
+    padding: 0 12px;
+    font-size: 15px;
+  }
+}
+
 .bots-pane {
   display: flex;
   flex-direction: column;
@@ -3500,15 +3526,26 @@ button.bots-details-name:hover {
   text-align: left;
 }
 
-/* A thread row's harness and account, at its right: a quiet label, not a badge. */
-.bots-thread-harness {
+/* The thread's harness, then its model's provider: two small marks at the row's right. */
+.bots-thread-brands {
+  display: flex;
   flex: none;
-  max-width: 40%;
-  overflow: hidden;
-  font-size: 12px;
-  color: var(--text-3);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.bots-thread-brand {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text);
+}
+
+.bots-thread-brand .brand-icon {
+  width: 14px;
+  height: 14px;
+  font-size: 14px;
 }
 
 .bots-details-foot {

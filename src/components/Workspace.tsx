@@ -15,8 +15,10 @@ import { cachedRuntimeStatuses, loadRuntimeStatuses, subscribeRuntimeStatuses } 
 import { contextFill, formatTokens, formatUsd, shortTokens, spendKind, threadSpend, useThreadModels } from "../lib/usage";
 import { toggleTerminal } from "../lib/terminal";
 import { arrowNav, cx, useFocusOnShow } from "../lib/ui";
-import { GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
+import { IconButton, Popover, RuntimeIcon, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
+
+export { RuntimeIcon };
 
 // The last git state read for each project, kept across reloads so the branch shows at once while
 // a fresh read (slow on a big repository or a paired device) catches up.
@@ -363,9 +365,6 @@ const CLAUDE_LIMITATIONS = "Native Claude Code (the CLI installed on this device
 const OPENCODE_LIMITATIONS = "Native OpenCode with its own providers, models, configuration, permissions and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
 const GROK_LIMITATIONS = "Native Grok Build (the CLI installed on this device) with its own models, sign-in, permission mode, skills, hooks and MCP servers. No Pi extensions, slash commands, compaction or shell commands. Harness is fixed once a thread starts.";
 export const RUNTIME_LABEL: Record<ThreadRuntime, string> = { pi: "Default", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude Code", opencode: "OpenCode", hermes: "Hermes", grok: "Grok" };
-export function RuntimeIcon({ runtime, size }: { runtime: ThreadRuntime; size: number }) {
-  return runtime === "hermes" ? <HermesMark size={size} /> : runtime === "grok" ? <GrokMark size={size} /> : runtime === "opencode" ? <OpencodeMark size={size} /> : runtime === "claude" ? <ClaudeMark size={size} /> : runtime === "durable" ? <DurableMark size={size} /> : runtime === "fx" ? <FxMark size={size} /> : runtime === "cursor" ? <CursorMark size={size} /> : runtime === "codex" ? <CodexMark size={size} /> : <PiMark size={size} />;
-}
 
 /**
  * The runtimes a new thread can pick on the device it will run on, and the one picked (falling back

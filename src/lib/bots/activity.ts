@@ -1,6 +1,7 @@
 // Who is busy, and where. The sidebar, the chat's header and its list all read from here, so a bot
 // never looks busy in one place and idle in another, and work in another chat isn't shown as work here.
 import { providerName } from "../models";
+import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
 import type { BotStatus, Conversation } from "./types";
@@ -115,15 +116,39 @@ export function threadMascot(acting: boolean): { busy: boolean; asleep: boolean 
   return acting ? { busy: true, asleep: false } : { busy: false, asleep: true };
 }
 
-const HARNESS: Record<ThreadRuntime, string> = { pi: "Pi", durable: "Durable", fx: "fx", codex: "Codex", cursor: "Cursor", claude: "Claude", opencode: "OpenCode", hermes: "Hermes", grok: "Grok" };
+/** Who serves a native harness's models when its thread doesn't say otherwise. */
+const SERVED_BY: Partial<Record<ThreadRuntime, string>> = { codex: "openai", claude: "anthropic", cursor: "cursor", grok: "xai", fx: "vercel", opencode: "opencode", hermes: "hermes" };
+/** Opencode's own plans, which Pi threads can run on too. */
+const OPENCODE_PLANS = new Set(["go", "plus", "black", "zen"]);
 
 /**
- * The harness a thread runs on and the account or provider behind it, briefly: "Codex · codex2",
- * "Claude · claude2", "Pi · Anthropic". Just the harness when neither is known.
+ * The provider behind a thread's model, as a provider id ProviderIcon and providerName know: the one in
+ * a Pi model's id ("openrouter/kimi-k3" → "openrouter"), the one an OpenCode, fx or Hermes model names
+ * after its harness ("opencode/anthropic/claude-…" → "anthropic"), else whoever serves that harness's
+ * models (Codex → OpenAI, Claude Code → Anthropic). Undefined for a Pi thread that hasn't answered yet.
  */
-export function threadHarness(chat: Pick<Chat, "runtime" | "runtimeAccount" | "messages">): string {
+export function threadProvider(chat: Pick<Chat, "runtime" | "messages">): string | undefined {
   const runtime = chat.runtime ?? "pi";
-  const model = chat.messages.findLast((m) => m.role === "assistant" && m.model)?.model;
-  const provider = runtime === "pi" && model?.plan === "pi" && model.id.includes("/") ? providerName(model.id.split("/")[0]!) : undefined;
-  return [HARNESS[runtime] ?? runtime, chat.runtimeAccount?.name ?? provider].filter(Boolean).join(" · ");
+  const model = chat.messages.findLast((m) => m.model)?.model;
+  if (model) {
+    const parts = model.id.split("/");
+    if (OPENCODE_PLANS.has(model.plan)) return "opencode";
+    if (model.plan === "pi") return parts.length > 1 ? parts[0] : undefined;
+    if ((model.plan === "opencode" || model.plan === "fx" || model.plan === "hermes") && parts.length > 2) return parts[1];
+  }
+  return SERVED_BY[runtime];
+}
+
+/**
+ * What a thread runs on, for the two marks beside it in the details' Threads tab: its harness, named with
+ * the account it signed in as ("Codex · codex2"), and the provider behind its model with that one's name.
+ */
+export function threadBrands(chat: Pick<Chat, "runtime" | "runtimeAccount" | "messages">): { runtime: ThreadRuntime; harness: string; provider?: { id: string; name: string } } {
+  const runtime = chat.runtime ?? "pi";
+  const provider = threadProvider(chat);
+  return {
+    runtime,
+    harness: [runtimeName(runtime), chat.runtimeAccount?.name].filter(Boolean).join(" · "),
+    provider: provider ? { id: provider, name: providerName(provider) } : undefined,
+  };
 }
