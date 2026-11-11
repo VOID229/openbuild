@@ -849,10 +849,15 @@ export function Composer({ variant, chatId, streaming }: Props) {
   // Mentioned files live in the text ("@path"), so they don't need a second chip above it.
   const chipFiles = files.filter((f) => !f.mention);
 
+  // A new thread's stash sits in the picker row above the box; a thread's is a tab on the box's top edge.
+  const stashTray = stashed.length > 0 && !editing && (
+    <StashTray inline={!chatId} items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={removeStash} />
+  );
+
   return (
     <div className={cx("composer-wrap", `composer-${variant}`)}>
-      {!chatId && <WorkspaceTop permission={<PermissionPicker dropUp={false} deviceId={mentionDevice} cwd={mentionCwd} />} />}
-      {stashed.length > 0 && !editing && <StashTray items={stashed} open={stashList.length > 0} active={Math.min(stashIndex, stashed.length - 1)} onToggle={toggleStash} onClose={() => setStashOpen(false)} onHover={setStashIndex} onUse={pasteStashed} onRemove={removeStash} />}
+      {!chatId && <WorkspaceTop stash={stashTray} permission={<PermissionPicker dropUp={false} deviceId={mentionDevice} cwd={mentionCwd} />} />}
+      {chatId && stashTray}
       {queue.length + steering.length > 0 && chatId && <QueueTray chatId={chatId} queue={queue} steering={steering} onEdit={startEdit} onFinish={finishEdit} live={streaming && !external ? (replyPlan === runtime && canSteer(runtime) ? "steer" : "other") : undefined} onError={setNotice} />}
       {slashMatches.length > 0 && <SlashMenu commands={slashMatches} active={slashIndex} dropUp={variant === "dock"} onPick={pickCommand} onHover={setSlashIndex} />}
       {mentionMatches.length > 0 && <MentionMenu entries={mentionMatches} active={mentionIndex} dropUp={variant === "dock"} onPick={pickMention} onHover={setMentionIndex} />}

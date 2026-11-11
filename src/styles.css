@@ -2209,10 +2209,10 @@ select.input {
   display: flex;
   align-items: center;
   padding-right: 2px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--composer-border);
   border-bottom: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: var(--surface-2);
+  background: var(--surface);
   animation: rise var(--med) var(--ease-out) both;
 }
 
@@ -2292,6 +2292,59 @@ select.input {
   color: var(--text-3);
 }
 
+/* A new thread's stash: one more quiet ghost pill in the picker row above the box, its list dropping
+   down over the box from where the pill sits. */
+.ws-top > .stash-inline {
+  height: 28px;
+  margin: 0 0 0 auto;
+}
+
+.ws-top > .stash-inline + .picker:has(.permission-pill) {
+  margin-left: 0;
+}
+
+.stash-inline .stash-tab {
+  height: 28px;
+  padding-right: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  animation: none;
+}
+
+.stash-inline .stash-tab-btn,
+.stash-inline .stash-head {
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.stash-inline .stash-tab-btn svg {
+  color: var(--text-3);
+}
+
+.stash-inline .queued-btn {
+  width: 24px;
+  height: 24px;
+}
+
+.stash-inline .stash-panel {
+  top: 0;
+  bottom: auto;
+  left: auto;
+  width: min(340px, calc(100cqi - 12px));
+  border-bottom: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+@container composer (max-width: 560px) {
+  .ws-top > .stash-inline {
+    margin-left: 0;
+  }
+}
+
 /* Queued messages: a thin tray tucked behind the top of the composer. */
 
 .queue {
@@ -2299,10 +2352,10 @@ select.input {
   flex-direction: column;
   margin: 0 22px -1px;
   padding: 2px 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--composer-border);
   border-bottom: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: var(--surface-2);
+  background: var(--surface);
   animation: rise var(--med) var(--ease-out) both;
 }
 
