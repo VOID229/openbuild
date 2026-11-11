@@ -17,8 +17,9 @@ import { findBrowser } from "../server/pi/extensions/html-render";
 import { expectedSeconds, expectedWall, parseShard, shard, usesBrowser, type Entry } from "./testPlan";
 
 const TIMINGS = join(import.meta.dir, "test-timings.json");
-// A file that never exits (a browser left alive, a bundler that spins) is killed. The slowest takes 40 s.
-const FILE_LIMIT = 120_000;
+// A file that never exits (a browser left alive, a bundler that spins, Bun 1.3.8 stuck before its
+// first test) is killed: after a minute, or four times as long as the file is expected to take.
+const fileLimit = (expected: number) => Math.max(60, Math.ceil(expected * 4));
 
 const whole = (name: string, least: number) => {
   const raw = process.env[name];
@@ -59,7 +60,7 @@ const entries = part ? shard(all, part.index, part.total) : all;
 // so they don't trail at the end on their own.
 entries.sort((a, b) => Number(b.browser) - Number(a.browser) || b.seconds - a.seconds || a.file.localeCompare(b.file));
 
-type Result = { file: string; code: number | null; seconds: number; killed: boolean; output: string };
+type Result = { file: string; code: number | null; seconds: number; killed: boolean; limit: number; output: string };
 const live = jobs === 1;
 const logs = mkdtempSync(join(tmpdir(), "openbuild-test-logs-"));
 const env: Record<string, string | undefined> = { ...process.env, NODE_ENV: "test" };
@@ -72,7 +73,8 @@ if (!live && process.stdout.isTTY && env.NO_COLOR === undefined) env.FORCE_COLOR
 process.once("SIGINT", () => { rmSync(logs, { recursive: true, force: true }); process.exit(130); });
 
 let spawned = 0;
-async function run(file: string, alone = live): Promise<Result> {
+async function run({ file, seconds: expected }: Entry, alone = live): Promise<Result> {
+  const limit = fileLimit(expected);
   const log = join(logs, `${spawned++}.log`);
   // One descriptor for both streams keeps stdout and stderr in the order they were written.
   const fd = alone && live ? undefined : openSync(log, "a");
@@ -88,7 +90,7 @@ async function run(file: string, alone = live): Promise<Result> {
     stderr: fd ?? "inherit",
   });
   let killed = false;
-  const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, FILE_LIMIT);
+  const timer = setTimeout(() => { killed = true; child.kill("SIGKILL"); }, limit * 1000);
   const code = await child.exited;
   clearTimeout(timer);
   let output = "";
@@ -97,14 +99,14 @@ async function run(file: string, alone = live): Promise<Result> {
     output = readFileSync(log, "utf8").trimEnd();
     rmSync(log, { force: true });
   }
-  return { file, code, seconds: (performance.now() - started) / 1000, killed, output };
+  return { file, code, seconds: (performance.now() - started) / 1000, killed, limit, output };
 }
 
-const outcome = (result: Result) => result.code === 0 ? "passed" : result.killed ? `KILLED after ${FILE_LIMIT / 1000} s` : "FAILED";
+const outcome = (result: Result) => result.code === 0 ? "passed" : result.killed ? `KILLED after ${result.limit} s` : "FAILED";
 function report(result: Result, note = "") {
   const failed = result.code !== 0;
   if (live && !result.output) {
-    if (result.killed) console.log(`\n${result.file} was killed after ${FILE_LIMIT / 1000} s.`);
+    if (result.killed) console.log(`\n${result.file} was killed after ${result.limit} s.`);
     return;
   }
   const line = `${failed ? "✗" : "✓"} ${result.file} · ${outcome(result)}${note} · ${result.seconds.toFixed(1)} s`;
@@ -151,7 +153,7 @@ async function pool(queue: Entry[], limit: number, browserLimit: number, browser
         const [item] = queue.splice(at, 1);
         running++;
         if (item!.browser) browsers++;
-        void run(item!.file).then(done).finally(() => {
+        void run(item!).then(done).finally(() => {
           running--;
           if (item!.browser) browsers--;
           next();
@@ -180,7 +182,7 @@ try {
   for (const before of first.filter(result => result.code !== 0).sort((a, b) => a.file.localeCompare(b.file))) {
     let last = before;
     for (let attempt = 0; attempt < retries && last.code !== 0; attempt++) {
-      last = await run(before.file, true);
+      last = await run(entries.find(entry => entry.file === before.file)!, true);
       report(last, last.code === 0 ? " on another run: flaky" : " again");
     }
     (last.code === 0 ? flaky : failed).push(before);
@@ -192,7 +194,7 @@ try {
 const wall = (performance.now() - started) / 1000;
 const total = first.reduce((sum, result) => sum + result.seconds, 0);
 const slowest = [...first].sort((a, b) => b.seconds - a.seconds).slice(0, 10);
-const names = (list: Result[]) => list.map(result => `  ${result.file}${result.killed ? ` (killed after ${FILE_LIMIT / 1000} s)` : ""}`).join("\n");
+const names = (list: Result[]) => list.map(result => `  ${result.file}${result.killed ? ` (killed after ${result.limit} s)` : ""}`).join("\n");
 if (!live) console.log(`\nSlowest files:\n${slowest.map(result => `  ${result.seconds.toFixed(1).padStart(6)} s  ${result.file}`).join("\n")}`);
 console.log(`\n${first.length} files in ${wall.toFixed(0)} s (${total.toFixed(0)} s of file time, ${jobs} at a time).`);
 if (flaky.length) console.log(`\nFlaky (failed, then passed on their own):\n${names(flaky)}`);
