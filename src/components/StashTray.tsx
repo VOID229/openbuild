@@ -5,6 +5,8 @@ import { ago, cx, useDismiss } from "../lib/ui";
 import { IconButton } from "./primitives";
 
 interface StashTrayProps {
+  /** In the new thread's picker row: a quiet pill whose list drops down, not a tab on the box. */
+  inline?: boolean;
   items: Stashed[];
   open: boolean;
   /** The row Up/Down and Enter act on while the list is open. */
@@ -17,7 +19,7 @@ interface StashTrayProps {
 }
 
 /** A tab on top of the composer; with several, opening into a list over what's above it, without moving anything. */
-export function StashTray({ items, open, active, onToggle, onClose, onHover, onUse, onRemove }: StashTrayProps) {
+export function StashTray({ inline, items, open, active, onToggle, onClose, onHover, onUse, onRemove }: StashTrayProps) {
   const tray = useRef<HTMLDivElement>(null);
   useDismiss(open, onClose, [tray]);
   // One stash has no list to choose from: the tab pastes it, and carries its remove button.
@@ -32,8 +34,8 @@ export function StashTray({ items, open, active, onToggle, onClose, onHover, onU
     </>
   );
   return (
-    <div ref={tray} className="stash">
-      {open ? (
+    <div ref={tray} className={cx("stash", inline && "stash-inline")}>
+      {open && (
         <div className="stash-panel">
           <button type="button" className="stash-head" aria-expanded aria-label="Close stash" onMouseDown={keepFocus} onClick={onToggle}>
             {header}
@@ -59,8 +61,10 @@ export function StashTray({ items, open, active, onToggle, onClose, onHover, onU
             })}
           </div>
         </div>
-      ) : (
-        <div className="stash-tab">
+      )}
+      {/* Inline, the tab keeps its place in the row under the open list, so the row doesn't shift. */}
+      {(!open || inline) && (
+        <div className="stash-tab" inert={open || undefined}>
           {only ? (
             <button type="button" className="stash-tab-btn" aria-label="Paste stash" onMouseDown={keepFocus} onClick={() => onUse(only)}>
               {header}

@@ -441,8 +441,8 @@ function RuntimeMenu() {
   );
 }
 
-/** New thread: runtime, checkout or worktree, branch and the runtime's permission mode, right above the composer. */
-export function WorkspaceTop({ permission }: { permission?: ReactNode }) {
+/** New thread: runtime, checkout or worktree, branch, the stash (when there is one) and the runtime's permission mode, right above the composer. */
+export function WorkspaceTop({ permission, stash }: { permission?: ReactNode; stash?: ReactNode }) {
   const { project, pref, info, loading } = useNewWorkspace();
   return (
     <div className="ws-top">
@@ -453,6 +453,7 @@ export function WorkspaceTop({ permission }: { permission?: ReactNode }) {
       </>}
       <RuntimeMenu />
       <ThreadAccountSelect />
+      {stash}
       {permission}
     </div>
   );
