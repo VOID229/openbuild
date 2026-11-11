@@ -840,9 +840,11 @@ async function close(botId: string, p: Record<string, unknown>) {
   if ((await pendingRuns(chat.id)).length) throw refuse("It's still working. Stop it first if you mean to.", 409);
   const current = (await refresh(chat.id)) ?? chat;
   // Like a merge auto-close, preserve this server-side close through stale browser saves.
-  storage.putChat({ ...current, archived: true, done: false, woke: false, autoClosedAt: Date.now(), snoozedUntil: undefined, pinned: false } as never);
+  const now = Date.now();
+  storage.putChat({ ...current, archived: true, done: false, woke: false, autoClosedAt: now, closedAt: now, snoozedUntil: undefined, pinned: false } as never);
   let note: string | undefined;
-  if (current.workspace?.worktree && (p.remove_worktree === true || appSettings().autoDeleteWorktrees)) {
+  // Asked for: now. Otherwise the "Delete worktrees of closed threads" setting removes it a day later.
+  if (current.workspace?.worktree && p.remove_worktree === true) {
     // Never forced: uncommitted work stays, for the user to decide about.
     await projects.removeWorktree(current.workspace.cwd).catch((err) => {
       note = `The worktree stayed: ${(err as Error).message}`;

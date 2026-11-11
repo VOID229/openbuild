@@ -203,10 +203,10 @@ function GeneralSection() {
           onChange={(defaultMode) => update({ workspace: { ...s.workspace, defaultMode } })}
         />
       </SettingRow>
-      <SettingRow label="Close threads when their PR merges" hint="Pinned, snoozed and active threads stay open. A worktree is removed only when nothing would be lost.">
+      <SettingRow label="Close threads when their PR merges" hint="Pinned, snoozed and active threads stay open. Its worktree is removed a day later, only if nothing would be lost.">
         <Toggle checked={s.workspace.closeMerged ?? true} onChange={(closeMerged) => update({ workspace: { ...s.workspace, closeMerged } })} label="Close threads when their PR merges" />
       </SettingRow>
-      <SettingRow label="Delete worktrees of closed threads" hint="Uncommitted changes are kept.">
+      <SettingRow label="Delete worktrees of closed threads" hint="A day after the thread closes. Uncommitted changes are kept.">
         <Toggle checked={s.autoDeleteWorktrees ?? false} onChange={(autoDeleteWorktrees) => update({ autoDeleteWorktrees })} label="Auto-delete worktrees" />
       </SettingRow>
       <SettingRow label="Share the stash with OpenBots">

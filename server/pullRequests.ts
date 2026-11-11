@@ -7,14 +7,14 @@
 //
 // A merge closes the thread only when it came after the thread's last user message (so a thread that
 // kept going after the merge stays open), and never while it's working, pinned, snoozed or was
-// reopened after an earlier auto-close. Its worktree is then removed when nothing would be lost:
-// no uncommitted changes, HEAD is the commit GitHub merged, and no other open thread works there.
+// reopened after an earlier auto-close. A day later its worktree is removed (closedWorktrees.ts) when
+// nothing would be lost: no uncommitted changes, HEAD is the commit GitHub merged, and no other open thread works there.
 // Only OpenBuild's own worktrees are ever removed.
 import { existsSync } from "node:fs";
 import type { ThreadPullRequest } from "../shared/types";
 import type { Chat } from "../src/lib/types";
 import { managedSessionBoundary } from "./pi/projection";
-import { findProject, removeWorktree } from "./projects";
+import { findProject } from "./projects";
 import * as storage from "./storage";
 import { gh, run } from "./workspaceGit";
 
@@ -69,6 +69,7 @@ export function toThreadPullRequest(pr: GhPullRequest, checkedAt: number): Threa
     ...(pr.isDraft ? { draft: true } : {}),
     ...(checks ? { checks } : {}),
     ...(Number.isFinite(mergedAt) ? { mergedAt } : {}),
+    ...(pr.headRefOid ? { head: pr.headRefOid } : {}),
     checkedAt,
   };
 }
@@ -115,15 +116,11 @@ export function keepPullRequestFields(chat: Chat, stored: Chat | undefined): Cha
   return next;
 }
 
-async function currentBranch(cwd: string): Promise<{ branch?: string; head?: string; dirty: boolean } | undefined> {
+async function currentBranch(cwd: string): Promise<{ branch?: string } | undefined> {
   if (!existsSync(cwd)) return undefined;
-  const [branch, head, status] = await Promise.all([
-    run(["git", "branch", "--show-current"], cwd, 10_000),
-    run(["git", "rev-parse", "HEAD"], cwd, 10_000),
-    run(["git", "status", "--porcelain"], cwd, 30_000),
-  ]);
+  const branch = await run(["git", "branch", "--show-current"], cwd, 10_000);
   if (branch.code !== 0) return undefined;
-  return { branch: branch.out || undefined, head: head.code === 0 ? head.out : undefined, dirty: status.code !== 0 || !!status.out };
+  return { branch: branch.out || undefined };
 }
 
 async function listPullRequests(repo: string): Promise<GhPullRequest[] | undefined> {
@@ -142,18 +139,6 @@ async function listPullRequests(repo: string): Promise<GhPullRequest[] | undefin
     return JSON.parse(r.out) as GhPullRequest[];
   } catch {
     return undefined;
-  }
-}
-
-/** Remove a closed thread's worktree when nothing in it would be lost. */
-async function removeMergedWorktree(chat: Chat, pr: GhPullRequest, local: { head?: string; dirty: boolean } | undefined, open: Chat[]) {
-  const cwd = chat.workspace?.cwd;
-  if (!cwd || !local || local.dirty || !pr.headRefOid || local.head !== pr.headRefOid) return;
-  if (open.some((other) => other.id !== chat.id && other.workspace?.cwd === cwd)) return;
-  try {
-    await removeWorktree(cwd, false, true);
-  } catch (err) {
-    console.warn(`[pull-requests] Kept the worktree ${cwd}: ${(err as Error).message}`);
   }
 }
 
@@ -208,10 +193,8 @@ async function sweepOnce(refresh?: () => Promise<void>) {
         pullRequest: pr,
         ...(close ? { archived: true, done: false, woke: false, autoClosedAt: now } : {}),
       } as unknown as storage.StoredChat);
-      if (close) {
-        console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
-        await removeMergedWorktree(stored, found, local, open);
-      }
+      // Its worktree goes a day later, if nothing in it would be lost (closedWorktrees.ts).
+      if (close) console.log(`[pull-requests] Closed "${stored.title}": #${pr.number} merged`);
     }
   }
 }

@@ -366,7 +366,7 @@ interface State {
   setChats: (chats: Chat[]) => void;
   upsertChat: (chat: Chat, persist?: boolean) => void;
   /** Update chat metadata (title, pinned, closed, workspace) without changing its recency. */
-  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "done" | "snoozedUntil" | "woke" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission" | "autoClosedAt" | "autoCloseOptOut">>) => void;
+  updateChat: (id: string, patch: Partial<Pick<Chat, "title" | "pinned" | "archived" | "done" | "snoozedUntil" | "woke" | "titleSource" | "unread" | "workspace" | "cursorAllowAllTools" | "permission" | "autoClosedAt" | "autoCloseOptOut" | "closedAt">>) => void;
   setSearchFocus: (focus: State["searchFocus"]) => void;
   patchMessage: (chatId: string, messageId: string, patch: Partial<Message> | ((m: Message) => Partial<Message>), persist?: boolean) => void;
 }

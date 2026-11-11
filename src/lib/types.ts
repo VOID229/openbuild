@@ -330,6 +330,8 @@ export interface Chat {
   pullRequest?: ThreadPullRequest;
   /** Pull requests its agent opened, by URL. Derived from its tool calls when it's summarized. */
   openedPullRequests?: string[];
+  /** When it was closed (by hand or by a bot): its worktree may be removed a day later. */
+  closedAt?: number;
   /** When the server closed it because its pull request merged. */
   autoClosedAt?: number;
   /** Reopened after being closed for a merge: never closed for it again. */

@@ -1,5 +1,6 @@
 import { warmStartup } from "./startupWarmup";
 import { startPullRequestSweep } from "./pullRequests";
+import { startClosedWorktreeSweep } from "./closedWorktrees";
 import { writeChat as saveChat } from "./chatWrite";
 import { searchChats } from "../src/lib/search";
 import { chatSummary } from "../shared/chatSummary";
@@ -732,6 +733,12 @@ try {
 // Native runtimes' sessions show up as threads by themselves, in the background (sessionImport.ts).
 sessionImport.startDiscovery();
 startPullRequestSweep(() => refreshChats(15_000));
+// Closed threads' worktrees, a day after they closed (when the setting is on). A paired device's goes through its proxy.
+startClosedWorktreeSweep(async (deviceId, cwd) => {
+  const path = `/api/devices/${encodeURIComponent(deviceId)}/api/workspaces/remove`;
+  const res = await proxyDevice(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd, force: false }) }), deviceId);
+  if (!res.ok) throw new Error((await res.json().catch(() => undefined))?.error ?? `HTTP ${res.status}`);
+});
 console.log(`\n  OpenBuild running at ${servers.map((s) => s.url).join(", ")}`);
 console.log(`  Threads and settings are saved in ${storage.location()}\n`);
 if (!localAuth.configured()) console.log("  No local password: anyone who can reach this server can use it. Set one with: openbuild set pass <password>\n");
