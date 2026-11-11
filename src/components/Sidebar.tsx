@@ -70,8 +70,9 @@ const isClosed = (chat: Chat, today = startOfToday()) =>
 const closePatch = (chat: Chat, today?: number) =>
   isClosed(chat, today)
     // Reopening a thread its merge closed keeps it open: the merge won't close it again.
-    ? { archived: false, done: true, ...(chat.autoClosedAt ? { autoClosedAt: undefined, autoCloseOptOut: true } : {}) }
-    : { archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false };
+    ? { archived: false, done: true, closedAt: undefined, ...(chat.autoClosedAt ? { autoClosedAt: undefined, autoCloseOptOut: true } : {}) }
+    // The server removes its worktree a day from now, if the user has that on (server/closedWorktrees.ts).
+    : { archived: true, done: false, woke: false, snoozedUntil: undefined, pinned: false, closedAt: Date.now() };
 
 /** Snoozing hides a thread under "Snoozed"; waking it by hand puts it back where it was. */
 const snoozePatch = (until: number) => ({ snoozedUntil: until, woke: false });
@@ -646,16 +647,7 @@ function toggleClosed(chat: Chat) {
   const closed = isClosed(chat);
   if (moving.has(chat.id)) return;
   if (!closed) leaveThread(chat.id);
-  const commit = () => {
-    const st = useStore.getState();
-    st.updateChat(chat.id, closePatch(chat));
-    const ws = chat.workspace;
-    if (!closed && st.settings.autoDeleteWorktrees && ws?.worktree) {
-      void removeWorktree(ws.cwd, false, ws.deviceId).catch((err: Error) => {
-        window.dispatchEvent(new CustomEvent("worktree-cleanup-error", { detail: `Worktree kept: ${err.message}` }));
-      });
-    }
-  };
+  const commit = () => useStore.getState().updateChat(chat.id, closePatch(chat));
   // A thread pinned from "Closed" stays in "Pinned" when it reopens.
   if (closed && chat.pinned) commit();
   else moveThread(chat.id, closed ? "open" : "close", commit);
@@ -1414,20 +1406,6 @@ export function Sidebar() {
   const sections = useStore((s) => s.sections);
   const toggleSection = useStore((s) => s.toggleSection);
   const [closedView, setClosedView] = useState(false);
-  const [cleanupError, setCleanupError] = useState<string>();
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const onError = (event: Event) => {
-      clearTimeout(timer);
-      setCleanupError((event as CustomEvent<string>).detail);
-      timer = setTimeout(() => setCleanupError(undefined), 8000);
-    };
-    window.addEventListener("worktree-cleanup-error", onError);
-    return () => {
-      window.removeEventListener("worktree-cleanup-error", onError);
-      clearTimeout(timer);
-    };
-  }, []);
   const historyRef = useRef<HTMLElement>(null);
   // A reload keeps the list where it was (search results start at the top).
   useScrollRestore(historyRef, deferredQuery ? undefined : closedView ? "threads:closed" : "threads");
@@ -1763,16 +1741,6 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
-      {cleanupError && (
-        <div className="notices">
-          <div className="notice" role="alert">
-            <div className="notice-row">
-              <span className="notice-text">{cleanupError}</span>
-              <IconButton label="Dismiss" onClick={() => setCleanupError(undefined)}><X size={14} /></IconButton>
-            </div>
-          </div>
-        </div>
-      )}
       <ChatContextMenu state={menu} sidebarRef={sidebarRef} onClose={closeMenu} onRename={setRenamingId} onRegenerate={onRegenerate} onDelete={setDeletingId} onSnooze={setSnoozingId} />
       {deleting && <DeleteThreadDialog chat={deleting} onClose={() => setDeletingId(undefined)} />}
       {snoozing && <SnoozeDialog chat={snoozing} onClose={() => setSnoozingId(undefined)} />}

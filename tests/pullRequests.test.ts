@@ -23,6 +23,8 @@ const script = `
   const storage = await import("./server/storage.ts");
   const projects = await import("./server/projects.ts");
   const pr = await import("./server/pullRequests.ts");
+  const closedWorktrees = await import("./server/closedWorktrees.ts");
+  const aDayOn = () => closedWorktrees.sweepClosedWorktrees(undefined, Date.now() + closedWorktrees.KEEP_FOR + 1000);
 
   // Pure rules first.
   assert.equal(pr.checksOf([]), undefined);
@@ -62,7 +64,7 @@ const script = `
   assert.equal(stale.pullRequest.number, 9);
   assert.equal(pr.keepPullRequestFields({ ...base, archived: false, autoCloseOptOut: true }, closed).archived, false);
 
-  // End to end: a worktree thread whose pull request merged gets closed, and its clean worktree removed.
+  // End to end: a worktree thread whose pull request merged gets closed, and a day later its clean worktree removed.
   const project = await projects.addProject(repo);
   const ws = await projects.prepareWorkspace(project.id, "worktree", undefined, "fix the thing");
   const ws2 = await projects.prepareWorkspace(project.id, "worktree", undefined, "other thing");
@@ -83,7 +85,12 @@ const script = `
   assert.equal(a.archived, true);
   assert.ok(a.autoClosedAt);
   assert.deepEqual([a.pullRequest.number, a.pullRequest.state, a.pullRequest.checks], [41, "merged", "passing"]);
-  assert.equal(existsSync(ws.cwd), false, "the clean worktree is removed");
+  assert.equal(a.pullRequest.head, head);
+  assert.equal(existsSync(ws.cwd), true, "the worktree stays for a day");
+  await closedWorktrees.sweepClosedWorktrees();
+  assert.equal(existsSync(ws.cwd), true, "still under a day");
+  await aDayOn();
+  assert.equal(existsSync(ws.cwd), false, "the clean worktree is removed a day later, with the setting off");
   assert.equal(sh(repo, "branch", "--list", ws.branch), "", "and its squash-merged branch");
   const b = storage.getChat("open");
   assert.equal(b.archived, undefined);
@@ -108,6 +115,7 @@ const script = `
   ]));
   await pr.sweep();
   assert.equal(storage.getChat("open").archived, true);
+  await aDayOn();
   assert.equal(existsSync(ws2.cwd), true);
 
   // A thread in the project's own checkout follows the pull request its agent opened from elsewhere.
