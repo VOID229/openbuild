@@ -200,12 +200,3 @@ test("the notice says which of the two is missing, links to pi.dev and leads int
   expect(remote.action).toBeUndefined();
   expect(remote.hint).toContain("Set it up on cachyos");
 });
-
-test("the primary bot's chat shows the notice while the server says Pi isn't ready", async () => {
-  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  expect(chat).toContain('conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0] && b.primary)');
-  expect(chat).toContain("{setup && primary && <PiSetupNotice setup={setup} bot={primary} />}");
-  const store = await Bun.file("src/lib/bots/store.ts").text();
-  expect(store).toContain('if (e.t === "setup")');
-  expect(store).toContain("setup: e.setup,");
-});

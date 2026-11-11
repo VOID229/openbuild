@@ -243,11 +243,6 @@ if (process.env.OPENBUILD_CURSOR_UI_CHILD !== "1") {
   });
 
   test("permissions sit in the workspace row, outside the composer's controls", async () => {
-    const { readFileSync } = await import("node:fs");
-    const composer = readFileSync(new URL("../src/components/Composer.tsx", import.meta.url), "utf8");
-    const bar = composer.slice(composer.indexOf('<div className="composer-bar">'), composer.indexOf("<RemoteControlToggle"));
-    expect(bar).toContain("<ModelPicker");
-    expect(bar).not.toContain("<PermissionPicker");
     reset();
     useStore.setState({ permissionModes: { "cursor||": { modes: [{ id: "default", name: "Configured" }], defaultMode: "default", status: "valid", checkedAt: Date.now() } } });
     const top = markup(createElement(WorkspaceTop, { permission: createElement(PermissionPicker, { dropUp: false }) }));

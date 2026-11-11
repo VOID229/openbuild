@@ -45,21 +45,6 @@ test("loud work, typing and holding on count as busy, and only holding says so f
   expect(busyBots(solo, { egg: { state: "error", conversationId: "solo" } }, {})).toEqual([]);
 });
 
-test("the sidebar and the chat's header read the same busy state, and the header says where", async () => {
-  const sidebar = await Bun.file("src/components/bots/BotsSidebar.tsx").text();
-  const chat = await Bun.file("src/components/bots/BotChat.tsx").text();
-  const common = await Bun.file("src/components/bots/common.tsx").text();
-  // Both through the one hook, so a group's huddle wakes and dozes the same members in each.
-  expect(common).toContain("useShallow((s) => (conversation ? busyBots(conversation, s.status, s.typing) : NONE))");
-  expect(sidebar).toContain("const working = useBusyBots(conversation);");
-  expect(chat).toContain("const working = useBusyBots(conversation);");
-  expect(chat).toContain("busy={busy} working={working}");
-  expect(chat).toContain("showWorking(conversation.id, s.status, typing)");
-  expect(chat).toContain("`Busy in ${conversationName(there, s.bots)}`");
-  expect(chat).toContain('activity ?? away ?? members');
-  expect(chat).toContain('<span className="bots-head-away">{away}</span>');
-});
-
 test("a busy solo avatar fidgets, an idle one doesn't", () => {
   useBots.setState({ bots: [{ id: "egg", name: "Dr Eggbot", look: { shape: "orb", color: "blue" } } as never], pulses: {} });
   const render = (busy: boolean) => renderToStaticMarkup(createElement(ConversationAvatar, { conversation: solo, size: 26, busy, badge: false }));

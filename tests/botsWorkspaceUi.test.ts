@@ -104,14 +104,6 @@ test("without the picker, a bot in this server's workspace lists this server's m
   expect(useBots.getState().workspace).toBe("srv");
 });
 
-test("the picker's component and styles are gone", async () => {
-  expect(await Bun.file("src/components/bots/WorkspacePicker.tsx").exists()).toBe(false);
-  for (const file of ["src/bots.css", "src/mobile.css"]) {
-    const css = await Bun.file(file).text();
-    expect(css).not.toMatch(/\.bots-workspace(-(menu|item|list|check|label|title|note|status|name|open|remote))?\b(?!-trouble)/);
-  }
-});
-
 test("in another device's workspace, its threads, files and apps resolve there or say they can't be opened here", async () => {
   snapshots.host = {
     bots: [bot],

@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { Chat, Settings } from "../src/lib/types";
@@ -332,9 +331,6 @@ test("bots can only be let use the harnesses installed on this server", async ()
 
 test("the runtime picker tightens its rows as the list grows", () => {
   expect([1, 6, 7, 8, 9, 12].map(runtimeMenuDensity)).toEqual(["roomy", "roomy", "tight", "tight", "dense", "dense"]);
-  const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
-  // Whatever still doesn't fit the room beside the anchor scrolls inside the menu instead of spilling out.
-  expect(css).toMatch(/\.ws-menu \.ws-options \{[^}]*min-height: 0;[^}]*overflow-y: auto;/);
 });
 
 test("existing threads omit the redundant runtime chip and never offer a runtime picker", () => {

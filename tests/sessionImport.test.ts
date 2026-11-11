@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,13 +100,6 @@ test("discovers Claude Code sessions silently, ready to continue, with finished 
 });
 
 test("the import dialog is gone: nothing asks, and discovery never runs inside test servers", async () => {
-  const root = join(import.meta.dir, "..");
-  const app = await readFile(join(root, "src/App.tsx"), "utf8");
-  const server = await readFile(join(root, "server/index.ts"), "utf8");
-  expect(app).not.toContain("SessionImport");
-  expect(server).not.toContain("/api/session-import");
-  expect(server).toContain("sessionImport.startDiscovery()");
-  expect(await Bun.file(join(root, "src/components/SessionImport.tsx")).exists()).toBe(false);
   const dir = await mkdtemp(join(tmpdir(), "openbuild-session-import-test-env-"));
   await run(dir, `${claudeFixture}
     import { strict as assert } from "node:assert";

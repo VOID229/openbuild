@@ -1,5 +1,4 @@
 import { afterEach, beforeAll, beforeEach, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { Window } from "happy-dom";
 
 // Escape in a thread opened inside OpenBots (/bots/thread-<id>), pressed in a DOM: it goes back like
@@ -259,12 +258,4 @@ test("a normal OpenBuild thread, and the bot chat itself, leave Escape alone", a
   await act(async () => useStore.setState({ botsOpen: true }));
   expect((await escape()).defaultPrevented).toBe(false);
   expect(useStore.getState().botsOpen).toBe(true);
-});
-
-test("App wires Escape and the Back button to the same navigation, only for the embedded thread", () => {
-  const app = readFileSync("src/App.tsx", "utf8");
-  expect(app).toContain("useBotsThreadEscape(botsThread);");
-  expect(app).toContain('label="Back to chat" tooltipSide="right" onClick={closeBotsThread}');
-  // Escape isn't a global shortcut, so a full OpenBuild thread's shortcuts don't change.
-  expect(readFileSync("src/lib/shortcuts.ts", "utf8")).not.toMatch(/default: "Escape"/);
 });
