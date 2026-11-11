@@ -132,8 +132,15 @@ export class Page {
   }
 }
 
+/** Says so in the file's output when setup took long: that time shows in no test's own. */
+const slow = (what: string, started: number) => {
+  const seconds = (performance.now() - started) / 1000;
+  if (seconds > 2) console.log(`[chromePage] ${what} took ${seconds.toFixed(1)} s`);
+};
+
 /** Starts Chrome; `close` stops it and removes its profile. */
 export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Promise<void> }> {
+  const started = performance.now();
   const profile = await mkdtemp(join(tmpdir(), "openbuild-chrome-"));
   const env = { ...process.env };
   // See html-render.ts: current Chrome can't parse the runner's `disabled:` bus address.
@@ -156,6 +163,7 @@ export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Prom
   });
   const ws = new WebSocket(url);
   await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+  slow("Chrome's start", started);
   return {
     ws,
     close: async () => {
@@ -172,6 +180,7 @@ export async function launchChrome(): Promise<{ ws: WebSocket; close: () => Prom
  * machines. `/api/*` answers `{}`; `routes` adds or overrides others. `stop` removes the build.
  */
 export async function serveFixture(html: string, routes: Record<string, (req: Request) => Response | Promise<Response>> = {}) {
+  const started = performance.now();
   const out = await mkdtemp(join(tmpdir(), "openbuild-fixture-"));
   // Now and then `bun build` doesn't exit: a build takes well under a second, so give up on one that
   // hasn't after a few and start again.
@@ -182,7 +191,9 @@ export async function serveFixture(html: string, routes: Record<string, (req: Re
     clearTimeout(stuck);
     if (code === 0) break;
     if (build.signalCode !== "SIGKILL" || attempt === 3) throw new Error(`Couldn't build ${html}:\n${err}`);
+    console.log(`[chromePage] a build of ${html} was stuck after 5 s: starting it again`);
   }
+  slow(`building ${html}`, started);
   const server = Bun.serve({
     port: 0,
     fetch: async (req) => {
