@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { createChatRefresh } from "../server/chatRefresh";
+import { spawnScript } from "./spawnScript";
 
 function deferred() {
   let resolve!: () => void;
@@ -79,8 +80,7 @@ test("chat preload and retry share a request, failures retry, later polls reques
     assert.deepEqual(await loadChats(), []);
     assert.deepEqual(urls, ["/api/chats?summaries&startup&all", "/api/chats?summaries&startup&all", "/api/chats?summaries"]);
   `;
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout: out, stderr: err } = await spawnScript(script);
   if (code !== 0) throw new Error(`${out}\n${err}`);
   expect(code).toBe(0);
 });

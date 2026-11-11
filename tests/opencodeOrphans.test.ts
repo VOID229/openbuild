@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { scriptCommand } from "./spawnScript";
 
 // OpenCode servers OpenBuild starts must not outlive it: not on SIGTERM (systemd stop with
 // KillMode=process, `openbuild stop`), and not on SIGKILL, where the next start reaps them.
@@ -79,10 +80,10 @@ test.skipIf(process.platform !== "linux")("after a SIGKILL the next start reaps 
   const before = rows().length;
   const service = Bun.spawn([bin, "serve", "--service"], { env: { ...process.env, OC_FIXTURE_LOG: log }, stdout: "pipe", stderr: "ignore" });
   others.push(service.pid);
-  const owner = Bun.spawn([process.execPath, "-e", `
+  const owner = Bun.spawn(scriptCommand(`
     const { workerConnection } = await import(${JSON.stringify(resolve("server/opencode-agent/connection.ts"))});
     await workerConnection(); console.log("ready"); setInterval(() => {}, 1000);
-  `], { env, stdout: "pipe", stderr: "inherit" });
+  `), { env, stdout: "pipe", stderr: "inherit" });
   others.push(owner.pid);
   await new Response(owner.stdout).body!.getReader().read();
   await until(() => rows().length === before + 2, "user's and worker's servers");

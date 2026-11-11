@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnScriptSync } from "./spawnScript";
 
 // A bot using another machine, end to end over loopback: a real OpenBuild server on a throwaway data
 // directory plays the paired machine ("Target Box"), and this process is the workspace server where
@@ -93,9 +94,9 @@ beforeAll(async () => {
   probe.stop(true);
   await launchTarget();
   // Open a pairing on the target the way `openbuild pair --host` does, and claim it from here.
-  const open = Bun.spawnSync([process.execPath, "-e", `const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Target Box", mode: "lan", urls: [] })));`], { env: { ...process.env, OPENCHAT_DATA_DIR: targetData }, stdout: "pipe", stderr: "pipe" });
-  if (open.exitCode !== 0) throw new Error(open.stderr.toString());
-  const { code } = JSON.parse(open.stdout.toString());
+  const open = spawnScriptSync(`const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Target Box", mode: "lan", urls: [] })));`, { OPENCHAT_DATA_DIR: targetData });
+  if (open.code !== 0) throw new Error(open.stderr);
+  const { code } = JSON.parse(open.stdout);
   const claimed = (await (await fetch(`${base()}/api/pair/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name: "Workspace Box" }) })).json()) as { token: string; device: any };
   token = claimed.token;
   target = claimed.device.id;
@@ -210,8 +211,8 @@ test("a target that goes offline fails the tool without running it here, and wor
 
 /** Pair another server with the target the way `openbuild pair --host` and `--client` do. Returns its token and the target's id for it. */
 async function pairAnother(name: string) {
-  const open = Bun.spawnSync([process.execPath, "-e", `const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Target Box", mode: "lan", urls: [] })));`], { env: { ...process.env, OPENCHAT_DATA_DIR: targetData }, stdout: "pipe", stderr: "pipe" });
-  const { code } = JSON.parse(open.stdout.toString());
+  const open = spawnScriptSync(`const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Target Box", mode: "lan", urls: [] })));`, { OPENCHAT_DATA_DIR: targetData });
+  const { code } = JSON.parse(open.stdout);
   const claimed = (await (await fetch(`${base()}/api/pair/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name }) })).json()) as { token: string };
   const clients = ((await (await fetch(`${base()}/api/paired-clients`)).json()) as { clients: { id: string; name: string }[] }).clients;
   return { token: claimed.token, id: clients.find((c) => c.name === name)!.id };

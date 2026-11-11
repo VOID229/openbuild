@@ -2,12 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const root = join(import.meta.dir, "..");
+import { spawnScript } from "./spawnScript";
 
 async function run(dir: string, script: string) {
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: root, env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir });
   if (code !== 0) throw new Error(`${out}\n${err}`);
   return out.trim();
 }
@@ -183,8 +181,7 @@ test("streamed activity in a one-to-one chat doesn't mark it unread in the sideb
     console.log("ok");
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { cwd: root, stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("ok");
 });

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type { PullCheck } from "../shared/types";
 import { usePanel } from "../src/lib/panel";
 import { actOnPull, clearPullFailure, mergeReadiness, mergeUnsettled, prefetchPull, pullKey, usePullActivity } from "../src/lib/pulls";
+import { spawnScript } from "./spawnScript";
 
 const fakeGh = `#!/bin/sh
 printf '%s\\n' "$*" >> "$GH_LOG"
@@ -174,13 +175,7 @@ test("pull requests are read and acted on through gh", async () => {
     Bun.spawnSync(["mkdir", "-p", bin]);
     writeFileSync(join(bin, "gh"), fakeGh);
     chmodSync(join(bin, "gh"), 0o755);
-    const proc = Bun.spawn([process.execPath, "-e", script], {
-      cwd: process.cwd(),
-      env: { ...process.env, TEST_ROOT: root, OPENCHAT_DATA_DIR: join(root, "data"), GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const { stdout: out, stderr: err, code } = await spawnScript(script, { TEST_ROOT: root, OPENCHAT_DATA_DIR: join(root, "data"), GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` });
     if (code !== 0) throw new Error(err || out);
     expect(out).toContain("ok");
   } finally {

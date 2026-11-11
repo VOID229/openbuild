@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { keyId } from "../server/friends/protocol";
 import { certificate, fakeClientBin, fakeNpmInstall, fakeRelay, freePort, identities, peer, until, type Peer } from "./fakeTunnel";
+import { spawnScriptSync } from "./spawnScript";
 
 // Friends through a tunnel, with a fake relay in OpenTunnel's place (friendsTunnelLive.test.ts runs the
 // same through the real client and relay when asked to). The host starts the tunnel client the way an
@@ -195,13 +196,13 @@ test("a guest holds one WSS through the tunnel, reconnects without losing anythi
 // address of theirs is refused rather than quietly swapped for the hosted one.
 test("the tunnel uses the hosted relay unless OPENBUILD_FRIEND_TUNNEL_API names another", () => {
   const run = (env: Record<string, string>) => {
-    const child = Bun.spawnSync([process.execPath, "-e", `
+    const child = spawnScriptSync(`
       const t = await import('./server/friends/tunnel.ts');
       let out;
       try { out = { relay: t.relay(), args: t.clientArgs() }; } catch (err) { out = { error: err.message }; }
       console.log(JSON.stringify(out));
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(directory, "relay-check"), OPENBUILD_FRIEND_TUNNEL_API: "", OPENTUNNEL_API: "https://someone-else.test", ...env }, stdout: "pipe", stderr: "pipe" });
-    return JSON.parse(child.stdout.toString());
+    `, { OPENCHAT_DATA_DIR: join(directory, "relay-check"), OPENBUILD_FRIEND_TUNNEL_API: "", OPENTUNNEL_API: "https://someone-else.test", ...env });
+    return JSON.parse(child.stdout);
   };
   expect(run({})).toEqual({ relay: "https://opentunnel.xyz", args: ["--profile", "openbuild-friends"] });
   expect(run({ OPENBUILD_FRIEND_TUNNEL_API: "https://tunnel.example.com/" })).toEqual({ relay: "https://tunnel.example.com", args: ["--profile", "openbuild-friends", "--api", "https://tunnel.example.com"] });
@@ -215,13 +216,13 @@ test("the tunnel uses the hosted relay unless OPENBUILD_FRIEND_TUNNEL_API names 
 // launcher whose native client is missing is said so, rather than run to fail with no PATH.
 test("an `env node` launcher from npm is resolved to its native client", () => {
   const resolveBin = (bin: string) => {
-    const child = Bun.spawnSync([process.execPath, "-e", `
+    const child = spawnScriptSync(`
       const t = await import('./server/friends/tunnel.ts');
       let out;
       try { out = { bin: t.bin() }; } catch (err) { out = { error: err.message }; }
       console.log(JSON.stringify(out));
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(directory, "bin-check"), OPENBUILD_FRIEND_TUNNEL_BIN: bin }, stdout: "pipe", stderr: "pipe" });
-    return JSON.parse(child.stdout.toString());
+    `, { OPENCHAT_DATA_DIR: join(directory, "bin-check"), OPENBUILD_FRIEND_TUNNEL_BIN: bin });
+    return JSON.parse(child.stdout);
   };
   const nested = fakeNpmInstall(join(directory, "npm-nested"));
   expect(resolveBin(nested.launcher)).toEqual({ bin: nested.native });

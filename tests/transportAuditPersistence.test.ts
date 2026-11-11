@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appTest } from "./convex";
+import { spawnScript } from "./spawnScript";
 import { api } from "../convex/_generated/api";
 
 describe("transport audit: read-only persistence findings", () => {
@@ -24,13 +25,7 @@ describe("transport audit: read-only persistence findings", () => {
         s.putChat({id:"audit",createdAt:1,updatedAt:100,messages:[prompt]});
         console.log(JSON.stringify(s.getChat("audit").messages.map(m => m.content)));
       `;
-      const child = Bun.spawn([process.execPath, "-e", script], {
-        cwd: join(import.meta.dir, ".."),
-        env: { ...process.env, OPENCHAT_DATA_DIR: dir },
-        stdout: "pipe",
-        stderr: "pipe",
-      });
-      const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir });
       expect(code).toBe(0);
       expect(err).toBe("");
       storedMessages = JSON.parse(out);

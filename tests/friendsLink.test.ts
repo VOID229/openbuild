@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // The host's side of a friend's connection, driven by hand with a socket that records what it's sent:
 // the handshake, frames applied once and in order, acknowledgements clearing the outbox, what's waiting
@@ -10,7 +11,7 @@ import { join } from "node:path";
 test("a friend's connection applies each frame once, resends what's unacknowledged, and is cut off past the rate limit", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-friends-link-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const store = await import('./server/friends/store.ts');
       const link = await import('./server/friends/link.ts');
@@ -75,8 +76,7 @@ test("a friend's connection applies each frame once, resends what's unacknowledg
       c.frame(last + 2);
       a.equal(c.ws.closed, 4003);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -90,7 +90,7 @@ test("a friend's connection applies each frame once, resends what's unacknowledg
 test("a frame that fails to apply is kept and retried until it applies, and is never skipped", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-friends-apply-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const store = await import('./server/friends/store.ts');
       const link = await import('./server/friends/link.ts');
@@ -172,8 +172,7 @@ test("a frame that fails to apply is kept and retried until it applies, and is n
       await Bun.sleep(150);
       a.deepEqual(applied, [1, 2, 3, 4, 5]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

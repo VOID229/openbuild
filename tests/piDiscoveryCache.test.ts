@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("Pi's unchanged archive survives server restart without transcript reads; edits still invalidate it", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ob-discovery-cache-"));
@@ -12,10 +13,9 @@ test("Pi's unchanged archive survives server restart without transcript reads; e
     const storage = await import('./server/storage.ts');
   `;
   async function run(script: string) {
-    const child = Bun.spawn([process.execPath, "-e", common + script + "\nprocess.exit(0);"], { cwd: join(import.meta.dir, ".."), env: { ...process.env,
+    const { code, stdout: out, stderr: err } = await spawnScript(common + script + "\nprocess.exit(0);", {
       OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent"), PI_CODING_AGENT_SESSION_DIR: join(dir, "sessions"),
-    }, stdout: "pipe", stderr: "pipe" });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    });
     expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
   }
   try {

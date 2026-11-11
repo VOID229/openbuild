@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 const run = async (script: string, env: Record<string, string> = {}) => {
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: join(import.meta.dir, ".."), env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script, env);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   return stdout.trim();
 };

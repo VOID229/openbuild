@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { finished, startScript } from "./spawnScript";
 
 // The runtime opens storage at import time. Each reproduction therefore gets its own process,
 // database, fake executable, and Pi directory; none can read the user's sessions or credentials.
@@ -26,12 +27,9 @@ async function reproduce(mode: string, body: string) {
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent"), PI_CODING_AGENT_SESSION_DIR: join(dir, "sessions"), PI_BIN: bin, PI_TEST_CASE: mode, PI_TEST_LOG: join(dir, "commands.jsonl") },
-    });
+    const child = startScript(script, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent"), PI_CODING_AGENT_SESSION_DIR: join(dir, "sessions"), PI_BIN: bin, PI_TEST_CASE: mode, PI_TEST_LOG: join(dir, "commands.jsonl") });
     const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await finished(child);
     clearTimeout(timer);
     expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
   } finally {

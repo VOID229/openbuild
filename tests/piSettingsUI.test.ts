@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 // Rendered in a subprocess so the component's module graph cannot leak into other tests.
 test("Pi settings offer New for skills and prompts but not extensions, keeping extension row controls", async () => {
@@ -12,8 +13,7 @@ test("Pi settings offer New for skills and prompts but not extensions, keeping e
     console.log(JSON.stringify({ extension: render("extension"), skill: render("skill"), prompt: render("prompt") }));
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   const html = JSON.parse(stdout.trim().split("\n").at(-1)!) as Record<string, string>;
 

@@ -2,29 +2,23 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // Each step runs in its own process (a server restart in between), against throwaway data and
 // native session folders, so tests never read the user's real database or transcripts.
 async function run(dir: string, script: string) {
   await mkdir(join(dir, "home"), { recursive: true });
-  const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", script], {
-    cwd: join(import.meta.dir, ".."),
-    env: {
-      ...process.env,
-      OPENCHAT_DATA_DIR: join(dir, "data"),
-      HOME: join(dir, "home"),
-      XDG_DATA_HOME: join(dir, "xdg"),
-      CLAUDE_CONFIG_DIR: join(dir, "claude"),
-      CODEX_HOME: join(dir, "codex"),
-      CURSOR_CONFIG_DIR: join(dir, "cursor"),
-      CODEX_BIN: join(dir, "no-codex"),
-      OPENCODE_BIN: join(dir, "no-opencode"),
-      OPENCODE_SERVER_URL: "",
-    },
-    stdout: "pipe",
-    stderr: "pipe",
+  const { code, stdout: out, stderr: err } = await spawnScript(script, {
+    OPENCHAT_DATA_DIR: join(dir, "data"),
+    HOME: join(dir, "home"),
+    XDG_DATA_HOME: join(dir, "xdg"),
+    CLAUDE_CONFIG_DIR: join(dir, "claude"),
+    CODEX_HOME: join(dir, "codex"),
+    CURSOR_CONFIG_DIR: join(dir, "cursor"),
+    CODEX_BIN: join(dir, "no-codex"),
+    OPENCODE_BIN: join(dir, "no-opencode"),
+    OPENCODE_SERVER_URL: "",
   });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
   expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
 }
 

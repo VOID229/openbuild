@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("worker replay repairs offline output, completion and stale saves without resurrecting retries", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ob-pi-projection-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { projectReply, projectChat, projectStoredChats } from './server/pi/projection';
       import * as storage from './server/storage';
@@ -74,8 +75,7 @@ test("worker replay repairs offline output, completion and stale saves without r
       projectStoredChats([tail]); a.equal(storage.getChat(chat.id).messages[0].shell.output,'first');
       projectStoredChats([{...tail,eventCount:2,events:[{t:'snap',output:'second',status:'running'}]}]);
       a.equal(storage.getChat(chat.id).messages[0].shell.output,'second');
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const stderr = await new Response(child.stderr).text();
-    expect(await child.exited, stderr).toBe(0);
+    `, { OPENCHAT_DATA_DIR: dir });
+    expect(code, stderr).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

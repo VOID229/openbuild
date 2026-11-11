@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MessageItem } from "../src/components/MessageItem";
 import { botStash, botStashOf, imageFiles, pasteBotStash, pasteStash, stashAction, threadStash, type Stashed } from "../src/lib/stash";
 import type { Attachment } from "../shared/types";
+import { spawnScript } from "./spawnScript";
 
 const file = (id: string, patch: Partial<Attachment> = {}) => ({ id, name: `${id}.txt`, mime: "text/plain", size: 1, dataUrl: "data:,", ...patch }) as Attachment;
 const stashed = (text: string, files: Attachment[] = []): Stashed => ({ id: "s", text, files, createdAt: 0 });
@@ -112,8 +113,7 @@ test("stashes survive fresh module loads with attachments, newest first, until r
     await fifth.stashReady;
     expect(items(fifth).map((s) => s.id)).toEqual([c.id]);
   `;
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout: out, stderr: err } = await spawnScript(script);
   if (code !== 0) throw new Error(`${out}\n${err}`);
   expect(code).toBe(0);
 });

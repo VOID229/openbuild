@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import questionAsk, { cleanOptions, letter } from "../server/pi/extensions/question-ask";
+import { spawnScript } from "./spawnScript";
 
 test("question_ask options drop blanks, duplicates and a hand-made Other", () => {
   expect(cleanOptions([" Postgres ", "SQLite", "Postgres", "", "Other", "C) Something else", "None of the above"])).toEqual(["Postgres", "SQLite"]);
@@ -76,13 +77,7 @@ test("a question_ask call in a Pi transcript reads as an answered question", asy
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

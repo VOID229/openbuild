@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { laneDirectory, sessionGeneration, SESSION_MAX_AGE, SESSION_MAX_BYTES, memoryContext, compactionPolicy, COMPACT_AT, deliveryIdentity, readDeliveries, saveDeliveries } from "../server/bots/sessionPolicy";
+import { spawnScript } from "./spawnScript";
 
 test("bot and conversation lanes are independent including friend conversations", () => {
   const paths = new Set([laneDirectory("/tmp", "a", "direct"), laneDirectory("/tmp", "a", "friend"), laneDirectory("/tmp", "b", "direct")]);
@@ -84,7 +85,7 @@ test("compaction starts at 3/4 of small windows and at a fixed bound on large on
 test("transcript suppresses committed context, retains explicit assignments and exposes reaction changes", async () => {
   const root = mkdtempSync(join(tmpdir(), "bot-dedup-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const svc = await import('./server/bots/service.ts');
       const runner = await import('./server/bots/runner.ts');
@@ -104,8 +105,7 @@ test("transcript suppresses committed context, retains explicit assignments and 
       a.match(changed, /CONTEXT_CANARY/);
       a.match(changed, /❤️/);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: root }, stdout: "pipe", stderr: "pipe" });
-    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: root });
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

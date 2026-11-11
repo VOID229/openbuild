@@ -7,6 +7,7 @@ import { DurableRuntime } from "../server/durable/runtime";
 import { DurableClient } from "../server/durable/remote";
 import { serveWorker } from "../server/durable/worker";
 import { fakeModels } from "./durable-fake";
+import { startScript } from "./spawnScript";
 
 function questionModels() {
   const fake = fakeModels();
@@ -95,7 +96,7 @@ describe("Durable questions", () => {
       writeFileSync(${JSON.stringify(marker)}, 'ready');
       setInterval(() => {}, 1000);
     `;
-    const child = Bun.spawn([process.execPath, "-e", code], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
+    const child = startScript(code);
     let runtime: DurableRuntime | undefined;
     try {
       await until(() => existsSync(marker));

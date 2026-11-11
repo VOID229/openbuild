@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 /** Run a client-side script in a child process with the app's browser globals stubbed. */
 async function run(script: string) {
@@ -15,8 +16,7 @@ async function run(script: string) {
       return answers(init);
     };
   `;
-  const child = Bun.spawn([process.execPath, "-e", prelude + script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  const { code, stderr: err } = await spawnScript(prelude + script);
   expect(err).toBe("");
   expect(code).toBe(0);
 }

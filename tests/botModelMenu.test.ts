@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScriptSync } from "./spawnScript";
 
 // Isolate UI mocks from the other suites.
 test("bot model menu uses Pi's current scope despite Show all and a stale selection", () => {
@@ -39,7 +40,7 @@ test("bot model menu uses Pi's current scope despite Show all and a stale select
     assert.ok(!html.includes("Cursor Auto"));
     assert.ok(!html.includes("Show all"));
   `;
-  const result = Bun.spawnSync([process.execPath, "--eval", script], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
-  expect(new TextDecoder().decode(result.stderr)).toBe("");
-  expect(result.exitCode).toBe(0);
+  const result = spawnScriptSync(script);
+  expect(result.stderr).toBe("");
+  expect(result.code).toBe(0);
 });

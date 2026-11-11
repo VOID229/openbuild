@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 // A stream that stops delivering without closing (a network change, a phone waking from sleep) used
 // to leave the bot's work and reply unseen until a reload. Isolated: it fakes the browser's clock,
@@ -99,8 +100,7 @@ test("a silent OpenBots stream reconnects by itself and brings back the bot's wo
     console.log("ok");
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("ok");
 });

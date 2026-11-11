@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // The one look a bot gets through the memory it had before the profile/journal split: on its next
 // turn of its own, once, and only if it had any. Turns run on fake Pis that record their prompts.
@@ -9,13 +10,7 @@ import { join } from "node:path";
 async function run(script: string) {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-memory-review-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     if (code !== 0) console.error(out, err);
     expect(err).toBe("");
     expect(code).toBe(0);

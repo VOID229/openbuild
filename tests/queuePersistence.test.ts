@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 // Keep the browser storage shim out of other tests' module caches.
 test("queues survive fresh module loads with attachments, edits, order and deletions", async () => {
@@ -43,8 +44,7 @@ test("queues survive fresh module loads with attachments, edits, order and delet
     await fourth.queuesReady;
     expect(fourth.queueOf("other")).toEqual([]);
   `;
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout: out, stderr: err } = await spawnScript(script);
   if (code !== 0) throw new Error(`${out}\n${err}`);
   expect(code).toBe(0);
 });

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // Run discovery in its own process so tests never open the user's real database or Pi archive.
 test("discovers past and future Pi sessions, refreshes history, resumes originals and respects deletions", async () => {
@@ -170,11 +171,7 @@ test("discovers past and future Pi sessions, refreshes history, resumes original
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent"), PI_CODING_AGENT_SESSION_DIR: join(dir, "custom") },
-    });
-    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent"), PI_CODING_AGENT_SESSION_DIR: join(dir, "custom") });
     expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
   } finally {
     await rm(dir, { recursive: true, force: true });

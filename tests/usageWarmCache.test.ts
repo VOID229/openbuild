@@ -2,15 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 async function isolated(script: string) {
   const dir = await mkdtemp(join(tmpdir(), "ob-usage-warm-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script + "\nprocess.exit(0);"], {
-      cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-      env: { ...process.env, HOME: dir, OPENCHAT_DATA_DIR: join(dir, "data"), GROK_HOME: join(dir, ".grok"), CODEX_HOME: join(dir, ".codex"), CLAUDE_CONFIG_DIR: join(dir, ".claude") },
-    });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script + "\nprocess.exit(0);", { HOME: dir, OPENCHAT_DATA_DIR: join(dir, "data"), GROK_HOME: join(dir, ".grok"), CODEX_HOME: join(dir, ".codex"), CLAUDE_CONFIG_DIR: join(dir, ".claude") });
     expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
   } finally { await rm(dir, { recursive: true, force: true }); }
 }

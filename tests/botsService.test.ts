@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("bot writes preserve ownership, history and one-shot scheduling", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-integrity-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -82,8 +83,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
       a.equal(db.routines(first.bot.id).find(r => r.id === stale.id).enabled, false);
       a.equal(wakes.length, beforeStale);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -95,7 +95,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 test("an untagged group message reaches every bot; whoever was last named answers it for 20 minutes, else the primary, with no routing model", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const spawn = Bun.spawn;
       let spawns = 0;
@@ -131,8 +131,7 @@ test("an untagged group message reaches every bot; whoever was last named answer
       a.equal(wakes.length, 2);
       a.equal(spawns, 0);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe(""); expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -140,7 +139,7 @@ test("an untagged group message reaches every bot; whoever was last named answer
 test("a group reply wakes only the bot it quotes; one quoting nobody there reaches every bot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-replies-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const svc = await import('./server/bots/service.ts');
       const primary = svc.createBot({ name: 'Boss' });
@@ -172,8 +171,7 @@ test("a group reply wakes only the bot it quotes; one quoting nobody there reach
       svc.updateConversation(group.id, { botIds: [primary.bot.id] });
       await check('Removed bot', quoted.id, [primary.bot.id]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -184,7 +182,7 @@ test("a group reply wakes only the bot it quotes; one quoting nobody there reach
 test("a message between bots shows as a linked activity line in each bot's own chat, without its text", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-side-activity-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -210,8 +208,7 @@ test("a message between bots shows as a linked activity line in each bot's own c
       a.equal(events(asker.conversationId).length, 1);
       a.equal(events(helper.conversationId).length, 2);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -222,7 +219,7 @@ test("a message between bots shows as a linked activity line in each bot's own c
 test('group follow refreshes only on user requests and follows membership changes', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-follow-'));
   try {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const svc = await import('./server/bots/service.ts');
       const boss = svc.createBot({ name: 'Boss' }).bot.id;
@@ -249,8 +246,7 @@ test('group follow refreshes only on user requests and follows membership change
       svc.updateConversation(group.id, { botIds: [boss] });
       wakes.length = 0; post('Only boss'); a.deepEqual(last(9), [boss]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe(''); expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
@@ -259,7 +255,7 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-follow-restart-'));
   // Each run is a fresh server process on the same data folder: a restart between them.
   const run = async (script: string) => {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stdout: out, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       const svc = await import('./server/bots/service.ts');
@@ -272,8 +268,7 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
       const rows = () => db.db.query('SELECT conversation_id AS id FROM group_follows ORDER BY conversation_id').all().map(r => r.id);
       ${script}
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe(''); expect(code).toBe(0);
     return out.trim() ? JSON.parse(out) : undefined;
   };
@@ -335,7 +330,7 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
 test("bots replying to each other never pause a chat, and an old bot-loop setting is ignored", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-loop-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
@@ -359,8 +354,7 @@ test("bots replying to each other never pause a chat, and an old bot-loop settin
       a.equal('botLoop' in svc.updateSettings({ botLoop: { enabled: true, limit: 3 } }), false);
       a.equal('botLoop' in db.getValue('settings'), false);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe(""); expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }
 });

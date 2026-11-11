@@ -3,13 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { unexpectedStderr } from './botStderr';
+import { spawnScript } from './spawnScript';
 
 // Scoped group steers through timeout recovery: the real service routing and runner, with a fake Pi
 // that keeps its own steering queue and answers late the way Pi 1.5 does, in a subprocess on its own data dir.
 async function run(name: string, body: string) {
   const dir = await mkdtemp(join(tmpdir(), `openbuild-group-steer-recovery-${name}-`));
   try {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -56,8 +57,7 @@ async function run(name: string, body: string) {
       const assignedIn = (text) => prompts.filter(p => lineFor(p.message, text)?.includes('[assigned request: answer this]'));
       ${body}
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(unexpectedStderr(err.replace(/^\[bots\] [0-9a-f-]{36} fallback one\/primary → two\/fallback: overloaded\n/gm, ""))).toBe('');
     expect(code).toBe(0);
   } finally {

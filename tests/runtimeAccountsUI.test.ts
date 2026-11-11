@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 // Module mocks stay in a subprocess so they cannot replace other tests' real store.
 test("runtime account settings keep store snapshots stable with no saved accounts", async () => {
@@ -31,8 +32,7 @@ test("runtime account settings keep store snapshots stable with no saved account
     if (checks < 8) throw new Error("Store selectors were not exercised");
     console.log("stable account snapshots");
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("stable account snapshots");
 });

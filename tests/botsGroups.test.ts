@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("registered group tool crosses authenticated dispatch and preserves chat boundaries", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-group-tools-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db';
       import * as svc from './server/bots/service';
@@ -74,8 +75,7 @@ test("registered group tool crosses authenticated dispatch and preserves chat bo
       process.env.OPENBOTS_TOKEN = 'invalid';
       await a.rejects(() => call({action:'create_group', name:'Forbidden', bots:['Gamma']}), /Unauthorized/);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

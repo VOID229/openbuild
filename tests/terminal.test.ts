@@ -5,6 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { editingSequence, terminalSize, terminalTail } from "../shared/terminal";
+import { spawnScript } from "./spawnScript";
 
 describe("terminalSize", () => {
   test("takes what the browser measured", () => {
@@ -169,13 +170,7 @@ test("a shell runs on a PTY in the folder asked for: it answers, resizes, and re
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

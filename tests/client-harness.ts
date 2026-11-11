@@ -1,8 +1,9 @@
 import { expect } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 /** Fresh browser modules and fake transport per scenario. Never contacts a service or user DB. */
 export async function scenario(body: string) {
-  const child = Bun.spawn([process.execPath, "-e", `
+  const { code, stderr } = await spawnScript(`
     import { strict as assert } from 'node:assert';
     const ls = new Map();
     globalThis.window = globalThis;
@@ -34,7 +35,6 @@ export async function scenario(body: string) {
     const current = () => useStore.getState().chats.find(c => c.id === 'c');
     ${body}
     process.exit(0);
-  `], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  `);
   expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
 }

@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 const script = `
   import { strict as assert } from "node:assert";
@@ -77,13 +78,7 @@ const script = `
 test("closed threads' worktrees are removed a day after they close", async () => {
   const root = mkdtempSync(join(tmpdir(), "openbuild-closed-worktrees-"));
   try {
-    const proc = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const { stdout: out, stderr: err, code } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root });
     if (code !== 0) console.error(out, err);
     expect(code).toBe(0);
     expect(out).toContain("ok");

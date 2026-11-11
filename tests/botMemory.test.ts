@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JOURNAL_RECENT, PROFILE_MAX_BYTES, type MemoryItem } from "../shared/bots";
 import { findMemory, JOURNAL_LINE_MAX, memoryDate, memoryKey, memorySection, similarMemories } from "../server/bots/sessionPolicy";
+import { spawnScript } from "./spawnScript";
 
 // A bot's memory: a capped profile that's always in its prompt, a journal of which only the latest
 // entries are, and search over all of it. Each script runs against its own data directory, in a
@@ -11,13 +12,7 @@ import { findMemory, JOURNAL_LINE_MAX, memoryDate, memoryKey, memorySection, sim
 async function run(script: string) {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-memory-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     if (code !== 0) console.error(out, err);
     expect(err).toBe("");
     expect(code).toBe(0);
@@ -399,10 +394,9 @@ test("memory from before the split fills the profile newest first up to its cap,
 
 test("memory outlives the process: a new one reads back the same profile, journal and index", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-memory-restart-"));
-  const env = { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") };
+  const env = { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") };
   const spawn = async (script: string) => {
-    const child = Bun.spawn([process.execPath, "-e", script], { cwd: join(import.meta.dir, ".."), env, stdout: "pipe", stderr: "pipe" });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script, env);
     if (code !== 0) console.error(out, err);
     expect(err).toBe("");
     expect(code).toBe(0);
