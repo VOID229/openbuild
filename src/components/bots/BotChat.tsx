@@ -1173,13 +1173,33 @@ function contentTop(row: HTMLElement, scroller: HTMLElement) {
 
 const edgeOf = (scroller: HTMLElement, edge: Edge) => scroller.scrollTop + (edge === "bottom" ? scroller.clientHeight : 0);
 
-/** The last message starting above the bottom of the view, or the first still showing at its top. */
+// A folded run of activity holds its lines hidden, with no place of their own: its toggle stands for them.
+const SPOT_ROWS = ".bm-row[data-id], .bm-event[data-id], .bm-events-toggle[data-id]";
+
+/**
+ * The last message starting above the bottom of the view, or the first still showing at its top.
+ * Found by the chat's blocks first, then only among the rows of the blocks at that edge: blocks out of
+ * view skip layout (content-visibility), and reading a row inside one lays it out there and then.
+ */
 function spotIn(scroller: HTMLElement, edge: Edge): Spot | undefined {
   const at = edgeOf(scroller, edge);
-  // A folded run of activity holds its lines hidden, with no place of their own: its toggle stands for them.
-  const rows = [...scroller.querySelectorAll<HTMLElement>(".bm-row[data-id], .bm-event[data-id], .bm-events-toggle[data-id]")].filter((r) => r.offsetParent);
-  const row = edge === "bottom" ? rows.findLast((r) => contentTop(r, scroller) < at) : rows.find((r) => contentTop(r, scroller) + r.offsetHeight > at);
-  return row && { id: row.dataset.id!, offset: contentTop(row, scroller) - at };
+  const blocks = [...(scroller.querySelector(".bots-messages-inner")?.children ?? [])] as HTMLElement[];
+  const rowsOf = (block: HTMLElement) => (block.matches(SPOT_ROWS) ? [block] : [...block.querySelectorAll<HTMLElement>(SPOT_ROWS)]).filter((r) => r.offsetParent);
+  if (edge === "bottom") {
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const block = blocks[i]!;
+      if (!block.offsetParent || contentTop(block, scroller) >= at) continue;
+      const row = rowsOf(block).findLast((r) => contentTop(r, scroller) < at);
+      if (row) return { id: row.dataset.id!, offset: contentTop(row, scroller) - at };
+    }
+    return undefined;
+  }
+  for (const block of blocks) {
+    if (!block.offsetParent || contentTop(block, scroller) + block.offsetHeight <= at) continue;
+    const row = rowsOf(block).find((r) => contentTop(r, scroller) + r.offsetHeight > at);
+    if (row) return { id: row.dataset.id!, offset: contentTop(row, scroller) - at };
+  }
+  return undefined;
 }
 
 /** Scrolls the spot's message back to where it was from that edge. False when its message is gone. */
@@ -1190,8 +1210,24 @@ function putBack(scroller: HTMLElement, spot: Spot | undefined, edge: Edge) {
   return true;
 }
 
+/**
+ * Lets the chat's rows out of view skip rendering (bots.css, bots-messages-settled), once a frame has
+ * laid them all out while it showed: each then keeps that height while skipped, so nothing is placed
+ * by an estimate. A frame that sees the chat shown is followed by the one that sets it.
+ */
+function settleRows(scroller: HTMLElement) {
+  let seen = false;
+  const step = () => {
+    if (!scroller.isConnected) return;
+    if (seen) return void scroller.classList.add("bots-messages-settled");
+    seen = scroller.clientHeight > 0;
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
 /** `since`: messages after it are new, and animate in. */
-function Messages({ conversation, since, onReply }: { conversation: Conversation; since: number; onReply: (id: string) => void }) {
+const Messages = memo(function Messages({ conversation, since, onReply }: { conversation: Conversation; since: number; onReply: (id: string) => void }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
   const typing = useBots((s) => s.typing[conversation.id] ?? EMPTY);
@@ -1328,6 +1364,7 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       // Hidden from the start, it's opened once it's shown.
       if (!el.clientHeight) return;
       opened.current = true;
+      settleRows(el);
       if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
       moved.current = el.scrollTop;
     } else if (!stick.current) restore();
@@ -1563,10 +1600,10 @@ function Messages({ conversation, since, onReply }: { conversation: Conversation
       <MessageMenu held={heldMessage && held && { message: heldMessage, bubble: held.bubble }} conversation={conversation} readonly={readonly} onClose={() => setHeld(undefined)} onReply={onReply} />
     </div>
   );
-}
+});
 
 /** One activity line: who did what, and what it was about. */
-function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
+const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
   const event = m.event!;
   // The bot the detail names, by id, so it still links after a rename. A thread's detail is a
   // PR or thread title, not a mention, so a bot name inside it stays plain text.
@@ -1603,7 +1640,7 @@ function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { mess
       )}
     </div>
   );
-}
+});
 
 /**
  * A run's lines with repeats folded: each line that does just what the one before it did (same bot, same
@@ -1638,7 +1675,7 @@ const RUN_FOLD_MS = 260;
  * each line shows as it would on its own. Folded, they're still there (hidden), so finding a line by
  * its id, or reading its words, works either way.
  */
-function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot[]; since: number }) {
+const EventRun = memo(function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot[]; since: number }) {
   const [open, setOpen] = useState(false);
   // Folding, the lines stay for as long as they take to fold away (bots.css), then hide.
   const [folding, setFolding] = useState(false);
@@ -1683,7 +1720,7 @@ function EventRun({ messages, bots, since }: { messages: BotMessage[]; bots: Bot
       </div>
     </div>
   );
-}
+});
 
 /** The longest edge a picked image keeps: a full-HD screenshot stays 1:1, a Retina one is halved. */
 const IMAGE_EDGE = 2048;

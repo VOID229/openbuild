@@ -1420,6 +1420,25 @@
   margin-top: 16px;
 }
 
+/* Rows out of view skip style, layout and paint, as a thread's messages do (.messages-inner > .msg):
+   coming back to OpenBots shows the chat again, which otherwise lays out every message loaded there
+   and then, before the switch can draw a frame. Only once the chat has been laid out whole
+   (bots-messages-settled, from BotChat), so every row skipped keeps its real height and the view is
+   put back exactly; rows that come later start from an estimate, and the chat's resize observer holds
+   the view still as it comes true. The clip margin keeps a focus ring, which sits just outside the row. */
+.bots-messages-inner > :is(.bm-group, .bm-event, .bm-events) {
+  contain-intrinsic-size: auto 72px;
+  overflow-clip-margin: 4px;
+}
+
+.bots-messages-inner > :is(.bm-event, .bm-events) {
+  contain-intrinsic-size: auto 20px;
+}
+
+.bots-messages-settled > .bots-messages-inner > :is(.bm-group, .bm-event, .bm-events) {
+  content-visibility: auto;
+}
+
 .bm-mine {
   align-items: flex-end;
 }

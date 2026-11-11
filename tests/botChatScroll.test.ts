@@ -155,6 +155,24 @@ describe.skipIf(!browser)("switching OpenBots chats", () => {
     await samePlace(page, left);
   }, 60_000);
 
+  test("shown again, a long chat lays out only what's in view, every row keeping its height", async () => {
+    const page = await open();
+    await select(page, "b");
+    await page.wheel(-900);
+    const left = await topMessage(page);
+    const height = () => page.eval<number>("document.querySelector('.bots-messages').scrollHeight");
+    const before = await height();
+    await show(page, false);
+    await show(page, true);
+    // Coming back to OpenBots (as App's Activity does) skips the rows far from the view instead of laying
+    // out the whole chat before the switch can draw: the first of 60 messages isn't rendered.
+    expect(await page.eval<boolean>("document.querySelector('.bots-messages').classList.contains('bots-messages-settled')")).toBe(true);
+    expect(await page.eval<boolean>("document.querySelector('.bots-messages-inner > .bm-group .bm-row').checkVisibility({ contentVisibilityAuto: true })")).toBe(false);
+    // Skipped rows keep their real heights, so the chat is as tall as it was, and the view where it was.
+    expect(await height()).toBe(before);
+    await samePlace(page, left);
+  }, 60_000);
+
   test("late content keeps a chat at the bottom: a snapshot, images, activity", async () => {
     const page = await open();
     await select(page, "b");
