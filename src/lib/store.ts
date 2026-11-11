@@ -46,6 +46,13 @@ const DEFAULT_SETTINGS: Settings = {
   shortcuts: {},
 };
 
+/** Whether the new thread's Remote Control switch is on: what was switched, else the default in Settings → General. */
+export const remoteControlDraft = (s: { draftRemoteControl?: boolean; settings: Settings }) => {
+  if (s.draftRemoteControl !== undefined) return s.draftRemoteControl;
+  const mode = s.settings.remoteControlDefault ?? "off";
+  return mode === "on" || (mode === "last-used" && !!s.settings.remoteControlLast);
+};
+
 type SidebarSections = { pinned: boolean; attention: boolean; limits: boolean; subagents: boolean; woke: boolean; done: boolean; working: boolean; snoozed: boolean; closed: boolean };
 
 /** Sidebar list options from the filter menu. */
@@ -246,8 +253,8 @@ interface State {
   activeChatId?: string;
   /** Pick a permission mode for a thread (or the draft). Ignored for runtimes without permission modes. */
   setPermission: (id: string | undefined, chatId?: string) => void;
-  /** Remote Control for the thread about to start (Claude Code only). Off for every new thread; not persisted. */
-  draftRemoteControl: boolean;
+  /** Remote Control for the thread about to start (Claude Code only), once switched. Unset = the default from Settings (`remoteControlDraft`); not persisted. */
+  draftRemoteControl?: boolean;
   setDraftRemoteControl: (on: boolean) => void;
   /** Permission modes each native runtime reports, by `permissionKey`. Not persisted. */
   permissionModes: Record<string, PermissionListing>;
@@ -395,7 +402,7 @@ export const useStore = create<State>()(
         }
         s.updateSettings({ runtimePermissions: { ...get().settings.runtimePermissions, [runtime]: id ?? "" } });
       },
-      draftRemoteControl: false,
+      draftRemoteControl: undefined,
       setDraftRemoteControl: (on) => set({ draftRemoteControl: on }),
       permissionModes: {},
       loadPermissionModes: async (runtime, deviceId, cwd, fresh = false) => {
@@ -854,7 +861,7 @@ export const useStore = create<State>()(
       },
       newChat: () => set((s) => ({
         activeChatId: undefined,
-        draftRemoteControl: false,
+        draftRemoteControl: undefined,
         usageOpen: false,
         settingsOpen: false,
         marketplaceOpen: false,

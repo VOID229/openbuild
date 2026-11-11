@@ -37,7 +37,14 @@ export interface NamingModel extends ModelRef {
 /** Bottom drawer (the default) or beside the thread in the side panel. */
 export type TerminalPosition = "bottom" | "side";
 
+/** How a new Claude Code thread's Remote Control switch starts: on, off, or as the last thread started. */
+export type RemoteControlDefault = "on" | "off" | "last-used";
+
 export interface Settings {
+  /** Settings → General → Remote control: the new-thread default for Claude Code. Absent = off. */
+  remoteControlDefault?: RemoteControlDefault;
+  /** Whether the last Claude Code thread started with Remote Control on, for "last-used". */
+  remoteControlLast?: boolean;
   runtimeAccounts?: import("../../shared/types").RuntimeAccount[];
   threadAccountId?: string;
   theme: Theme;

@@ -31,12 +31,13 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
   await config;
   const { useStore } = await import("../src/lib/store");
   const { RemoteControlToggle } = await import("../src/components/Pickers");
+  const { remoteControlDraft } = await import("../src/lib/store");
   const { sendMessage } = await import("../src/lib/chat");
   const base = useStore.getState().settings;
   const model = (runtime: string): ModelInfo => ({ id: `${runtime}/one`, name: "One", protocol: "chat", input: ["text"], reasoning: { efforts: ["low", "high"], mode: "effort", toggle: false } });
   const listing = (plan: "claude" | "cursor") => ({ "": { plan, status: "valid" as const, models: [model(plan)], defaultModel: `${plan}/one`, checkedAt: Date.now() } });
   function reset(settings: Partial<Settings> = {}, chats: Chat[] = []) {
-    useStore.setState({ settings: { ...base, threadRuntime: "claude", workspace: { mode: "local" }, naming: { enabled: false, models: [] }, ...settings }, chats, activeChatId: undefined, permissionModes: {}, selections: {}, projects: [], settingsOpen: false, draftRemoteControl: false, claudeModels: listing("claude"), cursorModels: listing("cursor") });
+    useStore.setState({ settings: { ...base, threadRuntime: "claude", workspace: { mode: "local" }, naming: { enabled: false, models: [] }, ...settings }, chats, activeChatId: undefined, permissionModes: {}, selections: {}, projects: [], settingsOpen: false, draftRemoteControl: undefined, claudeModels: listing("claude"), cursorModels: listing("cursor") });
   }
   function markup(element: Parameters<typeof renderToStaticMarkup>[0]) {
     const initial = useStore.getInitialState();
@@ -55,7 +56,7 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     throw new Error("reply never settled");
   }
 
-  test("each harness gets its own Remote Control switch: Claude Code's works, the others are disabled with where it's set", () => {
+  test("only Claude Code gets a Remote Control switch under the composer; Codex and Cursor are set in Settings", () => {
     reset();
     expect(row()).toContain(">Remote control</label>");
     expect(row()).toMatch(/role="switch" aria-checked="false" aria-label="Remote control"/);
@@ -63,14 +64,8 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     expect(row()).toContain("Needs a claude.ai sign-in");
     useStore.getState().setDraftRemoteControl(true);
     expect(row()).toContain('aria-checked="true"');
-    // Codex and Cursor can't be switched per thread: off, disabled, and one line on where it's set.
-    useStore.getState().updateSettings({ threadRuntime: "codex" });
-    expect(row()).toMatch(/aria-checked="false"[^>]*disabled=""/);
-    expect(row()).toContain("Set per machine, not per thread");
-    useStore.getState().updateSettings({ threadRuntime: "cursor" });
-    expect(row()).toMatch(/aria-checked="false"[^>]*disabled=""/);
-    expect(row()).toContain("Set in your Cursor account");
-    for (const runtime of ["pi", "durable", "fx", "opencode"] as const) {
+    // Codex and Cursor can't be switched per thread, so the composer shows no switch for them.
+    for (const runtime of ["codex", "cursor", "pi", "durable", "fx", "opencode"] as const) {
       useStore.getState().updateSettings({ threadRuntime: runtime });
       expect(row()).toBe("");
     }
@@ -117,8 +112,9 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     const { saveChatBeforeRun } = await import("../src/lib/db");
     await saveChatBeforeRun(remote);
     expect(saved.get(remote.id)?.remoteControl).toBe(true);
-    // Used up by that thread: the composer is back to off.
-    expect(useStore.getState().draftRemoteControl).toBe(false);
+    // Used up by that thread: the composer is back to the default, off.
+    expect(useStore.getState().draftRemoteControl).toBeUndefined();
+    expect(remoteControlDraft(useStore.getState())).toBe(false);
     expect(sendMessage("follow-up", [], remote.id)).toBe(true);
     await settled();
     expect(posts.at(-1)).toMatchObject({ threadId: remote.id, remoteControl: true });
@@ -143,6 +139,46 @@ if (process.env.OPENBUILD_REMOTE_CONTROL_UI_CHILD !== "1") {
     reset();
     useStore.getState().setDraftRemoteControl(true);
     useStore.getState().newChat();
-    expect(useStore.getState().draftRemoteControl).toBe(false);
+    expect(useStore.getState().draftRemoteControl).toBeUndefined();
+    expect(remoteControlDraft(useStore.getState())).toBe(false);
+  });
+
+  test("Settings → General sets where a new Claude Code thread's switch starts: on, off, or as the last one", async () => {
+    reset({ remoteControlDefault: "on" });
+    expect(row()).toContain('aria-checked="true"');
+    // Switching it for this thread wins over the default.
+    useStore.getState().setDraftRemoteControl(false);
+    expect(row()).toContain('aria-checked="false"');
+    useStore.getState().newChat();
+    expect(row()).toContain('aria-checked="true"');
+    reset({ remoteControlDefault: "off" });
+    expect(row()).toContain('aria-checked="false"');
+
+    // Last used: each new Claude Code thread remembers its choice for the next one.
+    reset({ remoteControlDefault: "last-used" });
+    globalThis.fetch = (async (url: any) => {
+      const path = String(url);
+      if (path.endsWith("/api/workspaces")) return Response.json({ workspace: { projectId: "", projectName: "", cwd: "/tmp/remote-control-ui" } });
+      if (path.endsWith("/api/pi/chat")) return ndjson({ t: "text", v: "OK" }, { t: "end" });
+      return Response.json({});
+    }) as typeof fetch;
+    expect(row()).toContain('aria-checked="false"');
+    useStore.getState().setDraftRemoteControl(true);
+    expect(sendMessage("on", [])).toBe(true);
+    await settled();
+    expect(useStore.getState().settings.remoteControlLast).toBe(true);
+    useStore.getState().newChat();
+    expect(row()).toContain('aria-checked="true"');
+    useStore.getState().setDraftRemoteControl(false);
+    expect(sendMessage("off", [])).toBe(true);
+    await settled();
+    expect(useStore.getState().settings.remoteControlLast).toBe(false);
+    useStore.getState().newChat();
+    expect(row()).toContain('aria-checked="false"');
+    // A thread on another harness leaves Claude Code's last choice alone.
+    useStore.getState().updateSettings({ remoteControlLast: true, threadRuntime: "cursor" });
+    expect(sendMessage("cursor", [])).toBe(true);
+    await settled();
+    expect(useStore.getState().settings.remoteControlLast).toBe(true);
   });
 }

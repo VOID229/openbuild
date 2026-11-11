@@ -2,6 +2,7 @@ import { ArrowUp, Bell, Cable, ChevronRight, MonitorSmartphone, CircleUser, Fold
 import { useEffect, useLayoutEffect, useRef, useState, type ComponentType, type FormEvent, type ReactNode } from "react";
 import { lowestEffort, nearestEffort, TEXT_RUNTIMES, type RuntimeStatus, type TextRuntime, type ThreadRuntime } from "../../shared/types";
 import { cloudConfigured } from "../lib/cloud";
+import { codexRemoteControl, setCodexRemoteControl, type CodexDaemon } from "../lib/pi";
 import { fastTarget } from "../lib/models";
 import { leaveSettings, openSettingsSection, settingsUp } from "../lib/pages";
 import { UPDATABLE_RUNTIMES, runtimeEnabled, runtimeName } from "../lib/runtimes";
@@ -219,6 +220,8 @@ function GeneralSection() {
         <Toggle checked={s.confirmDelete} onChange={(v) => update({ confirmDelete: v })} label="Confirm before deleting threads" />
       </SettingRow>
 
+      <RemoteControlSettings />
+
       <SettingsGroup title="Text generation" className="sgroup-rows">
         <SettingRow label="Name threads automatically" desc="After their first prompt.">
           <Toggle checked={naming.enabled} onChange={(v) => update({ naming: { ...naming, enabled: v } })} label="Name threads automatically" />
@@ -235,6 +238,56 @@ function GeneralSection() {
         <DictationSettings />
       </SettingsGroup>
     </>
+  );
+}
+
+/**
+ * Settings → General → Remote control, as each harness offers it. Claude Code opts in per thread, so
+ * this sets where a new thread's switch starts. Codex runs one daemon per machine: its switch turns
+ * that daemon's Remote Control on or off. Cursor keeps it in the Cursor account, which its CLI can't change.
+ */
+function RemoteControlSettings() {
+  const mode = useStore((st) => st.settings.remoteControlDefault ?? "off");
+  const update = useStore((st) => st.updateSettings);
+  const [codex, setCodex] = useState<CodexDaemon>();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  useEffect(() => {
+    let live = true;
+    codexRemoteControl().then((d) => live && setCodex(d), (e) => live && setError(e instanceof Error ? e.message : String(e)));
+    return () => { live = false; };
+  }, []);
+  const switchCodex = async (on: boolean) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      const d = await setCodexRemoteControl(on);
+      setCodex(d);
+      if (d.error) setError(d.error);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally { setBusy(false); }
+  };
+  const codexDesc = error ?? (!codex ? "Checking…" : !codex.installed ? "Codex isn’t installed." : "For this machine’s Codex daemon, not per thread.");
+  return (
+    <SettingsGroup title="Remote control" className="sgroup-rows">
+      <SettingRow label="Claude Code" desc="How new threads start. Needs a claude.ai sign-in.">
+        <OptionSelect
+          label="Claude Code Remote Control for new threads"
+          value={mode}
+          options={[
+            { value: "off", label: "Off" },
+            { value: "on", label: "On" },
+            { value: "last-used", label: "Last used" },
+          ]}
+          onChange={(remoteControlDefault) => update({ remoteControlDefault })}
+        />
+      </SettingRow>
+      <SettingRow label="Codex" desc={codexDesc}>
+        <Toggle checked={!!codex?.remoteControl} disabled={!codex?.installed || busy} onChange={switchCodex} label="Codex Remote Control" />
+      </SettingRow>
+      <SettingRow label="Cursor" desc={<>Set in your <a href="https://cursor.com/dashboard" target="_blank" rel="noreferrer">Cursor account</a>. Its CLI can’t change it.</>} />
+    </SettingsGroup>
   );
 }
 
