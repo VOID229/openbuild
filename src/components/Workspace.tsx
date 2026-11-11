@@ -4,7 +4,7 @@ import { ThreadAccountSelect } from "./RuntimeAccounts";
 // worktree, and the branch. In a thread, under the composer: where it works, how full its context
 // is, and what it has cost.
 import { Check, ChevronDown, FolderGit2, FolderMinus, GitBranch, GitCommitHorizontal, GitFork, Laptop, Plus, Search, SquareTerminal, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { GitInfo, ThreadRuntime, Workspace } from "../../shared/types";
 import { projectGit, removeProject, workspaceGit } from "../lib/pi";
 import { machineName } from "../lib/runtime";
@@ -19,6 +19,13 @@ import { IconButton, Popover, RuntimeIcon, Spinner } from "./primitives";
 import { NewProjectDialog, NewProjectSource, type NewProjectStart } from "./NewProject";
 
 export { RuntimeIcon };
+
+/**
+ * True inside OpenBots' thread preview (the thread open in a bot's details panel). There the row under
+ * the composer ends with the thread's harness mark rather than the terminal button, which belongs to the
+ * Build view.
+ */
+export const ThreadPreview = createContext(false);
 
 // The last git state read for each project, kept across reloads so the branch shows at once while
 // a fresh read (slow on a big repository or a paired device) catches up.
@@ -582,6 +589,8 @@ function UsageMeter({ chatId, runtime }: { chatId: string; runtime: ThreadRuntim
 function ThreadWorkspace({ chatId, workspace, streaming, permission }: { chatId: string; workspace?: Workspace; streaming: boolean; permission?: ReactNode }) {
   const [info, setInfo] = useState<GitInfo>();
   const runtime = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtime ?? "pi");
+  const account = useStore((s) => s.chats.find((c) => c.id === chatId)?.runtimeAccount?.name);
+  const preview = useContext(ThreadPreview);
   // Refresh after each reply (Pi may have committed or switched branches) and on coming back.
   useEffect(() => {
     if (streaming || !workspace?.branch) return;
@@ -616,10 +625,24 @@ function ThreadWorkspace({ chatId, workspace, streaming, permission }: { chatId:
       )}
       {permission}
       <UsageMeter chatId={chatId} runtime={runtime} />
-      <IconButton label="Open a terminal here" tooltip="Terminal (⌘J)" tooltipSide="top" className="ws-terminal" onClick={toggleTerminal}>
-        <SquareTerminal size={14} />
-      </IconButton>
+      {preview ? (
+        <HarnessMark runtime={runtime} account={account} />
+      ) : (
+        <IconButton label="Open a terminal here" tooltip="Terminal (⌘J)" tooltipSide="top" className="ws-terminal" onClick={toggleTerminal}>
+          <SquareTerminal size={14} />
+        </IconButton>
+      )}
     </div>
+  );
+}
+
+/** The harness a thread runs on (Claude Code, Codex, Pi…, not its model's provider), named in its tooltip. */
+function HarnessMark({ runtime, account }: { runtime: ThreadRuntime; account?: string }) {
+  const name = [runtimeName(runtime), account].filter(Boolean).join(" · ");
+  return (
+    <span className="ws-harness" role="img" aria-label={name} data-tooltip={name} data-tooltip-side="top">
+      <RuntimeIcon runtime={runtime} size={14} />
+    </span>
   );
 }
 
