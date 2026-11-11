@@ -86,9 +86,14 @@ export function tagsOfRefNames(refNames: string): string[] {
   return refNames.split(",").map((ref) => ref.trim()).filter((ref) => ref.startsWith("tag: ")).map((ref) => ref.slice(5).trim());
 }
 
+/** "Nightly" or "Stable". */
+export function channelName(channel: AppRelease["channel"]): string {
+  return channel === "nightly" ? "Nightly" : "Stable";
+}
+
 /** "Nightly 0.1.9" or "Stable 0.1.9". */
 export function releaseLabel(release: AppRelease): string {
-  return `${release.channel === "nightly" ? "Nightly" : "Stable"} ${release.version}`;
+  return `${channelName(release.channel)} ${release.version}`;
 }
 
 /** A release as it arrives over the wire, or undefined when it isn't one. */
