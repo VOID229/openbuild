@@ -198,6 +198,25 @@ function ConversationLink({ id, children }: { id: string; children: React.ReactN
   );
 }
 
+/**
+ * A routine line's words ("set a routine"), opening the bot's Routines in the details panel. A group or
+ * side chat's panel has none, so it goes to the bot's own chat first.
+ */
+function RoutinesLink({ bot, children }: { bot: Bot; children: React.ReactNode }) {
+  const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
+  if (!thread) return <>{children}</>;
+  return (
+    <button type="button" className="link bm-conversation-link" onClick={(e) => {
+      // An event row toggles open on click; following its link shouldn't do that as well.
+      e.stopPropagation();
+      const st = useBots.getState();
+      if (st.activeId !== thread) st.select(thread);
+      openBotsDetails();
+      st.showDetailsTab("routines");
+    }}>{children}</button>
+  );
+}
+
 /** A message between bots, from one side: the bot links to its thread, the rest to the side chat. */
 function MessageActivity({ event, other }: { event: NonNullable<BotMessage["event"]>; other: Bot }) {
   const sent = event.text.startsWith("Sent");
@@ -1589,7 +1608,7 @@ function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { mess
     // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
     <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
       <span className="bm-event-text">
-        {authored ? <><BotLink bot={author!} /> {authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
+        {authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
       </span>
       {event.kind !== "model" && detail && (
         <span className="bm-event-detail">
