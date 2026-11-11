@@ -13,7 +13,7 @@ import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/g
 import { arrowNav, canHover, copyText, cx, OPEN_SEARCH, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
-import { BotsToggle, ModeSwitch, ScrollThumb } from "../Sidebar";
+import { BotsToggle, ModeSwitch, ReleaseLabel, ScrollThumb } from "../Sidebar";
 import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
@@ -727,6 +727,7 @@ export function BotsSidebar() {
                 <Avatar src={avatar} name={profileName} size={26} />
                 <span className="bots-me-name">Settings</span>
               </button>
+              <ReleaseLabel />
               {/* The way into the marketplace sits beside the way out, as it does in the rail. */}
               {!remote && (
                 <IconButton label="Marketplace" tooltipSide="top" className="bots-apps-btn" aria-current={marketplaceOpen ? "page" : undefined} onClick={() => useStore.getState().openMarketplace()}>

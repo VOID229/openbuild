@@ -3,7 +3,8 @@
 Pushing to `main` runs `.github/workflows/nightly.yml`, which publishes a GitHub
 prerelease of that exact commit. Nothing is checked again there: every change
 reaches `main` through a pull request, and `.github/workflows/checks.yml` ran
-the typecheck and the full test suite on it. Stable releases remain manual.
+the typecheck and the full test suite on it. Promoting a version to stable is
+manual (below).
 
 ## The checks
 
@@ -37,10 +38,12 @@ machine now and then starves one. A failure that repeats fails the run.
 
 ## Releases
 
-Tags use the highest stable version tag in the commit's history, followed by
-`-nightly.<commit-date>.<workflow-run-number>` (for example,
-`0.1.7-nightly.20261102.123`). Tags are permanent; rerunning a successful workflow
-does not replace its release. No version-bump commit is needed.
+OpenBuild has one line of versions, `x.y.z`. Every merge to `main` is the next
+one: `z` goes up by 1, and after `z = 99` it rolls over to the next `y` at
+`z = 0` (`0.1.99` → `0.2.0`). The workflow tags the commit `x.y.z-nightly` and
+publishes it as a prerelease (`scripts/next-version.ts`, `shared/version.ts`).
+No version-bump commit is needed. Tags are permanent; rerunning a successful
+workflow keeps the commit's tag and does not replace its release.
 
 New pushes cancel older runs. The publish step also skips commits that are no
 longer the tip of `main`, including manually rerun workflows. The workflow can
@@ -48,7 +51,52 @@ be started manually with **Run workflow** on `main`.
 
 GitHub Actions must be enabled, and repository rules must allow the workflow's
 `GITHUB_TOKEN` to create release tags. No personal access token is needed.
-Only the publish job has `contents: write` permission.
+Only the publish jobs have `contents: write` permission.
 
-The existing nightly installer and updater discover published prereleases.
 Publishing a release does not install it or restart running installations.
+
+## Promoting a version to stable
+
+Stable isn't a number of its own: it's a version declared stable. Run
+**Promote to stable** (`.github/workflows/promote.yml`) with the version, for
+example `0.1.9`. It adds a plain `0.1.9` tag on the commit `0.1.9-nightly`
+names, published as a full (non-prerelease) release. Any version can be
+promoted, so stable can be `0.2.x` while the nightlies are further on.
+
+A plain tag is what makes a version stable, so everything finds it from the
+repository's tags (`git ls-remote --tags`), without GitHub's API:
+
+- the installer: `install.sh` installs the newest plain tag, and
+  `install.sh --nightly` the newest version of any kind, by its nightly tag;
+- `ob update` and the server's update notice, on the installation's track;
+- the sidebar, which shows a promoted version as stable.
+
+Installations from before this go by GitHub's prerelease flag, which the
+promoted release doesn't have, so they find it too.
+
+Tags from before this scheme keep working. The plain tags up to `0.1.8` are
+stable releases, and an `x.y.z-nightly.<date>.<run>` tag is a nightly from
+after the `x.y.z` it names: `0.1.8-nightly.20261111.275` is newer than `0.1.8`
+and older than `0.1.9-nightly`.
+
+## The version in the sidebar
+
+The foot of the sidebar names the running release: `Nightly 0.1.9`, or
+`Stable 0.1.9` once `0.1.9` is promoted. There is no build step to stamp a
+version, so the server reads it from the version tags in its commit's history
+when it starts (`server/version.ts`) and sends it with `/api/config`:
+
+- An installation is a checkout of a release tag (`install.sh`, `ob update`),
+  so HEAD's own tags name it.
+- A checkout between releases is named after the newest release in its
+  history (by commit date; never an ancestor before its descendant).
+- A source archive has no `.git`; git writes the commit and its ref names into
+  `.release-ref` as it makes the archive (`export-subst` in `.gitattributes`),
+  and the server reads that instead.
+- A version promoted after it was installed shows as stable once the release
+  check (at most hourly) has seen its plain tag.
+- With nothing to go on (an archive of an untagged commit, a history without
+  release tags), the sidebar shows no version.
+
+An update moves the checkout on, but the label keeps naming the release the
+server started as until it restarts.

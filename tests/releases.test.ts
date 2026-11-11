@@ -1,203 +1,158 @@
-import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkRelease, installRelease, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall, type Release } from "../server/releases";
+import { checkRelease, installRelease, knownTags, parseLsRemote, releaseTrack, restartServer, restartStatus, selectRelease, setReleaseTrack, watchInstall } from "../server/releases";
 
-const release = (tag: string, prerelease = false, date = "2026-10-30"): Release => ({ tag_name: tag, prerelease, draft: false, published_at: date, html_url: `https://github.com/VOID229/openbuild/releases/tag/${tag}` });
-// An explicit token, so these tests never read the real keychain or gh sign-in.
-const previousToken = process.env.GH_TOKEN;
-beforeAll(() => { process.env.GH_TOKEN = "test-token"; });
-afterAll(() => { if (previousToken === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = previousToken; });
+const CANONICAL = "https://github.com/VOID229/openbuild.git";
 
-test("release tracks select published releases, ignoring drafts and unsafe tags", () => {
-  const releases = [release("v1.0.0"), release("v1.1.0-nightly.1", true), { ...release("v9.0.0"), draft: true }, release("--evil"), release("v0.9.0", false, "2026-01-01")];
-  expect(selectRelease(releases, "stable")?.tag_name).toBe("v1.0.0");
-  expect(selectRelease(releases, "nightly")?.tag_name).toBe("v1.1.0-nightly.1");
-  expect(selectRelease([release("v1.0.0")], "nightly")).toBeUndefined();
+test("ls-remote output: tags to commits, an annotated tag by its peeled commit", () => {
+  const tags = parseLsRemote([
+    "aaa\trefs/tags/0.1.8",
+    "ttt\trefs/tags/0.1.9-nightly",
+    "bbb\trefs/tags/0.1.9-nightly^{}",
+    "ccc\trefs/heads/main",
+    "",
+  ].join("\n"));
+  expect(tags).toEqual({ "0.1.8": "aaa", "0.1.9-nightly": "bbb" });
+  expect(selectRelease({ ...tags, "--evil": "x", "9.9.9-rc.1": "y" }, "stable")).toBe("0.1.8");
+  expect(selectRelease(tags, "nightly")).toBe("0.1.9-nightly");
 });
 
-test("track persistence, cached release checks, switching tracks, offline recovery, and local-edit guard", async () => {
+/**
+ * A stand-in for the canonical repository, and a clone of it whose git sends the canonical URL there,
+ * each with its own data directory. Nothing reaches GitHub.
+ */
+async function withRepos(body: (r: { source: string; checkout: string; git: (repo: string, ...args: string[]) => string; commit: (repo: string) => string }) => Promise<void>) {
   const temp = mkdtempSync(join(tmpdir(), "ob-releases-"));
   const previous = process.env.OPENCHAT_DATA_DIR;
-  const originalFetch = globalThis.fetch;
-  const git = (...args: string[]) => {
-    const result = Bun.spawnSync(["git", "-C", temp, ...args]);
-    expect(result.exitCode).toBe(0);
+  const source = join(temp, "source"), checkout = join(temp, "checkout");
+  const git = (repo: string, ...args: string[]) => {
+    const p = Bun.spawnSync(["git", "-C", repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", ...args], { stdout: "pipe", stderr: "pipe" });
+    if (p.exitCode) throw new Error(p.stderr.toString());
+    return p.stdout.toString().trim();
   };
+  let n = 0;
+  const commit = (repo: string) => { writeFileSync(join(repo, `file-${++n}`), String(n)); git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", `commit ${n}`); return git(repo, "rev-parse", "HEAD"); };
   try {
     process.env.OPENCHAT_DATA_DIR = join(temp, "data");
-    expect(releaseTrack()).toBe("stable");
-    expect(() => setReleaseTrack("typo")).toThrow();
-    git("init"); git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "initial");
-    git("tag", "v1.0.0");
-    let calls = 0;
-    globalThis.fetch = (async () => { calls++; return Response.json([release("v1.0.0"), release("v1.1.0-nightly.1", true)]); }) as unknown as typeof fetch;
-    expect((await checkRelease(true, temp)).available).toBe(false);
-    await checkRelease(false, temp);
-    expect(calls).toBe(1);
-    setReleaseTrack("nightly");
-    expect(releaseTrack()).toBe("nightly");
-    expect((await checkRelease(false, temp)).latest).toBe("v1.1.0-nightly.1");
-    expect((await checkRelease(false, temp)).available).toBe(true);
-    // The saved list covers both tracks.
-    expect(calls).toBe(1);
-    // A stable release and a nightly on the same commit are both current on their tracks.
-    git("tag", "v1.1.0-nightly.1");
-    expect(await checkRelease(true, temp)).toMatchObject({ current: "v1.1.0-nightly.1", available: false });
+    mkdirSync(source);
+    git(source, "init", "-q", "-b", "main");
+    commit(source);
+    git(source, "tag", "0.1.8");
+    git(temp, "clone", "-q", source, checkout);
+    git(checkout, "config", `url.${source}.insteadOf`, CANONICAL);
+    git(checkout, "switch", "-q", "--detach", "0.1.8");
     setReleaseTrack("stable");
-    expect(await checkRelease(true, temp)).toMatchObject({ current: "v1.0.0", available: false });
-    setReleaseTrack("nightly");
-    git("tag", "-d", "v1.1.0-nightly.1");
-    writeFileSync(join(temp, "local.txt"), "preserve me");
-    await expect(installRelease(temp)).rejects.toThrow("local changes");
-    globalThis.fetch = (async () => new Response("limited", { status: 403 })) as unknown as typeof fetch;
-    await expect(checkRelease(true, temp)).rejects.toThrow("HTTP 403");
-    globalThis.fetch = (async () => Response.json([])) as unknown as typeof fetch;
-    // The failure doesn't lose the last known release.
-    expect((await checkRelease(false, temp)).latest).toBe("v1.1.0-nightly.1");
-    setReleaseTrack("stable");
-    expect(releaseTrack()).toBe("stable");
+    await body({ source, checkout, git, commit });
   } finally {
-    globalThis.fetch = originalFetch;
-    if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
-    rmSync(temp, { recursive: true, force: true });
-  }
-});
-
-/** Runs `body` in a tagged checkout with its own data directory, restoring fetch afterwards. */
-async function withCheckout(body: (temp: string, cachePath: string) => Promise<void>) {
-  const temp = mkdtempSync(join(tmpdir(), "ob-release-cache-"));
-  const previous = process.env.OPENCHAT_DATA_DIR, originalFetch = globalThis.fetch;
-  try {
-    process.env.OPENCHAT_DATA_DIR = join(temp, "data");
-    for (const args of [["init"], ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "--allow-empty", "-m", "initial"], ["tag", "v1.0.0"]]) Bun.spawnSync(["git", "-C", temp, ...args]);
-    setReleaseTrack("stable");
-    await body(temp, join(temp, "data", "release-cache.json"));
-  } finally {
-    globalThis.fetch = originalFetch;
     if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
     rmSync(temp, { recursive: true, force: true });
   }
 }
-type Sent = { url: string; headers: Record<string, string> };
-const stubFetch = (respond: (sent: Sent) => Response) => {
-  const sent: Sent[] = [];
-  globalThis.fetch = (async (url: string, init: { headers: Record<string, string> }) => {
-    const request = { url: String(url), headers: init.headers };
-    sent.push(request);
-    return respond(request);
-  }) as unknown as typeof fetch;
-  return sent;
-};
-const age = (path: string, by: number) => {
-  const saved = JSON.parse(readFileSync(path, "utf8"));
-  writeFileSync(path, JSON.stringify({ ...saved, checkedAt: saved.checkedAt - by }));
-};
 
-test("release checks are saved between processes, sent with a token, and revalidated by ETag", () => withCheckout(async (temp, path) => {
-  const sent = stubFetch(({ headers }) => headers["If-None-Match"] === '"one"' ? new Response(null, { status: 304 }) : Response.json([release("v1.1.0")], { headers: { etag: '"one"' } }));
-  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
-  expect(sent[0]!.headers.Authorization).toBe("Bearer test-token");
-  expect(readFileSync(path, "utf8")).not.toContain("test-token");
-  setReleaseTrack("stable"); // Clears the in-memory copy, as a new process would have none.
-  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
-  expect(sent.length).toBe(1);
-  age(path, 2 * 60 * 60_000);
+test("tracks: the newest nightly, or the newest version promoted to stable, read from the repository's tags", () => withRepos(async ({ source, checkout, git, commit }) => {
+  expect(releaseTrack()).toBe("stable");
+  expect(() => setReleaseTrack("typo")).toThrow();
+  expect(await checkRelease(true, checkout)).toMatchObject({ track: "stable", current: "0.1.8", latest: "0.1.8", available: false });
+  // The old scheme's nightlies are after the release they name.
+  commit(source);
+  git(source, "tag", "0.1.8-nightly.20261111.275");
+  const nine = commit(source);
+  git(source, "tag", "0.1.9-nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.8", available: false });
+  setReleaseTrack("nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.8", latest: "0.1.9-nightly", available: true, url: "https://github.com/VOID229/openbuild/releases/tag/0.1.9-nightly" });
+
+  // Promoting adds a plain tag on the same commit: the stable track's release, and no new nightly.
+  git(source, "tag", "0.1.9", nine);
+  expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.9-nightly", available: true });
   setReleaseTrack("stable");
-  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
-  expect(sent.length).toBe(2);
-  expect(sent[1]!.headers["If-None-Match"]).toBe('"one"');
+  expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.9", available: true });
+
+  // On that commit, both tracks are current, and it's named by the track's tag, even before the
+  // checkout has fetched the promotion.
+  git(checkout, "fetch", "-q", "--no-tags", "origin", "+refs/tags/0.1.9-nightly:refs/tags/0.1.9-nightly");
+  git(checkout, "switch", "-q", "--detach", "0.1.9-nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.9", available: false });
+  setReleaseTrack("nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.9-nightly", available: false });
+
+  // From a newer nightly, the stable track goes back to the stable release; a development commit doesn't.
+  commit(source);
+  git(source, "tag", "0.1.10-nightly");
+  git(checkout, "fetch", "-q", "origin", "+refs/tags/0.1.10-nightly:refs/tags/0.1.10-nightly");
+  git(checkout, "switch", "-q", "--detach", "0.1.10-nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.10-nightly", available: false });
+  setReleaseTrack("stable");
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.10-nightly", latest: "0.1.9", available: true });
+  commit(checkout);
+  expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.9", available: false });
+  setReleaseTrack("nightly");
+  expect(await checkRelease(true, checkout)).toMatchObject({ latest: "0.1.10-nightly", available: false });
+
+  writeFileSync(join(checkout, "local.txt"), "preserve me");
+  await expect(installRelease(checkout)).rejects.toThrow("local changes");
 }));
 
-test("a refused token falls back to an anonymous request", () => withCheckout(async (temp) => {
-  const sent = stubFetch(({ headers }) => headers.Authorization ? new Response("bad credentials", { status: 401 }) : Response.json([release("v1.1.0")]));
-  expect((await checkRelease(true, temp)).latest).toBe("v1.1.0");
-  expect(sent.map(s => !!s.headers.Authorization)).toEqual([true, false]);
+test("release checks are saved between processes, and a failure keeps the last known tags", () => withRepos(async ({ source, checkout }) => {
+  const path = join(process.env.OPENCHAT_DATA_DIR!, "release-cache.json");
+  expect(knownTags()).toBeUndefined();
+  expect((await checkRelease(false, checkout)).latest).toBe("0.1.8");
+  expect(Object.keys(knownTags()!)).toEqual(["0.1.8"]);
+  // The repository is gone: a recent list is still the answer, without asking.
+  const away = `${source}-away`;
+  renameSync(source, away);
+  setReleaseTrack("stable"); // Clears the in-memory copy, as a new process would have none.
+  expect((await checkRelease(false, checkout)).latest).toBe("0.1.8");
+  // An explicit check asks, and says it failed; background checks then hold off and keep the list.
+  await expect(checkRelease(true, checkout)).rejects.toThrow("Release check failed");
+  const saved = JSON.parse(readFileSync(path, "utf8"));
+  expect(saved.retryAt).toBeGreaterThan(Date.now());
+  writeFileSync(path, JSON.stringify({ ...saved, checkedAt: saved.checkedAt - 2 * 60 * 60_000 }));
+  setReleaseTrack("stable");
+  expect((await checkRelease(false, checkout)).latest).toBe("0.1.8");
+  renameSync(away, source);
+  expect((await checkRelease(true, checkout)).latest).toBe("0.1.8");
+  // A cache from before releases were tags is asked again.
+  writeFileSync(path, JSON.stringify({ releases: [], checkedAt: Date.now() }));
+  expect(knownTags()).toBeUndefined();
 }));
 
-test("a rate limit holds off background checks until it lifts, but not an explicit one", () => withCheckout(async (temp, path) => {
-  const reset = Math.floor(Date.now() / 1000) + 600;
-  const limited = () => new Response("limited", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) } });
-  let sent = stubFetch(limited);
-  await expect(checkRelease(false, temp)).rejects.toThrow("HTTP 403");
-  const attempts = sent.length;
-  // Nothing known yet, so background checks repeat the error without asking GitHub.
-  await expect(checkRelease(false, temp)).rejects.toThrow("rate limit");
-  expect(sent.length).toBe(attempts);
-  expect(JSON.parse(readFileSync(path, "utf8")).retryAt).toBe(reset * 1000);
-  sent = stubFetch(() => Response.json([release("v1.1.0")]));
-  expect(await checkRelease(false, temp).catch(() => "held")).toBe("held");
-  expect(sent.length).toBe(0);
-  expect((await checkRelease(true, temp)).latest).toBe("v1.1.0");
-  // Limited again: background checks keep the last known list.
-  sent = stubFetch(limited);
-  await expect(checkRelease(true, temp)).rejects.toThrow("HTTP 403");
-  sent = stubFetch(() => Response.json([]));
-  expect((await checkRelease(false, temp)).latest).toBe("v1.1.0");
-  expect(sent.length).toBe(0);
-}));
-
-test("only releases newer than the saved list are paged through", () => withCheckout(async (temp, path) => {
-  const dated = (n: number) => release(`v1.0.${n}`, false, new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString());
-  const all = Array.from({ length: 250 }, (_, n) => dated(n)).reverse();
-  const page = ({ url }: Sent, list: Release[]) => { const n = Number(new URL(url).searchParams.get("page")); return Response.json(list.slice((n - 1) * 100, n * 100)); };
-  let sent = stubFetch((s) => page(s, all));
-  expect((await checkRelease(true, temp)).latest).toBe("v1.0.249");
-  expect(sent.length).toBe(3);
-  const newer = [dated(300), ...all];
-  sent = stubFetch((s) => page(s, newer));
-  expect((await checkRelease(true, temp)).latest).toBe("v1.0.300");
-  expect(sent.length).toBe(1);
-  expect(JSON.parse(readFileSync(path, "utf8")).releases.length).toBe(251);
-}));
-
-test("updates fetch a release, keep branches, and roll back after failed dependencies", async () => {
-  const temp = mkdtempSync(join(tmpdir(), "ob-release-install-"));
-  const source = join(temp, "source"), checkout = join(temp, "checkout");
-  const previous = process.env.OPENCHAT_DATA_DIR, originalFetch = globalThis.fetch;
-  const command = (args: string[], cwd = temp) => {
+test("updates fetch a release with its tags, keep branches, and roll back after failed dependencies", () => withRepos(async ({ source, checkout, git }) => {
+  const command = (args: string[], cwd: string) => {
     const p = Bun.spawnSync(args, { cwd, stdout: "pipe", stderr: "pipe" });
     if (p.exitCode) throw new Error(p.stderr.toString());
     return p.stdout.toString().trim();
   };
-  const git = (...args: string[]) => command(["git", ...args], source);
-  try {
-    process.env.OPENCHAT_DATA_DIR = join(temp, "data");
-    command(["git", "init", source]);
-    git("config", "user.name", "Fixture"); git("config", "user.email", "fixture@example.test");
-    writeFileSync(join(source, "package.json"), JSON.stringify({ name: "release-fixture", version: "1.0.0" }));
-    mkdirSync(join(source, "plugins", "custom"), { recursive: true });
-    writeFileSync(join(source, "plugins", "custom", "plugin.json"), "original user plugin");
-    command([process.execPath, "install"], source);
-    git("add", "."); git("commit", "-m", "initial"); git("tag", "v1.0.0");
-    command(["git", "clone", source, checkout]);
-    command(["git", "config", `url.${source}.insteadOf`, "https://github.com/VOID229/openbuild.git"], checkout);
-    writeFileSync(join(source, "release.txt"), "new release");
-    writeFileSync(join(source, "plugins", "custom", "plugin.json"), "new bundled contents");
-    git("add", "."); git("commit", "-m", "release"); git("tag", "v1.1.0");
-    const branch = command(["git", "symbolic-ref", "--short", "HEAD"], checkout);
-    const originalHead = command(["git", "rev-parse", "HEAD"], checkout);
-    setReleaseTrack("stable");
-    globalThis.fetch = (async () => Response.json([release("v1.1.0")])) as unknown as typeof fetch;
-    expect(await installRelease(checkout)).toMatchObject({ current: "v1.1.0", installed: true });
-    // The installed release is recognised, so updating again downloads nothing.
-    expect(await checkRelease(true, checkout)).toMatchObject({ current: "v1.1.0", available: false });
-    expect(await installRelease(checkout)).toMatchObject({ current: "v1.1.0", installed: false });
-    expect(readFileSync(join(temp, "data", "plugins", "custom", "plugin.json"), "utf8")).toBe("original user plugin");
-    expect(command(["git", "rev-parse", branch], checkout)).toBe(originalHead);
-    const installed = command(["git", "rev-parse", "HEAD"], checkout);
-    writeFileSync(join(source, "package.json"), "{invalid json");
-    git("add", "."); git("commit", "-m", "broken dependencies"); git("tag", "v1.2.0");
-    globalThis.fetch = (async () => Response.json([release("v1.2.0")])) as unknown as typeof fetch;
-    await expect(installRelease(checkout)).rejects.toThrow("Dependency installation failed");
-    expect(command(["git", "rev-parse", "HEAD"], checkout)).toBe(installed);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (previous === undefined) delete process.env.OPENCHAT_DATA_DIR; else process.env.OPENCHAT_DATA_DIR = previous;
-    rmSync(temp, { recursive: true, force: true });
-  }
-});
+  writeFileSync(join(source, "package.json"), JSON.stringify({ name: "release-fixture", version: "1.0.0" }));
+  mkdirSync(join(source, "plugins", "custom"), { recursive: true });
+  writeFileSync(join(source, "plugins", "custom", "plugin.json"), "original user plugin");
+  command([process.execPath, "install"], source);
+  git(source, "add", "."); git(source, "commit", "-q", "-m", "initial"); git(source, "tag", "0.1.9-nightly");
+  git(checkout, "fetch", "-q", "origin");
+  git(checkout, "switch", "-q", "--detach", "origin/main");
+  const branch = "main";
+  const originalHead = git(checkout, "rev-parse", branch);
+  writeFileSync(join(source, "release.txt"), "new release");
+  writeFileSync(join(source, "plugins", "custom", "plugin.json"), "new bundled contents");
+  git(source, "add", "."); git(source, "commit", "-q", "-m", "release");
+  git(source, "tag", "0.1.10-nightly"); git(source, "tag", "0.1.10");
+  setReleaseTrack("stable");
+  expect(await installRelease(checkout)).toMatchObject({ current: "0.1.10", installed: true });
+  // Both of the version's tags came along, so it's recognised without asking: updating again downloads nothing.
+  expect(git(checkout, "tag", "--points-at", "HEAD").split("\n").sort()).toEqual(["0.1.10", "0.1.10-nightly"]);
+  expect(await checkRelease(true, checkout)).toMatchObject({ current: "0.1.10", available: false });
+  expect(await installRelease(checkout)).toMatchObject({ current: "0.1.10", installed: false });
+  expect(readFileSync(join(process.env.OPENCHAT_DATA_DIR!, "plugins", "custom", "plugin.json"), "utf8")).toBe("original user plugin");
+  expect(git(checkout, "rev-parse", branch)).toBe(originalHead);
+  const installed = git(checkout, "rev-parse", "HEAD");
+  writeFileSync(join(source, "package.json"), "{invalid json");
+  git(source, "add", "."); git(source, "commit", "-q", "-m", "broken dependencies"); git(source, "tag", "0.1.11-nightly");
+  setReleaseTrack("nightly");
+  await expect(installRelease(checkout)).rejects.toThrow("Dependency installation failed");
+  expect(git(checkout, "rev-parse", "HEAD")).toBe(installed);
+}));
 
 test("only an install that moved the checkout waits for a restart, and a failed restart reports its output", async () => {
   const temp = mkdtempSync(join(tmpdir(), "ob-restart-"));
@@ -238,8 +193,8 @@ test("curl installer selects a stable tag under sh and bash and only replaces an
   try {
     const { mkdirSync, chmodSync } = require("node:fs");
     const bin = join(temp, "bin"); mkdirSync(bin);
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *api.github.com*) echo v1.2.3;; esac\n');
-    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] && [ "$2" = --branch ] && [ "$3" = v1.2.3 ] || exit 1\nfor target do :; done\nmkdir -p "$target/.git"\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; esac\n');
+    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = ls-remote ] && exit 0\n[ "$1" = clone ] && [ "$2" = --branch ] && [ "$3" = 1.2.3 ] || exit 1\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     for (const shell of ["sh", "bash"]) {
       const target = join(temp, `${shell} install`);
@@ -263,8 +218,8 @@ test("curl installer removes a failed checkout so it can be retried", () => {
     const { mkdirSync, chmodSync, existsSync } = require("node:fs");
     const bin = join(temp, "bin"); mkdirSync(bin);
     const target = join(temp, "install");
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *api.github.com*) echo v1.2.3;; install*) echo dependency failure; exit 1;; esac\n');
-    writeFileSync(join(bin, "git"), '#!/bin/sh\nfor target do :; done\nmkdir -p "$target/.git"\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; install*) echo dependency failure; exit 1;; esac\n');
+    writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = ls-remote ] && exit 0\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     const result = Bun.spawnSync(["sh", join(import.meta.dir, "..", "install.sh")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target }, stdout: "pipe", stderr: "pipe" });
     expect(result.exitCode).toBe(1);
@@ -281,7 +236,7 @@ test("curl installer restores the old install when a reinstall fails, and won't 
     const target = join(temp, "install");
     mkdirSync(join(target, ".git"), { recursive: true });
     writeFileSync(join(target, "keep"), "");
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *api.github.com*) echo v1.2.3;; run\\ cli:install|"run cli:install") exit 1;; esac\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; run\\ cli:install|"run cli:install") exit 1;; esac\n');
     writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] || { [ -e "$OB_OLD" ] && echo https://github.com/VOID229/openbuild.git; exit 0; }\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target };

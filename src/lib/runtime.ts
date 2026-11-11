@@ -1,6 +1,7 @@
 import { isRemoteServer } from "./devices";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { fetchWithTimeout } from "./abort";
+import { asRelease, type AppRelease } from "../../shared/version";
 
 // Where this copy of the app runs, read once at startup from /api/config:
 //   - "local":  served by your own OpenChat server, which keeps chats and settings on disk and API
@@ -16,6 +17,8 @@ export interface AppConfig {
   serverId?: string;
   /** The computer the server (and Pi) runs on, e.g. "Gal's MacBook Pro". */
   machine?: string;
+  /** Local: the release the server is running (shared/release.ts). */
+  release?: AppRelease;
 }
 
 let resolved: AppConfig | undefined;
@@ -24,7 +27,7 @@ export const config: Promise<AppConfig> = (async () => {
   try {
     const res = await fetchWithTimeout("/api/config", {}, 3000);
     const c = (await res.json()) as Partial<AppConfig>;
-    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null, serverId: c.serverId, machine: c.machine } as AppConfig;
+    return { mode: c.mode === "hosted" ? "hosted" : "local", convexUrl: c.convexUrl || null, serverId: c.serverId, machine: c.machine, release: asRelease(c.release) } as AppConfig;
   } catch {
     return { mode: "local", convexUrl: null } as AppConfig;
   }
@@ -44,3 +47,6 @@ export const canResume = (via: string | undefined, deviceId?: string) =>
 
 /** The computer threads run on (once `config` has resolved). */
 export const machineName = () => resolved?.machine;
+
+/** The release the server is running (once `config` has resolved); undefined when it didn't say. */
+export const appRelease = () => resolved?.release;

@@ -257,36 +257,24 @@ install() {
   mkdir -p "$(dirname "$install_dir")"
 
   step 2
-  release_tag=$(bun -e '
+  # Releases are tags (shared/version.ts): every version is x.y.z-nightly, and a stable one also has a
+  # plain x.y.z tag. Tags from before that: x.y.z-nightly.<date>.<run> came after the x.y.z it names.
+  release_tag=$(git ls-remote --tags --refs "$repo" 2>>"$log" </dev/null | bun -e '
     const track = process.argv[1];
-    const nightly = track === "nightly";
-    const base = "https://api.github.com/repos/VOID229/openbuild/releases";
-    const signal = AbortSignal.timeout(10000);
-    // A token raises GitHub'"'"'s limit, which a shared network or VPN can exhaust. None is required.
-    const gh = process.env.GH_TOKEN || process.env.GITHUB_TOKEN ? undefined : Bun.which("gh");
-    const token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || (gh ? Bun.spawnSync([gh, "auth", "token", "--hostname", "github.com"], { stderr: "ignore", timeout: 5000 }).stdout.toString().trim() : "");
-    const get = (url, auth) => fetch(url, {
-      headers: { Accept: "application/vnd.github+json", "User-Agent": "OpenBuild", ...(auth ? { Authorization: `Bearer ${auth}` } : {}) }, signal,
-    });
-    const releases = [];
-    for (let page = 1; page <= (nightly ? 20 : 1); page++) {
-      const url = nightly ? `${base}?per_page=100&page=${page}` : `${base}/latest`;
-      let response = await get(url, token);
-      if (token && !response.ok && response.status < 500) response = await get(url);
-      if (!response.ok) throw new Error(`GitHub HTTP ${response.status}`);
-      const result = await response.json();
-      const batch = nightly ? result : [result];
-      releases.push(...batch);
-      if (batch.length < 100) break;
+    let best, bestKey;
+    for (const line of (await Bun.stdin.text()).split("\n")) {
+      const tag = line.split("\t")[1]?.trim().replace(/^refs\/tags\//, "");
+      const m = tag && /^(\d+)\.(\d+)\.(\d+)(-nightly(?:\.(\d+(?:\.\d+)*))?)?$/.exec(tag);
+      if (!m || (track === "stable" && m[4])) continue;
+      const key = [+m[1], +m[2], +m[3], m[5] ? 1 : 0, ...(m[5] ? m[5].split(".").map(Number) : [])];
+      let d = bestKey ? 0 : 1;
+      for (let i = 0; !d && i < Math.max(key.length, bestKey.length); i++) d = (key[i] ?? -1) - (bestKey[i] ?? -1);
+      // A promoted version is tagged both ways; the nightly track installs it by its nightly tag.
+      if (d > 0 || (d === 0 && m[4])) { best = tag; bestKey = key; }
     }
-    const tag = nightly
-      ? /^v?\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
-      : /^v?\d+\.\d+\.\d+(?:\+[0-9A-Za-z.-]+)?$/;
-    const release = releases.filter(r => !r.draft && r.prerelease === nightly && tag.test(r.tag_name))
-      .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))[0];
-    if (!release) throw new Error(`No published ${track} release`);
-    console.log(release.tag_name);
-  ' "$track" </dev/null 2>>"$log") || die "Could not find a published $track release. Check your connection or install from source."
+    if (!best) throw new Error(`No published ${track} release`);
+    console.log(best);
+  ' "$track" 2>>"$log") || die "Could not find a published $track release. Check your connection or install from source."
 
   step 3 "$release_tag"
   cloned=1
