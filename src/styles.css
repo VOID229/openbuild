@@ -82,13 +82,15 @@
   --shadow-md: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 4px 8px -2px rgba(0, 0, 0, 0.06), 0 12px 24px -8px rgba(0, 0, 0, 0.08);
   --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.08), 0 24px 48px -12px rgba(0, 0, 0, 0.16);
   --composer-shadow: 0 0 0 1px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.03), 0 8px 24px -6px rgba(0, 0, 0, 0.08);
+  --composer-border: rgba(0, 0, 0, 0.1);
+  --composer-border-focus: rgba(0, 0, 0, 0.18);
 
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-bubble: 18px;
-  --radius-composer: 26px;
+  --radius-composer: 28px;
   --radius-pill: 999px;
 
   /* Segmented controls: a quiet track, the chosen option lifted onto it. */
@@ -166,6 +168,8 @@
   --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 32px rgba(0, 0, 0, 0.7);
   --composer-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.5);
+  --composer-border: rgba(255, 255, 255, 0.12);
+  --composer-border-focus: rgba(255, 255, 255, 0.2);
   color-scheme: dark;
 }
 
@@ -2038,22 +2042,23 @@ select.input {
   width: 100%;
 }
 
-/* Grok-like: a raised box with a hairline, the text on top and a row of quiet controls under it. */
+/* Grok-like: a flat box on the pane's own colour, drawn by a faint hairline alone, the text on top
+   and a row of quiet controls under it. Measured off Grok: 28px corners, 16px in from the edge,
+   a 15px line and 36px controls. */
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 14px 10px 10px 18px;
+  gap: 12px;
+  padding: 16px 12px 12px 18px;
   border-radius: var(--radius-composer);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-raised);
-  box-shadow: var(--composer-shadow);
+  border: 1px solid var(--composer-border);
+  background: var(--surface);
   cursor: text;
   transition: border-color var(--fast) var(--ease);
 }
 
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--text) 24%, transparent);
+  border-color: var(--composer-border-focus);
 }
 
 .composer-drag {
@@ -2066,13 +2071,13 @@ select.input {
   width: 100%;
   min-height: 24px;
   max-height: 40vh;
-  padding: 2px 4px 0 0;
+  padding: 0 4px 0 0;
   border: 0;
   outline: none;
   resize: none;
   background: transparent;
   font-size: 15px;
-  line-height: 1.55;
+  line-height: 1.6;
   color: var(--text);
 }
 
@@ -2120,6 +2125,12 @@ select.input {
 
 .composer-controls .picker-static {
   min-width: 0;
+}
+
+/* Send sits a size up from the other controls, as Grok's does. */
+.composer .round-btn-send {
+  width: 36px;
+  height: 36px;
 }
 
 /* The bar follows the composer's own width, not the window's: the side panel narrows it too. The
