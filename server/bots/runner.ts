@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { appById } from "../../shared/apps";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, shownReplyError, type BotMessage } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -53,9 +53,10 @@ interface Mind {
   typing: boolean;
   /**
    * Keep the chat clear unless it starts typing (see BotStatus.quiet): a turn for reactions only
-   * ("reaction", until it writes), or just after a message ("sent", until it picks up real work).
+   * ("reaction", until it writes), just after a message ("sent", until it picks up real work), or a
+   * group turn it hasn't acted on yet ("deciding", until it types or uses a tool: BotStatus.deciding).
    */
-  quiet: false | "reaction" | "sent";
+  quiet: false | "reaction" | "sent" | "deciding";
   activity: string;
   /** The OpenBuild thread its current openbuild call is about (BotStatus.thread). */
   thread?: string;
@@ -162,7 +163,7 @@ export function wake(botId: string, item: Wake) {
     const images = imagesBetween(conversationId, from, through);
     shown.set(conversationId, through);
     if (item.kind === "messages") {
-      mind.quiet = false;
+      if (mind.quiet !== "deciding") mind.quiet = false;
       waitsOn(mind);
       show(botId, mind);
     }
@@ -216,8 +217,9 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
       const row = db.getMessage(id);
       return row?.conversationId === conversationId ? imagesBetween(conversationId, row.seq - 1, row.seq) : [];
     }).slice(-IMAGE_LIMIT);
-    mind.quiet = false;
-    waitsOn(mind);
+    // Still deciding whether the group's messages are its to answer: this one is decided on with them.
+    if (mind.quiet !== "deciding") mind.quiet = false;
+    if (!item.lead || item.lead === botId) waitsOn(mind);
     show(botId, mind);
     // A steer Pi is slow to answer is waited out, and the turn holds on to Pi until it is.
     return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids, item.lead), ...(images.length ? { images } : {}) }, (disposition) => {
@@ -239,6 +241,11 @@ function enqueue(botId: string, item: Wake) {
   void pump(botId);
 }
 
+/** Of waitingIn, the groups: every bot there gets each message and may well let it be, so it doesn't show holding on (see BotStatus.undecided). */
+function undecidedIn(waiting: string[]): string[] {
+  return waiting.filter((id) => db.getConversation(id)?.kind === "group");
+}
+
 /** Conversations whose messages wait for the bot to finish elsewhere. Reactions and routines don't need an answer shown. */
 export function waitingIn(botId: string): string[] {
   const focus = getFocus(botId);
@@ -248,9 +255,11 @@ export function waitingIn(botId: string): string[] {
 
 function setStatus(botId: string, next: BotStatus) {
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
+  const undecided = undecidedIn(waiting);
   // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
-  const owed = !!next.quiet && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
-  svc.setStatus(botId, { ...next, quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined });
+  // In a group, the bot is still to decide whether that one is its to answer too.
+  const owed = !!next.quiet && !next.deciding && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
+  svc.setStatus(botId, { ...next, quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined, undecided: undecided.length ? undecided : undefined });
 }
 
 async function pump(botId: string) {
@@ -564,7 +573,15 @@ const WRITING = new Set(["send_message", "question", "poll"]);
 
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
-  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, thread: mind.thread, since: Date.now() });
+  setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, deciding: mind.quiet === "deciding" || undefined, thread: mind.thread, since: Date.now() });
+}
+
+/** Tools a bot uses to make up its mind, not to act: a group turn on them is still deciding. */
+const DECIDING_TOOLS = new Set(["load_tools"]);
+
+/** It acted on a group turn it was deciding on: from now the chat shows it. */
+function decided(mind: Mind, next: Mind["quiet"] = false) {
+  if (mind.quiet === "deciding") mind.quiet = next;
 }
 
 /** The thread an openbuild call names (read, send, answer, stop, close, pr, merge), as the bot wrote it. */
@@ -611,8 +628,12 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     const conversationId = getFocus(botId);
     if (conversationId) svc.setDraft(undefined, { conversationId, botId });
     mind.thread = threadOf(tool, record.args);
+    // A reaction is an action too, but one the chat already shows on the message: the mascot only stirs.
+    if (!DECIDING_TOOLS.has(tool)) decided(mind, tool === "react" ? "reaction" : false);
     if (WRITING.has(tool)) setTyping(botId, mind, true);
-    else if (tool !== "react") {
+    else if (tool === "react") show(botId, mind);
+    else if (DECIDING_TOOLS.has(tool) && mind.quiet === "deciding") mind.tool = { name: tool, since: Date.now() };
+    else {
       setTyping(botId, mind, false);
       // Work after a message is still work: the chat shows it, as the sidebar does.
       if (mind.quiet === "sent") mind.quiet = false;
@@ -636,6 +657,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   }
   const ev = record.type === "message_update" ? record.assistantMessageEvent : undefined;
   if (ev?.type === "toolcall_start" && WRITING.has(String(ev.toolName ?? ""))) {
+    decided(mind);
     setTyping(botId, mind, true);
     mind.willWrite = true;
   }
@@ -652,6 +674,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     const conversationId = getFocus(botId);
     const text = plainReply(mind, mind.draft).join("\n\n");
     if (conversationId && !mind.sent && text) {
+      decided(mind);
       setTyping(botId, mind, true);
       svc.setDraft({ conversationId, botId, text: text.slice(-4000) }, { conversationId, botId });
     }
@@ -728,7 +751,8 @@ function sideReply(botId: string, item: Wake) {
   const conversationId = item.conversationId;
   const c = conversationId ? db.getConversation(conversationId) : undefined;
   if (item.kind !== "messages" || !c || !conversationId || c.friend || c.kind === "side") return;
-  if (c.kind === "group" && !item.messageIds?.length) return;
+  // In a group, only the bot that answers for everyone; the others are deciding whether to add anything.
+  if (c.kind === "group" && (!item.messageIds?.length || (item.lead && item.lead !== botId))) return;
   const mind = minds.get(botId);
   const tool = mind?.tool;
   if (!mind || !tool || !pumping.has(botId) || !mind.shown || mind.proc.exited || halted.has(botId)) return;
@@ -867,10 +891,13 @@ async function runTurn(botId: string, all: Wake[]) {
   const key = mindKey(botId, lane);
   // A reaction may well get no answer, so the chat shows nothing unless the bot starts typing.
   const quiet = jobs.every((j) => j.kind === "reaction");
+  // Every bot in a group reads what's said there and decides whether it's theirs: nothing shows of it,
+  // not even its mascot, until it acts (BotStatus.deciding).
+  const deciding = db.getConversation(conversationId ?? "")?.kind === "group" && jobs.every((j) => j.kind === "messages" || j.kind === "reaction");
   // A stop is for the turn it was said to: one left over from between turns isn't this one's.
   halted.delete(botId);
   setFocus(botId, conversationId);
-  setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || undefined, since: Date.now() });
+  setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || deciding || undefined, deciding: deciding || undefined, since: Date.now() });
   let mind: Mind | undefined;
   try {
     mind = await ensureMind(botId, lane);
@@ -879,14 +906,15 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.thread = undefined;
     mind.usage = {};
     rmSync(join(mind.sessionPath!, "settled"), { force: true });
-    mind.quiet = quiet && "reaction";
+    mind.quiet = deciding ? "deciding" : quiet && "reaction";
     mind.aborting = undefined;
     mind.tool = undefined;
     mind.nudged = false;
     mind.willWrite = false;
-    // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a group.
+    // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
+    // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
     const direct = db.getConversation(conversationId ?? "")?.kind === "direct";
-    mind.waitingUser = jobs.some((j) => j.kind === "messages" && (direct || !!j.messageIds?.length));
+    mind.waitingUser = jobs.some((j) => j.kind === "messages" && (direct || (!!j.messageIds?.length && (!j.lead || j.lead === botId))));
     mind.waitingSince = Date.now();
     // A note, a check-in or a reaction: nobody asked, so only news is worth a message (routines were asked for).
     mind.background = jobs.every((j) => j.kind === "note" || j.kind === "heartbeat" || j.kind === "reaction");
@@ -1238,7 +1266,15 @@ export function transcript(conversationId: string, bots: { id: string; name: str
   }).map(line(c, bots, user, botId, assigned, undefined, leads));
   const list = db.todos(conversationId);
   const todos = list.length ? `${c.friend ? untrustedData(todoText(list, botId)) : todoText(list, botId)}\n` : "";
-  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
+  return `Conversation ${conversationId.slice(0, 8)} (${c.kind}, “${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”):\n${sharedNote(c, user)}${huddleNote(c, bots, botId)}${membersNote(c, botId)}${c.instructions ? `Group instructions: ${c.instructions}\n` : ""}${todos}${lines.join("\n") || (rows.length ? "(nothing new since you last saw it)" : "(empty)")}`;
+}
+
+/** Who's in a group and what each does, so a bot can tell whether a message is its job or someone else's. */
+function membersNote(c: db.StoredConversation, botId: string): string {
+  if (c.kind !== "group" || c.huddle) return "";
+  const members = c.botIds.flatMap((id) => db.getBot(id) ?? []);
+  if (members.length < 2) return "";
+  return `Bots here: ${members.map((b) => `${b.id === botId ? "you" : mentionName(b.name)} (${roleLine(b) || "no role yet"})`).join("; ")}.\n`;
 }
 
 /** What a shared chat's transcript says first: who else is in it, and that they aren't the user. */
@@ -1321,7 +1357,7 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
   // Asked of several bots at once: one answers, the rest add only what's theirs alone.
   const shared = (lead: string) => lead === botId
     ? `${forYou.slice(0, -1)}; it went to others too, and you answer for all of you]`
-    : ` [asked of several bots; ${name(lead)} answers it. Reply only if it asks each of you, or with what's yours alone (your own task or finding, a correction); otherwise react or stay [silent]]`;
+    : ` [asked of several bots; ${name(lead)} answers it. Act on it or reply only if it asks each of you, or if part of it is your job by your role and nobody here fits it better (your own task or finding, a correction). Otherwise stay [silent]: no message, no reaction, no tools, and nothing shows of you]`;
   return (r: { seq: number; message: BotMessage }) => {
     const m = r.message;
     const who = authorLabel(c, m.author, bots, user);

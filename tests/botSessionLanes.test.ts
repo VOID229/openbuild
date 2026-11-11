@@ -225,7 +225,11 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
         } };
         minds.set(bot.id, fake);
         const ids = new Map();
-        const realPrompts = () => events().filter(e => e.type === 'prompt');
+        // An untagged group message reaches the other bot too: only this bot's Pi is followed here.
+        const otherLane = laneDirectory(db.botsDir() + '/sessions', other.id, group.id);
+        const own = e => !String(e.dir).startsWith(otherLane);
+        const realPrompts = () => events().filter(e => e.type === 'prompt' && own(e));
+        const starts = () => events().filter(e => e.type === 'start' && own(e));
         const say = async (where, text) => {
           const fakeBefore = fakePrompts.length, realBefore = realPrompts().length;
           const message = { id: crypto.randomUUID(), author: 'me', text, at: Date.now() };
