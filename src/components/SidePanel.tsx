@@ -13,7 +13,7 @@ import { arrangeTabs, defaultWidth, scopeKey, usePanel, type PanelView } from ".
 import { prefetchPulls } from "../lib/pulls";
 import { machineName } from "../lib/runtime";
 import { restartTerminalTab, showSideTerminal, useSideTerminal, type TerminalFolder } from "../lib/terminal";
-import { cx } from "../lib/ui";
+import { cx, useRoomTaken } from "../lib/ui";
 import { BrowserView, dropBrowserHistory } from "./BrowserView";
 import { DiffView } from "./DiffView";
 import { dropBuffer, FileView } from "./FileView";
@@ -242,7 +242,8 @@ export function SidePanel({ folder, toolsWidth }: { folder: TerminalFolder; tool
   useTabKeys(open && showing === "terminal", "side");
   const where = folder.deviceId ? (deviceName(folder.deviceId) ?? "paired device") : (machineName() ?? "this device");
   // The tabs leave room for the toolbar above them when nothing (the file tree) sits under it instead.
-  const reserve = Math.max(0, toolsWidth - (tree && folder.cwd ? treeWidth : 0));
+  const treeRoom = useRoomTaken(tree);
+  const reserve = Math.max(0, toolsWidth - (treeRoom && folder.cwd ? treeWidth : 0));
   const close = (path: string) => {
     if (dirty[path] && !confirm(`${path.split("/").pop()} has unsaved edits. Close it anyway?`)) return;
     dropBuffer(folder, path);

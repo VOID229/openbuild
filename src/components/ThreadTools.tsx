@@ -4,7 +4,7 @@ import { FolderTree, Maximize2, Minimize2, PanelRight } from "lucide-react";
 import { useLayoutEffect, useRef } from "react";
 import { usePanel } from "../lib/panel";
 import type { Chat } from "../lib/types";
-import { cx, useMediaQuery } from "../lib/ui";
+import { cx, useMediaQuery, useRoomTaken } from "../lib/ui";
 import { GitMenu } from "./GitMenu";
 import { IconButton } from "./primitives";
 
@@ -16,6 +16,11 @@ export function ThreadTools({ chat, onWidth }: { chat?: Chat; onWidth: (width: n
   const hasFiles = usePanel((s) => !!s.folder?.cwd);
   const { setPanel, setTree, setExpanded } = usePanel.getState();
   const narrow = useMediaQuery("(max-width: 768px)");
+  // The backing comes back once a closing panel or tree is gone, not over it while it fades.
+  // (An expanded panel gives its room back at once: it has no width of its own to hold.)
+  const panelRoom = useRoomTaken(panel && !expanded);
+  const treeRoom = useRoomTaken(tree && hasFiles);
+  const over = panel || panelRoom || treeRoom;
   const ref = useRef<HTMLDivElement>(null);
   // The panel's tabs keep clear of these buttons, which sit over its top edge.
   useLayoutEffect(() => {
@@ -27,7 +32,7 @@ export function ThreadTools({ chat, onWidth }: { chat?: Chat; onWidth: (width: n
   }, [onWidth]);
   const streaming = !!chat && chat.messages.findLast((m) => m.role === "assistant")?.status === "streaming";
   return (
-    <div ref={ref} className={cx("thread-tools", (panel || (tree && hasFiles)) && "thread-tools-over")}>
+    <div ref={ref} className={cx("thread-tools", over && "thread-tools-over")}>
       {panel && !narrow && (
         <IconButton label={expanded ? "Show the thread" : "Expand the panel"} className="thread-tool" onClick={() => setExpanded(!expanded)}>
           {expanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
