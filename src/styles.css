@@ -1331,6 +1331,11 @@ select.input {
   transform: rotate(-90deg);
 }
 
+/* The foot section opens upward, so shut it points up rather than right. */
+.history-group-bottom > .history-heading-toggle[aria-expanded="false"] .history-heading-chevron {
+  transform: rotate(180deg);
+}
+
 /* Collapsible sections snap open and shut (animating their height relays out the list every frame);
    the rows fade in as they appear. */
 .collapse {
