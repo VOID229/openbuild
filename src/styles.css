@@ -1008,28 +1008,23 @@ select.input {
   margin-left: auto;
 }
 
-/* Build or Bots, in the wordmark's place: centred across the row and as wide as it can be there
-   while keeping 8px clear of the two tools on the right (the row is the sidebar less its 18px of
-   padding, the tools 66px), up to 84px a pill. The lit pill is the canvas, cut out of a lighter track. */
+/* Build or Bots, in the wordmark's place: it fills the row between the panel button and the tools,
+   the same small gap on either side, its two pills splitting it evenly. The lit pill is the canvas,
+   cut out of a lighter track. */
 .mode-switch {
-  --mode-pill-w: min(84px, (var(--threads-sidebar-w) - 172px) / 2);
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  position: relative;
+  flex: 1;
   display: flex;
   gap: 2px;
+  margin: 0 4px;
   padding: 2px;
   border-radius: 11px;
   background: var(--active);
 }
 
-.brand-row > .mode-switch + * {
-  margin-left: auto;
-}
-
 .mode-pill {
   position: relative;
-  width: var(--mode-pill-w);
+  flex: 1;
   height: 30px;
   border-radius: 9px;
   font-size: 14px;
@@ -1048,7 +1043,7 @@ select.input {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: var(--mode-pill-w);
+  width: calc(50% - 3px);
   height: 30px;
   border-radius: 9px;
   background: var(--surface);
