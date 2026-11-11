@@ -2694,7 +2694,7 @@
 }
 
 .bots-composer-input::placeholder {
-  color: var(--text-3);
+  color: var(--composer-placeholder);
 }
 
 /* The textarea's own text is invisible; the backdrop under it draws the draft, with @mentions as tags. */
