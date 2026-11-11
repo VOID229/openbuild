@@ -1420,6 +1420,25 @@
   margin-top: 16px;
 }
 
+/* Hidden behind Build or a thread and shown again, rows out of view skip style, layout and paint, as a
+   thread's messages do (.messages-inner > .msg): coming back lays out what's in view, not every message
+   loaded, before the switch can draw a frame. BotChat sets bots-messages-skip as the chat hides, once it
+   has been laid out whole, so each row keeps its real height (contain-intrinsic-size: auto), and takes
+   it off once the switch's motion is over: a skipping row's mascots can't breathe on the compositor.
+   The clip margin keeps a focus ring, which sits just outside the row. */
+.bots-messages-inner > :is(.bm-group, .bm-event, .bm-events) {
+  contain-intrinsic-size: auto 72px;
+}
+
+.bots-messages-inner > :is(.bm-event, .bm-events) {
+  contain-intrinsic-size: auto 20px;
+}
+
+.bots-messages-skip > .bots-messages-inner > :is(.bm-group, .bm-event, .bm-events) {
+  content-visibility: auto;
+  overflow-clip-margin: 4px;
+}
+
 .bm-mine {
   align-items: flex-end;
 }
