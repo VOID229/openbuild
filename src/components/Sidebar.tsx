@@ -637,16 +637,21 @@ interface MenuState {
 }
 
 /** Delete a thread for good, stopping any reply still running. */
-/** Rows the sidebar lists, top to bottom; kept current by Sidebar. */
-let threadOrder: string[] = [];
+/** Rows the sidebar lists, top to bottom, one list per section; kept current by Sidebar. */
+let threadOrder: string[][] = [];
 
-/** Before the open thread leaves the list: move to the row that takes its place, or the one above if it was last. */
+/**
+ * Before the open thread leaves the list: move to the row that takes its place in its section, or
+ * the one above if it was last there. It never crosses into another section: when it was the
+ * section's only thread, a new thread opens instead.
+ */
 function leaveThread(id: string) {
   const s = useStore.getState();
   if (s.activeChatId !== id) return;
-  const order = threadOrder.filter((t) => t === id || !moving.has(t));
-  const at = order.indexOf(id);
-  const next = at < 0 ? order[0] : (order[at + 1] ?? order[at - 1]);
+  const sections = threadOrder.map((section) => section.filter((t) => t === id || !moving.has(t)));
+  const order = sections.find((section) => section.includes(id));
+  const at = order?.indexOf(id) ?? -1;
+  const next = order ? (order[at + 1] ?? order[at - 1]) : sections.flat()[0];
   // Over OpenBots or Usage, change the thread underneath without bringing OpenBuild forward.
   // A thread opened inside OpenBots goes back to the bot chat rather than on to the next thread.
   if (s.botsOpen || s.usageOpen) useStore.setState({ activeChatId: next, searchFocus: undefined, botsThread: false });
@@ -1524,9 +1529,9 @@ export function Sidebar() {
   // What's on screen, in order. Collapsed sections don't count, unless the open thread is in one.
   useEffect(() => {
     const listed = deferredQuery
-      ? hits.map((h) => h.chat)
+      ? [hits.map((h) => h.chat)]
       : closedView
-        ? closed
+        ? [closed]
         : (
             [
               [pinned, sections.pinned],
@@ -1539,8 +1544,8 @@ export function Sidebar() {
               [snoozed, sections.snoozed],
               [closed, sections.closed],
             ] as const
-          ).flatMap(([list, open]) => (open || list.some((c) => c.id === activeChatId) ? list : []));
-    threadOrder = listed.map((c) => c.id);
+          ).flatMap(([list, open]) => (open || list.some((c) => c.id === activeChatId) ? [list] : []));
+    threadOrder = listed.map((list) => list.map((c) => c.id));
   });
 
   // Snoozes that run out, now or while the app was closed, wake their threads into "Woke".
