@@ -7,11 +7,18 @@ import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
 
-/** Busy replying in another chat, with this one's message next in line. */
-export const holding = (st: BotStatus | undefined, conversationId: string) => !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId);
+/** Busy replying in another chat, with this one's message next in line. Not a group's: it hasn't decided whether that one's its to answer. */
+export const holding = (st: BotStatus | undefined, conversationId: string) =>
+  !!st && st.state !== "idle" && st.conversationId !== conversationId && !!st.waiting?.includes(conversationId) && !st.undecided?.includes(conversationId);
+
+/**
+ * Working, as far as anyone can see. A bot deciding whether a group message is its to answer isn't,
+ * anywhere: until it types or picks up a tool, nothing shows of it, not even its mascot.
+ */
+export const visiblyWorking = (st: BotStatus | undefined) => st?.state === "working" && !st.deciding;
 
 /** Working in this chat, quietly or not. */
-export const workingHere = (st: BotStatus | undefined, conversationId: string) => st?.state === "working" && st.conversationId === conversationId;
+export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
 
 /**
  * The conversation's bots that are busy, wherever: working in any chat, or typing in this one. Their
@@ -20,13 +27,13 @@ export const workingHere = (st: BotStatus | undefined, conversationId: string) =
  */
 export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: Record<string, string[] | undefined>): string[] {
   const here = typing[conversation.id] ?? [];
-  return conversation.botIds.filter((id) => here.includes(id) || status[id]?.state === "working");
+  return conversation.botIds.filter((id) => here.includes(id) || visiblyWorking(status[id]));
 }
 
 /** The conversation's bots working in another chat, and which, unless this chat's message is next (that's `holding`). */
 export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses): { botId: string; conversationId?: string }[] {
   return conversation.botIds
-    .filter((id) => status[id]?.state === "working" && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
+    .filter((id) => visiblyWorking(status[id]) && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
     .map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
 }
 
@@ -47,7 +54,8 @@ export function showWorking(conversationId: string, status: Statuses, typing: st
 export function stoppable(conversation: Pick<Conversation, "id" | "botIds" | "kind">, status: Statuses): string[] {
   return conversation.botIds.filter((id) => {
     const st = status[id];
-    return st?.state === "working" && (conversation.kind === "direct" || st.conversationId === conversation.id || !!st.waiting?.includes(conversation.id));
+    // One still deciding has nothing to stop yet that anyone can see.
+    return visiblyWorking(st) && (conversation.kind === "direct" || st!.conversationId === conversation.id || (!!st!.waiting?.includes(conversation.id) && !st!.undecided?.includes(conversation.id)));
   });
 }
 

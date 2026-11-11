@@ -1008,19 +1008,20 @@ const CLOCK_SKEW_MS = 60_000;
 // Who the user's last group request went to is kept in the database (db.groupFollow), so a restart
 // mid-window doesn't hand the next message to the primary. Only user requests refresh the clock.
 
+/** The group's bots that are still around. */
+const groupMembers = (c: db.StoredConversation) => c.botIds.filter((id) => db.getBot(id));
+
 /**
- * Who an untagged user message in a group goes to: whoever the last request went to, for 20 minutes
- * after it, or else the primary. Decided on the spot, so the recipients show as busy straight away.
+ * Who the user was last talking to in a group: the bots their last tagged (or quoted) request went to,
+ * for 20 minutes after their last request. An untagged message still goes to every bot there; these
+ * answer it unless it names someone or fits another's role better (see pickLead).
  */
-function groupRecipients(c: db.StoredConversation, message: BotMessage): string[] {
-  const members = c.botIds.filter(id => db.getBot(id));
+function followed(c: db.StoredConversation, message: BotMessage): string[] | undefined {
   const follow = db.groupFollow(c.id);
-  if (follow && message.at >= follow.at - CLOCK_SKEW_MS && message.at - follow.at < GROUP_FOLLOW_MS) {
-    const ids = follow.ids.filter(id => members.includes(id));
-    if (ids.length) return ids;
-  }
-  const primary = members.find(id => db.getBot(id)?.primary) ?? members[0];
-  return primary ? [primary] : [];
+  if (!follow || message.at < follow.at - CLOCK_SKEW_MS || message.at - follow.at >= GROUP_FOLLOW_MS) return undefined;
+  const members = groupMembers(c);
+  const ids = follow.ids.filter((id) => members.includes(id));
+  return ids.length ? ids : undefined;
 }
 
 const COMMON = new Set("the and for you your are can what that this with have from they about there their would could should just like some then them when which will been were does into also more here know want need make tell please think each every other only very much really thing anyone everyone someone right now still again today all".split(" ").map(stem));
@@ -1043,7 +1044,7 @@ function namedAt(text: string, bot: db.StoredBot): number {
  * sentence of its instructions, where a bot says what it does (the rest often names other bots' jobs). A tie, or nothing in common, goes to the primary if it was asked, else whoever was named first.
  * Decided here, with no model call; the others still get it, to add what's theirs alone.
  */
-export function pickLead(text: string, ids: string[]): string | undefined {
+export function pickLead(text: string, ids: string[], talking?: string[]): string | undefined {
   const bots = ids.flatMap((id) => db.getBot(id) ?? []);
   if (bots.length < 2) return bots[0]?.id;
   const named = bots.map((b) => ({ b, at: namedAt(text, b) })).filter((n) => n.at >= 0).sort((x, y) => x.at - y.at).map((n) => n.b);
@@ -1057,6 +1058,9 @@ export function pickLead(text: string, ids: string[]): string | undefined {
     return { b, fit: asked.filter((w) => role.has(w)).length };
   }).sort((x, y) => y.fit - x.fit);
   if (scored[0]!.fit && scored[0]!.fit > (scored[1]?.fit ?? 0)) return scored[0]!.b.id;
+  // Nothing to tell them apart: whoever the user was just talking to carries on.
+  const carrying = talking?.length ? pool.filter((b) => talking.includes(b.id)) : [];
+  if (carrying.length) return (carrying.find((b) => b.primary) ?? carrying[0])!.id;
   return (pool.find((b) => b.primary) ?? bots.find((b) => b.primary) ?? pool[0])!.id;
 }
 
@@ -1118,19 +1122,25 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
   if (!message.event) {
     let targets = wakeTargets(c, message);
     const groupRequest = message.author === "me" && c.kind === "group";
-    if (groupRequest && !message.poll) {
-      if (!targets.length) targets = groupRecipients(c, message);
-      db.setGroupFollow(conversationId, { ids: targets, at: message.at });
-    }
+    // An untagged message in a group goes to every bot there. Each decides whether it's theirs, and
+    // nothing shows of the ones that let it be (BotStatus.deciding).
+    const everyone = groupRequest && !message.poll && !targets.length;
+    const talking = everyone ? followed(c, message) : undefined;
+    if (everyone) targets = groupMembers(c);
+    // Who the user is talking to is who they last named; any request of theirs keeps that going.
+    if (groupRequest && !message.poll && (!everyone || talking)) db.setGroupFollow(conversationId, { ids: everyone ? talking! : targets, at: message.at });
     // "Stop", however it's put: whoever it reaches that has something going stops, and isn't woken to
-    // answer it. One with nothing going reads it as any other message.
+    // answer it. One with nothing going reads it as any other message. Said to the whole group, it
+    // stops the ones at work there, not whatever the others are doing elsewhere.
     if (message.author === "me" && !message.poll && !message.images?.length && isStopRequest(message.text)) {
-      const stopped = haltBots(conversationId, targets);
+      const stopped = haltBots(conversationId, everyone ? targets.filter((id) => workingIn(c, id)) : targets);
       if (stopped.length) patchMessage(conversationId, message.id, { seenBy: [...new Set([...(message.seenBy ?? []), ...stopped])] });
       targets = targets.filter((id) => !stopped.includes(id));
+      // It stopped something: the bots that had nothing going needn't think a stop over.
+      if (everyone && stopped.length) targets = [];
     }
     // Several bots asked at once: one answers, and the others add only what's theirs.
-    const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets) : undefined;
+    const lead = groupRequest && targets.length > 1 ? pickLead(message.text, targets, talking) : undefined;
     for (const botId of targets) if (!skip.has(botId)) hooks.wake(botId, { kind: "messages", conversationId, ...(groupRequest ? { messageIds: [message.id], ...(lead ? { lead } : {}) } : {}) });
   }
   return message;
@@ -1175,11 +1185,13 @@ export function stopConversation(conversationId: string, botId?: string): string
   const c = db.getConversation(conversationId);
   if (!c) throw new BotsError("No such conversation.", 404);
   if (botId && !c.botIds.includes(botId)) throw new BotsError("That bot isn't in this conversation.");
-  const here = (id: string) => {
-    const now = getStatus(id);
-    return c.kind === "direct" || now?.conversationId === conversationId || !!now?.waiting?.includes(conversationId);
-  };
-  return haltBots(conversationId, botId ? [botId] : c.botIds.filter(here));
+  return haltBots(conversationId, botId ? [botId] : c.botIds.filter((id) => workingIn(c, id)));
+}
+
+/** Whether a stop in this conversation is for this bot: at work there or with a message of it next in line, or anywhere for its own chat. */
+function workingIn(c: db.StoredConversation, botId: string): boolean {
+  const now = getStatus(botId);
+  return c.kind === "direct" || now?.conversationId === c.id || !!now?.waiting?.includes(c.id);
 }
 
 /** Whether the bot's turn in a conversation is one nobody is waiting on (see Hooks.background). */

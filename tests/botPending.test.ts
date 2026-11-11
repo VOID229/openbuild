@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-test('a sent message shows its bot busy at once: starting, busy elsewhere, or after a reply in the same chat', async () => {
+test('a group message reaches every bot there, and only the ones that act show; a sent message shows its bot busy at once otherwise', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-bots-pending-'));
   try {
     const child = Bun.spawn([process.execPath, '-e', `
@@ -14,7 +14,7 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       const { piFlags } = await import('./server/bots/extensions.ts');
       const { laneDirectory, sessionGeneration } = await import('./server/bots/sessionPolicy.ts');
       const sessionPathFor = id => sessionGeneration(laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', id, (globalThis.openbotsFocus?.get(id) ?? svc.directId(id))));
-      const { holding, showWorking } = await import('./src/lib/bots/activity.ts');
+      const { busyBots, holding, showWorking } = await import('./src/lib/bots/activity.ts');
       // A bot busy in a tool answers a new message through a helper session (botResponsiveness.test.ts): a stand-in, so no real Pi starts here.
       const helpers = await import('./server/bots/helpers.ts');
       const quickReplies = [];
@@ -38,21 +38,43 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       const typing = () => svc.snapshot().typing[group.id] ?? [];
       const post = (where, text) => svc.postMessage(where, { id: crypto.randomUUID(), author: 'me', text, at: Date.now() });
 
-      // Starting: the primary is working in the group before postMessage even returns.
+      const mine = id => prompts.filter(p => p.bot === id);
+      const shownWorking = () => showWorking(group.id, svc.snapshot().status, typing());
+
+      // Every bot in the group gets it, and decides whether it's theirs: working, but nothing shows of
+      // either, not even a mascot: the chat stays silent until one acts.
       post(group.id, 'Hello');
-      a.equal(status(boss.bot.id).state, 'working');
-      a.equal(status(boss.bot.id).conversationId, group.id);
-      a.deepEqual(showWorking(group.id, svc.snapshot().status, typing()), [boss.bot.id]);
-      await until(() => prompts.length === 1 && minds.get(boss.bot.id).steerable);
+      for (const id of [boss.bot.id, helper.bot.id]) {
+        a.equal(status(id).state, 'working');
+        a.equal(status(id).conversationId, group.id);
+        a.equal(status(id).deciding, true);
+      }
+      a.deepEqual(shownWorking(), []);
+      a.deepEqual(busyBots(group, svc.snapshot().status, svc.snapshot().typing), []);
+      await until(() => mine(boss.bot.id).length === 1 && mine(helper.bot.id).length === 1 && minds.get(boss.bot.id).steerable);
+
+      // Picking up a tool to make up its mind isn't acting; a real one is, and from then it shows.
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_start', toolName: 'load_tools', args: {} });
+      a.equal(status(boss.bot.id).deciding, true);
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_end', toolName: 'load_tools', result: {} });
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_start', toolName: 'bash', args: { status: 'Looking into it' } });
+      a.equal(status(boss.bot.id).deciding, undefined);
+      a.deepEqual(shownWorking(), [boss.bot.id]);
+      a.deepEqual(busyBots(group, svc.snapshot().status, svc.snapshot().typing), [boss.bot.id]);
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_end', toolName: 'bash', result: {} });
+      // The other lets it be: it never showed, and it's done.
+      mine(helper.bot.id)[0].finish();
+      await until(() => !runner.busy(helper.bot.id));
+      a.equal(status(helper.bot.id)?.state ?? 'idle', 'idle');
 
       // After a reply, it's quiet in the chat; a new message there shows it busy again straight away.
-      runner.onRecord(boss.bot.id, prompts[0].mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
       a.equal(status(boss.bot.id).quiet, true);
       post(group.id, 'One more thing');
       a.equal(status(boss.bot.id).quiet, undefined);
-      a.deepEqual(showWorking(group.id, svc.snapshot().status, typing()), [boss.bot.id]);
+      a.deepEqual(shownWorking(), [boss.bot.id]);
       // Tools after the reply keep it showing.
-      runner.onRecord(boss.bot.id, prompts[0].mind, { type: 'tool_execution_start', toolName: 'bash', args: { status: 'Checking the logs' } });
+      runner.onRecord(boss.bot.id, mine(boss.bot.id)[0].mind, { type: 'tool_execution_start', toolName: 'bash', args: { status: 'Checking the logs' } });
       a.equal(status(boss.bot.id).quiet, undefined);
       a.equal(status(boss.bot.id).activity, 'Checking the logs');
 
@@ -62,15 +84,23 @@ test('a sent message shows its bot busy at once: starting, busy elsewhere, or af
       a.deepEqual(showWorking(boss.conversationId, svc.snapshot().status, svc.snapshot().typing[boss.conversationId] ?? []), [boss.bot.id]);
 
       // The follow-up in the group was steered into the turn it's working on, not held for another.
-      a.equal(steers.length, 1);
-      a.ok(steers[0].message.includes('[new, for you]: One more thing'));
-      prompts[0].finish();
-      await until(() => prompts.length === 2 && minds.get(boss.bot.id).steerable);
+      // (Besides the nudge to say something, sent while it worked on the first with the user waiting.)
+      const delivered = steers.filter(s => s.bot === boss.bot.id && s.message !== runner.ACK_NUDGE);
+      a.equal(delivered.length, 1);
+      a.ok(delivered[0].message.includes('[new, for you'));
+      a.ok(delivered[0].message.includes('One more thing'));
+      // The other bot, only deciding, isn't nudged to say anything.
+      a.equal(steers.filter(s => s.bot === helper.bot.id).length, 0);
+      mine(boss.bot.id)[0].finish();
+      await until(() => mine(boss.bot.id).length === 2 && minds.get(boss.bot.id).steerable);
       a.equal(status(boss.bot.id).conversationId, boss.conversationId);
-      prompts[1].finish();
+      mine(boss.bot.id)[1].finish();
       await until(() => !runner.busy(boss.bot.id));
       a.equal(status(boss.bot.id)?.state ?? 'idle', 'idle');
-      // Only the message that found it inside a tool got a quick reply started.
+      await until(() => mine(helper.bot.id).length === 2);
+      mine(helper.bot.id)[1].finish();
+      await until(() => !runner.busy(helper.bot.id));
+      // Only the message that found it inside a tool got a quick reply started, and only the bot that answers for the group.
       a.deepEqual(quickReplies, [boss.bot.id]);
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });

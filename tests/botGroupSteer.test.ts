@@ -83,13 +83,14 @@ test('a busy group recipient is steered its request whether mentioned, replied t
     ['primary', () => post(group.id, 'me', 'PRIMARY', { at: now + 21 * 60_000 }), 'PRIMARY', []],
   ];
   for (const [mode, send, text, images] of cases) {
-    const before = steers.length;
+    const before = steersOf(alpha.bot).length;
     const message = send();
-    await until(() => steers.length === before + 1 && steers.at(-1).ok);
-    const steer = steers.at(-1);
+    await until(() => steersOf(alpha.bot).length === before + 1 && steersOf(alpha.bot).at(-1).ok);
+    const steer = steersOf(alpha.bot).at(-1);
     a.equal(steer.bot, alpha.bot.id, mode);
     a.equal(steer.focus, group.id, mode);
-    a.ok(lineFor(steer.message, text)?.includes('[new, for you]'), mode + ': ' + steer.message);
+    // Untagged, it went to Beta too, and Alpha answers for both.
+    a.ok(lineFor(steer.message, text)?.includes(['follow', 'primary'].includes(mode) ? '[new, for you; it went to others too, and you answer for all of you]' : '[new, for you]'), mode + ': ' + steer.message);
     // Only the request itself: not the transcript, not the turn's own request or earlier steers.
     for (const other of ['START', 'MENTION', 'REPLY', 'FOLLOW', 'PRIMARY'].filter(t => !text.includes(t))) a.ok(!steer.message.includes(other), mode + ' leaked ' + other);
     a.ok(!steer.message.includes('[silent]'), mode);
@@ -97,11 +98,20 @@ test('a busy group recipient is steered its request whether mentioned, replied t
     a.deepEqual(steer.images, images, mode);
     await until(() => db.getMessage(message.id).message.seenBy?.includes(alpha.bot.id));
   }
-  // Steered, so none of them waits for a turn of its own, and Beta was never woken.
-  a.equal(steersOf(beta.bot).length, 0);
-  a.equal(of(beta.bot).length, 0);
+  // Steered, so none of them waits for a turn of its own. Beta never heard the ones for Alpha, but
+  // the untagged ones went to the whole group: it decides on them in a turn of its own, Alpha answering.
+  await until(() => of(beta.bot).length === 1 && steersOf(beta.bot).length === 1 && steersOf(beta.bot)[0].ok);
+  // Alpha's own requests are only context in Beta's turn, and never steered into it.
+  for (const t of ['START', 'MENTION', 'REPLY']) {
+    a.ok(!steersOf(beta.bot)[0].message.includes(t), 'beta was steered ' + t);
+    const seen = lineFor(of(beta.bot)[0].message, t.startsWith('MENTION') ? '@Alpha MENTION' : t === 'START' ? '@Alpha START' : t);
+    a.ok(!seen || seen.includes('[context only: do not answer]'), 'beta was asked ' + t + ': ' + seen);
+  }
+  a.ok(lineFor(of(beta.bot)[0].message, 'FOLLOW')?.includes('[asked of several bots; Alpha answers it.'), of(beta.bot)[0].message);
+  a.ok(lineFor(steersOf(beta.bot)[0].message, 'PRIMARY')?.includes('[asked of several bots; Alpha answers it.'), steersOf(beta.bot)[0].message);
+  of(beta.bot)[0].finish('[silent]');
   of(alpha.bot)[0].finish('DONE');
-  await until(() => !runner.busy(alpha.bot.id));
+  await until(() => !runner.busy(alpha.bot.id) && !runner.busy(beta.bot.id));
   await settle();
   a.equal(of(alpha.bot).length, 1);
   a.equal(db.getMessage(start.id).message.seenBy?.length, 1);

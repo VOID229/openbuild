@@ -63,7 +63,11 @@ test("a request to several bots picks one to answer: a bot it names, then whose 
     const job = [{ kind: 'messages', conversationId: group.id, messageIds: [m.id], lead: manager }];
     a.match(render(job, manager), /\\[assigned request: answer this; it went to others too, and you answer for all of you\\]/);
     const theirs = render(job, dr);
-    a.match(theirs, /\\[asked of several bots; Manager answers it\\. Reply only if it asks each of you, or with what's yours alone/);
+    a.match(theirs, /\\[asked of several bots; Manager answers it\\. Act on it or reply only if it asks each of you, or if part of it is your job by your role and nobody here fits it better/);
+    a.match(theirs, /Otherwise stay \\[silent\\]: no message, no reaction, no tools/);
+    // Each knows who's there and what they do, to tell whether it's theirs.
+    a.match(theirs, /Bots here: Dr Eggbot \\(you're the primary and you run the team\\)|Bots here: you \\(/);
+    a.match(theirs, /Manager \\(You manage the work/);
     a.doesNotMatch(theirs, /assigned request: answer this/);
     process.exit(0);
   `);

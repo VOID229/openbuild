@@ -88,6 +88,14 @@ export interface BotStatus {
   quiet?: boolean;
   /** Other conversations with messages it'll get to once it's free. They show it holding on, not silence. */
   waiting?: string[];
+  /**
+   * Woke for a group message and hasn't acted on it yet: every bot in a group reads each message and
+   * decides whether it's theirs, so until one types or picks up a tool nothing shows of it, not even
+   * its mascot. The chat stays silent while its bots decide.
+   */
+  deciding?: boolean;
+  /** Of `waiting`, the groups whose messages it hasn't decided on yet: they don't show it holding on. */
+  undecided?: string[];
   error?: string;
   /** The error is the provider's (every fallback's, say): kept whole, but not for the chat to show. */
   provider?: boolean;

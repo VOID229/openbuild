@@ -233,7 +233,7 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
   }
 }, 90_000);
 
-test.skipIf(!pi)("group messages reach their bots with no routing model call: explicit, followed, else the primary", async () => {
+test.skipIf(!pi)("group messages reach their bots with no routing model call: explicit, else every bot, the followed one or the primary answering", async () => {
   const dir = mkdtempSync(join(tmpdir(), "openbuild-group-delivery-"));
   const agent = join(dir, "agent");
   mkdirSync(join(agent, "extensions"), { recursive: true });
@@ -249,8 +249,10 @@ test.skipIf(!pi)("group messages reach their bots with no routing model call: ex
         a.ok(!system.includes('routing a group message'), 'no routing model call');
         const prompt = JSON.stringify(body.messages.at(-1).content);
         requests.push(prompt);
-        // Return only the explicitly assigned request; context must never become another task.
-        const assigned = ['FIRST', '@Beta EXPLICIT', 'FOLLOW'].find(t => prompt.includes('[assigned request: answer this]: ' + t));
+        // Return only the explicitly assigned request; context must never become another task. A bot
+        // that isn't the one answering for the group lets it be.
+        if (/\\[asked of several bots; \\w+ answers it\\./.test(prompt)) return new Response(sse('[silent]'), { headers: { 'content-type': 'text/event-stream' } });
+        const assigned = ['FIRST', '@Beta EXPLICIT', 'FOLLOW'].find(t => prompt.includes('[assigned request: answer this]: ' + t) || prompt.includes('[assigned request: answer this; it went to others too, and you answer for all of you]: ' + t));
         if (!assigned) throw new Error('No assigned request: ' + prompt);
         return new Response(sse('ANSWER ' + assigned), { headers: { 'content-type': 'text/event-stream' } });
       } });
@@ -277,10 +279,11 @@ test.skipIf(!pi)("group messages reach their bots with no routing model call: ex
       await until(() => !runner.busy(alpha) && !runner.busy(beta));
       const replies = db.messages(group.id).filter(r => r.message.author !== 'me' && !r.message.event).map(r => [r.message.author, r.message.text]);
       a.deepEqual(replies, [[alpha, 'ANSWER FIRST'], [beta, 'ANSWER @Beta EXPLICIT'], [beta, 'ANSWER FOLLOW']]);
-      a.deepEqual(db.getMessage(first.id).message.seenBy, [alpha]);
+      // The untagged ones reached both; only the one answering said anything.
+      a.deepEqual(db.getMessage(first.id).message.seenBy?.toSorted(), [alpha, beta].toSorted());
       a.deepEqual(db.getMessage(explicit.id).message.seenBy, [beta]);
-      a.deepEqual(db.getMessage(follow.id).message.seenBy, [beta]);
-      a.equal(requests.length, 3);
+      a.deepEqual(db.getMessage(follow.id).message.seenBy?.toSorted(), [alpha, beta].toSorted());
+      a.equal(requests.length, 5);
       process.exit(0);
     `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, 'data'), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: '1' }, stdout: 'pipe', stderr: 'pipe' });
     const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);

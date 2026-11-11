@@ -92,7 +92,7 @@ test("bot writes preserve ownership, history and one-shot scheduling", async () 
 });
 
 
-test("untagged groups follow the last recipients for 20 minutes, else the primary, with no routing model", async () => {
+test("an untagged group message reaches every bot; whoever was last named answers it for 20 minutes, else the primary, with no routing model", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-follow-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
@@ -109,20 +109,21 @@ test("untagged groups follow the last recipients for 20 minutes, else the primar
       let now = Date.now();
       const post = text => svc.postMessage(group.id, { id: crypto.randomUUID(), author: 'me', text, at: now });
       // Woken before postMessage returns: nothing is decided in the background.
-      const check = (text, expected) => {
+      const check = (text, expected, lead) => {
         wakes.length = 0;
         const m = post(text);
-        a.deepEqual(wakes.map(w => [w.id, w.messageIds]), expected.map(id => [id, [m.id]]), text);
+        a.deepEqual(wakes.map(w => [w.id, w.messageIds, w.lead]), expected.map(id => [id, [m.id], lead]), text);
         return m;
       };
-      check('A new topic', [boss]);
-      check('@Helper hello', [helper]);
-      now += svc.GROUP_FOLLOW_MS - 1; check('Keep going', [helper]);
+      const both = [boss, helper];
+      check('A new topic', both, boss);
+      check('@Helper hello', [helper], undefined);
+      now += svc.GROUP_FOLLOW_MS - 1; check('Keep going', both, helper);
       // Each request restarts the clock, so the follow rolls on.
-      now += svc.GROUP_FOLLOW_MS - 1; check('Still here', [helper]);
-      now += svc.GROUP_FOLLOW_MS; check('Exactly 20 minutes later', [boss]);
-      check('@Boss @Helper both', [boss, helper]);
-      check('Continue both', [boss, helper]);
+      now += svc.GROUP_FOLLOW_MS - 1; check('Still here', both, helper);
+      now += svc.GROUP_FOLLOW_MS; check('Exactly 20 minutes later', both, boss);
+      check('@Boss @Helper both', both, boss);
+      check('Continue both', both, boss);
       // A duplicate post is the same message, and wakes nobody again.
       wakes.length = 0;
       const message = post('Once');
@@ -136,7 +137,7 @@ test("untagged groups follow the last recipients for 20 minutes, else the primar
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("group replies wake the quoted bot instead of falling back to the primary", async () => {
+test("a group reply wakes only the bot it quotes; one quoting nobody there reaches every bot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-replies-"));
   try {
     const child = Bun.spawn([process.execPath, "-e", `
@@ -161,10 +162,11 @@ test("group replies wake the quoted bot instead of falling back to the primary",
         a.deepEqual(woken, expected);
       };
       await check('Tell me more', quoted.id, [second.bot.id]);
-      await check('Generic', undefined, [primary.bot.id]);
-      await check('Follow up', mine.id, [primary.bot.id]);
-      await check('Missing quote', crypto.randomUUID(), [primary.bot.id]);
-      await check('Foreign quote', foreign.id, [primary.bot.id]);
+      const everyone = [primary.bot.id, second.bot.id];
+      await check('Generic', undefined, everyone);
+      await check('Follow up', mine.id, everyone);
+      await check('Missing quote', crypto.randomUUID(), everyone);
+      await check('Foreign quote', foreign.id, everyone);
       await check('@Boss your thoughts?', quoted.id, [primary.bot.id, second.bot.id]);
       await check('@Helper tell me more', quoted.id, [second.bot.id]);
       svc.updateConversation(group.id, { botIds: [primary.bot.id] });
@@ -232,16 +234,17 @@ test('group follow refreshes only on user requests and follows membership change
       let now = Date.now();
       const post = (text, author = 'me') => svc.postMessage(group.id, { id: crypto.randomUUID(), author, text, at: now });
       const last = n => wakes.slice(-n).map(w => w.id);
+      const lead = () => wakes.at(-1).lead;
       post('@Helper @Third start'); a.deepEqual(last(2), [helper, third]);
       // Bot chatter and reactions don't keep the follow alive.
       now += 19 * 60_000;
       const chatter = post('Bot chatter', helper);
       svc.toggleReaction(group.id, chatter.id, '👍', 'me');
-      now += 60_000; post('Expired'); a.deepEqual(last(1), [boss]);
+      now += 60_000; wakes.length = 0; post('Expired'); a.deepEqual(last(9), [boss, helper, third]); a.equal(lead(), boss);
       post('@Helper @Third again');
       // A removed member drops out of the follow; the rest keep it.
       svc.updateConversation(group.id, { botIds: [boss, helper] });
-      wakes.length = 0; post('Without third'); a.deepEqual(last(9), [helper]);
+      wakes.length = 0; post('Without third'); a.deepEqual(last(9), [boss, helper]); a.equal(lead(), helper);
       // With nobody left to follow, the primary takes it.
       svc.updateConversation(group.id, { botIds: [boss] });
       wakes.length = 0; post('Only boss'); a.deepEqual(last(9), [boss]);
@@ -263,7 +266,9 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
       const wakes = [];
       svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
       const post = (conversationId, text, at, author = 'me') => svc.postMessage(conversationId, { id: crypto.randomUUID(), author, text, at });
-      const woken = (conversationId, text, at) => { wakes.length = 0; const m = post(conversationId, text, at); return wakes.map(w => [w.id, w.conversationId, w.messageIds]).concat([[m.id]]); };
+      const woken = (conversationId, text, at) => { wakes.length = 0; const m = post(conversationId, text, at); return wakes.map(w => [w.id, w.conversationId, w.messageIds, w.lead]).concat([[m.id]]); };
+      // Who answers an untagged message, which every bot in the group gets.
+      const answers = (conversationId, text, at) => { const w = woken(conversationId, text, at); a.equal(new Set(w.slice(0, -1).map(x => x[3])).size, 1); return w[0][3]; };
       const rows = () => db.db.query('SELECT conversation_id AS id FROM group_follows ORDER BY conversation_id').all().map(r => r.id);
       ${script}
       process.exit(0);
@@ -285,28 +290,27 @@ test('group follow survives a restart mid-window, still expires, refreshes only 
       console.log(JSON.stringify({ boss, manager, one, two, three }));
     `);
     const { boss, manager, one, two, three } = ids;
-    // After the restart, 19 minutes in, the follow still holds: exactly one wake, for that message, in that chat.
+    // After the restart, 19 minutes in, the follow still holds: both get that message, in that chat, and Manager answers.
     await run(`
-      const [w, [id]] = woken('${one}', 'Keep going', ${T} + 19 * 60_000);
-      a.deepEqual(w, ['${manager}', '${one}', [id]]);
+      const [b, m, [id]] = woken('${one}', 'Keep going', ${T} + 19 * 60_000);
+      a.deepEqual([b, m], [['${boss}', '${one}', [id], '${manager}'], ['${manager}', '${one}', [id], '${manager}']]);
       // Another group has no follow of its own, so the primary takes it.
-      const [o] = woken('${two}', 'Elsewhere', ${T} + 19 * 60_000);
-      a.equal(o[0], '${boss}');
+      a.equal(answers('${two}', 'Elsewhere', ${T} + 19 * 60_000), '${boss}');
       // Bot chatter and reactions don't refresh the follow in "three".
       const chatter = post('${three}', 'Bot chatter', ${T} + 19 * 60_000, '${manager}');
       svc.toggleReaction('${three}', chatter.id, '👍', 'me');
     `);
     // Another restart: "one" was refreshed by the user at +19 min, "three" only by bots.
     await run(`
-      a.equal(woken('${one}', 'Still here', ${T} + 38 * 60_000)[0][0], '${manager}');
-      a.equal(woken('${three}', 'Expired', ${T} + 20 * 60_000)[0][0], '${boss}');
+      a.equal(answers('${one}', 'Still here', ${T} + 38 * 60_000), '${manager}');
+      a.equal(answers('${three}', 'Expired', ${T} + 20 * 60_000), '${boss}');
       // Exactly 20 minutes after the last request, it's over.
-      a.equal(woken('${one}', 'Too late', ${T} + 58 * 60_000)[0][0], '${boss}');
+      a.equal(answers('${one}', 'Too late', ${T} + 58 * 60_000), '${boss}');
       // A small step back of the clock still follows; a row stamped far ahead doesn't.
       post('${one}', '@Manager again', ${T} + 60 * 60_000);
-      a.equal(woken('${one}', 'Clock stepped back', ${T} + 60 * 60_000 - 30_000)[0][0], '${manager}');
+      a.equal(answers('${one}', 'Clock stepped back', ${T} + 60 * 60_000 - 30_000), '${manager}');
       db.setGroupFollow('${two}', { ids: ['${manager}'], at: ${T} + 10 * 60 * 60_000 });
-      a.equal(woken('${two}', 'Future row', ${T} + 61 * 60_000)[0][0], '${boss}');
+      a.equal(answers('${two}', 'Future row', ${T} + 61 * 60_000), '${boss}');
     `);
     // Cleanup: expired and future-stamped rows are swept on tick, deleted groups and emptied follows leave nothing, and a corrupt row is dropped.
     await run(`
