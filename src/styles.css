@@ -1311,7 +1311,7 @@ select.input {
   flex-shrink: 0;
 }
 
-/* "Closed" sits at the foot of the list, so opening it grows it upward (Sidebar.tsx Collapsible). */
+/* "Closed" sits at the foot of the list and opens into the space above it; toggling it never scrolls the list. */
 .history-group-bottom {
   margin-top: auto;
 }
