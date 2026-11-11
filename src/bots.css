@@ -609,7 +609,8 @@
   border-radius: var(--radius);
 }
 
-.bots-sidebar-inner {
+/* Under the header only: switching from OpenBuild, its header is already where this one sits. */
+.bots-sidebar-inner > :not(.brand-row) {
   animation: bots-fade-in var(--med) var(--ease-out) both;
 }
 
@@ -1130,12 +1131,23 @@
 }
 
 /* Switching between OpenBuild and OpenBots (ui.ts crossfade): the layout changes at once and the
-   incoming sidebar and pane fade in, the sidebar drifting in a few pixels from the left. On the sidebar
-   and the pane themselves, never their content: content with a fade of its own (the OpenBots list, the
-   rail) would start that fade over again when this one ends, and flicker. Opacity and translate only
+   incoming sidebar and pane fade in, a phone's sidebar drifting in a few pixels from the left. Never on
+   content with a fade of its own (the OpenBots list, the rail): that fade would start over again when
+   this one ends, and flicker. Opacity and translate only
    (not transform, which a phone's drawer slides on), so it costs nothing however heavy the panes are. */
-.world-enter .sidebar:not(.sidebar-closed) {
-  animation: world-side-in 220ms var(--ease-out) both;
+@media (max-width: 768px) {
+  .world-enter .sidebar:not(.sidebar-closed) {
+    animation: world-side-in 220ms var(--ease-out) both;
+  }
+}
+
+/* On a desktop the two sidebars are one width with one header, so nothing drifts: the header and its
+   switch hold still and only what's under it fades in. OpenBots' list and rail fade by themselves
+   (bots-fade-in, restarted as their Activity comes back), so they're left out here. */
+@media (min-width: 769px) {
+  .world-enter .sidebar:not(.sidebar-closed) > .sidebar-inner:not(.bots-sidebar-inner) > :not(.brand-row) {
+    animation: world-main-in 180ms var(--ease-out) both;
+  }
 }
 
 .world-enter .main {
