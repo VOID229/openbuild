@@ -733,7 +733,8 @@ export function BotsSidebar() {
                   <Store size={19} />
                 </IconButton>
               )}
-              <BotsToggle />
+              {/* On a desktop the header's switch does this; the rail and a phone keep it. */}
+              {mobile && <BotsToggle />}
             </div>
           </div>
         )}

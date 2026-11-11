@@ -1796,7 +1796,8 @@ export function Sidebar() {
             >
               <SquareCheck size={16} />
             </button>
-            <BotsToggle />
+            {/* On a desktop the header's switch does this; a phone's drawer keeps its wordmark. */}
+            {mobile && <BotsToggle />}
           </div>
         </div>
       </aside>

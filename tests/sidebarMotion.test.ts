@@ -71,7 +71,7 @@ describe.skipIf(!browser)("sidebar motion", () => {
       const page = await Page.open(chrome!.ws, server!.url.href, 1280, 800, READY);
       await page.eval(`store.setState({ botsOpen: false, sidebarOpen: true, botsSidebarOpen: ${open} })`);
       await page.settle();
-      const frames = await sample(page, `document.querySelector('[aria-label="OpenBots"]').click()`, 700);
+      const frames = await sample(page, `[...document.querySelectorAll('.sidebar:not(.bots-sidebar) .mode-pill')].find((b) => b.textContent === 'Bots').click()`, 700);
       expect(await page.eval<boolean>("store.getState().botsOpen")).toBe(true);
       expect(frames.at(-1)!.opacity).toBe(1);
       expect(frames.every((f) => (open ? f.list : f.rail))).toBe(true);
