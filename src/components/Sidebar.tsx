@@ -562,8 +562,9 @@ const COLLAPSE_MS = 260;
  * while it folds shut: "Closed" is most threads, and its rows were most of what a page load
  * built (thousands of icons) for a list nobody could see.
  */
-function Collapsible({ label, open, onToggle, chats, row }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode }) {
+function Collapsible({ label, open, onToggle, chats, row, bottom }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode; bottom?: boolean }) {
   const ref = useRef<HTMLElement>(null);
+  const opened = useRef(false);
   // Decided while rendering, so the render that shuts it still has the rows to fold away.
   const [wasOpen, setWasOpen] = useState(open);
   const [folding, setFolding] = useState(false);
@@ -592,9 +593,27 @@ function Collapsible({ label, open, onToggle, chats, row }: { label: string; ope
       unfold(section);
     }, ROW_IN_MS);
   }, [chats, rows]);
+  // A section kept at the foot of the list opens upward: it grows into the space above it, and once
+  // that runs out, the list scrolls the other sections up until its heading reaches the top.
+  useLayoutEffect(() => {
+    if (!bottom || !open || !opened.current || !ref.current) return;
+    opened.current = false;
+    const list = ref.current.closest<HTMLElement>(".history");
+    if (!list) return;
+    const top = ref.current.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
+    list.scrollTop = Math.max(list.scrollTop, Math.min(top, list.scrollHeight - list.clientHeight));
+  }, [bottom, open]);
   return (
-    <section ref={ref} className="history-group">
-      <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
+    <section ref={ref} className={cx("history-group", bottom && "history-group-bottom")}>
+      <button
+        type="button"
+        className="history-heading history-heading-toggle"
+        aria-expanded={open}
+        onClick={() => {
+          opened.current = !open;
+          onToggle();
+        }}
+      >
         {label}{" "}
         <span className="history-count">{chats.length}</span>
         <ChevronDown size={12} className="history-heading-chevron" />
@@ -1698,7 +1717,7 @@ export function Sidebar() {
                   </p>
                 )}
                 {closed.length > 0 && (
-                  <Collapsible label="Closed" open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} />
+                  <Collapsible label="Closed" open={sections.closed} onToggle={() => toggleSection("closed")} chats={closed} row={row} bottom />
                 )}
               </>
             )}
