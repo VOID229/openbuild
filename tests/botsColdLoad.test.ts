@@ -33,15 +33,16 @@ test.skipIf(!browser)("/bots paints while thread and bot APIs are pending", asyn
       };
     ` });
     await page.send("Page.navigate", { url: `${url}/bots` });
-    await page.until("document.querySelector('.bots-view [role=status]')?.textContent.includes('Loading OpenBots')");
+    // The server bundles the app for this first request: on a busy machine that alone can take a while.
+    await page.until("document.querySelector('.bots-view [role=status]')?.textContent.includes('Loading OpenBots')", 30_000);
     expect(await page.eval<string>("document.querySelector('main').innerText")).toContain("Loading OpenBots");
     await page.eval("window.releaseBots.forEach(release => release())");
     // The thread index is still pending: a bot response alone must make the main pane usable.
-    await page.until("!!document.querySelector('.bots-hello button, .bots-chat')");
+    await page.until("!!document.querySelector('.bots-hello button, .bots-chat')", 30_000);
     expect(await page.eval<boolean>("document.querySelector('main').innerText.length > 0")).toBe(true);
   } finally {
     await chrome?.close();
     server.kill();
     await server.exited;
   }
-}, 60_000);
+}, 120_000);

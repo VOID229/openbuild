@@ -83,4 +83,4 @@ exit 0
     await Promise.all(children.map((child) => child.exited));
     rmSync(temp, { recursive: true, force: true });
   }
-});
+}, 30_000);

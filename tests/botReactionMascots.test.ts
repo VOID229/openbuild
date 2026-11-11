@@ -46,8 +46,7 @@ const open = async (theme: "dark" | "light" = "dark") => {
   await page.until(`!!document.querySelector('[data-id="b-59"] .bm-reaction-mascots')`);
   await page.eval(`document.querySelector('.bots-messages').scrollTop = 1e6`);
   // Past the chips' pop-in.
-  await Bun.sleep(500);
-  await page.settle();
+  await page.finish('.bots-messages');
   return page;
 };
 

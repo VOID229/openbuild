@@ -63,8 +63,7 @@ const react = async (page: Page, id: string, at: ScrollLogicalPosition | number 
   expect(hit).toBe("React");
   await page.click(`[data-id="${id}"] button[aria-label="React"]`);
   await page.until(`!!document.querySelector('.bm-react-pop')`);
-  await Bun.sleep(400);
-  await page.settle();
+  await page.finished('.bm-react-pop');
   return box;
 };
 
@@ -95,8 +94,9 @@ const inside = (all: Awaited<ReturnType<typeof bounds>>, width: number, height: 
 };
 
 describe.skipIf(!browser)("the reaction picker", () => {
-  // a-39 is the manager's (left); a-38 is mine (right). Narrow widths include a small phone.
-  for (const width of [1000, 600, 390, 320]) {
+  // a-39 is the manager's (left); a-38 is mine (right). A desktop and a small phone: the widths between
+  // are walked by the resize test below.
+  for (const width of [1000, 320]) {
     for (const [side, id] of [["left", "a-39"], ["right", "a-38"]] as const) {
       test(`keeps every reaction in the window, ${side} message at ${width}px`, async () => {
         const page = await open(width, 700);

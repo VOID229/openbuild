@@ -75,6 +75,10 @@ for (const kind of ["direct", "group"] as const) {
       expect(Math.max(...heights)).toBeGreaterThanOrEqual(3 * LINE);
     }, 60_000);
 
+    // The same component and the same scroll handling serve both kinds: the rest runs once, in the
+    // group chat, whose messages carry more (avatars, names).
+    if (kind === "direct") return;
+
     test("typing into a tall draft doesn't snap the conversation back", async () => {
       const page = await open();
       await page.type(words.repeat(3));

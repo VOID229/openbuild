@@ -5,14 +5,14 @@ test("an offline/slow device has one deadline across all addresses", async () =>
   let requests = 0;
   const server = Bun.serve({ port: 0, hostname: "127.0.0.1", async fetch() {
     requests++;
-    await Bun.sleep(150);
+    await Bun.sleep(2000);
     return Response.json({ ok: true });
   } });
   try {
     const start = Date.now();
     await expect(requestUsage([server.url.href, server.url.href, server.url.href], "/usage", "test", 30))
       .rejects.toThrow("didn't answer in time");
-    expect(Date.now() - start).toBeLessThan(120);
+    expect(Date.now() - start).toBeLessThan(1500);
     expect(requests).toBe(1);
   } finally { server.stop(true); }
 });

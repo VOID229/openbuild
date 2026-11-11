@@ -271,7 +271,8 @@ export async function repository(cwd: string): Promise<{ url: string }> {
 }
 
 // GitHub works out whether a pull request can merge when it's asked, usually within a few seconds.
-const SETTLE_WAITS = [500, 1000, 1500, 2000];
+// Exported so a test can shorten the waits.
+export const SETTLE_WAITS = [500, 1000, 1500, 2000];
 
 /** Give GitHub a moment to answer whether it can merge, asking for only that. */
 async function settled(cwd: string, detail: PullDetail): Promise<PullDetail> {

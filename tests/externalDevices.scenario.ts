@@ -14,7 +14,9 @@ if (!directory || dirname(directory) !== realpathSync(tmpdir()) || !basename(dir
   throw new Error("External device scenario requires a throwaway openbuild-external-* data directory. Run externalDevices.test.ts.");
 }
 const devices = await import("../server/devices");
-const { machineLimits, machineReports } = await import("../server/usage/machines");
+const { machineLimits, machineReports, timing } = await import("../server/usage/machines");
+// A device that doesn't answer is waited for three times below: not for 3.5 s each.
+timing.waitMs = 150;
 const remoteUsage = await import("../server/usage/remoteRequest");
 
 const device = (id: string, external?: boolean) => ({ id, name: id, mode: "lan" as const, urls: [`http://${id}`], token: "t", ...(external && { external }) });
@@ -95,7 +97,7 @@ describe("external devices", () => {
     // Opening Usage forces a refresh; the device doesn't answer.
     const started = Date.now();
     const open = await machineLimits(true, async () => [limit("codex", "codex:here")]);
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(3000);
     expect(open.machines?.find((m) => m.id === "laptop")?.status).toBe("pending");
     expect(open.providers.find((p) => p.id === "codex:here")).toBeDefined();
     expect(open.providers.find((p) => p.id === "claude:laptop")).toMatchObject({ asOf });

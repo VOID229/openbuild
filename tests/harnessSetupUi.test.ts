@@ -30,8 +30,7 @@ const OPEN = "document.querySelector('.hs-root')?.dataset.state === 'open'";
 async function open(query: string, width: number, height: number, ready = OPEN) {
   const page = await Page.open(chrome!.ws, `${server!.url}?${query}`, width, height, ready);
   // The opening transition has finished.
-  await Bun.sleep(350);
-  await page.settle();
+  await page.finish();
   return page;
 }
 

@@ -47,7 +47,7 @@ describe("watchBuild", () => {
     await Bun.sleep(20);
     expect(newer).toBe(0);
     up = true;
-    await Bun.sleep(30);
+    for (let i = 0; i < 200 && !newer; i++) await Bun.sleep(5);
     stop();
     expect(newer).toBe(1);
   });

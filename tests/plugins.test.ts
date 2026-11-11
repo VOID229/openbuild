@@ -188,7 +188,8 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
     return { icons: ${JSON.stringify(iconPlugin.icons)} };
   };`);
   try {
-    for (const scenario of ["missing", "blocked", "corrupt", "malformed", "empty", "partial", "cached", "cold-failure", "cached-failure"]) {
+    // Each in a process of its own, all at once: they only read the plugin written above.
+    await Promise.all(["missing", "blocked", "corrupt", "malformed", "empty", "partial", "cached", "cold-failure", "cached-failure"].map(async (scenario) => {
       const script = `
         import { expect } from "bun:test";
         import { createElement } from "react";
@@ -308,7 +309,7 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
       const child = Bun.spawn([process.execPath, "-e", script], {
         cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
       });
-      const timer = setTimeout(() => child.kill(), 8_000);
+      const timer = setTimeout(() => child.kill(), 20_000);
       try {
         const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
         if (code !== 0) throw new Error(`${scenario}: ${out}\n${err}`);
@@ -317,7 +318,7 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
         clearTimeout(timer);
         child.kill();
       }
-    }
+    }));
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

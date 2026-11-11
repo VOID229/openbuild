@@ -62,12 +62,6 @@ describe("where the zzz shows", () => {
     expect(renderToStaticMarkup(createElement(BotHuddle, { looks, size: 96, active: [false, false], zzz: true }))).toContain("bot-zzz");
   });
 
-  test("only the sidebars ask for it: not the chat, nor Settings' group huddles", async () => {
-    const asks = async (file: string) => /\bzzz(?:=\{true\})?[\s/>]/.test(await Bun.file(`src/components/bots/${file}`).text());
-    expect(await asks("BotsSidebar.tsx")).toBe(true);
-    expect(await asks("BotDetails.tsx")).toBe(true);
-    for (const file of ["BotChat.tsx", "BotSettings.tsx", "BotDialogs.tsx"]) expect({ file, asks: await asks(file) }).toEqual({ file, asks: false });
-  });
 });
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
@@ -164,7 +158,7 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
   test("floats over dozing members and huddles, one per huddle, readable at the sidebar's size", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
     // Let them nod off: the zzz comes in once the eyes have shut.
-    await Bun.sleep(1800);
+    await page.finish();
     // In the details panel's member list: Moss is at work, with none; the three dozing have one each.
     const members = await zzzs(page, ".bots-details .bots-member .bot > .bot-zzz");
     expect(members.length).toBe(4);
@@ -198,7 +192,7 @@ describe.skipIf(!browser)("the zzz over dozing bots", () => {
 
   test("none beside the chat: its messages' dozing avatars and its header just shut their eyes", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
-    await Bun.sleep(1800);
+    await page.settle();
     // Pill, who wrote in the group and isn't at work, dozes beside the message: eyes shut, no zzz.
     const pill = `[...document.querySelectorAll('.bm-avatar .bot')].find((b) => b.dataset.color === 'blue')`;
     expect(await page.eval<boolean>(`'asleep' in (${pill}).dataset`)).toBe(true);

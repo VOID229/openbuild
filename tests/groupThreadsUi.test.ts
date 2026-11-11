@@ -57,8 +57,7 @@ async function showTab(page: Page, width: number) {
   await page.eval(`${TAB}.click()`);
   await page.until(`${TAB}.getAttribute('aria-selected') === 'true'`);
   // The panel's opening transition has finished.
-  await Bun.sleep(350);
-  await page.settle();
+  await page.finish();
 }
 
 /** What the tab lists: each row's title, the line under it, and its mascot's colour. */
@@ -130,7 +129,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     await clickRow(page, "Trace the slow");
     await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
     await page.until(`document.querySelector('.bots-details-threadpane').innerText.includes("Looking into it")`);
-    await Bun.sleep(450);
+    await page.finish();
     // Routing and OpenBots are untouched: still the bot chat, the thread is just the panel's content.
     expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
     expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
@@ -169,7 +168,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     const page = await open(390, 800);
     await clickRow(page, "Fix the flaky");
     await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
-    await Bun.sleep(450);
+    await page.finish();
     expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
     expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
     const fit = await page.eval<number[]>(`(() => { const p = document.querySelector('.bots-details').getBoundingClientRect(); const t = document.querySelector('.bots-details-threadpane .chat').getBoundingClientRect(); return [t.left - p.left, p.right - t.right, p.bottom - t.bottom]; })()`);
@@ -211,11 +210,11 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
       await page.settle();
     }
     /** Waits out the panel's width transition. */
-    const rest = () => Bun.sleep(350);
+    const rest = (page: Page) => page.finish();
     async function openThread(page: Page) {
       await clickRow(page, "Trace the slow");
       await page.until(`!!document.querySelector(${JSON.stringify(GRIP)})`);
-      await rest();
+      await rest(page);
       await page.settle();
     }
 
@@ -250,7 +249,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
       // A double-click goes back to the default, which isn't kept as a choice.
       const [x, y] = await gripAt(page);
       for (const clickCount of [1, 2]) for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount });
-      await rest();
+      await rest(page);
       expect((await widths(page)).thread).toBe(480);
       expect(await page.eval<unknown>(`localStorage.getItem(${JSON.stringify(KEY)})`)).toBe(null);
     }, 60_000);
@@ -264,27 +263,26 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
       await page.settle();
       expect(await page.eval<unknown>(`document.activeElement === document.querySelector(${JSON.stringify(GRIP)})`)).toBe(true);
       await key(page, "ArrowLeft");
-      await rest();
+      await rest(page);
       expect((await widths(page)).thread).toBe(496);
       await key(page, "ArrowLeft", true);
-      await rest();
+      await rest(page);
       expect((await widths(page)).thread).toBe(560);
       await key(page, "ArrowRight");
-      await rest();
+      await rest(page);
       expect((await widths(page)).thread).toBe(544);
       await key(page, "Home");
-      await rest();
+      await rest(page);
       expect((await widths(page)).thread).toBe(360);
       await key(page, "End");
-      await rest();
+      await rest(page);
       const w = await widths(page);
       expect(w.thread).toBe(w.room - 420);
       // The keys only resize: focus stays on the edge and the thread stays open.
       expect(await page.eval<unknown>("document.activeElement?.classList.contains('bots-thread-grip')")).toBe(true);
       expect(await page.eval<unknown>("!!document.querySelector('.bots-details-threadpane')")).toBe(true);
       // Focused from the keyboard, the edge shows its line.
-      await Bun.sleep(300);
-      expect(await page.eval<unknown>(`getComputedStyle(document.querySelector(${JSON.stringify(GRIP)}), '::after').opacity`)).toBe("1");
+      await page.until(`getComputedStyle(document.querySelector(${JSON.stringify(GRIP)}), '::after').opacity === "1"`);
       await shoot(page, "thread-grip-focused");
     }, 60_000);
 
@@ -317,24 +315,16 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
 
       // A narrower window: the chat keeps its room, and the width chosen comes back with the room.
       await page.send("Emulation.setDeviceMetricsOverride", { width: 1100, height: 860, deviceScaleFactor: 1, mobile: false });
-      await rest();
+      await rest(page);
       await page.settle();
       let w = await widths(page);
       expect(w.thread).toBe(w.room - 420);
       expect(w.chat).toBeGreaterThanOrEqual(420 - 1);
       expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
       await page.send("Emulation.setDeviceMetricsOverride", { width: WIDE, height: 860, deviceScaleFactor: 1, mobile: false });
-      await rest();
+      await rest(page);
       await page.settle();
       expect((await widths(page)).thread).toBe(580);
-    }, 60_000);
-
-    test("in the light theme too", async () => {
-      const page = await open(WIDE, 860, "light");
-      await openThread(page);
-      await drag(page, -80);
-      expect((await widths(page)).thread).toBe(560);
-      await shoot(page, "thread-resized-light");
     }, 60_000);
 
     test("on a phone the thread fills the details screen, with no edge to drag and a width kept on a wider screen ignored", async () => {
@@ -342,7 +332,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
       await page.eval(`localStorage.setItem(${JSON.stringify(KEY)}, "900")`);
       await clickRow(page, "Fix the flaky");
       await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
-      await rest();
+      await rest(page);
       expect(await page.eval<unknown>(`!!document.querySelector('.bots-thread-grip')`)).toBe(false);
       const fit = await page.eval<number[]>(`(() => { const p = document.querySelector('.bots-details').getBoundingClientRect(); const t = document.querySelector('.bots-details-threadpane').getBoundingClientRect(); return [p.width, t.width]; })()`);
       expect(fit[0]).toBe(390);

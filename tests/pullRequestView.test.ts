@@ -55,6 +55,8 @@ const script = `
   sh("init", "-b", "main");
   sh("commit", "--allow-empty", "-m", "first");
   const view = await import("./server/pullRequestView.ts");
+  // The waits between asks are for GitHub; the fake answers at once.
+  view.SETTLE_WAITS.fill(1);
   const log = process.env.GH_LOG;
   const calls = () => {
     const lines = readFileSync(log, "utf8").trim().split("\\n");
