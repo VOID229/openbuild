@@ -1308,7 +1308,7 @@ select.input {
   flex-shrink: 0;
 }
 
-/* "Closed" sits at the foot of the list, so opening it grows it upward (Sidebar.tsx Collapsible). */
+/* "Closed" sits at the foot of the list and opens into the space above it; toggling it never scrolls the list. */
 .history-group-bottom {
   margin-top: auto;
 }
@@ -1374,6 +1374,16 @@ select.input {
   .history-heading-toggle:hover {
     color: var(--text-2);
   }
+
+  /* The count and chevron light up with the name, to the same colour. */
+  .history-heading-toggle:hover :is(.history-count, .history-heading-chevron) {
+    color: inherit;
+    opacity: 1;
+  }
+}
+
+.history-heading-toggle .history-count {
+  transition: color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
 .history-heading-chevron {

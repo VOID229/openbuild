@@ -565,7 +565,6 @@ const COLLAPSE_MS = 260;
  */
 function Collapsible({ label, open, onToggle, chats, row, bottom }: { label: string; open: boolean; onToggle: () => void; chats: Chat[]; row: (c: Chat) => React.ReactNode; bottom?: boolean }) {
   const ref = useRef<HTMLElement>(null);
-  const opened = useRef(false);
   // Decided while rendering, so the render that shuts it still has the rows to fold away.
   const [wasOpen, setWasOpen] = useState(open);
   const [folding, setFolding] = useState(false);
@@ -594,27 +593,9 @@ function Collapsible({ label, open, onToggle, chats, row, bottom }: { label: str
       unfold(section);
     }, ROW_IN_MS);
   }, [chats, rows]);
-  // A section kept at the foot of the list opens upward: it grows into the space above it, and once
-  // that runs out, the list scrolls the other sections up until its heading reaches the top.
-  useLayoutEffect(() => {
-    if (!bottom || !open || !opened.current || !ref.current) return;
-    opened.current = false;
-    const list = ref.current.closest<HTMLElement>(".history");
-    if (!list) return;
-    const top = ref.current.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop;
-    list.scrollTop = Math.max(list.scrollTop, Math.min(top, list.scrollHeight - list.clientHeight));
-  }, [bottom, open]);
   return (
     <section ref={ref} className={cx("history-group", bottom && "history-group-bottom")}>
-      <button
-        type="button"
-        className="history-heading history-heading-toggle"
-        aria-expanded={open}
-        onClick={() => {
-          opened.current = !open;
-          onToggle();
-        }}
-      >
+      <button type="button" className="history-heading history-heading-toggle" aria-expanded={open} onClick={onToggle}>
         {label}{" "}
         <span className="history-count">{chats.length}</span>
         <ChevronDown size={12} className="history-heading-chevron" />
