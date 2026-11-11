@@ -37,10 +37,32 @@ machine now and then starves one. A failure that repeats fails the run.
 
 ## Releases
 
-Tags use the highest stable version tag in the commit's history, followed by
-`-nightly.<commit-date>.<workflow-run-number>` (for example,
-`0.1.7-nightly.20261102.123`). Tags are permanent; rerunning a successful workflow
-does not replace its release. No version-bump commit is needed.
+A nightly is a prerelease of the version it's heading to: the patch after the
+highest stable version tag in the commit's history, followed by
+`-nightly.<commit-date>.<workflow-run-number>`. After stable `0.1.8` the
+nightlies are `0.1.9-nightly.20261111.276` and so on, which semver sorts above
+`0.1.8` and below the `0.1.9` they become (`scripts/nightly-tag.sh`). Tags are
+permanent; rerunning a successful workflow does not replace its release. No
+version-bump commit is needed.
+
+## The version in the sidebar
+
+The foot of the sidebar names the running release: `Nightly 0.1.9` for
+`0.1.9-nightly.<date>.<run>`, `Stable 0.1.9` for `0.1.9`, and `Dev` for a
+commit that isn't a release. There is no build step to stamp a version, so the
+server reads it from the release tags on its commit when it starts
+(`server/version.ts`) and sends it with `/api/config`:
+
+- An installation is a checkout of a release tag (`install.sh`, `ob update`),
+  so `git tag --points-at HEAD` names it. When a stable release and a nightly
+  share a commit, the installation's update track picks between them.
+- A source archive of a tag has no `.git`; git writes the commit's ref names
+  into `.release-ref` as it makes the archive (`export-subst` in
+  `.gitattributes`), and the server reads that instead.
+- A development checkout between releases is `Dev`.
+
+An update moves the checkout on, but the label keeps naming the release the
+server started as until it restarts.
 
 New pushes cancel older runs. The publish step also skips commits that are no
 longer the tip of `main`, including manually rerun workflows. The workflow can

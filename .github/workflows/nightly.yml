@@ -40,14 +40,8 @@ jobs:
             exit 0
           fi
 
-          base=$(git tag --merged "$GITHUB_SHA" --sort=-version:refname \
-            | awk '/^v?[0-9]+\.[0-9]+\.[0-9]+$/ && !found { print; found=1 }')
-          if [[ -z "$base" ]]; then
-            echo "No stable version tag found in this commit's history." >&2
-            exit 1
-          fi
-          date=$(git show -s --format=%cs "$GITHUB_SHA" | tr -d '-')
-          tag="${base}-nightly.${date}.${GITHUB_RUN_NUMBER}"
+          # The patch after the latest stable tag: 0.1.9-nightly.<date>.<run> once 0.1.8 is out.
+          tag=$(scripts/nightly-tag.sh "$GITHUB_SHA" "$GITHUB_RUN_NUMBER")
 
           # Re-running a successful workflow preserves its existing release and tag.
           if gh release view "$tag" >/dev/null 2>&1; then

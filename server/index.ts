@@ -7,6 +7,7 @@ import { chatSummary } from "../shared/chatSummary";
 import { appWebsocket, type StreamSocketData } from "./streamTransport";
 import { createPreview, localPreviewTarget, forwardPreview, stopPreviews } from "./preview";
 import { checkRelease, restartStatus } from "./releases";
+import { runningRelease } from "./version";
 // OpenBuild server: serves the React app (bundled by Bun, with HMR in dev) and runs threads on the
 // installed Pi (server/pi/), in projects and worktrees on this machine (projects.ts). Threads and
 // settings are kept on disk (see storage.ts), so they don't depend on which port or browser you open
@@ -76,6 +77,8 @@ const PAIR_PORT = Number(process.env.PORT ?? 3100);
 const runHeaders = { "content-type": "application/x-ndjson; charset=utf-8", "cache-control": "no-cache, no-transform", "x-openchat-run": "1" };
 /** Production builds the app itself (server/client.ts); development keeps Bun's HTML route, with hot reloading. */
 const client = process.env.NODE_ENV === "production" ? productionClient() : undefined;
+/** The release this server started as (server/version.ts), shown at the foot of the sidebar. */
+const release = runningRelease();
 
 // Every API checks the Host allowlist (DNS rebinding), exact browser Origin (CSRF),
 // and the local password session. Only status/login/logout omit the session check
@@ -277,7 +280,7 @@ function serve(port: number, hostname: string) {
         }),
       },
       "/api/config": {
-        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine() })),
+        GET: api(() => Response.json({ convexUrl: process.env.OPENCHAT_CLOUD_URL || CLOUD_URL || null, mode: "local", serverId, deviceId: serverId, machine: machine(), release })),
       },
 
       // The OS folder picker, for a browser on this same machine (server/folderPicker.ts).

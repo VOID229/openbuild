@@ -1,5 +1,6 @@
 import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
-import { isHosted } from "../lib/runtime";
+import { appRelease, isHosted } from "../lib/runtime";
+import { releaseLabel } from "../../shared/release";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -1155,6 +1156,12 @@ export function BotsToggle() {
   );
 }
 
+/** Which OpenBuild this is, small in either sidebar's footer: "Nightly 0.1.9", "Stable 0.1.9" or "Dev". */
+export function ReleaseLabel() {
+  const release = appRelease();
+  return release ? <span className="release-label">{releaseLabel(release)}</span> : null;
+}
+
 /** The side the switch last showed lit, whichever sidebar showed it: the next one slides on from there. */
 let switchShown: boolean | undefined;
 
@@ -1768,6 +1775,7 @@ export function Sidebar() {
               <Avatar src={avatar} name={name} size={22} />
               Settings
             </button>
+            <ReleaseLabel />
             <button
               type="button"
               className={`usage-toggle${usageOpen ? " active" : ""}`}
