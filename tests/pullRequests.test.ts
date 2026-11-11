@@ -158,6 +158,29 @@ const script = `
   release();
   await after;
   assert.equal(await asks(), before + 2);
+
+  // What the pull requests tab reads reaches the threads following it, without waiting for a sweep.
+  const following = () => storage.getChat("following").pullRequest;
+  assert.equal(following().number, 50);
+  const sweeps = await asks();
+  pr.heardPullRequests([{ url, state: "open", checks: "failing", head: "y" }, { url: "https://github.com/o/r/pull/99", state: "open" }], Date.now());
+  assert.deepEqual([following().state, following().checks, following().head], ["open", "failing", "y"]);
+  // An answer asked for before the one saved is older news.
+  pr.heardPullRequests([{ url, state: "open", checks: "passing" }], 0);
+  assert.equal(following().checks, "failing");
+  // A merge is the sweep's to record, since it decides whether the thread closes.
+  pr.heardPullRequests([{ url, state: "merged" }], Date.now());
+  assert.equal(following().state, "open");
+  await pr.sweep();
+  assert.equal(await asks(), sweeps + 1, "a merge heard of starts a sweep");
+
+  // Sweeps come quicker while a followed pull request may change.
+  const t = { id: "x", title: "x", createdAt: now, updatedAt: now, messages: [{ id: "a", role: "assistant", content: "", createdAt: now, status: "done" }] };
+  assert.equal(pr.inFlux([t]), false);
+  assert.equal(pr.inFlux([{ ...t, pullRequest: { number: 1, url: "u", state: "open", checks: "pending", checkedAt: now } }]), true);
+  assert.equal(pr.inFlux([{ ...t, pullRequest: { number: 1, url: "u", state: "open", checks: "passing", checkedAt: now } }]), false);
+  assert.equal(pr.inFlux([{ ...t, messages: [{ ...t.messages[0], status: "streaming" }] }]), true, "a working thread may push or open one");
+  assert.equal(pr.inFlux([{ ...t, archived: true, messages: [{ ...t.messages[0], status: "streaming" }] }]), false);
   console.log("ok");
 `;
 

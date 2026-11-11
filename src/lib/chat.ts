@@ -229,7 +229,12 @@ export function adoptDiscoveredChats(incoming: Chat[], before: Map<string, Chat>
   for (const chat of incoming) {
     const original = before.get(chat.id);
     const now = byId.get(chat.id);
-    if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) continue;
+    if (now !== original || now?.messages.some((m) => m.status === "streaming" && m.stream?.via !== EXTERNAL_VIA)) {
+      // A thread this tab is busy with keeps its own copy, but not of its pull request: only the
+      // server follows that, so newer news of it is taken (the badge mustn't wait for the reply to end).
+      if (now && chat.pullRequest && (now.pullRequest?.checkedAt ?? 0) < chat.pullRequest.checkedAt) byId.set(chat.id, { ...now, pullRequest: chat.pullRequest });
+      continue;
+    }
     if (now === chat) continue;
     if (!now || JSON.stringify(now) !== JSON.stringify(chat)) {
       // The open thread has already shown this reply; only background threads get the dot.
