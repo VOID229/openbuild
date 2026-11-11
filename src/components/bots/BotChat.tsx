@@ -1210,21 +1210,8 @@ function putBack(scroller: HTMLElement, spot: Spot | undefined, edge: Edge) {
   return true;
 }
 
-/**
- * Lets the chat's rows out of view skip rendering (bots.css, bots-messages-settled), once a frame has
- * laid them all out while it showed: each then keeps that height while skipped, so nothing is placed
- * by an estimate. A frame that sees the chat shown is followed by the one that sets it.
- */
-function settleRows(scroller: HTMLElement) {
-  let seen = false;
-  const step = () => {
-    if (!scroller.isConnected) return;
-    if (seen) return void scroller.classList.add("bots-messages-settled");
-    seen = scroller.clientHeight > 0;
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
+/** How long rows out of view go on skipping rendering once the chat shows again: past the switch's motion. */
+const SKIP_AFTER_SHOWN_MS = 400;
 
 /** `since`: messages after it are new, and animate in. */
 const Messages = memo(function Messages({ conversation, since, onReply }: { conversation: Conversation; since: number; onReply: (id: string) => void }) {
@@ -1364,7 +1351,6 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
       // Hidden from the start, it's opened once it's shown.
       if (!el.clientHeight) return;
       opened.current = true;
-      settleRows(el);
       if (!stick.current && !putBack(el, top.current, "top")) stick.current = true;
       moved.current = el.scrollTop;
     } else if (!stick.current) restore();
@@ -1381,8 +1367,15 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
     const coarse = window.matchMedia("(pointer: coarse)");
     let height = el.clientHeight;
     let windowHeight = window.innerHeight;
+    // Coming back from Build or a thread, the rows out of view skip rendering (bots.css), so showing the
+    // chat lays out what's in view instead of every message, before the switch can draw. Only after it
+    // has been laid out whole, so each row skipped keeps its real height and the view goes back exactly;
+    // and only for the switch: skipped, a row's mascots can't breathe on the compositor.
+    let laidOut = false;
+    const full = el.classList.contains("bots-messages-skip") ? setTimeout(() => el.classList.remove("bots-messages-skip"), SKIP_AFTER_SHOWN_MS) : undefined;
     const observer = new ResizeObserver(() => {
       if (!el.clientHeight) return;
+      laidOut = true;
       const changed = el.clientHeight !== height;
       const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
@@ -1395,7 +1388,12 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
     });
     observer.observe(inner.current);
     observer.observe(el);
-    return () => observer.disconnect();
+    // Run as the chat is hidden (App's Activity), or goes.
+    return () => {
+      observer.disconnect();
+      clearTimeout(full);
+      if (laidOut) el.classList.add("bots-messages-skip");
+    };
   }, []);
 
   // A quote followed scrolls to its message once. Done with, so the chat opened again, or shown again

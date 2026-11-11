@@ -163,12 +163,24 @@ describe.skipIf(!browser)("switching OpenBots chats", () => {
     const height = () => page.eval<number>("document.querySelector('.bots-messages').scrollHeight");
     const before = await height();
     await show(page, false);
-    await show(page, true);
     // Coming back to OpenBots (as App's Activity does) skips the rows far from the view instead of laying
-    // out the whole chat before the switch can draw: the first of 60 messages isn't rendered.
-    expect(await page.eval<boolean>("document.querySelector('.bots-messages').classList.contains('bots-messages-settled')")).toBe(true);
-    expect(await page.eval<boolean>("document.querySelector('.bots-messages-inner > .bm-group .bm-row').checkVisibility({ contentVisibilityAuto: true })")).toBe(false);
+    // out the whole chat before the switch can draw: two frames in, the first of 60 messages isn't rendered.
+    const shown = await page.eval<{ skipped: boolean; height: number }>(`new Promise((resolve) => {
+      show(true);
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+        skipped: !document.querySelector('.bots-messages-inner > .bm-group .bm-row').checkVisibility({ contentVisibilityAuto: true }),
+        height: document.querySelector('.bots-messages').scrollHeight,
+      })));
+    })`);
+    expect(shown.skipped).toBe(true);
     // Skipped rows keep their real heights, so the chat is as tall as it was, and the view where it was.
+    expect(shown.height).toBe(before);
+    await samePlace(page, left);
+    // Once the switch is over, every row renders again (a skipped row's mascots can't breathe on the
+    // compositor), and nothing moves.
+    await page.until("!document.querySelector('.bots-messages-skip')");
+    await page.settle();
+    expect(await page.eval<boolean>("document.querySelector('.bots-messages-inner > .bm-group .bm-row').checkVisibility({ contentVisibilityAuto: true })")).toBe(true);
     expect(await height()).toBe(before);
     await samePlace(page, left);
   }, 60_000);
