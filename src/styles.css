@@ -2429,18 +2429,53 @@ select.input {
   }
 }
 
-/* Queued messages: a thin tray tucked behind the top of the composer. */
+/* Queued messages: a thin tray on the top of the composer, drawn over its top edge so the two read
+   as one outline. */
 
 .queue {
   display: flex;
   flex-direction: column;
-  margin: 0 22px -1px;
+  margin: 0 22px -2px;
   padding: 2px 0;
   border: 1px solid var(--composer-border);
   border-bottom: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--surface);
   animation: rise var(--med) var(--ease-out) both;
+  position: relative;
+  --fillet: 10px;
+}
+
+/* Concave fillets where the tray's sides meet the composer, so the two outlines run into each other.
+   Each one sits just outside a side, over the side's last few pixels and the composer's top edge: a
+   ring of the tray's line around a quarter circle, filled with the surface beyond it. It ends 4px
+   below the composer's top: 10px out from the tray's side the composer's corner, round or squircle,
+   has dropped about that far, so the curve lands on the composer's edge almost flat. */
+.queue::before,
+.queue::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  width: var(--fillet);
+  height: var(--fillet);
+  pointer-events: none;
+  --ring: transparent calc(var(--fillet) - 1.5px), var(--composer-border) calc(var(--fillet) - 1px),
+    var(--composer-border) calc(var(--fillet) - 0.5px), transparent var(--fillet);
+  --fill: transparent calc(var(--fillet) - 1.5px), var(--surface) calc(var(--fillet) - 1px);
+}
+
+.queue::before {
+  left: calc(-1 * var(--fillet));
+  background:
+    radial-gradient(circle at 0 0, var(--ring)),
+    radial-gradient(circle at 0 0, var(--fill));
+}
+
+.queue::after {
+  right: calc(-1 * var(--fillet));
+  background:
+    radial-gradient(circle at 100% 0, var(--ring)),
+    radial-gradient(circle at 100% 0, var(--fill));
 }
 
 .queued {
