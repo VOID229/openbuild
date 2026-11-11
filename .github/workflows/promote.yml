@@ -1,0 +1,55 @@
+name: Promote to stable
+
+# Declares a version stable: a plain x.y.z tag on the commit its x.y.z-nightly tag names, published
+# as a full release. The installer, `ob update` and the sidebar find stable releases from the tags
+# (shared/version.ts); installations from before that go by GitHub's prerelease flag, which this
+# release doesn't have.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to promote, e.g. 0.1.9
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promote
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Promote the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Give a version like 0.1.9, not \"$VERSION\"." >&2
+            exit 1
+          fi
+          nightly="$VERSION-nightly"
+          if ! sha=$(gh api "repos/$GH_REPO/commits/$nightly" --jq .sha 2>/dev/null); then
+            echo "There is no $nightly tag to promote." >&2
+            exit 1
+          fi
+          if tagged=$(gh api "repos/$GH_REPO/commits/$VERSION" --jq .sha 2>/dev/null) && [[ "$tagged" != "$sha" ]]; then
+            echo "$VERSION already names another commit ($tagged)." >&2
+            exit 1
+          fi
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "$VERSION is already stable."
+            exit 0
+          fi
+          gh release create "$VERSION" --target "$sha" --title "$VERSION" --latest \
+            --notes "Promoted to stable from [$nightly](https://github.com/$GH_REPO/releases/tag/$nightly)."
+          echo "$VERSION is now stable."

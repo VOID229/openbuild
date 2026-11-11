@@ -1,7 +1,7 @@
 import { isRemoteServer } from "./devices";
 import { EXTERNAL_VIA } from "../../shared/replies";
 import { fetchWithTimeout } from "./abort";
-import { asRelease, type AppRelease } from "../../shared/release";
+import { asRelease, type AppRelease } from "../../shared/version";
 
 // Where this copy of the app runs, read once at startup from /api/config:
 //   - "local":  served by your own OpenChat server, which keeps chats and settings on disk and API

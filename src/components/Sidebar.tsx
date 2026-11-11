@@ -1,6 +1,6 @@
 import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { appRelease, isHosted } from "../lib/runtime";
-import { releaseLabel } from "../../shared/release";
+import { releaseLabel } from "../../shared/version";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
