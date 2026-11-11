@@ -200,7 +200,8 @@ export function GitMenu({ chat, streaming }: { chat: Chat; streaming: boolean })
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        {busy ? <Spinner size={15} /> : <GitBranch size={16} />}
+        {/* A merge started from the pull request tab shows on its own Merge button, not here too. */}
+        {working ? <Spinner size={15} /> : <GitBranch size={16} />}
       </IconButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu git-menu" label="Commit" fixed="down" align="end">
         <div className="git-head">

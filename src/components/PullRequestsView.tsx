@@ -193,7 +193,8 @@ function PullView({ folder, number }: { folder: TerminalFolder; number: number }
         <span className="pv-number" title={pr.repo}>
           {pr.repo} <b>#{pr.number}</b>
         </span>
-        {(loading || busy) && <Spinner />}
+        {/* A merge shows on the Merge button alone. */}
+        {(loading || busy) && busy !== "merge" && <Spinner />}
         <a className="icon-btn fv-tool" href={pr.url} target="_blank" rel="noreferrer" aria-label="Open on GitHub" data-tooltip="Open on GitHub" data-tooltip-side="bottom">
           <ExternalLink size={13} />
         </a>
