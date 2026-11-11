@@ -1156,7 +1156,7 @@ export function BotsToggle() {
   );
 }
 
-/** Which OpenBuild this is, small in either sidebar's footer: "Nightly 0.1.9", "Stable 0.1.9" or "Dev". */
+/** Which OpenBuild this is, small in either sidebar's footer: "Nightly 0.1.9" or "Stable 0.1.9", or nothing when nothing names one. */
 export function ReleaseLabel() {
   const release = appRelease();
   return release ? <span className="release-label">{releaseLabel(release)}</span> : null;

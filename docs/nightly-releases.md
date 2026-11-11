@@ -48,18 +48,21 @@ version-bump commit is needed.
 ## The version in the sidebar
 
 The foot of the sidebar names the running release: `Nightly 0.1.9` for
-`0.1.9-nightly.<date>.<run>`, `Stable 0.1.9` for `0.1.9`, and `Dev` for a
-commit that isn't a release. There is no build step to stamp a version, so the
-server reads it from the release tags on its commit when it starts
-(`server/version.ts`) and sends it with `/api/config`:
+`0.1.9-nightly.<date>.<run>`, and `Stable 0.1.9` for `0.1.9`. There is no build
+step to stamp a version, so the server reads it from the release tags in its
+commit's history when it starts (`server/version.ts`) and sends it with
+`/api/config`:
 
 - An installation is a checkout of a release tag (`install.sh`, `ob update`),
-  so `git tag --points-at HEAD` names it. When a stable release and a nightly
-  share a commit, the installation's update track picks between them.
+  so HEAD's own tag names it. When a stable release and a nightly share a
+  commit, the installation's update track picks between them.
+- A checkout between releases is named after the newest release tag in its
+  history (by commit date; never an ancestor before its descendant).
 - A source archive of a tag has no `.git`; git writes the commit's ref names
   into `.release-ref` as it makes the archive (`export-subst` in
   `.gitattributes`), and the server reads that instead.
-- A development checkout between releases is `Dev`.
+- With nothing to go on (an archive of an untagged commit, a history without
+  release tags), the sidebar shows no version.
 
 An update moves the checkout on, but the label keeps naming the release the
 server started as until it restarts.
