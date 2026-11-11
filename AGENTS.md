@@ -20,6 +20,9 @@ to `main` directly. When you finish an implementation, a fix or any other change
    every check passes. This is required after every push, including follow-up changes to an existing
    PR and documentation-only changes. Do not end the task while checks are pending or failing just
    because the PR was opened or local tests passed.
+   A test file that fails is run once more on its own by the runner; one that passes then is marked
+   flaky (a warning on the pull request) and doesn't fail the run, so a red check is a failure that
+   repeated.
    Don't skip, disable or weaken a test to get there. Investigate unrelated failures too: retry a
    suspected flaky check and watch the retry to completion. If a persistent failure is broken on
    `main` or an external blocker prevents progress, report the evidence and the remaining blocker
