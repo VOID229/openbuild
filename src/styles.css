@@ -1239,12 +1239,23 @@ select.input {
 }
 
 .history {
+  display: flex;
   flex: 1;
+  flex-direction: column;
   min-height: 0;
   overflow-y: auto;
   margin: 0 -4px;
   padding: 0 4px 12px;
   scrollbar-width: none;
+}
+
+.history > * {
+  flex-shrink: 0;
+}
+
+/* "Closed" sits at the foot of the list, so opening it grows it upward (Sidebar.tsx Collapsible). */
+.history-group-bottom {
+  margin-top: auto;
 }
 
 .history::-webkit-scrollbar {
