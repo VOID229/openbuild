@@ -2443,39 +2443,53 @@ select.input {
   background: var(--surface);
   animation: rise var(--med) var(--ease-out) both;
   position: relative;
-  --fillet: 10px;
 }
 
-/* Concave fillets where the tray's sides meet the composer, so the two outlines run into each other.
-   Each one sits just outside a side, over the side's last few pixels and the composer's top edge: a
-   ring of the tray's line around a quarter circle, filled with the surface beyond it. It ends 4px
-   below the composer's top: 10px out from the tray's side the composer's corner, round or squircle,
-   has dropped about that far, so the curve lands on the composer's edge almost flat. */
+/* Concave fillets where the tray's sides meet the composer, so the two make one outline. Each is a
+   10px arc (along the 1px lines' centres) that leaves the tray's side straight down and meets the
+   composer's corner at a tangent, then fills the surface beyond it over the side's last pixels and the
+   composer's top edge. Where the arc touches the corner depends on the corner's shape; the numbers are
+   solved for the 24px round corner, and below for the 43.2px squircle as Chrome draws it. */
 .queue::before,
 .queue::after {
   content: "";
   position: absolute;
-  bottom: -2px;
-  width: var(--fillet);
-  height: var(--fillet);
+  bottom: var(--fillet-bottom);
+  width: var(--fillet-w);
+  height: var(--fillet-h);
   pointer-events: none;
-  --ring: transparent calc(var(--fillet) - 1.5px), var(--composer-border) calc(var(--fillet) - 1px),
-    var(--composer-border) calc(var(--fillet) - 0.5px), transparent var(--fillet);
-  --fill: transparent calc(var(--fillet) - 1.5px), var(--surface) calc(var(--fillet) - 1px);
+  --ring: transparent 9.25px, var(--composer-border) 9.75px, var(--composer-border) 10.25px, transparent 10.75px;
+  --fill: transparent 9.25px, var(--surface) 9.75px;
+}
+
+.queue {
+  --fillet-cx: -3.43px;
+  --fillet-w: 7.07px;
+  --fillet-h: 10.46px;
+  --fillet-bottom: -1px;
+}
+
+@supports (corner-shape: squircle) {
+  .queue {
+    --fillet-cx: -3.05px;
+    --fillet-w: 7.45px;
+    --fillet-h: 10.52px;
+    --fillet-bottom: -1.47px;
+  }
 }
 
 .queue::before {
-  left: calc(-1 * var(--fillet));
+  left: calc(-1 * var(--fillet-w));
   background:
-    radial-gradient(circle at 0 0, var(--ring)),
-    radial-gradient(circle at 0 0, var(--fill));
+    radial-gradient(circle at var(--fillet-cx) 0, var(--ring)),
+    radial-gradient(circle at var(--fillet-cx) 0, var(--fill));
 }
 
 .queue::after {
-  right: calc(-1 * var(--fillet));
+  right: calc(-1 * var(--fillet-w));
   background:
-    radial-gradient(circle at 100% 0, var(--ring)),
-    radial-gradient(circle at 100% 0, var(--fill));
+    radial-gradient(circle at calc(100% - var(--fillet-cx)) 0, var(--ring)),
+    radial-gradient(circle at calc(100% - var(--fillet-cx)) 0, var(--fill));
 }
 
 .queued {
