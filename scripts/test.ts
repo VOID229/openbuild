@@ -13,6 +13,7 @@
 import { appendFileSync, closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
+import { findBrowser } from "../server/pi/extensions/html-render";
 import { expectedSeconds, expectedWall, parseShard, shard, usesBrowser, type Entry } from "./testPlan";
 
 const TIMINGS = join(import.meta.dir, "test-timings.json");
@@ -115,14 +116,37 @@ function report(result: Result, note = "") {
   console.log(actions ? "::endgroup::" : "");
 }
 
-// Run `queue` with up to `limit` files at once, at most `browserLimit` of them using a browser.
-async function pool(queue: Entry[], limit: number, browserLimit: number, done: (result: Result) => void) {
-  let running = 0, browsers = 0;
+/**
+ * The first Chrome on a machine that hasn't run one (every CI runner) takes 10 to 30 s to start, and
+ * the test that started it would sit through that. Start one here, and let it go, before any
+ * browser file runs: the other files have every slot meanwhile.
+ */
+async function warmBrowser() {
+  const browser = findBrowser();
+  if (!browser) return;
+  const warmEnv = { ...process.env };
+  // As tests/chromePage.ts: current Chrome can't parse a runner's `disabled:` bus address.
+  delete warmEnv.DBUS_SESSION_BUS_ADDRESS;
+  delete warmEnv.DBUS_SYSTEM_BUS_ADDRESS;
+  const began = performance.now();
+  const child = Bun.spawn([browser, "--headless", "--disable-gpu", "--use-gl=stub", "--disable-dev-shm-usage", "--no-first-run", `--user-data-dir=${join(logs, "chrome")}`,
+    ...(process.platform === "linux" ? ["--no-sandbox"] : []), "--dump-dom", "about:blank"], { env: warmEnv, stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+  const timer = setTimeout(() => child.kill("SIGKILL"), 60_000);
+  await child.exited;
+  clearTimeout(timer);
+  const seconds = (performance.now() - began) / 1000;
+  if (seconds > 2) console.log(`The first Chrome took ${seconds.toFixed(1)} s to start; browser files waited for it.`);
+}
+
+// Run `queue` with up to `limit` files at once, at most `browserLimit` of them using a browser, and
+// none of those before `browserReady`.
+async function pool(queue: Entry[], limit: number, browserLimit: number, browserReady: Promise<unknown>, done: (result: Result) => void) {
+  let running = 0, browsers = 0, ready = false;
   await new Promise<void>(finished => {
     const next = () => {
       if (!queue.length && !running) return finished();
       while (running < limit) {
-        const at = queue.findIndex(item => !item.browser || browsers < browserLimit);
+        const at = queue.findIndex(item => !item.browser || (ready && browsers < browserLimit));
         if (at < 0) break;
         const [item] = queue.splice(at, 1);
         running++;
@@ -134,6 +158,7 @@ async function pool(queue: Entry[], limit: number, browserLimit: number, done: (
         });
       }
     };
+    void browserReady.catch(() => {}).then(() => { ready = true; next(); });
     next();
   });
 }
@@ -146,7 +171,7 @@ const scope = part ? `shard ${part.index} of ${part.total}: ${entries.length} of
 // The estimate is for CI's two files at a time, one with a browser.
 console.log(`Running ${scope}, ${jobs} at a time (${browserJobs} with a browser)${part ? `; about ${Math.ceil(expectedWall(entries))} s on CI` : ""}.`);
 try {
-  await pool([...entries], jobs, browserJobs, result => {
+  await pool([...entries], jobs, browserJobs, entries.some(entry => entry.browser) ? warmBrowser() : Promise.resolve(), result => {
     first.push(result);
     report(result, result.code !== 0 && retries ? " (will be run again)" : "");
   });
