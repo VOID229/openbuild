@@ -1,7 +1,7 @@
 // OpenBots' sidebar: pinned bots and groups as big tiles, then every other conversation as a row
 // with its latest message, filed under the user's own sections. Closed on a desktop, it narrows to
 // a rail of avatars instead of going away.
-import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, PanelLeft, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
+import { Bell, BellDot, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FolderInput, Pencil, Pin, PinOff, Plus, Search, Star, Store, Trash, UsersRound, X } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
@@ -13,7 +13,8 @@ import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/g
 import { arrowNav, canHover, copyText, cx, OPEN_SEARCH, useDismiss, useMediaQuery, usePresence } from "../../lib/ui";
 import { useScrollRestore } from "../../lib/scrollRestore";
 import { Avatar, IconButton, Popover } from "../primitives";
-import { BotsToggle, ScrollThumb } from "../Sidebar";
+import { BotsToggle, ModeSwitch, ScrollThumb } from "../Sidebar";
+import { PanelIcon, PlusIcon, SearchIcon } from "../HeaderIcons";
 import { place, type Side } from "../Tooltip";
 import { BotsGlyph } from "./BotAvatar";
 import { ConfirmDeleteDialog, CreateBotDialog, CreateGroupDialog, NameDialog } from "./BotDialogs";
@@ -379,7 +380,7 @@ function NewMenu({ onDialog, rail }: { onDialog: (d: Dialog) => void; rail?: boo
   return (
     <>
       <IconButton ref={anchor} label="New" tooltip={open ? false : "New bot or group"} tooltipSide={rail ? "right" : "bottom"} aria-haspopup="menu" aria-expanded={open} className={rail ? "bots-rail-btn" : undefined} onClick={() => setOpen(!open)}>
-        <Plus size={18} />
+        <PlusIcon />
       </IconButton>
       <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} className="menu bots-new-menu" role="menu" label="New" fixed={rail ? "up" : "down"} align={rail ? "start" : "end"}>
         <div onKeyDown={(e) => arrowNav(e)}>
@@ -497,7 +498,7 @@ function Rail({ pinned, rest, activeId, onMenu, onDialog, peek }: { pinned: Conv
   return (
     <div className="bots-rail-inner">
       <IconButton label="Open sidebar" tooltipSide="right" className="bots-rail-btn" onClick={() => useStore.getState().setBotsSidebarOpen(true)}>
-        <PanelLeft size={18} />
+        <PanelIcon />
       </IconButton>
       <div className="history-wrap">
         <ScrollThumb target={listRef} />
@@ -628,10 +629,10 @@ export function BotsSidebar() {
               {/* On a phone the list is a screen of its own, with the search always at hand. */}
               {!mobile && (
                 <IconButton label="Close sidebar" onClick={() => useStore.getState().setBotsSidebarOpen(false)}>
-                  <PanelLeft size={18} />
+                  <PanelIcon />
                 </IconButton>
               )}
-              <span className="wordmark bots-wordmark">OpenBots</span>
+              {mobile ? <span className="wordmark bots-wordmark">OpenBots</span> : <ModeSwitch />}
               {!mobile && (
                 <IconButton
                   label="Search"
@@ -645,7 +646,7 @@ export function BotsSidebar() {
                     setQuery("");
                   }}
                 >
-                  <Search size={18} />
+                  <SearchIcon />
                 </IconButton>
               )}
               {!remote && <NewMenu onDialog={setDialog} />}
@@ -732,7 +733,8 @@ export function BotsSidebar() {
                   <Store size={19} />
                 </IconButton>
               )}
-              <BotsToggle />
+              {/* On a desktop the header's switch does this; the rail and a phone keep it. */}
+              {mobile && <BotsToggle />}
             </div>
           </div>
         )}

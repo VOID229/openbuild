@@ -1,6 +1,6 @@
 import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { isHosted } from "../lib/runtime";
-import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, ListFilter, Minus, MessageCircle, PanelLeft, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
+import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { adoptHistory, stopGeneration } from "../lib/chat";
@@ -22,6 +22,7 @@ import { useLongPress } from "../lib/gestures";
 import { arrowNav, canHover, copyText, crossfade, cx, useDismiss, useMediaQuery, usePresence } from "../lib/ui";
 import { Avatar, BrandIcon, GrokMark, HermesMark, OpencodeMark, ClaudeMark, CodexMark, DurableMark, FxMark, IconButton, PiMark, Popover, CursorMark, Spinner } from "./primitives";
 import { PluginSlot } from "../lib/plugins";
+import { FilterIcon, PanelIcon, SearchIcon } from "./HeaderIcons";
 import { ChoiceField, DateField, TimeField } from "./DateTimeFields";
 import { BotsGlyph } from "./bots/BotAvatar";
 import { clock } from "../lib/clock";
@@ -1155,6 +1156,42 @@ export function BotsToggle() {
   );
 }
 
+/** The side the switch last showed lit, whichever sidebar showed it: the next one slides on from there. */
+let switchShown: boolean | undefined;
+
+/**
+ * OpenBuild or OpenBots, as two pills in the middle of either sidebar's header: the one you're in is
+ * lit, the other takes you across. Each sidebar has its own copy, in the same place, and only the one
+ * on screen runs its effects (the other is in a hidden Activity), so the copy coming in slides its
+ * light over from where the one going out left it: one switch, to the eye.
+ */
+export function ModeSwitch() {
+  const bots = useStore((s) => s.botsOpen);
+  const light = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const from = switchShown;
+    switchShown = bots;
+    if (from === undefined || from === bots || !light.current) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const across = "translateX(calc(100% + 2px))";
+    light.current.animate([{ transform: from ? across : "translateX(0)" }, { transform: bots ? across : "translateX(0)" }], {
+      duration: 320,
+      easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+    });
+  }, [bots]);
+  return (
+    <div className={cx("mode-switch", bots && "mode-switch-bots")} role="group" aria-label="Threads or bots">
+      <span ref={light} className="mode-light" aria-hidden />
+      <button type="button" className={cx("mode-pill", !bots && "mode-pill-on")} aria-pressed={!bots} onClick={() => bots && toggleBots()}>
+        Build
+      </button>
+      <button type="button" className={cx("mode-pill", bots && "mode-pill-on")} aria-pressed={bots} onClick={() => !bots && toggleBots()}>
+        Bots
+      </button>
+    </div>
+  );
+}
+
 /** Models that replied in any chat, for the model filter. */
 function useChatModels() {
   const chats = useStore((s) => s.chats);
@@ -1264,7 +1301,7 @@ function FilterMenu() {
         className={cx(active && "filter-active")}
         onClick={() => (open ? close() : setOpen(true))}
       >
-        <ListFilter size={18} />
+        <FilterIcon />
         {active && <span className="filter-dot" aria-hidden />}
       </IconButton>
       <Popover open={open} onClose={close} anchor={anchor} className="menu filter-menu drop-down" role="menu" label="Sort and filter threads" fixed="down">
@@ -1595,9 +1632,9 @@ export function Sidebar() {
         <div className="sidebar-inner">
           <div className="brand-row">
             <IconButton label="Close sidebar" tooltip="Close sidebar" onClick={() => setSidebarOpen(false)}>
-              <PanelLeft size={18} />
+              <PanelIcon />
             </IconButton>
-            <span className="wordmark">OpenBuild</span>
+            {mobile ? <span className="wordmark">OpenBuild</span> : <ModeSwitch />}
             {!mobile && (
               <IconButton
                 label="Search"
@@ -1611,7 +1648,7 @@ export function Sidebar() {
                   setQuery("");
                 }}
               >
-                <Search size={18} />
+                <SearchIcon />
               </IconButton>
             )}
             <FilterMenu />
@@ -1756,7 +1793,8 @@ export function Sidebar() {
             >
               <SquareCheck size={16} />
             </button>
-            <BotsToggle />
+            {/* On a desktop the header's switch does this; a phone's drawer keeps its wordmark. */}
+            {mobile && <BotsToggle />}
           </div>
         </div>
       </aside>

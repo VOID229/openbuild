@@ -71,7 +71,7 @@ describe.skipIf(!browser)("sidebar motion", () => {
       const page = await Page.open(chrome!.ws, server!.url.href, 1280, 800, READY);
       await page.eval(`store.setState({ botsOpen: false, sidebarOpen: true, botsSidebarOpen: ${open} })`);
       await page.settle();
-      const frames = await sample(page, `document.querySelector('[aria-label="OpenBots"]').click()`, 700);
+      const frames = await sample(page, `[...document.querySelectorAll('.sidebar:not(.bots-sidebar) .mode-pill')].find((b) => b.textContent === 'Bots').click()`, 700);
       expect(await page.eval<boolean>("store.getState().botsOpen")).toBe(true);
       expect(frames.at(-1)!.opacity).toBe(1);
       expect(frames.every((f) => (open ? f.list : f.rail))).toBe(true);
@@ -80,27 +80,28 @@ describe.skipIf(!browser)("sidebar motion", () => {
     }, 60_000);
   }
 
-  test("both sidebars are one width, with their wordmarks the same size in the same place", async () => {
+  test("both sidebars are one width, with the Build/Bots switch in the same place, lighting where you are", async () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1280, 800, READY);
     const mark = () =>
-      page.eval<{ text: string; center: number; top: number; size: string; sidebar: number }>(`(() => {
-        const el = [...document.querySelectorAll('.sidebar .wordmark')].find((w) => w.getBoundingClientRect().width > 0);
+      page.eval<{ on: string; center: number; top: number; sidebar: number }>(`(() => {
+        const el = [...document.querySelectorAll('.sidebar .mode-switch')].find((w) => w.getBoundingClientRect().width > 0);
         const r = el.getBoundingClientRect();
-        return { text: el.textContent, center: Math.round(r.left + r.width / 2), top: Math.round(r.top), size: getComputedStyle(el).fontSize, sidebar: Math.round(el.closest('.sidebar').getBoundingClientRect().width) };
+        return { on: el.querySelector('.mode-pill-on').textContent, center: Math.round(r.left + r.width / 2), top: Math.round(r.top), sidebar: Math.round(el.closest('.sidebar').getBoundingClientRect().width) };
       })()`);
-    await page.eval("store.setState({ botsOpen: false, sidebarOpen: true })");
+    await page.eval("store.setState({ botsOpen: false, sidebarOpen: true, botsSidebarOpen: true })");
     await page.settle();
     const build = await mark();
-    await page.eval("store.setState({ botsOpen: true, botsSidebarOpen: true })");
-    await page.until("[...document.querySelectorAll('.bots-sidebar .wordmark')].some((w) => w.getBoundingClientRect().width > 0)");
+    // Its other pill takes you across.
+    await page.eval(`[...document.querySelectorAll('.sidebar:not(.bots-sidebar) .mode-pill')].find((b) => b.textContent === 'Bots').click()`);
+    await page.until("store.getState().botsOpen && [...document.querySelectorAll('.bots-sidebar .mode-switch')].some((w) => w.getBoundingClientRect().width > 0)");
+    // Measured once the switch's fade-in is over: it comes in moving a few pixels.
+    await page.eval("new Promise((r) => setTimeout(r, 600))");
     await page.settle();
     const bots = await mark();
-    expect([build.text, bots.text]).toEqual(["OpenBuild", "OpenBots"]);
+    expect([build.on, bots.on]).toEqual(["Build", "Bots"]);
     expect(bots.sidebar).toBe(build.sidebar);
     expect(bots.center).toBe(build.center);
     expect(bots.top).toBe(build.top);
-    expect(build.size).toBe("18px");
-    expect(bots.size).toBe("18px");
   }, 60_000);
 
   test("closing OpenBots' sidebar fades the list away over the rail as it narrows", async () => {

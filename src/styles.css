@@ -1005,12 +1005,67 @@ select.input {
   margin-left: auto;
 }
 
+/* Build or Bots, in the wordmark's place: centred across the row, small enough to sit between the
+   panel button and the tools. The lit pill is the canvas, cut out of a lighter track. */
+.mode-switch {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--active);
+}
+
+.brand-row > .mode-switch + * {
+  margin-left: auto;
+}
+
+.mode-pill {
+  position: relative;
+  width: 56px;
+  height: 26px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-3);
+  transition: color 240ms var(--ease);
+}
+
+.mode-pill-on {
+  color: var(--text);
+}
+
+/* The lit pill: one piece under both labels, so switching slides it across (ModeSwitch animates the
+   move, since the switch going out and the one coming in are different elements). */
+.mode-light {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 56px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--surface);
+  box-shadow: var(--seg-on-shadow);
+}
+
+.mode-switch-bots .mode-light {
+  transform: translateX(calc(100% + 2px));
+}
+
+@media (hover: hover) {
+  .mode-pill:not(.mode-pill-on):hover {
+    color: var(--text);
+  }
+}
+
 .brand-row > .icon-btn {
   position: relative;
 }
 
 .brand-row .icon-btn {
-  color: var(--text-3);
+  color: var(--text-2);
 }
 
 @media (hover: hover) {
