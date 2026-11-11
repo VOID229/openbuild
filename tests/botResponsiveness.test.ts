@@ -9,13 +9,14 @@ import openbots, { CATALOG_BRIEF } from "../server/bots/extension";
 import { piBin } from "../server/pi/install";
 import { stoppable } from "../src/lib/bots/activity";
 import { unexpectedStderr } from "./botStderr";
+import { spawnScript } from "./spawnScript";
 
 // Each scenario runs the real service and runner in a subprocess on its own data dir, with stand-in
 // Pi processes for the bots' main sessions and for their helper sessions.
 async function run(name: string, body: string) {
   const dir = await mkdtemp(join(tmpdir(), `openbuild-responsive-${name}-`));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -79,8 +80,7 @@ async function run(name: string, body: string) {
       const group = svc.createConversation({ kind: 'group', name: 'Team', botIds: [alpha.bot.id, beta.bot.id] });
       ${body}
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(unexpectedStderr(err)).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -671,7 +671,7 @@ test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow 
     const agentDir = join(dir, "agent");
     mkdirSync(agentDir, { recursive: true });
     writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "shared-test-key" } }));
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { writeFileSync } from 'node:fs';
       const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
@@ -775,8 +775,7 @@ test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow 
       await until(() => !runner.busy(alpha.bot.id));
       a.equal(said().at(-1), 'pong');
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agentDir, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agentDir, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // A friend's messages in a shared chat, on this side: who they're from, whom they wake, how they count
 // toward nothing that pauses a chat, how bots read them, and what a bot may do in that chat. The friend is a
@@ -10,13 +11,7 @@ import { join } from "node:path";
 async function run(script: string) {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-friends-bots-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir, PI_BIN: join(dir, "no-pi"), PI_CODING_AGENT_DIR: join(dir, "pi") });
     if (code !== 0) console.error(out, err);
     expect(err).toBe("");
     expect(code).toBe(0);

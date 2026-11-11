@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("runtime maintenance commands, HTTP validation, jobs and status caching (isolated)", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-runtime-updates-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { writeFileSync, chmodSync, mkdirSync, symlinkSync } from 'node:fs';
       const dir = process.env.OPENCHAT_DATA_DIR;
@@ -167,8 +168,7 @@ test("runtime maintenance commands, HTTP validation, jobs and status caching (is
       a.equal(verified.code, 1);
       a.ok(verified.lines.some(line => line.includes('executable is still old')));
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

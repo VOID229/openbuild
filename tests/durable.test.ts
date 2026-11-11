@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DurableRuntime } from "../server/durable";
 import type { PiChatRequest } from "../shared/types";
 import { fakeModels } from "./durable-fake";
+import { startScript } from "./spawnScript";
 
 const request = (model: string): PiChatRequest => ({ threadId: "test-durable-thread", cwd: tmpdir(), model, effort: "off", message: "hi", prior: 0, stream: { id: "durable-test-request" } });
 async function until(fn: () => boolean) {
@@ -261,7 +262,7 @@ describe("durable runtime (offline)", () => {
       const r = new DurableRuntime(${JSON.stringify(directory)}, f.models);
       await r.startRun({...${JSON.stringify(request("MODEL"))}, model:f.model});
       setInterval(()=>{},1000);`;
-    const child = Bun.spawn([process.execPath, "-e", code], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
+    const child = startScript(code);
     try {
       await until(() => existsSync(marker));
       child.kill("SIGKILL"); await child.exited;
@@ -289,7 +290,7 @@ describe("durable runtime (offline)", () => {
       const r = new DurableRuntime(${JSON.stringify(directory)}, f.models);
       await r.startRun({...${JSON.stringify(request("MODEL"))}, model:f.model});
       setInterval(()=>{},1000);`;
-    const child = Bun.spawn([process.execPath, "-e", code], { cwd: process.cwd(), stdout: "pipe", stderr: "pipe" });
+    const child = startScript(code);
     try {
       await until(() => existsSync(marker));
       child.kill("SIGKILL"); await child.exited;

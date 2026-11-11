@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { runInNewContext } from "node:vm";
 import { Computer, procListeners } from "../server/computers/index";
 import { Browser } from "../server/computers/browser";
+import { spawnScript } from "./spawnScript";
 
 async function temporary(run: (dir: string) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-computers-"));
@@ -69,12 +70,11 @@ test("engine discovery accepts successful info for both engines without mixed te
       await chmod(file, 0o755);
     }
     // Separate module/cache/environment: no real engine can be discovered or started.
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       const { engines } = await import('./server/computers/index.ts');
       const found = await engines();
       if (JSON.stringify(found) !== '["podman","docker"]') throw new Error(JSON.stringify(found));
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, PATH: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { PATH: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   });

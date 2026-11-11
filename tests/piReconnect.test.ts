@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { canSyncChat, readChatProjection } from "../src/lib/chatSync";
 import type { Chat } from "../src/lib/types";
+import { spawnScript } from "./spawnScript";
 
 async function run(script: string) {
   const prelude = `
@@ -18,8 +19,7 @@ async function run(script: string) {
     const stream = { id: 'reply-0123456789abcdef', via: 'server-1' };
     const request = { threadId: 'thread-1', cwd: '/tmp', model: 'openai/gpt', effort: 'off', message: 'hi', prior: 0 };
   `;
-  const child = Bun.spawn([process.execPath, "-e", prelude + script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  const { code, stderr: err } = await spawnScript(prelude + script);
   expect(err).toBe("");
   expect(code).toBe(0);
 }

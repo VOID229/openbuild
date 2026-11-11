@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
+import { spawnScriptSync } from "./spawnScript";
 
 // Two real OpenBuild servers on throwaway data directories: a host on 127.0.0.1 and a client on
 // 127.0.0.2, on the same port, so the client's discovery finds the host the way it would find
@@ -70,9 +71,9 @@ const connect = (body: unknown, init: RequestInit = {}) =>
 /** Open a pairing on the host, the way `openbuild pair --host` does. */
 function openPairing(data: string, mode: "lan" | "tailscale", name = "host-box") {
   const script = `const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: ${JSON.stringify(name)}, mode: ${JSON.stringify(mode)}, urls: [] })));`;
-  const run = Bun.spawnSync([process.execPath, "-e", script], { env: { ...process.env, OPENCHAT_DATA_DIR: data }, stdout: "pipe", stderr: "pipe" });
-  if (run.exitCode !== 0) throw new Error(run.stderr.toString());
-  return JSON.parse(run.stdout.toString()) as { code: string; expiresAt: number };
+  const run = spawnScriptSync(script, { OPENCHAT_DATA_DIR: data });
+  if (run.code !== 0) throw new Error(run.stderr);
+  return JSON.parse(run.stdout) as { code: string; expiresAt: number };
 }
 
 const readJson = (file: string) => JSON.parse(readFileSync(file, "utf8"));

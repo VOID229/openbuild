@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 // Keep browser/store mocks isolated from the other suites.
 test("bots mutations await acknowledgement, reconcile failures, serialize writes and load history", async () => {
@@ -86,8 +87,7 @@ test("bots mutations await acknowledgement, reconcile failures, serialize writes
     console.log("ok");
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("ok");
 });
@@ -131,8 +131,7 @@ test("an update to a message from before the loaded ones doesn't land at the bot
     console.log("ok");
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("ok");
 });
@@ -188,8 +187,7 @@ test("bots paint from the cache, then the server's snapshot replaces it and is c
     console.log("ok");
     process.exit(0);
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   expect(stdout.trim()).toBe("ok");
 });
@@ -264,8 +262,7 @@ test("the OpenBots switch happens at once, lands entrance motion, keeps looping 
     assert.equal(entrance.finished, true);
     assert.ok(!classes.has("world-enter"));
   `;
-  const child = Bun.spawn([process.execPath, "--eval", script], { stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(script);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
 });
 

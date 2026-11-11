@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 import { botModelChain, castVote, fallbackMode, findMentions, findTags, isSilent, makePoll, matchMentionBots, mentionBroadcastAt, pollVotesVisible, pollWaitingOn, replyBubbles } from "../shared/bots";
 
 test("[silent] never becomes a bubble", () => {
@@ -62,7 +63,7 @@ test("a poll waits on the other bots, and on the user if a bot asked", () => {
 test("polls ask the whole group, from the user or a bot, and only in groups", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-poll-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -207,8 +208,7 @@ test("polls ask the whole group, from the user or a bot, and only in groups", as
       a.equal(activityFor('bash', { command: 'ls', status: '  ' }), 'Running a command');
       a.equal(activityFor('bash', { command: 'ls', status: 42 }), 'Running a command');
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -219,7 +219,7 @@ test("polls ask the whole group, from the user or a bot, and only in groups", as
 test("computer tools never silently fall back to unrestricted host access", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-computer-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
       let engines = [];
@@ -249,8 +249,7 @@ test("computer tools never silently fall back to unrestricted host access", asyn
       await sendMessage(bot.id, { text: 'Explicit host screenshot', attach_screenshot: true });
       a.equal(calls[0].body.kind, 'host');
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -261,7 +260,7 @@ test("computer tools never silently fall back to unrestricted host access", asyn
 test("web search uses the user's providers and keeps their keys from the bot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-search-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
       mock.module('./server/computers/index.ts', () => ({ capabilities: async () => ({ engines: [] }), engines: async () => [], procListeners: new Set() }));
@@ -328,8 +327,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
       a.deepEqual(svc.getSettings().defaultFallbackModels, ['openai-codex-2/gpt-6.1-sol']);
       a.deepEqual(await vault.secrets('brave'), ['BRAVE-SECRET']);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir, OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -340,7 +338,7 @@ test("web search uses the user's providers and keeps their keys from the bot", a
 test("Dr Eggbot introduces itself on first open, asks whether the user codes, and offers the starter team only to developers", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-welcome-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -463,8 +461,7 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       svc.answerQuestion(chat, typed.id, 'A');
       a.equal(db.listBots().length, 4);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -476,7 +473,7 @@ test("send_message, models and check-ins against a real bots database", async ()
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-"));
   try {
     await Bun.write(join(dir, "pi", "settings.json"), JSON.stringify({ defaultProvider: "openrouter", defaultModel: "deepseek/flash" }));
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -779,8 +776,7 @@ test("send_message, models and check-ins against a real bots database", async ()
       svc.answerQuestion(conversationId, q.id, long);
       a.equal(db.getMessage(q.id).message.question.answer, long);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -791,7 +787,7 @@ test("send_message, models and check-ins against a real bots database", async ()
 test("any number of routines stay active at once, each bot's separate, each in its own turn", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-routines-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -903,8 +899,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
       // Its turn came, so the group no longer waits.
       a.equal(svc.snapshot().status[first.bot.id]?.waiting, undefined);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -915,7 +910,7 @@ test("any number of routines stay active at once, each bot's separate, each in i
 test("a screenshot sent while a bot is replying reaches it, by steering or in the next turn", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-images-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -968,8 +963,7 @@ test("a screenshot sent while a bot is replying reaches it, by steering or in th
       release();
       await until(() => db.cursor(bot.id, conversationId) === db.latestSeq(conversationId));
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -980,7 +974,7 @@ test("a screenshot sent while a bot is replying reaches it, by steering or in th
 test("bots write their own instructions, and only a blank slate is open to a non-primary bot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-instructions-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -1023,8 +1017,7 @@ test("bots write their own instructions, and only a blank slate is open to a non
       a.equal(db.getBot(blank.id).instructions, 'First draft.');
       a.throws(() => manage(blank.id, { action: 'update', bot: without.id, instructions: 'Nope.' }), /only change yourself/);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -1035,7 +1028,7 @@ test("bots write their own instructions, and only a blank slate is open to a non
 test("only the primary bot adds bots to its groups or removes them", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-groups-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as db from './server/bots/db.ts';
       import * as svc from './server/bots/service.ts';
@@ -1073,8 +1066,7 @@ test("only the primary bot adds bots to its groups or removes them", async () =>
       a.throws(() => manage(primary.id, { action: 'remove_from_group', bot: coach.id }), /at least two bots/);
       a.throws(() => manage(primary.id, { action: 'remove_from_group', bot: helper.id }), /isn't in the group/);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -1085,7 +1077,7 @@ test("only the primary bot adds bots to its groups or removes them", async () =>
 test("the primary sets bots' models and fallbacks with manage_bot, checked against the real list first", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-manage-models-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { mock } from 'bun:test';
       let listing = { models: [
@@ -1249,8 +1241,7 @@ test("the primary sets bots' models and fallbacks with manage_bot, checked again
       svc.updateBot(made.id, { fallbackModels: ['x/y'] });
       a.deepEqual([db.getBot(made.id).fallbackModels, db.getBot(made.id).noFallbacks], [['x/y'], undefined]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -1261,7 +1252,7 @@ test("the primary sets bots' models and fallbacks with manage_bot, checked again
 test("a bot falls back through its models in order, only before its reply has done anything", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bots-fallback-"));
   try {
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -1568,8 +1559,7 @@ test("a bot falls back through its models in order, only before its reply has do
       a.equal(svc.getSettings().defaultFallbackModels, undefined);
       a.deepEqual(modelChain(inherits.bot.id), [undefined]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") });
     // Each failed reply is in the server log, with the provider's reasons and without the key.
     expect(err).toMatch(/\[bots\] \S+ couldn't reply: /);
     expect(err).toMatch(/\[bots\] \S+ couldn't reply: Every model failed\.\na\/one: a\/one is over its limit\nb\/two: b\/two is over its limit\nc\/three: Model not found: c\/three\n/);

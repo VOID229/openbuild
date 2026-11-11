@@ -9,8 +9,8 @@ import type { NativeFrame } from "../server/bots/claude-code/native-types.ts";
 import { createClaudeCodeProvider } from "../server/bots/claude-code/provider.ts";
 import { nativeToolUseId } from "../server/bots/claude-code/transcript.ts";
 import { allProfiles, providerId } from "../server/bots/claude.ts";
+import { spawnScript } from "./spawnScript";
 
-const ROOT = join(import.meta.dir, "..");
 const marker = () => ({ type: "ephemeral", ttl: "1h" });
 const cached = (text: string) => ({ type: "text", text, cache_control: marker() });
 const count = (payload: unknown) => (JSON.stringify(payload).match(/"cache_control":\{"type"/g) ?? []).length;
@@ -195,13 +195,7 @@ esac
 `);
     chmodSync(claude, 0o755);
     setup?.(home);
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `import { strict as a } from "node:assert";\n${script}\nprocess.exit(0);`], {
-      cwd: ROOT,
-      env: { ...process.env, HOME: home, OPENCHAT_DATA_DIR: join(home, "data"), PI_CODING_AGENT_DIR: join(home, "pi"), CLAUDE_BIN: claude, CLAUDE_CONFIG_DIR: "", PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "sk-ant-ambient", CLAUDE_CODE_OAUTH_TOKEN: "ambient-oauth", ...env } as Record<string, string>,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    const { code, stderr: err, stdout: out } = await spawnScript(`import { strict as a } from "node:assert";\n${script}\nprocess.exit(0);`, { HOME: home, OPENCHAT_DATA_DIR: join(home, "data"), PI_CODING_AGENT_DIR: join(home, "pi"), CLAUDE_BIN: claude, CLAUDE_CONFIG_DIR: "", PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "sk-ant-ambient", CLAUDE_CODE_OAUTH_TOKEN: "ambient-oauth", ...env });
     expect(err + out).toBe("");
     expect(code).toBe(0);
     return home;
@@ -514,7 +508,7 @@ test("status, discovery and requests for each login never see the server's Claud
       ANTHROPIC_CUSTOM_HEADERS: "x-auth: ambient",
     };
     // Its own process: the ambient values go in process.env, where Pi's would be.
-    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
+    const { code, stderr: err, stdout: out } = await spawnScript(`
       import { strict as a } from "node:assert";
       import { readFileSync } from "node:fs";
       const { createClaudeCodeProvider } = await import("./server/bots/claude-code/provider.ts");
@@ -561,13 +555,7 @@ test("status, discovery and requests for each login never see the server's Claud
       }
       a.ok(launches.filter((l) => l.dir === dirs[1]).every((l) => l.kind === "status"), "the second login only ever had its status asked");
       process.exit(0);
-    `], {
-      cwd: ROOT,
-      env: { ...process.env, ...ambient, HOME: root, SIGNED_IN_DIR: dirs[0], LAUNCH_LOG: join(root, "launches.jsonl"), AMBIENT_NAMES: JSON.stringify(Object.keys(ambient)) },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    `, { ...ambient, HOME: root, SIGNED_IN_DIR: dirs[0], LAUNCH_LOG: join(root, "launches.jsonl"), AMBIENT_NAMES: JSON.stringify(Object.keys(ambient)) });
     expect(err + out).toBe("");
     expect(code).toBe(0);
   } finally {

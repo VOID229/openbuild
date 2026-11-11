@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { FAKE_OPENCODE } from "./opencodeFixture";
+import { finished, startScript } from "./spawnScript";
 
 // Run the module wrappers in a fresh process: their data directory and storage imports
 // must never inherit another test's singleton clients or touch developer-owned workers.
@@ -85,25 +86,20 @@ test("OpenCode completes in its own lane while an older main worker has live ord
   writeFileSync(fake, `#!${process.execPath}\n` + FAKE_OPENCODE);
   chmodSync(fake, 0o700);
   writeFileSync(release, "complete immediately");
-  let child: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
+  let child: ReturnType<typeof startScript> | undefined;
   try {
-    child = Bun.spawn([process.execPath, "--eval", ISOLATION], {
-      env: {
-        ...process.env, OPENCHAT_DATA_DIR: data, PI_CODING_AGENT_DIR: join(directory, "agent"),
-        OPENCODE_BIN: fake, OPENCODE_SERVER_URL: "", OPENCODE_SERVER_PASSWORD: "",
-        FAKE_RELEASE: release, FAKE_EFFECTS: join(directory, "effects"),
-        FAKE_TOOL_EFFECTS: join(directory, "tools"), FAKE_PROTOCOL: join(directory, "protocol"),
-        FAKE_HISTORY: join(directory, "history.json"),
-        FIXTURE_WORKER_MODULE: resolve("server/pi/worker.ts"),
-        FIXTURE_REMOTE_MODULE: resolve("server/pi/remote.ts"),
-        FIXTURE_HTML_MODULE: resolve("server/htmlDelivery.ts"),
-        FIXTURE_PLUGIN_MODULE: resolve("server/pluginGuidance.ts"),
-      },
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
+    child = startScript(ISOLATION, {
+      OPENCHAT_DATA_DIR: data, PI_CODING_AGENT_DIR: join(directory, "agent"),
+      OPENCODE_BIN: fake, OPENCODE_SERVER_URL: "", OPENCODE_SERVER_PASSWORD: "",
+      FAKE_RELEASE: release, FAKE_EFFECTS: join(directory, "effects"),
+      FAKE_TOOL_EFFECTS: join(directory, "tools"), FAKE_PROTOCOL: join(directory, "protocol"),
+      FAKE_HISTORY: join(directory, "history.json"),
+      FIXTURE_WORKER_MODULE: resolve("server/pi/worker.ts"),
+      FIXTURE_REMOTE_MODULE: resolve("server/pi/remote.ts"),
+      FIXTURE_HTML_MODULE: resolve("server/htmlDelivery.ts"),
+      FIXTURE_PLUGIN_MODULE: resolve("server/pluginGuidance.ts"),
     });
-    const [stdout, stderr, code] = await Promise.all([
-      new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
-    ]);
+    const { stdout, stderr, code } = await finished(child);
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
     expect(stdout).toContain("OpenCode completed independently");
   } finally {

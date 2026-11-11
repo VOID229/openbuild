@@ -2,11 +2,12 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnScript } from './spawnScript';
 
 test('mixed group wakes preserve assigned delivery and never steer requests assigned elsewhere', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-mixed-delivery-'));
   try {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const db = await import('./server/bots/db.ts');
@@ -86,8 +87,7 @@ test('mixed group wakes preserve assigned delivery and never steer requests assi
       a.equal(steers.length, 0);
       a.equal(db.messages(group.id).filter(r => r.message.text === 'PENDING DONE').length, 2);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe('');
     expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }

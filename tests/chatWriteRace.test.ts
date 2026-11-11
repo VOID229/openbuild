@@ -2,13 +2,14 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // A thread's sidebar edit (PATCH) waits for its replies' runs before saving; a reply's message written
 // meanwhile must still be there after the save. In a process of its own, on a data folder of its own.
 test("a metadata edit saved while a reply writes keeps the reply's message", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ob-chat-write-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from "node:assert";
       const storage = await import("./server/storage.ts");
       const { writeChat } = await import("./server/chatWrite.ts");
@@ -31,8 +32,7 @@ test("a metadata edit saved while a reply writes keeps the reply's message", asy
       a.equal(after.pinned, true);
       a.equal(after.unread, false);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, HOME: dir, OPENCHAT_DATA_DIR: join(dir, "data") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { HOME: dir, OPENCHAT_DATA_DIR: join(dir, "data") });
     expect(err).not.toContain("Error");
     expect(code).toBe(0);
   } finally {

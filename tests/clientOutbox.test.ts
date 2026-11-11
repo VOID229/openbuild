@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { spawnScript } from "./spawnScript";
 
 test("outbox acknowledgement cannot delete a newer IndexedDB write", async () => {
   const script = `
@@ -16,7 +17,6 @@ test("outbox acknowledgement cannot delete a newer IndexedDB write", async () =>
     await delIf('c', current => current?.seq === 2, store);
     assert.equal(await get('c', store), undefined);
   `;
-  const child = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  const { code, stderr } = await spawnScript(script);
   expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
 });

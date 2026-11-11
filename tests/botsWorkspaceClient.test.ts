@@ -2,6 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // A tab's OpenBots kept per workspace: this server's ("srv", "Studio") and a paired host's ("host",
 // "Host Box"), each by its server id. Every tab is its own process with a fake browser (address,
@@ -77,8 +78,7 @@ const PRELUDE = `
 `;
 
 async function tab(script: string, env: Record<string, string> = {}) {
-  const child = Bun.spawn([process.execPath, "--eval", PRELUDE + script + "\nprocess.exit(0);"], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
-  const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+  const { code, stdout, stderr } = await spawnScript(PRELUDE + script + "\nprocess.exit(0);", env);
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`);
   return stdout.trim();
 }

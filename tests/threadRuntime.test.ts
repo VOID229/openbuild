@@ -2,18 +2,18 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("thread runtime is immutable, persistent, and legacy-safe", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-runtime-"));
   const run = async (script: string) => {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as storage from './server/storage.ts';
       import { claimRuntime, threadRuntime, runtimeChangeAllowed } from './server/threadRuntime.ts';
       ${script}
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   };

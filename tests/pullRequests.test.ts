@@ -5,6 +5,7 @@ import { expect, test } from "bun:test";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 const script = `
   import { strict as assert } from "node:assert";
@@ -191,13 +192,7 @@ test("worktree threads follow their pull request and close when it merges", asyn
     Bun.spawnSync(["mkdir", "-p", bin]);
     writeFileSync(join(bin, "gh"), `#!/bin/sh\necho "$*" >> "$FAKE_GH_LOG"\ncat "$FAKE_GH_JSON"\n`);
     chmodSync(join(bin, "gh"), 0o755);
-    const proc = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_JSON: join(root, "prs.json"), FAKE_GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const { stdout: out, stderr: err, code } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(root, "data"), TEST_ROOT: root, FAKE_GH_JSON: join(root, "prs.json"), FAKE_GH_LOG: join(root, "gh.log"), PATH: `${bin}:${process.env.PATH}` });
     if (code !== 0) console.error(out, err);
     expect(code).toBe(0);
     expect(out).toContain("ok");

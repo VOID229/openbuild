@@ -4,6 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { outputTail, shellCommand } from "../shared/shell";
+import { spawnScript } from "./spawnScript";
 
 describe("shellCommand", () => {
   test("! shares the command with the agent, !! keeps it from the agent", () => {
@@ -91,13 +92,7 @@ test("Pi's record of a command shows as a shell message, and a running command s
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: join(dir, "agent") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

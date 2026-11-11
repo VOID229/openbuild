@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { piBin } from "../server/pi/install";
+import { spawnScript } from "./spawnScript";
 
 const pi = piBin();
 
@@ -25,7 +26,7 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
          pi.registerTool({ name: "bot_web_search", label: "x", description: "x", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: null }) });
        }`,
     );
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { writeFileSync } from 'node:fs';
       const seenTools = new Set();
@@ -102,8 +103,7 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
       // Never loaded, so never declared.
       a.ok(!seenTools.has('routine') && !seenTools.has('openbuild'));
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     expect(err).toBe("");
     expect(code).toBe(0);
     expect(existsSync(marker)).toBe(false);
@@ -134,7 +134,7 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
     );
     // A name of ours again, for a clash the settings page can report.
     writeFileSync(join(agent, "extensions", "clash.ts"), `export default function (pi: any) { pi.registerTool({ name: "send_message", label: "x", description: "x", parameters: { type: "object", properties: {} }, execute: async () => ({ content: [], details: null }) }); }`);
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { existsSync, writeFileSync } from 'node:fs';
       let tools = [];
@@ -223,8 +223,7 @@ test.skipIf(!pi)("a bot loads only the extensions the user picked, and the model
       svc.updateSettings({ customExtensions: { enabled: true, ids: ['extensions/clash.ts'] } });
       await a.rejects(botModels(true), /conflicts/);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     // A temp Pi has no install folder to read a model scope from, which is allowed for, and the reply that couldn't run is logged.
     expect(err.replace(/\[pi\] model scope unavailable.*\n/g, "").replace(/\[bots\] \S+ couldn't reply: pickedprovider\/extra isn't available to bots\..*\n/, "")).toBe("");
     expect(code).toBe(0);
@@ -238,7 +237,7 @@ test.skipIf(!pi)("group messages reach their bots with no routing model call: ex
   const agent = join(dir, "agent");
   mkdirSync(join(agent, "extensions"), { recursive: true });
   try {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { writeFileSync } from 'node:fs';
       const requests = [];
@@ -285,8 +284,7 @@ test.skipIf(!pi)("group messages reach their bots with no routing model call: ex
       a.deepEqual(db.getMessage(follow.id).message.seenBy?.toSorted(), [alpha, beta].toSorted());
       a.equal(requests.length, 5);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, 'data'), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: '1' }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(dir, 'data'), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: '1' });
     expect(err).toMatch(/fallback missing\/model → account\/m: missing\/model isn't available to bots/);
     expect(code).toBe(0);
   } finally { rmSync(dir, { recursive: true, force: true }); }

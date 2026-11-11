@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // Runner-level: real ensureMind and process replacement against a fake Pi binary that keeps its
 // session the way Pi 1.5's --session-dir/--session-id does (resumed by exact id, created otherwise).
@@ -39,7 +40,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
   const root = mkdtempSync(join(tmpdir(), "bot-lanes-"));
   try {
     writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
       import { dirname, join } from 'node:path';
@@ -163,12 +164,7 @@ test("a bot's conversations resume their own Pi session A→B→A, and rotation 
       a.deepEqual(runner.pendingAssignments(bot.id), []);
       runner.stop(bot.id);
       process.exit(0);
-    `], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") },
-      stdout: "pipe", stderr: "pipe",
-    });
-    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") });
     expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 60_000);
@@ -177,7 +173,7 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
   const root = mkdtempSync(join(tmpdir(), "bot-fixed-"));
   try {
     writeFileSync(join(root, "pi"), FAKE_PI, { mode: 0o700 });
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { appendFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
       import { dirname, join } from 'node:path';
@@ -291,12 +287,7 @@ test("a fake mind with a fixed session path is kept through an ambiguous prompt,
         runner.stop(bot.id);
       }
       process.exit(0);
-    `], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") },
-      stdout: "pipe", stderr: "pipe",
-    });
-    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(root, "data"), PI_BIN: join(root, "pi"), FAKE_LOG: join(root, "log.jsonl"), FAKE_MODE: join(root, "mode") });
     expect({ code, stderr: stderr.replace(/\[bots\] \S+ couldn't reply:.*\n/g, "") }).toEqual({ code: 0, stderr: "" });
   } finally { rmSync(root, { recursive: true, force: true }); }
 }, 90_000);

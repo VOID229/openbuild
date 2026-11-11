@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { finished, startScript } from "./spawnScript";
 
 for (const safe of [false, true]) test(`bot plugin boundaries and truthful toggles (safe=${safe})`, async () => {
   const dir = mkdtempSync(join(tmpdir(), "openbuild-bot-plugins-"));
@@ -14,7 +15,7 @@ for (const safe of [false, true]) test(`bot plugin boundaries and truthful toggl
   }
   const config = join(dir, "config.ts");
   writeFileSync(config, `export default { pluginsDir: ${JSON.stringify(plugins)}, disabledPlugins: ["blocked"], safeMode: ${safe} };`);
-  const child = Bun.spawn([process.execPath, "-e", `
+  const child = startScript(`
     import { strict as a } from 'node:assert';
     const svc = await import('./server/bots/service');
     const db = await import('./server/bots/db');
@@ -83,9 +84,9 @@ for (const safe of [false, true]) test(`bot plugin boundaries and truthful toggl
     agent.revokeToken(token);
     a.equal((await request(token)).status, 401);
     process.exit(0);
-  `], { env: { ...process.env, OPENCHAT_DATA_DIR: dir, OPENBUILD_CONFIG: config, OPENBUILD_SAFE: "0" }, stdout: "pipe", stderr: "pipe" });
+  `, { OPENCHAT_DATA_DIR: dir, OPENBUILD_CONFIG: config, OPENBUILD_SAFE: "0" });
   try {
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await finished(child);
     expect({ code, error: code ? out + err : "" }).toEqual({ code: 0, error: "" });
   } finally { child.kill(); rmSync(dir, { recursive: true, force: true }); }
 }, 30_000);

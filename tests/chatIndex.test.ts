@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // Its own process, so the test never opens the user's real database.
 test("chat versions change with content and match what PUT reports", async () => {
@@ -45,13 +46,7 @@ test("chat versions change with content and match what PUT reports", async () =>
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {
@@ -88,13 +83,7 @@ test("the thread listing reads an index, and Durable threads are found without p
     process.exit(0);
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data") },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: join(dir, "data") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

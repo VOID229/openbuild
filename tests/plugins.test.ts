@@ -8,6 +8,7 @@ import type { ModelInfo } from "../shared/types";
 import { providerOf, providerName, providerSvg } from "../src/lib/models";
 import { providerGroups } from "../src/lib/modelSearch";
 import { addProviderOrder, clearProviderOverrides, setProviderOverrides } from "../src/lib/pluginOverrides";
+import { finished, spawnScript, startScript } from "./spawnScript";
 
 const DEEPSEEK_ICON = `<svg viewBox="0 0 24 24"><path d="M18.654 0z" style="color:var(--text)"/></svg>`;
 const CLAUDE_ICON = `<svg viewBox="0 0 24 24"><path fill="#D97757" d="M0 0z"/></svg>`;
@@ -168,10 +169,7 @@ test("Claude model icons include provider-scoped default aliases without rebrand
     expect(pluginBrandSvg("other/claude-opus-5-5")).toBeUndefined();
   `;
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-    });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const { code, stdout: out, stderr: err } = await spawnScript(script);
     if (code !== 0) throw new Error(`${out}\n${err}`);
     expect(code).toBe(0);
   } finally { rmSync(directory, { recursive: true, force: true }); }
@@ -306,12 +304,10 @@ test("icon snapshots paint immediately while cold loads wait for plugins", async
           }
         }
       `;
-      const child = Bun.spawn([process.execPath, "-e", script], {
-        cwd: join(import.meta.dir, ".."), stdout: "pipe", stderr: "pipe",
-      });
+      const child = startScript(script);
       const timer = setTimeout(() => child.kill(), 20_000);
       try {
-        const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+        const { code, stdout: out, stderr: err } = await finished(child);
         if (code !== 0) throw new Error(`${scenario}: ${out}\n${err}`);
         expect(code).toBe(0);
       } finally {

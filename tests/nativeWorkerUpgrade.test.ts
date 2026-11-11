@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // All imports of remote/worker happen in a child with isolated data, before module evaluation.
 const SCENARIO = String.raw`
@@ -106,11 +107,7 @@ process.exit(0);
 test("native feature lanes isolate new admissions and preserve historical ownership/replay", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ob-native-upgrade-"));
   try {
-    const child = Bun.spawn([process.execPath, "--eval", SCENARIO], {
-      env: { ...process.env, OPENCHAT_DATA_DIR: directory, PI_CODING_AGENT_DIR: join(directory, "agent"), WORKER: resolve("server/pi/worker.ts"), REMOTE: resolve("server/pi/remote.ts") },
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
-    });
-    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    const { stdout, stderr, code } = await spawnScript(SCENARIO, { OPENCHAT_DATA_DIR: directory, PI_CODING_AGENT_DIR: join(directory, "agent"), WORKER: resolve("server/pi/worker.ts"), REMOTE: resolve("server/pi/remote.ts") });
     expect({ code, stderr, stdout }).toEqual({ code: 0, stderr: "", stdout: "native lanes safe\n" });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }, 30_000);
@@ -137,11 +134,7 @@ try {
 test("CLI normal stop preserves versioned workers; explicit stop --all cleans them up", async () => {
   const directory = mkdtempSync(join(tmpdir(), "ob-native-cli-"));
   try {
-    const child = Bun.spawn([process.execPath, "--eval", CLEANUP], {
-      env: { ...process.env, OPENCHAT_DATA_DIR: directory, OPENBUILD_SYSTEMD: "0", WORKER: resolve("server/pi/worker.ts"), CLI: resolve("bin/openbuild.ts") },
-      stdin: "ignore", stdout: "pipe", stderr: "pipe",
-    });
-    const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    const { stdout, stderr, code } = await spawnScript(CLEANUP, { OPENCHAT_DATA_DIR: directory, OPENBUILD_SYSTEMD: "0", WORKER: resolve("server/pi/worker.ts"), CLI: resolve("bin/openbuild.ts") });
     expect({ code, stderr, stdout }).toEqual({ code: 0, stderr: "", stdout: "cleanup safe\n" });
   } finally { rmSync(directory, { recursive: true, force: true }); }
 }, 20_000);

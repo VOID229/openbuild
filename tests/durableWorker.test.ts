@@ -5,25 +5,19 @@ import { join } from "node:path";
 import { DurableClient } from "../server/durable/remote";
 import { workerSocket } from "../server/durable/worker";
 import type { PiChatRequest } from "../shared/types";
+import { spawnScript, startScript } from "./spawnScript";
 
 const directory = mkdtempSync(join(tmpdir(), "durable-worker-"));
 const socket = join(directory, "worker-test.sock");
 const marker = join(directory, "model-entered");
-const worker = Bun.spawn(
-  [
-    process.execPath,
-    "-e",
-    `
+const worker = startScript(`
     import { serveWorker } from ${JSON.stringify(join(import.meta.dir, "..", "server", "durable", "worker.ts"))};
     import { DurableRuntime } from ${JSON.stringify(join(import.meta.dir, "..", "server", "durable", "runtime.ts"))};
     import { fakeModels } from ${JSON.stringify(join(import.meta.dir, "durable-fake.ts"))};
     const fake = fakeModels({ delayMs: 1200, marker: ${JSON.stringify(marker)} });
     const runtime = new DurableRuntime(${JSON.stringify(directory)}, fake.models);
     serveWorker(runtime, ${JSON.stringify(socket)});
-    `,
-  ],
-  { stdout: "pipe", stderr: "pipe" },
-);
+`);
 afterAll(() => {
   worker.kill();
   rmSync(directory, { recursive: true, force: true });
@@ -119,16 +113,14 @@ test("the worker is started detached and a new server process reuses it", async 
     await client.recover();
     console.log("attached");
   `;
-  const first = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [codeA, errA] = await Promise.all([first.exited, new Response(first.stderr).text()]);
+  const { code: codeA, stderr: errA } = await spawnScript(script);
   expect(errA).toBe("");
   expect(codeA).toBe(0);
   const state = JSON.parse(readFileSync(join(dir, "worker.json"), "utf8")) as { pid: number; socket: string };
   // The server process that started it is gone; the worker isn't.
   expect(() => process.kill(state.pid, 0)).not.toThrow();
 
-  const second = Bun.spawn([process.execPath, "-e", script], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const [codeB, errB] = await Promise.all([second.exited, new Response(second.stderr).text()]);
+  const { code: codeB, stderr: errB } = await spawnScript(script);
   expect(errB).toBe("");
   expect(codeB).toBe(0);
   // Same worker: a second one would have replaced worker.json with a different pid.

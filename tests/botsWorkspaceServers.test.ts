@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serverLog } from "./serverLog";
+import { spawnScriptSync } from "./spawnScript";
 
 // A tab on one device using another's OpenBots workspace, end to end over loopback: two real
 // OpenBuild servers on throwaway data directories, "Host Box" (whose workspace it is) and "Viewer
@@ -84,9 +85,9 @@ async function stop(port: number) {
 
 /** Pair the viewer with the host the way Settings → Devices does: the host's code, claimed, kept in the viewer's devices.json. */
 async function pair() {
-  const open = Bun.spawnSync([process.execPath, "-e", `const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Host Box", mode: "lan", urls: [] })));`], { env: { ...process.env, OPENCHAT_DATA_DIR: hostData }, stdout: "pipe", stderr: "pipe" });
-  if (open.exitCode !== 0) throw new Error(open.stderr.toString());
-  const { code } = JSON.parse(open.stdout.toString());
+  const open = spawnScriptSync(`const d = await import(${JSON.stringify(resolve("server/devices.ts"))}); console.log(JSON.stringify(d.createPairing({ name: "Host Box", mode: "lan", urls: [] })));`, { OPENCHAT_DATA_DIR: hostData });
+  if (open.code !== 0) throw new Error(open.stderr);
+  const { code } = JSON.parse(open.stdout);
   const claimed = (await (await fetch(`${hostBase()}/api/pair/claim`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code, name: "Viewer Box" }) })).json()) as { token: string; device: any };
   token = claimed.token;
   hostId = claimed.device.id;

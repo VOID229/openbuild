@@ -2,11 +2,12 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnScript } from './spawnScript';
 
 test('a group message reaches every bot there, and only the ones that act show; a sent message shows its bot busy at once otherwise', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'openbuild-bots-pending-'));
   try {
-    const child = Bun.spawn([process.execPath, '-e', `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const svc = await import('./server/bots/service.ts');
@@ -103,8 +104,7 @@ test('a group message reaches every bot there, and only the ones that act show; 
       // Only the message that found it inside a tool got a quick reply started, and only the bot that answers for the group.
       a.deepEqual(quickReplies, [boss.bot.id]);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, '..'), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: 'pipe', stderr: 'pipe' });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe('');
     expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }

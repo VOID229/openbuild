@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { FRIEND_TOOLS } from "../shared/friends";
 import openbots, { CATALOG_BRIEF, CORE_TOOLS, loadedTools } from "../server/bots/extension";
 import { piBin } from "../server/pi/install";
+import { spawnScript } from "./spawnScript";
 
 /** The extension in a stand-in Pi that keeps an active set, as Pi's own does: `--tools` names only `allowed`. */
 function fakePi(allowed?: string[]) {
@@ -158,7 +159,7 @@ test.skipIf(!pi)("Pi declares a loaded tool on the next request, and keeps it af
     const agent = join(dir, "agent");
     mkdirSync(agent, { recursive: true });
     writeFileSync(join(agent, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "k" } }));
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import { writeFileSync } from 'node:fs';
       import openbots, { CORE_TOOLS } from './server/bots/extension.ts';
@@ -234,8 +235,7 @@ test.skipIf(!pi)("Pi declares a loaded tool on the next request, and keeps it af
       await talk('AGAIN');
       await talk('DIRECT');
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally {

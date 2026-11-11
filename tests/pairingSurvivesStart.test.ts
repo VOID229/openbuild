@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createLocalAuth } from "../server/localAuth";
+import { spawnScriptSync } from "./spawnScript";
 
 // A pairing has to survive however OpenBuild is started on either side. The "macbook" hosts over a
 // fake tailnet (127.0.0.2, from a fake `tailscale` on PATH) with the real `openbuild start`; the
@@ -54,9 +55,9 @@ function cliOn(data: string, port: number, ...args: string[]) {
 const onMac = (code: string) => onData(mac, macPort, code);
 function onData(data: string, port: number, code: string) {
   const script = `const d = await import(${JSON.stringify(join(root, "server/devices.ts"))}); console.log(JSON.stringify(await (async () => { ${code} })() ?? null));`;
-  const run = Bun.spawnSync([process.execPath, "-e", script], { env: env(data, port), stdout: "pipe", stderr: "pipe" });
-  if (run.exitCode !== 0) throw new Error(run.stderr.toString());
-  return JSON.parse(run.stdout.toString());
+  const run = spawnScriptSync(script, env(data, port));
+  if (run.code !== 0) throw new Error(run.stderr);
+  return JSON.parse(run.stdout);
 }
 
 const macMode = () => JSON.parse(readFileSync(join(mac, "server.json"), "utf8")).mode as string;

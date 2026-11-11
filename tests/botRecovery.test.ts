@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { promptSafely, recoverPrompt, ModelFailure } from "../server/bots/runner";
 import { PiTimeoutError } from "../server/pi/rpc";
+import { spawnScript } from "./spawnScript";
 
 test("lost prompt acknowledgement aborts active Pi before releasing the caller, without replay", async () => {
   let active = false;
@@ -175,7 +176,7 @@ test("a steer Pi queues after the turn settled is cleared and gets a turn of its
   const { mkdtemp, rm } = await import("node:fs/promises");
   const data = await mkdtemp("/tmp/openbots-steer-");
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stdout: out, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       const minds = globalThis.openbotsMinds = new Map();
       const svc = await import('./server/bots/service.ts');
@@ -214,8 +215,7 @@ test("a steer Pi queues after the turn settled is cleared and gets a turn of its
       a.equal(queue.length, 0);
       runner.onRecord(boss.bot.id, mind, { type: 'agent_settled' });
       process.exit(0);
-    `], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe", env: { ...process.env, OPENCHAT_DATA_DIR: data } });
-    const [code, out, err] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: data });
     expect({ code, output: out + err }).toEqual({ code: 0, output: "" });
   } finally {
     await rm(data, { recursive: true, force: true });

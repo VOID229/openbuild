@@ -2,13 +2,13 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 // Each script runs against its own data directory, in a process of its own.
 async function run(script: string) {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-bot-setting-lines-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "pi") });
     expect(err.replace(/^\[bots\] [0-9a-f-]{36} fallback xai\/grok-4.7 → openai\/gpt-6.1-sol: down\n/gm, "")).toBe("");
     expect(code).toBe(0);
   } finally {

@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawnScript } from "./spawnScript";
 
 test("primary work status uses runner state and exact assignments, with authenticated tool denial", async () => {
   const dir = await mkdtemp(join(tmpdir(), "bot-work-status-"));
   try {
-    const child = Bun.spawn([process.execPath, "-e", `
+    const { code, stderr: err } = await spawnScript(`
       import { strict as a } from 'node:assert';
       import * as svc from './server/bots/service';
       import * as agent from './server/bots/agent';
@@ -56,8 +57,7 @@ test("primary work status uses runner state and exact assignments, with authenti
       svc.updateBot(b.bot.id, {primary:true});
       a.equal((await call()).isError, true);
       process.exit(0);
-    `], { cwd: join(import.meta.dir, ".."), env: { ...process.env, OPENCHAT_DATA_DIR: dir }, stdout: "pipe", stderr: "pipe" });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe("");
     expect(code).toBe(0);
   } finally { await rm(dir, { recursive: true, force: true }); }

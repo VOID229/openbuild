@@ -7,18 +7,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { PI_SITE, PiSetupNotice, setupText } from "../src/components/bots/PiSetupNotice";
 import type { Bot } from "../src/lib/bots/types";
 import { piBin } from "../server/pi/install";
+import { spawnScript } from "./spawnScript";
 
 /** Runs `script` against its own data and Pi directories: nothing here may touch the real ones. */
 async function isolated(prefix: string, script: string, env: Record<string, string> = {}, quiet = /^$/) {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   try {
-    const child = Bun.spawn([process.execPath, "-e", script], {
-      cwd: join(import.meta.dir, ".."),
-      env: { ...process.env, OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "agent"), ...env },
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    const { code, stderr: err } = await spawnScript(script, { OPENCHAT_DATA_DIR: dir, PI_CODING_AGENT_DIR: join(dir, "agent"), ...env });
     expect(err.split("\n").filter((line) => line && !quiet.test(line))).toEqual([]);
     expect(code).toBe(0);
   } finally {
