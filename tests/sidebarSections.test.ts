@@ -58,3 +58,39 @@ test("a shut section has no rows until it opens, and keeps them while it folds s
   expect(rows(host, "Closed").heading.dataset.landed).toBeUndefined();
   await act(async () => root.unmount());
 });
+
+test("leaving the open thread moves within its section, never into the next one", async () => {
+  // "Woke" sits right above "Done" (neither has spinners, which happy-dom can't cancel cleanly).
+  const now = Date.now();
+  useStore.setState({
+    chats: [
+      thread("woke-1", { woke: true, updatedAt: now }),
+      thread("woke-2", { woke: true, updatedAt: now - 1 }),
+      thread("done-1", { done: true, updatedAt: now - 2 }),
+      thread("done-2", { done: true, updatedAt: now - 3 }),
+    ],
+    chatsLoaded: true,
+    sidebarOpen: true,
+    activeChatId: "woke-2",
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(h(Sidebar)));
+  expect(rows(host, "Woke").rows).toBe(2);
+  expect(rows(host, "Done").rows).toBe(2);
+
+  // The last thread in "Woke" closes elsewhere (its pull request merged): the one above it opens,
+  // not the first of "Done" below.
+  const merged = useStore.getState().chats.find((c) => c.id === "woke-2")!;
+  await act(async () => useStore.getState().upsertChat({ ...merged, archived: true, woke: false, autoClosedAt: now }, false));
+  expect(useStore.getState().activeChatId).toBe("woke-1");
+
+  // The section's only thread is closed here: a new thread opens rather than one from "Done".
+  await act(async () => host.querySelector<HTMLElement>('.history-row[data-thread="woke-1"] [aria-label="Close"]')!.click());
+  expect(useStore.getState().activeChatId).toBeUndefined();
+  await act(() => Bun.sleep(340));
+  expect(useStore.getState().activeChatId).toBeUndefined();
+  await act(() => Bun.sleep(500));
+  await act(async () => root.unmount());
+});
