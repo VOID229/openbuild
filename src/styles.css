@@ -10253,6 +10253,8 @@ a.fv-tool { display: inline-grid; place-items: center; border-radius: var(--radi
 
 /* The thread's own way in, next to where it works (Cmd/Ctrl+J does the same from anywhere). */
 .ws-terminal { width: 24px; height: 24px; margin-left: -2px; color: var(--text-3); }
+/* In OpenBots' thread preview, the thread's harness in its place: a mark, not a button. */
+.ws-harness { display: grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: -2px; color: var(--text-2); }
 
 /* File tree. */
 .ft-tools {

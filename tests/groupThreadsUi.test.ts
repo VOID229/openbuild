@@ -184,6 +184,40 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     await shoot(page, "phone-back-to-tab");
   }, 60_000);
 
+  /** The end of the row under the open thread's composer: the harness mark or the terminal button, and the tooltip each gives. */
+  const rowEnd = (scope: string) =>
+    `(() => { const row = document.querySelector(${JSON.stringify(`${scope} .ws-bottom`)}); if (!row) return null; const end = row.lastElementChild; return { cls: end.className, tip: end.getAttribute('data-tooltip'), label: end.getAttribute('aria-label'), svg: !!end.querySelector('svg, img'), terminal: !!row.querySelector('.ws-terminal') }; })()`;
+
+  for (const [where, width, height] of [["on a desktop", 1280, 860], ["on a phone", 390, 800]] as const)
+    test(`${where}, the thread open in the panel ends the row under its composer with its harness, not a terminal button`, async () => {
+      const page = await open(width, height);
+      await serve(page, `serverChats.map((c) => c.id === "t-trace" ? { ...c, runtime: "claude" } : c.id === "t-flaky" ? { ...c, runtime: "codex" } : c)`);
+      await page.until(`store.getState().chats.find((c) => c.id === "t-trace")?.runtime === "claude"`);
+      await clickRow(page, "Trace the slow");
+      await page.until(`!!document.querySelector('.bots-details-threadpane .ws-bottom')`);
+      await page.finish();
+      expect(await page.eval<unknown>(rowEnd(".bots-details-threadpane"))).toEqual({ cls: "ws-harness", tip: "Claude Code", label: "Claude Code", svg: true, terminal: false });
+      // Square and in the row, which still fits the panel without scrolling the page sideways.
+      const box = await page.eval<{ w: number; h: number; inside: boolean }>(`(() => { const m = document.querySelector('.bots-details-threadpane .ws-harness').getBoundingClientRect(); const p = document.querySelector('.bots-details').getBoundingClientRect(); return { w: m.width, h: m.height, inside: m.left >= p.left && m.right <= p.right + 1 }; })()`);
+      expect(box).toEqual({ w: 24, h: 24, inside: true });
+      expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+      await shoot(page, `harness-mark-${width}`);
+      // Another thread shows its own harness.
+      await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+      await page.until("!document.querySelector('.bots-details-threadpane')");
+      await clickRow(page, "Fix the flaky");
+      await page.until(`!!document.querySelector('.bots-details-threadpane .ws-harness')`);
+      expect(await page.eval<unknown>(rowEnd(".bots-details-threadpane"))).toEqual({ cls: "ws-harness", tip: "Codex", label: "Codex", svg: true, terminal: false });
+      // Opened out in OpenBuild, the same thread keeps its terminal button.
+      await page.click('.bots-details-threadpane [aria-label="Open in OpenBuild"]');
+      await page.until("!store.getState().botsOpen");
+      // (OpenBots stays in the page, hidden, so only what shows counts.)
+      const shown = (sel: string) => `[...document.querySelectorAll(${JSON.stringify(sel)})].filter((e) => e.checkVisibility())`;
+      await page.until(`${shown(".ws-bottom .ws-terminal")}.length === 1`);
+      expect(await page.eval<unknown>(`${shown(".ws-harness")}.length`)).toBe(0);
+      expect(await page.eval<unknown>(`${shown(".ws-bottom .ws-terminal")}[0].getAttribute('aria-label')`)).toBe("Open a terminal here");
+    }, 60_000);
+
   describe("resizing a thread open in the panel", () => {
     // Wide enough that dragging out to 580px still leaves the bot chat its room beside the sidebar.
     const WIDE = 1440;

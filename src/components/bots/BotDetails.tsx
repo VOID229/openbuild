@@ -16,6 +16,7 @@ import type { Chat } from "../../lib/types";
 import { arrowNav, cx, useFocusOnShow, useMediaQuery, usePresence } from "../../lib/ui";
 import { useEdgeDrag } from "../FileTree";
 import { LoadedChat } from "../LoadedChat";
+import { ThreadPreview } from "../Workspace";
 import { HermesMark, IconButton, Popover, ProviderIcon, RuntimeIcon, Toggle } from "../primitives";
 import { expandBotsThread } from "../Sidebar";
 import { BotAdvanced } from "./BotAdvanced";
@@ -473,7 +474,9 @@ function ThreadPane({ chat, phone, back, size }: { chat: Chat; phone: boolean; b
         </IconButton>
       </div>
       <div className="bots-details-thread">
-        <LoadedChat key={chat.id} chat={chat} />
+        <ThreadPreview.Provider value>
+          <LoadedChat key={chat.id} chat={chat} />
+        </ThreadPreview.Provider>
       </div>
     </div>
   );
