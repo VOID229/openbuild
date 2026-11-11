@@ -195,14 +195,14 @@ esac
 `);
     chmodSync(claude, 0o755);
     setup?.(home);
-    const child = Bun.spawn([process.execPath, "-e", `import { strict as a } from "node:assert";\n${script}\nprocess.exit(0);`], {
+    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `import { strict as a } from "node:assert";\n${script}\nprocess.exit(0);`], {
       cwd: ROOT,
       env: { ...process.env, HOME: home, OPENCHAT_DATA_DIR: join(home, "data"), PI_CODING_AGENT_DIR: join(home, "pi"), CLAUDE_BIN: claude, CLAUDE_CONFIG_DIR: "", PATH: "/usr/bin:/bin", ANTHROPIC_API_KEY: "sk-ant-ambient", CLAUDE_CODE_OAUTH_TOKEN: "ambient-oauth", ...env } as Record<string, string>,
       stdout: "pipe",
       stderr: "pipe",
     });
-    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect(err).toBe("");
+    const [code, err, out] = await Promise.all([child.exited, new Response(child.stderr).text(), new Response(child.stdout).text()]);
+    expect(err + out).toBe("");
     expect(code).toBe(0);
     return home;
   } catch (e) {
@@ -514,7 +514,7 @@ test("status, discovery and requests for each login never see the server's Claud
       ANTHROPIC_CUSTOM_HEADERS: "x-auth: ambient",
     };
     // Its own process: the ambient values go in process.env, where Pi's would be.
-    const child = Bun.spawn([process.execPath, "-e", `
+    const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", `
       import { strict as a } from "node:assert";
       import { readFileSync } from "node:fs";
       const { createClaudeCodeProvider } = await import("./server/bots/claude-code/provider.ts");

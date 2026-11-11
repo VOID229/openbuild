@@ -35,9 +35,6 @@ export async function scenario(body: string) {
     ${body}
     process.exit(0);
   `], { cwd: `${import.meta.dir}/..`, stdout: "pipe", stderr: "pipe" });
-  const deadline = setTimeout(() => child.kill(), 4000);
-  try {
-    const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
-    expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
-  } finally { clearTimeout(deadline); }
+  const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+  expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
 }
