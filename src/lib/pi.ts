@@ -19,6 +19,11 @@ const sendBounded = <T>(url: string, body: unknown, signal?: AbortSignal) =>
 /** A paired device's id; undefined means this server. */
 type DeviceId = string | undefined;
 
+/** The machine's Codex daemon and whether its Remote Control is on (Settings → General). */
+export interface CodexDaemon { installed: boolean; status?: string; version?: string; error?: string; remoteControl?: boolean }
+export const codexRemoteControl = () => get<CodexDaemon>("/api/codex/status/remote-control");
+export const setCodexRemoteControl = (enabled: boolean) => send<CodexDaemon>("/api/codex/status/remote-control", "POST", { enabled });
+
 export const harnessSession = (id: string, deviceId?: DeviceId) =>
   get<{ runtime?: ThreadRuntime; id: string | null }>(apiUrl(deviceId, `/api/pi/threads/${encodeURIComponent(id)}/session`));
 

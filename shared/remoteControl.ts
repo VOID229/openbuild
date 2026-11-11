@@ -12,7 +12,7 @@ export const REMOTE_CONTROL: Partial<Record<ThreadRuntime, { scope: RemoteContro
   },
   codex: {
     scope: "machine",
-    note: "Codex pairs one app-server daemon per machine (`codex remote-control start`). OpenBuild's Codex threads run in their own app-server, so the daemon can't drive them while they run.",
+    note: "Codex pairs one app-server daemon per machine (`codex remote-control start`, or the switch in OpenBuild's Settings → General). OpenBuild's Codex threads run in their own app-server, so the daemon can't drive them while they run.",
   },
   cursor: {
     scope: "account",

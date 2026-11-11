@@ -36,20 +36,44 @@ export async function status(): Promise<CodexStatus> {
   } finally { clearTimeout(timer); }
 }
 /** The machine's Codex app-server daemon, which owns Codex Remote Control; OpenBuild's threads don't run on it. */
-export interface CodexDaemon { installed: boolean; status?: string; version?: string; error?: string; checkedAt: number }
+export interface CodexDaemon { installed: boolean; status?: string; version?: string; error?: string; checkedAt: number; remoteControl?: boolean }
+const codexHome = () => codexEnv().CODEX_HOME || join(homedir(), ".codex");
+/**
+ * Whether the machine's daemon has Remote Control on: `enable-remote-control` writes
+ * `remoteControlEnabled` to `<CODEX_HOME>/app-server-daemon/settings.json` (checked on 0.167). No file = off.
+ */
+export async function daemonRemoteControl(): Promise<boolean> {
+  try {
+    const settings = await Bun.file(join(codexHome(), "app-server-daemon", "settings.json")).json();
+    return settings?.remoteControlEnabled === true;
+  } catch { return false; }
+}
+/** Turns the daemon's Remote Control on or off, for its next start and the running daemon alike. */
+export async function setDaemonRemoteControl(on: boolean): Promise<CodexDaemon> {
+  const bin = codexBin();
+  if (!bin) return { installed: false, checkedAt: Date.now() };
+  const p = Bun.spawn([bin, "app-server", "daemon", on ? "enable-remote-control" : "disable-remote-control"], { stdout: "pipe", stderr: "pipe", env: codexEnv() });
+  const timer = setTimeout(() => p.kill(), 30000);
+  try {
+    const [, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    if (code !== 0) return { ...(await daemonStatus()), error: err.trim().slice(-500) || `codex app-server daemon ${on ? "enable" : "disable"}-remote-control exited ${code}` };
+  } finally { clearTimeout(timer); }
+  return daemonStatus();
+}
 /** Read-only: `daemon version` reports the daemon without starting it. */
 export async function daemonStatus(): Promise<CodexDaemon> {
   const bin = codexBin(), checkedAt = Date.now();
   if (!bin) return { installed: false, checkedAt };
+  const remoteControl = await daemonRemoteControl();
   const p = Bun.spawn([bin, "app-server", "daemon", "version"], { stdout: "pipe", stderr: "pipe", env: codexEnv() });
   const timer = setTimeout(() => p.kill(), 10000);
   try {
     const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
-    if (code !== 0) return { installed: true, error: err.trim().slice(-500) || `codex app-server daemon version exited ${code}`, checkedAt };
+    if (code !== 0) return { installed: true, remoteControl, error: err.trim().slice(-500) || `codex app-server daemon version exited ${code}`, checkedAt };
     const r = JSON.parse(out);
-    return { installed: true, status: typeof r.status === "string" ? r.status : undefined, version: typeof r.appServerVersion === "string" ? r.appServerVersion : undefined, checkedAt };
+    return { installed: true, remoteControl, status: typeof r.status === "string" ? r.status : undefined, version: typeof r.appServerVersion === "string" ? r.appServerVersion : undefined, checkedAt };
   } catch (e) {
-    return { installed: true, error: e instanceof Error ? e.message : String(e), checkedAt };
+    return { installed: true, remoteControl, error: e instanceof Error ? e.message : String(e), checkedAt };
   } finally { clearTimeout(timer); }
 }
 export interface CodexModels { models: ModelInfo[]; defaultModel?: string; checkedAt: number }

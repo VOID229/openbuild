@@ -273,6 +273,12 @@ export function piRoutes(api: Api) {
     // Codex Remote Control is the machine's daemon, so it's reported with the install, not per thread.
     "/api/codex/status/remote-control": {
       GET: api(async () => Response.json(await codexInstall.daemonStatus())),
+      // Settings → General → Remote control: on or off for the whole machine, not per thread.
+      POST: api(async (req) => {
+        const body = await req.json().catch(() => ({}));
+        if (typeof body?.enabled !== "boolean") return fail(new Error("enabled must be true or false"), 400);
+        return Response.json(await codexInstall.setDaemonRemoteControl(body.enabled));
+      }),
     },
     "/api/codex/models": {
       GET: api(async (req) => {

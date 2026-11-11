@@ -11,7 +11,7 @@ import {
 import { findModel, isAuto, providerName, providerOf } from "../lib/models";
 import { usePlugins } from "../lib/plugins";
 import { hasModelScope, providerGroups, scopedModels, searchProviderGroups } from "../lib/modelSearch";
-import { atChat, codexDetection, claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, runtimeOf, selectionFor, useStore } from "../lib/store";
+import { atChat, codexDetection, claudeDetection, composerEffort, modelsDueIn, composerSpeed, hasPermissionModes, permissionKey, permissionOf, remoteControlDraft, runtimeOf, selectionFor, useStore } from "../lib/store";
 import type { Detection } from "../lib/types";
 import { supportedSpeed } from "../lib/effort";
 import { arrowNav, cx, useDevicePref } from "../lib/ui";
@@ -738,28 +738,25 @@ export function ModelPicker({ dropUp, chatId, deviceId }: { dropUp: boolean; cha
 }
 
 /**
- * Remote Control, as each vendor offers it, on a row of its own under the composer. Claude Code opts
- * in per session, so a new thread can start with it on. Codex pairs a daemon for the whole machine
- * and Cursor sets it in the account: for those the switch is off and disabled, with one line saying where it's set.
+ * Remote Control on a row of its own under the composer, for Claude Code only: it opts in per session,
+ * so a new thread can start with it on, from the default in Settings → General. Codex (one daemon per
+ * machine) and Cursor (an account setting) have no per-thread switch, so they show none here; their
+ * global state is in Settings → General.
  */
 export function RemoteControlToggle({ chatId }: { chatId?: string }) {
   const id = useId();
   const runtime = useStore((s) => runtimeOf(s, chatId));
   const chatOn = useStore((s) => (chatId ? !!s.chats.find((c) => c.id === chatId)?.remoteControl : false));
-  const draftOn = useStore((s) => s.draftRemoteControl);
+  const draftOn = useStore(remoteControlDraft);
   const setDraft = useStore((s) => s.setDraftRemoteControl);
-  const remote = REMOTE_CONTROL[runtime];
-  if (!remote) return null;
-  // A thread keeps what it started with: only Claude Code threads that opted in show it afterwards.
-  if (chatId && (!chatOn || remote.scope !== "thread")) return null;
-  const perThread = remote.scope === "thread";
-  const note = !perThread
-    ? remote.scope === "machine" ? "Set per machine, not per thread" : `Set in your ${RUNTIME_NAME[runtime]} account`
-    : chatId ? "On since this thread started" : "Needs a claude.ai sign-in";
+  if (REMOTE_CONTROL[runtime]?.scope !== "thread") return null;
+  // A thread keeps what it started with: only threads that opted in show it afterwards.
+  if (chatId && !chatOn) return null;
+  const note = chatId ? "On since this thread started" : "Needs a claude.ai sign-in";
   return (
     <div className="remote-control-row" data-runtime={runtime} data-tooltip={note} data-tooltip-side="bottom">
       <label htmlFor={id} className="remote-control-label">Remote control</label>
-      <Toggle id={id} className="toggle-sm" checked={perThread && (chatId ? chatOn : draftOn)} disabled={!perThread || !!chatId} onChange={setDraft} label="Remote control" describedBy={`${id}-note`} />
+      <Toggle id={id} className="toggle-sm" checked={chatId ? chatOn : draftOn} disabled={!!chatId} onChange={setDraft} label="Remote control" describedBy={`${id}-note`} />
       <span id={`${id}-note`} className="remote-control-note">{note}</span>
     </div>
   );
