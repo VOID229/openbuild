@@ -98,8 +98,8 @@ test("the primary's rename of a bot, asked in a group, says so in that group", a
   await run(`${SETUP}
     const { manage } = await import('./server/bots/agent.ts');
     await manage(boss.id, { action: 'update', bot: 'Helper', name: 'Atlas', conversation: group.id });
-    process.exit(0);
     a.equal(events(group.id, 'renamed')[0].event.text, 'Helper is now Atlas');
     a.equal(svc.pendingRenameNotes(helper.id).length, 1);
+    process.exit(0);
   `);
 });

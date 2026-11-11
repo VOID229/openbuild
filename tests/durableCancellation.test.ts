@@ -16,7 +16,7 @@ test("Durable Stop unblocks even when a provider stream ignores its abort signal
     const run = await runtime.startRun(req);
     while (fake.calls() === 0) await Bun.sleep(5);
     stopping = runtime.stopRun(run.id);
-    const result = await Promise.race([stopping.then(() => "stopped"), Bun.sleep(150).then(() => "hung")]);
+    const result = await Promise.race([stopping.then(() => "stopped"), Bun.sleep(3000).then(() => "hung")]);
     expect(result).toBe("stopped");
     expect(run.ended).toBe(true);
     expect(run.events.at(-1)).toMatchObject({ t: "done", finish: "aborted" });

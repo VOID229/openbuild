@@ -202,12 +202,10 @@ describe("drafts", () => {
     const image = { id: "i", name: "a.png", mime: "image/png", size: 3, dataUrl: "data:image/png;base64,AAA" } as any;
     saveDraft("c1", "hello", [image]);
     expect(getDraft("c1")?.files).toEqual([image]);
-    await Bun.sleep(500);
     expect(await idb.get("draft:c1", saved)).toMatchObject({ text: "hello", fileIds: ["i"] });
     expect(await idb.get("draftfile:i", saved)).toEqual(image);
     saveDraft("c1", "  ", []);
     expect(getDraft("c1")).toBeUndefined();
-    await Bun.sleep(500);
     expect(await idb.get("draft:c1", saved)).toBeUndefined();
     expect(await idb.get("draftfile:i", saved)).toBeUndefined();
   });

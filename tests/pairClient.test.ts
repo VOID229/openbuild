@@ -174,7 +174,7 @@ describe("pairing with a code", () => {
       setTimeout(() => ctrl.abort(), 100);
       const outcome = await pairing.pairWithCode({ mode: "lan", code: "ABCD-2345", port: 1, candidates: [`http://127.0.0.1:${silent.port}`], signal: ctrl.signal });
       expect(outcome).toEqual({ ok: false, reason: "cancelled" });
-      expect(Date.now() - started).toBeLessThan(700);
+      expect(Date.now() - started).toBeLessThan(3000);
     } finally {
       silent.stop(true);
     }

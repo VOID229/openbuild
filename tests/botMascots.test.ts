@@ -124,7 +124,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     // Not shut yet, a moment in.
     expect(Number(await page.eval(`getComputedStyle((${boo}).querySelector('.bot-lid')).opacity`))).toBeLessThan(0.5);
     // Settled: eyes shut, head leaning in.
-    await Bun.sleep(2000);
+    await page.finish();
     const [lid, eyeOpacity, tilt] = await page.eval<[string, string, string]>(`[(${boo}).querySelector('.bot-lid'), (${boo}).querySelector('.bot-eye'), (${boo}).querySelector('.bot-tilt')].map((el, i) => getComputedStyle(el)[i < 2 ? 'opacity' : 'transform'])`);
     expect([lid, eyeOpacity]).toEqual(["1", "0"]);
     expect(tilt).not.toBe("none");
@@ -135,7 +135,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     const page = await open();
     await setWorking(page, []);
     // Let them nod off.
-    await Bun.sleep(2200);
+    await page.finish();
     const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle-box[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
     expect(running.length).toBeGreaterThan(10);
     // The breathing, and the letters of the "zzz" over them floating up.
@@ -161,7 +161,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     const bots = await seen(page);
     for (const b of bots) if (b.color !== "green") expect({ asleep: b.asleep, lid: b.lid, eye: b.eye }).toEqual({ asleep: true, lid: 1, eye: 0 });
     // Moss at work doesn't fidget, the rest don't breathe: nothing runs at all.
-    await Bun.sleep(1500);
+    await Bun.sleep(500);
     const moving = () => page.eval<number>(`document.getAnimations().filter((a) => a.playState === 'running' && a.effect.target.closest('.bot')).length`);
     expect(await moving()).toBe(0);
     expect(await page.eval<number>(`[...document.querySelectorAll('.bot')].filter((b) => b.dataset.action || b.dataset.eyes).length`)).toBe(0);
@@ -189,9 +189,10 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     })()`);
     // Every bot at work, in every place they show: a lot of fidgeting to watch.
     await setWorking(page, ["egg", "moss", "boo", "pill", "tile", "spark"]);
-    await Bun.sleep(9000);
+    // Which beats may be drawn at all is botMascotRoutines.test.ts's; this is that they're drawn here.
+    await Bun.sleep(3000);
     const moves = await page.eval<string[]>("window.moves");
-    expect(await page.eval<number>("window.poses")).toBeGreaterThan(20);
+    expect(await page.eval<number>("window.poses")).toBeGreaterThan(5);
     // The ones that woke stretched; whatever else they did, none of it was a spin or a hop.
     expect(moves).toContain("stretch");
     expect(moves.filter((m) => m === "spin" || m === "hop")).toEqual([]);

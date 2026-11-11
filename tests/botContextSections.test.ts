@@ -27,6 +27,9 @@ async function run(script: string) {
 test("a bot's system prompt is the same turn after turn, and a new memory changes only its own section", async () => {
   await run(`
     import { strict as a } from 'node:assert';
+    import { mock } from 'bun:test';
+    // The machines note asks this computer for its container engine, which takes as long as docker does to answer.
+    mock.module('./server/computers/api.ts', () => ({ computerApi: () => ({ call: async () => ({}) }), computerTargets: async () => [{ device: 'local', name: 'Studio', status: 'ready', grants: { files: true, terminal: true, browser: true, unisolated: true }, engines: ['podman'] }] }));
     const svc = await import('./server/bots/service.ts');
     const agent = await import('./server/bots/agent.ts');
     const runner = await import('./server/bots/runner.ts');

@@ -193,7 +193,8 @@ describe.skipIf(!browser)("the sidebar's hover card", () => {
     })()`);
   };
 
-  for (const theme of ["light", "dark"] as const) {
+  // Where they sit doesn't depend on the theme: one is enough.
+  for (const theme of ["dark"] as const) {
     test(`lines a group's bots up side by side, four and then a count of the rest (${theme})`, async () => {
       const page = await open(theme);
       // The collapsed sidebar's rail, where the card shows over a group's avatar, once it has folded away.

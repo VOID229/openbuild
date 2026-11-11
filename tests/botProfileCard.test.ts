@@ -23,10 +23,10 @@ const MASCOT = "[...document.querySelectorAll('.bm-theirs .bm-profile-trigger')]
 
 class CardPage extends Page {
   mouse = { x: 900, y: 650 };
-  /** A real pointer gliding to (x, y) a few pixels at a time, as a hand moves it. */
+  /** A real pointer gliding to (x, y) in short steps, as a hand moves it. */
   async moveTo(x: number, y: number) {
     const from = this.mouse;
-    const steps = Math.max(1, Math.ceil(Math.hypot(x - from.x, y - from.y) / 6));
+    const steps = Math.max(1, Math.ceil(Math.hypot(x - from.x, y - from.y) / 24));
     for (let i = 1; i <= steps; i++) {
       await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x + ((x - from.x) * i) / steps, y: from.y + ((y - from.y) * i) / steps });
     }

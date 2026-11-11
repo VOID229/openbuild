@@ -392,5 +392,4 @@ test("with no machine named a tool runs on this server, each machine keeps its o
   expect((await tool(bot, "bash", { command: `touch ${marker}` })).error).toMatch(/Target Box (is unreachable|stopped answering)/);
   expect(existsSync(marker)).toBe(false);
   expect(svc.fullBot(bot)!.computer).toBeUndefined();
-  await launchTarget();
 }, 60_000);

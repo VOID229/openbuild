@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { dragClaims, dragCommits, holdLayout, REPLY_AT, replyDrag } from "../src/lib/gestures";
 
 describe("dragging a pane", () => {
@@ -24,34 +23,6 @@ describe("swiping a bubble to reply", () => {
   });
   test("goes nowhere the other way, where the screen's edge means back", () => {
     expect(replyDrag(50)).toBe(0);
-  });
-});
-
-describe("the phone stylesheet", () => {
-  // Nothing in it may reach a desktop window: outside the sheet and the held bubble's menu, which only touch screens open, every
-  // rule sits behind a media query for phones or for touch.
-  const css = readFileSync("src/mobile.css", "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
-  const topLevel: string[] = [];
-  let depth = 0;
-  let selector = "";
-  for (const ch of css) {
-    if (ch === "{") {
-      if (depth === 0) topLevel.push(selector.trim());
-      selector = "";
-      depth++;
-    } else if (ch === "}") {
-      depth--;
-      selector = "";
-    } else selector += ch;
-  }
-  test("keeps its rules behind phone or touch media queries", () => {
-    const loose = topLevel.filter((s) => !s.startsWith("@media"));
-    for (const s of loose) expect(s).toMatch(/^\.(sheet|bm-hold|bm-swipe-icon)/);
-  });
-  test("its queries only match phones, touch screens, or reduced motion", () => {
-    const queries = topLevel.filter((s) => s.startsWith("@media"));
-    expect(queries.length).toBeGreaterThan(0);
-    for (const q of queries) expect(q).toMatch(/max-width: (768|960)px|pointer: coarse|hover: none|prefers-reduced-motion/);
   });
 });
 

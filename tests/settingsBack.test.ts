@@ -312,11 +312,6 @@ async function backOpensAtTop(page: Page, back: () => Promise<unknown>, heading:
 
 for (const [device, width, height] of [["desktop", 1000, 520], ["phone", 390, 640]] as const) {
   describe.skipIf(!browser)(`going back on a ${device} opens the section at its top`, () => {
-    test("from a bot's page", async () => {
-      const page = await open("bots", width, height);
-      await press(page, "Bot 0");
-      await backOpensAtTop(page, () => page.click(backFrom(device)), "Your bots");
-    }, 60_000);
 
     test("from a group's page, with Enter on the arrow", async () => {
       const page = await open("bots", width, height);

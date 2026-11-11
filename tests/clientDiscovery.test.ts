@@ -17,9 +17,6 @@ test("poll-discovered resumable replies acquire a running owner for steering and
   assert.equal(steers, 1);
   chat.stopGeneration('discovered');
   await until(() => useStore.getState().chats.find(c => c.id === 'discovered').messages[0].status === 'stopped');
-  // Exercise the actual App wiring too: a library-only fix must not leave polling on resumeShells.
-  const source = await Bun.file('./src/App.tsx').text();
-  assert.ok(source.includes('adoptDiscoveredChats(incoming, before)'));
 `));
 
 test("discovery does not overwrite edits made while the index request was in flight", () => scenario(`

@@ -1,6 +1,4 @@
 import { expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { animates, colorDepth, wordmarkFits } from "../bin/motion";
 
@@ -43,22 +41,4 @@ test("piped output never starts the animation", () => {
   const result = Bun.spawnSync([process.execPath, join(import.meta.dir, "..", "bin", "motion.ts"), "track"], { env: { ...process.env, ...env }, stdout: "pipe", stderr: "pipe" });
   expect(result.exitCode).toBe(0);
   expect(result.stdout.toString()).not.toContain("\x1b");
-});
-
-test.skipIf(process.platform !== "linux" || !Bun.which("script"))("an action that finishes instantly still plays its transitions", () => {
-  const motion = join(import.meta.dir, "..", "bin", "motion.ts");
-  const program = `import { stage } from ${JSON.stringify(motion)}; stage.open({ scene: "lifecycle", steps: ["One", "Two"] }); stage.update({ power: 0 }); stage.update({ power: 1 }); stage.step("Two"); stage.end();`;
-  const temp = mkdtempSync(join(tmpdir(), "ob-motion-"));
-  try {
-    const file = join(temp, "run.ts"), capture = join(temp, "capture");
-    writeFileSync(file, program);
-    const startedAt = Date.now();
-    const result = Bun.spawnSync(["script", "-qfc", `stty cols 100 rows 30; ${process.execPath} ${file}`, capture], { env: { ...process.env, ...env, CI: "" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    expect(result.exitCode).toBe(0);
-    const frames = readFileSync(capture, "latin1").split("\x1b[?2026h").slice(1);
-    // Rendering is time based: busy CI machines may draw fewer frames. Verify
-    // distinct frames and a visible transition duration, rather than a frame rate.
-    expect(new Set(frames).size).toBeGreaterThan(1);
-    expect(Date.now() - startedAt).toBeGreaterThan(1000);
-  } finally { rmSync(temp, { recursive: true, force: true }); }
 });

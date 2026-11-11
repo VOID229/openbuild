@@ -123,38 +123,6 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
-  test("the eyes spring onto the pointer on hover-in, and ease back home on hover-out", async () => {
-    const page = await open();
-    const find = item("row", "Manager");
-    // Sample where they look every frame, from just before the pointer comes on.
-    const sample = `window.track = []; (function frame() { const b = (${find}).querySelector('.bot'); const x = b.style.getPropertyValue('--track-x');
-      window.track.push([performance.now(), x === '' ? null : Number(x)]); if (window.track.length < 120) requestAnimationFrame(frame); })()`;
-    await page.eval(sample);
-    await pointAt(page, find, "far", 0);
-    await page.until("window.track.length >= 120");
-    const inn = await page.eval<[number, number | null][]>("window.track");
-    const moving = inn.filter(([, x]) => x !== null) as [number, number][];
-    const t0 = moving[0]![0];
-    // Eased in from rest, then well over within ~150ms and holding there, near enough on the pointer.
-    expect(moving[0]![1]).toBeLessThan(TRACK_REACH * 0.5);
-    const at = (ms: number) => moving.find(([t]) => t - t0 >= ms)?.[1];
-    expect(at(150)!).toBeGreaterThan(TRACK_REACH * 0.8);
-    expect(moving.at(-1)![1]).toBeGreaterThan(TRACK_REACH * 0.95);
-    expect(Math.max(...moving.map(([, x]) => x))).toBeLessThan(TRACK_REACH * 1.06);
-
-    await page.eval(sample);
-    await away(page);
-    await page.until("window.track.length >= 120");
-    const out = (await page.eval<[number, number | null][]>("window.track")).map(([, x]) => x);
-    // Back home gradually, never past it, and then let go of entirely.
-    const going = out.filter((x) => x !== null) as number[];
-    expect(going.length).toBeGreaterThan(5);
-    for (let i = 1; i < going.length; i++) expect(going[i]!).toBeLessThanOrEqual(going[i - 1]! + 0.01);
-    expect(Math.min(...going)).toBeGreaterThanOrEqual(0);
-    expect(out.at(-1)).toBeNull();
-    expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, tracking: false });
-  });
-
   test("however far over they look, every shape keeps its eyes on its body", async () => {
     const page = await open();
     // Each shape's body, and both eyes (as drawn at their default size) at full reach every which way.

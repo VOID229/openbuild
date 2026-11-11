@@ -9,8 +9,8 @@ import { dataDir } from "../paths";
 import { REMOTE_FRESH_MS, retryDelay, shouldRefresh } from "./cache";
 import { preferLimits } from "./limitSelection";
 import { requestUsage } from "./remoteRequest";
-/** How long a first answer is waited for before the page shows without it. */
-const WAIT_MS = 3500;
+/** How long a first answer is waited for before the page shows without it. An object so a test can shorten it. */
+export const timing = { waitMs: 3500 };
 
 interface Cached<T> {
   at: number;
@@ -83,7 +83,7 @@ async function remote<T>(device: devices.StoredDevice, key: string, path: string
   // Limits wait a little for the refresh, never a sleeping device's whole timeout: past that the
   // machine shows as pending (its old readings marked stale) and the page polls until it lands.
   // History reports still show cached numbers immediately.
-  if (c.running && (key === "limits" || c.value === undefined)) await Promise.race([c.running, Bun.sleep(WAIT_MS)]);
+  if (c.running && (key === "limits" || c.value === undefined)) await Promise.race([c.running, Bun.sleep(timing.waitMs)]);
   return { value: c.value, at: c.at, error: c.error, pending: !!c.running };
 }
 
