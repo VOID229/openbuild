@@ -1,5 +1,6 @@
 import { GitPullRequest } from "lucide-react";
 import type { ThreadPullRequest } from "../../shared/types";
+import { NEW_TAB_CLICK, newTabClick } from "../lib/links";
 
 /** What the badge says about a pull request: its state, and its checks while it's open. */
 export function pullRequestLabel(pr: ThreadPullRequest): string {
@@ -24,20 +25,29 @@ export function pullRequestTone(pr: Pick<ThreadPullRequest, "state" | "checks" |
 /**
  * A thread's pull request (server/pullRequests.ts) in its sidebar row: its number, with the icon
  * coloured by its state. The row is already a button, so the badge opens the pull request on click
- * rather than being a link of its own.
+ * rather than being a link of its own: in OpenBuild (`onOpen`, the side panel's pull requests tab)
+ * when it can, and on GitHub with ⌘/Ctrl-click, Shift-click or a middle click.
  */
-export function PullRequestBadge({ pr, size = 12 }: { pr: ThreadPullRequest; size?: number }) {
+export function PullRequestBadge({ pr, size = 12, onOpen }: { pr: ThreadPullRequest; size?: number; onOpen?: () => void }) {
+  const github = () => window.open(pr.url, "_blank", "noopener,noreferrer");
   return (
     <span
       role="link"
       className={`pr-badge pr-${pullRequestTone(pr)} history-pr`}
-      title={`Pull request ${pullRequestLabel(pr)} · open on GitHub`}
+      title={onOpen ? `Pull request ${pullRequestLabel(pr)} · ${NEW_TAB_CLICK} to open on GitHub` : `Pull request ${pullRequestLabel(pr)} · open on GitHub`}
       // Opening the pull request mustn't also open (or start dragging) the thread.
       onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        window.open(pr.url, "_blank", "noopener,noreferrer");
+        if (onOpen && !newTabClick(e) && !e.shiftKey) onOpen();
+        else github();
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+        github();
       }}
     >
       <GitPullRequest size={size} className="pr-icon" />

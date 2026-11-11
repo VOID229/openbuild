@@ -13,6 +13,8 @@ import { DEFAULT_VIEW, useStore } from "../lib/store";
 import { OPEN_SEARCH } from "../lib/ui";
 import { useScrollRestore } from "../lib/scrollRestore";
 import { PullRequestBadge } from "./PullRequestBadge";
+import { usePanel } from "../lib/panel";
+import { refreshTerminal } from "../lib/terminal";
 import { prefetchUsage } from "../lib/usageStats";
 import type { Chat } from "../lib/types";
 import type { Device } from "../../shared/types";
@@ -150,13 +152,24 @@ function Highlight({ text, ranges }: { text: string; ranges: Range[] }) {
   return <>{parts}</>;
 }
 
+/**
+ * The open thread's pull request in the side panel's pull requests tab. The panel follows the thread
+ * (refreshTerminal), so it's moved to the thread just opened first, or the tab would open on the last
+ * one's folder.
+ */
+function showPullRequest(number: number) {
+  refreshTerminal();
+  usePanel.getState().openPulls(number);
+}
+
 interface RowProps {
   chat: Chat;
   active: boolean;
   hit?: SearchHit;
   renaming: boolean;
   regenerating: boolean;
-  onSelect: (chat: Chat, hit?: SearchHit) => void;
+  /** `then`: what to do once the thread is open, as showing its pull request. */
+  onSelect: (chat: Chat, hit?: SearchHit, then?: () => void) => void;
   onMenu: (chatId: string, x: number, y: number, fromButton?: boolean, snooze?: boolean) => void;
   onRenameDone: () => void;
 }
@@ -430,7 +443,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               @ {device}
             </span>
           )}
-          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} />}
+          {chat.pullRequest && <PullRequestBadge pr={chat.pullRequest} onOpen={chat.workspace?.cwd ? () => onSelect(chat, hit, () => showPullRequest(chat.pullRequest!.number)) : undefined} />}
           <span className="history-runtime" title={`${runtime === "hermes" ? "Hermes harness" : runtime === "grok" ? "Native Grok harness" : runtime === "opencode" ? "Native OpenCode harness" : runtime === "claude" ? "Native Claude Code harness" : runtime === "cursor" ? "Native Cursor harness" : runtime === "durable" ? "Durable harness" : runtime === "fx" ? "fx harness" : runtime === "codex" ? "Native Codex harness" : "Pi harness"}${model ? ` · ${model.name}` : ""}`}>
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
@@ -1563,13 +1576,14 @@ export function Sidebar() {
   }, [query, setSearchFocus]);
 
   const onSelect = useCallback(
-    (c: Chat, hit?: SearchHit) => {
+    (c: Chat, hit?: SearchHit, then?: () => void) => {
       const open = () => {
         // Prefetched while the row was pointed at: it opens with its messages, not "Loading thread…".
         const full = historyAtHand(c);
         if (full) adoptHistory(c, full);
         selectChat(c.id);
         if (hit?.snippet) setSearchFocus({ chatId: c.id, messageId: hit.snippet.messageId, words: hit.words });
+        then?.();
       };
       if (!mobile) return open();
       // The drawer answers the tap first: it slides on the compositor while the thread renders behind

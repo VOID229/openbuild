@@ -341,3 +341,127 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     }, 60_000);
   });
 });
+
+/** A real click with ⌘ (on a Mac) or Ctrl held, on the first element `selector` finds. */
+async function newTabClick(page: Page, selector: string) {
+  const [x, y, modifiers] = await page.eval<[number, number, number]>(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2, /Mac/.test(navigator.platform) ? 4 : 2]; })()`);
+  for (const type of ["mousePressed", "mouseReleased"]) await page.send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, modifiers });
+  await page.settle();
+}
+
+describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
+  const LINK = (title: string) => `[...document.querySelectorAll('.bots-view .bm-event-detail a.link')].find((a) => a.textContent === ${JSON.stringify(title)} && a.checkVisibility())`;
+  /** OpenBots on `conversation`, with its details closed. */
+  async function chat(conversation: string, width = 1280, height = 860) {
+    const page = await Page.open(chrome!.ws, `${server!.url.href}bots?theme=dark`, width, height, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+    await page.eval(`(() => {
+      store.getState().setBotsOpen(true);
+      store.getState().setBotsSidebarOpen(${width > 768});
+      bots.getState().select(${JSON.stringify(conversation)});
+      bots.getState().setDetailsOpen(false);
+    })()`);
+    await page.until("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()");
+    await page.finish();
+    return page;
+  }
+  async function follow(page: Page, title: string) {
+    await page.until(`!!${LINK(title)}`);
+    await page.eval(`(() => { document.querySelector('[data-test-link]')?.removeAttribute('data-test-link'); ${LINK(title)}.setAttribute('data-test-link', ''); })()`);
+    await page.click("[data-test-link]");
+  }
+
+  test("in a group: running, it opens under Threads in the details beside the chat; finished, over OpenBots", async () => {
+    const page = await chat("dev");
+    await follow(page, "Fix the flaky sidebar test");
+    await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details-thread-title').textContent`)).toBe("Fix the flaky sidebar test");
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    expect(await page.eval<unknown>("location.pathname")).toBe("/bots");
+    expect(await page.eval<unknown>("!!document.querySelector('.bots-view .bots-messages')?.checkVisibility()")).toBe(true);
+    await shoot(page, "link-running-in-details");
+    // Back lands on the Threads tab it was opened under.
+    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+    await page.until("!document.querySelector('.bots-details-threadpane')");
+    expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
+
+    // Finished, it isn't listed there: the large view over OpenBots, as before.
+    await follow(page, "Bump dependencies");
+    await page.until("store.getState().botsThread === true");
+    expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-done");
+    expect(await page.eval<unknown>("store.getState().botsOpen")).toBe(true);
+  }, 60_000);
+
+  test("in a bot's own chat: a Threads tab shows while it has one running, and the link opens it there", async () => {
+    const page = await chat("dm-manager");
+    await page.eval(`bots.getState().setDetailsOpen(true)`);
+    await page.until("!!document.querySelector('.bots-details-open')");
+    await page.finish();
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`)).toEqual(["Instructions", "Routines", "Tasks", "Advanced", "Threads 1"]);
+    // Wider than the panel, the row scrolls rather than the page, its line under every tab.
+    const row = `document.querySelector('.bots-details .bots-tabs')`;
+    expect(await page.eval<unknown>(`getComputedStyle(${row}).overflowX`)).toBe("auto");
+    expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    await shoot(page, "bot-threads-tab");
+    await follow(page, "Rename the config loader");
+    await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
+    await shoot(page, "bot-link-running-in-details");
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details-thread-title').textContent`)).toBe("Rename the config loader");
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
+    await page.until("!document.querySelector('.bots-details-threadpane')");
+    expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
+    expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
+    // Scrolled along to the tab it opened on, which shows whole.
+    expect(await page.eval<unknown>(`(() => { const r = ${row}.getBoundingClientRect(); const t = ${TAB}.getBoundingClientRect(); return ${row}.scrollLeft > 0 && t.left >= r.left - 1 && t.right <= r.right + 1; })()`)).toBe(true);
+    await shoot(page, "bot-threads-tab-scrolled");
+
+    // Once it finishes the tab stays while it's showing, and goes with the next chat.
+    await serve(page, `serverChats.map((c) => c.id === "t-direct" ? { ...thread(c.id, c.title, "manager", "dm-manager", "openbuild", true), pullRequest: c.pullRequest } : c)`);
+    await page.until(`${TAB}.textContent === "Threads"`);
+    await page.eval(`bots.getState().select("dm-tracer")`);
+    await page.eval(`bots.getState().select("dm-manager")`);
+    await page.until(`!${TAB}`);
+  }, 60_000);
+
+  test("on a phone, a running thread opens on the details screen", async () => {
+    const page = await chat("dev", 390, 800);
+    await follow(page, "Fix the flaky sidebar test");
+    await page.until(`!!document.querySelector('.bots-details-open .bots-details-threadpane .chat')`);
+    await page.finish();
+    expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
+    expect(await page.eval<unknown>("history.state?.botsLayer")).toBe("details");
+    expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    await shoot(page, "phone-link-running-in-details");
+  }, 60_000);
+});
+
+describe.skipIf(!browser)("a thread's pull request badge in the sidebar", () => {
+  const BADGE = `.history-row[data-thread="t-direct"] .history-pr`;
+  async function build() {
+    const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=dark`, 1280, 860, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+    await page.eval(`(() => { store.getState().setBotsOpen(false); store.getState().selectChat("t-flaky"); store.getState().setSidebarOpen(true); })()`);
+    await page.until(`!!document.querySelector(${JSON.stringify(BADGE)})?.checkVisibility()`);
+    await page.finish();
+    return page;
+  }
+
+  test("a click opens its thread with the pull request in the side panel's tab", async () => {
+    const page = await build();
+    await page.click(BADGE);
+    await page.until(`store.getState().activeChatId === "t-direct" && panel.getState().view === "pulls"`);
+    expect(await page.eval<unknown>(`(() => { const p = panel.getState(); return [p.panel, p.pulls, p.activePull, p.folder?.cwd, p.folder?.thread]; })()`)).toEqual([true, true, 42, "/tmp/openbuild", "t-direct"]);
+    expect(await page.eval<unknown>("opened")).toEqual([]);
+    expect(await page.eval<unknown>("location.pathname")).toBe("/thread-t-direct");
+    await shoot(page, "badge-opens-pull-tab");
+  }, 60_000);
+
+  test("⌘/Ctrl-click opens it on GitHub, leaving the open thread as it was", async () => {
+    const page = await build();
+    await newTabClick(page, BADGE);
+    await page.until("opened.length === 1");
+    expect(await page.eval<unknown>("opened")).toEqual(["https://github.com/acme/openbuild/pull/42"]);
+    expect(await page.eval<unknown>("store.getState().activeChatId")).toBe("t-flaky");
+    expect(await page.eval<unknown>("panel.getState().view")).not.toBe("pulls");
+    expect(await page.eval<unknown>(`document.querySelector(${JSON.stringify(BADGE)}).title`)).toMatch(/^Pull request #42 open, checks running · (⌘|Ctrl)-click to open on GitHub$/);
+  }, 60_000);
+});

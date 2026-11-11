@@ -32,6 +32,11 @@ export function reachableUrl(url: string, folder?: Pick<TerminalFolder, "deviceI
 
 const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
+/** A click that asks for a real browser tab: ⌘-click on a Mac, Ctrl-click elsewhere. */
+export const newTabClick = (e: Pick<MouseEvent, "metaKey" | "ctrlKey">): boolean => (isMac ? e.metaKey : e.ctrlKey);
+/** That click, as a tooltip says it. */
+export const NEW_TAB_CLICK = isMac ? "⌘-click" : "Ctrl-click";
+
 /** Show a localhost page in the side panel: the tab already there, or a new one. */
 export function openInPanel(url: string): void {
   const panel = usePanel.getState();
@@ -64,7 +69,7 @@ const repoId = (url: string) =>
 /** A link's click: localhost goes to the side panel, ⌘/Ctrl-click to a real tab; anything else is left alone. */
 export function onLinkClick(e: MouseEvent<HTMLAnchorElement>, href: string | undefined): void {
   if (!href || e.button !== 0 || e.defaultPrevented) return;
-  const newTab = isMac ? e.metaKey : e.ctrlKey;
+  const newTab = newTabClick(e);
   const folder = usePanel.getState().folder;
   if (!isLocalUrl(href)) {
     const pull = parsePullUrl(href);

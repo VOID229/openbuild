@@ -3267,12 +3267,26 @@ button.bots-details-name:hover {
   font-weight: 500;
 }
 
-/* Tabs: a plain underlined row. */
+/* Tabs: a plain underlined row. A bot's fill the panel, and Threads comes after them while it has any
+   running: the row scrolls sideways then, with the selected tab kept in view (BotDetails' Tabs). The line under the row is a
+   shadow, so the scroller doesn't clip the selected tab's underline off it. */
 .bots-tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  box-shadow: inset 0 -1px 0 var(--border);
+}
+
+.bots-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Inside the row, so the scroller doesn't cut its ring off. */
+:where([data-keyboard-nav]) .bots-tab:focus-visible {
+  outline-offset: -2px;
 }
 
 .bots-tab {
@@ -3290,7 +3304,7 @@ button.bots-details-name:hover {
 .bots-tab::after {
   content: "";
   position: absolute;
-  inset: auto 8px -1px;
+  inset: auto 8px 0;
   height: 2px;
   border-radius: 1px;
   background: var(--text);

@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleD
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, holding, showWorking, stoppable, workingHere } from "../../lib/bots/activity";
+import { elsewhere, holding, showWorking, stoppable, threadOpensIn, workingHere } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -179,10 +179,26 @@ function ThreadLink({ id, children }: { id: string; children: React.ReactNode })
     e.preventDefault();
     // An event row toggles open on click; following its link shouldn't do that as well.
     e.stopPropagation();
-    useStore.getState().openThreadInBots(id);
-    // A thread a bot has only just started may not have reached this tab yet; it opens once it does.
-    if (!useStore.getState().chats.some((c) => c.id === id)) window.dispatchEvent(new Event(RELOAD_THREADS));
+    openThreadLink(id);
   }}>{children}</a>;
+}
+
+/**
+ * A thread a bot here is still running opens in the details panel, under Threads, beside the chat. The
+ * rest (finished, or another chat's) aren't listed there, so they open over OpenBots instead.
+ */
+function openThreadLink(id: string) {
+  const app = useStore.getState();
+  const bots = useBots.getState();
+  const conversation = bots.conversations.find((c) => c.id === bots.activeId);
+  const chat = app.chats.find((c) => c.id === id);
+  if (conversation && threadOpensIn(conversation, app.chats, id) === "details") {
+    openBotsDetails();
+    bots.showDetailsThread(id);
+    if (chat?.unread) app.updateChat(id, { unread: false });
+  } else app.openThreadInBots(id);
+  // A thread a bot has only just started may not have reached this tab yet; it opens once it does.
+  if (!chat) window.dispatchEvent(new Event(RELOAD_THREADS));
 }
 
 /** Opens a conversation in OpenBots, such as the side chat a message between bots went to. */

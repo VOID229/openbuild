@@ -12,12 +12,18 @@ const bots = [bot("manager", "manager", "ghost", "orange"), bot("tracer", "trace
 const conversation = (id: string, kind: "direct" | "group", botIds: string[], messages: BotMessage[] = []): Conversation => ({
   id, kind, botIds, createdAt: start, updatedAt: start, messages, ...(kind === "group" ? { name: "OpenBuild Dev" } : {}),
 });
+/** The line a bot's chat shows when it starts a thread, linking to it. */
+const started = (id: string, by: string, threadId: string, title: string, at: number): BotMessage => ({ id, author: by, at, text: "", event: { kind: "thread", text: "Started a thread", detail: title, threadId } });
 const conversations = [
   conversation("dev", "group", ["manager", "tracer"], [
     { id: "m1", author: "me", at: start, text: "Can you two look into the flaky sidebar test?" },
+    // Each line between messages, so none fold away into a run of background actions.
+    started("e1", "manager", "t-flaky", "Fix the flaky sidebar test", start + 500),
     { id: "m2", author: "manager", at: start + 1000, text: "On it. I've started a thread for it." },
+    started("e2", "tracer", "t-done", "Bump dependencies", start + 1500),
+    { id: "m3", author: "tracer", at: start + 2000, text: "And the dependencies are bumped." },
   ]),
-  conversation("dm-manager", "direct", ["manager"]),
+  conversation("dm-manager", "direct", ["manager"], [started("e3", "manager", "t-direct", "Rename the config loader", start + 4000)]),
   conversation("dm-tracer", "direct", ["tracer"]),
   conversation("dm-outsider", "direct", ["outsider"]),
 ];
@@ -43,7 +49,7 @@ w.serverChats = [
   thread("t-flaky", "Fix the flaky sidebar test", "manager", "dev", "openbuild"),
   thread("t-trace", "Trace the slow startup", "tracer", "dev", "openbuild-site"),
   // Not this group's: started from a one-to-one chat, by a bot outside it, or finished.
-  thread("t-direct", "Rename the config loader", "manager", "dm-manager", "openbuild"),
+  { ...thread("t-direct", "Rename the config loader", "manager", "dm-manager", "openbuild"), pullRequest: { number: 42, url: "https://github.com/acme/openbuild/pull/42", state: "open", checks: "pending", checkedAt: start } },
   thread("t-outside", "Tidy the vault", "outsider", "dm-outsider", "notes"),
   thread("t-done", "Bump dependencies", "tracer", "dev", "openbuild", true),
 ].map((chat, i) => ({ ...chat, updatedAt: now - i * 1000 }));
@@ -66,6 +72,10 @@ function stream(): Response {
   return new Response(body, { headers: { "content-type": "application/x-ndjson", "x-openbuild-server": ID } });
 }
 
+// Pull requests opened on GitHub, rather than in the app.
+w.opened = [] as string[];
+window.open = ((url?: string | URL) => (w.opened.push(String(url)), null)) as typeof window.open;
+
 // Threads' streams would go over /api/stream's socket; this page has none, so they fall back to fetch.
 w.WebSocket = undefined;
 window.fetch = (async (input: RequestInfo | URL) => {
@@ -77,6 +87,8 @@ window.fetch = (async (input: RequestInfo | URL) => {
   if (path === "/api/projects") return Response.json({ projects: [] });
   if (path === "/api/plugins") return Response.json({ plugins: [] });
   if (path === "/api/chats") return Response.json({ chats: w.serverChats });
+  // The side panel's pull requests tab: there's no GitHub here, which it says rather than showing one.
+  if (path.startsWith("/api/workspaces/pulls")) return Response.json({ error: "No GitHub here" }, { status: 500 });
   const one = /^\/api\/chats\/([^/]+)$/.exec(path);
   if (one) {
     const chat = (w.serverChats as Chat[]).find((c) => c.id === one[1]);
