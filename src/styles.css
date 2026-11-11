@@ -1377,6 +1377,16 @@ select.input {
   .history-heading-toggle:hover {
     color: var(--text-2);
   }
+
+  /* The count and chevron light up with the name, to the same colour. */
+  .history-heading-toggle:hover :is(.history-count, .history-heading-chevron) {
+    color: inherit;
+    opacity: 1;
+  }
+}
+
+.history-heading-toggle .history-count {
+  transition: color var(--fast) var(--ease), opacity var(--fast) var(--ease);
 }
 
 .history-heading-chevron {
