@@ -21,7 +21,8 @@ shares that state between files and is not the release check. Files run in
 parallel, half as many as there are CPUs and at most 3 with a headless Chrome;
 `TEST_JOBS` and `TEST_BROWSER_JOBS` change that, and `TEST_JOBS=1` runs them one
 at a time with live output. A passing file prints one line (`TEST_VERBOSE=1`
-prints its output too); a failing one prints its output.
+prints its output too, and so does a GitHub log, folded under the file's line);
+a failing one prints its output.
 
 A file that fails is run once more at the end, on its own. If it passes then, it
 is listed as flaky (a warning on the pull request) and the run still passes: the

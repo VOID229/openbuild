@@ -6,9 +6,10 @@
 //   --timings                   after a full passing run, record how long each file took (the shards' balance)
 //
 // Files run in parallel: TEST_JOBS at once, at most TEST_BROWSER_JOBS of them driving a headless
-// Chrome (TEST_JOBS=1 runs them one after another with live output). A passing file prints one line;
-// a failing one prints its output, and is run once more on its own at the end (TEST_RETRIES=0 turns
-// that off): a failure that doesn't repeat is reported as flaky and doesn't fail the run.
+// Chrome (TEST_JOBS=1 runs them one after another with live output). A passing file prints one line
+// (TEST_VERBOSE=1, or a GitHub log, where it folds: its output too); a failing one prints its output,
+// and is run once more on its own at the end (TEST_RETRIES=0 turns that off): a failure that doesn't
+// repeat is reported as flaky and doesn't fail the run.
 import { appendFileSync, closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,8 +107,9 @@ function report(result: Result, note = "") {
     return;
   }
   const line = `${failed ? "✗" : "✓"} ${result.file} · ${outcome(result)}${note} · ${result.seconds.toFixed(1)} s`;
-  if (!failed && !verbose) return console.log(line);
-  // In a GitHub log a failure's output folds under its line.
+  // A GitHub log folds each file's output under its line, so all of it is kept there: a passing
+  // file's per-test times are what a slow run is explained with.
+  if (!failed && !verbose && !actions) return console.log(line);
   console.log(actions ? `::group::${line}` : `\n━━ ${line}`);
   if (result.output) console.log(result.output);
   console.log(actions ? "::endgroup::" : "");
