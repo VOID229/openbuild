@@ -14,6 +14,11 @@ the files out so the four take about as long as each other, using the timings in
 `scripts/test-timings.json`; `bun run test --timings` records them again after a
 full passing run, which is worth doing when slow tests are added or removed.
 
+A fresh runner's first Chrome takes 10 to 30 seconds to start. The workflow
+starts one in the background before the install, and the test runner holds the
+browser files back until a Chrome has started, giving the other files every
+slot meanwhile.
+
 Run the same suite locally with `bun run test` (optionally followed by a test
 filename filter). Each file gets a fresh process so browser globals, fetch mocks,
 and storage modules cannot affect later files. Plain `bun test` on Bun 1.3.8

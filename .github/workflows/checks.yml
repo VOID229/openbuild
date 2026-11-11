@@ -41,23 +41,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # A runner's first Chrome takes about 8 s to start, and 20 beside running tests: start one now,
+      # in the background, behind the install. (scripts/test.ts holds browser files until one is up.)
+      - run: (nohup chromium --headless --disable-gpu --no-sandbox --user-data-dir="$RUNNER_TEMP/warm-chrome" --dump-dom about:blank > /dev/null 2>&1 &) || true
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.8
       - run: bun install --frozen-lockfile
-      - name: EXPERIMENT browsers
-        if: matrix.shard == 1
-        run: |
-          for b in chromium chromium-browser google-chrome google-chrome-stable; do which $b && readlink -f "$(which $b)" || true; done
-          echo "$CHROME_BIN"
-          for b in google-chrome chromium chromium-browser; do
-            if which $b >/dev/null; then
-              for i in 1 2; do
-                s=$(date +%s.%N); $b --headless --disable-gpu --no-sandbox --user-data-dir=/tmp/exp-$b-$i --dump-dom about:blank >/dev/null 2>&1 || true; e=$(date +%s.%N)
-                echo "$b run $i: $(echo "$e - $s" | bc) s"
-              done
-            fi
-          done
       # Two files at a time (one with a browser) on the 4-vCPU runner: at 4 a run on two cores
       # with hyperthreads failed 7 timing-sensitive files (5 s timeouts, animation frames).
       - run: bun run test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
