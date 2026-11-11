@@ -91,7 +91,8 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-bubble: 18px;
-  --radius-composer: 30px;
+  /* Composers: 24px round corners, or 40px smoothed (squircle) corners where the browser can draw them. */
+  --radius-composer: 24px;
   --radius-pill: 999px;
 
   /* Segmented controls: a quiet track, the chosen option lifted onto it. */
@@ -2045,19 +2046,31 @@ select.input {
 }
 
 /* Grok-like: a flat box on the pane's own colour, drawn by a faint hairline alone, the text on top
-   and a row of quiet controls under it. Measured off Grok's home box: 30px corners, one line of
-   15px text 14px from the top and 16px in, 16px down to a row of 36px controls 12px off the edge,
+   and a row of quiet controls under it. Tuned against Grok's home box: smoothed corners, one line of
+   15px text 12px from the top and 16px in, 14px down to a row of 36px controls 12px off the edge,
    a #262626 hairline when focused and a dim #4d4d4d placeholder. */
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 14px 12px 12px 16px;
+  gap: 14px;
+  padding: 12px 12px 12px 16px;
   border-radius: var(--radius-composer);
   border: 1px solid var(--composer-border);
   background: var(--surface);
   cursor: text;
   transition: border-color var(--fast) var(--ease);
+}
+
+/* Smoothed corners ease into the edges instead of meeting them at a point, so they can run larger. */
+@supports (corner-shape: squircle) {
+  :root {
+    --radius-composer: 40px;
+  }
+
+  .composer,
+  .bots-composer {
+    corner-shape: squircle;
+  }
 }
 
 .composer:focus-within {
