@@ -465,6 +465,8 @@ describe.skipIf(!browser)("a thread's pull request badge in the sidebar", () => 
     const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=dark`, 1280, 860, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
     await page.eval(`(() => { store.getState().setBotsOpen(false); store.getState().selectChat("t-flaky"); store.getState().setSidebarOpen(true); })()`);
     await page.until(`!!document.querySelector(${JSON.stringify(BADGE)})?.checkVisibility()`);
+    // The thread it starts on can land after the badge shows; the tests compare against it.
+    await page.until(`store.getState().activeChatId === "t-flaky"`);
     await page.finish();
     return page;
   }
