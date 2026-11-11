@@ -2638,27 +2638,27 @@
   margin: 0 auto;
 }
 
-/* A raised field on a hairline, its tools in monochrome on either side of the text. */
+/* Like the thread composer: flat on the pane, drawn by a faint hairline alone, its tools in
+   monochrome on either side of the text. One line of it reads as a pill. */
 .bots-composer {
   position: relative;
   max-width: var(--bm-w);
   margin: 0 auto;
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--border-strong);
-  background: var(--surface-raised);
-  box-shadow: var(--composer-shadow);
+  border-radius: var(--radius-composer);
+  border: 1px solid var(--composer-border);
+  background: var(--surface);
   transition: border-color var(--fast) var(--ease);
 }
 
 .bots-composer:focus-within {
-  border-color: color-mix(in srgb, var(--text) 24%, transparent);
+  border-color: var(--composer-border-focus);
 }
 
 .bots-composer-row {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  padding: 8px;
+  padding: 10px;
 }
 
 .bots-composer-btn {
@@ -2773,8 +2773,8 @@
   display: grid;
   flex: none;
   place-items: center;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   margin-left: 2px;
   border-radius: 50%;
   background: var(--surface-3);
