@@ -91,7 +91,7 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-bubble: 18px;
-  /* Composers: 24px round corners, or 40px smoothed (squircle) corners where the browser can draw them. */
+  /* Composers: 24px round corners, or Grok's 43.2px smoothed (squircle) corners where the browser can draw them. */
   --radius-composer: 24px;
   --radius-pill: 999px;
 
@@ -170,7 +170,7 @@
   --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 32px rgba(0, 0, 0, 0.7);
   --composer-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.5);
-  --composer-border: rgba(255, 255, 255, 0.12);
+  --composer-border: rgba(255, 255, 255, 0.15);
   --composer-border-focus: rgba(255, 255, 255, 0.15);
   --composer-placeholder: #4d4d4d;
   color-scheme: dark;
@@ -2046,14 +2046,15 @@ select.input {
 }
 
 /* Grok-like: a flat box on the pane's own colour, drawn by a faint hairline alone, the text on top
-   and a row of quiet controls under it. Tuned against Grok's home box: smoothed corners, one line of
-   15px text 12px from the top and 16px in, 14px down to a row of 36px controls 12px off the edge,
-   a #262626 hairline when focused and a dim #4d4d4d placeholder. */
+   and a row of quiet controls under it. Grok's home box, from its computed styles: 43.2px squircle
+   corners, 104px tall, a 15% white hairline on black. Inside: one line of 15px text 14px from the top
+   and 16px in, 16px down to a row of 36px controls 12px off the edge,
+   and a dim #4d4d4d placeholder. */
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 12px 12px 12px 16px;
+  gap: 16px;
+  padding: 14px 12px 12px 16px;
   border-radius: var(--radius-composer);
   border: 1px solid var(--composer-border);
   background: var(--surface);
@@ -2064,7 +2065,7 @@ select.input {
 /* Smoothed corners ease into the edges instead of meeting them at a point, so they can run larger. */
 @supports (corner-shape: squircle) {
   :root {
-    --radius-composer: 40px;
+    --radius-composer: 43.2px;
   }
 
   .composer,
