@@ -2426,18 +2426,67 @@ select.input {
   }
 }
 
-/* Queued messages: a thin tray tucked behind the top of the composer. */
+/* Queued messages: a thin tray on the top of the composer, drawn over its top edge so the two read
+   as one outline. */
 
 .queue {
   display: flex;
   flex-direction: column;
-  margin: 0 22px -1px;
+  margin: 0 22px -2px;
   padding: 2px 0;
   border: 1px solid var(--composer-border);
   border-bottom: 0;
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--surface);
   animation: rise var(--med) var(--ease-out) both;
+  position: relative;
+}
+
+/* Concave fillets where the tray's sides meet the composer, so the two make one outline. Each is a
+   10px arc (along the 1px lines' centres) that leaves the tray's side straight down and meets the
+   composer's corner at a tangent, then fills the surface beyond it over the side's last pixels and the
+   composer's top edge. Where the arc touches the corner depends on the corner's shape; the numbers are
+   solved for the 24px round corner, and below for the 43.2px squircle as Chrome draws it. */
+.queue::before,
+.queue::after {
+  content: "";
+  position: absolute;
+  bottom: var(--fillet-bottom);
+  width: var(--fillet-w);
+  height: var(--fillet-h);
+  pointer-events: none;
+  --ring: transparent 9.25px, var(--composer-border) 9.75px, var(--composer-border) 10.25px, transparent 10.75px;
+  --fill: transparent 9.25px, var(--surface) 9.75px;
+}
+
+.queue {
+  --fillet-cx: -3.43px;
+  --fillet-w: 7.07px;
+  --fillet-h: 10.46px;
+  --fillet-bottom: -1px;
+}
+
+@supports (corner-shape: squircle) {
+  .queue {
+    --fillet-cx: -3.05px;
+    --fillet-w: 7.45px;
+    --fillet-h: 10.52px;
+    --fillet-bottom: -1.47px;
+  }
+}
+
+.queue::before {
+  left: calc(-1 * var(--fillet-w));
+  background:
+    radial-gradient(circle at var(--fillet-cx) 0, var(--ring)),
+    radial-gradient(circle at var(--fillet-cx) 0, var(--fill));
+}
+
+.queue::after {
+  right: calc(-1 * var(--fillet-w));
+  background:
+    radial-gradient(circle at calc(100% - var(--fillet-cx)) 0, var(--ring)),
+    radial-gradient(circle at calc(100% - var(--fillet-cx)) 0, var(--fill));
 }
 
 .queued {
