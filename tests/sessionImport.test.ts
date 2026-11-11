@@ -7,7 +7,7 @@ import { join } from "node:path";
 // native session folders, so tests never read the user's real database or transcripts.
 async function run(dir: string, script: string) {
   await mkdir(join(dir, "home"), { recursive: true });
-  const child = Bun.spawn([process.execPath, "-e", script], {
+  const child = Bun.spawn([process.execPath, "--preload", "./tests/subprocess-preload.ts", "-e", script], {
     cwd: join(import.meta.dir, ".."),
     env: {
       ...process.env,
