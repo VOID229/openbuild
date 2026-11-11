@@ -1,9 +1,10 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
-// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal (with its tasks);
-// the working threads either started from its chat; who's in a side chat.
-import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
+// model, computer and OpenBuild permissions under Advanced and its threads, both in the More menu; a
+// group's members, goal (with its tasks); the working threads either started from its chat; who's in a
+// side chat.
+import { Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { actingOn, runningThreads, threadActivity, threadHarness, threadMascot } from "../../lib/bots/activity";
+import { actingOn, runningThreads, threadActivity, threadBrands, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -12,10 +13,10 @@ import { cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
 import type { Chat } from "../../lib/types";
-import { cx, useMediaQuery, usePresence } from "../../lib/ui";
+import { arrowNav, cx, useFocusOnShow, useMediaQuery, usePresence } from "../../lib/ui";
 import { useEdgeDrag } from "../FileTree";
 import { LoadedChat } from "../LoadedChat";
-import { IconButton, Toggle } from "../primitives";
+import { HermesMark, IconButton, Popover, ProviderIcon, RuntimeIcon, Toggle } from "../primitives";
 import { expandBotsThread } from "../Sidebar";
 import { BotAdvanced } from "./BotAdvanced";
 import { BotAvatar } from "./BotAvatar";
@@ -32,7 +33,6 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
       <button
         type="button"
         className="bots-details-name"
-        data-tooltip="Rename"
         onClick={() => {
           setDraft(value);
           setEditing(true);
@@ -66,8 +66,34 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
   );
 }
 
-function Tabs<T extends string>({ tabs, value, onChange }: { tabs: readonly (readonly [T, string])[]; value: T; onChange: (t: T) => void }) {
+type Tab<T> = readonly [T, string];
+
+/** The More menu's tabs, the open one ticked; it takes the focus as the menu shows, or the first one does. */
+function MoreItems<T extends string>({ items, value, pick }: { items: readonly Tab<T>[]; value: T; pick: (t: T) => void }) {
+  const focus = useRef<HTMLButtonElement>(null);
+  useFocusOnShow(focus);
+  const focused = items.some(([id]) => id === value) ? value : items[0]?.[0];
+  return (
+    <div onKeyDown={(e) => arrowNav(e)}>
+      {items.map(([id, label]) => (
+        <button key={id} ref={id === focused ? focus : undefined} type="button" role="menuitemradio" aria-checked={value === id} className="menu-item" onClick={() => pick(id)}>
+          <span className="menu-item-label">{label}</span>
+          {value === id && <Check size={14} className="menu-check" />}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The details' tabs. Those in `more` sit behind a More tab, in a small menu floating over the panel, so
+ * the row stays short enough to show whole; More shows as the active tab while one of them is open.
+ */
+function Tabs<T extends string>({ tabs, more = [], value, onChange }: { tabs: readonly Tab<T>[]; more?: readonly Tab<T>[]; value: T; onChange: (t: T) => void }) {
   const row = useRef<HTMLDivElement>(null);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const [menu, setMenu] = useState(false);
+  const inMore = more.some(([id]) => id === value);
   // A row wider than the panel scrolls: the tab showing stays in view, as when a link opens Threads.
   // Again when the row shows or changes size: hidden behind a thread open in the panel it has none.
   useLayoutEffect(() => {
@@ -91,6 +117,37 @@ function Tabs<T extends string>({ tabs, value, onChange }: { tabs: readonly (rea
           {label}
         </button>
       ))}
+      {more.length > 0 && (
+        <>
+          <button
+            ref={moreButton}
+            type="button"
+            role="tab"
+            aria-selected={inMore}
+            aria-haspopup="menu"
+            aria-expanded={menu}
+            className="bots-tab bots-tab-more"
+            onClick={() => setMenu(!menu)}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowDown") return;
+              e.preventDefault();
+              setMenu(true);
+            }}
+          >
+            More
+          </button>
+          <Popover open={menu} onClose={() => setMenu(false)} anchor={moreButton} className="bots-tab-menu" role="menu" label="More tabs" fixed="down">
+            <MoreItems
+              items={more}
+              value={value}
+              pick={(id) => {
+                setMenu(false);
+                onChange(id);
+              }}
+            />
+          </Popover>
+        </>
+      )}
     </div>
   );
 }
@@ -299,6 +356,23 @@ function useConversationThreads(conversation: Conversation): { chat: Chat; bot: 
   return useMemo(() => runningThreads({ id, messages }, chats), [chats, id, messages]);
 }
 
+/** The harness a thread runs on, then the provider behind its model: two marks, each named in its tooltip. */
+function ThreadBrands({ chat }: { chat: Chat }) {
+  const { runtime, harness, provider } = threadBrands(chat);
+  return (
+    <span className="bots-thread-brands">
+      <span className="bots-thread-brand" role="img" aria-label={harness} data-tooltip={harness}>
+        <RuntimeIcon runtime={runtime} size={14} />
+      </span>
+      {provider && (
+        <span className="bots-thread-brand" role="img" aria-label={provider.name} data-tooltip={provider.name}>
+          {provider.id === "hermes" ? <HermesMark size={14} /> : <ProviderIcon provider={provider.id} />}
+        </span>
+      )}
+    </span>
+  );
+}
+
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
 function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }[]; bots: Bot[]; open: (id: string) => void }) {
   const status = useBots((s) => s.status);
@@ -317,7 +391,7 @@ function Threads({ threads, bots, open }: { threads: { chat: Chat; bot: string }
                   <span className="bots-routine-title">{chat.title}</span>
                   <span className="bots-routine-when">{[bot?.name, chat.workspace?.projectName, activity === "waiting" && "Waiting for you"].filter(Boolean).join(" · ")}</span>
                 </span>
-                <span className="bots-thread-harness">{threadHarness(chat)}</span>
+                <ThreadBrands chat={chat} />
               </button>
             </li>
           );
@@ -562,9 +636,11 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   ["instructions", "Instructions"],
                   ["routines", "Routines"],
                   ["tasks", "Tasks"],
+                ]}
+                more={[
                   ["advanced", "Advanced"],
                   // Only while the bot has threads going from here (or the tab is showing, as they finish).
-                  ...(threads.length || tab === "threads" ? [["threads", `Threads${threads.length ? ` ${threads.length}` : ""}`] as const] : []),
+                  ...(threads.length || tab === "threads" ? [["threads", "Threads"] as const] : []),
                 ]}
                 value={tab}
                 onChange={setTab}
@@ -606,7 +682,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["members", `Members ${conversation.botIds.length}`],
                   ["goal", "Goal"],
-                  ["threads", `Threads${threads.length ? ` ${threads.length}` : ""}`],
+                  ["threads", "Threads"],
                 ]}
                 value={tab}
                 onChange={setTab}

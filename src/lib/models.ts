@@ -22,6 +22,7 @@ import stepfun from "../assets/brands/stepfun-color.svg" with { type: "text" };
 import opencode from "../assets/brands/opencode.svg" with { type: "text" };
 import openrouter from "../assets/brands/openrouter.svg" with { type: "text" };
 import cursor from "../assets/brands/cursor.svg" with { type: "text" };
+import vercel from "../assets/brands/vercel.svg" with { type: "text" };
 
 // The icons are decorative; drop their <title> so they don't produce stray hover tooltips.
 const clean = (svg: string) => svg.replace(/<title>[\s\S]*?<\/title>/, "");
@@ -69,6 +70,7 @@ const PROVIDER_ICONS: [RegExp, string][] = (<[RegExp, string][]>[
   [/^qwen|^alibaba|^dashscope/, qwen],
   [/^nvidia/, nvidia],
   [/^xiaomi|^mimo/, mimo],
+  [/^vercel/, vercel],
 ]).map(([re, svg]) => [re, clean(svg)]);
 
 export const providerSvg = (provider: string) => PROVIDER_ICONS.find(([re]) => re.test(provider.toLowerCase()))?.[1];

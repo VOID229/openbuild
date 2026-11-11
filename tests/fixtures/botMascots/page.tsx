@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 import { BotsSidebar } from "../../../src/components/bots/BotsSidebar";
 import { BotsView } from "../../../src/components/bots/BotsView";
 import { useBots } from "../../../src/lib/bots/store";
+import { usePlugins } from "../../../src/lib/plugins";
 import { useStore } from "../../../src/lib/store";
 import type { Bot, BotMessage, Conversation } from "../../../src/lib/bots/types";
 
@@ -50,6 +51,8 @@ useBots.setState({
   connected: true,
   ensureSeeded: () => {},
 });
+// Provider marks (beside a thread in the details) wait for the plugins' icons; there are none here.
+await usePlugins.getState().refresh();
 Object.assign(window, { bots: useBots, store: useStore });
 createRoot(document.getElementById("root")!).render(
   <>

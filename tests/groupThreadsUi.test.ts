@@ -32,6 +32,8 @@ async function shoot(page: Page, name: string) {
 }
 
 const TAB = `[...document.querySelectorAll('.bots-details .bots-tab')].find((t) => t.textContent.startsWith('Threads'))`;
+/** A bot's More tab, which holds its Advanced and Threads tabs. */
+const MORE = `document.querySelector('.bots-details .bots-tab-more')`;
 
 /** The group chat open in OpenBots with its details showing the Threads tab. */
 async function open(width = 1280, height = 860, theme = "dark") {
@@ -87,7 +89,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     const page = await open();
     await page.until(`document.querySelectorAll('.bots-details .bots-cards .bots-member').length === 2`);
     const tabs = await page.eval<string[]>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`);
-    expect(tabs).toEqual(["Members 2", "Goal", "Threads 2"]);
+    expect(tabs).toEqual(["Members 2", "Goal", "Threads"]);
     const listed = await rows(page);
     expect(listed.map((r) => [r.title, r.sub])).toEqual([
       ["Fix the flaky sidebar test", "manager · openbuild"],
@@ -109,7 +111,6 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     await serve(page, `[...serverChats, thread("t-new", "Write the release notes", "tracer", "dev", "openbuild")]`);
     await page.until(`document.querySelectorAll('.bots-details .bots-cards .bots-member').length === 3`);
     expect((await rows(page)).map((r) => r.title)).toContain("Write the release notes");
-    expect(await page.eval<unknown>(`${TAB}.textContent`)).toBe("Threads 3");
     // One finishes.
     await serve(page, `serverChats.map((c) => c.id === "t-flaky" ? thread(c.id, c.title, "manager", "dev", "openbuild", true) : c)`);
     await page.until(`document.querySelectorAll('.bots-details .bots-cards .bots-member').length === 2`);
@@ -396,11 +397,32 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     await page.eval(`bots.getState().setDetailsOpen(true)`);
     await page.until("!!document.querySelector('.bots-details-open')");
     await page.finish();
-    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`)).toEqual(["Instructions", "Routines", "Tasks", "Advanced", "Threads 1"]);
-    // Wider than the panel, the row scrolls rather than the page, its line under every tab.
-    const row = `document.querySelector('.bots-details .bots-tabs')`;
-    expect(await page.eval<unknown>(`getComputedStyle(${row}).overflowX`)).toBe("auto");
+    // The bot's name renames it on a click, with no tooltip over it.
+    expect(await page.eval<unknown>(`document.querySelector('.bots-details-name').hasAttribute('data-tooltip')`)).toBe(false);
+    await page.click(".bots-details .bots-details-name");
+    await page.until("document.activeElement?.classList.contains('bots-details-name-input')");
+    await page.eval(`document.activeElement.blur()`);
+    await page.until("!!document.querySelector('button.bots-details-name')");
+    // Three tabs and More, which holds Advanced and, while it has one running, Threads.
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`)).toEqual(["Instructions", "Routines", "Tasks", "More"]);
+    // The row shows whole, nothing scrolled out of it, and the page doesn't scroll sideways.
+    const tabRow = `document.querySelector('.bots-details .bots-tabs')`;
+    expect(await page.eval<unknown>(`${tabRow}.scrollWidth <= ${tabRow}.clientWidth`)).toBe(true);
     expect(await page.eval<unknown>("document.documentElement.scrollWidth - innerWidth")).toBe(0);
+    expect(await page.eval<unknown>(`${MORE}.getAttribute('aria-selected')`)).toBe("false");
+    await page.click(".bots-details .bots-tab-more");
+    await page.until(`!!document.querySelector('.bots-tab-menu[data-state="open"]')`);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-tab-menu .menu-item')].map((t) => t.textContent)`)).toEqual(["Advanced", "Threads"]);
+    // It floats over the page, in the window, not inside the panel where the panel could cut it off.
+    expect(await page.eval<unknown>(`(() => { const m = document.querySelector('.bots-tab-menu'); const r = m.getBoundingClientRect(); return !m.closest(".bots-details") && getComputedStyle(m).position === "fixed" && r.left >= 0 && r.right <= innerWidth && r.width < 180; })()`)).toBe(true);
+    await shoot(page, "bot-more-menu");
+    await page.click(".bots-tab-menu .menu-item:nth-child(2)");
+    await page.until(`!document.querySelector('.bots-tab-menu')`);
+    // A tab inside More shows as More being the open one.
+    expect(await page.eval<unknown>(`${MORE}.getAttribute('aria-selected')`)).toBe("true");
+    expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
+    await page.click(".bots-details .bots-tab:first-child");
+    await page.until(`${MORE}.getAttribute('aria-selected') === 'false'`);
     await shoot(page, "bot-threads-tab");
     await follow(page, "Rename the config loader");
     await page.until(`!!document.querySelector('.bots-details-threadpane .chat')`);
@@ -409,18 +431,20 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
     expect(await page.eval<unknown>("store.getState().botsThread")).toBe(false);
     await page.click('.bots-details-threadpane [aria-label="Back to threads"]');
     await page.until("!document.querySelector('.bots-details-threadpane')");
-    expect(await page.eval<unknown>(`${TAB}.getAttribute('aria-selected')`)).toBe("true");
+    expect(await page.eval<unknown>(`${MORE}.getAttribute('aria-selected')`)).toBe("true");
     expect((await rows(page)).map((r) => r.title)).toEqual(["Rename the config loader"]);
-    // Scrolled along to the tab it opened on, which shows whole.
-    expect(await page.eval<unknown>(`(() => { const r = ${row}.getBoundingClientRect(); const t = ${TAB}.getBoundingClientRect(); return ${row}.scrollLeft > 0 && t.left >= r.left - 1 && t.right <= r.right + 1; })()`)).toBe(true);
-    await shoot(page, "bot-threads-tab-scrolled");
+    await shoot(page, "bot-threads-tab-open");
 
-    // Once it finishes the tab stays while it's showing, and goes with the next chat.
+    // Once it finishes Threads stays while it's showing, and goes with the next chat.
     await serve(page, `serverChats.map((c) => c.id === "t-direct" ? { ...thread(c.id, c.title, "manager", "dm-manager", "openbuild", true), pullRequest: c.pullRequest } : c)`);
-    await page.until(`${TAB}.textContent === "Threads"`);
+    await page.until(`!document.querySelector('.bots-details .bots-cards')`);
+    expect(await page.eval<unknown>(`${MORE}.getAttribute('aria-selected')`)).toBe("true");
     await page.eval(`bots.getState().select("dm-tracer")`);
     await page.eval(`bots.getState().select("dm-manager")`);
-    await page.until(`!${TAB}`);
+    await page.until(`${MORE}.getAttribute('aria-selected') === 'false'`);
+    await page.click(".bots-details .bots-tab-more");
+    await page.until(`!!document.querySelector('.bots-tab-menu[data-state="open"]')`);
+    expect(await page.eval<unknown>(`[...document.querySelectorAll('.bots-tab-menu .menu-item')].map((t) => t.textContent)`)).toEqual(["Advanced"]);
   }, 60_000);
 
   test("on a phone, a running thread opens on the details screen", async () => {

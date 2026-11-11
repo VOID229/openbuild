@@ -1,13 +1,14 @@
 // The mascots beside a group's coding threads (its details panel's Threads tab), and the "zzz" over
 // dozing ones, in a real Chrome: a mascot sleeps unless its bot is acting on that very thread, when it
-// fidgets visibly even at 28px; each row names its harness and account; a finished thread leaves the
+// fidgets visibly even at 28px; each row shows its harness and its model's provider; a finished thread leaves the
 // list; and dozing bots and huddles in the sidebars
 // show a small zzz that still reads there, still while motion is reduced, and none beside the chat.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { BotAvatar, BotHuddle } from "../src/components/bots/BotAvatar";
-import { actingOn, threadActivity, threadHarness, threadMascot } from "../src/lib/bots/activity";
+import { actingOn, threadActivity, threadBrands, threadMascot } from "../src/lib/bots/activity";
+import type { PlanId } from "../shared/types";
 import type { Chat, Message } from "../src/lib/types";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -42,14 +43,25 @@ describe("a thread's mascot", () => {
     expect(threadMascot(false)).toEqual({ busy: false, asleep: true });
   });
 
-  test("names the thread's harness and its account or provider", () => {
+  test("names the thread's harness, with its account, and the provider behind its model", () => {
     const account = (name: string, runtime: "codex" | "claude") => ({ id: name, name, runtime, configDir: "/x" });
-    expect(threadHarness({ runtime: "codex", runtimeAccount: account("codex2", "codex"), messages: [] })).toBe("Codex · codex2");
-    expect(threadHarness({ runtime: "claude", runtimeAccount: account("claude2", "claude"), messages: [] })).toBe("Claude · claude2");
-    expect(threadHarness({ runtime: "claude", messages: [] })).toBe("Claude");
-    const answered = { ...reply("done"), model: { plan: "pi" as const, id: "anthropic/claude-opus", name: "Opus" } };
-    expect(threadHarness({ messages: [answered] })).toBe("Pi · Anthropic");
-    expect(threadHarness({ messages: [] })).toBe("Pi");
+    const answered = (plan: PlanId, id: string) => ({ ...reply("done"), model: { plan, id, name: id } });
+    expect(threadBrands({ runtime: "codex", runtimeAccount: account("codex2", "codex"), messages: [] })).toEqual({ runtime: "codex", harness: "Codex · codex2", provider: { id: "openai", name: "OpenAI" } });
+    expect(threadBrands({ runtime: "claude", runtimeAccount: account("claude2", "claude"), messages: [] })).toEqual({ runtime: "claude", harness: "Claude Code · claude2", provider: { id: "anthropic", name: "Anthropic" } });
+    // Both marks even when one company makes both.
+    expect(threadBrands({ runtime: "claude", messages: [answered("claude", "claude/opus")] })).toEqual({ runtime: "claude", harness: "Claude Code", provider: { id: "anthropic", name: "Anthropic" } });
+    expect(threadBrands({ runtime: "codex", messages: [answered("codex", "codex2/gpt-6.1-sol")] }).provider).toEqual({ id: "openai", name: "OpenAI" });
+    // Pi: the provider in the model's id.
+    expect(threadBrands({ messages: [answered("pi", "openrouter/moonshotai/kimi-k3")] })).toEqual({ runtime: "pi", harness: "Pi", provider: { id: "openrouter", name: "OpenRouter" } });
+    expect(threadBrands({ runtime: "durable", messages: [answered("pi", "anthropic/claude-opus")] })).toEqual({ runtime: "durable", harness: "Durable", provider: { id: "anthropic", name: "Anthropic" } });
+    expect(threadBrands({ messages: [answered("zen", "kimi-k3")] }).provider?.id).toBe("opencode");
+    // Not answered yet, a Pi thread's provider isn't known.
+    expect(threadBrands({ messages: [] })).toEqual({ runtime: "pi", harness: "Pi", provider: undefined });
+    // OpenCode, fx and Hermes name the provider after the harness; without one, the harness's own serves it.
+    expect(threadBrands({ runtime: "opencode", messages: [answered("opencode", "opencode/anthropic/claude-opus")] }).provider?.id).toBe("anthropic");
+    expect(threadBrands({ runtime: "fx", messages: [answered("fx", "fx/gpt-6")] }).provider?.id).toBe("vercel");
+    expect(threadBrands({ runtime: "grok", messages: [] }).provider).toEqual({ id: "xai", name: "xAI" });
+    expect(threadBrands({ runtime: "cursor", messages: [answered("cursor", "cursor/composer-2")] }).provider).toEqual({ id: "cursor", name: "Cursor" });
   });
 });
 
@@ -83,7 +95,7 @@ const READY = "document.querySelectorAll('.bots-tile').length >= 5 && !!document
 /** Coding threads Moss and Boo started from the "OpenBuild Dev" group: one at work, one asking the user, one done. */
 const THREADS = `[
   { id: "t-work", title: "Fix the flaky test", runtime: "codex", runtimeAccount: { id: "c2", name: "codex2", runtime: "codex", configDir: "/x" }, startedBy: { conversation: "dev", bot: "moss" }, workspace: { projectName: "openbuild" }, messages: [{ id: "t1", role: "assistant", content: "", status: "streaming", createdAt: 1 }] },
-  { id: "t-ask", title: "Migrate the database", startedBy: { conversation: "dev", bot: "boo" }, messages: [{ id: "t2", role: "assistant", content: "", status: "streaming", createdAt: 1, parts: [{ type: "ask", id: "q", method: "confirm", title: "Run it?" }] }] },
+  { id: "t-ask", title: "Migrate the database", startedBy: { conversation: "dev", bot: "boo" }, messages: [{ id: "t2", role: "assistant", content: "", status: "streaming", createdAt: 1, model: { plan: "pi", id: "openrouter/moonshotai/kimi-k3", name: "Kimi K3" }, parts: [{ type: "ask", id: "q", method: "confirm", title: "Run it?" }] }] },
   { id: "t-done", title: "Bump the version", startedBy: { conversation: "dev", bot: "pill" }, messages: [{ id: "t3", role: "assistant", content: "Done", status: "done", createdAt: 1 }] },
 ]`;
 
@@ -102,11 +114,18 @@ describe.skipIf(!browser)("mascots in the Threads tab", () => {
     const page = await Page.open(chrome!.ws, server!.url.href, 1180, 760, READY);
     await openThreads(page);
     const rows = await page.eval<string[]>(`[...document.querySelectorAll('.bots-details .bots-member')].map((r) => r.textContent)`);
-    expect(rows).toEqual(["Fix the flaky testMoss · openbuildCodex · codex2", "Migrate the databaseBoo · Waiting for youPi"]);
-    // The harness sits at the row's right edge, on one line.
-    const harness = await page.eval<{ right: number; row: number; height: number }>(`(() => { const h = document.querySelector('.bots-details .bots-thread-harness'); const r = h.getBoundingClientRect(); return { right: r.right, row: h.parentElement.getBoundingClientRect().right, height: r.height }; })()`);
-    expect(harness.row - harness.right).toBeLessThan(16);
-    expect(harness.height).toBeLessThan(20);
+    expect(rows).toEqual(["Fix the flaky testMoss · openbuild", "Migrate the databaseBoo · Waiting for you"]);
+    // At each row's right, the harness's mark and then the provider's, each named, and drawn.
+    const marks = await page.eval<{ names: string[]; drawn: boolean }[]>(`[...document.querySelectorAll('.bots-details .bots-thread-brands')].map((b) => ({ names: [...b.children].map((m) => m.getAttribute('aria-label') + '|' + m.dataset.tooltip), drawn: [...b.children].every((m) => !!m.querySelector('svg, img')) }))`);
+    expect(marks).toEqual([
+      { names: ["Codex · codex2|Codex · codex2", "OpenAI|OpenAI"], drawn: true },
+      { names: ["Pi|Pi", "OpenRouter|OpenRouter"], drawn: true },
+    ]);
+    // They sit at the row's right edge, small, side by side.
+    const brands = await page.eval<{ right: number; row: number; height: number; width: number }>(`(() => { const h = document.querySelector('.bots-details .bots-thread-brands'); const r = h.getBoundingClientRect(); return { right: r.right, row: h.parentElement.getBoundingClientRect().right, height: r.height, width: r.width }; })()`);
+    expect(brands.row - brands.right).toBeLessThan(16);
+    expect(brands.height).toBeLessThan(20);
+    expect(brands.width).toBeLessThan(44);
     const state = (title: string) => page.eval<object>(`(() => { const b = ${rowBot(title)}; return { busy: 'busy' in b.dataset, asleep: 'asleep' in b.dataset }; })()`);
     // Moss is at work in the group, but not on its thread: both rows doze, though both threads are running.
     expect(await state("Fix the flaky test")).toEqual({ busy: false, asleep: true });
