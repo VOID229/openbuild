@@ -91,7 +91,7 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-bubble: 18px;
-  --radius-composer: 24px;
+  --radius-composer: 30px;
   --radius-pill: 999px;
 
   /* Segmented controls: a quiet track, the chosen option lifted onto it. */
@@ -2045,7 +2045,7 @@ select.input {
 }
 
 /* Grok-like: a flat box on the pane's own colour, drawn by a faint hairline alone, the text on top
-   and a row of quiet controls under it. Measured off Grok's home box: 24px corners (fitted to its curve), one line of
+   and a row of quiet controls under it. Measured off Grok's home box: 30px corners, one line of
    15px text 14px from the top and 16px in, 16px down to a row of 36px controls 12px off the edge,
    a #262626 hairline when focused and a dim #4d4d4d placeholder. */
 .composer {
