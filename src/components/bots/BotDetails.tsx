@@ -1,9 +1,9 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
-// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal (with its tasks)
-// and working threads; who's in a side chat.
+// model, computer and OpenBuild permissions under an Advanced tab; a group's members, goal (with its tasks);
+// the working threads either started from its chat; who's in a side chat.
 import { ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { actingOn, threadActivity, threadHarness, threadMascot } from "../../lib/bots/activity";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { actingOn, runningThreads, threadActivity, threadHarness, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
@@ -67,8 +67,25 @@ function InlineName({ value, onChange }: { value: string; onChange: (v: string) 
 }
 
 function Tabs<T extends string>({ tabs, value, onChange }: { tabs: readonly (readonly [T, string])[]; value: T; onChange: (t: T) => void }) {
+  const row = useRef<HTMLDivElement>(null);
+  // A row wider than the panel scrolls: the tab showing stays in view, as when a link opens Threads.
+  // Again when the row shows or changes size: hidden behind a thread open in the panel it has none.
+  useLayoutEffect(() => {
+    const el = row.current;
+    if (!el) return;
+    const reveal = () => {
+      const tab = el.querySelector<HTMLElement>('[aria-selected="true"]');
+      if (!tab || el.scrollWidth <= el.clientWidth) return;
+      if (tab.offsetLeft < el.scrollLeft) el.scrollLeft = tab.offsetLeft;
+      else if (tab.offsetLeft + tab.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = tab.offsetLeft + tab.offsetWidth - el.clientWidth;
+    };
+    reveal();
+    const seen = new ResizeObserver(reveal);
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, [value, tabs.length]);
   return (
-    <div className="bots-tabs" role="tablist">
+    <div ref={row} className="bots-tabs" role="tablist">
       {tabs.map(([id, label]) => (
         <button key={id} type="button" role="tab" aria-selected={value === id} className="bots-tab" onClick={() => onChange(id)}>
           {label}
@@ -272,20 +289,14 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
 }
 
 /**
- * The coding threads this group's bots started from it that are working now, with the bot that
- * started each. Threads started before chats recorded it are found by the group's "Started a thread"
- * activity, while it's still loaded.
+ * The coding threads this chat's bots started from it that are working now, with the bot that started
+ * each (runningThreads). Threads started before chats recorded it are found by the chat's "Started a
+ * thread" activity, while it's still loaded.
  */
-function useGroupThreads(conversation: Conversation): { chat: Chat; bot: string }[] {
+function useConversationThreads(conversation: Conversation): { chat: Chat; bot: string }[] {
   const chats = useStore((s) => s.chats);
-  return useMemo(() => {
-    const started = new Map<string, string>();
-    for (const m of conversation.messages) if (m.event?.kind === "thread" && m.event.text === "Started a thread" && m.event.threadId) started.set(m.event.threadId, m.author);
-    return chats.flatMap((chat) => {
-      const bot = chat.startedBy ? (chat.startedBy.conversation === conversation.id ? chat.startedBy.bot : undefined) : started.get(chat.id);
-      return bot && threadActivity(chat) !== "idle" ? [{ chat, bot }] : [];
-    });
-  }, [chats, conversation.id, conversation.messages]);
+  const { id, messages } = conversation;
+  return useMemo(() => runningThreads({ id, messages }, chats), [chats, id, messages]);
 }
 
 /** A row opens its thread inside this panel (ThreadPane), with Back returning to this list. */
@@ -442,7 +453,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
   const bot = conversation.kind === "direct" ? bots.find((b) => b.id === conversation.botIds[0]) : undefined;
   const [tab, setTab] = useState<"instructions" | "routines" | "tasks" | "advanced" | "members" | "goal" | "threads">(conversation.kind === "direct" ? "instructions" : "members");
   const [editingLook, setEditingLook] = useState(false);
-  const threads = useGroupThreads(conversation);
+  const threads = useConversationThreads(conversation);
   const st = useBots.getState();
   // Only when the conversation changes: effects run again when OpenBots comes back from a thread
   // opened over it (App's Activity), and that should find the tab it was left on.
@@ -452,22 +463,26 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setTab(conversation.kind === "direct" ? "instructions" : "members");
   }
   useEffect(() => setEditingLook(false), [conversation.id]);
-  // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
-  // list is; a routine line in the chat opens the bot's Routines, from its own chat (EventLine).
-  const asked = useBots((s) => s.detailsTab);
-  const [askedKey, setAskedKey] = useState(asked?.key);
-  if (asked && asked.key !== askedKey) {
-    setAskedKey(asked.key);
-    if (asked.tab === "routines") {
-      if (conversation.kind === "direct") setTab("routines");
-    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
-  }
   // The thread open inside the panel. Kept while the panel is closed and opened again, dropped for another chat.
   const [threadId, setThreadId] = useState<string>();
   const [threadFor, setThreadFor] = useState(conversation.id);
   if (threadFor !== conversation.id) {
     setThreadFor(conversation.id);
     setThreadId(undefined);
+  }
+  // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
+  // list is; a routine line in the chat opens the bot's Routines, from its own chat (EventLine); a link
+  // in the chat to a thread still running opens that thread, under Threads.
+  const asked = useBots((s) => s.detailsTab);
+  const [askedKey, setAskedKey] = useState(asked?.key);
+  if (asked && asked.key !== askedKey) {
+    setAskedKey(asked.key);
+    if (asked.tab === "threads") {
+      setTab("threads");
+      setThreadId(asked.thread);
+    } else if (asked.tab === "routines") {
+      if (conversation.kind === "direct") setTab("routines");
+    } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
   const panel = useRef<HTMLElement>(null);
@@ -548,6 +563,8 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                   ["routines", "Routines"],
                   ["tasks", "Tasks"],
                   ["advanced", "Advanced"],
+                  // Only while the bot has threads going from here (or the tab is showing, as they finish).
+                  ...(threads.length || tab === "threads" ? [["threads", `Threads${threads.length ? ` ${threads.length}` : ""}`] as const] : []),
                 ]}
                 value={tab}
                 onChange={setTab}
@@ -570,6 +587,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 </div>
               )}
               {tab === "advanced" && <BotAdvanced bot={bot} />}
+              {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               <div className="bots-details-foot">
                 <button
                   type="button"

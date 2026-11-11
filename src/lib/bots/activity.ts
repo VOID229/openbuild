@@ -68,6 +68,40 @@ export function threadActivity(chat: Pick<Chat, "messages">): ThreadActivity {
   return last.parts?.some((p) => p.type === "ask" && p.answer === undefined) ? "waiting" : "working";
 }
 
+/**
+ * The bot that started this thread from this conversation, if one did: the thread says so itself
+ * (`startedBy`), and older ones by the conversation's "Started a thread" line.
+ */
+export function threadStarter(conversation: Pick<Conversation, "id" | "messages">, chat: Pick<Chat, "id" | "startedBy">): string | undefined {
+  if (chat.startedBy) return chat.startedBy.conversation === conversation.id ? chat.startedBy.bot : undefined;
+  return conversation.messages.find((m) => m.event?.kind === "thread" && m.event.text === "Started a thread" && m.event.threadId === chat.id)?.author;
+}
+
+/**
+ * What the conversation's details list under Threads: the threads its bots started from it, while
+ * they're still going (waiting for an answer counts). A finished one drops off.
+ */
+export function runningThreads(conversation: Pick<Conversation, "id" | "messages">, chats: Chat[]): { chat: Chat; bot: string }[] {
+  const started = new Map<string, string>();
+  for (const m of conversation.messages) if (m.event?.kind === "thread" && m.event.text === "Started a thread" && m.event.threadId) started.set(m.event.threadId, m.author);
+  return chats.flatMap((chat) => {
+    const bot = chat.startedBy ? (chat.startedBy.conversation === conversation.id ? chat.startedBy.bot : undefined) : started.get(chat.id);
+    return bot && threadActivity(chat) !== "idle" ? [{ chat, bot }] : [];
+  });
+}
+
+/**
+ * Where a link in a conversation to one of its threads opens it: in the details' Threads tab while it's
+ * listed there, else over OpenBots. A thread that hasn't reached this tab yet but that a bot here just
+ * started (its "Started a thread" line came first) is still running, so it goes to the panel too.
+ */
+export function threadOpensIn(conversation: Pick<Conversation, "id" | "kind" | "messages">, chats: Chat[], threadId: string): "details" | "over" {
+  if (conversation.kind === "side") return "over";
+  const chat = chats.find((c) => c.id === threadId);
+  if (!chat) return threadStarter(conversation, { id: threadId }) ? "details" : "over";
+  return threadStarter(conversation, chat) && threadActivity(chat) !== "idle" ? "details" : "over";
+}
+
 /** Whether the bot is acting on this thread right now: in an openbuild call that names it (see BotStatus.thread). */
 export function actingOn(st: BotStatus | undefined, threadId: string): boolean {
   return st?.state === "working" && !!st.thread && threadId.startsWith(st.thread);
