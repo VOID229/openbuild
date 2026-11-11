@@ -36,7 +36,7 @@ import { preloadRuntimeStatuses } from "./lib/runtimeStatus";
 import { isHosted } from "./lib/runtime";
 import { composerDevice, ensureSelection, useStore } from "./lib/store";
 import { startPaneGestures } from "./lib/gestures";
-import { cx, OPEN_SEARCH, useMediaQuery } from "./lib/ui";
+import { cx, OPEN_SEARCH, useMediaQuery, useRoomTaken } from "./lib/ui";
 import { readRoute, startRouting } from "./lib/routes";
 import { initPlugins, PluginSlot } from "./lib/plugins";
 import { SHORTCUTS, SHORTCUT_EVENT, eventMatchesBinding, isShortcutRecording, shortcutBinding, type ShortcutEventDetail, type ShortcutId } from "./lib/shortcuts";
@@ -216,7 +216,11 @@ function Main() {
   const treeWidth = usePanel((s) => s.treeWidth);
   // How far the top-right tools reach over the thread (past the panel and tree they sit above), so
   // the thread can keep out from under them.
-  const toolsOver = Math.max(0, toolsWidth - (panelOpen ? panelWidth : 0) - (treeOpen && folder?.cwd ? treeWidth : 0));
+  // Counted until a closing panel or tree has actually given its room back, so the thread moves once.
+  // (An expanded panel gives its room back at once: it has no width of its own to hold.)
+  const panelRoom = useRoomTaken(panelOpen && !expanded);
+  const treeRoom = useRoomTaken(treeOpen);
+  const toolsOver = Math.max(0, toolsWidth - (panelRoom ? panelWidth : 0) - (treeRoom && folder?.cwd ? treeWidth : 0));
   // The side panel and file tree follow the open thread's folder (or, on the home screen, the project
   // the composer is set to), on the device it's on.
   const projectId = useStore((s) => s.settings.workspace.projectId);

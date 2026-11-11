@@ -225,6 +225,24 @@ export function useMediaQuery(query: string) {
   return matches;
 }
 
+/**
+ * The side panel's and file tree's room, which stays taken while they fade out (styles.css: a
+ * `--fast` delay on their width) and goes back in one step after. True as soon as `open` is, and
+ * false only once that room is back, so what keeps clear of them (the thread, the top-right tools)
+ * moves once, with them, instead of a frame ahead.
+ */
+export function useRoomTaken(open: boolean) {
+  const [taken, setTaken] = useState(open);
+  useEffect(() => {
+    if (open) return setTaken(true);
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return setTaken(false);
+    const fast = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--fast")) || 120;
+    const timer = setTimeout(() => setTaken(false), fast);
+    return () => clearTimeout(timer);
+  }, [open]);
+  return open || taken;
+}
+
 /** Copies `text`, and says whether it made it to the clipboard. */
 export async function copyText(text: string): Promise<boolean> {
   try {
