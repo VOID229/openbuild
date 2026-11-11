@@ -916,7 +916,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           {...dictation.fieldProps}
           className="composer-input"
           value={text}
-          rows={variant === "home" ? 2 : 1}
+          rows={1}
           placeholder={editing ? "Edit queued message" : "Describe a task or ask a question"}
           aria-label="Message"
           onChange={(e) => {

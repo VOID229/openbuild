@@ -2639,7 +2639,7 @@
 }
 
 /* Like the thread composer: flat on the pane, drawn by a faint hairline alone, its tools in
-   monochrome on either side of the text. One line of it reads as a pill. */
+   monochrome on either side of the text. */
 .bots-composer {
   position: relative;
   max-width: var(--bm-w);
@@ -2694,7 +2694,7 @@
 }
 
 .bots-composer-input::placeholder {
-  color: var(--text-3);
+  color: var(--composer-placeholder);
 }
 
 /* The textarea's own text is invisible; the backdrop under it draws the draft, with @mentions as tags. */

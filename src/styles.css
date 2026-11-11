@@ -83,14 +83,16 @@
   --shadow-lg: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.08), 0 24px 48px -12px rgba(0, 0, 0, 0.16);
   --composer-shadow: 0 0 0 1px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.03), 0 8px 24px -6px rgba(0, 0, 0, 0.08);
   --composer-border: rgba(0, 0, 0, 0.1);
-  --composer-border-focus: rgba(0, 0, 0, 0.18);
+  --composer-border-focus: rgba(0, 0, 0, 0.13);
+  --composer-placeholder: #a8a8a8;
 
   --radius-sm: 6px;
   --radius: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
   --radius-bubble: 18px;
-  --radius-composer: 28px;
+  /* Composers: 24px round corners, or Grok's 43.2px smoothed (squircle) corners where the browser can draw them. */
+  --radius-composer: 24px;
   --radius-pill: 999px;
 
   /* Segmented controls: a quiet track, the chosen option lifted onto it. */
@@ -168,8 +170,9 @@
   --shadow-md: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 4px 12px rgba(0, 0, 0, 0.5);
   --shadow-lg: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 32px rgba(0, 0, 0, 0.7);
   --composer-shadow: 0 0 0 1px rgba(255, 255, 255, 0.02), 0 8px 24px rgba(0, 0, 0, 0.5);
-  --composer-border: rgba(255, 255, 255, 0.12);
-  --composer-border-focus: rgba(255, 255, 255, 0.2);
+  --composer-border: rgba(255, 255, 255, 0.15);
+  --composer-border-focus: rgba(255, 255, 255, 0.15);
+  --composer-placeholder: #4d4d4d;
   color-scheme: dark;
 }
 
@@ -2114,18 +2117,32 @@ select.input {
 }
 
 /* Grok-like: a flat box on the pane's own colour, drawn by a faint hairline alone, the text on top
-   and a row of quiet controls under it. Measured off Grok: 28px corners, 16px in from the edge,
-   a 15px line and 36px controls. */
+   and a row of quiet controls under it. Grok's home box, from its computed styles: 43.2px squircle
+   corners, 104px tall, a 15% white hairline on black. Inside: one line of 15px text 14px from the top
+   and 16px in, 16px down to a row of 36px controls 12px off the edge,
+   and a dim #4d4d4d placeholder. */
 .composer {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px 12px 12px 18px;
+  gap: 16px;
+  padding: 14px 12px 12px 16px;
   border-radius: var(--radius-composer);
   border: 1px solid var(--composer-border);
   background: var(--surface);
   cursor: text;
   transition: border-color var(--fast) var(--ease);
+}
+
+/* Smoothed corners ease into the edges instead of meeting them at a point, so they can run larger. */
+@supports (corner-shape: squircle) {
+  :root {
+    --radius-composer: 43.2px;
+  }
+
+  .composer,
+  .bots-composer {
+    corner-shape: squircle;
+  }
 }
 
 .composer:focus-within {
@@ -2152,19 +2169,15 @@ select.input {
   color: var(--text);
 }
 
-.composer-home .composer-input {
-  min-height: 48px;
-}
-
 .composer-input::placeholder {
-  color: var(--text-3);
+  color: var(--composer-placeholder);
 }
 
 .composer-bar {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-left: -6px;
+  margin-left: -2px;
   cursor: default;
 }
 
