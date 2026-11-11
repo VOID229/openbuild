@@ -7,6 +7,7 @@ import { createRoot } from "react-dom/client";
 import { BotsSidebar } from "../../../src/components/bots/BotsSidebar";
 import { useBots } from "../../../src/lib/bots/store";
 import { useStore } from "../../../src/lib/store";
+import { config } from "../../../src/lib/runtime";
 import type { Bot, Conversation } from "../../../src/lib/bots/types";
 
 const bot = (id: string, name: string, shape: string, color: string): Bot => ({ id, name, look: { shape, color }, instructions: "", memory: [], routines: [], createdAt: 1 });
@@ -33,4 +34,5 @@ useBots.setState({
   ensureSeeded: () => {},
 });
 Object.assign(window, { bots: useBots, store: useStore });
-createRoot(document.getElementById("root")!).render(<BotsSidebar />);
+// As the app does, render once /api/config has said which release this is (the footer shows it).
+void config.then(() => createRoot(document.getElementById("root")!).render(<BotsSidebar />));

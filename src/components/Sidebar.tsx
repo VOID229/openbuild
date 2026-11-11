@@ -1,6 +1,6 @@
 import { historyAtHand, loadChatHistory, prefetchHistory } from "../lib/db";
 import { appRelease, isHosted } from "../lib/runtime";
-import { releaseLabel } from "../../shared/version";
+import { channelName, releaseLabel } from "../../shared/version";
 import { AlarmClock, AlarmClockCheck, ArrowLeft, BatteryWarning, Bot, CalendarDays, ChartNoAxesColumn, Check, ChevronDown, ChevronRight, Clock, ClockArrowUp, Copy, Ellipsis, FileText, Fingerprint, GitBranch, ExternalLink, FolderX, Layers, Minus, MessageCircle, Pencil, Pin, PinOff, Plus, RefreshCw, RotateCcw, Search, SquareArrowUp, SquareCheck, SquarePen, Trash, X } from "lucide-react";
 import { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -1156,10 +1156,40 @@ export function BotsToggle() {
   );
 }
 
-/** Which OpenBuild this is, small in either sidebar's footer: "Nightly 0.1.9" or "Stable 0.1.9", or nothing when nothing names one. */
+/**
+ * Which OpenBuild this is, small in either sidebar's footer: just "Nightly" or "Stable", with the version
+ * opening out beside it on hover or keyboard focus (styles.css, .release-version), as the bot's name does
+ * in OpenBots' header. Without hover a tap shows it, and another tap or one elsewhere puts it away. Its
+ * name is always the whole label. Nothing when nothing names a release.
+ */
 export function ReleaseLabel() {
   const release = appRelease();
-  return release ? <span className="release-label">{releaseLabel(release)}</span> : null;
+  const [shown, setShown] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!shown) return;
+    const away = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && setShown(false);
+    document.addEventListener("pointerdown", away, true);
+    return () => document.removeEventListener("pointerdown", away, true);
+  }, [shown]);
+  if (!release) return null;
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={cx("release-label", shown && "release-label-shown")}
+      aria-label={releaseLabel(release)}
+      onClick={() => setShown((s) => !s)}
+      onBlur={() => setShown(false)}
+    >
+      <span aria-hidden>{channelName(release.channel)}</span>
+      <span className="release-version" aria-hidden>
+        <span>
+          <span>{release.version}</span>
+        </span>
+      </span>
+    </button>
+  );
 }
 
 /** The side the switch last showed lit, whichever sidebar showed it: the next one slides on from there. */

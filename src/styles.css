@@ -1914,16 +1914,108 @@ select.input {
   margin-right: auto;
 }
 
-/* The running release ("Nightly 0.1.9"), beside the footer's buttons: there to be found, not to be read. */
+/* The running release, beside the footer's buttons: there to be found, not to be read. At rest it's only
+   the channel ("Nightly"); hovered, focused from the keyboard or tapped, the version opens out after it. */
 .release-label {
+  display: inline-flex;
   flex: none;
-  margin: 0 4px 0 8px;
+  align-items: baseline;
+  margin: 0 0 0 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
+  line-height: 16px;
   white-space: nowrap;
   color: var(--text-3);
-  user-select: text;
+  transition: color 260ms var(--ease-out);
+}
+
+/* The version opens out as the bot's name does in OpenBots' header (bots.css, .bots-head-reveal): its
+   window widens (0fr → 1fr) over the version at its full width, so it's uncovered whole, never squeezed,
+   while the version fades up, sharpens and settles in just behind the widening. Going, it fades first
+   and the window closes after it. */
+.release-version {
+  display: inline-grid;
+  grid-template-columns: 0fr;
+  min-width: 0;
+  transition: grid-template-columns 320ms var(--sidebar-ease) 60ms;
+}
+
+.release-version > span {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.release-version > span > span {
+  display: block;
+  width: max-content;
+  padding-left: 0.32em;
+  opacity: 0;
+  translate: -6px 0;
+  filter: blur(2px);
+  transition:
+    opacity 140ms var(--ease-out),
+    translate 200ms var(--ease-out),
+    filter 140ms var(--ease-out);
+}
+
+.release-label:focus-visible,
+.release-label-shown {
+  color: var(--text-2);
+}
+
+.release-label:focus-visible .release-version,
+.release-label-shown .release-version {
+  grid-template-columns: 1fr;
+  transition: grid-template-columns 380ms var(--sidebar-ease);
+}
+
+.release-label:focus-visible .release-version > span > span,
+.release-label-shown .release-version > span > span {
+  opacity: 1;
+  translate: 0 0;
+  filter: blur(0);
+  transition:
+    opacity 260ms var(--ease-out) 110ms,
+    translate 380ms var(--sidebar-ease) 60ms,
+    filter 300ms var(--ease-out) 90ms;
+}
+
+/* Not on a touch screen, where a tap would leave it stuck open: there a tap shows it (.release-label-shown). */
+@media not all and (hover: none) and (pointer: coarse) {
+  .release-label:hover {
+    color: var(--text-2);
+  }
+
+  .release-label:hover .release-version {
+    grid-template-columns: 1fr;
+    transition: grid-template-columns 380ms var(--sidebar-ease);
+  }
+
+  .release-label:hover .release-version > span > span {
+    opacity: 1;
+    translate: 0 0;
+    filter: blur(0);
+    transition:
+      opacity 260ms var(--ease-out) 110ms,
+      translate 380ms var(--sidebar-ease) 60ms,
+      filter 300ms var(--ease-out) 90ms;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .release-label,
+  .release-version,
+  .release-version > span > span {
+    transition: none !important;
+  }
+
+  .release-version > span > span {
+    filter: none !important;
+    translate: 0 0 !important;
+  }
 }
 
 /* The first toggle keeps clear of the name, even when the sidebar is at its narrowest. */
