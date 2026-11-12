@@ -48,6 +48,9 @@ export class WorkerRun extends Run {
   }
 }
 
+/** Each harness's steer, by the runtime a turn runs on. */
+const STEERS = { pi: sessions.steer, fx: fx.steer, codex: codex.steer, cursor: cursor.steer, claude: claude.steer, opencode: opencode.steer, hermes: hermes.steer, grok: grok.steer };
+
 export class PiWorkerRuntime {
   private db: Database;
   private runs = new Map<string, WorkerRun>();
@@ -271,6 +274,11 @@ export class PiWorkerRuntime {
     }
   }
   private deliverSteer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"]) {
+    // The running turn's own harness takes it, or says why it can't: asking each in turn would hand
+    // a Claude turn that isn't steerable yet to Pi, which answers that it isn't working.
+    const running = [...this.runs.values()].find((r) => r.record.threadId === threadId && r.record.kind === "run" && r.record.status === "pending");
+    const runtime = (running?.record.request as PiChatRequest | undefined)?.runtime ?? "pi";
+    if (running) return (STEERS[runtime as keyof typeof STEERS] ?? sessions.steer)(threadId, steerId, message, images);
     return hermes.canSteer(threadId) ? hermes.steer(threadId, steerId, message, images) : grok.canSteer(threadId) ? grok.steer(threadId, steerId, message, images) : fx.canSteer(threadId) ? fx.steer(threadId, steerId, message, images) : cursor.canSteer(threadId) ? cursor.steer(threadId, steerId, message, images) : claude.canSteer(threadId) ? claude.steer(threadId, steerId, message, images) : opencode.canSteer(threadId) ? opencode.steer(threadId, steerId, message, images) : codex.canSteer(threadId) ? codex.steer(threadId, steerId, message, images) : sessions.steer(threadId, steerId, message, images);
   }
   compact = sessions.compact;

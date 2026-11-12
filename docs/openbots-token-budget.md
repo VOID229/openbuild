@@ -158,20 +158,20 @@ Measured read-only on a copy of every lane session written after #234 went live
 output only, no model call). "Recorded" is what happened; "replayed" walks the same turns under
 the new rule, assuming the bots would have made the same tool calls, starting from no usage history:
 
-| 28 sessions, 13 bots, 394 turns, 1,482 model requests | Recorded | Replayed |
+| 28 sessions, 13 bots, 400 turns, 1,519 model requests | Recorded | Replayed |
 | --- | ---: | ---: |
-| Requests that only loaded a tool | 157 (10.6%) | 30 (2.2%) |
-| Turns that had to load first | 148 (37.6%) | 30 (7.6%) |
-| Prompt tokens spent on those requests | 9,824,568 | 1,177,358 |
-| Times a restarted Pi dropped loaded tools | 130 (406 tools) | 0 |
-| Uncached prompt tokens right after a drop | 3,897,955 | 0 |
-| Tool declarations per request (tokens, chars / 4.28) | 1,903 | 2,660 |
-| Share of declaring all 26 tools (7,518 tokens) | 25.3% | 35.4% |
+| Requests that only loaded a tool | 158 (10.4%) | 30 (2.2%) |
+| Turns that had to load first | 149 (37.2%) | 30 (7.5%) |
+| Prompt tokens spent on those requests | 9,904,847 | 1,177,358 |
+| Times a restarted Pi dropped loaded tools | 131 (408 tools) | 0 |
+| Uncached prompt tokens right after a drop | 3,978,234 | 0 |
+| Tool declarations per request (tokens, chars / 4.28) | 1,931 | 2,698 |
+| Share of declaring all 26 tools (7,545 tokens) | 25.6% | 35.8% |
 
-So a request carries about 760 more tokens of declarations (cached after the first), and about
-8.6M prompt tokens of load requests and 3.9M uncached tokens after drops go, over these two days.
+So a request carries about 770 more tokens of declarations (cached after the first), and about
+8.7M prompt tokens of load requests and 4.0M uncached tokens after drops go, over these two days.
 `bun scripts/bot-prompt-size.ts --tools` prints what a request declares with the core alone (1,184
-tokens) and with typical preloads (1,868 to 2,636), against all tools (7,518).
+tokens) and with typical preloads (1,868 to 2,662), against all tools (7,545).
 
 ## Turn metrics (2026-11-12)
 

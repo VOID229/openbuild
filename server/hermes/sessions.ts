@@ -2,6 +2,7 @@
 import { AcpProcess } from "../fx/acp";
 import { hermesProgram } from "./install";
 import * as storage from "../storage";
+import { unsupportedSteer } from "../steerErrors";
 import { contentOf } from "../acpContent";
 import type { PiChatRequest, StreamEvent } from "../../shared/types";
 type Reply = { value?: string; confirmed?: boolean; cancelled?: boolean };
@@ -48,7 +49,7 @@ export function answer(id: string, ask: string, reply: Reply) {
 }
 export async function steer(id: string, steerId: string, text: string, images?: PiChatRequest["images"]) {
   const l = live.get(id); if (!l?.accepting) throw new Error("Hermes isn't working on this thread");
-  if (!text.trim() || images?.length) throw new Error("Hermes steering requires text; queue images as a follow-up");
+  if (!text.trim() || images?.length) throw unsupportedSteer(new Error("Hermes steering requires text; queue images as a follow-up"));
   const old = l.steers.get(steerId); if (old) { if (old.text !== text) throw new Error("Steering ID reused"); return { handled: false }; }
   const sessionId = await l.ready;
   const completion = l.proc.request<any>("session/prompt", { sessionId, prompt: [{ type: "text", text }] }, 0).then(r => {

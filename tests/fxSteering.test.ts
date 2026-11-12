@@ -56,8 +56,11 @@ test("fx uses advertised ACP steering, correlates native delivery, and rejects u
  try{
   const req=request(),running=collect(req);await wait(()=>canSteer(req.threadId));
   await expect(steer(req.threadId,"image","image",[{data:"aA==",mimeType:"image/png"}])).rejects.toThrow("text only");
+  // Never steerable, as opposed to not now: bots say so rather than try again.
+  await expect(steer(req.threadId,"image","image",[{data:"aA==",mimeType:"image/png"}])).rejects.toMatchObject({code:"steer_unsupported"});
   await expect(steer(req.threadId,"empty"," ")).rejects.toThrow("nonempty");
   await expect(steer(req.threadId,"long","é".repeat(33000))).rejects.toThrow("64 KiB");
+  await expect(steer(req.threadId,"long","é".repeat(33000))).rejects.toMatchObject({code:"steer_unsupported"});
   await steer(req.threadId,"s1","same text");await steer(req.threadId,"s2","same text");await steer(req.threadId,"s1","same text");
   await expect(steer(req.threadId,"s1","different")).rejects.toThrow("different input");
   const events=await running;
@@ -73,7 +76,8 @@ test("fx uses advertised ACP steering, correlates native delivery, and rejects u
   expect(JSON.parse(getValue(`fx-session:${held.threadId}`)!).turns).toBe(1);
   process.env.FX_TEST_CAPABILITY="no";
   const legacy=request(),legacyRun=collect(legacy);await wait(()=>canSteer(legacy.threadId));
-  await expect(steer(legacy.threadId,"unsupported","no")).rejects.toThrow("does not advertise");await legacyRun;
+  await expect(steer(legacy.threadId,"unsupported","no")).rejects.toThrow("does not advertise");
+  await expect(steer(legacy.threadId,"unsupported","no")).rejects.toMatchObject({code:"steer_unsupported"});await legacyRun;
  }finally{for(const id of threads)release(id);if(original.bin===undefined)delete process.env.FX_BIN;else process.env.FX_BIN=original.bin;if(original.cap===undefined)delete process.env.FX_TEST_CAPABILITY;else process.env.FX_TEST_CAPABILITY=original.cap;rmSync(dir,{recursive:true,force:true});}
 });
 
@@ -93,5 +97,23 @@ test("the worker logs what the user wrote for a steer, never the prompt the mode
   await wait(()=>run.record.status!=="pending");
   expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"plain",text:"look at this"},{t:"steer",id:"file",text:"and this"},{t:"steer",id:"older-client",text:"from an older client"}]);
   expect(JSON.stringify(run.events)).not.toContain("private preferences");
+ }finally{release(threadId);if(original===undefined)delete process.env.FX_BIN;else process.env.FX_BIN=original;rmSync(dir,{recursive:true,force:true});}
+});
+
+test("the worker hands a steer to the turn's own harness, even before that harness can take one",async()=>{
+ const dir=mkdtempSync(join(tmpdir(),"fx-steer-route-")),bin=join(dir,"fx");
+ writeFileSync(bin,`#!${process.execPath}\n`+fixture);chmodSync(bin,0o700);
+ const original=process.env.FX_BIN;process.env.FX_BIN=bin;
+ const runtime=new PiWorkerRuntime(join(dir,"worker")),threadId=crypto.randomUUID();
+ try{
+  const run=runtime.startRun({threadId,runtime:"fx",cwd:dir,model:"fx/fake",effort:"off",prior:0,message:"work",stream:{id:"route-run"}} as any);
+  // fx is still starting: it says so itself, where Pi used to answer for it that it wasn't working.
+  expect(canSteer(threadId)).toBe(false);
+  const early=await runtime.steer(threadId,"early","too soon").then(()=>undefined,(e:Error)=>e);
+  expect(early?.message).toContain("fx isn't working");
+  await wait(()=>canSteer(threadId));
+  await runtime.steer(threadId,"ready","now");
+  await wait(()=>run.record.status!=="pending");
+  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"ready",text:"now"}]);
  }finally{release(threadId);if(original===undefined)delete process.env.FX_BIN;else process.env.FX_BIN=original;rmSync(dir,{recursive:true,force:true});}
 });

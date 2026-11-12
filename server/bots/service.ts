@@ -1362,6 +1362,9 @@ export function removeMessage(conversationId: string, messageId: string) {
 }
 
 
+/** What a bot is asked to do with a reaction of the user's: they should see it was noticed, without a message for it. */
+export const REACT_BACK = "React back to it with react's to_reaction so they know you saw it, and write only if it calls for words. Mid-work, carry on after.";
+
 export function toggleReaction(conversationId: string, messageId: string, emoji: string, by: string, to?: string): BotMessage {
   const row = db.getMessage(messageId);
   if (!row || row.conversationId !== conversationId) throw new BotsError("No such message.", 404);
@@ -1379,8 +1382,8 @@ export function toggleReaction(conversationId: string, messageId: string, emoji:
     const quote = `“${row.message.text.slice(0, 200)}”`;
     const short = messageId.slice(0, 8);
     const text = target
-      ? `${who} reacted ${emoji} to your ${target.emoji} reaction on [${short}] ${quote}. That's reaction #${next.length} there; react to it with react's to_reaction if you like. A reaction doesn't need an answer: react back, say something, or stay [silent], whatever a person would do.`
-      : `${who} reacted ${emoji} to your message [${short}]: ${quote}. That's reaction #${next.length} there; react to it with react's to_reaction if you like. A reaction doesn't need an answer: react back, say something, or stay [silent], whatever a person would do.`;
+      ? `${who} reacted ${emoji} to your ${target.emoji} reaction on [${short}] ${quote}. That's reaction #${next.length} there. ${REACT_BACK}`
+      : `${who} reacted ${emoji} to your message [${short}]: ${quote}. That's reaction #${next.length} there. ${REACT_BACK}`;
     hooks.wake(owner, { kind: "reaction", conversationId, text, reaction: { messageId, emoji, by, to } });
   }
   return patched;

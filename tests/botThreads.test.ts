@@ -24,6 +24,26 @@ const answers: any[] = [];
 const steers: any[] = [];
 /** When set, the harness can't take a steer now, with this reason. */
 let steerFails = "";
+/** How many more steers the harness turns away as not ready yet, as one does while its turn starts. */
+let steerNotYet = 0;
+/** What the harness says it did with a steer: true is a Pi extension taking it as input. */
+let steerHandled = false;
+/**
+ * What each harness's adapter (server/<harness>/sessions.ts) answers a steer it can't take: while its
+ * turn is starting, and for images where it steers text only (marked unsupported, as the adapters do).
+ */
+const HARNESS_STEERS: Record<string, { notYet: string; textOnly?: string }> = {
+  pi: { notYet: "Pi hasn't started on this reply yet. Try again in a moment." },
+  claude: { notYet: "Claude Code isn't working on this thread" },
+  codex: { notYet: "Codex hasn't started on this reply yet. Try again in a moment." },
+  opencode: { notYet: "OpenCode isn't working on this thread" },
+  grok: { notYet: "Grok isn't working on this thread" },
+  cursor: { notYet: "Cursor isn't working on this thread", textOnly: "Cursor steering takes text only: its image attachments are not supported by this adapter" },
+  fx: { notYet: "fx isn't working on this thread", textOnly: "fx ACP steering supports text only; send images as a queued follow-up" },
+  hermes: { notYet: "Hermes isn't working on this thread", textOnly: "Hermes steering requires text; queue images as a follow-up" },
+};
+const HARNESSES = Object.keys(HARNESS_STEERS);
+const { unsupportedSteer } = await import("../server/steerErrors");
 const wakes: any[] = [];
 const runs = new Map<string, Run>();
 let snapshots: any[] = [];
@@ -48,15 +68,26 @@ mock.module("../server/pi/remote", () => ({
   answer: async (...args: any[]) => (answers.push(args), true),
   // Most harnesses answer a steer they took with handled: false; only a Pi extension says true.
   steer: async (...args: any[]) => {
+    const [threadId, , , images] = args;
+    const harness = HARNESS_STEERS[(storage.getChat(threadId) as any)?.runtime ?? "pi"]!;
     if (steerFails) throw new Error(steerFails);
+    if (images?.length && harness.textOnly) throw unsupportedSteer(new Error(harness.textOnly));
+    if (steerNotYet > 0) {
+      steerNotYet--;
+      throw new Error(harness.notYet);
+    }
     steers.push(args);
-    return { handled: false };
+    return { handled: steerHandled };
   },
   stopRun: async () => true,
 }));
 mock.module("../server/pi/routes", () => ({ modelListing: async () => ({ models, defaultModel: "acme/one" }) }));
 mock.module("../server/pi/sessions", () => ({ listModels: async () => ({}), isThreadId: () => true }));
-mock.module("../server/runtimes", () => ({ runtimes: () => ({ pi: { installed: true }, claude: { installed: true }, codex: { installed: true }, cursor: { installed: true }, grok: { installed: true } }) }));
+mock.module("../server/runtimes", () => ({ runtimes: () => Object.fromEntries(HARNESSES.map((h) => [h, { installed: true }])) }));
+for (const runtime of ["opencode-agent", "grok", "hermes", "fx"]) {
+  const id = runtime === "opencode-agent" ? "opencode" : runtime;
+  mock.module(`../server/${runtime}/install`, () => ({ listModels: async () => ({ models: [{ id: `${id}/one`, name: `${id} One` }], defaultModel: `${id}/one` }) }));
+}
 mock.module("../server/claude/install", () => ({ listModels: async () => (await claudeListing, { models: [{ id: "claude/one", name: "Claude One" }, { id: "claude/two", name: "Claude Two", reasoning: { efforts: ["low", "high"] }, speeds: [{ id: "fast" }] }], defaultModel: "claude/one" }), listPermissions: async () => modes }));
 for (const runtime of ["codex", "cursor"]) {
   mock.module(`../server/${runtime}/install`, () => ({
@@ -87,6 +118,10 @@ beforeEach(() => {
   snapshots = [];
   discovered = [];
   steerFails = "";
+  steerNotYet = 0;
+  steerHandled = false;
+  // A harness that can't take a steer yet is retried for a while; not for long here.
+  Object.assign(threads.steerRetry, { ms: 60, every: 10 });
   storage.setValue("client-state", "{}");
   grant();
   svc.updateSettings({ harnesses: {} });
@@ -616,7 +651,7 @@ test("an invalid combination writes nothing, even with valid parts", async () =>
 /** End the thread's running turn the way the worker would, and let the bot's follower see it. */
 async function endTurn(threadId: string, how: "done" | "aborted" | "error" = "done") {
   const snapshot = snapshots.find((s) => s.threadId === threadId && s.status === "pending");
-  Object.assign(snapshot, { status: how === "aborted" ? "aborted" : "done", endedAt: Date.now(), events: [{ t: "text", v: "Done" }, ...(how === "error" ? [{ t: "error", message: "boom" }] : []), { t: "done", finish: how === "aborted" ? "aborted" : "stop" }] });
+  Object.assign(snapshot, { status: how === "aborted" ? "aborted" : "done", endedAt: Date.now(), events: [...snapshot.events, { t: "text", v: "Done" }, ...(how === "error" ? [{ t: "error", message: "boom" }] : []), { t: "done", finish: how === "aborted" ? "aborted" : "stop" }] });
   runs.get(snapshot.id)!.end();
   await settle();
 }
@@ -655,19 +690,30 @@ test("a steer the harness took is a steer, whatever it says about extensions", a
   expect(admitted.length).toBe(1);
 });
 
-test("what a harness can't take now is queued, and sent as the next turn, one a turn, in order", async () => {
+/** The agent reads a steer: its turn logs it, as the harness reports it. */
+function readSteer(threadId: string, steerId: string, text = "") {
+  snapshots.find((s) => s.threadId === threadId && s.status === "pending")!.events.push({ t: "steer", id: steerId, text });
+}
+
+test("what a harness won't take is queued, and sent as the next turn, one a turn, in order", async () => {
   await call("start", { project: project.name, prompt: "Go" });
   const { threadId } = admitted[0];
   steerFails = "Pi hasn't started on this reply yet.";
   const first = await call("send", { thread: threadId, text: "First" });
-  expect(first).toMatchObject({ sent: false, queued: true, position: 1 });
-  expect(first.note).toContain("Pi hasn't started on this reply yet.");
-  // Once something waits, later messages wait behind it, even if steering would work now.
-  steerFails = "";
-  const second = await call("send", { thread: threadId, text: "Second" });
-  expect(second).toMatchObject({ queued: true, position: 2 });
-  expect(steers).toEqual([]);
+  // Tried for a while, as the user would press Steer again, then said plainly.
+  expect(first).toMatchObject({ sent: false, steered: false, queued: true, position: 1 });
+  expect(first.cannot_steer).toBeUndefined();
+  expect(first.reason).toMatch(/pi didn't take it into the running turn within/);
+  expect(first.note).toMatch(/^Not steered: .*Pi hasn't started on this reply yet\./);
   expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Queued a prompt for", threadId });
+  // Settings always wait for the next turn, behind it.
+  const second = await call("send", { thread: threadId, text: "Second", effort: "high" });
+  expect(second).toMatchObject({ queued: true, position: 2 });
+  // A plain message still steers now, as the user's Steer does with anything in the queue.
+  steerFails = "";
+  const third = await call("send", { thread: threadId, text: "Third" });
+  expect(third).toMatchObject({ sent: true, steered: true });
+  readSteer(threadId, steers[0][1], "Third");
 
   await endTurn(threadId);
   expect(admitted.length).toBe(2);
@@ -679,10 +725,136 @@ test("what a harness can't take now is queued, and sent as the next turn, one a 
 
   await endTurn(threadId);
   expect(admitted.length).toBe(3);
+  expect(admitted[2]).toMatchObject({ effort: "high" });
   expect(admitted[2].message).toContain("Second");
   await endTurn(threadId);
   expect(admitted.length).toBe(3);
 });
+
+test("a steer a Pi extension took as input isn't waited on or sent again", async () => {
+  await call("start", { project: project.name, prompt: "Go" });
+  const { threadId } = admitted[0];
+  steerHandled = true;
+  expect(await call("send", { thread: threadId, text: "/plan" })).toMatchObject({ sent: true, steered: true });
+  expect((await call("read", { thread: threadId })).steering).toBeUndefined();
+  await endTurn(threadId);
+  expect(admitted.length).toBe(1);
+});
+
+test("a turn that ends while the harness can't take the steer yet gets it as its next turn", async () => {
+  await call("start", { project: project.name, prompt: "Go" });
+  const { threadId } = admitted[0];
+  Object.assign(threads.steerRetry, { ms: 5000 });
+  steerNotYet = 1_000;
+  const sending = call("send", { thread: threadId, text: "Late" });
+  await settle();
+  await endTurn(threadId);
+  const sent = await sending;
+  expect(sent).toMatchObject({ steered: false, queued: true });
+  expect(sent.reason).toMatch(/its turn ended before pi took the message/);
+  // Nothing was left to send it, so send did.
+  expect(admitted.length).toBe(2);
+  expect(admitted[1].message).toContain("Late");
+});
+
+/** An image message in the bot's own conversation, for image_messages. */
+function imageMessage() {
+  const id = crypto.randomUUID();
+  svc.postMessage(svc.directId(bot.id)!, { id, author: "me", at: Date.now(), text: "Screenshot", images: ["data:image/png;base64,aGVsbG8="] });
+  return id;
+}
+
+for (const harness of HARNESSES) {
+  const textOnly = !!HARNESS_STEERS[harness]!.textOnly;
+
+  test(`${harness}: send steers a working thread as the user's Steer does`, async () => {
+    const profile = { name: "Gal", bio: "Likes short answers", location: "", language: "" };
+    storage.setValue("client-state", JSON.stringify({ state: { settings: { profile } } }));
+    await call("start", { project: project.name, prompt: "Go", harness });
+    const { threadId } = admitted[0];
+    expect(admitted[0].runtime).toBe(harness);
+    // Right after a turn starts its harness can't take a steer yet; send waits for it rather than queue.
+    steerNotYet = 2;
+    const sent = await call("send", { thread: threadId, text: "Also check the tests" });
+    expect(sent).toMatchObject({ sent: true, steered: true });
+    expect(sent.queued).toBeUndefined();
+    // What the composer's Steer sends: the profile-wrapped prompt, and what the user sees as display.
+    const { withProfileContext } = await import("../src/lib/profile");
+    expect(steers.length).toBe(1);
+    const [steeredThread, steerId, message, images, display] = steers[0];
+    expect(steeredThread).toBe(threadId);
+    expect(message).toBe(withProfileContext("Also check the tests", profile));
+    expect(images).toBeUndefined();
+    expect(display).toBe("Also check the tests");
+    const reply = (storage.getChat(threadId) as any).messages.at(-1);
+    expect(reply.steerSenders[steerId]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
+    expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Wrote a prompt in", threadId });
+
+    // Shown as steering until the agent reads it; once read, the turn's end doesn't send it again.
+    expect((await call("read", { thread: threadId })).steering).toBe(1);
+    readSteer(threadId, steerId, "Also check the tests");
+    expect((await call("read", { thread: threadId })).steering).toBeUndefined();
+    await endTurn(threadId);
+    expect(admitted.length).toBe(1);
+    expect(wakes.at(-1).text).toContain("finished its turn");
+    expect(wakes.at(-1).text).not.toContain("steered into");
+  });
+
+  test(`${harness}: a steer the agent hadn't read when the turn finished goes in as its next turn`, async () => {
+    await call("start", { project: project.name, prompt: "Go", harness });
+    const { threadId } = admitted[0];
+    expect(await call("send", { thread: threadId, text: "One more thing" })).toMatchObject({ steered: true });
+    await endTurn(threadId);
+    expect(admitted.length).toBe(2);
+    expect(admitted[1]).toMatchObject({ threadId, runtime: harness });
+    expect(admitted[1].message).toContain("One more thing");
+    const note = wakes.at(-1).text;
+    expect(note).toContain("finished its turn");
+    expect(note).toContain("hadn't been read by its agent when that turn ended, so it went in as its next turn");
+    // The next turn ends with nothing left over.
+    await endTurn(threadId);
+    expect(admitted.length).toBe(2);
+  });
+
+  test(`${harness}: ${textOnly ? "images can't be steered, and send says so" : "images are steered with the message"}`, async () => {
+    await call("start", { project: project.name, prompt: "Go", harness });
+    const { threadId } = admitted[0];
+    const sent = await call("send", { thread: threadId, text: "Look at this", image_messages: [imageMessage()] });
+    if (!textOnly) {
+      expect(sent).toMatchObject({ sent: true, steered: true });
+      expect(steers[0][3]).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+      // Saved on the reply, as the composer saves a steer's files.
+      expect((storage.getChat(threadId) as any).messages.at(-1).steerFiles[steers[0][1]][0]).toMatchObject({ mime: "image/png", dataUrl: "data:image/png;base64,aGVsbG8=" });
+      return;
+    }
+    // Not tried again and again, and not quietly queued: the result says it can't, and why.
+    expect(sent).toMatchObject({ sent: false, steered: false, cannot_steer: true, queued: true, position: 1 });
+    expect(sent.reason).toBe(`${harness} can't steer this message into a running turn: ${HARNESS_STEERS[harness]!.textOnly}`);
+    expect(sent.note).toMatch(/^Not steered: /);
+    expect(sent.note).toContain("without image_messages");
+    expect(steers).toEqual([]);
+    // Its words alone steer.
+    expect(await call("send", { thread: threadId, text: "Look at the header" })).toMatchObject({ steered: true });
+    readSteer(threadId, steers[0][1]);
+    await endTurn(threadId);
+    expect(admitted[1].message).toContain("Look at this");
+    expect(admitted[1].images).toEqual([{ mimeType: "image/png", data: "aGVsbG8=" }]);
+  });
+}
+
+for (const how of ["aborted", "error"] as const) {
+  test(`an unread steer isn't sent after a turn that ${how === "aborted" ? "was stopped" : "failed"}, and the bot hears so`, async () => {
+    await call("start", { project: project.name, prompt: "Go" });
+    const { threadId } = admitted[0];
+    await call("send", { thread: threadId, text: "Unread" });
+    await endTurn(threadId, how);
+    expect(admitted.length).toBe(1);
+    const note = wakes.at(-1).text;
+    expect(note).toContain(`hadn't been read by its agent when the thread ${how === "aborted" ? "was stopped" : "failed"}, so it wasn't sent`);
+    expect(note).toContain("Unread");
+    expect((await call("read", { thread: threadId })).queued).toBeUndefined();
+  });
+}
 
 for (const how of ["aborted", "error"] as const) {
   test(`a queued message isn't sent after a turn that ${how === "aborted" ? "was stopped" : "failed"}, and the bot hears so`, async () => {
