@@ -259,13 +259,16 @@ export function botWorkStatus(requester: string) {
   return { bots: db.listBots().map((bot) => {
     const current = getStatus(bot.id);
     const times = activityTimes.get(bot.id);
+    // Between turns with tool calls still out (BotStatus.jobs), it's free: idle, and waiting on those.
+    const inTurn = current?.state === "working" && !current.jobs;
     return {
       id: bot.id, name: bot.name,
-      state: current?.state === "working" ? "working" : "idle",
-      runnerState: current?.state ?? "idle",
-      turnStartedAt: current?.state === "working" ? times?.turnStartedAt ?? null : null,
-      conversationId: current?.state === "working" ? current.conversationId ?? null : null,
+      state: inTurn ? "working" : "idle",
+      runnerState: current?.jobs ? "waiting" : current?.state ?? "idle",
+      turnStartedAt: inTurn ? times?.turnStartedAt ?? null : null,
+      conversationId: inTurn ? current.conversationId ?? null : null,
       lastActivityAt: times?.lastActivityAt ?? null,
+      backgroundJobs: current?.jobs ?? 0,
       pendingAssignments: hooks.pendingAssignments?.(bot.id) ?? [],
     };
   }), pendingMeaning: "Exact assigned user-message deliveries still queued or in the current turn; delivery is not proof of an unanswered request.", handoffs: "not_tracked" };
@@ -275,7 +278,7 @@ export function setStatus(botId: string, next: BotStatus) {
   const previous = getStatus(botId);
   const now = Date.now();
   activityTimes.set(botId, {
-    turnStartedAt: next.state === "working" ? (previous?.state === "working" ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
+    turnStartedAt: next.state === "working" && !next.jobs ? (previous?.state === "working" && !previous.jobs ? activityTimes.get(botId)?.turnStartedAt ?? now : now) : null,
     lastActivityAt: now,
   });
   if (next.state === "idle") status.delete(botId);
