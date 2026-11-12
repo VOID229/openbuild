@@ -1,7 +1,7 @@
 // The real OpenBots sidebar, for tests/botsSidebarMascots.test.ts to point at in Chrome: bots' own
-// chats and groups, pinned (tiles) and not (rows), one group with a member at work and one bot at
-// work in its own chat. `?only=<chat id>` shows just that chat, and `?seed=<n>` makes Math.random
-// repeat, so with one bot on the page two loads live the same life.
+// chats and groups, pinned (tiles) and not (rows), one group with a member at work. `?only=<chat id>`
+// shows just that chat (`row-worker` is a bot at work in its own, shown only that way), and
+// `?seed=<n>` makes Math.random repeat, so with one bot on the page two loads live the same life.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -37,7 +37,7 @@ const conversations = [
   chat("row-group", "group", ["tracer", "scout"]),
   chat("busy-group", "group", ["pip", "scout"]),
   chat("row-worker", "direct", ["worker"]),
-].filter((c) => !params.get("only") || c.id === params.get("only"));
+].filter((c) => (params.get("only") ? c.id === params.get("only") : c.id !== "row-worker"));
 useStore.setState({ botsOpen: true, botsSidebarOpen: true });
 useBots.setState({
   bots,
