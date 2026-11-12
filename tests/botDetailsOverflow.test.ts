@@ -133,7 +133,9 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
     const page = await open("dm", 320, 640, "mono");
     expect(await page.eval<string>("getComputedStyle(document.querySelector('.bots-tab')).fontFamily")).toContain("Geist Mono");
     expect(await page.eval<boolean>(`document.fonts.check('500 14px "Geist Mono Variable"')`)).toBe(true);
-    expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
+    const cut = await page.eval<string[]>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)");
+    if (cut.length) console.log("DIAG", await page.eval<string>("JSON.stringify({ row: document.querySelector('.bots-tabs').clientWidth, scroll: [document.querySelector('.bots-details-scroll').offsetWidth, document.querySelector('.bots-details-scroll').clientWidth], tabs: [...document.querySelectorAll('.bots-tab')].map((t) => [t.textContent, t.scrollWidth, t.clientWidth, getComputedStyle(t).paddingLeft, getComputedStyle(t).fontSize, getComputedStyle(t).letterSpacing]), fonts: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family + ' ' + f.unicodeRange.slice(0, 20)), ua: navigator.userAgent })"));
+    expect(cut).toEqual([]);
     expect(await wide(page)).toEqual([]);
   }, 60_000);
 
