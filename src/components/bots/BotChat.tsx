@@ -1114,7 +1114,7 @@ function Working({ conversationId, direct, botIds, bots }: { conversationId: str
         const activity = workingLine(conversationId, id, statuses[id]);
         if (!bot) return null;
         // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
-        const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy pulse={{ key: activity, mood: "idle", action: "squish" }} />;
+        const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy pulse={{ key: activity, mood: "idle", action: "pop" }} />;
         return (
           <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
             {direct ? avatar : <span className="bm-avatar">{avatar}</span>}

@@ -26,8 +26,14 @@ const open = async () => {
   return page;
 };
 
-/** The colour of each bot under `selector`, by where it is: whether it dozes and whether it's busy. */
-type Seen = { where: string; color: string; asleep: boolean; busy: boolean; lid: number | null; eye: number };
+/**
+ * How shut a bot's eyes are, in the page: an eye closes by being squashed to a dash, so 1 is open and
+ * near 0 shut. A blink squashes it for a moment too; that isn't being shut.
+ */
+const OPEN = `((b) => 'blink' in b.dataset ? 1 : new DOMMatrix(getComputedStyle(b.querySelector('.bot-eye-fill')).transform).d)`;
+
+/** The colour of each bot under `selector`, by where it is: whether it dozes, whether it's busy, and how open its eyes are. */
+type Seen = { where: string; color: string; asleep: boolean; busy: boolean; eye: number };
 const seen = (page: Page) =>
   page.eval<Seen[]>(`(() => {
     const places = {
@@ -38,10 +44,9 @@ const seen = (page: Page) =>
       hero: [...document.querySelectorAll('.bots-details-avatar')],
       member: [...document.querySelector('.bots-details .bots-cards').querySelectorAll('.bots-member')],
     };
-    return Object.entries(places).flatMap(([where, els]) => els.flatMap((el) => [...el.querySelectorAll('.bot')].map((b) => {
-      const lid = b.querySelector('.bot-lid');
-      return { where, color: b.dataset.color, asleep: 'asleep' in b.dataset, busy: 'busy' in b.dataset, lid: lid && Number(getComputedStyle(lid).opacity), eye: Number(getComputedStyle(b.querySelector('.bot-eye')).opacity) };
-    })));
+    return Object.entries(places).flatMap(([where, els]) => els.flatMap((el) => [...el.querySelectorAll('.bot')].map((b) => (
+      { where, color: b.dataset.color, asleep: 'asleep' in b.dataset, busy: 'busy' in b.dataset, eye: ${OPEN}(b) }
+    ))));
   })()`);
 
 /** Every bot in the "OpenBuild Dev" tile, by colour (Moss is green, Boo amber). */
@@ -50,7 +55,7 @@ const devBot = (color: string) => `[...document.querySelectorAll('.bots-tile')].
 /** The transitions running under a bot, with what they change and how long they take. */
 const transitions = (page: Page, bot: string) =>
   page.eval<{ on: string; property: string; duration: number; delay: number }[]>(`(${bot}).getAnimations({ subtree: true }).filter((a) => a instanceof CSSTransition).map((a) => ({
-    on: ['bot-lid', 'bot-eye', 'bot-tilt', 'bot-turn', 'bot-look', 'bot-light'].find((c) => a.effect.target.classList.contains(c)) ?? '', property: a.transitionProperty, duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay,
+    on: ['bot-eye-fill', 'bot-doze', 'bot-nap'].find((c) => a.effect.target.classList.contains(c)) ?? '', property: a.transitionProperty, duration: a.effect.getTiming().duration, delay: a.effect.getTiming().delay,
   }))`);
 
 /**
@@ -64,7 +69,7 @@ const watchTransitions = (page: Page) =>
   }), true), true)`);
 const started = (page: Page, bot: string) =>
   page.eval<{ on: string; property: string; duration: number; delay: number }[]>(`window.started.filter((t) => (${bot}).contains(t.target)).map((t) => ({
-    on: ['bot-lid', 'bot-eye', 'bot-tilt', 'bot-turn', 'bot-look', 'bot-light'].find((c) => t.target.classList.contains(c)) ?? '', property: t.property, duration: t.duration, delay: t.delay,
+    on: ['bot-eye-fill', 'bot-doze', 'bot-nap'].find((c) => t.target.classList.contains(c)) ?? '', property: t.property, duration: t.duration, delay: t.delay,
   }))`);
 
 const setWorking = (page: Page, ids: string[]) =>
@@ -79,10 +84,10 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
       // Moss (green) is at work: awake, and busy but beside its messages (the line saying what it's
       // doing has a busy mascot of its own). Everyone else dozes, eyes shut.
       const moss = b.color === "green";
-      expect({ ...b, lid: b.lid! > 0.99, eye: b.eye < 0.01 }).toEqual({ ...b, asleep: !moss, busy: moss && b.where !== "message", lid: !moss, eye: !moss });
+      expect({ ...b, eye: b.eye < 0.3 }).toEqual({ ...b, asleep: !moss, busy: moss && b.where !== "message", eye: !moss });
     }
-    // A bot's own chat doesn't doze, and has no lids to close.
-    expect(await page.eval<null>(`[...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Dr Eggbot')).querySelector('.bot-lid')`)).toBeNull();
+    // A bot's own chat doesn't doze, and has no "zzz" to show.
+    expect(await page.eval<object>(`(() => { const b = [...document.querySelectorAll('.bots-tile')].find((t) => t.textContent.includes('Dr Eggbot')).querySelector('.bot'); return { asleep: 'asleep' in b.dataset, zzz: !!b.querySelector('.bot-zzz'), open: ${OPEN}(b) > 0.9 }; })()`)).toEqual({ asleep: false, zzz: false, open: true });
   });
 
   test("a member at work in a big group is shown, never one of the count", async () => {
@@ -101,40 +106,44 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
 
   test("a bot wakes when it starts work and dozes off when it stops, eased both ways", async () => {
     const page = await open();
-    // Boo (amber) starts work: awake at once, with a stretch, its eyes opening and head coming up.
+    // Boo (amber) starts work: awake at once, with a stretch, its eyes opening and its body coming up.
     await watchTransitions(page);
     await setWorking(page, ["moss", "boo"]);
     await page.settle();
     const boo = devBot("amber");
     expect(await page.eval<object>(`({ asleep: 'asleep' in (${boo}).dataset, busy: 'busy' in (${boo}).dataset, action: (${boo}).dataset.action })`)).toEqual({ asleep: false, busy: true, action: "stretch" });
     const waking = await started(page, boo);
-    expect(waking.some((t) => t.on === "bot-lid" && t.property === "opacity" && t.duration >= 100)).toBe(true);
-    expect(waking.some((t) => t.on === "bot-tilt" && t.duration >= 400)).toBe(true);
+    expect(waking.some((t) => t.on === "bot-eye-fill" && t.property === "transform" && t.duration >= 100)).toBe(true);
+    expect(waking.some((t) => t.on === "bot-doze" && t.duration >= 400)).toBe(true);
+    expect(waking.some((t) => t.on === "bot-nap" && t.duration >= 400)).toBe(true);
 
-    // It stops: the eyes grow heavy first and shut slowly, then the head goes down, slower still.
+    // It stops: the eyes grow heavy and shut slowly, as the face drops and the body slumps, slower still.
     await Bun.sleep(1200);
     await setWorking(page, ["moss"]);
     await page.settle();
     expect(await page.eval<boolean>(`'asleep' in (${boo}).dataset`)).toBe(true);
     const dozing = await transitions(page, boo);
-    const eye = dozing.find((t) => t.on === "bot-eye" && t.property === "transform")!;
+    const eye = dozing.find((t) => t.on === "bot-eye-fill" && t.property === "transform")!;
     expect(eye.duration).toBeGreaterThanOrEqual(600);
-    expect(dozing.find((t) => t.on === "bot-lid")!.delay).toBeGreaterThanOrEqual(400);
-    expect(dozing.find((t) => t.on === "bot-tilt")!.duration).toBeGreaterThanOrEqual(1000);
+    expect(dozing.find((t) => t.on === "bot-doze")!.duration).toBeGreaterThanOrEqual(1000);
+    expect(dozing.find((t) => t.on === "bot-nap")!.duration).toBeGreaterThanOrEqual(1000);
     // Not shut yet, a moment in.
-    expect(Number(await page.eval(`getComputedStyle((${boo}).querySelector('.bot-lid')).opacity`))).toBeLessThan(0.5);
-    // Settled: eyes shut, head leaning in.
+    expect(await page.eval<number>(`${OPEN}(${boo})`)).toBeGreaterThan(0.5);
+    // Settled: eyes shut, face down, body slumped over.
     await page.finish();
-    const [lid, eyeOpacity, tilt] = await page.eval<[string, string, string]>(`[(${boo}).querySelector('.bot-lid'), (${boo}).querySelector('.bot-eye'), (${boo}).querySelector('.bot-tilt')].map((el, i) => getComputedStyle(el)[i < 2 ? 'opacity' : 'transform'])`);
-    expect([lid, eyeOpacity]).toEqual(["1", "0"]);
-    expect(tilt).not.toBe("none");
-    expect(tilt).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+    const [eyes, slump, nap] = await page.eval<[number, string, string]>(`[${OPEN}(${boo}), getComputedStyle((${boo}).querySelector('.bot-doze')).transform, getComputedStyle((${boo}).querySelector('.bot-nap')).transform]`);
+    expect(eyes).toBeLessThan(0.3);
+    for (const t of [slump, nap]) {
+      expect(t).not.toBe("none");
+      expect(t).not.toBe("matrix(1, 0, 0, 1, 0, 0)");
+    }
   }, 20_000);
 
   test("dozing bots only breathe under their zzz, and on the compositor", async () => {
     const page = await open();
     await setWorking(page, []);
-    // Let them nod off.
+    // Let them nod off, the one that was at work coming to rest first.
+    await page.until("[...document.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].every((el) => !el.style.transform)");
     await page.finish();
     const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle-box[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
     expect(running.length).toBeGreaterThan(10);
@@ -159,7 +168,7 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     await page.until(READY);
     await page.settle();
     const bots = await seen(page);
-    for (const b of bots) if (b.color !== "green") expect({ asleep: b.asleep, lid: b.lid, eye: b.eye }).toEqual({ asleep: true, lid: 1, eye: 0 });
+    for (const b of bots) if (b.color !== "green") expect({ asleep: b.asleep, shut: b.eye < 0.3 }).toEqual({ asleep: true, shut: true });
     // Moss at work doesn't fidget, the rest don't breathe: nothing runs at all.
     await Bun.sleep(500);
     const moving = () => page.eval<number>(`document.getAnimations().filter((a) => a.playState === 'running' && a.effect.target.closest('.bot')).length`);
@@ -168,10 +177,10 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     // Waking and nodding off are instant, without a stretch.
     await setWorking(page, ["moss", "boo"]);
     await page.settle();
-    expect(await page.eval<(string | null)[]>(`[getComputedStyle((${devBot("amber")}).querySelector('.bot-lid')).opacity, (${devBot("amber")}).dataset.action ?? null]`)).toEqual(["0", null]);
+    expect(await page.eval<(number | null)[]>(`[${OPEN}(${devBot("amber")}), (${devBot("amber")}).dataset.action ?? null]`)).toEqual([1, null]);
     await setWorking(page, ["moss"]);
     await page.settle();
-    expect(await page.eval<string>(`getComputedStyle((${devBot("amber")}).querySelector('.bot-lid')).opacity`)).toBe("1");
+    expect(await page.eval<number>(`${OPEN}(${devBot("amber")})`)).toBeLessThan(0.3);
     expect(await moving()).toBe(0);
   }, 20_000);
 

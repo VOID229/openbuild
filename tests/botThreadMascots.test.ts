@@ -145,19 +145,19 @@ describe.skipIf(!browser)("mascots in the Threads tab", () => {
     await openThreads(page);
     await page.eval(`bots.setState((s) => ({ status: { ...s.status, moss: { state: "working", conversationId: "dev", thread: "t-work" } } }))`);
     await page.until(`'busy' in (${rowBot("Fix the flaky test")}).dataset`);
-    // Where its eyes are and how its head is tilted, on screen, every 100ms for a few seconds.
+    // Where its eyes are and how its body is rolled, on screen, every 100ms for a few seconds.
     const samples = await page.eval<{ x: number; y: number; tilt: string }[]>(`new Promise((done) => {
       const bot = ${rowBot("Fix the flaky test")};
       const out = [];
       const timer = setInterval(() => {
-        const r = bot.querySelector('.bot-look').getBoundingClientRect();
-        out.push({ x: r.x + r.width / 2, y: r.y + r.height / 2, tilt: getComputedStyle(bot.querySelector('.bot-tilt')).transform });
+        const r = bot.querySelector('.bot-eye-fill').getBoundingClientRect();
+        out.push({ x: r.x + r.width / 2, y: r.y + r.height / 2, tilt: bot.querySelector('.bot-whole').style.transform });
         if (out.length >= 60) { clearInterval(timer); done(out); }
       }, 100);
     })`);
     const xs = samples.map((s) => s.x);
     const ys = samples.map((s) => s.y);
-    // The face travels a few real pixels as it looks about and turns its head (a blink moves nothing).
+    // The face travels a few real pixels as it looks about and turns (a blink moves nothing).
     expect(Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))).toBeGreaterThanOrEqual(2);
     expect(new Set(samples.map((s) => `${s.x.toFixed(1)},${s.y.toFixed(1)},${s.tilt}`)).size).toBeGreaterThan(5);
   }, 20_000);

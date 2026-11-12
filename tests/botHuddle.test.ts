@@ -27,7 +27,7 @@ test("without `active` a huddle animates every member together, and none doze", 
   const html = renderToStaticMarkup(createElement(BotHuddle, { looks, size: 34, alive: true, busy: true }));
   expect(html.match(/bot-alive/g)?.length).toBe(3);
   expect(html).not.toContain("data-asleep");
-  expect(html).not.toContain("bot-lid");
+  expect(html).not.toContain("bot-zzz");
 });
 
 const six = ["blue", "green", "pink", "amber", "teal", "purple"].map((color) => ({ shape: "orb", color }));

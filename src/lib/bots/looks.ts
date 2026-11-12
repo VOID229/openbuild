@@ -10,10 +10,8 @@ export interface Face {
   y: number;
   /** Distance between the eyes' centres. */
   gap: number;
-  /** Eye size, 1 = the default 7.5 × 16. */
+  /** Eye size, 1 = the default (EYE_W × EYE_H in rig.ts). How far the head can turn is worked out from the outline. */
   scale?: number;
-  /** How far the eyes may go following the pointer, 1 = all the way; less where the body has no room. */
-  reach?: number;
 }
 
 export interface Shape {
@@ -141,7 +139,7 @@ export const SHAPES: Shape[] = [
     id: "flower",
     label: "Flower",
     path: smooth(polar((t) => 33 + 8.5 * Math.cos(6 * t) + w(6, 1)(t), { n: 96, rotate: 4 })),
-    face: { x: 53, y: 49, gap: 13, reach: 0.88 },
+    face: { x: 53, y: 49, gap: 13 },
   },
   {
     id: "drop",
@@ -170,7 +168,7 @@ export const SHAPES: Shape[] = [
     id: "pebble",
     label: "Pebble",
     path: roundedPolygon(regular(3, 47, -24, 48, 54), 17),
-    face: { x: 54, y: 50, gap: 13, reach: 0.42 },
+    face: { x: 54, y: 50, gap: 13 },
   },
   {
     id: "gem",
@@ -183,7 +181,7 @@ export const SHAPES: Shape[] = [
     label: "Burst",
     // A wobbly splat: eight soft points of uneven length.
     path: smooth(polar((t) => 31 + 9 * Math.cos(7 * t) + 2.5 * Math.sin(3 * t + 1) + w(8, 1)(t), { n: 112, rotate: -6 })),
-    face: { x: 52, y: 50, gap: 13, reach: 0.85 },
+    face: { x: 52, y: 50, gap: 13 },
   },
   {
     id: "jelly",
@@ -247,8 +245,8 @@ export const COLOR_BY_ID = new Map(COLORS.map((c) => [c.id, c]));
 
 /** An expression a bot can hold or flash. */
 export type Mood = "idle" | "happy" | "thinking" | "sleepy" | "surprised" | "love" | "wink" | "squint";
-/** A one-off move, always on the ground (never a hop). A stretch is waking up from a doze. */
-export type Action = "spin" | "wiggle" | "squish" | "nod" | "stretch";
+/** A one-off move, always in place (never a hop): a turn right round, a rock from side to side, a swell, a nod. A stretch is waking up from a doze. */
+export type Action = "spin" | "wiggle" | "pop" | "nod" | "stretch";
 
 export interface BotLook {
   shape: string;
