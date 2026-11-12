@@ -39,6 +39,20 @@ const STANCE = `((b) => {
   return { yaw: turn(slid[4]), pitch: turn(slid[5]), bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), roll: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/), zoom: of('.bot-whole', /scale\\((-?[\\d.]+)\\)/) || 1 };
 })`;
 
+/**
+ * Waits until the bots under `scope` have come to rest: nothing passing on any of them (a blink, a
+ * move, a face pulled) and every layer where it was 400 ms ago, which is longer than the gap in a
+ * double blink and than a spring takes to stop once it's nearly there.
+ */
+const settled = (page: Page, scope: string) =>
+  page.until(`(() => {
+    const bots = [...document.querySelectorAll(${JSON.stringify(`${scope} .bot`)})];
+    const now = JSON.stringify(bots.map((b) => [b.dataset.blink, b.dataset.action, b.dataset.mood, ...[...b.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].map((el) => el.style.transform)]));
+    const state = (window.settling ??= {});
+    if (state.seen !== now) Object.assign(state, { seen: now, since: performance.now() });
+    return performance.now() - state.since >= 400 && bots.every((b) => !('blink' in b.dataset) && !b.dataset.action && b.dataset.mood === 'idle');
+  })()`, 8000);
+
 describe.skipIf(!browser)("a bot on its own", () => {
   test("its eyes are solid and big, with nothing in them, and happy eyes stay open: never a chevron", async () => {
     const page = await open();
@@ -208,8 +222,8 @@ describe.skipIf(!browser)("a bot on its own", () => {
   test("out of view, awake bots spend no frames", async () => {
     const page = await open();
     await page.eval("document.body.style.paddingTop = '3000px'");
-    // Whatever each was in the middle of runs out first.
-    await Bun.sleep(3500);
+    // Whatever each was in the middle of runs out first: a blink, a move, a face, and its springs.
+    await settled(page, "#life");
     await page.eval(`(window.changes = 0, new MutationObserver((r) => (window.changes += r.length)).observe(document.getElementById('life'), { subtree: true, attributes: true }))`);
     await page.send("Performance.enable");
     const metrics = async () => Object.fromEntries((await page.send("Performance.getMetrics")).metrics.map((m: { name: string; value: number }) => [m.name, m.value]));
@@ -232,7 +246,8 @@ describe.skipIf(!browser)("a bot on its own", () => {
     // The ones that only follow the pointer: turned toward it, then let be.
     await page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });
     await page.eval("document.getElementById('life').remove()");
-    await Bun.sleep(1500);
+    // Until they've all turned toward it and stopped.
+    await settled(page, "#shapes");
     await page.eval(`(window.changes = 0, new MutationObserver((r) => (window.changes += r.length)).observe(document.getElementById('shapes'), { subtree: true, attributes: true }))`);
     await Bun.sleep(600);
     // Turned and holding it: nothing is written while nothing moves.

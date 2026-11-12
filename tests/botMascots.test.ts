@@ -119,6 +119,8 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
 
     // It stops: the eyes grow heavy and shut slowly, as the face drops and the body slumps, slower still.
     await Bun.sleep(1200);
+    // (Not in the middle of a blink, nor opening again after one: its eyes would be part shut already.)
+    await page.until(`!('blink' in (${boo}).dataset) && new DOMMatrix(getComputedStyle((${boo}).querySelector('.bot-eye-fill')).transform).d > 0.98`);
     await setWorking(page, ["moss"]);
     await page.settle();
     expect(await page.eval<boolean>(`'asleep' in (${boo}).dataset`)).toBe(true);
