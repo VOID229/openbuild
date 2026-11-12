@@ -44,7 +44,7 @@ interface Mind {
   /** Steers on their way into this turn: the turn holds on to Pi until each is answered. */
   pendingSteers?: Set<Promise<void>>;
   /** Steers Pi queued this turn, in order, and how many queued ones were cleared unread. */
-  queuedSteers?: { item: Wake; conversationId: string; from: number; keys?: Set<string>; note?: boolean }[];
+  queuedSteers?: { item: Wake; conversationId: string; from: number; keys?: Set<string> }[];
   dropped?: number;
   /** The bot already wrote to the chat this run, so leftover assistant text isn't posted too. */
   sent: boolean;
@@ -68,17 +68,8 @@ interface Mind {
   steering?: Promise<boolean>;
   /** Group requests steered into this turn's current attempt. */
   steered?: Wake[];
-  /** The turn answers a message of the user's: they're waiting, and are owed a word before slow work. */
+  /** The turn answers a message of the user's: they're waiting on it, so what it says isn't held to being news. */
   waitingUser?: boolean;
-  /** Since when they've been waiting on this turn. */
-  waitingSince?: number;
-  /** The turn was told to acknowledge them (see ackDue): once a turn. */
-  nudged?: boolean;
-  /** A word of the runner's own was steered in this turn and may still sit unread in Pi's queue. */
-  noted?: boolean;
-  /** Its current step already holds a message for the chat that hasn't gone out yet. */
-  willWrite?: boolean;
-  ackTimer?: ReturnType<typeof setTimeout>;
   /** The tool call it's inside right now, other than writing to the chat. */
   tool?: { name: string; since: number };
   /** Messages a helper session wrote for the bot during this turn, which the turn itself hasn't seen. */
@@ -159,12 +150,12 @@ export function wake(botId: string, item: Wake) {
     const from = Math.max(db.cursor(botId, conversationId), shown.get(conversationId) ?? 0);
     const through = db.latestSeq(conversationId);
     const keys = new Set<string>();
-    const text = render([item], botId, mind.contextKeys, keys);
+    const text = render([item], botId, mind.contextKeys, keys, true);
     const images = imagesBetween(conversationId, from, through);
     shown.set(conversationId, through);
     if (item.kind === "messages") {
       if (mind.quiet !== "deciding") mind.quiet = false;
-      waitsOn(mind);
+      mind.waitingUser = true;
       show(botId, mind);
     }
     // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
@@ -219,7 +210,7 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
     }).slice(-IMAGE_LIMIT);
     // Still deciding whether the group's messages are its to answer: this one is decided on with them.
     if (mind.quiet !== "deciding") mind.quiet = false;
-    if (!item.lead || item.lead === botId) waitsOn(mind);
+    if (!item.lead || item.lead === botId) mind.waitingUser = true;
     show(botId, mind);
     // A steer Pi is slow to answer is waited out, and the turn holds on to Pi until it is.
     return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids, item.lead), ...(images.length ? { images } : {}) }, (disposition) => {
@@ -316,7 +307,6 @@ export function halt(botId: string, conversationId?: string): boolean {
 
 /** Abort the run a mind is in. One that can't be shown to have stopped is retired, so nothing it does later reaches the chat. */
 async function abortTurn(key: string, mind: Mind) {
-  clearTimeout(mind.ackTimer);
   try {
     await Promise.all(mind.pendingSteers ?? []);
     await recoverPrompt(mind);
@@ -610,7 +600,6 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   }
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
   mind.sent ||= successfulMessageTool(record);
-  if (mind.sent) clearTimeout(mind.ackTimer);
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
@@ -639,7 +628,6 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
       if (mind.quiet === "sent") mind.quiet = false;
       show(botId, mind, activityFor(tool, record.args));
       mind.tool = { name: tool, since: Date.now() };
-      ackDue(mind);
     }
   }
   if (record.type === "tool_execution_end" && mind.tool?.name === tool) mind.tool = undefined;
@@ -649,7 +637,6 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     show(botId, mind);
   }
   if (record.type === "tool_execution_end" && WRITING.has(tool)) {
-    mind.willWrite = false;
     // Sent. Whatever it does next stays out of the chat until it types again or picks up real work.
     setTyping(botId, mind, false);
     mind.quiet = "sent";
@@ -659,7 +646,6 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (ev?.type === "toolcall_start" && WRITING.has(String(ev.toolName ?? ""))) {
     decided(mind);
     setTyping(botId, mind, true);
-    mind.willWrite = true;
   }
   const delta = ev?.type === "text_delta" ? String(ev.delta ?? "") : "";
   if (delta) {
@@ -691,50 +677,8 @@ export function plainReply(mind: Pick<Mind, "background" | "waitingUser">, draft
   return replyBubbles(text);
 }
 
-/** Tools that can take a while: the user hears from the bot before one runs, not after. */
+/** Tools that can take a while: a message that arrives during one gets a side reply at once. */
 const SLOW_TOOLS = new Set(["bash", "browser", "process", "openbuild", "use_app", "bot_web_search"]);
-/** How long the user waits on a turn that's working before it's told to say something. */
-export const ACK_AFTER_MS = 3000;
-export const ACK_NUDGE = "The user is waiting and hasn't heard from you yet. Send one short send_message now saying what you're doing, then carry on.";
-
-/** A message of the user's joined the turn: from now they're waiting on it. */
-function waitsOn(mind: Mind) {
-  if (mind.waitingUser) return;
-  mind.waitingUser = true;
-  mind.waitingSince = Date.now();
-}
-
-/**
- * Tells a turn to acknowledge the user: once, when they're waiting, it has written nothing, and it's
- * inside a tool that's slow or has kept them three seconds already. Only ever during a tool call and
- * with nothing queued ahead, so Pi hands the nudge over with that tool's result and no extra model
- * call is made for it. A turn for a note, a check-in or a reaction has nobody waiting, and is never
- * nudged.
- */
-function ackDue(mind: Mind) {
-  if (!mind.waitingUser || mind.nudged || mind.sent || mind.willWrite || !mind.tool || !mind.steerable || mind.proc.exited) return;
-  // Pi hands the model one queued message at a time, the first with the tool's result. A message of the
-  // user's steered into this turn may still be waiting there (the runner can't tell once Pi has read
-  // it) and gets them an answer itself; a nudge behind it would only cost another model call.
-  if (mind.pendingSteers?.size || mind.queuedSteers?.some((entry) => !entry.note)) return;
-  const waited = Date.now() - (mind.waitingSince ?? Date.now());
-  if (!SLOW_TOOLS.has(mind.tool.name) && waited < ACK_AFTER_MS) {
-    clearTimeout(mind.ackTimer);
-    mind.ackTimer = setTimeout(() => ackDue(mind), ACK_AFTER_MS - waited);
-    mind.ackTimer.unref?.();
-    return;
-  }
-  mind.nudged = true;
-  note(mind, ACK_NUDGE);
-}
-
-/** Steer a word of the runner's own into the turn. Left unread, it's dropped with the turn, never carried into the next. */
-function note(mind: Mind, message: string) {
-  mind.noted = true;
-  steerSafely(mind, { type: "steer", message }, (disposition) => {
-    if (disposition === "queued") (mind.queuedSteers ??= []).push({ item: { kind: "note" }, conversationId: "", from: 0, note: true });
-  });
-}
 
 /** How long a tool call has to have run before a new message gets a side reply; a slow tool counts at once. */
 export const LONG_TOOL_MS = 3000;
@@ -889,7 +833,7 @@ async function runTurn(botId: string, all: Wake[]) {
   const conversationId = jobs.find((j) => j.conversationId)?.conversationId ?? svc.directId(botId);
   const lane = laneOf(conversationId);
   const key = mindKey(botId, lane);
-  // A reaction may well get no answer, so the chat shows nothing unless the bot starts typing.
+  // A reaction gets a reaction back as a rule, not a message, so the chat shows nothing unless the bot starts typing.
   const quiet = jobs.every((j) => j.kind === "reaction");
   // Every bot in a group reads what's said there and decides whether it's theirs: nothing shows of it,
   // not even its mascot, until it acts (BotStatus.deciding).
@@ -909,13 +853,10 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.quiet = deciding ? "deciding" : quiet && "reaction";
     mind.aborting = undefined;
     mind.tool = undefined;
-    mind.nudged = false;
-    mind.willWrite = false;
     // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
     // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
     const direct = db.getConversation(conversationId ?? "")?.kind === "direct";
     mind.waitingUser = jobs.some((j) => j.kind === "messages" && (direct || (!!j.messageIds?.length && (!j.lead || j.lead === botId))));
-    mind.waitingSince = Date.now();
     // A note, a check-in or a reaction: nobody asked, so only news is worth a message (routines were asked for).
     mind.background = jobs.every((j) => j.kind === "note" || j.kind === "heartbeat" || j.kind === "reaction");
     // The transcript is read now, so anything later is the next steer's or turn's to show.
@@ -1065,7 +1006,6 @@ async function runTurn(botId: string, all: Wake[]) {
     if (mind) await release(botId, mind, key).catch((err) => console.error("[bots] couldn't release Pi:", err));
     halted.delete(botId);
     if (mind) {
-      clearTimeout(mind.ackTimer);
       mind.tool = undefined;
       mind.helperSaid = undefined;
       mind.waitingUser = false;
@@ -1162,8 +1102,7 @@ async function release(botId: string, mind: Mind, key = botId) {
     try {
       if (mind.needsRecovery) await recoverPrompt(mind);
       // Pi's input handlers can queue a steer after the turn settled: it would turn up in the next one.
-      else if (mind.queuedSteers?.length || mind.noted) {
-        mind.noted = false;
+      else if (mind.queuedSteers?.length) {
         const cleared = await mind.proc.send<{ steering?: string[] } | undefined>({ type: "clear_queue" }, 30_000);
         mind.dropped = (mind.dropped ?? 0) + (cleared?.steering?.length ?? 0);
       }
@@ -1177,9 +1116,7 @@ async function release(botId: string, mind: Mind, key = botId) {
   const unread = mind.dropped && db.getBot(botId) ? queued.slice(-mind.dropped) : [];
   for (const entry of queued) if (!unread.includes(entry)) for (const key of entry.keys ?? []) mind.contextKeys?.add(key);
   mind.dropped = 0;
-  for (const { item, conversationId, from, note } of unread) {
-    // The runner's own nudges go with the turn they were for.
-    if (note) continue;
+  for (const { item, conversationId, from } of unread) {
     mind.shown?.set(conversationId, Math.min(mind.shown.get(conversationId) ?? from, from));
     // A stopped turn's unread messages stay unread, but don't start the work again by themselves.
     if (!halted.has(botId)) enqueue(botId, item);
@@ -1227,7 +1164,14 @@ function waitSettled(mind: Mind): Promise<void> {
   });
 }
 
-export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>): string {
+/**
+ * What a message steered into a working turn asks for: the user sees at once that it landed. It rides
+ * with the message itself, so it costs no model call of its own.
+ */
+export const STEER_ACK = "Show you saw it before you go on: one short send_message (the answer if that's quick, otherwise what you'll do now, like \"Got it, switching to X\"), or just a reaction when that says enough. Then fold it in and carry on.";
+
+/** A turn's prompt, or with `steered` what joins a turn already working: that says what to do mid-work instead of how to reply. */
+export function render(jobs: Wake[], botId: string, delivered?: Set<string>, candidates?: Set<string>, steered = false): string {
   const bots = db.listBots();
   const user = svc.getSettings().user?.name || "User";
   const parts: string[] = [];
@@ -1244,7 +1188,9 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
   }
   // The clock rides with each prompt: in the system prompt it would re-send the whole context every turn.
   parts.push(`The time is ${new Date().toString()}.`);
-  parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another). If there's nothing to say, send nothing and end with the plain reply [silent].");
+  // A reaction steered in says what to do with it itself (service.REACT_BACK).
+  if (steered) parts.push(jobs.some((j) => j.kind === "messages") ? `This arrived while you were working. ${STEER_ACK}` : "");
+  else parts.push("Use send_message to reply (one call per bubble, in this conversation unless you name another). If there's nothing to say, send nothing and end with the plain reply [silent].");
   return parts.filter(Boolean).join("\n\n");
 }
 
@@ -1348,7 +1294,9 @@ export function steerNote(conversationId: string, botId: string, ids: string[], 
     return row?.conversationId === conversationId ? [row] : [];
   });
   const lines = rows.sort((a, b) => a.seq - b.seq).map(line(c, bots, svc.getSettings().user?.name || "User", botId, ids, " [new, for you]", lead ? new Map(ids.map((id) => [id, lead])) : undefined));
-  return `New in conversation ${conversationId.slice(0, 8)} (“${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”) while you were working:\n${lines.join("\n")}\nFold it into what you're doing. If a quick reply or reaction would help, send one; otherwise carry on.`;
+  // Someone else answers it: this bot is only deciding whether any of it is its own, and owes no word.
+  const closing = lead && lead !== botId ? "Fold it into what you're doing. If a quick reply or reaction would help, send one; otherwise carry on." : STEER_ACK;
+  return `New in conversation ${conversationId.slice(0, 8)} (“${c.friend ? untrustedData(conversationTitle(c, bots)) : conversationTitle(c, bots)}”) while you were working:\n${lines.join("\n")}\n${closing}`;
 }
 
 function line(c: db.StoredConversation, bots: { id: string; name: string }[], user: string, botId: string, assigned?: string[], forYou = " [assigned request: answer this]", leads?: Map<string, string>) {

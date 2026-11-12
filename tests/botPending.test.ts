@@ -85,12 +85,11 @@ test('a group message reaches every bot there, and only the ones that act show; 
       a.deepEqual(showWorking(boss.conversationId, svc.snapshot().status, svc.snapshot().typing[boss.conversationId] ?? []), [boss.bot.id]);
 
       // The follow-up in the group was steered into the turn it's working on, not held for another.
-      // (Besides the nudge to say something, sent while it worked on the first with the user waiting.)
-      const delivered = steers.filter(s => s.bot === boss.bot.id && s.message !== runner.ACK_NUDGE);
+      const delivered = steers.filter(s => s.bot === boss.bot.id);
       a.equal(delivered.length, 1);
       a.ok(delivered[0].message.includes('[new, for you'));
       a.ok(delivered[0].message.includes('One more thing'));
-      // The other bot, only deciding, isn't nudged to say anything.
+      // The other bot, only deciding, is steered nothing.
       a.equal(steers.filter(s => s.bot === helper.bot.id).length, 0);
       mine(boss.bot.id)[0].finish();
       await until(() => mine(boss.bot.id).length === 2 && minds.get(boss.bot.id).steerable);

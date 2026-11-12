@@ -731,6 +731,9 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(reacted().length, 1);
       a.equal(reacted()[0].reaction.messageId, quoted.id);
       a.match(reacted()[0].text, /reacted 👍 to your message/);
+      // The user should see it was noticed: the bot is asked to react back, not told it can let it be.
+      a.match(reacted()[0].text, /That's reaction #2 there\\. React back to it with react's to_reaction so they know you saw it/);
+      a.doesNotMatch(reacted()[0].text, /doesn't need an answer/);
       svc.toggleReaction(conversationId, quoted.id, '👍', 'me');
       const own = svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text: 'mine' });
       svc.toggleReaction(conversationId, own.id, '👍', 'me');
@@ -755,6 +758,7 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(reacted().length, start + 1);
       a.equal(reacted().at(-1).reaction.to, laugh.id);
       a.match(reacted().at(-1).text, /to your 😂 reaction/);
+      a.ok(reacted().at(-1).text.endsWith("That's reaction #4 there. " + svc.REACT_BACK));
       a.match(transcript(chat.id, db.listBots(), 'User', bot.id), /#2 🙏 from you → #1, #3 😂 from Other → #2, #4 ❤️ from User → #3/);
       // Taking one back takes the answers with it.
       a.equal(svc.toggleReaction(chat.id, post.id, '🙏', bot.id, fire.id).reactions.length, 1);
