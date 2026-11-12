@@ -55,9 +55,50 @@ test("each has its own proportions: a disc, a square, a lozenge twice as wide as
   // A hexagon, a star and a flower stand on a point: taller than wide, as six-fold things are.
   for (const id of ["hex", "star", "flower"]) expect(ratio(id)).toBeCloseTo(Math.sqrt(3) / 2, 1);
   expect(ratio("teardrop")).toBeLessThan(0.9);
-  // The disc is about 72 across; the pointed ones reach further to cover the same area.
+  // The disc is about 72 across; the pointed ones reach further to cover the same area, and the
+  // triangle, rounder, a little less far.
   expect(size.blob!.w).toBeCloseTo(71.6, 0);
-  for (const id of ["star", "sparkle", "tablet", "wedge"]) expect(Math.max(size[id]!.w, size[id]!.h)).toBeGreaterThan(size.blob!.w + 8);
+  for (const id of ["star", "sparkle", "tablet"]) expect(Math.max(size[id]!.w, size[id]!.h)).toBeGreaterThan(size.blob!.w + 8);
+  expect(size.wedge!.w).toBeGreaterThan(size.blob!.w + 6);
+});
+
+/** How tightly an outline bends at its sharpest: the radius of the circle through points 6 units of its length apart. */
+function tightest(path: string) {
+  const [points] = outline(path);
+  const lengths = [0];
+  for (let i = 1; i <= points!.length; i++) lengths.push(lengths[i - 1]! + Math.hypot(points![i % points!.length]![0] - points![i - 1]![0], points![i % points!.length]![1] - points![i - 1]![1]));
+  const total = lengths.at(-1)!;
+  const at = (s: number): [number, number] => {
+    s = ((s % total) + total) % total;
+    const i = lengths.findIndex((l) => l > s) - 1;
+    const f = (s - lengths[i]!) / (lengths[i + 1]! - lengths[i]!);
+    const [a, b] = [points![i]!, points![(i + 1) % points!.length]!];
+    return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+  };
+  let least = Infinity;
+  for (let s = 0; s < total; s += 0.5) {
+    const [a, b, c] = [at(s - 6), at(s), at(s + 6)];
+    const cross = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    // Only where it bends outward, round a corner: a notch between petals doesn't count.
+    if (cross <= 0) continue;
+    least = Math.min(least, (Math.hypot(b[0] - a[0], b[1] - a[1]) * Math.hypot(c[0] - b[0], c[1] - b[1]) * Math.hypot(c[0] - a[0], c[1] - a[1])) / (2 * cross));
+  }
+  return least;
+}
+
+test("the square and the triangle have round corners, softer than the house's or the hexagon's", () => {
+  const bend = Object.fromEntries(SHAPES.map((s) => [s.id, tightest(s.path)]));
+  // A disc bends the same all round, by its radius.
+  expect(bend.blob!).toBeGreaterThan(30);
+  for (const id of ["square", "wedge"]) {
+    expect(bend[id]!).toBeGreaterThan(12);
+    expect(bend[id]!).toBeGreaterThan(bend.house!);
+    expect(bend[id]!).toBeGreaterThan(bend.hex!);
+  }
+  // Still a square, though: its corners stand out from its sides, as a disc's don't.
+  const [square] = outline(SHAPES.find((s) => s.id === "square")!.path);
+  const reach = square!.map(([x, y]) => Math.hypot(x - 50, y - 50));
+  expect(Math.max(...reach) / Math.min(...reach)).toBeGreaterThan(1.15);
 });
 
 test("all but the cloud and the sparkle are their own mirror image", () => {
