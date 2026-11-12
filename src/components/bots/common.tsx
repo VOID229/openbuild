@@ -2,7 +2,7 @@
 import { Star } from "lucide-react";
 import { memo, useEffect, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { busyBots } from "../../lib/bots/activity";
+import { busyBots, starting, STARTING_MS } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -98,6 +98,21 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
 
 const MISSING = { shape: "blob", color: "gray" };
 
+/** Whether a bot has just started on something and has no step to show yet (`starting`), for as long as that lasts. */
+export function useStarting(botId: string | undefined): boolean {
+  const now = Date.now();
+  const on = useBots((s) => !!botId && starting(s.status[botId], Date.now()));
+  const since = useBots((s) => (botId ? s.status[botId]?.since : undefined));
+  const [, again] = useState(0);
+  // Nothing in the store changes when the moment is over: look again then.
+  useEffect(() => {
+    if (!on || !since) return;
+    const t = setTimeout(() => again((n) => n + 1), Math.max(0, Math.min(STARTING_MS, since + STARTING_MS - Date.now())) + 20);
+    return () => clearTimeout(t);
+  }, [on, since]);
+  return on && !!since && now - since < STARTING_MS;
+}
+
 /** A conversation's picture: the bot, or a huddle of the group's or side chat's bots. */
 export const ConversationAvatar = memo(function ConversationAvatar({
   conversation,
@@ -129,12 +144,14 @@ export const ConversationAvatar = memo(function ConversationAvatar({
 }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
+  // A bot's own mascot is three dots for the moment it has started and has no step to show yet.
+  const waiting = useStarting(conversation.kind === "direct" ? conversation.botIds[0] : undefined);
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id));
   if (conversation.kind === "direct") {
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} waiting={waiting} pulse={bot ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />

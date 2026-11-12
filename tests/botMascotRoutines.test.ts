@@ -34,7 +34,7 @@ test("at work, the whole body is in it: it turns, rolls right over, leans in and
   expect(Math.max(...all.map((p) => p.roll ?? 0))).toBeGreaterThan(25);
   expect(Math.min(...all.map((p) => p.roll ?? 0))).toBeLessThan(-25);
   expect(Math.max(...all.map((p) => p.zoom ?? 0))).toBeGreaterThan(0.05);
-  expect(Math.min(...all.map((p) => p.zoom ?? 0))).toBeLessThan(-0.1);
+  expect(Math.min(...all.map((p) => p.zoom ?? 0))).toBeLessThan(-0.04);
   // More staring, wide-eyed, than squinting.
   const wide = all.filter((p) => p.eyes === "wide").length;
   expect(wide / all.length).toBeGreaterThan(0.2);

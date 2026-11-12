@@ -5,7 +5,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { AHEAD, aimTarget, BODY_TURN, covers, EYE_H, EYE_W, eyesFor, eyesOf, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { AHEAD, aimTarget, BODY_TURN, covers, EYE_H, EYE_W, eyesFor, eyesOf, FAR, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -140,7 +140,7 @@ test("facing straight out a bot is drawn as its shape is, and turned, the body a
     expect(x).toBeGreaterThan(8);
     expect(x).toBeLessThan(22);
     expect(y).toBeGreaterThan(2);
-    expect(Math.hypot(a, b)).toBeLessThan(Math.hypot(c, d) * 0.93);
+    expect(Math.hypot(a, b)).toBeLessThan(Math.hypot(c, d) * 0.97);
     expect(Math.abs(b)).toBeLessThan(0.1);
   }
   // Turned right, the left eye is the nearer one: a little bigger, and it has slid further.
@@ -269,8 +269,8 @@ test("however far over it looks, every shape keeps its eyes on its body", () => 
         // As far as it'll go that way: a full turn, held to the room the shape has.
         const [yaw, pitch] = turnTo(shape, Math.cos((a / 16) * Math.PI) * 3, Math.sin((a / 16) * Math.PI) * 3, form);
         for (const side of [-1, 1]) {
-          // Each eye's middle, and most of the way to each end of it.
-          for (const [dx, dy] of [[0, 0], [0, -h * fh * 0.36], [0, h * fh * 0.36], [-w * fw * 0.36, 0], [w * fw * 0.36, 0]] as const) {
+          // Each eye's middle, and well toward each end of it: only its ends may slip under the edge.
+          for (const [dx, dy] of [[0, 0], [0, -h * fh * 0.28], [0, h * fh * 0.28], [-w * fw * 0.28, 0], [w * fw * 0.28, 0]] as const) {
             const [x, y] = [shape.face.x + (side * gap) / 2 + dx, shape.face.y + dy];
             if (!inside(body, ...project(x, y, yaw, pitch))) misses.push(`${shape.id} ${form} ${a}`);
           }
@@ -335,4 +335,23 @@ test("the eyes are tall pills, and at work they're big: a quarter of the face be
   // Big eyes need the room: a turn at work is held to what they have.
   const wedge = SHAPES.find((s) => s.id === "wedge")!;
   expect(Math.abs(poseTarget(wedge, { x: 1, y: 0 }, true).yaw)).toBeLessThanOrEqual(Math.abs(poseTarget(wedge, { x: 1, y: 0 }).yaw));
+});
+
+test("turned away, the eyes are smaller all round, and keep half their width at the edge", () => {
+  const size = (yaw: number, pitch: number) => {
+    const rig = newRig();
+    snap(rig, to(yaw, pitch));
+    const [a, b, c, d] = frame(rig, orb, 100).left.slice(7, -1).split(", ").map(Number) as [number, number, number, number];
+    return [Math.hypot(a, b), Math.hypot(c, d)] as const;
+  };
+  const [w, h] = size(YAW, 0);
+  // A full turn to the side: shorter by FAR, and narrower still, but never the sliver a true turn gives.
+  expect(h).toBeGreaterThan(0.7);
+  expect(h).toBeLessThan(0.82);
+  expect(w).toBeLessThan(h);
+  expect(w).toBeGreaterThan(Math.cos((YAW * Math.PI) / 180) * (1 - FAR));
+  // Part of the way, it's in between; and looking down does the same to its height.
+  expect(size(YAW / 2, 0)[1]).toBeGreaterThan(h);
+  expect(size(YAW / 2, 0)[1]).toBeLessThan(1);
+  expect(size(0, PITCH)[1]).toBeLessThan(size(0, PITCH)[0]);
 });

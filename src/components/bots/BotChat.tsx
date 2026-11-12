@@ -42,7 +42,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, useStarting } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1104,6 +1104,11 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
+/** A working row's mascot: fidgeting, swelling at each new step, and three dots for the moment it has just started. */
+function WorkingMascot({ bot, size, activity }: { bot: Bot; size: number; activity: string }) {
+  return <BotAvatar look={bot.look} size={size} busy waiting={useStarting(bot.id)} pulse={{ key: activity, mood: "idle", action: "pop" }} />;
+}
+
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
 function Working({ conversationId, direct, botIds, bots }: { conversationId: string; direct: boolean; botIds: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
@@ -1114,7 +1119,7 @@ function Working({ conversationId, direct, botIds, bots }: { conversationId: str
         const activity = workingLine(conversationId, id, statuses[id]);
         if (!bot) return null;
         // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
-        const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy pulse={{ key: activity, mood: "idle", action: "pop" }} />;
+        const avatar = <WorkingMascot bot={bot} size={direct ? 30 : 28} activity={activity} />;
         return (
           <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
             {direct ? avatar : <span className="bm-avatar">{avatar}</span>}

@@ -4,7 +4,7 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import { statusLine, WRITING_REPLY } from "../../../shared/bots";
+import { statusLine, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -18,6 +18,18 @@ export const holding = (st: BotStatus | undefined, conversationId: string) =>
  * anywhere: until it types or picks up a tool, nothing shows of it, not even its mascot.
  */
 export const visiblyWorking = (st: BotStatus | undefined) => st?.state === "working" && !st.deciding;
+
+/** How long a bot's first moment of work lasts at most, ms: its mascot is three dots for it. */
+export const STARTING_MS = 1600;
+
+/**
+ * Just started on something, with no step to name yet: the moment between picking a message up and
+ * the first thing it does about it (its status is still plain working words). Its mascot is three
+ * dots for it (BotAvatar's `waiting`). `now` is this device's clock, which may not agree with the
+ * server's `since`: a start that looks to be in the future counts as just now.
+ */
+export const starting = (st: BotStatus | undefined, now: number) =>
+  visiblyWorking(st) && !st!.quiet && !!st!.since && now - st!.since < STARTING_MS && (!st!.activity?.trim() || (WORKING_PHRASES as readonly string[]).includes(st!.activity.trim()));
 
 /** Working in this chat, quietly or not. */
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;

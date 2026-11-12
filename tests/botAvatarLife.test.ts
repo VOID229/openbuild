@@ -28,14 +28,14 @@ const open = async () => {
 
 /**
  * In the page: how a bot stands, read off what its layers were given. The head's turn is read from
- * how far the eyes have slid across the body (the face stands 30 units off it), near enough.
+ * how far the eyes have slid across the body (the face stands 32 units off it), near enough.
  */
 const STANCE = `((b) => {
   const of = (cls, re) => Number((re.exec(b.querySelector(cls).style.transform) ?? [0, 0])[1]);
   // (Both eyes, averaged: the nearer one slides further than the other.)
   const eyes = [...b.querySelectorAll('.bot-eye')].map((e) => (/matrix\\(([^)]+)\\)/.exec(e.style.transform)?.[1] ?? '1,0,0,1,0,0').split(',').map(Number));
   const slid = [0, 0, 0, 0, (eyes[0][4] + eyes[1][4]) / 2, (eyes[0][5] + eyes[1][5]) / 2];
-  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 31))) * 180 / Math.PI;
+  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 33))) * 180 / Math.PI;
   return { yaw: turn(slid[4]), pitch: turn(slid[5]), bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), roll: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/), zoom: of('.bot-whole', /scale\\((-?[\\d.]+)\\)/) || 1 };
 })`;
 
@@ -54,11 +54,11 @@ const settled = (page: Page, scope: string) =>
   })()`, 8000);
 
 describe.skipIf(!browser)("a bot on its own", () => {
-  test("its eyes are solid and big, with nothing in them, and happy eyes stay open: never a chevron", async () => {
+  test("its eyes are solid and big, with nothing in them, and a pleased eye is a thick solid arch: never a stroke", async () => {
     const page = await open();
     await page.finish();
     // Each mood's eyes: what they're made of, and how big each is on screen.
-    type Eye = { tag: string; inside: number; pseudo: boolean; w: number; h: number; fill: string };
+    type Eye = { tag: string; inside: number; pseudo: boolean; w: number; h: number; fill: string; notch?: { w: number; fill: string } };
     const eyes = await page.eval<Record<string, { round: number; strokes: number; eyes: Eye[] }>>(`Object.fromEntries([...document.querySelectorAll('#moods .cell')].map((c) => [c.dataset.mood, {
       // Anything round or stroked anywhere on the bot: a dot, a glint, an arc.
       round: c.querySelectorAll('circle, ellipse').length,
@@ -68,6 +68,7 @@ describe.skipIf(!browser)("a bot on its own", () => {
         tag: shape.tagName.toLowerCase(), inside: shape.tagName === 'SPAN' ? shape.childNodes.length : shape.querySelectorAll('*').length - 1,
         pseudo: [getComputedStyle(shape, '::before').content, getComputedStyle(shape, '::after').content].some((v) => v !== 'none'),
         w: r.width, h: r.height, fill: shape.tagName === 'SPAN' ? s.backgroundColor : getComputedStyle(shape).fill,
+        notch: getComputedStyle(shape, '::after').content === 'none' ? undefined : { w: parseFloat(getComputedStyle(shape, '::after').width), fill: getComputedStyle(shape, '::after').backgroundColor },
       }; }),
     }]))`);
     for (const [mood, e] of Object.entries(eyes)) {
@@ -75,8 +76,10 @@ describe.skipIf(!browser)("a bot on its own", () => {
       expect(e.strokes).toBe(0);
       expect(e.eyes.length).toBe(2);
       for (const eye of e.eyes) {
-        // One solid shape, one flat colour, nothing drawn inside it or over it.
-        expect({ mood, inside: eye.inside, pseudo: eye.pseudo }).toEqual({ mood, inside: 0, pseudo: false });
+        // One solid shape, one flat colour, nothing drawn inside it or over it. Only a pleased eye has
+        // anything to it: the notch that makes it an arch (below).
+        const arch = mood === "happy" || (mood === "wink" && eye === e.eyes[1]);
+        expect({ mood, inside: eye.inside, pseudo: eye.pseudo }).toEqual({ mood, inside: 0, pseudo: arch });
         expect(eye.fill).toBe("rgb(20, 20, 20)");
         expect(eye.tag).toBe(mood === "love" ? "svg" : "span");
       }
@@ -85,15 +88,19 @@ describe.skipIf(!browser)("a bot on its own", () => {
     // Deep: an open eye stands over a fifth of the bot's height, and more than twice as tall as wide.
     expect(idle!.h).toBeGreaterThan(96 * 0.2);
     expect(idle!.h / idle!.w).toBeGreaterThan(2);
-    // Happy: still an open, filled eye, a little wider than an open one and most of its height.
+    // Pleased: a filled arch, wider than an open eye and about half its height, thick all the way
+    // round: the notch under it, in the body's colour, is under a third of its width.
     for (const eye of eyes.happy!.eyes) {
-      expect(eye.w).toBeGreaterThan(idle!.w * 0.95);
-      expect(eye.h).toBeGreaterThan(idle!.h * 0.6);
+      expect(eye.w).toBeGreaterThan(idle!.w * 1.2);
+      expect(eye.h).toBeGreaterThan(idle!.h * 0.45);
+      expect(eye.h).toBeLessThan(eye.w);
+      expect(eye.notch!.fill).toBe("rgb(76, 193, 114)");
+      expect(eye.notch!.w).toBeLessThan(eye.w * 0.33);
     }
     // A wink shuts one eye to a slit and smiles with the other.
     const [shut, smiling] = eyes.wink!.eyes;
     expect(shut!.h).toBeLessThan(idle!.h * 0.4);
-    expect(smiling!.h).toBeGreaterThan(idle!.h * 0.6);
+    expect(smiling!.h).toBeGreaterThan(idle!.h * 0.45);
     // A squint is a slit, well under half an open eye; surprise is rounder, not smaller.
     for (const eye of eyes.squint!.eyes) expect(eye.h).toBeLessThan(idle!.h * 0.4);
     for (const eye of eyes.surprised!.eyes) {
@@ -218,6 +225,49 @@ describe.skipIf(!browser)("a bot on its own", () => {
     // In place: it never leaves where it sits.
     expect(Math.max(...turns.map((t) => Math.abs(t.lift)))).toBeLessThan(0.06);
   }, 20_000);
+
+  test("starting on something, it turns into three dots, and comes back as itself when there's a step to show", async () => {
+    const page = await open();
+    const read = () =>
+      page.eval<{ dots: string | null; body: number; row: { x: number; y: number; w: number; fill: string }[] }>(`(() => {
+        const b = document.querySelector('#dots .bot'), box = b.getBoundingClientRect();
+        return { dots: b.dataset.dots ?? null, body: Number(getComputedStyle(b.querySelector('.bot-act')).opacity), row: [...b.querySelectorAll('.bot-dots i')].map((d) => { const r = d.getBoundingClientRect(); return { x: (r.left + r.width / 2 - box.left) / box.width, y: (r.top + r.height / 2 - box.top) / box.height, w: r.width / box.width, fill: getComputedStyle(d).backgroundColor }; }) };
+      })()`);
+    // Itself, with no dots anywhere in the page.
+    expect(await read()).toEqual({ dots: null, body: 1, row: [] });
+    await page.eval("wait(true)");
+    await page.until("document.querySelector('#dots .bot').dataset.dots === 'in' && getComputedStyle(document.querySelector('#dots .bot-act')).opacity === '0'");
+    await Bun.sleep(300);
+    const there = await read();
+    // The body is gone, and in its place three dots in its colour, side by side across its middle.
+    expect(there.row.length).toBe(3);
+    expect(there.row.map((d) => d.fill)).toEqual(["rgb(76, 193, 114)", "rgb(76, 193, 114)", "rgb(76, 193, 114)"]);
+    expect(there.row[0]!.x).toBeLessThan(0.25);
+    expect(there.row[1]!.x).toBeCloseTo(0.5, 1);
+    expect(there.row[2]!.x).toBeGreaterThan(0.75);
+    for (const d of there.row) {
+      expect(d.y).toBeCloseTo(0.5, 1);
+      expect(d.w).toBeGreaterThan(0.17);
+      expect(d.w).toBeLessThan(0.3);
+    }
+    // A wave runs along them: over a cycle each has its turn as the bright one.
+    const bright = new Set<number>();
+    for (let i = 0; i < 24; i++) {
+      const o = await page.eval<number[]>("[...document.querySelectorAll('#dots .bot-dots i')].map((d) => Number(getComputedStyle(d).opacity))");
+      bright.add(o.indexOf(Math.max(...o)));
+      await Bun.sleep(50);
+    }
+    expect([...bright].sort()).toEqual([0, 1, 2]);
+    // A step to show: back as itself, and the dots are taken out of the page.
+    await page.eval("wait(false)");
+    await page.until("!document.querySelector('#dots .bot-dots') && !('dots' in document.querySelector('#dots .bot').dataset)");
+    expect(await read()).toEqual({ dots: null, body: 1, row: [] });
+    // Left waiting, it doesn't stay dots for good: it comes back by itself after a couple of seconds.
+    await page.eval("wait(true)");
+    await page.until("document.querySelector('#dots .bot').dataset.dots === 'in'");
+    await page.until("!document.querySelector('#dots .bot-dots')", 5000);
+    expect((await read()).body).toBe(1);
+  }, 30_000);
 
   test("out of view, awake bots spend no frames", async () => {
     const page = await open();

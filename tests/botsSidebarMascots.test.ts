@@ -35,14 +35,14 @@ const item = (kind: "tile" | "row", title: string) =>
 
 /**
  * In the page: how a bot stands, read off what its layers were given. The head's turn is read from
- * how far the eyes have slid across the body (the face stands 30 units off it), near enough.
+ * how far the eyes have slid across the body (the face stands 32 units off it), near enough.
  */
 const STANCE = `((b) => {
   const of = (cls, re) => { const t = b.querySelector(cls).style.transform; return t === '' ? null : Number((re.exec(t) ?? [0, 0])[1]); };
   // (Both eyes, averaged: the nearer one slides further than the other.)
   const eyes = [...b.querySelectorAll('.bot-eye')].map((e) => /matrix\\(([^)]+)\\)/.exec(e.style.transform)?.[1].split(',').map(Number));
   const slid = eyes.every(Boolean) ? [0, 0, 0, 0, (eyes[0][4] + eyes[1][4]) / 2, (eyes[0][5] + eyes[1][5]) / 2] : undefined;
-  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 31))) * 180 / Math.PI;
+  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 33))) * 180 / Math.PI;
   return { yaw: slid ? turn(slid[4]) : null, pitch: slid ? turn(slid[5]) : null, bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), lean: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/) };
 })`;
 
