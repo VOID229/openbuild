@@ -19,7 +19,7 @@ import { durableQuestions, questionTick, type DurableQuestion, type QuestionRepl
 import type { Context } from "@earendil-works/chord/context";
 import { cancellationSafeModels } from "./models";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import type { PiChatRequest, StreamEvent, Usage } from "../../shared/types";
+import { botSender, type BotSender, type PiChatRequest, type StreamEvent, type Usage } from "../../shared/types";
 import { Run } from "../runs";
 import { runStopRequested } from "../runStops";
 import { dataDir } from "../paths";
@@ -27,7 +27,7 @@ import { agentDir, packageRoot } from "../pi/install";
 import { addUsage } from "../pi/usage";
 
 /** `text` is what the model reads; `display` is what the user wrote, when they differ. */
-interface DurableSteer { id: string; text: string; display?: string; images?: PiChatRequest["images"] }
+interface DurableSteer { id: string; text: string; display?: string; images?: PiChatRequest["images"]; sender?: BotSender }
 interface Manifest {
   steers?: DurableSteer[];
   version: 1;
@@ -259,14 +259,14 @@ export class DurableRuntime {
       ? [{ type: "text" as const, text: item.text }, ...item.images.map(image => ({ type: "image" as const, ...image }))]
       : item.text;
     return root.submit({ type: "input", content, whenBusy: "steer", requestId: JSON.stringify(["openbuild-steer", m.id, item.id]),
-      entry: { kind: "openbuild.steer", data: { run: m.id, id: item.id, text: item.display ?? item.text } } }, context);
+      entry: { kind: "openbuild.steer", data: { run: m.id, id: item.id, text: item.display ?? item.text, ...item.sender } } }, context);
   }
-  async steer(threadId: string, id: string, text: string, images?: PiChatRequest["images"], display?: string): Promise<{ handled: boolean }> {
+  async steer(threadId: string, id: string, text: string, images?: PiChatRequest["images"], display?: string, sender?: BotSender): Promise<{ handled: boolean }> {
     if (this.closed) throw new Error("Durable runtime is closed");
     await this.recover();
     return this.serial("$admission", async () => {
       if (this.deleted(threadId)) throw new DurableUnsupportedError("This durable thread was deleted");
-      const input: DurableSteer = { id, text, ...(display !== undefined ? { display } : {}), ...(images?.length ? { images: images.map(i => ({ data: i.data, mimeType: i.mimeType })) } : {}) };
+      const input: DurableSteer = { id, text, ...(display !== undefined ? { display } : {}), ...(images?.length ? { images: images.map(i => ({ data: i.data, mimeType: i.mimeType })) } : {}), ...(sender ? { sender } : {}) };
       const previous = [...this.manifests.values()].findLast(m => m.request.threadId === threadId && m.steers?.some(s => s.id === id));
       if (previous) {
         if (!isDeepStrictEqual(previous.steers!.find(s => s.id === id), input)) throw new DurableUnsupportedError("Steering ID was reused with different input");
@@ -315,8 +315,8 @@ export class DurableRuntime {
       const events: StreamEvent[] = [];
       let pageIndex = 0;
       if (entry.kind === "openbuild.steer") {
-        const data = entry.data as { run?: string; id?: string; text?: string } | undefined;
-        if (data?.run === m.id && m.steers?.some(item => item.id === data.id)) events.push({ t: "steer", id: data.id, text: data.text ?? "" });
+        const data = entry.data as { run?: string; id?: string; text?: string } & Partial<BotSender> | undefined;
+        if (data?.run === m.id && m.steers?.some(item => item.id === data.id)) events.push({ t: "steer", id: data.id, text: data.text ?? "", ...botSender(data) });
       }
       for (const message of entry.model ?? []) {
         const html = new HtmlDelivery(event => events.push(event), () => `html-${entry.id}-${pageIndex++}`);

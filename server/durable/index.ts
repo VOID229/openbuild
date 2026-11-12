@@ -5,7 +5,7 @@
  * long-lived worker process (`worker.ts`) so a server restart doesn't interrupt a turn: the worker
  * keeps working and the restarted server reattaches to it through `remote.ts`.
  */
-import type { PiChatRequest } from "../../shared/types";
+import type { BotSender, PiChatRequest } from "../../shared/types";
 import { DurableClient } from "./remote";
 
 export { DurableRun } from "./remote";
@@ -22,4 +22,4 @@ export const stopThread = (threadId: string) => client.stopThread(threadId);
 /** Call on server startup, not on first client reconnect. */
 export const recover = () => client.recover();
 export const compact = (threadId: string, instructions?: string) => client.compact(threadId, instructions);
-export const steer = (threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) => client.steer(threadId, steerId, message, images, display);
+export const steer = (threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string, sender?: BotSender) => client.steer(threadId, steerId, message, images, display, sender);

@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { dataDir } from "../paths";
 import type { PiWorkerRuntime, WorkerRun } from "./workerRuntime";
+import { botSender } from "../../shared/types";
 
 export const workerSocket = (directory: string) => join("/tmp", `ob-pi-${process.getuid?.() ?? "user"}`, `${createHash("sha256").update(directory).digest("hex").slice(0, 20)}.sock`);
 const encoder = new TextEncoder();
@@ -136,7 +137,7 @@ export async function serveWorker(directory: string, socket = workerSocket(direc
             case "/threads/stop": runtime.stopThread(String(body.threadId)); return Response.json({ ok: true });
             case "/threads/delete": runtime.deleteThread(String(body.threadId)); return Response.json({ ok: true });
             case "/answer": return Response.json(runtime.answer(body.threadId, body.askId, body.reply));
-            case "/steer": return Response.json(await runtime.steer(body.threadId, body.steerId, body.message, body.images, body.display));
+            case "/steer": return Response.json(await runtime.steer(body.threadId, body.steerId, body.message, body.images, body.display, botSender(body.sender)));
             case "/compact": return Response.json(await runtime.compact(body.threadId, body.instructions));
             case "/release": runtime.release(body.threadId); return Response.json({ ok: true });
             case "/restartIdle": runtime.restartIdle(); return Response.json({ ok: true });

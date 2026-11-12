@@ -94,8 +94,10 @@ test("the worker logs what the user wrote for a steer, never the prompt the mode
   await runtime.steer(threadId,"plain",prompt("look at this"),undefined,"look at this");
   await runtime.steer(threadId,"file",prompt('<file name="a.txt">file body</file>\n\nand this'),undefined,"and this");
   await runtime.steer(threadId,"older-client",prompt("from an older client"));
+  // A bot's steer: its event names the bot, so the thread labels it "Sent by" as it's read.
+  await runtime.steer(threadId,"bot",prompt("from a bot"),undefined,"from a bot",{sentBy:"Dr Eggbot",sentByBot:"bot-1"});
   await wait(()=>run.record.status!=="pending");
-  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"plain",text:"look at this"},{t:"steer",id:"file",text:"and this"},{t:"steer",id:"older-client",text:"from an older client"}]);
+  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"plain",text:"look at this"},{t:"steer",id:"file",text:"and this"},{t:"steer",id:"older-client",text:"from an older client"},{t:"steer",id:"bot",text:"from a bot",sentBy:"Dr Eggbot",sentByBot:"bot-1"}]);
   expect(JSON.stringify(run.events)).not.toContain("private preferences");
  }finally{release(threadId);if(original===undefined)delete process.env.FX_BIN;else process.env.FX_BIN=original;rmSync(dir,{recursive:true,force:true});}
 });

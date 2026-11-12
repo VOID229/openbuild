@@ -9,7 +9,7 @@ import { closeSync, mkdirSync, openSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { readEvents } from "../../shared/replies";
-import type { PiChatRequest, StreamEvent } from "../../shared/types";
+import type { BotSender, PiChatRequest, StreamEvent } from "../../shared/types";
 import { Run } from "../runs";
 import { dataDir } from "../paths";
 import { DurableUnsupportedError } from "./runtime";
@@ -200,8 +200,8 @@ export class DurableClient {
     }
   }
 
-  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string): Promise<{ handled: boolean }> {
-    const res = await this.request("/steer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, steerId, message, images, display }) });
+  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string, sender?: BotSender): Promise<{ handled: boolean }> {
+    const res = await this.request("/steer", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ threadId, steerId, message, images, display, sender }) });
     if (!res.ok) throw workerError(await res.json().catch(() => null), res.status);
     return await res.json() as { handled: boolean };
   }

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import type { Run } from "../runs";
 import { dataDir } from "../paths";
 import { DurableRuntime } from "./runtime";
+import { botSender } from "../../shared/types";
 
 /** Bumped when the socket protocol changes, so a stale worker is replaced even if its files look current. */
 const PROTOCOL = 1;
@@ -129,7 +130,7 @@ export function serveWorker(runtime: DurableRuntime, socket: string) {
             await runtime.stopThread(String(body.threadId));
             return json({ ok: true });
           case "/steer":
-            return json(await runtime.steer(String(body.threadId), String(body.steerId), String(body.message), body.images, typeof body.display === "string" ? body.display : undefined));
+            return json(await runtime.steer(String(body.threadId), String(body.steerId), String(body.message), body.images, typeof body.display === "string" ? body.display : undefined, botSender(body.sender)));
           case "/compact":
             return json({ id: await runtime.compact(String(body.threadId), typeof body.instructions === "string" ? body.instructions : undefined) });
           case "/shutdown":
