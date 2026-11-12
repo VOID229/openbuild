@@ -21,7 +21,8 @@ import { problems } from "./rpc";
 import { TEXT_RUNTIMES } from "../../shared/types";
 import { complete } from "../textGeneration";
 import { forgetModels, isThreadId, listCommands, listModels, modelEfforts, type PiModels } from "./sessions";
-import { answer, compact, findShell, startShell, stopShell, restartIdle, steer } from "./remote";
+import { answer, compact, findShell, startShell, stopShell, restartIdle } from "./remote";
+import { steerThread } from "../steer";
 import { piBin } from "./install";
 import { claimRuntime, threadRuntime, validRuntime } from "../threadRuntime";
 import * as durable from "../durable";
@@ -401,8 +402,7 @@ export function piRoutes(api: Api) {
           return bad("Expected { steerId, message, images?, display? }");
         }
         try {
-          if (threadRuntime(req.params.id) === "durable") return Response.json(await durable.steer(req.params.id, body.steerId, body.message, body.images, body.display));
-          return Response.json(await steer(req.params.id, body.steerId, body.message, body.images, body.display));
+          return Response.json(await steerThread(req.params.id, body.steerId, body.message, body.images, body.display));
         } catch (err) {
           return fail(err, 409);
         }
