@@ -39,7 +39,7 @@ import { BotAvatar } from "./BotAvatar";
 import { BotProfileHover } from "./BotProfileCard";
 
 /** A friend's bot whose look didn't come across. */
-const FRIEND_LOOK = { shape: "orb", color: "gray" };
+const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
 import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots } from "./common";

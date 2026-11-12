@@ -350,7 +350,7 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       const conversationId = svc.directId(bot.id);
       a.equal(bot.primary, true);
       a.equal(bot.name, 'Dr Eggbot');
-      a.deepEqual(bot.look, { shape: 'puff', color: 'white' });
+      a.deepEqual(bot.look, { shape: 'cloud', color: 'white' });
       a.match(bot.instructions, /primary bot/);
       a.equal(svc.getSettings().onboarding, 'active');
       a.equal(db.messages(conversationId, 10).length, 0);
@@ -408,11 +408,11 @@ test("Dr Eggbot introduces itself on first open, asks whether the user codes, an
       a.equal(byName.Tracer.threads.enabled, true);
       a.equal(byName.Tracer.threads.merge, false);
       a.equal(byName.Researcher.threads, undefined);
-      // The team's looks: Manager a yellow ghost, Tracer a blue capsule, Researcher a green round.
-      a.deepEqual(byName.Manager.look, { shape: 'jelly', color: 'amber' });
-      a.deepEqual(byName.Tracer.look, { shape: 'pill', color: 'blue' });
-      a.deepEqual(byName.Researcher.look, { shape: 'orb', color: 'green' });
-      a.deepEqual(db.listBots().find(b => b.primary).look, { shape: 'puff', color: 'white' });
+      // The team's looks: Manager a yellow house, Tracer a blue tablet, Researcher a green blob.
+      a.deepEqual(byName.Manager.look, { shape: 'house', color: 'amber' });
+      a.deepEqual(byName.Tracer.look, { shape: 'tablet', color: 'blue' });
+      a.deepEqual(byName.Researcher.look, { shape: 'blob', color: 'green' });
+      a.deepEqual(db.listBots().find(b => b.primary).look, { shape: 'cloud', color: 'white' });
       const group = db.listConversations().find(c => c.kind === 'group');
       a.equal(group.name, 'Team');
       a.deepEqual([...group.botIds].sort(), [bot.id, ...team.map(b => b.id)].sort());

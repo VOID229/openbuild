@@ -72,10 +72,8 @@
   height: 0;
 }
 
-/* Leaning with the body's resting pose (EYE_TILT in rig.ts), until a turn of the head moves them. */
 .bot-eye {
   top: 0;
-  transform: rotate(-9deg);
 }
 
 .bot-eye-fill {
@@ -117,6 +115,12 @@
 .bot[data-mood="wink"] .bot-eye-left .bot-eye-fill {
   --fw: 1.2;
   --fh: 0.22;
+}
+
+/* At work the eyes are big: fat and deep, a quarter of the face between them. */
+.bot[data-eyes="big"] .bot-eye-fill {
+  --fw: 1.6;
+  --fh: 1.48;
 }
 
 .bot[data-mood="sleepy"] .bot-eye-fill {

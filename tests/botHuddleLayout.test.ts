@@ -49,13 +49,12 @@ const huddles = (page: Page) =>
       if (m) {
         const r = m.getBoundingClientRect(), round = !!m.closest('.bot-huddle-seat');
         const points = [];
-        for (let x = r.left; x <= r.right; x += 0.5) for (let y = r.top; y <= r.bottom; y += 0.5)
+        for (let x = r.left; x <= r.right; x += 1) for (let y = r.top; y <= r.bottom; y += 1)
           // In a seat it's a disc, or a pill: within half its height of the line through its middle.
           if (!round || Math.hypot(x - Math.max(r.left + r.height / 2, Math.min(x, r.right - r.height / 2)), y - (r.top + r.bottom) / 2) <= r.height / 2) points.push([x, y]);
-        touched = shapes.filter((s) => {
-          const inv = s.getScreenCTM().inverse();
-          return points.some(([x, y]) => s.isPointInFill(new DOMPoint(x, y).matrixTransform(inv)));
-        }).length;
+        // (Asked of the page itself, point by point: the bodies are rolled and turned in perspective.)
+        const under = new Set(points.flatMap(([x, y]) => document.elementsFromPoint(x, y)));
+        touched = shapes.filter((s) => under.has(s)).length;
       }
       return {
         where, size: h.querySelector('.bot-huddle-box').offsetWidth, bodies: shapes.map((s) => box(s.getBoundingClientRect())), hidden, touched,

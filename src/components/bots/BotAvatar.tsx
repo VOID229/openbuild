@@ -1,13 +1,14 @@
 // OpenBots' bots: a flat shape in one colour with two big, deep eyes, and nothing else. What makes
 // one alive is how it moves: it's a solid thing that turns, rolls and leans as a whole (see
 // lib/bots/rig.ts), the face sliding across the body as the head turns and the eyes darting ahead of
-// it. Left alone it breathes, stares straight out, blinks and looks around; at work it's brisk,
-// rocking, peering and leaning in. It can follow the pointer, turning and leaning toward it; a held
+// it. A still bot rests turned up and away and rolled over. Left alone it breathes, stares straight
+// out, blinks and looks around; at work it faces you, eyes grown big, brisk, rocking, peering and
+// leaning in. It can follow the pointer, turning and leaning toward it; a held
 // mood (thinking while typing, happy at a reaction) changes its eyes, and in a group the ones not at
 // work doze, a "zzz" floating up over them. Nothing ever hops, and nothing spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
-import { aimTarget, atRest, eyesOf, frame, newRig, nod, poseTarget, REST, snap, step, type Pose } from "../../lib/bots/rig";
+import { aimTarget, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type Pose } from "../../lib/bots/rig";
 import { nextBeat, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
@@ -60,6 +61,9 @@ function offScreen(el: Element) {
   return !r.width || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
 }
 
+/** When the page has a moment to spare (or soon enough anyway). */
+const whenIdle = (step: () => void) => void (typeof requestIdleCallback === "function" ? requestIdleCallback(step, { timeout: 3000 }) : setTimeout(step, 300));
+
 /** How long a turn right round takes, ms. */
 const SPIN = 720;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -68,9 +72,9 @@ const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t 
  * One eye: a solid pill and nothing in it, its form set by the mood and pose in CSS (see
  * .bot-eye-fill). Hearts, in love. Where the head's turn puts it is written to it frame by frame.
  */
-function Eye({ side, x, love, at }: { side: "left" | "right"; x: number; love: boolean; at: React.Ref<HTMLSpanElement> }) {
+function Eye({ side, x, love, at, rest }: { side: "left" | "right"; x: number; love: boolean; at: React.Ref<HTMLSpanElement>; rest: string }) {
   return (
-    <span ref={at} className={`bot-eye bot-eye-${side}`} style={{ left: `calc(var(--u) * ${x})` }}>
+    <span ref={at} className={`bot-eye bot-eye-${side}`} style={{ left: `calc(var(--u) * ${x})`, transform: rest }}>
       {love ? (
         <svg className="bot-eye-heart" viewBox="-7 -8 14 14">
           <path d="M0 5.6C-10 -1.1 -4.5 -9 0 -3.4C4.5 -9 10 -1.1 0 5.6Z" />
@@ -140,26 +144,28 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const sleeping = dozing && !flash;
   const held = pose ?? (shown === "thinking" ? THINKING : undefined);
 
-  // The body: springs toward wherever it's facing (a pose, the pointer, or straight ahead), stepped
+  // The body: springs toward wherever it's facing (a pose, the pointer, or back to rest), stepped
   // frame by frame while anything moves and written straight to the layers, so none of it renders.
-  const body = useRef({ rig: newRig(), tracking: false, last: 0, spun: 0, pose: held, shape, size });
-  Object.assign(body.current, { pose: held, shape, size });
+  // It's drawn at rest to begin with (`rest`, below), with nothing run to put it there.
+  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; shape: typeof shape; size: number; busy: boolean }>(undefined);
+  body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, pose: held, shape, size, busy };
+  Object.assign(body.current, { pose: held, shape, size, busy });
   const write = () => {
-    const b = body.current;
+    const b = body.current!;
     const f = frame(b.rig, b.shape, b.size);
-    for (const [el, t] of [[wholeRef.current, f.whole], [bodyRef.current, f.body], [leftRef.current, f.left], [rightRef.current, f.right]] as const) if (el) el.style.transform = t === "none" ? "" : t;
+    for (const [el, t] of [[wholeRef.current, f.whole], [bodyRef.current, f.body], [leftRef.current, f.left], [rightRef.current, f.right]] as const) if (el) el.style.transform = t;
     if (skinRef.current) skinRef.current.style.visibility = f.back ? "hidden" : "";
   };
   const target = () => {
-    const b = body.current;
+    const b = body.current!;
     const el = ref.current;
-    if (b.pose) return poseTarget(b.shape, b.pose);
-    if (!b.tracking || !el || pointer.x < 0) return REST;
+    if (b.pose) return poseTarget(b.shape, b.pose, b.busy);
+    if (!b.tracking || !el || pointer.x < 0) return restOf(b.shape);
     const r = el.getBoundingClientRect();
-    return r.width ? aimTarget(b.shape, pointer.x - (r.left + (b.shape.face.x / 100) * r.width), pointer.y - (r.top + (b.shape.face.y / 100) * r.height), r.width) : REST;
+    return r.width ? aimTarget(b.shape, pointer.x - (r.left + (b.shape.face.x / 100) * r.width), pointer.y - (r.top + (b.shape.face.y / 100) * r.height), r.width) : restOf(b.shape);
   };
   const tick = useRef((now: number) => {
-    const b = body.current;
+    const b = body.current!;
     const dt = b.last ? now - b.last : 16;
     b.last = now;
     if (b.spun) {
@@ -175,18 +181,21 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   });
   /** Sets it moving toward wherever it now faces (or puts it there, when motion is reduced). */
   const move = () => {
-    if (!calm()) return animate(tick.current);
-    snap(body.current.rig, target());
+    if (calm()) snap(body.current!.rig, target());
+    else animate(tick.current);
+    // Drawn as it stands now, before the next paint: a new shape or size was just drawn at rest.
     write();
   };
   useEffect(() => () => void moving.delete(tick.current), []);
+  // How far this shape can turn is worked out ahead, in idle time, so its first look doesn't wait for it.
+  useEffect(() => warm(shape, whenIdle), [shape]);
   // A new pose or thought, a new shape or size: on its way there. The first time, it's simply there.
   const mounted = useRef(false);
   useLayoutEffect(() => {
     if (mounted.current) return move();
     mounted.current = true;
     if (!held) return;
-    snap(body.current.rig, target());
+    snap(body.current!.rig, target());
     write();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [held, shape, size]);
@@ -196,7 +205,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   useEffect(() => {
     const el = ref.current;
     if (!track || !el || calm()) return;
-    const b = body.current;
+    const b = body.current!;
     b.tracking = true;
     el.dataset.tracking = "";
     const stop = follow(() => animate(tick.current));
@@ -205,7 +214,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       stop();
       b.tracking = false;
       delete el.dataset.tracking;
-      if (!atRest(b.rig)) animate(tick.current);
+      animate(tick.current);
     };
   }, [track]);
 
@@ -220,8 +229,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     if (calm()) return;
     // A turn right round and a nod are the body's own: the face goes round the back and comes out the
     // other side, or dips and comes back up. The rest are played over it (.bot-act).
-    if (a === "spin") body.current.spun = performance.now();
-    if (a === "nod") nod(body.current.rig);
+    if (a === "spin") body.current!.spun = performance.now();
+    if (a === "nod") nod(body.current!.rig);
     if (a === "spin" || a === "nod") animate(tick.current);
     setAction(undefined);
     requestAnimationFrame(() => setAction(a));
@@ -282,6 +291,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
 
   const { face } = shape;
   const eyes = eyesOf(shape);
+  // How it's drawn while nothing has moved it: at rest. (What moves it writes over these.)
+  const rest = restFrame(shape, size);
   // Each bot starts somewhere else in its cycle of breaths.
   // The outline its face is cut to is its own (named for the shape too, so that even two that came by
   // the same name would be cut alike).
@@ -298,7 +309,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
       data-asleep={sleeping ? "" : undefined}
-      data-eyes={flash ? undefined : pose?.eyes}
+      data-eyes={flash ? undefined : eyesFor(pose, busy)}
       role={label ? "img" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
@@ -312,8 +323,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       {/* A one-off move (.bot-act), the slump of a doze (.bot-doze), then the body itself. */}
       <span className="bot-act">
         <span className="bot-doze">
-          <span className="bot-whole" ref={wholeRef}>
-            <span className="bot-body" ref={bodyRef}>
+          <span className="bot-whole" ref={wholeRef} style={{ transform: rest.whole }}>
+            <span className="bot-body" ref={bodyRef} style={{ transform: rest.body }}>
               <svg viewBox="0 0 100 100" width={size} height={size}>
                 <defs>
                   <clipPath id={clip} clipPathUnits="objectBoundingBox">
@@ -321,15 +332,14 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
                   </clipPath>
                 </defs>
                 <path className="bot-shape" d={shape.path} fill={color.hex} />
-                {shape.extra && <path d={shape.extra.path} fill={shape.extra.fill} />}
               </svg>
               {/* The face, painted on the body and cut to its outline: the eyes slide across it as the head
                   turns, and under its edge. Sizes in it are in --u, a unit of the 100-unit box. */}
               <span className="bot-skin" ref={skinRef} style={{ clipPath: `url(#${clip})`, "--eye-w": eyes.w, "--eye-h": eyes.h } as React.CSSProperties}>
                 <span className="bot-nap">
                   <span className="bot-eyes" style={{ left: `${face.x}%`, top: `${face.y}%` }}>
-                    <Eye side="left" x={-eyes.gap / 2} love={shown === "love"} at={leftRef} />
-                    <Eye side="right" x={eyes.gap / 2} love={shown === "love"} at={rightRef} />
+                    <Eye side="left" x={-eyes.gap / 2} love={shown === "love"} at={leftRef} rest={rest.left} />
+                    <Eye side="right" x={eyes.gap / 2} love={shown === "love"} at={rightRef} rest={rest.right} />
                   </span>
                 </span>
               </span>
@@ -393,7 +403,9 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
   const items: [React.Key, React.ReactNode][] = [];
   if (me) items.push(["me", me]);
   members.forEach((i, n) => {
-    const s = layout[n + (me ? 1 : 0)]?.[2] ?? 0.5;
+    // A touch smaller than its seat when it has neighbours: the shapes reach wide (a sparkle's arms,
+    // a wedge's corners), and seated side by side they'd touch each other and the count.
+    const s = (layout[n + (me ? 1 : 0)]?.[2] ?? 0.5) * (count > 1 ? 0.92 : 1);
     items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} track={track} />]);
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.

@@ -265,7 +265,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
             {shared.members.map((m) => (
               <li key={m.id} className="bots-card-row bots-member">
                 <span className="bots-member-main">
-                  <BotAvatar look={m.look ?? { shape: "orb", color: "gray" }} size={28} alive={false} />
+                  <BotAvatar look={m.look ?? { shape: "blob", color: "gray" }} size={28} alive={false} />
                   <span className="bots-card-text">{m.name}</span>
                 </span>
               </li>

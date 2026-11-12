@@ -1,8 +1,11 @@
-// OpenBots: the shapes and colours a bot can wear. Each shape is an SVG path in a 100×100 box plus
-// where its face sits, so the eyes land on the body however it's drawn (some shapes lean or tilt).
-// Most outlines are generated: a radius around the centre (a puff's lobes, a star's points) or a
-// polygon with soft corners, then smoothed into one closed curve. A little wobble keeps them from
-// looking machine-made.
+// OpenBots: the shapes and colours a bot can wear. Each shape is an SVG path in a 100×100 box, drawn
+// upright and facing straight out, plus where its face sits on it. How a bot stands at rest (turned
+// a little and rolled over) and how it moves are lib/bots/rig.ts's.
+//
+// The thirteen outlines are traced: each is a list of radii from the middle of the box, evenly spaced
+// clockwise from the top, folded by the shape's own symmetry (a flower is one half-petal, twelve
+// times) and joined into one smooth closed curve. They all cover the same area, so no bot looks
+// bigger than another, and each sits by the middle of its bounding box.
 
 export interface Face {
   /** Centre between the eyes. */
@@ -18,11 +21,7 @@ export interface Shape {
   id: string;
   label: string;
   path: string;
-  /** Drawn on top of the body in a fixed colour (a sprout's leaf). */
-  extra?: { path: string; fill: string };
   face: Face;
-  /** Special shapes sit at the end of the picker, like seasonal ones. */
-  special?: boolean;
 }
 
 type Point = [number, number];
@@ -31,195 +30,136 @@ const TAU = Math.PI * 2;
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
 /** A smooth closed curve through the points (Catmull-Rom, drawn as cubic Béziers). */
-function smooth(points: Point[], tension = 1): string {
+function smooth(points: Point[]): string {
   const n = points.length;
   const at = (i: number) => points[((i % n) + n) % n]!;
   let d = `M${r1(at(0)[0])} ${r1(at(0)[1])}`;
   for (let i = 0; i < n; i++) {
     const [p0, p1, p2, p3] = [at(i - 1), at(i), at(i + 1), at(i + 2)];
-    const c1: Point = [p1[0] + ((p2[0] - p0[0]) / 6) * tension, p1[1] + ((p2[1] - p0[1]) / 6) * tension];
-    const c2: Point = [p2[0] - ((p3[0] - p1[0]) / 6) * tension, p2[1] - ((p3[1] - p1[1]) / 6) * tension];
+    const c1: Point = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+    const c2: Point = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
     d += `C${r1(c1[0])} ${r1(c1[1])} ${r1(c2[0])} ${r1(c2[1])} ${r1(p2[0])} ${r1(p2[1])}`;
   }
   return `${d}Z`;
 }
 
-/** Points around (cx, cy) at the radius `r(θ)`, θ = 0 pointing right, turning clockwise. */
-function polar(r: (t: number) => number, { n = 72, rotate = 0, cx = 50, cy = 50, sx = 1, sy = 1 } = {}): Point[] {
-  const rot = (rotate * Math.PI) / 180;
-  return Array.from({ length: n }, (_, i) => {
-    const t = (i / n) * TAU;
-    const rr = r(t);
-    return [cx + Math.cos(t + rot) * rr * sx, cy + Math.sin(t + rot) * rr * sy] as Point;
-  });
+/**
+ * An outline from its radii about (50, 50), evenly spaced clockwise from straight up. The radii
+ * cover one part of it, repeated `fold` times round; unless `mirror` is off, each part is its own
+ * mirror image and they cover half of it, both ends included. A fold of 0 is a circle of the one radius.
+ */
+function traced(radii: number[], fold = 1, mirror = true): string {
+  const part = fold === 0 ? Array.from({ length: 48 }, () => radii[0]!) : mirror ? [...radii, ...radii.slice(1, -1).reverse()] : radii;
+  const all = Array.from({ length: Math.max(fold, 1) }, () => part).flat();
+  return smooth(all.map((r, i) => { const t = (i / all.length) * TAU; return [50 + Math.sin(t) * r, 50 - Math.cos(t) * r] as Point; }));
 }
-
-/** A gentle irregularity, the same every time for the same seed. */
-const wobble = (seed: number, amount = 1.2) => (t: number) => amount * (Math.sin(3 * t + seed) * 0.6 + Math.cos(2 * t + seed * 1.7) * 0.4);
-
-/** A polygon with rounded corners: each corner is cut back by `round` and bent through the vertex. */
-function roundedPolygon(vertices: Point[], round: number): string {
-  const n = vertices.length;
-  const at = (i: number) => vertices[((i % n) + n) % n]!;
-  const toward = (a: Point, b: Point, dist: number): Point => {
-    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    const k = Math.min(dist, len / 2) / len;
-    return [a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k];
-  };
-  let d = "";
-  for (let i = 0; i < n; i++) {
-    const v = at(i);
-    const a = toward(v, at(i - 1), round);
-    const b = toward(v, at(i + 1), round);
-    d += `${i === 0 ? "M" : "L"}${r1(a[0])} ${r1(a[1])}Q${r1(v[0])} ${r1(v[1])} ${r1(b[0])} ${r1(b[1])}`;
-  }
-  return `${d}Z`;
-}
-
-/** The corners of a regular polygon around (50, 50). */
-function regular(sides: number, radius: number, rotate: number, cx = 50, cy = 50): Point[] {
-  const rot = (rotate * Math.PI) / 180;
-  return Array.from({ length: sides }, (_, i) => {
-    const t = rot + (i / sides) * TAU - Math.PI / 2;
-    return [cx + Math.cos(t) * radius, cy + Math.sin(t) * radius] as Point;
-  });
-}
-
-/** A rectangle's corners, turned about its centre. */
-function rect(w: number, h: number, rotate: number, cx = 50, cy = 50): Point[] {
-  const rot = (rotate * Math.PI) / 180;
-  return ([[-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]] as Point[]).map(([x, y]) => [
-    cx + x * Math.cos(rot) - y * Math.sin(rot),
-    cy + x * Math.sin(rot) + y * Math.cos(rot),
-  ]);
-}
-
-const w = wobble;
 
 export const SHAPES: Shape[] = [
   {
-    id: "orb",
-    label: "Orb",
-    path: smooth(polar((t) => 39 + w(1, 1)(t), { n: 48 })),
-    face: { x: 57, y: 45, gap: 15 },
+    id: "blob",
+    label: "Blob",
+    // A plain disc.
+    path: traced([35.8], 0),
+    face: { x: 50, y: 50.2, gap: 22.3, scale: 1.11 },
   },
   {
-    id: "puff",
-    label: "Puff",
-    // Five lobes with soft dips between them, like a cloud.
-    path: smooth(polar((t) => 32 + 9 * Math.pow(Math.abs(Math.cos(2.5 * t)), 0.7) + w(2, 1.4)(t), { n: 90, rotate: 8 })),
-    face: { x: 56, y: 47, gap: 15 },
+    id: "cloud",
+    label: "Cloud",
+    // Three puffs over a flatter, bumpy underside; a little lopsided, as drawn.
+    path: traced([31.4, 30.4, 29.6, 28.7, 28.8, 29.9, 31.1, 32, 32.9, 33.8, 34.3, 34.9, 35.3, 35.5, 35.6, 35.6, 35.5, 35.2, 34.8, 34.3, 33.5, 34, 35.7, 37.6, 38.9, 40, 40.9, 41.5, 42.2, 42.4, 42.3, 42.2, 41.9, 41.1, 40.2, 39.1, 37.8, 36.2, 34.5, 32.4, 31.1, 31.3, 31.8, 32.1, 32.4, 32.7, 32.8, 33, 33, 33, 32.6, 32.6, 32.4, 32.1, 31.7, 31.2, 31.3, 33.3, 35.4, 37, 38.6, 39.8, 40.9, 41.6, 42.2, 42.6, 42.9, 42.8, 42.5, 42, 41.4, 40.5, 39.4, 38, 36.5, 34.7, 32.7, 31.8, 32.5, 33.1, 33.9, 34.4, 34.8, 35.2, 35.5, 35.6, 35.6, 35.7, 35.6, 35.3, 35.1, 34.5, 34.2, 33.5, 32.9, 32.2], 1, false),
+    face: { x: 50, y: 52.7, gap: 19.3, scale: 1.06 },
   },
   {
-    id: "tile",
-    label: "Tile",
-    path: roundedPolygon(rect(64, 60, -14), 17),
-    face: { x: 55, y: 48, gap: 15 },
+    id: "square",
+    label: "Square",
+    // A square with soft corners.
+    path: traced([31.9, 31.9, 32.1, 32.5, 33, 33.7, 34.5, 35.5, 36.8, 38.3, 40.2, 41.7, 42.3], 4),
+    face: { x: 50, y: 53.6, gap: 16.8 },
   },
   {
-    id: "spark",
-    label: "Spark",
-    path: smooth(polar((t) => 30 + 15 * Math.pow((Math.cos(4 * t) + 1) / 2, 1.6) + w(3, 0.8)(t), { n: 96, rotate: 12 })),
-    face: { x: 52, y: 48, gap: 13 },
+    id: "sparkle",
+    label: "Sparkle",
+    // A four-pointed sparkle, its arms uneven and leaning.
+    path: traced([39.6, 41.7, 43.5, 44.5, 44.9, 44.6, 43.5, 41.6, 39.6, 37.2, 35, 32.8, 30.6, 29, 27.2, 26.1, 25, 26.2, 27.4, 29.1, 31, 32.8, 35, 37.3, 39.5, 41.7, 43.4, 44.6, 45, 44.5, 43.5, 41.6, 39.5, 37.2, 34.8, 32.8, 30.9, 29.1, 27.6, 26.1, 24.9, 26.2, 27.4, 29.1, 31, 32.8, 34.9, 37.3, 39.6, 41.7, 43.3, 44.5, 44.9, 44.6, 43.4, 41.6, 39.5, 37.1, 34.8, 32.8, 30.6, 28.8, 27.2, 26.1, 25, 26.2, 27.4, 28.9, 31, 32.8, 34.9, 37.3, 39.5, 41.7, 43.3, 44.5, 45, 44.6, 43.5, 41.6, 39.5, 37.3, 34.8, 32.8, 30.9, 29.2, 27.6, 26.1, 25, 26.2, 27.4, 29.1, 31, 32.8, 34.9, 37.3], 1, false),
+    face: { x: 50, y: 49.8, gap: 19.2, scale: 1.03 },
   },
   {
     id: "clover",
     label: "Clover",
-    path: smooth(polar((t) => 30 + 11 * Math.pow(Math.abs(Math.cos(2 * t)), 0.55) + w(4, 1)(t), { n: 96, rotate: 22 })),
-    face: { x: 54, y: 48, gap: 14 },
+    // Four round leaves.
+    path: traced([29, 30.4, 31.8, 33.2, 34.4, 35.6, 36.5, 37.3, 38, 38.5, 39, 39.2, 39.2], 4),
+    face: { x: 50, y: 49.1, gap: 19, scale: 0.96 },
   },
   {
-    id: "bean",
-    label: "Bean",
-    // A lying-down kidney: wide, with a dent in its top edge.
-    path: smooth(polar((t) => 37 - 9 * Math.exp(-Math.pow(Math.atan2(Math.sin(t + Math.PI / 2), Math.cos(t + Math.PI / 2)), 2) / 0.18) + w(5, 1)(t), { n: 72, sx: 1.12, sy: 0.82, rotate: -10 })),
-    face: { x: 60, y: 52, gap: 15 },
+    id: "heart",
+    label: "Heart",
+    // A heart, wide and soft at the point.
+    path: traced([29, 30.1, 31.5, 32.8, 34.1, 35.3, 36.4, 37.5, 38.7, 39.6, 40.6, 41.4, 42.1, 42.6, 43.1, 43.4, 43.6, 43.5, 43.3, 43, 42.5, 41.8, 41.1, 40, 39, 37.8, 36.3, 35, 33.6, 32.4, 31.1, 30.4, 29.8, 29.4, 29, 28.7, 28.5, 28.5, 28.7, 29, 29.4, 29.8, 30.6, 31.5, 32.2, 32.9, 33.3, 33.6, 33.8]),
+    face: { x: 50, y: 52, gap: 18.8, scale: 0.96 },
   },
   {
     id: "flower",
     label: "Flower",
-    path: smooth(polar((t) => 33 + 8.5 * Math.cos(6 * t) + w(6, 1)(t), { n: 96, rotate: 4 })),
-    face: { x: 53, y: 49, gap: 13 },
+    // Six round petals.
+    path: traced([39.1, 38.9, 38.5, 37.7, 36.6, 35.2, 33.4, 31.2, 28.6], 6),
+    face: { x: 50, y: 54.9, gap: 16.4 },
   },
   {
-    id: "drop",
-    label: "Drop",
-    // A droplet tipped over to the upper left.
-    path: smooth(polar((t) => 33 + 14 * Math.pow(Math.max(0, Math.cos(t - (-2.4))), 5) + w(7, 0.8)(t), { n: 80, cy: 53 })),
-    face: { x: 56, y: 52, gap: 14 },
+    id: "teardrop",
+    label: "Teardrop",
+    // A drop: round below, coming to a soft point on top.
+    path: traced([40.8, 40.6, 39.9, 38.6, 37.2, 35.8, 34.6, 33.4, 32.5, 31.8, 31.2, 30.8, 30.5, 30.3, 30.3, 30.4, 30.6, 31, 31.3, 31.7, 32.1, 32.4, 32.9, 33.3, 33.6, 34, 34.3, 34.8, 35.2, 35.7, 36.1, 36.6, 37, 37.3, 37.7, 38, 38.3, 38.7, 39, 39.3, 39.5, 39.7, 39.9, 40.1, 40.3, 40.4, 40.4, 40.5, 40.6]),
+    face: { x: 50, y: 56.9, gap: 18.1, scale: 1.03 },
   },
   {
-    id: "egg",
-    label: "Egg",
-    // Narrower at the top than the bottom.
-    path: smooth(Array.from({ length: 64 }, (_, i) => {
-      const t = (i / 64) * TAU;
-      return [50 + Math.cos(t) * 33 * (1 + 0.2 * Math.sin(t)), 51 + Math.sin(t) * 41] as Point;
-    })),
-    face: { x: 55, y: 56, gap: 14 },
+    id: "tablet",
+    label: "Tablet",
+    // A lozenge lying on its side.
+    path: traced([27.5, 27.6, 27.8, 28, 28.5, 29.1, 29.8, 30.7, 31.8, 32.9, 34, 35, 36, 36.9, 37.8, 38.7, 39.4, 40.1, 40.8, 41.3, 41.7, 42.1, 42.3, 42.4, 42.6], 2),
+    face: { x: 50, y: 50.6, gap: 25.2, scale: 1.09 },
   },
   {
-    id: "pill",
-    label: "Pill",
-    path: roundedPolygon(rect(78, 48, -10), 24),
-    face: { x: 58, y: 47, gap: 15 },
+    id: "wedge",
+    label: "Wedge",
+    // A triangle with soft corners, wide at the base.
+    path: traced([36, 35.7, 35.3, 34.5, 33.5, 32.5, 31.5, 30.4, 29.5, 28.7, 28, 27.2, 26.7, 26.2, 26, 25.8, 25.7, 25.8, 25.9, 26.3, 26.7, 27.2, 28, 28.7, 29.8, 31, 32.4, 34.3, 36.4, 39.1, 42.1, 45.1, 47.8, 49.6, 50.5, 50, 48.8, 47.1, 45, 43.3, 41.6, 40.2, 39, 38, 37.3, 36.7, 36.3, 36.1, 36]),
+    face: { x: 50, y: 57.2, gap: 19, scale: 1.06 },
   },
   {
-    id: "pebble",
-    label: "Pebble",
-    path: roundedPolygon(regular(3, 47, -24, 48, 54), 17),
-    face: { x: 54, y: 50, gap: 13 },
+    id: "house",
+    label: "House",
+    // A square with a roof.
+    path: traced([35.5, 35.3, 34.8, 33.9, 33.1, 32.2, 31.6, 31, 30.8, 30.5, 30.4, 30.5, 30.7, 30.9, 31.4, 32, 32.6, 33.1, 33.5, 33.8, 33.8, 33.9, 33.9, 33.8, 33.7, 33.8, 34, 34.4, 34.9, 35.6, 36.5, 37.6, 38.9, 40.5, 42.5, 44.2, 45.2, 45.4, 44.4, 42.6, 41, 39.5, 38.4, 37.4, 36.7, 36.2, 35.8, 35.5, 35.5]),
+    face: { x: 50, y: 56.4, gap: 18.2 },
   },
   {
-    id: "gem",
-    label: "Gem",
-    path: roundedPolygon(regular(5, 42, 12, 50, 52), 14),
-    face: { x: 55, y: 50, gap: 15 },
+    id: "star",
+    label: "Star",
+    // Six stubby points.
+    path: traced([43.7, 43.2, 41.8, 38.2, 34.5, 31.6, 29.4, 28.4, 28], 6),
+    face: { x: 50, y: 55.3, gap: 19.2, scale: 1.04 },
   },
   {
-    id: "burst",
-    label: "Burst",
-    // A wobbly splat: eight soft points of uneven length.
-    path: smooth(polar((t) => 31 + 9 * Math.cos(7 * t) + 2.5 * Math.sin(3 * t + 1) + w(8, 1)(t), { n: 112, rotate: -6 })),
-    face: { x: 52, y: 50, gap: 13 },
-  },
-  {
-    id: "jelly",
-    label: "Jelly",
-    // Rounded on top, a little skirt of bumps along the bottom.
-    path: smooth(
-      ([...polar(() => 36, { n: 28, cy: 50 }).filter(([, y]) => y <= 50), [86, 62], [84, 77], [76, 82], [68, 76], [59, 83], [50, 77], [41, 83], [32, 76], [24, 82], [16, 77], [14, 62]] as Point[]).sort(
-        (a, b) => Math.atan2(a[1] - 55, a[0] - 50) - Math.atan2(b[1] - 55, b[0] - 50),
-      ),
-      0.9,
-    ),
-    face: { x: 55, y: 47, gap: 15 },
-  },
-  {
-    id: "kitty",
-    label: "Kitty",
-    special: true,
-    path:
-      smooth(polar((t) => 34 + w(9, 0.8)(t), { n: 48, cy: 56, sx: 1.08, sy: 0.96 })) +
-      roundedPolygon([[19, 40], [24, 12], [44, 30]], 6) +
-      roundedPolygon([[56, 30], [76, 12], [81, 40]], 6),
-    face: { x: 52, y: 58, gap: 16 },
-  },
-  {
-    id: "sprout",
-    label: "Sprout",
-    special: true,
-    path: smooth(polar((t) => 35 + w(10, 1)(t), { n: 48, cy: 56 })),
-    extra: {
-      // A stem and one leaf, curling off to the right.
-      path: "M50 23c-1-6 1-11 5-14 1 4 0 9-3 14zM54 16c6-7 16-8 22-4-4 7-14 10-22 4z",
-      fill: "#4fae55",
-    },
-    face: { x: 56, y: 56, gap: 15 },
+    id: "hex",
+    label: "Hex",
+    // A hexagon standing on a point.
+    path: traced([37.8, 37.6, 37, 36.2, 35.5, 35, 34.6, 34.3, 34.3], 6),
+    face: { x: 50, y: 54.3, gap: 24.1, scale: 1.19 },
   },
 ];
 
-export const SHAPE_BY_ID = new Map(SHAPES.map((s) => [s.id, s]));
+/**
+ * The shapes bots wore before these, by the one that takes each one's place: a bot saved (or sent by
+ * a friend's server) as one of them keeps a look, the nearest to what it had.
+ */
+const FORMER: Record<string, string> = {
+  orb: "blob", puff: "cloud", tile: "square", spark: "sparkle", bean: "tablet", drop: "teardrop", egg: "teardrop", pill: "tablet",
+  pebble: "wedge", gem: "house", burst: "star", jelly: "house", kitty: "blob", sprout: "blob",
+};
+
+/** Every shape by its id, and by the ids of the former shapes it stands in for. */
+export const SHAPE_BY_ID = new Map<string, Shape>(SHAPES.map((s) => [s.id, s]));
+for (const [was, now] of Object.entries(FORMER)) SHAPE_BY_ID.set(was, SHAPE_BY_ID.get(now)!);
 
 export interface BotColor {
   id: string;
@@ -256,9 +196,9 @@ export interface BotLook {
 export const shapeOf = (look: BotLook): Shape => SHAPE_BY_ID.get(look.shape) ?? SHAPES[0]!;
 export const colorOf = (look: BotLook): BotColor => COLOR_BY_ID.get(look.color) ?? COLORS[7]!;
 
-/** A look for a new bot: any regular shape, any colour but white and gray (they read as disabled). */
+/** A look for a new bot: any shape, any colour but white and gray (they read as disabled). */
 export function randomLook(): BotLook {
-  const shapes = SHAPES.filter((s) => !s.special);
+  const shapes = SHAPES;
   const colors = COLORS.filter((c) => c.id !== "white" && c.id !== "gray");
   return { shape: shapes[Math.floor(Math.random() * shapes.length)]!.id, color: colors[Math.floor(Math.random() * colors.length)]!.id };
 }

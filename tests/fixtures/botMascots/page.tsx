@@ -14,12 +14,12 @@ import type { Bot, BotMessage, Conversation } from "../../../src/lib/bots/types"
 
 const bot = (id: string, name: string, shape: string, color: string): Bot => ({ id, name, look: { shape, color }, instructions: "", memory: [], routines: [], createdAt: 1 });
 const bots = [
-  bot("egg", "Dr Eggbot", "puff", "white"),
-  bot("moss", "Moss", "orb", "green"),
-  bot("boo", "Boo", "jelly", "amber"),
-  bot("pill", "Pill", "pill", "blue"),
-  bot("tile", "Tile", "tile", "purple"),
-  bot("spark", "Spark", "spark", "teal"),
+  bot("egg", "Dr Eggbot", "cloud", "white"),
+  bot("moss", "Moss", "blob", "green"),
+  bot("boo", "Boo", "house", "amber"),
+  bot("pill", "Pill", "tablet", "blue"),
+  bot("tile", "Tile", "square", "purple"),
+  bot("spark", "Spark", "sparkle", "teal"),
 ];
 const at = Date.now() - 60_000;
 const said = (id: string, author: string, text: string, i: number): BotMessage => ({ id, author, at: at + i * 1000, text });
