@@ -268,6 +268,13 @@ function resolveModel(text: string, attachments: Attachment[], chatId: string | 
 }
 
 /**
+ * Sending to a closed thread reopens it, so it's listed under "Working" and then "Done" when the reply
+ * finishes, as reopening it by hand would (a merge that closed it won't close it again).
+ */
+const reopened = (chat: Chat) =>
+  chat.archived ? { archived: false, closedAt: undefined, ...(chat.autoClosedAt ? { autoClosedAt: undefined, autoCloseOptOut: true } : {}) } : {};
+
+/**
  * Send to `chatId` (default: the open chat, or a new one). Only the open chat is switched to.
  * `background` leaves the new thread in the sidebar and keeps the screen where it is.
  */
@@ -305,7 +312,7 @@ export function sendMessage(text: string, attachments: Attachment[], chatId = us
   // The account behind the picked native model, until the thread's first turn settles it.
   const account = runtimeOf(st, chatId) === "claude" && !existing?.messages.length ? claudeModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : runtimeOf(st, chatId) === "codex" && !existing?.messages.length ? codexModelAccount(st, threadDevice(st, chatId), resolved.ref.id) : undefined;
   const chat: Chat = existing
-    ? { ...existing, runtime: existing.runtime ?? "pi", runtimeAccount: account ?? existing.runtimeAccount, updatedAt: now, messages: [...existing.messages, user, assistant] }
+    ? { ...existing, ...reopened(existing), runtime: existing.runtime ?? "pi", runtimeAccount: account ?? existing.runtimeAccount, updatedAt: now, messages: [...existing.messages, user, assistant] }
     : { id: uid(), title: makeTitle(text, attachments), runtime: st.settings.threadRuntime ?? "pi", runtimeAccount: ["claude", "codex"].includes(st.settings.threadRuntime ?? "") ? account : st.settings.runtimeAccounts?.find((a) => a.id === st.settings.threadAccountId && a.runtime === st.settings.threadRuntime && (a.deviceId ?? "") === (threadDevice(st) ?? "")), permission: permissionOf(st), ...(remoteControlDraft(st) && remoteControlPerThread(st.settings.threadRuntime) ? { remoteControl: true } : {}), createdAt: now, updatedAt: now, messages: [user, assistant], efforts: { ...st.settings.modelEfforts }, speeds: { ...st.settings.modelSpeeds } };
   if (!existing) pinWorkspace(chat.id);
   st.upsertChat(chat);
@@ -347,6 +354,7 @@ export function regenerate(chatId: string, messageId: string) {
     requeueSteers(chatId, prev);
     if (prev.messageId !== messageId) st.patchMessage(chatId, prev.messageId, { status: "stopped" }, true);
   }
+  if (chat.archived) st.updateChat(chatId, reopened(chat));
   const now = Date.now();
   st.patchMessage(chatId, messageId, {
     content: "",

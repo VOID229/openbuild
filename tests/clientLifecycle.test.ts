@@ -104,3 +104,18 @@ test("a new send cannot orphan a running reply", () => scenario(`
   chat.stopGeneration('c');
 `));
 
+
+test("sending to a closed thread reopens it while the reply runs", () => scenario(`
+  const reply = deferred();
+  transport = async url => { if (url === '/api/pi/chat') return reply.promise; throw new Error(url); };
+  useStore.setState({ chats: [{ ...base, archived: true, closedAt: 5, autoClosedAt: 5 }] });
+  assert.ok(chat.sendMessage('one more thing', []));
+  assert.equal(current().archived, false);
+  assert.equal(current().closedAt, undefined);
+  assert.equal(current().autoClosedAt, undefined);
+  assert.equal(current().autoCloseOptOut, true);
+  assert.equal(current().messages.at(-1).status, 'streaming');
+  assert.equal(useStore.getState().activeChatId, 'c');
+  reply.resolve(response({ t: 'text', v: 'ok' }, { t: 'end' }));
+  await until(() => current().messages.at(-1).status === 'done');
+`));
