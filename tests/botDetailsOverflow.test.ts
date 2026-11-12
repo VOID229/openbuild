@@ -1,8 +1,9 @@
 // OpenBots' details panel never scrolls sideways, in a real Chrome on a desktop and on phones: on every
 // tab of a bot's details and a group's, nothing in the panel is wider than it, while the mascot leans
 // after a pointer at the window's edges and plays its moves too, and a sideways wheel or swipe over it
-// moves nothing. Text fields scroll their own text, as they do anywhere. The fixture
-// (fixtures/botDetails/page.tsx) fills it with words too long to wrap.
+// moves nothing. The tabs fit with their labels whole, in the mono font too; where they can't (a 280px
+// screen), they end in an ellipsis instead. Text fields scroll their own text, as they do anywhere. The
+// fixture (fixtures/botDetails/page.tsx) fills the panel with words too long to wrap.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -49,8 +50,9 @@ const watch = (page: Page, ms: number) =>
 const scrolled = (page: Page) =>
   page.eval<string[]>("[document.scrollingElement, ...document.querySelectorAll('*')].filter((el) => el.scrollLeft && !el.matches('input, textarea')).map((el) => el.className + ': ' + el.scrollLeft)");
 
-const open = async (chat: string, width: number, height: number) => {
-  const page = await Page.open(chrome!.ws, `${server!.url.href}?chat=${chat}`, width, height, "!!document.querySelector('.bots-view')");
+const open = async (chat: string, width: number, height: number, font?: string) => {
+  const page = await Page.open(chrome!.ws, `${server!.url.href}?chat=${chat}${font ? `&font=${font}` : ""}`, width, height, "!!document.querySelector('.bots-view')");
+  await page.eval("document.fonts.ready.then(() => true)");
   await page.eval("openBotsDetails(), true");
   await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
   await page.finish(".bots-details");
@@ -124,4 +126,21 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
       expect(await scrolled(page)).toEqual([]);
     }, 60_000);
   }
+
+  // The widest face the app offers still fits a narrow phone's tabs whole.
+  test("with the mono font on a narrow phone, every tab still shows its whole label", async () => {
+    const page = await open("dm", 320, 640, "mono");
+    expect(await page.eval<string>("getComputedStyle(document.querySelector('.bots-tab')).fontFamily")).toContain("Geist Mono");
+    expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
+    expect(await wide(page)).toEqual([]);
+  }, 60_000);
+
+  // Narrower still (a folded phone's cover screen) they don't fit: they give up the ends of their labels
+  // to an ellipsis, and the row still doesn't scroll.
+  test("on a 280px screen, the tabs end in an ellipsis rather than scroll", async () => {
+    const page = await open("dm", 280, 640);
+    expect(await page.eval<number>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).length")).toBeGreaterThan(0);
+    expect(await page.eval<unknown>("(() => { const row = document.querySelector('.bots-details .bots-tabs'); return row.scrollWidth - row.clientWidth; })()")).toBe(0);
+    expect(await wide(page)).toEqual([]);
+  }, 60_000);
 });
