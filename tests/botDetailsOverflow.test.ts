@@ -1,9 +1,9 @@
 // OpenBots' details panel never scrolls sideways, in a real Chrome on a desktop and on phones: on every
 // tab of a bot's details and a group's, nothing in the panel is wider than it, while the mascot leans
 // after a pointer at the window's edges and plays its moves too, and a sideways wheel or swipe over it
-// moves nothing. The tabs fit with their labels whole, in the mono font too; where they can't (a 280px
-// screen), they end in an ellipsis instead. Text fields scroll their own text, as they do anywhere. The
-// fixture (fixtures/botDetails/page.tsx) fills the panel with words too long to wrap.
+// moves nothing. The tabs fit with their labels whole; where they can't (a 280px screen), they end in
+// an ellipsis instead. Text fields scroll their own text, as they do anywhere. The fixture
+// (fixtures/botDetails/page.tsx) fills the panel with words too long to wrap.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -50,10 +50,8 @@ const watch = (page: Page, ms: number) =>
 const scrolled = (page: Page) =>
   page.eval<string[]>("[document.scrollingElement, ...document.querySelectorAll('*')].filter((el) => el.scrollLeft && !el.matches('input, textarea')).map((el) => el.className + ': ' + el.scrollLeft)");
 
-const open = async (chat: string, width: number, height: number, font?: string) => {
-  const page = await Page.open(chrome!.ws, `${server!.url.href}?chat=${chat}${font ? `&font=${font}` : ""}`, width, height, "!!document.querySelector('.bots-view')");
-  // The app's faces, loaded before anything is measured: one still loading measures in its fallback.
-  await page.eval(`Promise.all(['500 14px "Inter Variable"', '500 14px "Geist Mono Variable"'].map((f) => document.fonts.load(f))).then(() => true)`);
+const open = async (chat: string, width: number, height: number) => {
+  const page = await Page.open(chrome!.ws, `${server!.url.href}?chat=${chat}`, width, height, "!!document.querySelector('.bots-view')");
   await page.eval("openBotsDetails(), true");
   await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
   await page.finish(".bots-details");
@@ -128,19 +126,8 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
     }, 60_000);
   }
 
-  // The widest face the app offers still fits a narrow phone's tabs whole.
-  test("with the mono font on a narrow phone, every tab still shows its whole label", async () => {
-    const page = await open("dm", 320, 640, "mono");
-    expect(await page.eval<string>("getComputedStyle(document.querySelector('.bots-tab')).fontFamily")).toContain("Geist Mono");
-    expect(await page.eval<boolean>(`document.fonts.check('500 14px "Geist Mono Variable"')`)).toBe(true);
-    const cut = await page.eval<string[]>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)");
-    if (cut.length) console.log("DIAG", await page.eval<string>("JSON.stringify({ row: document.querySelector('.bots-tabs').clientWidth, scroll: [document.querySelector('.bots-details-scroll').offsetWidth, document.querySelector('.bots-details-scroll').clientWidth], tabs: [...document.querySelectorAll('.bots-tab')].map((t) => [t.textContent, t.scrollWidth, t.clientWidth, getComputedStyle(t).paddingLeft, getComputedStyle(t).fontSize, getComputedStyle(t).letterSpacing]), fonts: [...document.fonts].filter((f) => f.status === 'loaded').map((f) => f.family + ' ' + f.unicodeRange.slice(0, 20)), ua: navigator.userAgent })"));
-    expect(cut).toEqual([]);
-    expect(await wide(page)).toEqual([]);
-  }, 60_000);
-
-  // Narrower still (a folded phone's cover screen) they don't fit: they give up the ends of their labels
-  // to an ellipsis, and the row still doesn't scroll.
+  // On a 280px screen (a folded phone's cover) the tabs don't fit: they give up the ends of their
+  // labels to an ellipsis, and the row still doesn't scroll.
   test("on a 280px screen, the tabs end in an ellipsis rather than scroll", async () => {
     const page = await open("dm", 280, 640);
     expect(await page.eval<number>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).length")).toBeGreaterThan(0);

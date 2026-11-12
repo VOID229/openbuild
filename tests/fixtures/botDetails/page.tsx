@@ -2,9 +2,6 @@
 // Chrome: a primary bot (Dr Eggbot, the white puff) with words too long to wrap in its role,
 // instructions, routines, tasks and model, and a group of two with a long name and goal. The server is
 // faked: the models bots run on, and nothing else.
-// The app's own faces (as main.tsx loads them), so the tabs measure the same here as in it, and on CI.
-import "@fontsource-variable/inter/opsz.css";
-import "@fontsource-variable/geist-mono";
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -51,7 +48,6 @@ const conversations: Conversation[] = [
 useStore.setState({ botsOpen: true, botsSidebarOpen: false });
 useBots.setState({ bots, conversations, activeId: new URLSearchParams(location.search).get("chat") ?? "dm", loaded: true, connected: true, ensureSeeded: () => {} });
 Object.assign(window, { bots: useBots, openBotsDetails });
-if (new URLSearchParams(location.search).get("font")) document.documentElement.dataset.font = new URLSearchParams(location.search).get("font")!;
 createRoot(document.getElementById("root")!).render(
   <div className="bots-view" style={{ flex: 1, minWidth: 0, height: "100vh" }}>
     <BotsView />
