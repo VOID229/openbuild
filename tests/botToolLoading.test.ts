@@ -52,7 +52,7 @@ test("the catalog lists every tool that isn't core, by name, with a line of its 
 });
 
 test("core tools are declared from the start with their full schemas; the rest wait to be loaded", () => {
-  const { emit, declared, tool } = fakePi(["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]);
+  const { emit, declared, tool } = fakePi([...CORE_TOOLS, ...NON_CORE]);
   // A new session: Pi's `--tools` activated everything, and the extension puts the catalog back out.
   emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } });
   expect(declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS].sort());
@@ -132,7 +132,7 @@ test("a loaded tool stays loaded for the rest of the session, through a restart"
   expect([...loadedTools(entries, catalog)!]).toEqual(["routine"]);
   expect(loadedTools([], catalog)!.size).toBe(0);
   // A restarted Pi on that session: --tools activated everything; routine stays, the rest go.
-  const { emit, declared, tool } = fakePi(["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]);
+  const { emit, declared, tool } = fakePi([...CORE_TOOLS, ...NON_CORE]);
   emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => entries } });
   expect(declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS, "routine"].sort());
   expect(tool("routine").execute).toBeFunction();
@@ -144,7 +144,7 @@ test("a session from before the catalog keeps every tool it had", () => {
   expect(loadedTools(old, catalog)).toBeUndefined();
   // Messages but no recorded loadout at all: keep everything too.
   expect(loadedTools([said], catalog)).toBeUndefined();
-  const { emit, declared } = fakePi(["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]);
+  const { emit, declared } = fakePi([...CORE_TOOLS, ...NON_CORE]);
   emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => old } });
   expect(declared().length).toBe(ALL.length);
 });
@@ -163,7 +163,7 @@ test("a restarted Pi without a tool list gets back what the session had loaded",
   expect(active().slice(0, CORE_TOOLS.length).sort()).toEqual([...CORE_TOOLS].sort());
   expect(tool("routine").execute).toBeFunction();
   // And it's the same loadout the Pi with a tool list comes back to.
-  const listed = fakePi(["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]);
+  const listed = fakePi([...CORE_TOOLS, ...NON_CORE]);
   listed.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => entries } });
   expect(listed.declared().map((t) => t.name).sort()).toEqual(declared().map((t) => t.name).sort());
 });
@@ -176,7 +176,7 @@ test("a session from before the catalog keeps every tool without a tool list too
 });
 
 test("a new session's loadout is the core, however Pi started", () => {
-  for (const allowed of [undefined, ["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]]) {
+  for (const allowed of [undefined, [...CORE_TOOLS, ...NON_CORE]]) {
     const { emit, active } = fakePi(allowed);
     emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } });
     expect([...active()].sort()).toEqual([...CORE_TOOLS].sort());
@@ -200,7 +200,7 @@ test("a bot's usual tools are declared from the start of a session, with nothing
   expect(preloadNames("bash, use_app,,bash")).toEqual(["bash", "use_app"]);
   expect(preloadNames("")).toEqual([]);
   expect(preloadNames(undefined)).toEqual([]);
-  for (const allowed of [undefined, ["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]]) {
+  for (const allowed of [undefined, [...CORE_TOOLS, ...NON_CORE]]) {
     // A new session: the core and the usual tools, real schemas and all. A name that isn't a tool is ignored.
     const fresh = fakePi(allowed);
     withPreload("bash,use_app,teleport,send_message", () => fresh.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } }));

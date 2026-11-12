@@ -53,13 +53,14 @@ const fail = (err: unknown) => ({ content: text(`Error: ${err instanceof Error ?
 const NO_STATUS = new Set(["send_message", "react", "question", "poll", "html_render", "todo", "load_tools", "jobs"]);
 
 /**
- * The tools every request declares in full: chatting (all a friend's chat may use) and memory, which
- * nearly every turn reaches for, and load_tools. Every other tool is a line in load_tools' catalog,
+ * The tools every request declares in full: chatting (all a friend's chat may use), question (a bot
+ * that would have to load it first writes its questions as a message instead), memory, which nearly
+ * every turn reaches for, and load_tools. Every other tool is a line in load_tools' catalog,
  * and its schema reaches the model only once the bot loads it. That's Pi's own dynamic tool loading:
  * setActiveTools() during a tool call declares the tool on the next request of the same turn, and Pi
  * records each change of loadout in the session, where a restarted Pi finds it (session_start below).
  */
-export const CORE_TOOLS = ["send_message", "react", "memory", "search", "load_tools"];
+export const CORE_TOOLS = ["send_message", "react", "question", "memory", "search", "load_tools"];
 const CORE = new Set(CORE_TOOLS);
 
 /** Each catalog tool in a line: enough for the bot to know it's there and when to load it. */
@@ -70,7 +71,6 @@ export const CATALOG_BRIEF: Record<string, string> = {
   edit: "replace text in a file on your computer",
   browser: "your web browser: open, click, type, screenshot",
   process: "start, read and stop long-running programs",
-  question: "ask the user to pick from choices",
   poll: "start a poll in a group chat",
   vote_poll: "vote in a poll",
   html_render: "show an HTML page (chart, diagram, demo) in the chat",
@@ -334,7 +334,7 @@ export default function openbots(pi: any) {
 
   register(tool("react", "React", "React to a message, or to someone's reaction on it, with one emoji. Reacting again with the same emoji takes it back.", { type: "object", properties: { message: str("Short message id."), emoji: str("One emoji."), to_reaction: { type: "number", description: "Optional: the number (#n) of the reaction on that message to react to, instead of the message itself." }, conversation: str("Short conversation id.") }, required: ["message", "emoji"] }, (p, signal) => call("react", p, signal)));
 
-  register(tool("question", "Ask", "Ask the user to pick. They can also type their own answer. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices. Don't add Other." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), conversation: str("Short conversation id.") }, required: ["title"] }, (p, signal) => call("question", p, signal)));
+  register(tool("question", "Ask", "Ask the user something you need answered, as a card they answer with a tap: one question per call, its choices as options. They can also type their own answer. Don't write such a question in a message. Don't invent the answer; stop after asking.", { type: "object", properties: { title: str("The question."), hint: str("Optional one line under it."), options: { type: "array", items: { type: "string" }, description: "Real choices, or a suggested answer or two for an open question. Don't add Other." }, offer: str("Only \"developer\" or \"team\", when you're told to ask whether the user writes code or to offer the starter team. The app sets their choices and makes the team."), conversation: str("Short conversation id.") }, required: ["title"] }, (p, signal) => call("question", p, signal)));
 
   register(tool("poll", "Poll", "Start a poll in a group chat. The user and every bot there can vote. Options are lettered A, B, C… for you.", { type: "object", properties: { question: str("The question."), options: { type: "array", items: { type: "string" }, description: "Two to ten choices." }, multiple: { type: "boolean", description: "Voters can pick several. One answer each if omitted." }, hide_votes: { type: "boolean", description: "Hide answers from each voter until they've answered. On if omitted; false shows them from the start." }, conversation: str("Short conversation id.") }, required: ["question", "options"] }, (p, signal) => call("poll", p, signal)));
 

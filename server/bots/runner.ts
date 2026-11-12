@@ -6,7 +6,7 @@ import { untrustedData } from "./transcriptData";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, type BotMessage } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, type BotMessage, type Question } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -1437,7 +1437,7 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const text = m.event && eventText(m.event);
     const detail = m.event && eventDetail(m.event);
     // "Wrote a prompt in" runs straight into the thread's title; other details follow a colon.
-    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.html ? `(showed a page: “${m.html.title}”)${m.text ? ` ${m.text.slice(0, 2000)}` : ""}` : m.text.slice(0, 2000);
+    const rawBody = m.event ? `(${text}${detail ? `${text!.endsWith(" in") ? " " : ": "}${detail}` : ""})` : m.poll ? pollBody(m, botId, name) : m.html ? `(showed a page: “${m.html.title}”)${m.text ? ` ${m.text.slice(0, 2000)}` : ""}` : m.question ? questionBody(m.question, !!c.friend) : m.text.slice(0, 2000);
     // Shared event wording can embed friend-controlled names and quoted content.
     const body = (c.friend && m.event) || parseFriendAuthor(m.author) ? untrustedData(rawBody) : rawBody;
     // Unscoped group wakes may react to bots/events, never adopt user requests assigned elsewhere.
@@ -1452,6 +1452,15 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${c.friend || parseFriendAuthor(x.by) ? untrustedData(x.emoji) : x.emoji} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
     return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
   };
+}
+
+/** A question card in the transcript: what was asked, its choices, and whether the user has answered it yet. */
+function questionBody(q: Question, shared: boolean): string {
+  const options = q.options.map((o) => o.label).join(" / ");
+  // In a shared chat the friend can answer too, in their own words.
+  const typed = (text: string) => (shared ? untrustedData(text) : text);
+  const answer = q.answer === undefined ? "not answered yet" : `answered: ${q.options.find((o) => o.key === q.answer)?.label ?? typed(q.answer)}`;
+  return `(asked with question: “${q.title}”${options ? ` [${options}]` : ""}, ${answer})`;
 }
 
 /** A poll in the transcript: its options, who picked what if this bot may know yet, and whether it still has to vote. */

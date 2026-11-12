@@ -572,6 +572,22 @@ export function emptyUpdate(text: string): boolean {
   return new RegExp(`^${part}(?: (?:and )?${part})*$`).test(said);
 }
 
+const LIST_ITEM = /^\s*(?:\d{1,2}[.)]|[A-Ha-h][.)]|[-*•])\s+\S/;
+
+/**
+ * A message that puts questions to its reader as a list: several listed questions, or one question
+ * with its choices listed under it. That's what the question card is for. A question in a sentence,
+ * or a list that isn't asking anything, is just a message.
+ */
+export function asksInList(text: string): boolean {
+  const lines = text.split("\n").filter((line) => line.trim());
+  const first = lines.findIndex((line) => LIST_ITEM.test(line));
+  if (first < 0) return false;
+  const items = lines.filter((line) => LIST_ITEM.test(line));
+  if (items.filter((line) => line.includes("?")).length >= 2) return true;
+  return items.length >= 2 && first > 0 && /\?[^\p{L}\p{N}]*$/u.test(lines[first - 1]!);
+}
+
 const STOP_LEAD = "(?:ok|okay|hey|no|nah|oh|wait|actually|sorry|please|pls|just|hmm)";
 const STOP_TAIL = "(?:please|pls|now|right now|for now|thanks|thank you|thx|already)";
 const STOP_CORE = [
