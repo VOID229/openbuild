@@ -3006,16 +3006,18 @@
    ========================================================================== */
 
 /* The panel takes its width at once (animating a width relays the whole chat out on every frame);
-   only what's in it fades and slides in, a few pixels. */
+   only what's in it fades and slides in, a few pixels. Clipped rather than hidden: a hidden box still
+   scrolls, from a focus or a script, and what's in it would slide sideways. */
 .bots-details {
+  --details-w: 356px;
   flex: none;
   width: 0;
-  overflow: hidden;
+  overflow: clip;
   border-left: 1px solid transparent;
 }
 
 .bots-details-open {
-  width: 356px;
+  width: var(--details-w);
   border-left-color: var(--border);
 }
 
@@ -3040,10 +3042,11 @@
   }
 }
 
+/* A set width, so nothing reflows as the panel closes; inside its border, which the panel's width counts. */
 .bots-details-inner {
   display: flex;
   flex-direction: column;
-  width: 356px;
+  width: calc(var(--details-w) - 1px);
   height: 100%;
 }
 
@@ -3120,9 +3123,11 @@
   padding: 10px 10px 0;
 }
 
+/* Up and down only: overflow-y alone makes x auto too, and a pixel too wide would scroll it sideways. */
 .bots-details-scroll {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   padding: 0 20px 24px;
 }
@@ -3286,33 +3291,30 @@ button.bots-details-name:hover {
   font-weight: 500;
 }
 
-/* Tabs: a plain underlined row. A bot's fill the panel, and Threads comes after them while it has any
-   running: the row scrolls sideways then, with the selected tab kept in view (BotDetails' Tabs). The line under the row is a
-   shadow, so the scroller doesn't clip the selected tab's underline off it. */
+/* Tabs: a plain underlined row that never scrolls. Past the first few they're under More, so they fit
+   the panel; where they wouldn't (a narrow phone, a wide font), each gives up a little of its label to
+   an ellipsis rather than the row scrolling sideways. The line under the row is a shadow, under the
+   selected tab's underline. */
 .bots-tabs {
   display: flex;
   gap: 4px;
   margin-bottom: 16px;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-  scrollbar-width: none;
   box-shadow: inset 0 -1px 0 var(--border);
 }
 
-.bots-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-/* Inside the row, so the scroller doesn't cut its ring off. */
+/* Inside the tab, as its label clips to it. */
 :where([data-keyboard-nav]) .bots-tab:focus-visible {
   outline-offset: -2px;
 }
 
 .bots-tab {
   position: relative;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   height: 36px;
   padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: 13.5px;
   font-weight: 500;
   color: var(--text-2);

@@ -11,6 +11,7 @@
   "tests/botComposerSend.test.ts": 8.8,
   "tests/botContextSections.test.ts": 3.7,
   "tests/botCoordination.test.ts": 2.3,
+  "tests/botDetailsOverflow.test.ts": 17.4,
   "tests/botGroupSteerRecovery.test.ts": 4.1,
   "tests/botGroupSteer.test.ts": 7.0,
   "tests/botHeadPill.test.ts": 28.3,
