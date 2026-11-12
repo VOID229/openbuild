@@ -155,6 +155,10 @@ export type Attachment = {
   /** Decoded contents for text files; inlined into the prompt by the client. */
   text?: string;
   size: number;
+  /** Kept on a machine's disk instead (a video, an archive, anything not inlined): where it is there. The prompt names this path. */
+  path?: string;
+  /** Which machine has it: a paired device's id, absent for this server. */
+  deviceId?: string;
   /** Picked from the composer's "@" menu: the text already names it, so no chip is shown. */
   mention?: boolean;
 };

@@ -1,9 +1,11 @@
 import { userVisiblePrompt } from "../../shared/promptDisplay";
-import { Bookmark, Check, ChevronRight, CircleAlert, Copy, FileText, Globe, RotateCcw, Sparkles } from "lucide-react";
+import { isPicture } from "../../shared/attachments";
+import { Bookmark, Check, ChevronRight, CircleAlert, Copy, Globe, RotateCcw, Sparkles } from "lucide-react";
 import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
-import { formatBytes } from "../lib/files";
+import { attachmentUrl } from "../lib/files";
+import { FileChip } from "./FileChip";
 import { addStash } from "../lib/stash";
 import { useStore } from "../lib/store";
 import type { Message, Part, SearchCall, SteerPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -182,25 +184,19 @@ function Searches({ searches }: { searches: SearchCall[] }) {
 function chatImages(chatId: string) {
   const chat = useStore.getState().chats.find((c) => c.id === chatId);
   const files = (chat?.messages ?? []).flatMap((m) => [...(m.attachments ?? []), ...(m.parts ?? []).flatMap((p) => (p.type === "steer" && p.attachments) || [])]);
-  return files.filter((a) => a.mime.startsWith("image/"));
+  return files.filter((a) => isPicture(a));
 }
 
 function Attachments({ files, chatId }: { files: Attachment[]; chatId: string }) {
   return (
     <div className="msg-attachments">
       {files.map((a) =>
-        a.mime.startsWith("image/") ? (
+        isPicture(a) ? (
           <button key={a.id} type="button" className="msg-image" aria-label={`Preview ${a.name}`} onClick={() => openLightbox(chatImages(chatId), a.id)}>
             <img src={a.dataUrl} alt={a.name} />
           </button>
         ) : (
-          <span key={a.id} className="attachment-file msg-file" title={a.name}>
-            <FileText size={16} />
-            <span>
-              <span className="attachment-name">{a.name}</span>
-              <span className="attachment-meta">{formatBytes(a.size)}</span>
-            </span>
-          </span>
+          <FileChip key={a.id} className="msg-file" name={a.name} mime={a.mime} size={a.size} href={a.path ? attachmentUrl(a) : undefined} />
         ),
       )}
     </div>

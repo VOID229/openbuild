@@ -1,7 +1,7 @@
 // An OpenBots conversation, chat style: bubbles grouped by who sent them, a time between messages
 // far apart, reactions both ways, replies that quote what they answer, and bots typing. Group
 // chats name each bot over its messages; side chats between bots are read-only.
-import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ImagePlus, ListChecks, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleDashed, CircleDot, Copy, CornerUpLeft, ListChecks, Paperclip, Plus, SmilePlus, Square, TextSelect, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
@@ -10,7 +10,7 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
+import { capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
@@ -26,6 +26,8 @@ import { useFieldDictation } from "../../lib/useFieldDictation";
 import { Avatar, IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { uid } from "../../lib/id";
+import { AttachmentError, uploadFile } from "../../lib/files";
+import { FileChip } from "../FileChip";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
@@ -448,6 +450,9 @@ function CopyAction({ text }: { text: string }) {
 }
 
 /** Saves a copy of a message I sent to the stash. The message itself stays as it is. */
+/** A message's pictures and files as a composer holds them. */
+const attachedOf = (m: Pick<BotMessage, "images" | "files">) => [...(m.images ?? []), ...(m.files ?? []).map(fileRef)];
+
 function StashAction({ text, images }: { text: string; images: string[] }) {
   const crossStash = useStore((s) => s.settings.crossStash);
   const [stashed, setStashed] = useState(false);
@@ -761,7 +766,8 @@ const sameRow = (a: RowProps, b: RowProps) => {
 const MessageRow = memo(function MessageRow({ message: m, conversation, bots, pos, fresh, readonly, onReply, onPicker, onHold, seen, sending, oldPage }: RowProps) {
   const mine = m.author === "me";
   const quoted = m.replyTo ? conversation.messages.find((x) => x.id === m.replyTo) : undefined;
-  const emojiOnly = !m.images?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
+  const filesAt = useBots((s) => s.workspace);
+  const emojiOnly = !m.images?.length && !m.files?.length && !m.question && !m.plan && !m.poll && !m.connect && !m.html && EMOJI_ONLY.test(m.text.replace(/\s/g, ""));
   const card = !!(m.question || m.plan || m.poll || m.connect || m.html);
   const everyone = useMemo(() => everyoneIn(conversation, bots), [conversation.kind, conversation.botIds, bots]);
   const react = (emoji: string) => {
@@ -815,6 +821,13 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
               ))}
             </div>
           )}
+          {!!m.files?.length && (
+            <div className="bm-files">
+              {m.files.map((f) => (
+                <FileChip key={f.id} className="bm-file" name={f.name} mime={f.mime} size={f.size} href={filesAt ? workspacePath(filesAt, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${encodeURIComponent(f.id)}`) : undefined} />
+              ))}
+            </div>
+          )}
           {m.text && !m.question && !m.poll && !m.connect && (
             <div className="bm-text">
               <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
@@ -834,7 +847,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
             <IconButton label="Reply" tooltip={false} className="bm-action" onClick={() => onReply(m.id)}>
               <CornerUpLeft size={16} />
             </IconButton>
-            {mine && !m.poll && (m.text.trim() || !!m.images?.length) && <StashAction text={m.text} images={m.images ?? []} />}
+            {mine && !m.poll && (m.text.trim() || !!m.images?.length || !!m.files?.length) && <StashAction text={m.text} images={attachedOf(m)} />}
             <CopyAction text={m.html ? m.html.html : m.text || messageText(m)} />
           </div>
         )}
@@ -1084,13 +1097,13 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
               Select <TextSelect size={18} />
             </button>
           )}
-          {!readonly && mine && !shown.poll && (shown.text.trim() || !!shown.images?.length) && (
+          {!readonly && mine && !shown.poll && (shown.text.trim() || !!shown.images?.length || !!shown.files?.length) && (
             <button
               type="button"
               role="menuitem"
               className="bm-hold-item"
               onClick={() => {
-                botStashOf(crossStash).add(shown.text, imageFiles(shown.images ?? []));
+                botStashOf(crossStash).add(shown.text, imageFiles(attachedOf(shown)));
                 act("stashed");
               }}
             >
@@ -1992,6 +2005,9 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const { images } = sent;
     const body = sent.text.trim();
     if (!body && !images.length) return;
+    if (uploading.current.length) return setNotice("Still uploading. It sends once the files are there.");
+    const pictures = images.filter((item) => !parseFileRef(item));
+    const files = images.flatMap((item) => parseFileRef(item) ?? []);
     box.current = { text: "", images: [] };
     dictation.cancel();
     const conversationId = conversation.id;
@@ -2005,7 +2021,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     setImages([]);
     setMention(undefined);
     onReply(undefined);
-    void useBots.getState().post(conversationId, { id, author: "me", text: body, images: images.length ? images : undefined, replyTo: quoting }).then((acknowledged) => {
+    void useBots.getState().post(conversationId, { id, author: "me", text: body, images: pictures.length ? pictures : undefined, files: files.length ? files : undefined, replyTo: quoting }).then((acknowledged) => {
       flying.current = flying.current.filter((f) => f !== sent);
       // Not confirmed, but the workspace's own snapshot shows it arrived after all.
       const m = acknowledged ?? useBots.getState().conversations.find((c) => c.id === conversationId)?.messages.find((x) => x.id === id);
@@ -2039,6 +2055,30 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         if (caret && document.activeElement === caret.el) caret.el.setSelectionRange(caret.start + shift, caret.end + shift);
       });
     });
+  };
+  // Files on their way to the workspace's server. Each joins the others in `images` once it's there.
+  const [uploads, setUploads] = useState<{ id: string; name: string; mime: string; size: number; sent: number; stop: AbortController }[]>([]);
+  const uploading = useRef(uploads);
+  uploading.current = uploads;
+  useEffect(() => () => uploading.current.forEach((u) => u.stop.abort()), []);
+  /** Add what was picked, dropped or pasted: a picture goes in the message, anything else to the bots' computers. */
+  const attach = (list: File[]) => {
+    const pictures = list.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
+    const others = list.filter((f) => !pictures.includes(f)).slice(0, MAX_BOT_FILES);
+    if (pictures.length) void Promise.all(pictures.slice(0, 4).map((f) => shrink(f))).then((urls) => setImages((cur) => capAttached([...cur, ...urls])), (err: Error) => setNotice(err.message));
+    for (const f of others) {
+      const entry = { id: uid(), name: f.name || "file", mime: f.type || "application/octet-stream", size: f.size, sent: 0, stop: new AbortController() };
+      setUploads((all) => [...all, entry]);
+      const url = workspacePath(workspace, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${entry.id}`);
+      uploadFile(f, url, (sent) => setUploads((all) => all.map((u) => (u.id === entry.id ? { ...u, sent } : u))), entry.stop.signal)
+        .then(
+          (saved) => setImages((cur) => capAttached([...cur, fileRef(saved)])),
+          (err) => {
+            if ((err as Error).name !== "AbortError") setNotice(err instanceof AttachmentError ? err.message : `Couldn't upload ${f.name}.`);
+          },
+        )
+        .finally(() => setUploads((all) => all.filter((u) => u.id !== entry.id)));
+    }
   };
   const pasteStashed = (item: Stashed) => {
     dictation.cancel();
@@ -2121,7 +2161,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             file.current?.click();
           }}
         >
-          <ImagePlus size={20} /> Add images
+          <Paperclip size={20} /> Add files
         </button>
         <button
           type="button"
@@ -2146,10 +2186,10 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           if (textOnly) return;
-          const files = [...e.dataTransfer.files].filter((f) => f.type.startsWith("image/"));
+          const files = [...e.dataTransfer.files];
           if (!files.length) return;
           e.preventDefault();
-          void Promise.all(files.slice(0, 4).map((f) => shrink(f))).then((urls) => setImages((cur) => [...cur, ...urls].slice(0, 4)));
+          attach(files);
         }}
       >
         {matches.length > 0 && (
@@ -2181,14 +2221,32 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           </div>
         )}
         {notice && <div className="bots-composer-notice">{notice}</div>}
-        {images.length > 0 && (
+        {images.length + uploads.length > 0 && (
           <div className="bots-composer-images">
-            {images.map((src, i) => (
-              <span key={i} className="bots-composer-image">
-                <button type="button" className="bots-composer-image-open" aria-label="Preview image" onClick={() => openLightbox(images.map((src, j) => ({ id: `draft-${j}`, name: "Image", dataUrl: src })), `draft-${i}`)}>
-                  <img src={src} alt="" />
-                </button>
-                <button type="button" className="bots-composer-image-remove" aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
+            {images.map((src, i) => {
+              const attached = parseFileRef(src);
+              return attached ? (
+                <span key={attached.id} className="bots-composer-file">
+                  <FileChip name={attached.name} mime={attached.mime} size={attached.size} />
+                  <button type="button" className="bots-composer-image-remove" aria-label={`Remove ${attached.name}`} onClick={() => setImages((cur) => cur.filter((x) => x !== src))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ) : (
+                <span key={i} className="bots-composer-image">
+                  <button type="button" className="bots-composer-image-open" aria-label="Preview image" onClick={() => openLightbox(images.flatMap((src, j) => (parseFileRef(src) ? [] : [{ id: `draft-${j}`, name: "Image", dataUrl: src }])), `draft-${i}`)}>
+                    <img src={src} alt="" />
+                  </button>
+                  <button type="button" className="bots-composer-image-remove" aria-label="Remove image" onClick={() => setImages((cur) => cur.filter((_, j) => j !== i))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              );
+            })}
+            {uploads.map((u) => (
+              <span key={u.id} className="bots-composer-file bots-composer-uploading">
+                <FileChip name={u.name} mime={u.mime} size={u.size} progress={u.sent} />
+                <button type="button" className="bots-composer-image-remove" aria-label={`Cancel ${u.name}`} onClick={() => u.stop.abort()}>
                   <X size={12} />
                 </button>
               </span>
@@ -2199,7 +2257,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           {textOnly ? null : phone ? (
             // One button, so the text gets the width. Only a group has more than images to offer.
             <IconButton
-              label={conversation.kind === "group" ? "Add to message" : "Add images"}
+              label={conversation.kind === "group" ? "Add to message" : "Add files"}
               tooltip={false}
               className="bots-composer-btn bots-composer-add"
               onClick={() => (conversation.kind === "group" ? setAdding(true) : file.current?.click())}
@@ -2208,8 +2266,8 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             </IconButton>
           ) : (
             <>
-              <IconButton label="Add images" tooltip="Add images" tooltipSide="top" className="bots-composer-btn" onClick={() => file.current?.click()}>
-                <ImagePlus size={18} />
+              <IconButton label="Add files" tooltip="Add files" tooltipSide="top" className="bots-composer-btn" onClick={() => file.current?.click()}>
+                <Paperclip size={18} />
               </IconButton>
               {conversation.kind === "group" && (
                 <IconButton label="New poll" tooltip="New poll" tooltipSide="top" className="bots-composer-btn" onClick={() => setPolling(true)}>
@@ -2221,13 +2279,12 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           <input
             ref={file}
             type="file"
-            accept="image/*"
             multiple
             hidden
             onChange={(e) => {
-              const files = [...(e.target.files ?? [])].slice(0, 4);
+              const files = [...(e.target.files ?? [])];
               e.target.value = "";
-              void Promise.all(files.map((f) => shrink(f))).then((urls) => setImages((cur) => [...cur, ...urls].slice(0, 4)));
+              attach(files);
             }}
           />
           <div className="bots-composer-field">
@@ -2258,10 +2315,10 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
             }}
             onPaste={(e) => {
               if (textOnly) return;
-              const files = [...e.clipboardData.files].filter((f) => f.type.startsWith("image/"));
+              const files = [...e.clipboardData.files];
               if (!files.length) return;
               e.preventDefault();
-              void Promise.all(files.slice(0, 4).map((f) => shrink(f))).then((urls) => setImages((cur) => [...cur, ...urls].slice(0, 4)));
+              attach(files);
             }}
             onKeyDown={(e) => {
               if (e.nativeEvent.isComposing) return;

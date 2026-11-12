@@ -31,7 +31,9 @@ const workspace = {
   mode: "ok" as Mode,
   hold: false,
   /** Every message POST, in order, with the id it carried. */
-  posts: [] as { id: string; text: string; images?: string[] }[],
+  posts: [] as { id: string; text: string; images?: string[]; files?: BotMessage["files"] }[],
+  /** Every piece of a file PUT, in order: which file, where in it, and how many bytes. */
+  pieces: [] as { id: string; name: string; offset: number; bytes: number }[],
   held: [] as (() => void)[],
   release() {
     for (const go of this.held.splice(0)) go();
@@ -53,9 +55,17 @@ window.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   const rest = m[1]!;
   if (rest === "/api/bots") return Response.json({ bots, conversations: [conversation()], settings: { sections: [] }, typing: {}, drafts: [], status: {} }, { headers });
   if (rest === "/api/bots/stream") return new Response(new ReadableStream(), { headers });
+  const file = /^\/api\/bots\/conversations\/chat\/files\/([^/]+)$/.exec(rest);
+  if (method === "PUT" && file) {
+    const q = new URL(String(input), location.href).searchParams;
+    const bytes = (init.body as Blob).size;
+    workspace.pieces.push({ id: file[1]!, name: q.get("name")!, offset: Number(q.get("offset")), bytes });
+    if (workspace.hold) await new Promise<void>((go) => workspace.held.push(go));
+    return Response.json({ id: file[1], name: q.get("name"), mime: q.get("type") || "application/octet-stream", size: Number(q.get("offset")) + bytes, path: `/data/attachments/${file[1]}/${q.get("name")}` }, { headers });
+  }
   if (method === "POST" && rest.endsWith("/messages")) {
     const body = JSON.parse(String(init.body)) as BotMessage;
-    workspace.posts.push({ id: body.id, text: body.text, images: body.images });
+    workspace.posts.push({ id: body.id, text: body.text, images: body.images, files: body.files });
     const mode = workspace.mode;
     if (workspace.hold) await new Promise<void>((go) => workspace.held.push(go));
     if (mode === "refuse") return Response.json({ error: "Not allowed right now." }, { status: 400, headers });

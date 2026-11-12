@@ -12,6 +12,8 @@ import { isBotId } from "../../shared/bots";
 import { bad, readJson } from "../handlers";
 import * as apps from "./apps";
 import * as claude from "./claude";
+import { serve as serveStored } from "../attachments";
+import { receiveFile } from "./files";
 import { machines, setIsolation } from "./machines";
 import { startBots } from "./runner";
 import { BotsError, snapshot, subscribe } from "./service";
@@ -133,6 +135,10 @@ export function botRoutes(api: Api) {
           return fail(err);
         }
       }),
+    },
+    "/api/bots/conversations/:id/files/:fileId": {
+      PUT: api((req: Bun.BunRequest<"/api/bots/conversations/:id/files/:fileId">) => receiveFile(req, req.params.id, req.params.fileId)),
+      GET: api((req: Bun.BunRequest<"/api/bots/conversations/:id/files/:fileId">) => attachedFile(req, req.params.id, req.params.fileId)),
     },
     "/api/bots/:id/file": {
       GET: api((req: Bun.BunRequest<"/api/bots/:id/file">) => botFile(req, req.params.id)),
@@ -517,6 +523,12 @@ export async function botFile(req: Request, botId: string): Promise<Response> {
     return fail(err);
   }
 }
+
+/** A file the user attached in a conversation, to play or save again. */
+export function attachedFile(req: Request, conversationId: string, fileId: string): Response {
+  return svc.snapshot().conversations.some((c) => c.id === conversationId) ? serveStored(req, fileId) : bad("Conversation not found", 404);
+}
+export { receiveFile };
 
 function isClientMessage(m: unknown): m is BotMessage {
   if (!m || typeof m !== "object") return false;

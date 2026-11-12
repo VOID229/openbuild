@@ -1692,6 +1692,35 @@
   }
 }
 
+.bm-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.bm-files:last-child {
+  margin-bottom: 0;
+}
+
+.bm-file {
+  height: 48px;
+  max-width: 260px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  color: inherit;
+}
+
+.bm-file .attachment-name {
+  color: inherit;
+}
+
+.bm-file .attachment-meta {
+  color: inherit;
+  opacity: 0.7;
+}
+
 .bm-images {
   display: flex;
   flex-wrap: wrap;
@@ -2830,6 +2859,21 @@
   width: 64px;
   height: 64px;
   animation: bm-pop var(--med) var(--ease-out) both;
+}
+
+.bots-composer-file {
+  position: relative;
+  height: 56px;
+  overflow: visible;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-2);
+  animation: bm-pop var(--med) var(--ease-out) both;
+}
+
+.bots-composer-uploading .attachment-file {
+  overflow: hidden;
+  border-radius: inherit;
 }
 
 .bots-composer-image-open {

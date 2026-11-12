@@ -16,7 +16,7 @@
 // the pairing credentials only, never a current host.
 import { SERVER_HEADER } from "../computers/api";
 import * as devices from "../devices";
-import { botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse, stopWork } from "./routes";
+import { attachedFile, receiveFile, botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse, stopWork } from "./routes";
 import * as svc from "./service";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
@@ -25,7 +25,8 @@ type Who = NonNullable<ReturnType<typeof devices.authenticateDevice>>;
 type Run = (req: Request, args: string[], body: any, server: Bun.Server<unknown>, who?: Who) => Response | Promise<Response>;
 
 const ID = "([^/]+)";
-const route = (method: string, path: string, run: Run) => ({ method, path: new RegExp(`^${path.replaceAll(":id", ID)}$`), run });
+/** `raw`: the body is a piece of a file, handed over as bytes instead of parsed. */
+const route = (method: string, path: string, run: Run, raw = false) => ({ method, path: new RegExp(`^${path.replaceAll(":id", ID)}$`), run, raw });
 
 /** Everything a paired device can do in this workspace. Anything not listed is refused. */
 const ALLOWED = [
@@ -44,16 +45,18 @@ const ALLOWED = [
   route("POST", "/api/bots/conversations/:id/read", (_, [id]) => markRead(id!)),
   route("POST", "/api/bots/conversations/:id/stop", (_, [id], body) => stopWork(id!, body)),
   route("GET", "/api/bots/:id/file", (req, [id]) => botFile(req, id!)),
+  route("PUT", "/api/bots/conversations/:id/files/:id", (req, [id, file], body) => receiveFile(req, id!, file!, body ?? new Uint8Array()), true),
+  route("GET", "/api/bots/conversations/:id/files/:id", (req, [id, file]) => attachedFile(req, id!, file!)),
 ];
 
 /** The allowed operation for a method and an /api/bots path, with its decoded path arguments. */
-export function allowedOperation(method: string, path: string): { run: Run; args: string[] } | undefined {
+export function allowedOperation(method: string, path: string): { run: Run; args: string[]; raw: boolean } | undefined {
   for (const r of ALLOWED) {
     if (r.method !== method) continue;
     const m = r.path.exec(path);
     if (!m) continue;
     try {
-      return { run: r.run, args: m.slice(1).map(decodeURIComponent) };
+      return { run: r.run, args: m.slice(1).map(decodeURIComponent), raw: r.raw };
     } catch {
       return undefined;
     }
@@ -150,7 +153,8 @@ async function bound(req: Bun.BunRequest<"/api/workspace/to/:target/*">, server:
     return stamp(await managed.handle(inner, server));
   }
   let body: unknown;
-  if (raw?.byteLength) {
+  if (op!.raw) body = raw && new Uint8Array(raw);
+  else if (raw?.byteLength) {
     try {
       body = JSON.parse(new TextDecoder().decode(raw));
     } catch {
@@ -173,7 +177,9 @@ async function bound(req: Bun.BunRequest<"/api/workspace/to/:target/*">, server:
 
 /** How long a host gets to send response headers, as for the device proxy in index.ts. */
 const HEADER_TIMEOUT_MS = 6000;
-const PASSED_HEADERS = ["content-type", "cache-control", "content-disposition", "x-content-type-options", SERVER_HEADER];
+const PASSED_HEADERS = ["content-type", "cache-control", "content-disposition", "x-content-type-options", "accept-ranges", "content-range", "content-security-policy", SERVER_HEADER];
+/** A piece of a file has to arrive in full before the host answers, and its bots get the file before the last one does. */
+const UPLOAD_TIMEOUT_MS = 120_000;
 
 /** Streams this server's tabs have open through each host, ended when the host is unpaired here. */
 const viaStreams = new Map<string, Set<AbortController>>();
@@ -194,24 +200,25 @@ async function via(req: Bun.BunRequest<"/api/workspace/via/:host/*">, server: Bu
   if (!allowedOperation(req.method, path)) return Response.json({ error: "That isn't something a workspace tab can do on another device.", reason: "refused" }, { status: 403 });
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
   const headers: Record<string, string> = { authorization: `Bearer ${host.token}` };
-  for (const name of ["content-type", "accept"]) {
+  for (const name of ["content-type", "accept", "range", "if-range"]) {
     const value = req.headers.get(name);
     if (value) headers[name] = value;
   }
   const streaming = path === "/api/bots/stream";
+  const timeout = req.method === "PUT" ? UPLOAD_TIMEOUT_MS : HEADER_TIMEOUT_MS;
   let last = "it didn't answer";
   for (const base of host.urls) {
     const ctrl = new AbortController();
     const abort = () => ctrl.abort();
     req.signal.addEventListener("abort", abort, { once: true });
-    const deadline = setTimeout(abort, HEADER_TIMEOUT_MS);
+    const deadline = setTimeout(abort, timeout);
     let res: Response;
     try {
       res = await fetch(`${base.replace(/\/$/, "")}/api/workspace/to/${encodeURIComponent(hostId)}${path}${url.search}`, { method: req.method, headers, body, redirect: "manual", signal: ctrl.signal });
     } catch (err) {
       clearTimeout(deadline);
       req.signal.removeEventListener("abort", abort);
-      last = req.signal.aborted ? "the tab went away" : ctrl.signal.aborted ? `no answer in ${HEADER_TIMEOUT_MS / 1000}s` : (err as Error).message;
+      last = req.signal.aborted ? "the tab went away" : ctrl.signal.aborted ? `no answer in ${timeout / 1000}s` : (err as Error).message;
       // A write that may have reached the host isn't sent anywhere else.
       if (body !== undefined && !neverConnected(err)) break;
       continue;
@@ -235,6 +242,9 @@ async function via(req: Bun.BunRequest<"/api/workspace/via/:host/*">, server: Bu
       const value = res.headers.get(name);
       if (value) out.set(name, value);
     }
+    // A file (never compressed on the way): its length lets a player seek.
+    const length = res.headers.get("accept-ranges") && res.headers.get("content-length");
+    if (length) out.set("content-length", length);
     if (!streaming || !res.ok || !res.body) {
       req.signal.removeEventListener("abort", abort);
       if (res.status === 401) return Response.json({ error: `${host.name} no longer trusts this pairing. Pair it again.`, reason: "revoked" }, { status: 401, headers: out });
@@ -262,6 +272,7 @@ export function workspaceRoutes(api: Api) {
     "/api/workspace/to/:target/*": {
       GET: to,
       POST: to,
+      PUT: to,
       PATCH: to,
       DELETE: to,
     },
@@ -269,6 +280,7 @@ export function workspaceRoutes(api: Api) {
     "/api/workspace/via/:host/*": {
       GET: through,
       POST: through,
+      PUT: through,
       PATCH: through,
       DELETE: through,
     },

@@ -34,7 +34,7 @@ class SendPage extends Page {
     return this.eval<Row[]>("rows()");
   }
   posts() {
-    return this.eval<{ id: string; text: string; images?: string[] }[]>("workspace.posts");
+    return this.eval<{ id: string; text: string; images?: string[]; files?: { id: string; name: string; mime: string; size: number }[] }[]>("workspace.posts");
   }
   set(mode: "ok" | "refuse" | "lost", hold = false) {
     return this.eval(`(workspace.mode = ${JSON.stringify(mode)}, workspace.hold = ${hold}, true)`);
@@ -90,6 +90,44 @@ for (const kind of ["direct", "group"] as const) {
       expect(await page.value()).toBe("typed meanwhile");
       await page.until(`workspace.draft() === "typed meanwhile"`);
       expect((await page.posts()).map((p) => p.text)).toEqual(["hello there"]);
+    }, 60_000);
+
+    test("a dropped video goes up in pieces, waits as a chip, and is sent as a file the message links to", async () => {
+      const page = await open();
+      await page.set("ok", true);
+      // 9 MB: three pieces. A picture in the same drop still goes inside the message.
+      await page.eval(`(() => {
+        const data = new DataTransfer();
+        data.items.add(new File([new Uint8Array(9 * 1024 * 1024)], "talk.mp4", { type: "video/mp4" }));
+        document.querySelector(".bots-composer").dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await page.until("!!document.querySelector('.bots-composer-uploading')");
+      expect(await page.eval<string>("document.querySelector('.bots-composer-uploading .attachment-meta').textContent")).toContain("Uploading");
+      // Not sent while it's still going up.
+      await page.type("see this");
+      await page.eval(`(document.querySelector(".bots-composer").requestSubmit(), true)`);
+      await page.until("!!document.querySelector('.bots-composer-notice')");
+      expect(await page.notice()).toContain("Still uploading");
+      expect(await page.posts()).toEqual([]);
+      for (let i = 0; i < 3; i++) {
+        await page.until("workspace.held.length > 0");
+        await page.release();
+      }
+      await page.until("!document.querySelector('.bots-composer-uploading') && !!document.querySelector('.bots-composer-file')");
+      const pieces = await page.eval<{ id: string; name: string; offset: number; bytes: number }[]>("workspace.pieces");
+      expect(pieces.map((p) => [p.offset, p.bytes])).toEqual([[0, 4 * 1024 * 1024], [4 * 1024 * 1024, 4 * 1024 * 1024], [8 * 1024 * 1024, 1024 * 1024]]);
+      expect(await page.eval<string>("document.querySelector('.bots-composer-file .attachment-meta').textContent")).toBe("9.0 MB");
+      await page.set("ok", false);
+      await page.eval(`(document.querySelector(".bots-composer").requestSubmit(), true)`);
+      await page.until("workspace.posts.length === 1 && !document.querySelector('.bots-composer-file')");
+      const [post] = await page.posts();
+      expect(post).toMatchObject({ text: "see this", files: [{ id: pieces[0]!.id, name: "talk.mp4", mime: "video/mp4", size: 9 * 1024 * 1024 }] });
+      expect(post!.images).toBeUndefined();
+      // In the conversation it's a chip that opens the file from the workspace.
+      await page.until("!!document.querySelector('.bm-mine .bm-file')");
+      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file').getAttribute('href')")).toBe(`/api/workspace/to/srv/api/bots/conversations/chat/files/${pieces[0]!.id}`);
+      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file .attachment-name').textContent")).toBe("talk.mp4");
     }, 60_000);
 
     test("a refused send comes back ahead of what was typed since, with the caret where it was", async () => {

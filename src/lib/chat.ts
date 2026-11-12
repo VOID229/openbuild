@@ -6,6 +6,7 @@ import { saveChatBeforeRun } from "./db";
 import { abortable } from "./abort";
 import { readChatProjection } from "./chatSync";
 import { autoName, autoNameWorktree } from "./naming";
+import { attachedFileNote, isPicture } from "../../shared/attachments";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
 import { clearQueue, consumeSteer, stageSteer, steeringOf, editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
@@ -81,7 +82,7 @@ function searchDigest(settings: Settings, detection: Parameters<typeof digestMod
 
 function toWire(history: Message[], input: string[]): WireMessage[] {
   const supports = (a: Attachment) =>
-    (a.mime.startsWith("image/") && input.includes("image")) || (a.mime === "application/pdf" && input.includes("pdf"));
+    (isPicture(a) && input.includes("image")) || (a.mime === "application/pdf" && input.includes("pdf"));
   const out: WireMessage[] = [];
   for (const m of history) {
     // Skip failed/empty assistant turns; they carry nothing useful for the model. Commands the user
@@ -433,10 +434,11 @@ export async function newWorkspace(chat: Chat, signal?: AbortSignal): Promise<Wo
 /** The text sent to Pi for a user message: text files inlined, unsupported files noted. */
 function piMessage(m: Message, input: string[]): { message: string; images: PiChatRequest["images"] } {
   const files = m.attachments ?? [];
-  const images = files.filter((a) => a.mime.startsWith("image/") && input.includes("image"));
+  const images = files.filter((a) => isPicture(a) && input.includes("image"));
+  // A file kept on the agent's machine is named by its path there; the agent opens it with its own tools.
   const notes = files
     .filter((a) => a.text == null && !images.includes(a))
-    .map((a) => `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`);
+    .map((a) => (a.path ? attachedFileNote(a, a.path) : `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`));
   const texts = files.filter((a) => a.text != null).map((a) => `<file name="${a.name}">\n${a.text}\n</file>`);
   return {
     message: withProfileContext([...texts, ...notes, m.content].filter(Boolean).join("\n\n") || " ", useStore.getState().settings.profile),

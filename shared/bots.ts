@@ -400,12 +400,43 @@ export interface BotPage {
 
 export type EventKind = "routine" | "memory" | "joined" | "left" | "renamed" | "created" | "changed" | "error" | "computer" | "poll" | "thread" | "message" | "model";
 
+/** A file the user attached, kept on the workspace's server and in each bot's home folder there. */
+export interface BotFile {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
+/** A file waiting in a composer, among its pictures (data URLs): the same list holds both. */
+const FILE_REF = "obfile:";
+export const fileRef = (f: BotFile) => FILE_REF + JSON.stringify({ id: f.id, name: f.name, mime: f.mime, size: f.size });
+export function parseFileRef(item: string): BotFile | undefined {
+  if (!item.startsWith(FILE_REF)) return undefined;
+  try {
+    const f = JSON.parse(item.slice(FILE_REF.length));
+    return typeof f?.id === "string" && typeof f.name === "string" ? { id: f.id, name: f.name, mime: String(f.mime ?? ""), size: Number(f.size) || 0 } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+export const MAX_BOT_IMAGES = 4;
+export const MAX_BOT_FILES = 10;
+/** What a composer keeps of what was added: the first pictures and files up to each limit. */
+export function capAttached(items: string[]): string[] {
+  let images = 0;
+  let files = 0;
+  return [...new Set(items)].filter((item) => (item.startsWith(FILE_REF) ? ++files <= MAX_BOT_FILES : ++images <= MAX_BOT_IMAGES));
+}
+
 export interface BotMessage {
   id: string;
   author: Author;
   at: number;
   text: string;
   images?: string[];
+  /** Files from the user that aren't pictures for the model: the bots open them on their computers. */
+  files?: BotFile[];
   /** The message this one answers. */
   replyTo?: string;
   reactions?: Reaction[];

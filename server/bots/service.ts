@@ -14,6 +14,7 @@ import { isPermissionId } from "../../shared/types";
 import { HTML_RENDER_MAX_TITLE, htmlProblem } from "../../shared/htmlRender";
 import { validRuntime } from "../threadRuntime";
 import * as db from "./db";
+import { checkedFiles, filesNote } from "./files";
 import { findMemory, JOURNAL_LINE_MAX, memoryContext, memoryKey, profileBytes, similarMemories } from "./sessionPolicy";
 
 const MESSAGE_LIMIT = 200;
@@ -958,11 +959,24 @@ export function markRead(id: string) {
 
 // ------------------------------------------------------------------ messages
 
+/** A message's attached files as one bot finds them on its computer (server/bots/files.ts). */
+export const attachedNote = (botId: string, m: BotMessage) => filesNote(botId, m.files);
+
 function checkMessage(m: BotMessage) {
   if (!isBotId(m.id)) throw new BotsError("Bad message id.");
   if (m.text.length > 20_000) throw new BotsError("That message is too long.");
   if ((m.images?.length ?? 0) > 4) throw new BotsError("Up to 4 images.");
   for (const img of m.images ?? []) if (img.length > 2_500_000) throw new BotsError("An image is too large.");
+  if (m.files !== undefined) {
+    if (m.author !== "me") throw new BotsError("Bots share a file by linking to it.");
+    try {
+      const files = checkedFiles(m.files);
+      if (files?.length) m.files = files;
+      else delete m.files;
+    } catch (err) {
+      throw new BotsError((err as Error).message);
+    }
+  }
   if (m.html !== undefined) {
     if (m.author === "me") throw new BotsError("Pages are shown by bots.");
     const page = m.html as Partial<BotMessage["html"] & object>;
@@ -1093,7 +1107,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     if (c.huddle.closedAt) throw new BotsError(`That side chat has closed.${message.author === c.huddle.by ? " Report back in the chat it came from." : ""}`);
   }
   // The friend's side gets text: a photo or poll would be in this copy alone, so it isn't posted at all.
-  if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.poll || message.html)) throw new BotsError("Photos, polls and pages aren't shared with friends yet.");
+  if (c.friend && !c.friend.ended && !friendHere && !message.event && (message.images?.length || message.files?.length || message.poll || message.html)) throw new BotsError("Photos, files, polls and pages aren't shared with friends yet.");
   if (message.poll) {
     if (c.kind !== "group") throw new BotsError("Polls are for group chats.");
     const poll = cleanPoll(message.poll);
@@ -1135,7 +1149,7 @@ export function postMessage(conversationId: string, message: BotMessage): BotMes
     // "Stop", however it's put: whoever it reaches that has something going stops, and isn't woken to
     // answer it. One with nothing going reads it as any other message. Said to the whole group, it
     // stops the ones at work there, not whatever the others are doing elsewhere.
-    if (message.author === "me" && !message.poll && !message.images?.length && isStopRequest(message.text)) {
+    if (message.author === "me" && !message.poll && !message.images?.length && !message.files?.length && isStopRequest(message.text)) {
       const stopped = haltBots(conversationId, everyone ? targets.filter((id) => workingIn(c, id)) : targets);
       if (stopped.length) patchMessage(conversationId, message.id, { seenBy: [...new Set([...(message.seenBy ?? []), ...stopped])] });
       targets = targets.filter((id) => !stopped.includes(id));
