@@ -1,10 +1,10 @@
 // The bots in OpenBots' sidebar, pointed at in a real Chrome. A bot's own chat, pinned (a tile) or
-// not (a row), only follows the pointer while it's on the row: its eyes aim at it from far over and
-// its whole body turns and leans after them, with no hop or happy face on the way in and no spin when pressed. A group's huddle doesn't react to
-// the pointer at all, and keeps fidgeting only for the member at work.
+// not (a row), only follows the pointer while it's on the row: its whole body turns toward it and
+// leans into it, with no hop or happy face on the way in and no spin when pressed. A group's huddle
+// doesn't react to the pointer at all, and keeps fidgeting only for the member at work.
+// (That every shape keeps its eyes on its body while it does is tests/botAvatarLife.test.ts's.)
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { aimAt, EYE_BOOST, EYE_H, EYE_W, TRACK_REACH } from "../src/components/bots/BotAvatar";
-import { SHAPES } from "../src/lib/bots/looks";
+import { PITCH, YAW } from "../src/lib/bots/rig";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
@@ -33,20 +33,27 @@ const item = (kind: "tile" | "row", title: string) =>
     ? `[...document.querySelectorAll('.bots-tile')].find((t) => t.querySelector('.bots-tile-name')?.textContent === ${JSON.stringify(title)})`
     : `[...document.querySelectorAll('.bots-row-main')].find((r) => r.querySelector('.bots-row-title')?.textContent === ${JSON.stringify(title)})`;
 
-/** Each bot in an item: where it looks (the --track-* it follows), and what it's doing. */
+/**
+ * In the page: how a bot stands, read off what its layers were given (null while it has nothing on
+ * it). The head's turn is read from how far an eye has slid across the body (it stands 30 units off
+ * it, drawn at 0.885 of its size).
+ */
+const STANCE = `((b) => {
+  const of = (cls, re) => { const t = b.querySelector(cls).style.transform; return t === '' ? null : Number((re.exec(t) ?? [0, 0])[1]); };
+  const slid = /matrix\\(([^)]+)\\)/.exec(b.querySelector('.bot-eye').style.transform)?.[1].split(',').map(Number);
+  const unit = b.getBoundingClientRect().width / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 26.5))) * 180 / Math.PI;
+  return { yaw: slid ? turn(slid[4]) : null, pitch: slid ? turn(slid[5]) : null, bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), lean: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/) };
+})`;
+
+/** Each bot in an item: how far its head is turned (right and down, in degrees), its body under it, how it leans, and what it's doing. */
 const mascots = (page: Page, find: string) =>
-  page.eval<{ x: number | null; y: number | null; steer: number | null; lean: number; tracking: boolean; action: string | null; mood: string | null; busy: boolean }[]>(`[...(${find}).querySelectorAll('.bot')].map((b) => ({
-    x: b.style.getPropertyValue('--track-x') === '' ? null : Number(b.style.getPropertyValue('--track-x')),
-    steer: b.style.getPropertyValue('--steer-x') === '' ? null : Number(b.style.getPropertyValue('--steer-x')),
-    lean: (() => { const m = new DOMMatrix(getComputedStyle(b.querySelector('.bot-steer')).transform); return (Math.atan2(m.b, m.a) * 180) / Math.PI; })(),
-    y: b.style.getPropertyValue('--track-y') === '' ? null : Number(b.style.getPropertyValue('--track-y')),
-    tracking: 'tracking' in b.dataset, action: b.dataset.action ?? null, mood: b.dataset.mood ?? null, busy: 'busy' in b.dataset,
+  page.eval<{ yaw: number | null; pitch: number | null; bodyYaw: number | null; lean: number | null; tracking: boolean; action: string | null; mood: string | null; busy: boolean }[]>(`[...(${find}).querySelectorAll('.bot')].map((b) => ({
+    ...${STANCE}(b), tracking: 'tracking' in b.dataset, action: b.dataset.action ?? null, mood: b.dataset.mood ?? null, busy: 'busy' in b.dataset,
   }))`);
 
-/** Waits until the item's first bot's eyes satisfy `holds` (given x, y and tracking), as they spring there. */
+/** Waits until the item's first bot satisfies `holds` (given yaw, pitch, bodyYaw, lean and tracking), as it springs there. */
 const until = (page: Page, find: string, holds: string) =>
-  page.until(`(() => { const b = (${find}).querySelector('.bot'); const v = (n) => b.style.getPropertyValue(n) === '' ? null : Number(b.style.getPropertyValue(n));
-    const x = v('--track-x'), y = v('--track-y'), tracking = 'tracking' in b.dataset; return ${holds}; })()`);
+  page.until(`(() => { const b = (${find}).querySelector('.bot'); const { yaw, pitch, bodyYaw, lean } = ${STANCE}(b), tracking = 'tracking' in b.dataset; return ${holds}; })()`);
 
 /** Moves the real pointer to (dx, dy) from the item's avatar's centre, in steps, as a hand does. "far"
  *  is as far right as the item goes, still on it. */
@@ -64,32 +71,34 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     test(`a bot's ${kind === "tile" ? "pinned tile" : "row"} follows the pointer with its eyes, and only that`, async () => {
       const page = await open();
       const find = item(kind, title);
-      expect((await mascots(page, find))[0]).toMatchObject({ x: null, tracking: false });
+      expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, lean: null, tracking: false });
 
-      // Off to the right of the avatar, a little below: the eyes go right and a little down, well over.
+      // Off to the right of the avatar, a little below: the head turns right over that way, and a little down.
       await pointAt(page, find, "far", 12);
-      await until(page, find, `tracking && x > ${TRACK_REACH * 0.95}`);
+      await until(page, find, `tracking && yaw > ${YAW * 0.65}`);
       const right = (await mascots(page, find))[0]!;
-      expect(right.x!).toBeLessThan(TRACK_REACH * 1.06);
-      expect(right.y!).toBeGreaterThan(0);
-      expect(right.y!).toBeLessThan(right.x! / 3);
+      // (Read off the nearer eye, which slides a little further than the head turns.)
+      expect(right.yaw!).toBeLessThan(YAW * 1.5);
+      expect(right.pitch!).toBeGreaterThan(0);
+      expect(right.pitch!).toBeLessThan(right.yaw! / 3);
       // No hop and no smile on the way in.
       expect(right.action).toBeNull();
       expect(right.mood).toBe("idle");
-      // The whole body turns after the eyes, on a slower spring, and leans toward the pointer.
-      await until(page, find, "Number(b.style.getPropertyValue('--steer-x')) > 0.9");
-      expect((await mascots(page, find))[0]!.lean).toBeGreaterThan(4);
+      // The whole body turns under the head, by less and a beat behind, and leans toward the pointer.
+      await until(page, find, `bodyYaw > ${YAW * 0.25} && lean > 8`);
+      const turned = (await mascots(page, find))[0]!;
+      expect(turned.bodyYaw!).toBeLessThan(turned.yaw!);
 
-      // Up and to the left, close in: the eyes follow there, by less.
+      // Up and to the left, close in: it turns there, and not all the way.
       await pointAt(page, find, -8, -10);
-      await until(page, find, "x < 0 && y < 0");
-      await Bun.sleep(400);
+      await until(page, find, "yaw < 0 && pitch < 0 && lean < 0");
+      await Bun.sleep(500);
       const near = (await mascots(page, find))[0]!;
-      expect(near.x!).toBeLessThan(0);
-      expect(near.y!).toBeLessThan(0);
-      expect(Math.hypot(near.x!, near.y!)).toBeLessThan(Math.hypot(right.x!, right.y!));
-      expect(near.steer!).toBeLessThan(0);
-      expect(near.lean).toBeLessThan(0);
+      expect(near.yaw!).toBeLessThan(0);
+      expect(near.pitch!).toBeLessThan(0);
+      expect(Math.hypot(near.yaw! / YAW, near.pitch! / PITCH)).toBeLessThan(0.96);
+      expect(near.bodyYaw!).toBeLessThan(0);
+      expect(near.lean!).toBeLessThan(0);
 
       // Pressing doesn't spin it.
       await pointAt(page, find, 20, 0);
@@ -99,10 +108,10 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       expect((await mascots(page, find))[0]!.action).toBeNull();
       await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 
-      // Off the item: it stops following and eases back to looking ahead.
+      // Off the item: it stops following and eases back to looking ahead, with nothing left on it.
       await away(page);
-      await until(page, find, "x === null");
-      expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, steer: null, lean: 0, tracking: false, action: null });
+      await until(page, find, "yaw === null && bodyYaw === null && lean === null");
+      expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, pitch: null, bodyYaw: null, lean: null, tracking: false, action: null });
     });
   }
 
@@ -114,7 +123,7 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       const [x, y] = await page.eval<[number, number]>(`(() => { const r = (${find}).querySelector('.bot').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()`);
       await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
       await Bun.sleep(60);
-      for (const m of await mascots(page, find)) expect(m).toMatchObject({ x: null, y: null, tracking: false, action: null, mood: "idle" });
+      for (const m of await mascots(page, find)) expect(m).toMatchObject({ tracking: false, action: null, mood: "idle" });
       await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
     });
   }
@@ -130,38 +139,6 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
-  test("however far over they look, every shape keeps its eyes on its body", async () => {
-    const page = await open();
-    // Each shape's body, and both eyes (as drawn at their default size) at full reach every which way.
-    const misses = await page.eval<string[]>(`(() => {
-      const shapes = ${JSON.stringify(SHAPES.map((s) => ({ id: s.id, path: s.path, face: s.face })))};
-      const aims = ${JSON.stringify(Object.fromEntries(SHAPES.map((s) => [s.id, Array.from({ length: 16 }, (_, a) => aimAt(Math.cos((a / 8) * Math.PI) * 1000, Math.sin((a / 8) * Math.PI) * 1000, 28, s.face.reach))])))};
-      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-      svg.setAttribute('viewBox', '0 0 100 100');
-      document.body.append(svg);
-      const misses = [];
-      for (const { id, path, face } of shapes) {
-        const body = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-        body.setAttribute('d', path);
-        svg.append(body);
-        const s = (face.scale ?? 1) * ${EYE_BOOST}, gap = face.gap * 1.1, ew = ${EYE_W} * s, eh = ${EYE_H} * s;
-        for (let a = 0; a < 16; a++) {
-          const [lx, ly] = aims[id][a];
-          for (const side of [-1, 1]) {
-            const cx = face.x + (side * gap) / 2 + lx, cy = face.y + ly;
-            // The eye's outline: the ends of its rounded caps and the sides at their middle.
-            for (const [px, py] of [[cx, cy - eh / 2], [cx, cy + eh / 2], [cx - ew / 2, cy], [cx + ew / 2, cy]])
-              if (!body.isPointInFill(new DOMPoint(px, py))) misses.push(id + ' ' + a);
-          }
-        }
-        body.remove();
-      }
-      svg.remove();
-      return [...new Set(misses)];
-    })()`);
-    expect(misses).toEqual([]);
-  });
-
   test("with reduced motion, nothing follows the pointer", async () => {
     const page = await open();
     await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
@@ -171,6 +148,6 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     await page.settle();
     const find = item("row", "Manager");
     await pointAt(page, find, "far", 12);
-    expect((await mascots(page, find))[0]).toMatchObject({ x: null, tracking: false, action: null });
+    expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, lean: null, tracking: false, action: null });
   });
 });
