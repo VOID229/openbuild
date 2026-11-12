@@ -188,17 +188,35 @@ function rowDevice(devices: Device[], deviceId: string | undefined): string | un
 const GENERATING_TITLE = "Generating title";
 
 /** A thread's title; the one a model just wrote wipes in over the placeholder it replaces. */
-function RowTitle({ title, titling }: { title: string; titling: boolean }) {
+function RowTitle({ title, titling, working }: { title: string; titling: boolean; working: boolean }) {
   const [wasTitling, setWasTitling] = useState(titling);
   const [revealing, setRevealing] = useState(false);
   if (titling !== wasTitling) {
     setWasTitling(titling);
     setRevealing(!titling);
   }
-  if (titling) return <span className="history-title-text history-title-generating">{GENERATING_TITLE}</span>;
-  if (!revealing) return <span className="history-title-text">{title}</span>;
+  // Every branch renders the same <span>, so the ref (and the glow on it) survives the switches.
+  const ref = useRef<HTMLSpanElement>(null);
+  const glow = working && !titling && !revealing;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !glow || calm()) return;
+    // Pinned to the document's clock, like the spinner it replaces: every working row sweeps in step.
+    const a = el.animate(
+      [
+        { backgroundPosition: "100% 0", easing: "cubic-bezier(0.4, 0, 0.6, 1)" },
+        { backgroundPosition: "0% 0", offset: GLOW_SWEEP },
+        { backgroundPosition: "0% 0" },
+      ],
+      { duration: GLOW_MS, iterations: Infinity },
+    );
+    a.startTime = 0;
+    return () => a.cancel();
+  }, [glow]);
+  if (titling) return <span ref={ref} className="history-title-text history-title-generating">{GENERATING_TITLE}</span>;
+  if (!revealing) return <span ref={ref} className={cx("history-title-text", glow && "history-title-glow")}>{title}</span>;
   return (
-    <span className="history-title-text history-title-reveal">
+    <span ref={ref} className="history-title-text history-title-reveal">
       <span className="history-title-new" onAnimationEnd={() => setRevealing(false)}>
         {title}
       </span>
@@ -208,6 +226,10 @@ function RowTitle({ title, titling }: { title: string; titling: boolean }) {
     </span>
   );
 }
+
+/** A working thread's title: a band of light crosses it in the first part of each cycle, then it rests. */
+const GLOW_MS = 2200;
+const GLOW_SWEEP = 0.77;
 
 type RowMotion = "close" | "snooze" | "open";
 
@@ -389,7 +411,7 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
               <Highlight text={chat.title} ranges={hit.titleRanges} />
             </span>
           ) : (
-            <RowTitle title={chat.title} titling={titling} />
+            <RowTitle title={chat.title} titling={titling} working={streaming || regenerating} />
           )}
           {chat.subagent && (
             <span className="history-subagent" title="Subagent" aria-label="Subagent">
@@ -398,11 +420,10 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
           )}
           {hit && isClosed(chat) && <span className="badge">closed</span>}
           <span className="history-status">
+            {/* Working shows on the title itself (RowTitle's glow); only a blocked question keeps a mark here. */}
             {waiting ? (
               <Spinner size={13} waiting />
-            ) : streaming || regenerating ? (
-              <Spinner size={13} />
-            ) : chat.snoozedUntil ? (
+            ) : streaming || regenerating ? null : chat.snoozedUntil ? (
               <span className="history-snooze" title={`Snoozed until ${new Date(chat.snoozedUntil).toLocaleString()}`}>
                 <AlarmClock size={12} />
                 {snoozeLabel(chat.snoozedUntil)}
@@ -428,15 +449,8 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
         )}
         <span className="history-meta">
           {chat.workspace?.projectName && (
-            <span className="history-proj" title={chat.workspace.worktree ? `${chat.workspace.projectName} · ${chat.workspace.branch}` : chat.workspace.projectName}>
-              <span className="history-proj-name">{chat.workspace.projectName}</span>
-              {/* Branch naming leaves the checkout path stable for running sessions. */}
-              {chat.workspace.worktree && (
-                <span className="history-worktree">
-                  <GitBranch size={12} />
-                  <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
-                </span>
-              )}
+            <span className="history-proj" title={chat.workspace.projectName}>
+              {chat.workspace.projectName}
             </span>
           )}
           {device && (
@@ -449,6 +463,14 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
+        {/* A worktree's branch gets a line of its own, so neither it nor the project is cut short.
+            Branch naming leaves the checkout path stable for running sessions. */}
+        {chat.workspace?.projectName && chat.workspace.worktree && (
+          <span className="history-worktree" title={chat.workspace.branch}>
+            <GitBranch size={12} />
+            <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
+          </span>
+        )}
       </button>
       <span className="history-actions">
         <IconButton
