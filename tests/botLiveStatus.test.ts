@@ -208,6 +208,12 @@ test("tools side by side each keep their line until their own end, and a sent me
   start('bash', 'p1', { status: 'Building the app', command: 'make' });
   start('bash', 'p2', { status: 'Running the tests', command: 'make test' });
   a.equal(line(), 'Running the tests');
+  // A call that becomes a background job takes its own status as its label, not the newest call's.
+  a.equal(runner.toolLabel(alpha.bot.id, 'bash'), 'Running the tests');
+  start('read', 'p0', { path: 'a.md' });
+  a.equal(runner.toolLabel(alpha.bot.id, 'bash'), 'Running the tests');
+  a.equal(runner.toolLabel(alpha.bot.id, 'read'), undefined);
+  end('read', 'p0');
   // The first of two bash calls ends: the other is still running, and still showing.
   end('bash', 'p2');
   a.equal(line(), 'Building the app');

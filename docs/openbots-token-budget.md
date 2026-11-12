@@ -28,6 +28,8 @@ Context windows come from one model listing per extension set, cached for 10 min
 when Pi forgets its models, so a fresh per-conversation mind doesn't cost a second Pi start. The
 runner explicitly approves its managed bot working directory so Pi 1.5 loads these settings. It
 does not change global Pi settings or credentials. Settings are generated when a process starts.
+The same file sets `steeringMode: "all"`, so every message that arrived while a tool ran reaches
+the turn in one model call instead of one each (`docs/openbots-async-jobs.md`).
 The real-Pi test verifies effective settings, including a model override, without an inference.
 
 Transcript delivery fingerprints use the full message object and conversation id, not truncated

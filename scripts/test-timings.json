@@ -1,6 +1,7 @@
 {
   "tests/botActivityUi.test.ts": 3.6,
   "tests/botAdvancedChrome.test.ts": 2.3,
+  "tests/botAvatarLife.test.ts": 18.0,
   "tests/botChatMascot.test.ts": 6.9,
   "tests/botChatScroll.test.ts": 23.5,
   "tests/botClaude.test.ts": 2.6,
@@ -14,6 +15,7 @@
   "tests/botGroupSteer.test.ts": 7.0,
   "tests/botHeadPill.test.ts": 28.3,
   "tests/botHuddleLayout.test.ts": 5.1,
+  "tests/botJobs.test.ts": 22.0,
   "tests/botLiveStatus.test.ts": 7.0,
   "tests/botMachinesChrome.test.ts": 5.8,
   "tests/botMascots.test.ts": 17.9,

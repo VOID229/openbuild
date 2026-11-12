@@ -20,6 +20,9 @@ In order of precedence:
    rest of `WORKING_PHRASES` (`shared/bots.ts`). Each time a step ends, the line moves on to the
    next phrase, so it visibly changes at that moment.
 
+Between turns, a bot with background jobs still running reads "Waiting on: …" with the job's own
+line (`server/bots/jobs.ts`). A job takes that line from the status of the call it grew out of.
+
 ## When it changes
 
 | Pi record | Status |

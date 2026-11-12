@@ -1,14 +1,14 @@
 // How a bot's eyes follow the pointer: aimed straight at it, quick to lock on with a little snap,
-// eased in from rest and eased back home. tests/botsSidebarMascots.test.ts watches it in a real Chrome.
+// eased in from rest and eased back home; and the body turning and leaning after them, slower. tests/botsSidebarMascots.test.ts watches it in a real Chrome.
 import { expect, test } from "bun:test";
-import { aimAt, gazeStep, TRACK_REACH, type Gaze } from "../src/components/bots/BotAvatar";
+import { aimAt, BODY, EYES, gazeStep, TRACK_REACH, type Gaze } from "../src/components/bots/BotAvatar";
 
 const rest = (): Gaze => ({ x: 0, y: 0, vx: 0, vy: 0 });
 /** Runs the spring at 60fps toward (tx, ty) until it settles: each frame's position, and the frame count. */
-function run(g: Gaze, tx: number, ty: number, locking: boolean) {
+function run(g: Gaze, tx: number, ty: number, locking: boolean, springs = EYES) {
   const xs: number[] = [];
   for (let i = 0; i < 600; i++) {
-    const done = gazeStep(g, tx, ty, 1000 / 60, locking);
+    const done = gazeStep(g, tx, ty, 1000 / 60, locking, springs);
     xs.push(g.x);
     if (done) return xs;
   }
@@ -58,4 +58,19 @@ test("a long frame doesn't throw the eyes off", () => {
   gazeStep(g, TRACK_REACH, 0, 2000, true);
   expect(g.x).toBeGreaterThan(0);
   expect(g.x).toBeLessThan(TRACK_REACH * 1.1);
+});
+
+test("the body turns after the eyes: behind them, swaying a little past, and settled within a second", () => {
+  const eyes = run(rest(), TRACK_REACH, 0, true);
+  const body = run(rest(), TRACK_REACH, 0, true, BODY);
+  for (let i = 1; i < 6; i++) expect(body[i]!).toBeLessThan(eyes[i]!);
+  const peak = Math.max(...body);
+  expect(peak).toBeGreaterThan(TRACK_REACH * 1.03);
+  expect(peak).toBeLessThan(TRACK_REACH * 1.15);
+  expect(body.length).toBeLessThan(60);
+  // And back home, without swinging past.
+  const g: Gaze = { x: TRACK_REACH, y: 0, vx: 0, vy: 0 };
+  const back = run(g, 0, 0, false, BODY);
+  for (const x of back) expect(x).toBeGreaterThanOrEqual(-0.05);
+  expect(back.length).toBeLessThan(60);
 });

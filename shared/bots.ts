@@ -102,6 +102,11 @@ export interface BotStatus {
   error?: string;
   /** The error is the provider's (every fallback's, say): kept whole, but not for the chat to show. */
   provider?: boolean;
+  /**
+   * Between turns, with this many tool calls still running in the background: `activity` names what
+   * it's waiting on, in the conversation they were started from. It's free to take a message anywhere.
+   */
+  jobs?: number;
   since?: number;
 }
 

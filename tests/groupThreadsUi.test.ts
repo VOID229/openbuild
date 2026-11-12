@@ -496,7 +496,9 @@ describe.skipIf(!browser)("a link in a bot chat to one of its threads", () => {
 describe.skipIf(!browser)("a thread's pull request badge in the sidebar", () => {
   const BADGE = `.history-row[data-thread="t-direct"] .history-pr`;
   async function build() {
-    const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=dark`, 1280, 860, "window.store?.getState().chatsLoaded && window.bots?.getState().loaded");
+    // Routing starts in an effect after the threads load, and its first read takes the thread from the
+    // URL ("/": none), so a thread picked before then is dropped. It has run once "/" reads "/new".
+    const page = await Page.open(chrome!.ws, `${server!.url.href}?theme=dark`, 1280, 860, `window.store?.getState().chatsLoaded && window.bots?.getState().loaded && location.pathname === "/new"`);
     await page.eval(`(() => { store.getState().setBotsOpen(false); store.getState().selectChat("t-flaky"); store.getState().setSidebarOpen(true); })()`);
     await page.until(`!!document.querySelector(${JSON.stringify(BADGE)})?.checkVisibility()`);
     // The thread it starts on can land after the badge shows; the tests compare against it.

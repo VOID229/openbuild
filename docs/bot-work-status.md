@@ -6,8 +6,10 @@ including authenticated tool dispatch; being primary when a token was issued doe
 not preserve access after demotion. Other bots cannot read this projection.
 
 Each entry contains `id`, `name`, `state` (working or idle), `runnerState`
-(including error), `turnStartedAt`, `conversationId`, `lastActivityAt`, and
-`pendingAssignments`. Times are Unix milliseconds; unknown times and the current
+(including error, and waiting), `turnStartedAt`, `conversationId`, `lastActivityAt`,
+`backgroundJobs`, and `pendingAssignments`. A bot between turns whose tool calls are
+still running in the background (see `docs/openbots-async-jobs.md`) is idle: it's free
+to take a message. Its `runnerState` is `waiting` and `backgroundJobs` counts them. Times are Unix milliseconds; unknown times and the current
 conversation of an idle bot are null. Working state comes from the same
 runner-published service status used by the sidebar, including quiet work. It is
 not inferred from a running process. Turn start stays fixed across activity

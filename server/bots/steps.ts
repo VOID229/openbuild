@@ -44,7 +44,7 @@ export const RETRYING = "Trying again";
 const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
 
 /** The status the bot wrote for this call: one short line, or nothing usable. */
-function ownStatus(value: unknown) {
+export function ownStatus(value: unknown) {
   const line = typeof value === "string" ? value.split("\n")[0]!.replace(/\s+/g, " ").trim().replace(/[.…]+$/, "") : "";
   if (!line) return undefined;
   const short = line.length > 50 ? `${line.slice(0, 49).trimEnd()}…` : line;
@@ -95,6 +95,7 @@ export function activityFor(tool: string, args: unknown): string {
   if (tool === "apps") return a.action === "skill" ? "Reading up on how to do it" : "Looking through apps";
   if (tool === "use_app") return `Using ${appById(String(a.app ?? ""))?.name ?? "an app"}`;
   if (tool === "routine") return "Sorting out a routine";
+  if (tool === "jobs") return a.action === "cancel" ? "Cancelling a background job" : "Checking on background jobs";
   if (tool === "ask_bot") return "Asking another bot";
   if (tool === "background") return "Handing a lookup to a helper";
   if (tool === "side_chat") return a.action === "close" ? "Wrapping up a side chat" : "Talking it over with the others";

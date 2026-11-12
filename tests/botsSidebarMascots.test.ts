@@ -1,9 +1,9 @@
 // The bots in OpenBots' sidebar, pointed at in a real Chrome. A bot's own chat, pinned (a tile) or
-// not (a row), only follows the pointer with its eyes while it's on the row, aiming at it from far
-// over: no hop or happy face on the way in, no spin when pressed. A group's huddle doesn't react to
+// not (a row), only follows the pointer while it's on the row: its eyes aim at it from far over and
+// its whole body turns and leans after them, with no hop or happy face on the way in and no spin when pressed. A group's huddle doesn't react to
 // the pointer at all, and keeps fidgeting only for the member at work.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { aimAt, TRACK_REACH } from "../src/components/bots/BotAvatar";
+import { aimAt, EYE_BOOST, EYE_H, EYE_W, TRACK_REACH } from "../src/components/bots/BotAvatar";
 import { SHAPES } from "../src/lib/bots/looks";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -35,8 +35,10 @@ const item = (kind: "tile" | "row", title: string) =>
 
 /** Each bot in an item: where it looks (the --track-* it follows), and what it's doing. */
 const mascots = (page: Page, find: string) =>
-  page.eval<{ x: number | null; y: number | null; tracking: boolean; action: string | null; mood: string | null; busy: boolean }[]>(`[...(${find}).querySelectorAll('.bot')].map((b) => ({
+  page.eval<{ x: number | null; y: number | null; steer: number | null; lean: number; tracking: boolean; action: string | null; mood: string | null; busy: boolean }[]>(`[...(${find}).querySelectorAll('.bot')].map((b) => ({
     x: b.style.getPropertyValue('--track-x') === '' ? null : Number(b.style.getPropertyValue('--track-x')),
+    steer: b.style.getPropertyValue('--steer-x') === '' ? null : Number(b.style.getPropertyValue('--steer-x')),
+    lean: (() => { const m = new DOMMatrix(getComputedStyle(b.querySelector('.bot-steer')).transform); return (Math.atan2(m.b, m.a) * 180) / Math.PI; })(),
     y: b.style.getPropertyValue('--track-y') === '' ? null : Number(b.style.getPropertyValue('--track-y')),
     tracking: 'tracking' in b.dataset, action: b.dataset.action ?? null, mood: b.dataset.mood ?? null, busy: 'busy' in b.dataset,
   }))`);
@@ -74,6 +76,9 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       // No hop and no smile on the way in.
       expect(right.action).toBeNull();
       expect(right.mood).toBe("idle");
+      // The whole body turns after the eyes, on a slower spring, and leans toward the pointer.
+      await until(page, find, "Number(b.style.getPropertyValue('--steer-x')) > 0.9");
+      expect((await mascots(page, find))[0]!.lean).toBeGreaterThan(4);
 
       // Up and to the left, close in: the eyes follow there, by less.
       await pointAt(page, find, -8, -10);
@@ -83,6 +88,8 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       expect(near.x!).toBeLessThan(0);
       expect(near.y!).toBeLessThan(0);
       expect(Math.hypot(near.x!, near.y!)).toBeLessThan(Math.hypot(right.x!, right.y!));
+      expect(near.steer!).toBeLessThan(0);
+      expect(near.lean).toBeLessThan(0);
 
       // Pressing doesn't spin it.
       await pointAt(page, find, 20, 0);
@@ -95,7 +102,7 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       // Off the item: it stops following and eases back to looking ahead.
       await away(page);
       await until(page, find, "x === null");
-      expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, tracking: false, action: null });
+      expect((await mascots(page, find))[0]).toMatchObject({ x: null, y: null, steer: null, lean: 0, tracking: false, action: null });
     });
   }
 
@@ -137,7 +144,7 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
         const body = document.createElementNS('http://www.w3.org/2000/svg', 'path');
         body.setAttribute('d', path);
         svg.append(body);
-        const s = (face.scale ?? 1) * 1.12, gap = face.gap * 1.1, ew = 7.5 * s, eh = 16 * s;
+        const s = (face.scale ?? 1) * ${EYE_BOOST}, gap = face.gap * 1.1, ew = ${EYE_W} * s, eh = ${EYE_H} * s;
         for (let a = 0; a < 16; a++) {
           const [lx, ly] = aims[id][a];
           for (const side of [-1, 1]) {
