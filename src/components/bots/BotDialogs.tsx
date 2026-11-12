@@ -108,7 +108,7 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
         <DialogHead title="New bot" onClose={onClose} />
         <div className="bots-dialog-body">
           <div className="bots-dialog-hero">
-            <BotAvatar look={look} size={112} lively track playful pulse={changes ? { key: changes, action: changes % 3 === 0 ? "hop" : "squish" } : undefined} />
+            <BotAvatar look={look} size={112} lively track playful pulse={changes ? { key: changes, action: changes % 3 === 0 ? "wiggle" : "squish" } : undefined} />
           </div>
           <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your bot" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />
           <LookPicker
