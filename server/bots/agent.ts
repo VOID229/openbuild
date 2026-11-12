@@ -2,6 +2,7 @@ import { memoryDate, memorySection } from "./sessionPolicy";
 import { untrustedData } from "./transcriptData";
 // What a bot's Pi extension can do. The extension talks to a unix socket (see listen()); every
 // request is one bot, identified by the token minted for its process, so a bot can't act as another.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
@@ -19,6 +20,7 @@ import * as threads from "./threads";
 import * as plugins from "./plugins";
 import { FRIEND_TOOLS } from "../../shared/friends";
 import { JobCancelled, runHelper, startJob } from "./helpers";
+import { DETACHABLE, hasBoard, jobsTool, run as runCall } from "./jobs";
 import { allowsTools, friend as storedFriend } from "../friends/store";
 
 /** Whose Pi a token is: the bot, and which of its Pis (runner.ts laneOf): "main", or "friend:<id>" for a chat shared with that friend. */
@@ -34,8 +36,14 @@ export function setFocus(botId: string, conversationId: string | undefined) {
   if (conversationId) focus.set(botId, conversationId);
   else focus.delete(botId);
 }
+/**
+ * A call that outlives its turn (jobs.ts) still acts where it was made: everything it awaits reads
+ * the conversation pinned here, whatever the bot has moved on to since.
+ */
+const pinned = new AsyncLocalStorage<{ botId: string; conversationId?: string }>();
 export function getFocus(botId: string): string | undefined {
-  return focus.get(botId);
+  const pin = pinned.getStore();
+  return pin?.botId === botId ? pin.conversationId : focus.get(botId);
 }
 
 const tokens = (kept.openbotsTokens ??= new Map<string, Holder>());
@@ -76,10 +84,7 @@ export function listen() {
         return Response.json({ error: "Expected JSON" }, { status: 400 });
       }
       try {
-        const method = String(body.method ?? "");
-        const params = body.params ?? {};
-        const result = lane === "main" ? await handle(botId, method, params) : lane === "helper" ? await handleHelper(botId, method, params) : await handleFriend(botId, lane, method, params);
-        return Response.json({ result });
+        return Response.json({ result: await dispatch(botId, lane, String(body.method ?? ""), body.params ?? {}) });
       } catch (err) {
         const status = err instanceof svc.BotsError ? err.status : 500;
         return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status });
@@ -91,12 +96,29 @@ export function listen() {
   } catch {}
 }
 
-async function handle(botId: string, method: string, p: Record<string, unknown>): Promise<unknown> {
+/** Tests stand in their own tools here. */
+export const seams = { handle };
+
+/**
+ * One tool call from a bot's Pi. In its own session, a call to a tool that can run long (jobs.ts
+ * DETACHABLE) answers with a job number once it has run past the threshold, and carries on; its
+ * result wakes the bot. A friend's chat and a helper session wait their calls out as ever.
+ */
+export async function dispatch(botId: string, lane: string, method: string, params: Record<string, unknown>): Promise<unknown> {
+  if (lane === "helper") return handleHelper(botId, method, params);
+  if (lane !== "main") return handleFriend(botId, lane, method, params);
+  if (!DETACHABLE.has(method)) return seams.handle(botId, method, params);
+  const conversationId = focus.get(botId);
+  return runCall(botId, method, params, (signal) => pinned.run({ botId, conversationId }, () => seams.handle(botId, method, params, signal)), { conversationId });
+}
+
+async function handle(botId: string, method: string, p: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
   switch (method) {
     case "context": {
       const sections = contextSections(botId);
       sections.openbots_machines = [sections.openbots_machines, await machinesNote(), await webSearchNote(), apps.contextNote()].join("\n\n");
-      return { sections };
+      // A bot with a job board has the tool for it declared, whatever its session had loaded.
+      return { sections, ...(hasBoard(botId) ? { load: ["jobs"] } : {}) };
     }
     case "send_message":
       return sendMessage(botId, p);
@@ -117,7 +139,7 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
     case "search":
       return search(botId, p);
     case "bot_web_search":
-      return webSearch(botId, p);
+      return webSearch(botId, p, signal);
     case "apps":
       return p.action === "connect" ? offerApp(botId, p) : apps.appsTool(p);
     case "use_app":
@@ -128,6 +150,8 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
       return askBot(botId, p);
     case "background":
       return background(botId, p);
+    case "jobs":
+      return jobsTool(botId, p);
     case "side_chat":
       return sideChat(botId, p);
     case "manage_bot":
@@ -137,7 +161,7 @@ async function handle(botId: string, method: string, p: Record<string, unknown>)
     case "openbuild":
       return threads.handle(botId, p);
     case "bash":
-      return bash(botId, p);
+      return bash(botId, p, signal);
     case "read":
       return read(botId, p);
     case "write":
@@ -179,9 +203,11 @@ async function handleFriend(botId: string, lane: string, method: string, p: Reco
   const allowed = allowsTools(friendId);
   if (method === "context") return { sections: { openbots_friend: friendNote(botId, friendId), ...(allowed ? contextSections(botId) : {}) } };
   // The chat this turn is for: a late call from a turn that's over doesn't get to write anywhere else.
-  const here = focus.get(botId);
+  const here = getFocus(botId);
   const shared = here ? db.getConversation(here) : undefined;
   if (!shared?.friend || shared.friend.friend !== friendId || !shared.botIds.includes(botId)) throw new svc.BotsError("This isn't your turn in a chat with that friend.", 403);
+  // The job board is the bot's own work: nothing of it shows in a friend's chat, where calls never detach.
+  if (method === "jobs") throw new svc.BotsError("There are no background jobs in chats with friends.", 403);
   if (allowed) return handle(botId, method, p);
   if (!FRIEND_TOOLS.includes(method)) throw new svc.BotsError(`In chats with friends you can only chat (send_message and react). ${svc.getSettings().user?.name || "Your user"} hasn't allowed other tools here.`, 403);
   if (typeof p.conversation === "string" && p.conversation && resolveConversation(botId, p.conversation) !== here) throw new svc.BotsError("Here you can only write in this shared chat.", 403);
@@ -195,7 +221,7 @@ export function friendNote(botId: string, friendId: string): string {
   const user = svc.getSettings().user?.name || "your user";
   const friend = storedFriend(friendId);
   const name = untrustedData(friend?.name ?? "a friend");
-  const here = focus.get(botId);
+  const here = getFocus(botId);
   const c = here ? db.getConversation(here) : undefined;
   const allowed = allowsTools(friendId);
   const ours = (c?.botIds ?? []).filter((id) => id !== botId).map((id) => db.getBot(id)?.name).filter(Boolean);
@@ -250,7 +276,7 @@ export function contextSections(botId: string): Record<string, string> {
     "Talk like a person texting: short, warm, plain; no headings or bullet lists unless asked. One send_message call is one bubble, and several short bubbles beat one long one.",
     "You can write to any conversation you're in at any time. You don't owe every message a reply: with nothing to add, end your turn with the plain reply [silent]. [silent] is only that final reply: never pass it to send_message, and it isn't needed after you've sent messages.",
     RESPONSIVE,
-    "New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
+    "A tool call that runs long doesn't hold you up: it carries on as a background job, you get its job number at once and its result wakes you later. Never wait on one or run it again; carry on, or end your turn. New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
     "Every tool with a status parameter needs a short custom status (a few plain words, at most 50 characters) saying what this call does for the user, like Checking why the build failed, not a generic Running a command. It's the live activity line, not a chat message.",
     "Messages show their short id in brackets, (replying to …) when they quote one, and the reactions on them numbered #1, #2… (→ #n answers another). To answer an older message, quote it with send_message reply_to; leave reply_to out for the newest. React with react; to react to a reaction, pass its number as to_reaction.",
     `When seeing beats reading (a chart, diagram, demo, mockup, small interactive tool or visual summary), put a self-contained HTML page in the chat with html_render, drawn in a sandboxed frame about ${BOT_HTML_WIDTH}px wide. Not for quick answers; don't restate the page in a message, only add what it doesn't say.`,
@@ -358,7 +384,7 @@ function instructionsGuide(bot: Bot): string {
 }
 
 function conversationFor(botId: string, given: unknown): string {
-  const id = typeof given === "string" && given ? resolveConversation(botId, given) : focus.get(botId);
+  const id = typeof given === "string" && given ? resolveConversation(botId, given) : getFocus(botId);
   if (!id) throw new svc.BotsError("Say which conversation.");
   stayInHuddle(botId, id);
   const c = db.getConversation(id);
@@ -630,7 +656,7 @@ export async function webSearchNote(): Promise<string> {
   ].join("\n");
 }
 
-export async function webSearch(_botId: string, p: Record<string, unknown>) {
+export async function webSearch(_botId: string, p: Record<string, unknown>, signal?: AbortSignal) {
   const query = String(p.query ?? "").trim().slice(0, 500);
   if (!query) throw new svc.BotsError("Say what to search for.");
   const creds = await searchProviders();
@@ -640,7 +666,7 @@ export async function webSearch(_botId: string, p: Record<string, unknown>) {
   // Named providers only: the toolkit's page reader runs on the server, outside this bot's computer.
   const id = asked ? creds.find((c) => c.provider === asked)?.provider : (toolkit.specs[0]!.name.replace(/^search_/, "") as SearchProviderId);
   if (!id) throw new svc.BotsError(`${asked} isn't set up. You have: ${creds.map((c) => c.provider).join(", ")}.`);
-  const outcome = await toolkit.run(toolName(id), JSON.stringify({ ...p, query }), AbortSignal.timeout(120_000));
+  const outcome = await toolkit.run(toolName(id), JSON.stringify({ ...p, query }), signal ? AbortSignal.any([AbortSignal.timeout(120_000), signal]) : AbortSignal.timeout(120_000));
   if (outcome.error) throw new svc.BotsError(creds.flatMap((c) => c.keys).reduce((text, key) => text.replaceAll(key, "[hidden]"), `${SEARCH_PROVIDERS[id].label}: ${outcome.error}`));
   return outcome.text;
 }
@@ -671,10 +697,10 @@ export function routine(botId: string, p: Record<string, unknown>) {
     enabled: true,
     task: typeof p.task === "string" ? p.task : undefined,
     followUp: !!p.follow_up,
-    conversationId: typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : focus.get(botId),
+    conversationId: typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : getFocus(botId),
     by: botId,
   });
-  const where = saved.conversationId || focus.get(botId);
+  const where = saved.conversationId || getFocus(botId);
   if (where) {
     svc.postMessage(where, {
       id: crypto.randomUUID(),
@@ -689,7 +715,7 @@ export function routine(botId: string, p: Record<string, unknown>) {
 
 /** A turn in a huddle stays there: whoever opened it reports back, so nobody else writes or mentions anyone elsewhere. */
 function stayInHuddle(botId: string, target?: string) {
-  const here = focus.get(botId);
+  const here = getFocus(botId);
   const huddle = here ? db.getConversation(here)?.huddle : undefined;
   if (huddle && target !== here) throw new svc.BotsError(`You're in a side chat: say it there. ${huddle.by === botId ? "You report" : `${mentionName(db.getBot(huddle.by)?.name ?? "Whoever opened it")} reports`} back once it closes.`);
 }
@@ -716,7 +742,7 @@ export async function askBot(botId: string, p: Record<string, unknown>) {
   }
   const sideId = side.id;
   const after = db.latestSeq(sideId);
-  const from = focus.get(botId);
+  const from = getFocus(botId);
   const origin = from && from !== sideId && db.getConversation(from)?.botIds.includes(botId) ? from : undefined;
   const request = origin ? svc.requestIn(botId, origin) : undefined;
   const other = mentionName(db.getBot(otherId)?.name ?? "The other bot");
@@ -754,7 +780,7 @@ export const LOOKUP_MS = 5 * 60_000;
 export function background(botId: string, p: Record<string, unknown>) {
   const task = String(p.task ?? "").trim().slice(0, 4000);
   if (!task) throw new svc.BotsError("Say what to check.");
-  const origin = focus.get(botId) ?? svc.directId(botId);
+  const origin = getFocus(botId) ?? svc.directId(botId);
   if (!origin) throw new svc.BotsError("Say which conversation.");
   const request = svc.requestIn(botId, origin);
   const started = startJob(botId, "lookup", async (signal) => {
@@ -868,7 +894,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
       delete patch.proactivity;
     }
     // A rename is said in the chat it was asked in, when the bot is in it.
-    const where = typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : focus.get(botId);
+    const where = typeof p.conversation === "string" ? conversationFor(botId, p.conversation) : getFocus(botId);
     if (!changesModel(p)) {
       if (!Object.keys(patch).length) throw new svc.BotsError("Say what to change.");
       const bot = svc.updateBot(target, patch, { conversationId: where });
@@ -1086,7 +1112,7 @@ function lookOf(value: unknown): Bot["look"] | undefined {
 
 // ------------------------------------------------------------------ the computers, one per machine
 
-async function bash(botId: string, p: Record<string, unknown>) {
+async function bash(botId: string, p: Record<string, unknown>, signal?: AbortSignal) {
   const { api, id, on } = await computerOn(botId, p.machine);
   const command = String(p.command ?? "");
   if (!command.trim()) throw new svc.BotsError("Give a command.");
@@ -1096,7 +1122,7 @@ async function bash(botId: string, p: Record<string, unknown>) {
   const result = await api.exec(id, { command, cwd: typeof p.cwd === "string" ? p.cwd : undefined, timeout }, (d) => {
     if (size < 200_000) chunks.push(d);
     size += d.length;
-  });
+  }, signal);
   const output = Buffer.concat(chunks).toString("utf8").slice(0, 100_000);
   return { exitCode: result.exitCode, output: output || "(no output)", truncated: size > 100_000, ...(on && { ranOn: on }) };
 }

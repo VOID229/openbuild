@@ -31,10 +31,13 @@ export function busyBots(conversation: Pick<Conversation, "id" | "botIds">, stat
   return conversation.botIds.filter((id) => here.includes(id) || visiblyWorking(status[id]));
 }
 
-/** The conversation's bots working in another chat, and which, unless this chat's message is next (that's `holding`). */
+/**
+ * The conversation's bots working in another chat, and which, unless this chat's message is next (that's
+ * `holding`). One that's only waiting on its background jobs (BotStatus.jobs) is free, not busy elsewhere.
+ */
 export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses): { botId: string; conversationId?: string }[] {
   return conversation.botIds
-    .filter((id) => visiblyWorking(status[id]) && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
+    .filter((id) => visiblyWorking(status[id]) && !status[id]!.jobs && status[id]!.conversationId !== conversation.id && !holding(status[id], conversation.id))
     .map((id) => ({ botId: id, conversationId: status[id]!.conversationId }));
 }
 

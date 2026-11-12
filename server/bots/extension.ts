@@ -50,7 +50,7 @@ const ok = (value: unknown) => ({ content: text(value), details: value });
 const fail = (err: unknown) => ({ content: text(`Error: ${err instanceof Error ? err.message : String(err)}`), details: null, isError: true });
 
 // These already show as typing or need no status line.
-const NO_STATUS = new Set(["send_message", "react", "question", "poll", "html_render", "todo", "load_tools"]);
+const NO_STATUS = new Set(["send_message", "react", "question", "poll", "html_render", "todo", "load_tools", "jobs"]);
 
 /**
  * The tools every request declares in full: chatting (all a friend's chat may use) and memory, which
@@ -81,6 +81,7 @@ export const CATALOG_BRIEF: Record<string, string> = {
   routine: "your schedule: recurring and one-off routines",
   ask_bot: "ask another bot; their reply wakes you later",
   background: "hand a slow check or lookup to a helper; the result wakes you",
+  jobs: "your background jobs (calls that ran long): read a result, cancel one, queue a follow-up",
   side_chat: "talk something through with other bots",
   openbuild: "run coding agents in the user's OpenBuild",
   plugins: "OpenBuild plugins",
@@ -144,6 +145,9 @@ function tool(name: string, label: string, description: string, parameters: obje
   };
 }
 
+/** A call that ran past the threshold answered with its job number instead of a result (jobs.ts Started). */
+const startedJob = (value: unknown): boolean => !!value && typeof value === "object" && typeof (value as { job?: unknown }).job === "number" && (value as { state?: unknown }).state === "running";
+
 const str = (description: string) => ({ type: "string", description });
 /** The machine a computer tool runs on. Each has a computer of the bot's own; nothing falls back to another. */
 const machine = str("The machine to run on: a name or id from your context's machine list. This server if omitted.");
@@ -194,6 +198,8 @@ export default function openbots(pi: any) {
   // A call to a tool that isn't loaded yet loads it, and the bot is told to call it again.
   pi.on("message_end", (event: any) => {
     const message = event?.message;
+    // A call just became a background job: the tool that reads, cancels and queues behind it is declared from the next request.
+    if (message?.role === "toolResult" && !message.isError && startedJob(message.details)) load(["jobs"]);
     if (!dynamic() || message?.role !== "toolResult" || !message.isError || !catalog.includes(message.toolName)) return;
     if (message.content?.[0]?.text !== `Tool ${message.toolName} not found`) return;
     if (!load([message.toolName]).length) return;
@@ -202,7 +208,8 @@ export default function openbots(pi: any) {
 
   pi.on("before_agent_start", async (event: any) => {
     try {
-      const context = (await call("context")) as { sections: Record<string, string> };
+      const context = (await call("context")) as { sections: Record<string, string>; load?: string[] };
+      if (Array.isArray(context.load) && context.load.length) load(context.load);
       const opts = event.systemPromptOptions ?? event;
       const sections = { ...context.sections, ...toolRules(opts) };
       // Pi re-sends only the sections whose text changed, so a new memory doesn't repeat the whole context.
@@ -215,7 +222,7 @@ export default function openbots(pi: any) {
     }
   });
 
-  register(tool("bash", "Terminal", "Run a shell command on your computer and wait for it to finish. For something long-running, use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p, signal) => call("bash", p, signal)));
+  register(tool("bash", "Terminal", "Run a shell command on your computer. One that takes long carries on as a background job, and its result wakes you. For a program that keeps running (a server, a watcher), use process instead.", { type: "object", properties: { machine, command: str("The command."), cwd: str("Working directory, relative to your home if not absolute."), timeout: { type: "number", description: "Milliseconds before the command is stopped. Default 120000." } }, required: ["command"] }, (p, signal) => call("bash", p, signal)));
 
   register(tool("read", "Read file", "Read a text file on your computer.", { type: "object", properties: { machine, path: str("File path."), offset: { type: "number" }, limit: { type: "number" } }, required: ["path"] }, (p, signal) => call("read", p, signal)));
 
@@ -365,6 +372,7 @@ export default function openbots(pi: any) {
     async execute(_id: string, params: Params, signal?: unknown) {
       try {
         const out = (await call("use_app", own(params), abortSignal(signal))) as { text: string; images?: { data: string; mimeType: string }[]; isError?: boolean };
+        if (startedJob(out)) return ok(out);
         const images = (out.images ?? []).map((i) => ({ type: "image" as const, data: i.data, mimeType: i.mimeType }));
         return { content: [...(out.text || !images.length ? text(out.text || "(no output)") : []), ...images], details: { app: params?.app, tool: params?.tool }, ...(out.isError ? { isError: true } : {}) };
       } catch (err) {
@@ -378,6 +386,16 @@ export default function openbots(pi: any) {
   register(tool("ask_bot", "Ask bot", "Ask another bot. It doesn't wait: carry on or end your turn, and their reply wakes you where you are now. It shows up as a side conversation the user can read. bot is their name or short id.", { type: "object", properties: { bot: str("Who."), text: str("What you're asking.") }, required: ["bot", "text"] }, (p, signal) => call("ask_bot", p, signal)));
 
   register(tool("background", "Background check", "Hand a slow check or lookup to a background helper and carry on: it can run commands, read files and search, but can't message anyone or change anything of yours. Its result wakes you in this conversation. task says exactly what to find out, written to stand on its own.", { type: "object", properties: { task: str("What to check or look up, and what to report back.") }, required: ["task"] }, (p, signal) => call("background", p, signal)));
+
+  register(
+    tool(
+      "jobs",
+      "Jobs",
+      "Your background jobs: tool calls that ran long and carry on after your turn. Each result wakes you by itself. action is list, result (job, and offset and limit to page: a finished job's whole output), cancel (job, or all: when it's no longer wanted) or follow_up (job, text: something to do once it's in, handed back to you with its result; remove: a queued follow-up's number, to drop it). job is the job's number; the only running one if omitted.",
+      { type: "object", properties: { action: str("list, result, cancel or follow_up."), job: str("The job's number, or all for cancel."), text: str("follow_up: what to do once the job is in."), remove: { type: "number", description: "follow_up: the number of a queued follow-up to drop." }, offset: { type: "number", description: "result: where to start reading." }, limit: { type: "number", description: "result: how many characters." } }, required: ["action"] },
+      (p, signal) => call("jobs", p, signal),
+    ),
+  );
 
   register(tool("side_chat", "Side chat", "Talk something through with other bots away from the main chat. action start (bots: one to four names, topic: the question, written to stand on its own, report_to: the short id of the chat to report back to, the one you're in if omitted) opens a temporary side chat the user can read but not write in. It closes after a few messages each, when it goes quiet, or with action close (conversation). Whoever opened it is asked to report back once it closes. For one quick question to one bot, use ask_bot.", { type: "object", properties: { action: str("start or close."), bots: { type: "array", items: { type: "string" }, description: "start: who to talk with, by name or short id." }, topic: str("start: what to work out."), report_to: str("start: short conversation id."), conversation: str("close: the side chat's short id. The one you're in if omitted.") }, required: ["action"] }, (p, signal) => call("side_chat", p, signal)));
 

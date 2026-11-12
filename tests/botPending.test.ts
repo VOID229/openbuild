@@ -100,8 +100,9 @@ test('a group message reaches every bot there, and only the ones that act show; 
       await until(() => mine(helper.bot.id).length === 2);
       mine(helper.bot.id)[1].finish();
       await until(() => !runner.busy(helper.bot.id));
-      // Only the message that found it inside a tool got a quick reply started, and only the bot that answers for the group.
-      a.deepEqual(quickReplies, [boss.bot.id]);
+      // The message that found it inside one of its own calls started no helper reply: that call stops
+      // holding the turn once someone is waiting (jobs.ts), and the bot answers itself.
+      a.deepEqual(quickReplies, []);
       process.exit(0);
     `, { OPENCHAT_DATA_DIR: dir });
     expect(err).toBe('');
