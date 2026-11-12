@@ -27,7 +27,9 @@ const SETUP = `
   svc.setHooks({ wake() {}, stop() {} });
   svc.updateSettings({ onboarding: 'done', user: { name: 'Gal' } });
   // The app's routes, once the test's bots are made: with none yet, they'd start the usual primary.
-  const app = async () => (await import('./server/bots/routes.ts')).botRoutes((h) => h);
+  // The runner first: a bot made through manage imports it lazily to introduce itself (agent.ts), and
+  // Bun 1.3.8 runs routes.ts (which starts the runner as it loads) before a runner that is still loading.
+  const app = async () => (await import('./server/bots/runner.ts'), (await import('./server/bots/routes.ts')).botRoutes((h) => h));
   // The app's settings: the user's own edit.
   const patch = async (id, body) => {
     const req = new Request('http://x/api/bots/' + id, { method: 'PATCH', body: JSON.stringify(body) });

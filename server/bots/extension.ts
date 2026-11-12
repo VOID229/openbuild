@@ -90,7 +90,7 @@ export const CATALOG_BRIEF: Record<string, string> = {
 
 /** load_tools' description: what it does, then the catalog. */
 export function catalogDescription(names: string[]): string {
-  return "Load tools by name before you first call them; several at once is fine, and you can call them right after. They stay loaded for this session. Your other tools:\n" + names.map((name) => `- ${name}: ${CATALOG_BRIEF[name] ?? name}`).join("\n");
+  return "Load tools by name before you first call them; several at once is fine, and you can call them right after. They stay loaded for this session, and one already in your tool list needs no loading: call it directly. Your other tools:\n" + names.map((name) => `- ${name}: ${CATALOG_BRIEF[name] ?? name}`).join("\n");
 }
 
 /**
@@ -109,6 +109,24 @@ export function loadedTools(entries: any[], catalog: Set<string>): Set<string> |
   // Recorded before load_tools existed: it had every tool, so it keeps them.
   if (!tools.has("load_tools")) return undefined;
   return new Set([...tools].filter((name) => catalog.has(name)));
+}
+
+/** The tools this bot's Pi starts with besides the core: the ones it uses most, picked by the runner (toolPreload.ts). */
+export function preloadNames(value = process.env.OPENBOTS_PRELOAD): string[] {
+  return [...new Set(String(value ?? "").split(",").map((name) => name.trim()).filter(Boolean))];
+}
+
+/**
+ * The active tools a session starts or resumes with: every tool that isn't in the catalog as Pi has
+ * it, and of the catalog exactly `wanted` (all of it when undefined), whether Pi started with the
+ * catalog active (`--tools` names every tool) or not (no `--tools`: only tools active by default).
+ * Tools that stay active keep their order, so an unchanged loadout is the same list.
+ */
+export function startingTools(active: string[], catalog: string[], wanted: Set<string> | undefined, registered?: Set<string>): string[] {
+  const inCatalog = new Set(catalog);
+  const want = (name: string) => (!wanted || wanted.has(name)) && (!registered || registered.has(name));
+  const kept = active.filter((name) => !inCatalog.has(name) || want(name));
+  return [...kept, ...catalog.filter((name) => want(name) && !kept.includes(name))];
 }
 const status = { type: "string", minLength: 1, description: "Required, and written first, before the other arguments: the user sees it the moment you start writing this call, and while it runs. A short custom status (a few words, at most 50 characters). Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
 
@@ -187,16 +205,22 @@ export default function openbots(pi: any) {
     return wanted.filter((name) => now.has(name));
   };
 
-  // `--tools` activates every tool it names, so a catalog tool the session hasn't loaded is put back out.
+  // What the session had loaded comes back, with the bot's usual tools (OPENBOTS_PRELOAD), and the rest
+  // of the catalog stays out. Pi doesn't do either on its own: with `--tools` it activates every tool it
+  // names, and without (a user extension is switched on for bots) only the tools active by default, so
+  // a Pi that restarts (after an idle spell, or to follow the bot into another conversation) would
+  // otherwise come back with a loadout that isn't the session's.
   pi.on("session_start", (_event: any, ctx: any) => {
     // A helper session has only the few tools it was started with, and nothing to load more with.
     if (!dynamic() || process.env.OPENBOTS_HELPER) return;
     const entries = typeof ctx?.sessionManager?.getBranch === "function" ? ctx.sessionManager.getBranch() : [];
     const kept = loadedTools(entries, new Set(catalog));
-    if (!kept) return;
+    const registered = typeof pi.getAllTools === "function" ? new Set<string>(pi.getAllTools().map((t: any) => t.name)) : undefined;
     const active: string[] = pi.getActiveTools();
-    const next = active.filter((name) => !catalog.includes(name) || kept.has(name));
-    if (next.length !== active.length) pi.setActiveTools(next);
+    // A chat that can't load tools (a friend's) has none to start with either.
+    const usual = active.includes("load_tools") ? preloadNames() : [];
+    const next = startingTools(active, catalog, kept && new Set([...kept, ...usual]), registered);
+    if (next.length !== active.length || next.some((name, i) => name !== active[i])) pi.setActiveTools(next);
   });
 
   // A call to a tool that isn't loaded yet loads it, and the bot is told to call it again.

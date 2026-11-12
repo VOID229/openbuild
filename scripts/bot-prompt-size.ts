@@ -140,6 +140,9 @@ export async function measureMemory(): Promise<{ memories: number; profile: numb
 // schema. "before" is origin/main 6e31329, where all 24 OpenBots tools were declared on every request.
 // "after" is the core set (CORE_TOOLS, load_tools' catalog included) a request carries until the bot
 // loads more; each tool it loads then costs its own declaration, from the next request on.
+// "preload" is what a bot's Pi starts with on top of the core: the tools it used in two or more turns
+// of the last week, most used first, within PRELOAD_BUDGET_CHARS (server/bots/toolPreload.ts). The
+// examples are bots that keep to a few tools; "most" is one that uses every tool, which fills the budget.
 
 /** All 24 tools' declarations at origin/main 6e31329, in characters, measured as declaration() does. */
 export const TOOLS_BEFORE = 29660;
@@ -156,6 +159,27 @@ export async function measureTools(): Promise<{ core: Record<string, number>; ca
   return { core, catalog: load.description.length - load.description.indexOf("\n"), loadable };
 }
 
+/** What bots that keep to these tools start with, on top of the core. */
+const PRELOAD_EXAMPLES: Record<string, string[]> = {
+  "chat only": [],
+  "coding threads": ["openbuild", "bash"],
+  "apps and a shell": ["use_app", "apps", "bash"],
+  "primary bot": ["openbuild", "use_app", "manage_bot", "apps", "bash"],
+};
+
+export async function measurePreload(core: number): Promise<{ budget: number; examples: Record<string, { tools: string[]; chars: number; request: number }>; most: { tools: string[]; chars: number; request: number } }> {
+  const { PRELOAD_BUDGET_CHARS, declarationSizes, preloadTools } = await import("../server/bots/toolPreload.ts");
+  const sizes = declarationSizes();
+  const now = Date.now();
+  // Listed most used first: each tool a turn fewer than the one before it.
+  const pick = (names: string[]) => {
+    const tools = preloadTools(Object.fromEntries(names.map((name, i) => [name, Array.from({ length: Math.max(2, names.length + 1 - i) }, () => now)])), now, sizes);
+    const chars = tools.reduce((n, name) => n + sizes[name]!, 0);
+    return { tools, chars, request: core + chars };
+  };
+  return { budget: PRELOAD_BUDGET_CHARS, examples: Object.fromEntries(Object.entries(PRELOAD_EXAMPLES).map(([name, tools]) => [name, pick(tools)])), most: pick(Object.keys(sizes).sort((a, b) => sizes[b]! - sizes[a]!)) };
+}
+
 const tokens = (chars: number) => Math.round(chars / BYTES_PER_TOKEN);
 const sum = (m: { systemPrompt: number; context: number; apps: number }) => m.systemPrompt + m.context + m.apps;
 
@@ -168,10 +192,16 @@ if (import.meta.main) {
       const after = Object.values(m.core).reduce((a, b) => a + b, 0);
       const sizes = Object.values(m.loadable).sort((a, b) => a - b);
       const size = (chars: number) => ({ chars, approxTokens: tokens(chars) });
+      const all = after + Object.values(m.loadable).reduce((a, b) => a + b, 0);
+      const preload = await measurePreload(after);
+      // A request's declarations with a bot's usual tools preloaded, against declaring every tool there is now.
+      const withPreload = (p: { tools: string[]; chars: number; request: number }) => ({ preloaded: p.tools, ...size(p.request), savedOfAllTools: `${Math.round((1 - p.request / all) * 100)}%` });
       console.log(JSON.stringify({
         before: { tools: 24, ...size(TOOLS_BEFORE) },
         after: { tools: Object.keys(m.core), ...size(after), catalog: size(m.catalog) },
         saved: { chars: TOOLS_BEFORE - after, approxTokens: tokens(TOOLS_BEFORE) - tokens(after), percent: Math.round((1 - after / TOOLS_BEFORE) * 100) },
+        allToolsNow: { tools: Object.keys(m.core).length + Object.keys(m.loadable).length, ...size(all) },
+        preload: { budget: size(preload.budget), examples: Object.fromEntries(Object.entries(preload.examples).map(([name, p]) => [name, withPreload(p)])), most: withPreload(preload.most) },
         loadOne: { median: size(sizes[Math.floor(sizes.length / 2)]!), smallest: size(sizes[0]!), largest: size(sizes.at(-1)!), each: Object.fromEntries(Object.entries(m.loadable).map(([k, v]) => [k, tokens(v)])) },
         estimate: `chars / ${BYTES_PER_TOKEN}`,
       }, null, 1));

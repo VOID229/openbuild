@@ -49,6 +49,8 @@ function migrate(db: Database): Database {
 
 /** A bot owed its one look through the memory it had before the split (kv key prefix). */
 const MEMORY_REVIEW = "memory-review:";
+/** Per bot: when its recent turns used each catalog tool (toolPreload.ts). */
+const TOOL_USAGE = "tool-usage:";
 
 /**
  * Memory from before the profile/journal split has no kind. It was all in the prompt then, standing
@@ -144,7 +146,16 @@ export function deleteBot(id: string) {
     db.query("DELETE FROM routines WHERE bot_id = ?").run(id);
     db.query("DELETE FROM cursors WHERE bot_id = ?").run(id);
     db.query("DELETE FROM kv WHERE key = ?").run(MEMORY_REVIEW + id);
+    db.query("DELETE FROM kv WHERE key = ?").run(TOOL_USAGE + id);
   })();
+}
+
+/** When the bot's recent turns used each catalog tool: what its Pi's starting tools are picked from. */
+export function toolUsage(botId: string): Record<string, number[]> | undefined {
+  return getValue<Record<string, number[]>>(TOOL_USAGE + botId);
+}
+export function setToolUsage(botId: string, usage: Record<string, number[]>) {
+  setValue(TOOL_USAGE + botId, usage);
 }
 
 // ------------------------------------------------------------------ memory

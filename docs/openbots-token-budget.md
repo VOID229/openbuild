@@ -46,7 +46,8 @@ not deleted or truncated in storage. This is a conservative byte budget, not an 
 count. The remember/search interfaces and complete memory storage remain available.
 
 `bots/usage.jsonl` logs one numeric aggregate per runner turn: opaque bot id, random turn id, timestamp,
-assistant call count and provider-reported input/output/cache-read/cache-write fields. No text,
+assistant call count and provider-reported input/output/cache-read/cache-write fields, and since
+2026-11-12 the turn's timings and tool loads (see "Turn metrics" below). No text,
 model error, tool arguments, URLs, names, credentials or conversation contents are logged. Missing
 usage is labeled unmeasured. These records **exclude compaction usage** and are not a complete
 billing ledger; fields retain provider-specific meanings and must not be confused with uncached
@@ -127,3 +128,66 @@ claude-code failure was `A maximum of 4 blocks with cache_control may be provide
 the Claude Code bridge's replay of mid-conversation system messages. Fewer system patches should
 make it rare, but a turn after a memory change still sends one; the breakpoint count needs fixing
 in the bridge itself.
+
+## Sticky and preloaded tools (2026-11-12)
+
+Since #234 a request declares a small core (`send_message`, `react`, `memory`, `search`,
+`load_tools`) and a bot loads the rest by name. A loaded tool is meant to stay loaded for the
+session. In practice bots lost their tools at almost every Pi restart, and a bot's Pi restarts
+often: after 20 idle minutes, and whenever the bot moves to another conversation (a session each).
+
+The cause: the extension's `session_start` restore only took tools away. It assumed Pi starts with
+every tool active, which is true only with `--tools`. When a user extension is switched on for bots,
+`piFlags()` leaves `--tools` out (the extension brings tools of its own), Pi starts with just the
+tools that are active by default (the core), and nothing put the session's loaded tools back. Pi
+then recorded `toolsRemoved`, the next request said "The following tools are no longer available",
+the prompt cache went with them, and the bot spent a request on `load_tools` again, or called the
+tool, failed once and called it again. The real-Pi test of the restart ran only with `--tools`,
+and CI has no Pi installed, so it didn't show.
+
+Now `session_start` sets the loadout outright, whichever way Pi started: what the session's
+transcript had loaded, plus the bot's usual tools, and none of the rest of the catalog. Nothing a
+session loaded is taken away until its generation rotates.
+
+The usual tools are picked per bot from its own turns (`server/bots/toolPreload.ts`): catalog tools
+used in at least 2 turns of the last 7 days, most used first, within 6,400 characters of
+declarations (about 1,500 tokens). The runner keeps the last 20 uses of each tool per bot
+(`tool-usage:<bot>` in the bots database, tool names and times only) and passes the pick to Pi as
+`OPENBOTS_PRELOAD`. A chat shared with a friend who isn't allowed tools gets none.
+
+Measured read-only on a copy of every lane session written after #234 went live
+(`bun scripts/bot-tool-loads.ts <copied-session-directory> --since 2026-11-10T14:51:00Z`, numeric
+output only, no model call). "Recorded" is what happened; "replayed" walks the same turns under
+the new rule, assuming the bots would have made the same tool calls, starting from no usage history:
+
+| 30 sessions, 13 bots, 409 turns, 1,626 model requests | Recorded | Replayed |
+| --- | ---: | ---: |
+| Requests that only loaded a tool | 163 (10.0%) | 31 (2.1%) |
+| Turns that had to load first | 154 (37.7%) | 31 (7.6%) |
+| Prompt tokens spent on those requests | 10,196,491 | 1,081,709 |
+| Times a restarted Pi dropped loaded tools | 133 (416 tools) | 0 |
+| Uncached prompt tokens right after a drop | 4,062,020 | 0 |
+| Tool declarations per request (tokens, chars / 4.28) | 2,047 | 2,822 |
+| Share of declaring all 27 tools (8,255 tokens) | 24.8% | 34.2% |
+
+So a request carries about 775 more tokens of declarations (cached after the first), and about
+9.1M prompt tokens of load requests and 4.1M uncached tokens after drops go, over these two days.
+`bun scripts/bot-prompt-size.ts --tools` prints what a request declares with the core alone (1,251
+tokens) and with typical preloads (2,018 to 2,718), against all tools (8,255).
+
+## Turn metrics (2026-11-12)
+
+Each `bots/usage.jsonl` line now also carries, for the turn (`server/bots/turnMetrics.ts`): what
+woke the bot and whether the user was waiting, how it ended, model requests and how many failed,
+whether the turn had to start a Pi process and how many tools that Pi was preloaded with, the
+milliseconds from the message that woke it to the turn starting, the prompt reaching Pi, the chat
+first showing the bot at work, its first tool call, its first message and the turn's end, tool
+calls, `load_tools` calls and the tools they named, calls to a tool that wasn't loaded, and the
+catalog tools used. Numbers, enums and OpenBots' own tool names only: a tool of the user's own is
+"other". Lines from before carry only the token fields.
+
+`bun scripts/bot-turn-metrics.ts` summarizes the file (read-only): requests per turn, the share of
+requests that failed or only loaded tools, p50/p90 of each wait for turns answering the user,
+prompt tokens per turn and per request, and the cached share. `--since 24h`, `--until`, `--bot`
+and `--json` narrow or reshape it, and `--split <time>` puts the turns before and after a moment
+side by side, which is how a change is measured against its baseline.

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FRIEND_TOOLS } from "../shared/friends";
-import openbots, { CATALOG_BRIEF, CORE_TOOLS, loadedTools } from "../server/bots/extension";
+import openbots, { CATALOG_BRIEF, CORE_TOOLS, loadedTools, preloadNames, startingTools } from "../server/bots/extension";
 import { piBin } from "../server/pi/install";
 import { spawnScript } from "./spawnScript";
 
@@ -149,96 +149,248 @@ test("a session from before the catalog keeps every tool it had", () => {
   expect(declared().length).toBe(ALL.length);
 });
 
+// The regression #234 shipped with: its restore only took tools away, counting on `--tools` to have
+// activated them all. With a user extension switched on for bots there's no `--tools`, a restarted Pi
+// comes up with the core alone, and every restart (an idle spell, another conversation) lost the loadout.
+test("a restarted Pi without a tool list gets back what the session had loaded", () => {
+  const entries = [loadout([...CORE_TOOLS]), said, loadout(["routine", "openbuild"]), said, loadout(["todo"]), loadout([], ["todo"]), said];
+  const { emit, declared, active, tool } = fakePi();
+  // As Pi starts without `--tools`: only the tools that are active by default.
+  expect([...active()].sort()).toEqual([...CORE_TOOLS].sort());
+  emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => entries } });
+  expect(declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS, "openbuild", "routine"].sort());
+  // The core keeps its place in the list, so a session that loaded nothing declares what it did before.
+  expect(active().slice(0, CORE_TOOLS.length).sort()).toEqual([...CORE_TOOLS].sort());
+  expect(tool("routine").execute).toBeFunction();
+  // And it's the same loadout the Pi with a tool list comes back to.
+  const listed = fakePi(["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]);
+  listed.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => entries } });
+  expect(listed.declared().map((t) => t.name).sort()).toEqual(declared().map((t) => t.name).sort());
+});
+
+test("a session from before the catalog keeps every tool without a tool list too", () => {
+  const old = [loadout(ALL.map((t) => t.name).filter((n) => n !== "load_tools")), said];
+  const { emit, declared } = fakePi();
+  emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => old } });
+  expect(declared().map((t) => t.name).sort()).toEqual(ALL.map((t) => t.name).sort());
+});
+
+test("a new session's loadout is the core, however Pi started", () => {
+  for (const allowed of [undefined, ["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]]) {
+    const { emit, active } = fakePi(allowed);
+    emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } });
+    expect([...active()].sort()).toEqual([...CORE_TOOLS].sort());
+  }
+});
+
+/** Runs with OPENBOTS_PRELOAD set as the runner sets it for a bot's Pi. */
+function withPreload<T>(value: string | undefined, run: () => T): T {
+  const previous = process.env.OPENBOTS_PRELOAD;
+  if (value === undefined) delete process.env.OPENBOTS_PRELOAD;
+  else process.env.OPENBOTS_PRELOAD = value;
+  try {
+    return run();
+  } finally {
+    if (previous === undefined) delete process.env.OPENBOTS_PRELOAD;
+    else process.env.OPENBOTS_PRELOAD = previous;
+  }
+}
+
+test("a bot's usual tools are declared from the start of a session, with nothing to load", () => {
+  expect(preloadNames("bash, use_app,,bash")).toEqual(["bash", "use_app"]);
+  expect(preloadNames("")).toEqual([]);
+  expect(preloadNames(undefined)).toEqual([]);
+  for (const allowed of [undefined, ["send_message", "react", "memory", "search", "load_tools", ...NON_CORE]]) {
+    // A new session: the core and the usual tools, real schemas and all. A name that isn't a tool is ignored.
+    const fresh = fakePi(allowed);
+    withPreload("bash,use_app,teleport,send_message", () => fresh.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } }));
+    expect(fresh.declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS, "bash", "use_app"].sort());
+    expect([...fresh.tool("bash").parameters.required].sort()).toEqual(["command", "status"]);
+    // A session that's resumed: what it had loaded, and the usual tools with it. Nothing it had is taken away.
+    const resumed = fakePi(allowed);
+    const entries = [loadout([...CORE_TOOLS]), said, loadout(["routine"]), said];
+    withPreload("bash", () => resumed.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => entries } }));
+    expect(resumed.declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS, "bash", "routine"].sort());
+  }
+});
+
+test("a chat that can only chat, and a helper session, start with no usual tools", () => {
+  // A friend's chat: the tool list names only chat, so there's nothing to load with and nothing preloaded.
+  const friend = fakePi(FRIEND_TOOLS);
+  withPreload("bash,use_app", () => friend.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } }));
+  expect(friend.declared().map((t) => t.name).sort()).toEqual([...FRIEND_TOOLS].sort());
+  // A helper session keeps exactly the tools it was started with.
+  const helper = fakePi(["bash", "read", "search"]);
+  const previous = process.env.OPENBOTS_HELPER;
+  process.env.OPENBOTS_HELPER = "1";
+  try {
+    withPreload("use_app", () => helper.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } }));
+  } finally {
+    if (previous === undefined) delete process.env.OPENBOTS_HELPER;
+    else process.env.OPENBOTS_HELPER = previous;
+  }
+  expect(helper.declared().map((t) => t.name).sort()).toEqual(["bash", "read", "search"]);
+});
+
+test("the starting loadout keeps the order of what's already active", () => {
+  const catalog = ["bash", "read", "todo"];
+  // Nothing to change: the same list, so Pi isn't asked to set anything.
+  expect(startingTools(["send_message", "load_tools", "bash"], catalog, new Set(["bash"]))).toEqual(["send_message", "load_tools", "bash"]);
+  // Takes out what isn't wanted, appends what's missing in catalog order, leaves other tools alone.
+  expect(startingTools(["send_message", "todo", "theirs", "load_tools"], catalog, new Set(["read", "bash"]))).toEqual(["send_message", "theirs", "load_tools", "bash", "read"]);
+  // No recorded loadout to go by: the whole catalog.
+  expect(startingTools(["send_message"], catalog, undefined)).toEqual(["send_message", "bash", "read", "todo"]);
+  // Only tools this Pi has registered.
+  expect(startingTools(["send_message"], catalog, new Set(["bash", "todo"]), new Set(["send_message", "todo"]))).toEqual(["send_message", "todo"]);
+});
+
 const pi = piBin();
 
 // Real Pi and a fake model: the first request carries only the core, load_tools adds a tool for the
-// next request of the same turn, a restarted Pi keeps it, and calling one that isn't loaded loads it.
-test.skipIf(!pi)("Pi declares a loaded tool on the next request, and keeps it after a restart", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "openbuild-bots-tools-"));
-  try {
-    const agent = join(dir, "agent");
-    mkdirSync(agent, { recursive: true });
-    writeFileSync(join(agent, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "k" } }));
-    const { code, stderr: err } = await spawnScript(`
-      import { strict as a } from 'node:assert';
-      import { writeFileSync } from 'node:fs';
-      import openbots, { CORE_TOOLS } from './server/bots/extension.ts';
-      const registered = [];
-      openbots({ on() {}, registerTool(t) { registered.push(t); } });
-      const schema = (name) => registered.find((t) => t.name === name);
-      const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
-      const say = (text) => sse({ role: 'assistant', content: text }) + sse({}, 'stop') + 'data: [DONE]\\n\\n';
-      let n = 0;
-      const use = (name, args) => sse({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + (++n), type: 'function', function: { name, arguments: JSON.stringify(args) } }] }) + sse({}, 'tool_calls') + 'data: [DONE]\\n\\n';
-      const requests = [];
-      const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(req) {
-        const body = await req.json();
-        const tools = (body.tools ?? []).map((t) => t.function);
-        const names = tools.map((t) => t.name);
-        // The runner's nudge to acknowledge the user can ride in with a tool's result when the machine is slow: the model carries on from the result.
-        const messages = body.messages.filter((m) => !(m.role === 'user' && JSON.stringify(m.content).includes("hasn't heard from you yet")));
-        const last = messages.at(-1);
-        const text = JSON.stringify(last.content);
-        const user = JSON.stringify(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
-        requests.push(names);
-        let out;
-        if (last.role !== 'tool') {
-          if (user.includes('LOAD')) {
-            a.deepEqual([...names].sort(), [...CORE_TOOLS].sort());
-            const load = tools.find((t) => t.name === 'load_tools');
-            a.match(load.description, /\\n- routine: /);
-            a.match(load.description, /\\n- bash: /);
-            out = use('load_tools', { names: ['routine'] });
-          } else if (user.includes('AGAIN')) {
-            // A new Pi on the same session: routine is still declared, nothing else came back.
-            a.deepEqual([...names].sort(), [...CORE_TOOLS, 'routine'].sort());
+// next request of the same turn, a restarted Pi keeps it, calling one that isn't loaded loads it, and a
+// new session starts with the tools the bot has been using. Run twice, as Pi starts both ways: with the
+// tool list (`--tools`), and without it because a user extension is switched on for bots.
+for (const mode of ["listed", "extension"] as const) {
+  test.skipIf(!pi)(`Pi keeps loaded tools through a restart and starts new sessions with the usual ones (${mode === "listed" ? "tool list" : "user extension, no tool list"})`, async () => {
+    const dir = mkdtempSync(join(tmpdir(), "openbuild-bots-tools-"));
+    try {
+      const agent = join(dir, "agent");
+      mkdirSync(join(agent, "extensions"), { recursive: true });
+      writeFileSync(join(agent, "auth.json"), JSON.stringify({ mock: { type: "api_key", key: "k" } }));
+      writeFileSync(join(agent, "extensions", "own.ts"), "export default function own() {}\n");
+      const { code, stderr: err } = await spawnScript(`
+        import { strict as a } from 'node:assert';
+        import { readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        import openbots, { CORE_TOOLS } from './server/bots/extension.ts';
+        const registered = [];
+        openbots({ on() {}, registerTool(t) { registered.push(t); } });
+        const schema = (name) => registered.find((t) => t.name === name);
+        const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
+        const say = (text) => sse({ role: 'assistant', content: text }) + sse({}, 'stop') + 'data: [DONE]\\n\\n';
+        let n = 0;
+        const use = (name, args) => sse({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + (++n), type: 'function', function: { name, arguments: JSON.stringify(args) } }] }) + sse({}, 'tool_calls') + 'data: [DONE]\\n\\n';
+        const requests = [];
+        const server = Bun.serve({ port: 0, hostname: '127.0.0.1', async fetch(req) {
+          const body = await req.json();
+          const tools = (body.tools ?? []).map((t) => t.function);
+          const names = tools.map((t) => t.name);
+          // The runner's nudge to acknowledge the user can ride in with a tool's result when the machine is slow: the model carries on from the result.
+          const messages = body.messages.filter((m) => !(m.role === 'user' && JSON.stringify(m.content).includes("hasn't heard from you yet")));
+          const last = messages.at(-1);
+          const text = JSON.stringify(last.content);
+          const user = JSON.stringify(messages.filter((m) => m.role === 'user').at(-1)?.content ?? '');
+          requests.push(names);
+          let out;
+          if (last.role !== 'tool') {
+            // A new session is shown the chat so far, so its own word is looked for first.
+            if (user.includes('FRESH')) {
+              // The bot used routine in two turns: its new session declares it from the first request.
+              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'routine'].sort());
+              a.deepEqual(tools.find((t) => t.name === 'routine').parameters, schema('routine').parameters);
+              out = use('routine', { action: 'list', status: 'Checking my schedule' });
+            } else if (user.includes('DIRECT')) {
+              a.ok(!names.includes('todo'));
+              out = use('todo', { action: 'list' });
+            } else if (user.includes('AGAIN')) {
+              // A new Pi on the same session: routine is still declared, nothing else came back.
+              a.deepEqual([...names].sort(), [...CORE_TOOLS, 'routine'].sort());
+              out = use('routine', { action: 'list', status: 'Checking my schedule' });
+            } else if (user.includes('LOAD')) {
+              a.deepEqual([...names].sort(), [...CORE_TOOLS].sort());
+              const load = tools.find((t) => t.name === 'load_tools');
+              a.match(load.description, /\\n- routine: /);
+              a.match(load.description, /\\n- bash: /);
+              out = use('load_tools', { names: ['routine'] });
+            } else out = say('?');
+          } else if (text.includes('Loaded routine')) {
+            // The same turn: the next request declares routine with its real schema.
+            const routine = tools.find((t) => t.name === 'routine');
+            a.ok(routine, names.join(','));
+            a.equal(routine.description, schema('routine').description);
+            a.deepEqual(routine.parameters, schema('routine').parameters);
             out = use('routine', { action: 'list', status: 'Checking my schedule' });
-          } else if (user.includes('DIRECT')) {
-            a.ok(!names.includes('todo'));
+          } else if (text.includes("todo wasn't loaded")) {
+            a.ok(names.includes('todo'), names.join(','));
+            a.deepEqual(tools.find((t) => t.name === 'todo').parameters, schema('todo').parameters);
             out = use('todo', { action: 'list' });
-          } else out = say('?');
-        } else if (text.includes('Loaded routine')) {
-          // The same turn: the next request declares routine with its real schema.
-          const routine = tools.find((t) => t.name === 'routine');
-          a.ok(routine, names.join(','));
-          a.equal(routine.description, schema('routine').description);
-          a.deepEqual(routine.parameters, schema('routine').parameters);
-          out = use('routine', { action: 'list', status: 'Checking my schedule' });
-        } else if (text.includes("todo wasn't loaded")) {
-          a.ok(names.includes('todo'), names.join(','));
-          a.deepEqual(tools.find((t) => t.name === 'todo').parameters, schema('todo').parameters);
-          out = use('todo', { action: 'list' });
-        } else if (text.includes('Error')) {
-          out = say('tool failed: ' + text.slice(0, 300));
-        } else out = say('done ' + n);
-        return new Response(out, { headers: { 'content-type': 'text/event-stream' } });
-      } });
-      writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', models: [{ id: 'm' }] } } }));
-      const db = await import('./server/bots/db.ts');
-      const svc = await import('./server/bots/service.ts');
-      const runner = await import('./server/bots/runner.ts');
-      svc.updateSettings({ defaultModel: 'mock/m', onboarding: 'done' });
-      const { bot, conversationId } = svc.createBot({ name: 'Alpha' });
-      runner.startBots();
-      const said = () => db.messages(conversationId, 50).filter((r) => !r.message.event && r.message.author === bot.id).map((r) => r.message.text);
-      const talk = async (text) => {
-        const before = said().length;
-        svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text });
-        const until = Date.now() + 30000;
-        while (Date.now() < until && said().length === before) await Bun.sleep(50);
-        const reply = said().at(-1);
-        a.ok(reply?.startsWith('done'), text + ': ' + reply);
-        while (runner.busy(bot.id) && Date.now() < until) await Bun.sleep(50);
-      };
-      await talk('LOAD');
-      runner.stop(bot.id);
-      await talk('AGAIN');
-      await talk('DIRECT');
-      process.exit(0);
-    `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
-    expect(err).toBe("");
-    expect(code).toBe(0);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}, 90_000);
+          } else if (text.includes('Error')) {
+            out = say('tool failed: ' + text.slice(0, 300));
+          } else out = say('done ' + n);
+          return new Response(out, { headers: { 'content-type': 'text/event-stream' } });
+        } });
+        writeFileSync(process.env.PI_CODING_AGENT_DIR + '/models.json', JSON.stringify({ providers: { mock: { baseUrl: 'http://127.0.0.1:' + server.port + '/v1', api: 'openai-completions', models: [{ id: 'm' }] } } }));
+        const db = await import('./server/bots/db.ts');
+        const svc = await import('./server/bots/service.ts');
+        const runner = await import('./server/bots/runner.ts');
+        const { piFlags } = await import('./server/bots/extensions.ts');
+        const { laneDirectory } = await import('./server/bots/sessionPolicy.ts');
+        svc.updateSettings({ defaultModel: 'mock/m', onboarding: 'done' });
+        if (${JSON.stringify(mode)} === 'extension') svc.updateSettings({ customExtensions: { enabled: true, ids: ['extensions/own.ts'] } });
+        // A user extension brings tools of its own, so the list that would name (and activate) every tool goes.
+        a.equal(piFlags().includes('--tools'), ${JSON.stringify(mode)} === 'listed');
+        const { bot, conversationId } = svc.createBot({ name: 'Alpha' });
+        runner.startBots();
+        const said = () => db.messages(conversationId, 50).filter((r) => !r.message.event && r.message.author === bot.id).map((r) => r.message.text);
+        const talk = async (text) => {
+          const before = said().length;
+          svc.postMessage(conversationId, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text });
+          const until = Date.now() + 30000;
+          while (Date.now() < until && said().length === before) await Bun.sleep(50);
+          const reply = said().at(-1);
+          a.ok(reply?.startsWith('done'), text + ': ' + reply);
+          while (runner.busy(bot.id) && Date.now() < until) await Bun.sleep(50);
+        };
+        const turns = () => readFileSync(process.env.OPENCHAT_DATA_DIR + '/bots/usage.jsonl', 'utf8').split('\\n').filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.calls);
+        await talk('LOAD');
+        a.deepEqual(runner.preloadFor(bot.id), []);
+        runner.stop(bot.id);
+        await talk('AGAIN');
+        await talk('DIRECT');
+
+        // Each turn left its numbers: what it took, how long the user waited, and what it had to load.
+        const [load, again, direct] = turns();
+        a.equal(turns().length, 3);
+        for (const t of [load, again, direct]) {
+          a.equal(t.v, 2);
+          a.equal(t.bot, bot.id);
+          a.equal(t.trigger, 'messages');
+          a.equal(t.waiting, true);
+          a.equal(t.outcome, 'replied');
+          a.equal(t.failedCalls, 0);
+          a.equal(t.preloaded, 0);
+          for (const key of ['queuedMs', 'promptMs', 'statusMs', 'toolMs', 'replyMs', 'doneMs']) a.ok(Number.isFinite(t[key]) && t[key] >= 0, key + ': ' + t[key]);
+          a.ok(t.statusMs <= t.toolMs && t.toolMs <= t.replyMs && t.replyMs <= t.doneMs, JSON.stringify(t));
+          a.ok(t.queuedMs <= t.promptMs);
+          a.equal(JSON.stringify(t).includes('Checking my schedule'), false);
+        }
+        // LOAD: a request to load routine, one to call it, one to answer.
+        a.ok(load.calls >= 3, JSON.stringify(load));
+        a.deepEqual([load.piStarted, load.loads, load.loaded, load.unloadedCalls, load.firstTool, load.tools], [true, 1, 1, 0, 'load_tools', ['routine']]);
+        // AGAIN: a new Pi, and nothing to load.
+        a.ok(again.calls >= 2 && again.calls < load.calls, JSON.stringify(again));
+        a.deepEqual([again.piStarted, again.loads, again.unloadedCalls, again.firstTool, again.tools], [true, 0, 0, 'routine', ['routine']]);
+        // DIRECT: the same Pi; the call to todo failed once for not being loaded.
+        a.deepEqual([direct.piStarted, direct.loads, direct.unloadedCalls, direct.firstTool, direct.tools], [false, 0, 1, 'todo', ['todo']]);
+
+        // Two turns used routine and one used todo: routine is one of its usual tools now.
+        a.deepEqual(Object.fromEntries(Object.entries(db.toolUsage(bot.id)).map(([name, times]) => [name, times.length])), { routine: 2, todo: 1 });
+        a.deepEqual(runner.preloadFor(bot.id), ['routine']);
+        // A day on, the lane starts a new session (sessionGeneration): made to look that old here.
+        runner.stop(bot.id);
+        const lane = laneDirectory(process.env.OPENCHAT_DATA_DIR + '/bots/sessions', bot.id, conversationId);
+        const [generation] = readdirSync(lane);
+        renameSync(join(lane, generation), join(lane, 'generation-1'));
+        await talk('FRESH');
+        a.equal(readdirSync(lane).length, 2);
+        const fresh = turns().at(-1);
+        a.deepEqual([fresh.piStarted, fresh.preloaded, fresh.loads, fresh.unloadedCalls, fresh.firstTool], [true, 1, 0, 0, 'routine']);
+        process.exit(0);
+      `, { OPENCHAT_DATA_DIR: join(dir, "data"), PI_CODING_AGENT_DIR: agent, PI_BIN: pi!, PI_OFFLINE: "1", OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json") });
+      expect(err).toBe("");
+      expect(code).toBe(0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 90_000);
+}
