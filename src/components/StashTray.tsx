@@ -1,4 +1,5 @@
 import { Bookmark, ChevronDown, FileText, X } from "lucide-react";
+import { isPicture } from "../../shared/attachments";
 import { useRef } from "react";
 import type { Stashed } from "../lib/stash";
 import { ago, cx, useDismiss } from "../lib/ui";
@@ -44,7 +45,7 @@ export function StashTray({ inline, items, open, active, onToggle, onClose, onHo
           <div className="stash-list">
             {items.map((item, i) => {
               const chips = item.files.filter((f) => !f.mention);
-              const image = chips.find((f) => f.mime.startsWith("image/"));
+              const image = chips.find((f) => isPicture(f));
               return (
                 <div key={item.id} className={cx("stash-row", i === active && "stash-row-active")} onMouseEnter={() => onHover(i)}>
                   <button type="button" className="stash-use" onMouseDown={keepFocus} onClick={() => onUse(item)}>

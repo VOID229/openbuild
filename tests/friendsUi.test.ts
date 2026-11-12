@@ -84,7 +84,7 @@ test("a shared chat names each friend's message for who wrote it, and offers tex
   expect(document.querySelector('.bm-row[data-id="m3"] .bm-quote-who')?.textContent).toBe("Bolt");
   expect(document.querySelector(".bots-head-name")?.textContent).toBe("Picnic · Alice");
   // Photos and polls don't cross to the friend, so they aren't offered.
-  expect(document.querySelector('[aria-label="Add images"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Add files"]')).toBeNull();
   expect(document.querySelector('[aria-label="New poll"]')).toBeNull();
   expect(document.querySelector('[aria-label="Add to message"]')).toBeNull();
 });

@@ -1450,7 +1450,8 @@ function line(c: db.StoredConversation, bots: { id: string; name: string }[], us
     const list = m.reactions ?? [];
     const number = (id?: string) => list.findIndex((x) => reactionId(x) === id) + 1;
     const reactions = list.length ? `\n  reactions: ${list.map((x, i) => `#${i + 1} ${c.friend || parseFriendAuthor(x.by) ? untrustedData(x.emoji) : x.emoji} from ${name(x.by)}${x.to && number(x.to) ? ` → #${number(x.to)}` : ""}`).join(", ")}` : "";
-    return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${reactions}`;
+    const files = m.files?.length ? ` ${svc.attachedNote(botId, m)}` : "";
+    return `[${m.id.slice(0, 8)}] ${who}${mark}${reply}: ${body}${files}${reactions}`;
   };
 }
 

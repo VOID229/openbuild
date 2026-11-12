@@ -21,6 +21,7 @@ import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } f
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
 import { terminalRoutes } from "./terminals";
+import { attachmentRoutes } from "./attachments";
 import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
@@ -113,6 +114,8 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/usage(\/|$)/.test(path) ||
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
+  // Files attached to a message for a thread that runs here: kept, read back and removed, by id.
+  /^\/api\/attachments\/[^/]+$/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
   /^\/api\/(fx|codex|cursor|claude|opencode|grok|hermes)\/(status|models)(\/|$)/.test(path) ||
   /^\/api\/claude\/permissions(\/|$)/.test(path) ||
@@ -158,13 +161,15 @@ async function writeChat(chat: storage.StoredChat, onto?: (stored: Chat) => stor
 }
 
 /** Headers from a proxied remote response that are safe to pass back to the browser. */
-const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after"];
+const PROXY_RESPONSE_HEADERS = ["content-type", "cache-control", "content-disposition", "x-openchat-run", "retry-after", "accept-ranges", "content-range", "content-security-policy", "x-content-type-options"];
 /**
  * How long a paired device gets to send response headers. A sleeping machine's tailnet address
  * swallows connections instead of refusing them, and without a deadline the browser's request (and
  * whatever waits on it, such as the project list) hangs for minutes.
  */
 const PROXY_HEADER_TIMEOUT_MS = 6000;
+/** A piece of a file has to arrive in full before the device answers, over whatever link there is. */
+const PROXY_UPLOAD_TIMEOUT_MS = 120_000;
 
 /**
  * Forward a request to a paired device's server. The browser never sees the device token: it is
@@ -185,6 +190,7 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
   }
   headers.set("authorization", `Bearer ${device.token}`);
   const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.arrayBuffer();
+  const timeout = req.method === "PUT" && path.startsWith("/api/attachments/") ? PROXY_UPLOAD_TIMEOUT_MS : PROXY_HEADER_TIMEOUT_MS;
   let lastError = "the device didn't answer";
   for (const base of device.urls) {
     const target = `${base.replace(/\/$/, "")}${path}${url.search}`;
@@ -192,7 +198,7 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
     const ctrl = new AbortController();
     const abort = () => ctrl.abort();
     req.signal.addEventListener("abort", abort, { once: true });
-    const deadline = setTimeout(abort, PROXY_HEADER_TIMEOUT_MS);
+    const deadline = setTimeout(abort, timeout);
     try {
       const res = await fetch(target, { method: req.method, headers, body, signal: ctrl.signal });
       clearTimeout(deadline);
@@ -214,11 +220,14 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
         const value = res.headers.get(name);
         if (value) out.set(name, value);
       }
+      // A file (never compressed on the way): its length lets a player seek and a download show progress.
+      const length = res.headers.get("accept-ranges") && res.headers.get("content-length");
+      if (length) out.set("content-length", length);
       return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
     } catch (err) {
       clearTimeout(deadline);
       req.signal.removeEventListener("abort", abort);
-      lastError = req.signal.aborted ? "the browser went away" : ctrl.signal.aborted ? `no answer in ${PROXY_HEADER_TIMEOUT_MS / 1000}s` : (err as Error).message;
+      lastError = req.signal.aborted ? "the browser went away" : ctrl.signal.aborted ? `no answer in ${timeout / 1000}s` : (err as Error).message;
     }
   }
   return bad(`Couldn't reach ${device.name}: ${lastError}`, 502);
@@ -666,6 +675,8 @@ function serve(port: number, hostname: string) {
       ...piRoutes(api),
 
       ...terminalRoutes(api),
+
+      ...attachmentRoutes(api),
 
       ...usageRoutes(api),
 

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MessageItem } from "../src/components/MessageItem";
+import { fileRef } from "../shared/bots";
 import { botStash, botStashOf, imageFiles, pasteBotStash, pasteStash, stashAction, threadStash, type Stashed } from "../src/lib/stash";
 import type { Attachment } from "../shared/types";
 import { spawnScript } from "./spawnScript";
@@ -60,6 +61,16 @@ describe("the OpenBots stash", () => {
     const item = stashed("second", imageFiles([image(2), image(3), image(4)]));
     expect(pasteBotStash({ text: "first", images: [image(1)] }, item)).toEqual({ text: "first\nsecond", images: [image(1), image(2), image(3), image(4)], left: 0 });
     expect(pasteBotStash({ text: "", images: [image(0), image(1)] }, item)).toMatchObject({ images: [image(0), image(1), image(2), image(3)], left: 1 });
+  });
+  test("a file uploaded for bots rides along with the images, past the image limit", () => {
+    const ref = fileRef({ id: "f1", name: "talk.mp4", mime: "video/mp4", size: 9 });
+    const [f] = imageFiles([ref]);
+    expect(f).toMatchObject({ name: "talk.mp4", mime: "video/mp4", size: 9, dataUrl: ref });
+    const item = stashed("", imageFiles([image(4), ref]));
+    expect(pasteBotStash({ text: "", images: [image(0), image(1), image(2), image(3)] }, item)).toEqual({ text: "", images: [image(0), image(1), image(2), image(3), ref], left: 1 });
+    // A file kept for a thread's machine isn't in the bots' store: it's left out.
+    const threadFile = stashed("", [file("clip", { mime: "video/mp4", path: "/data/attachments/x/clip.mp4" })]);
+    expect(pasteBotStash({ text: "", images: [] }, threadFile)).toEqual({ text: "", images: [], left: 1 });
   });
   test("counts the files a shared OpenBuild stash carries that a bot can't take", () => {
     const item = stashed("look @src/x.ts", [file("doc", { mime: "application/pdf" }), file("m", { mention: true }), ...imageFiles([image(1)])]);

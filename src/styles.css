@@ -2901,7 +2901,35 @@ select.input {
   color: var(--text-2);
 }
 
-.attachment-file > span {
+/* How much of the file is on the other side: a line along the chip's bottom edge. */
+.attachment-file:has(.attachment-progress) {
+  position: relative;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
+.attachment-progress {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+  transition: width var(--med) var(--ease);
+}
+
+.attachment-link {
+  text-decoration: none;
+  border-radius: inherit;
+  transition: background var(--fast) var(--ease);
+}
+
+@media (hover: hover) {
+  .attachment-link:hover {
+    background: var(--surface-3, var(--surface-2));
+  }
+}
+
+.attachment-file > span:not(.attachment-progress) {
   display: flex;
   flex-direction: column;
   min-width: 0;

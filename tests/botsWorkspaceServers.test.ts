@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { serverLog } from "./serverLog";
@@ -192,6 +192,84 @@ test("with the grant, the stream comes through the viewer, opening with a hello 
   }
   expect((await hostMessages()).some((m) => m.id === message.id)).toBe(true);
   await stream.cancel();
+}, 30_000);
+
+/** Send `bytes` to a file route in pieces of `piece` bytes, as the browser does. */
+async function upload(put: (query: string, body: BodyInit) => Promise<Response>, name: string, bytes: Uint8Array, piece: number) {
+  let last: any;
+  for (let offset = 0; offset < bytes.length || !last; offset += piece) {
+    const q = new URLSearchParams({ name, type: "video/x-matroska", offset: String(offset), total: String(bytes.length) });
+    const res = await put(q.toString(), raw(bytes.subarray(offset, offset + piece)));
+    last = await res.json();
+    expect({ status: res.status, error: last.error }).toEqual({ status: 200, error: undefined });
+  }
+  return last as { id: string; name: string; mime: string; size: number; path: string; done: boolean };
+}
+const raw = (bytes: Uint8Array) => bytes as unknown as BodyInit;
+const octets = { "content-type": "application/octet-stream" };
+const clip = () => crypto.getRandomValues(new Uint8Array(50_000));
+
+test("a file attached for bots goes up in pieces through the viewer, into each bot's home, and comes back by range", async () => {
+  const bytes = clip();
+  const id = crypto.randomUUID();
+  const at = `/api/bots/conversations/${conversation}/files/${id}`;
+  const saved = await upload((q, body) => via(`${at}?${q}`, { method: "PUT", headers: octets, body }), "../clip one.mkv", bytes, 20_000);
+  // The name is one path segment, whatever the tab called it.
+  expect(saved).toMatchObject({ id, name: "clip one.mkv", mime: "video/x-matroska", size: bytes.length, done: true });
+  expect(saved.path.startsWith(join(hostData, "attachments", id))).toBe(true);
+  // A piece sent again (its answer was lost) lands where it did the first time.
+  const again = await via(`${at}?${new URLSearchParams({ name: "clip one.mkv", offset: "40000", total: String(bytes.length) })}`, { method: "PUT", headers: octets, body: raw(bytes.subarray(40_000)) });
+  expect(((await again.json()) as any).size).toBe(bytes.length);
+  expect(new Uint8Array(readFileSync(saved.path))).toEqual(bytes);
+
+  // The message names the file as the host's store has it, not as the tab claims.
+  const message = { ...myMessage("watch this"), files: [{ id, name: "lies.txt", mime: "text/plain", size: 1 }] };
+  expect((await via(`/api/bots/conversations/${conversation}/messages`, { method: "POST", ...json(message) })).status).toBe(200);
+  const snap = (await (await fetch(`${hostBase()}/api/bots`)).json()) as { conversations: { id: string; botIds: string[]; messages: any[] }[] };
+  const chat = snap.conversations.find((c) => c.id === conversation)!;
+  expect(chat.messages.find((m) => m.id === message.id).files).toEqual([{ id, name: "clip one.mkv", mime: "video/x-matroska", size: bytes.length }]);
+  // Every bot there has its own copy, in its home folder.
+  expect(chat.botIds.length).toBeGreaterThan(0);
+  for (const bot of chat.botIds) expect(new Uint8Array(readFileSync(join(hostData, "computers", bot, "home", "Attachments", id.slice(0, 8), "clip one.mkv")))).toEqual(bytes);
+
+  // Back through the viewer: whole, and the part a player seeks to.
+  const whole = await via(at);
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("content-type")).toBe("video/x-matroska");
+  expect(new Uint8Array(await whole.arrayBuffer())).toEqual(bytes);
+  const part = await via(at, { headers: { range: "bytes=100-199" } });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe(`bytes 100-199/${bytes.length}`);
+  expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.subarray(100, 200));
+
+  // A file that never finished can't be attached, and one for a chat that doesn't exist isn't kept.
+  const half = crypto.randomUUID();
+  await via(`/api/bots/conversations/${conversation}/files/${half}?${new URLSearchParams({ name: "half.zip", offset: "0", total: "10" })}`, { method: "PUT", headers: octets, body: raw(new Uint8Array(4)) });
+  expect((await via(`/api/bots/conversations/${conversation}/messages`, { method: "POST", ...json({ ...myMessage("half"), files: [{ id: half }] }) })).status).toBe(400);
+  expect((await via(`/api/bots/conversations/nope/files/${crypto.randomUUID()}?name=x&offset=0&total=1`, { method: "PUT", headers: octets, body: raw(new Uint8Array(1)) })).status).toBe(404);
+}, 30_000);
+
+test("a file for a thread on a paired device goes up through the proxy, onto that device's disk", async () => {
+  const device = (path: string, init?: RequestInit) => fetch(`${viewerBase()}/api/devices/${hostId}${path}`, init);
+  const bytes = clip();
+  const id = crypto.randomUUID();
+  const saved = await upload((q, body) => device(`/api/attachments/${id}?${q}`, { method: "PUT", headers: octets, body }), "song.mp3", bytes, 30_000);
+  expect(saved).toMatchObject({ name: "song.mp3", size: bytes.length, done: true });
+  expect(saved.path).toBe(join(hostData, "attachments", id, "song.mp3"));
+  expect(new Uint8Array(readFileSync(saved.path))).toEqual(bytes);
+  const part = await device(`/api/attachments/${id}`, { headers: { range: "bytes=-10" } });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-length")).toBe("10");
+  expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.subarray(bytes.length - 10));
+
+  // The same route on this server itself, for a thread that runs here.
+  const here = crypto.randomUUID();
+  const local = await upload((q, body) => fetch(`${viewerBase()}/api/attachments/${here}?${q}`, { method: "PUT", headers: octets, body }), "notes.zip", bytes, 50_000);
+  expect(local.path).toBe(join(viewerData, "attachments", here, "notes.zip"));
+
+  // A piece has to fit its file, and an id is never a path.
+  expect((await fetch(`${viewerBase()}/api/attachments/${crypto.randomUUID()}?name=x&offset=5&total=3`, { method: "PUT", headers: octets, body: raw(new Uint8Array(2)) })).status).toBe(400);
+  expect((await fetch(`${viewerBase()}/api/attachments/..%2Fescape?name=x&offset=0&total=1`, { method: "PUT", headers: octets, body: raw(new Uint8Array(1)) })).status).toBe(400);
 }, 30_000);
 
 test("only the listed operations run; everything else refuses the device and changes nothing", async () => {

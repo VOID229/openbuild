@@ -2,6 +2,7 @@
 // drafts they don't belong to a chat and never expire: one stays, in this browser's IndexedDB, until it's used or removed.
 import { create, type StoreApi, type UseBoundStore } from "zustand";
 import type { Attachment } from "../../shared/types";
+import { capAttached, parseFileRef } from "../../shared/bots";
 import { uid } from "./id";
 import { createStore, del, entries, set } from "./kv";
 
@@ -84,19 +85,25 @@ export function pasteStash(current: { text: string; files: Attachment[] }, item:
   return { text: before + item.text, files: [...current.files, ...added] };
 }
 
-/** A bot message's images (data URLs) as stash attachments. */
+/** What a bot message or composer carries (image data URLs, and files as their references) as stash attachments. */
 export function imageFiles(images: string[]): Attachment[] {
-  return images.map((dataUrl) => ({ id: uid(), name: "Image", mime: /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? "image/jpeg", dataUrl, size: Math.round((dataUrl.length * 3) / 4) }));
+  return images.map((dataUrl) => {
+    const file = parseFileRef(dataUrl);
+    // A file stays on its workspace's server: the reference is all that travels, where a data URL would be.
+    if (file) return { id: uid(), name: file.name, mime: file.mime || "application/octet-stream", dataUrl, size: file.size };
+    return { id: uid(), name: "Image", mime: /^data:([^;,]+)/.exec(dataUrl)?.[1] ?? "image/jpeg", dataUrl, size: Math.round((dataUrl.length * 3) / 4) };
+  });
 }
 
 /**
- * A bot composer after pasting a stash into it. OpenBots takes text and up to `max` images; anything else
- * a shared OpenBuild stash carries (documents, mentioned files) is counted in `left`.
+ * A bot composer after pasting a stash into it. OpenBots takes text, a few images and the files that
+ * were uploaded for bots; anything else a shared OpenBuild stash carries (documents, mentioned files,
+ * files kept for a thread's machine) is counted in `left`.
  */
-export function pasteBotStash(current: { text: string; images: string[] }, item: Stashed, max = 4) {
+export function pasteBotStash(current: { text: string; images: string[] }, item: Stashed) {
   const { text } = pasteStash({ text: current.text, files: [] }, item);
-  const fresh = item.files.filter((f) => !f.mention && f.mime.startsWith("image/") && f.dataUrl && !current.images.includes(f.dataUrl)).map((f) => f.dataUrl);
-  const images = [...current.images, ...fresh].slice(0, max);
+  const fresh = item.files.filter((f) => !f.mention && (f.mime.startsWith("image/") || parseFileRef(f.dataUrl)) && f.dataUrl && !current.images.includes(f.dataUrl)).map((f) => f.dataUrl);
+  const images = capAttached([...current.images, ...fresh]);
   const left = item.files.filter((f) => !f.mention).length - (images.length - current.images.length);
   return { text, images, left };
 }

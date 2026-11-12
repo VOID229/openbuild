@@ -1,4 +1,5 @@
 import { ArrowUp, BookOpen, Check, CornerUpLeft, FileText, Folder, GripVertical, Pencil, Plus, Puzzle, Slash, Square, SquareTerminal, Trash2, X } from "lucide-react";
+import { isPicture } from "../../shared/attachments";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Attachment, PiCommand, WorkspaceEntry } from "../../shared/types";
 import { canSteer, drainQueue, interruptWith, sendMessage, steerQueued, stopGeneration, uid } from "../lib/chat";
@@ -8,7 +9,10 @@ import { compactThread } from "../lib/pi";
 import { useFieldDictation } from "../lib/useFieldDictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../lib/draftSelection";
-import { ACCEPT, AttachmentError, formatBytes, readAttachment } from "../lib/files";
+import { AttachmentError, attachmentUrl, formatBytes, readAttachment } from "../lib/files";
+import { heldFile, holdFile } from "../lib/localFiles";
+import { MAX_ATTACHMENT_BYTES } from "../../shared/attachments";
+import { FileChip } from "./FileChip";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
@@ -90,7 +94,7 @@ function QueuedRow({ item, editing, dragging, onGrab, onNudge, onEdit, onDelete,
         <GripVertical size={14} />
       </button>
       {file &&
-        (file.mime.startsWith("image/") ? (
+        (isPicture(file) ? (
           <img className="queued-thumb" src={file.dataUrl} alt="" />
         ) : (
           <FileText className="queued-file" size={15} />
@@ -125,7 +129,7 @@ function SteeringRow({ item }: { item: Queued }) {
     <div className="queued queued-steering" data-queued-id={item.id}>
       <CornerUpLeft className="queued-file" size={14} />
       {file &&
-        (file.mime.startsWith("image/") ? (
+        (isPicture(file) ? (
           <img className="queued-thumb" src={file.dataUrl} alt="" />
         ) : (
           <FileText className="queued-file" size={15} />
@@ -448,13 +452,31 @@ export function Composer({ variant, chatId, streaming }: Props) {
   // What's attached right now, including images added earlier in the same paste that haven't rendered yet.
   const attached = useRef(files);
   attached.current = files;
+  // Files this browser no longer holds (attached on another device, or too large to outlast a reload).
+  const [missing, setMissing] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    void Promise.all(files.filter((f) => f.local).map(async (f) => ((await heldFile(f.id)) ? undefined : f.id))).then((ids) => live && setMissing(ids.filter((id): id is string => !!id)));
+    return () => {
+      live = false;
+    };
+  }, [files]);
   const addFiles = async (list: FileList | File[]) => {
     for (const file of Array.from(list)) {
       try {
         const a = await readAttachment(file);
+        if (!a) {
+          // Anything else waits here, untouched, and goes to the agent's machine when the message is sent.
+          if (file.size > MAX_ATTACHMENT_BYTES) throw new AttachmentError(`${file.name} is larger than ${formatBytes(MAX_ATTACHMENT_BYTES)}.`);
+          const kept: Attachment = { id: uid(), name: file.name || "file", mime: file.type || "application/octet-stream", dataUrl: "", size: file.size, local: true };
+          holdFile(kept.id, file);
+          attached.current = [...attached.current, kept];
+          setFiles((f) => [...f, kept]);
+          continue;
+        }
         // The same image twice is checked only against what's attached now, so a removed image can come back.
         // A duplicate is dropped silently: it's already in the box, so there's nothing to tell you.
-        if (a.mime.startsWith("image/") && attached.current.some((f) => f.dataUrl === a.dataUrl)) continue;
+        if (isPicture(a) && attached.current.some((f) => f.dataUrl === a.dataUrl)) continue;
         attached.current = [...attached.current, a];
         setFiles((f) => [...f, a]);
       } catch (err) {
@@ -700,6 +722,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const submit = (line = text.trim(), background = false) => {
     if (editing) return finishEdit(true);
     if (!line && !files.length) return;
+    const gone = files.find((f) => missing.includes(f.id));
+    if (gone) return setNotice(`${gone.name} isn't on this device anymore. Remove it, or attach it again.`);
     dictation.cancel();
     const leave = () => {
       if (background) useStore.getState().newChat();
@@ -886,23 +910,17 @@ export function Composer({ variant, chatId, streaming }: Props) {
           <div className="attachments">
             {chipFiles.map((f) => (
               <div key={f.id} className="attachment" title={f.name}>
-                {f.mime.startsWith("image/") ? (
+                {isPicture(f) ? (
                   <button
                     type="button"
                     className="attachment-preview"
                     aria-label={`Preview ${f.name}`}
-                    onClick={() => openLightbox(chipFiles.filter((x) => x.mime.startsWith("image/")), f.id)}
+                    onClick={() => openLightbox(chipFiles.filter((x) => isPicture(x)), f.id)}
                   >
                     <img src={f.dataUrl} alt="" />
                   </button>
                 ) : (
-                  <span className="attachment-file">
-                    <FileText size={16} />
-                    <span>
-                      <span className="attachment-name">{f.name}</span>
-                      <span className="attachment-meta">{formatBytes(f.size)}</span>
-                    </span>
-                  </span>
+                  <FileChip name={f.name} mime={f.mime} size={f.size} href={f.path ? attachmentUrl(f) : undefined} note={missing.includes(f.id) ? "Not on this device" : undefined} />
                 )}
                 <button type="button" className="attachment-remove" aria-label={`Remove ${f.name}`} onClick={() => setFiles((all) => all.filter((x) => x.id !== f.id))}>
                   <X size={12} strokeWidth={2.5} />
@@ -945,7 +963,6 @@ export function Composer({ variant, chatId, streaming }: Props) {
             type="file"
             multiple
             hidden
-            accept={ACCEPT}
             onChange={(e) => {
               if (e.target.files) void addFiles(e.target.files);
               e.target.value = "";

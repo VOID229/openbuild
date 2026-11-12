@@ -66,6 +66,7 @@ export function messageText(m: BotMessage): string {
   }
   const text = m.text.replace(/\*\*|__|`/g, "").replace(/\s+/g, " ").trim();
   if (text) return text;
+  if (m.files?.length) return m.files.length === 1 ? `📎 ${m.files[0]!.name}` : `📎 ${m.files.length + (m.images?.length ?? 0)} files`;
   return m.images?.length ? (m.images.length === 1 ? "📷 Photo" : `📷 ${m.images.length} photos`) : "";
 }
 
