@@ -9158,7 +9158,7 @@ a.btn-primary {
   text-overflow: ellipsis;
 }
 
-/* A worktree thread's branch, on a third line under the project: the whole width is its own. */
+/* A worktree thread's branch, on its own line between the title and the project: the whole width is its own. */
 .history-worktree {
   display: flex;
   align-items: center;

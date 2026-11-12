@@ -447,6 +447,15 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             <Highlight text={hit.snippet.text} ranges={hit.snippet.ranges} />
           </span>
         )}
+        {/* A worktree's branch comes first under the title, on a line of its own, so neither it nor the
+            project is cut short; where the thread runs, its PR and harness close the row below it.
+            Branch naming leaves the checkout path stable for running sessions. */}
+        {chat.workspace?.projectName && chat.workspace.worktree && (
+          <span className="history-worktree" title={chat.workspace.branch}>
+            <GitBranch size={12} />
+            <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
+          </span>
+        )}
         <span className="history-meta">
           {chat.workspace?.projectName && (
             <span className="history-proj" title={chat.workspace.projectName}>
@@ -463,14 +472,6 @@ const ChatRow = memo(function ChatRow({ chat, active, hit, renaming, regeneratin
             {runtime === "hermes" ? <HermesMark size={14} /> : runtime === "grok" ? <GrokMark size={14} /> : runtime === "opencode" ? <OpencodeMark size={14} /> : runtime === "claude" ? <ClaudeMark size={14} /> : runtime === "cursor" ? <CursorMark size={14} /> : runtime === "durable" ? <DurableMark size={14} /> : runtime === "fx" ? <FxMark size={14} /> : runtime === "codex" ? <CodexMark size={14} /> : <PiMark size={14} />}
           </span>
         </span>
-        {/* A worktree's branch gets a line of its own, so neither it nor the project is cut short.
-            Branch naming leaves the checkout path stable for running sessions. */}
-        {chat.workspace?.projectName && chat.workspace.worktree && (
-          <span className="history-worktree" title={chat.workspace.branch}>
-            <GitBranch size={12} />
-            <span>{chat.workspace.branch?.replace(/^openbuild\//, "") || chat.workspace.cwd.split(/[\\/]/).pop()}</span>
-          </span>
-        )}
       </button>
       <span className="history-actions">
         <IconButton
