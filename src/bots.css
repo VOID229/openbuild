@@ -2706,6 +2706,14 @@
   opacity: 0.45;
 }
 
+/* A card closed from its coding thread, where the question was settled first. */
+.bm-question-closed {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
 .bm-own {
   display: flex;
   align-items: center;

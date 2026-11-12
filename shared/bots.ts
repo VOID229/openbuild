@@ -243,6 +243,13 @@ export interface Question {
   answer?: string;
   /** A first-run question the server sets the choices of and acts on itself: "developer" asks whether the user writes code, "team" makes the starter team when taken. */
   offer?: "team" | "developer";
+  /** The coding thread's question this card passes on, so the card closes when it's settled in the thread. */
+  thread?: { id: string; ask: string };
+  /**
+   * Closed from its thread, where the question was settled first: "answered" there (answer holds what
+   * was answered), or "gone" when the thread stopped waiting on it without an answer.
+   */
+  closed?: "answered" | "gone";
 }
 
 /** Up to A–J. */

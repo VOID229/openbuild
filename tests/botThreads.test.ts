@@ -295,6 +295,181 @@ test("answers are checked against what the question takes", () => {
   expect(waitingAsks([ask(), ask({ id: "a2" }), { t: "asked", id: "a1" }]).map((a) => a.id)).toEqual(["a2"]);
 });
 
+/** Start a thread and have it ask these; returns what the bot follows. */
+async function asking(...asks: ReturnType<typeof ask>[]) {
+  await call("start", { project: project.name, prompt: "Go" });
+  const { threadId, stream } = admitted.at(-1);
+  const snapshot = snapshots.at(-1);
+  const run = runs.get(stream.id)!;
+  for (const question of asks) {
+    snapshot.events.push(question);
+    run.push(question);
+  }
+  await settle();
+  /** The thread stops waiting on a question, as its worker reports it. */
+  const asked = (id: string, answer?: string) => {
+    const event = { t: "asked" as const, id, ...(answer !== undefined ? { answer } : {}) };
+    snapshot.events.push(event);
+    run.push(event);
+  };
+  return { threadId, run, snapshot, asked };
+}
+const answered = () => wakes.filter((w) => w.text.includes("isn't waiting on"));
+const batch = (quiet: number, max = 1000) => Object.assign(threads.answerBatch, { quiet, max });
+
+test("the bot hears what the user answered in the thread: the option, the words, or yes and no", async () => {
+  batch(10);
+  const { threadId, asked } = await asking(ask({ question: true, other: true }), ask({ id: "a2", title: "Name?", method: "input", options: undefined, question: true }), ask({ id: "a3", title: "Sure?", method: "confirm", options: undefined, question: true }));
+  asked("a1", "Blue");
+  await Bun.sleep(60);
+  expect(answered()).toHaveLength(1);
+  expect(answered()[0]).toMatchObject({ id: bot.id, kind: "note", conversationId: svc.directId(bot.id) });
+  expect(answered()[0].text).toContain(`[${threadId.slice(0, 8)}]`);
+  expect(answered()[0].text).toContain("“Which?” (question a1): the user answered it in the thread, choosing “Blue”.");
+  expect(answered()[0].text).toContain("Don't answer it or ask the user about it again.");
+  asked("a2", "Ada Lovelace");
+  await Bun.sleep(60);
+  expect(answered()[1].text).toContain("“Name?” (question a2): the user answered it in the thread, typing “Ada Lovelace”.");
+  asked("a3", "No");
+  await Bun.sleep(60);
+  expect(answered()[2].text).toContain("“Sure?” (question a3): the user answered it in the thread: “No”.");
+  expect(answered()).toHaveLength(3);
+  // The bot can't answer what's settled.
+  await expect(call("answer", { thread: threadId, question: "a1", answer: "Red" })).rejects.toThrow(/isn't waiting/);
+});
+
+test("answers given close together make one note, and a new question or the turn's end takes the rest along", async () => {
+  batch(40);
+  const { asked, run, snapshot } = await asking(ask({ question: true }), ask({ id: "a2", title: "Size?", options: ["S", "L"], other: true, question: true }), ask({ id: "a3", title: "Why?", method: "input", options: undefined, question: true }));
+  asked("a1", "Red");
+  await Bun.sleep(10);
+  asked("a2", "Medium, please");
+  await Bun.sleep(100);
+  expect(answered()).toHaveLength(1);
+  expect(answered()[0].text).toContain("isn't waiting on these anymore:\n- “Which?” (question a1): the user answered it in the thread, choosing “Red”.\n- “Size?” (question a2): the user answered it in the thread, typing “Medium, please”.\nDon't answer them");
+  // An answer just before the next question comes with it, ahead of it.
+  batch(5000, 5000);
+  asked("a3", "Because");
+  const next = ask({ id: "a4", title: "Colour?", question: true });
+  snapshot.events.push(next);
+  run.push(next);
+  await settle();
+  const note = wakes.find((w) => w.text.includes("Colour?"))!;
+  expect(note.text.indexOf("typing “Because”")).toBeGreaterThan(-1);
+  expect(note.text.indexOf("typing “Because”")).toBeLessThan(note.text.indexOf("is waiting on: Colour?"));
+  // And one the turn ends on comes with its end, as does a question it stopped waiting on unanswered.
+  asked("a4");
+  snapshot.status = "done";
+  run.end();
+  await settle();
+  const end = wakes.at(-1)!;
+  expect(end.text).toContain("“Colour?” (question a4): it stopped waiting on it without an answer.");
+  expect(end.text).toContain("finished its turn");
+  expect(wakes.filter((w) => w.text.includes("Because"))).toHaveLength(1);
+});
+
+test("the bot's own answer isn't told back to it; another bot's is", async () => {
+  batch(10);
+  const { threadId, asked } = await asking(ask({ question: true }), ask({ id: "a2", title: "Size?", options: ["S", "L"], question: true }));
+  await call("answer", { thread: threadId, question: "a1", answer: "red" });
+  asked("a1", "Red");
+  await Bun.sleep(60);
+  expect(answered()).toEqual([]);
+  const { bot: tracer } = svc.createBot({ name: "Tracer Bot" });
+  svc.updateBot(tracer.id, { threads: { enabled: true, projects: [project.id], others: true } });
+  await handle(tracer.id, { action: "answer", thread: threadId, question: "a2", answer: "L" });
+  asked("a2", "L");
+  await Bun.sleep(60);
+  expect(answered()).toHaveLength(1);
+  expect(answered()[0].id).toBe(bot.id);
+  expect(answered()[0].text).toContain("“Size?” (question a2): Tracer answered it with openbuild, choosing “L”.");
+  expect(wakes.some((w) => w.id === tracer.id && w.text.includes("isn't waiting"))).toBe(false);
+});
+
+test("a secret answer isn't repeated to the bot", async () => {
+  batch(10);
+  const { asked } = await asking(ask({ id: "k1", title: "API key?", method: "input", options: undefined, secret: true, question: true }));
+  asked("k1", "sk-very-secret");
+  await Bun.sleep(60);
+  expect(answered()[0].text).toContain("“API key?” (question k1): the user answered it in the thread. It was secret, so it isn't shown here.");
+  expect(JSON.stringify(wakes)).not.toContain("sk-very-secret");
+});
+
+test("a question card passing a thread's question on closes with the answer given in the thread", async () => {
+  batch(10);
+  const agent = await import("../server/bots/agent");
+  const conversation = svc.directId(bot.id)!;
+  const { threadId, asked } = await asking(ask({ question: true, other: true }), ask({ id: "a2", title: "Size?", options: ["S", "L"], other: true, question: true }), ask({ id: "a3", title: "Ok?", question: true }), ask({ id: "a4", title: "Mine?", question: true }));
+  const card = async (question: string, options = ["Red", "Blue"]) => (await agent.askUser(bot.id, { title: "From the thread", options, thread: threadId.slice(0, 8), thread_question: question, conversation })) as { id: string; note: string };
+  const cardOf = (id: string) => svc.conversationView(conversation)!.messages.find((m) => m.id === id)!.question!;
+  const one = await card("a1");
+  expect(one.note).toContain("If they answer in the thread instead, the card closes");
+  expect(cardOf(one.id).thread).toEqual({ id: threadId, ask: "a1" });
+  const two = await card("a2", ["S", "L"]);
+  const three = await card("a3");
+  const four = await card("a4");
+  // An option the card offers shows picked; anything else shows as the words.
+  asked("a1", "Blue");
+  asked("a2", "Medium");
+  await Bun.sleep(60);
+  expect(cardOf(one.id)).toMatchObject({ answer: "B", closed: "answered" });
+  expect(cardOf(two.id)).toMatchObject({ answer: "Medium", closed: "answered" });
+  expect(answered()).toHaveLength(1);
+  expect(answered()[0].text).toContain(`“Which?” (question a1): the user answered it in the thread, choosing “Blue”. Your question card [${one.id.slice(0, 8)}] for it is closed, showing that answer.`);
+  expect(answered()[0].text).toContain(`Your question card [${two.id.slice(0, 8)}] for it is closed, showing that answer.`);
+  // A closed card can't be answered in the chat.
+  expect(() => svc.answerQuestion(conversation, one.id, "A")).toThrow(/settled in its thread/);
+  // One the thread stops waiting on unanswered closes without an answer.
+  asked("a3");
+  await Bun.sleep(60);
+  expect(cardOf(three.id).answer).toBeUndefined();
+  expect(cardOf(three.id).closed).toBe("gone");
+  expect(answered()[1].text).toContain(`it stopped waiting on it without an answer. Your question card [${three.id.slice(0, 8)}] for it is closed.`);
+  // The bot answering itself closes its card too, but isn't told.
+  await call("answer", { thread: threadId, question: "a4", answer: "Red" });
+  asked("a4", "Red");
+  await Bun.sleep(60);
+  expect(cardOf(four.id)).toMatchObject({ answer: "A", closed: "answered" });
+  expect(answered()).toHaveLength(2);
+  // No card is posted for a question that's already settled.
+  await expect(card("a1")).rejects.toThrow(/isn't waiting anymore/);
+});
+
+test("following a run again after a restart doesn't repeat answers the bot has heard about", async () => {
+  batch(10);
+  const db = await import("../server/bots/db");
+  const { threadId } = await asking();
+  // Read again from the start: a1 was told and settled before the restart, a2 only told.
+  const run = new Run();
+  runs.set("replayed", run);
+  for (const event of [ask({ question: true }), { t: "asked" as const, id: "a1", answer: "Blue" }, ask({ id: "a2", title: "Size?", options: ["S", "L"], question: true }), { t: "asked" as const, id: "a2", answer: "L" }]) run.push(event);
+  db.setValue("thread-watches", [{ runId: "replayed", threadId, botId: bot.id, conversationId: svc.directId(bot.id), told: ["a1", "a2"], settled: ["a1"] }]);
+  threads.resumeWatches();
+  await Bun.sleep(60);
+  expect(answered()).toHaveLength(1);
+  expect(answered()[0].text).toContain("“Size?” (question a2): the user answered it in the thread, choosing “L”.");
+  expect(answered()[0].text).not.toContain("Which?");
+  run.end();
+  await settle();
+  expect(wakes.filter((w) => w.text.includes("Size?"))).toHaveLength(1);
+});
+
+test("a card the user answered in the chat isn't closed over when the bot passes it on", async () => {
+  batch(10);
+  const agent = await import("../server/bots/agent");
+  const conversation = svc.directId(bot.id)!;
+  const { threadId, asked } = await asking(ask({ question: true }));
+  const { id } = (await agent.askUser(bot.id, { title: "From the thread", options: ["Red", "Blue"], thread: threadId, thread_question: "a1", conversation })) as { id: string };
+  svc.answerQuestion(conversation, id, "A");
+  await call("answer", { thread: threadId, question: "a1", answer: "Red" });
+  asked("a1", "Red");
+  await Bun.sleep(60);
+  const q = svc.conversationView(conversation)!.messages.find((m) => m.id === id)!.question!;
+  expect(q.answer).toBe("A");
+  expect(q.closed).toBeUndefined();
+  expect(answered()).toEqual([]);
+});
+
 test("the bot hears when a turn ends, and the chat is brought up to date without a browser", async () => {
   await call("start", { project: project.name, prompt: "Go" });
   const { threadId, stream } = admitted[0];
