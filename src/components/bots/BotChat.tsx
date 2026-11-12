@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleD
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, holding, showWorking, stoppable, threadOpensIn, workingHere } from "../../lib/bots/activity";
+import { elsewhere, liveLine, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -1104,14 +1104,6 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
-/** What a bot says in a chat while it finishes replying in another. Stable per chat, so it doesn't flicker. */
-const HOLDING = ["Hold on a second", "Finishing up something", "One moment, wrapping something up", "Be right with you"];
-export function holdingLine(conversationId: string, botId: string): string {
-  let hash = 0;
-  for (const ch of conversationId + botId) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
-  return HOLDING[Math.abs(hash) % HOLDING.length]!;
-}
-
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
 function Working({ conversationId, direct, botIds, bots }: { conversationId: string; direct: boolean; botIds: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
@@ -1119,7 +1111,7 @@ function Working({ conversationId, direct, botIds, bots }: { conversationId: str
     <>
       {botIds.map((id) => {
         const bot = bots.find((b) => b.id === id);
-        const activity = holding(statuses[id], conversationId) ? holdingLine(conversationId, id) : statuses[id]?.activity || "Thinking";
+        const activity = workingLine(conversationId, id, statuses[id]);
         if (!bot) return null;
         // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
         const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy pulse={{ key: activity, mood: "idle", action: "squish" }} />;
@@ -2351,13 +2343,9 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const remote = !!useRemoteWorkspace();
   const detailsOpen = useBots((s) => s.detailsOpen) && !remote;
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
-  // What the other side is up to, under the name on a phone, where there's a bar for it.
-  const activity = useBots((s) => {
-    const working = conversation.botIds.map((id) => s.status[id]).find((st) => workingHere(st, conversation.id) && !st!.quiet);
-    if (working) return working.activity || "Thinking";
-    const held = conversation.botIds.find((id) => holding(s.status[id], conversation.id));
-    return held ? holdingLine(conversation.id, held) : undefined;
-  });
+  // What the other side is up to, under the name on a phone, where there's a bar for it: the live
+  // step, or that it's writing. The same line the chat's working row and the sidebar read from.
+  const activity = useBots((s) => liveLine(conversation, s.status, s.typing[conversation.id]));
   // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does; a group's others doze.
   const working = useBusyBots(conversation);
   const busy = working.length > 0;
@@ -2382,7 +2370,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const name = conversationName(conversation, bots);
   const sideBots = conversation.kind === "side" ? conversation.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" ·")[0] ?? "A bot") : [];
   const members = conversation.kind === "direct" ? "" : [...conversation.botIds.map((id) => firstName(bots.find((b) => b.id === id) ?? ({ name: "A bot" } as Bot))), ...(conversation.friend?.members.map((m) => m.name.split(/\s+/)[0]!) ?? [])].join(", ");
-  const sub = typing ? "typing…" : activity ?? away ?? members;
+  const sub = activity ?? away ?? members;
   const repo = useStore((s) => conversationRepo(conversation, s.chats));
   return (
     <div className="bots-chat">
@@ -2399,7 +2387,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={36} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
               <span className="bots-head-text">
                 <span className="bots-head-name">{name}</span>
-                {sub && <span className={cx("bots-head-sub", (typing || activity) && "bots-head-sub-live")}>{sub}</span>}
+                {sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{sub}</span>}
               </span>
               {!remote && <HeadTasks conversation={conversation} mobile />}
             </>
@@ -2412,7 +2400,7 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
                 <span>
                   <span>
                     <span className="bots-head-name">{name}</span>
-                    {!typing && !activity && away && <span className="bots-head-away">{away}</span>}
+                    {!activity && away && <span className="bots-head-away">{away}</span>}
                   </span>
                 </span>
               </span>

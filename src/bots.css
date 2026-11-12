@@ -2314,10 +2314,17 @@
 }
 
 /* The words are painted by the shimmer's moving gradient (styles.css, .shimmer), so they set no colour
-   of their own: one here would sit on top of the highlight and hide it. */
+   of their own: one here would sit on top of the highlight and hide it. Each new status swaps in at
+   once, with no slide or fade from nothing: the step it names may only last a moment. */
 .bm-working-text {
   font-size: 14px;
-  animation: shimmer 1.6s linear infinite, bm-working-in 240ms ease-out both;
+  animation: shimmer 1.6s linear infinite, bm-working-swap 110ms ease-out both;
+}
+
+@keyframes bm-working-swap {
+  from {
+    opacity: 0.35;
+  }
 }
 
 @keyframes bm-working-in {
