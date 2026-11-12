@@ -66,6 +66,8 @@ async function run(name: string, body: string) {
       const events = (id) => db.messages(id, 80).flatMap(r => r.message.event ? [r.message.event.text] : []);
       const toolStart = (bot, name, args = {}) => runner.onRecord(bot.id, minds.get(bot.id), { type: 'tool_execution_start', toolName: name, args });
       const toolEnd = (bot, name, result = {}) => runner.onRecord(bot.id, minds.get(bot.id), { type: 'tool_execution_end', toolName: name, result });
+      // A tool an extension of the user's brought, three seconds in: it can't detach (jobs.ts), so a helper answers for the bot.
+      const longTool = (bot, name, args = {}) => { toolStart(bot, name, args); minds.get(bot.id).tool.since -= runner.LONG_TOOL_MS; };
       // The bot writes to the chat with its tool, as Pi reports it.
       const send = async (bot, text) => {
         const out = await agent.sendMessage(bot.id, { text });
@@ -277,7 +279,7 @@ test("ask_bot returns at once, and the answer wakes the asker where it asked fro
 
 // ------------------------------------------------------------------ 4. a reply during a long tool
 
-test("a message that arrives during a long tool gets a quick helper reply, and still reaches the turn", () => run("side-reply", `
+test("a message that arrives during a long tool that can't detach gets a quick helper reply, and still reaches the turn", () => run("side-reply", `
   svc.updateBot(alpha.bot.id, { model: 'acme/big-one' });
   post(own, 'me', 'run the build');
   await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
@@ -285,7 +287,14 @@ test("a message that arrives during a long tool gets a quick helper reply, and s
   post(own, 'me', 'use release mode');
   await until(() => steersOf(alpha.bot).some(m => m.includes('use release mode')));
   a.equal(spawned.length, 0);
+  // Inside one of its own slow tools: that call stops holding the turn instead, and the bot answers itself.
   toolStart(alpha.bot, 'bash', { command: 'make', status: 'Building the release' });
+  post(own, 'me', 'is it going?');
+  await until(() => steersOf(alpha.bot).some(m => m.includes('is it going?')));
+  await settle();
+  a.equal(spawned.length, 0);
+  toolEnd(alpha.bot, 'bash');
+  longTool(alpha.bot, 'deploy', { status: 'Building the release' });
   post(own, 'me', 'how long will it take?');
   await until(() => spawned.length === 1 && spawned[0].prompt);
   const h = spawned[0];
@@ -308,8 +317,8 @@ test("a message that arrives during a long tool gets a quick helper reply, and s
   a.equal(db.messages(own, 5).at(-1).message.author, alpha.bot.id);
   a.ok(h.closed);
   // No extra steer for it: the main turn is shown what was said for it when it next writes there, once.
-  a.equal(steersOf(alpha.bot).length, 3);
-  toolEnd(alpha.bot, 'bash');
+  a.equal(steersOf(alpha.bot).length, 4);
+  toolEnd(alpha.bot, 'deploy');
   const held = await agent.sendMessage(alpha.bot.id, { text: 'Still building.' });
   a.equal(held.sent, false);
   a.match(held.new, /Alpha: Still building, a couple of minutes more\./);
@@ -324,16 +333,16 @@ test("a message that arrives during a long tool gets a quick helper reply, and s
 test("a side reply is dropped when the turn answered first, or the helper has nothing to say", () => run("side-reply-drop", `
   post(own, 'me', 'run the build');
   await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
-  toolStart(alpha.bot, 'bash', { command: 'make' });
+  longTool(alpha.bot, 'deploy');
   post(own, 'me', 'status?');
   await until(() => spawned.length === 1 && spawned[0].prompt);
-  toolEnd(alpha.bot, 'bash');
+  toolEnd(alpha.bot, 'deploy');
   await send(alpha.bot, 'Halfway there.');
   spawned[0].answer('Still working on it.');
   await settle();
   a.ok(!said(own).includes('Still working on it.'));
 
-  toolStart(alpha.bot, 'bash', { command: 'make test' });
+  longTool(alpha.bot, 'deploy');
   post(own, 'me', 'ok thanks');
   await until(() => spawned.length === 2 && spawned[1].prompt);
   spawned[1].answer('[silent]');
@@ -345,7 +354,7 @@ test("a side reply is dropped when the turn answered first, or the helper has no
   a.match(spawned[2].prompt, /busy in another chat/);
   spawned[2].answer('In the middle of a build, with you shortly.');
   await until(() => said(group.id).includes('In the middle of a build, with you shortly.'));
-  toolEnd(alpha.bot, 'bash');
+  toolEnd(alpha.bot, 'deploy');
   of(alpha.bot)[0].finish('');
   await until(() => of(alpha.bot).length === 2);
   a.equal(of(alpha.bot)[1].focus, group.id);
@@ -615,7 +624,7 @@ test("ask_bot says it doesn't wait, background is a catalog tool, and a helper k
   const main = tools();
   expect(main.tool("ask_bot").description).toMatch(/doesn't wait/);
   expect(CATALOG_BRIEF.ask_bot).not.toMatch(/wait for/);
-  expect(main.tool("background").parameters.required).toEqual(["task", "status"]);
+  expect(main.tool("background").parameters.required).toEqual(["status", "task"]);
   expect(CATALOG_BRIEF.background).toBeTruthy();
   // A new main session puts catalog tools back out until they're loaded; a helper has nothing to load them with.
   expect(main.active()).not.toContain("bash");
@@ -654,9 +663,11 @@ test("a tool call stops waiting when the turn is aborted", async () => {
 
 const pi = piBin();
 
-// Real Pi and the real extension against a fake model and a slow search: the nudge reaches the model
-// with the slow tool's result, a real helper session answers meanwhile, and stop really ends the run.
-test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge of the runner's, a helper replies during a slow tool, and stop aborts it", async () => {
+// Real Pi and the real extension against a fake model and a slow search. The user writes twice while
+// the search is out: the call stops holding the turn and carries on as a job, both messages reach the
+// model together with its job number (each asking for a quick ack, with no nudge of the runner's), the
+// bot answers itself (no helper), and the search's result wakes it. Then stop really ends a run.
+test.skipIf(!pi)("on a real Pi: a slow call becomes a job when the user writes, its result wakes the bot, and stop aborts a run", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-responsive-pi-"));
   try {
     const agentDir = join(dir, "agent");
@@ -668,12 +679,12 @@ test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge 
       const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
       const say = (text) => sse({ role: 'assistant', content: text }) + sse({}, 'stop') + 'data: [DONE]\\n\\n';
       const use = (name, args) => sse({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + name + Math.random().toString(36).slice(2, 8), type: 'function', function: { name, arguments: JSON.stringify(args) } }] }) + sse({}, 'tool_calls') + 'data: [DONE]\\n\\n';
-      const seen = { rule: false, nudge: false, steered: false, ack: false, held: false, helper: [], hung: false, unexpected: undefined, lookup: undefined, result: undefined };
+      const seen = { rule: false, nudge: false, ack: false, started: undefined, together: false, jobsTool: false, helper: 0, woke: undefined, hung: false, unexpected: undefined, lookup: undefined, result: undefined };
       const server = Bun.serve({ port: 0, hostname: '127.0.0.1', idleTimeout: 120, async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === '/search') {
           if (url.searchParams.get('q') === 'hang') { seen.hung = true; await Bun.sleep(60_000); }
-          else if (url.searchParams.get('q') === 'tea') await Bun.sleep(6000);
+          else if (url.searchParams.get('q') === 'tea') await Bun.sleep(12_000);
           return Response.json({ results: [{ title: 'Tea result', url: 'https://tea.test/', content: 'About tea' }] });
         }
         const body = await req.json();
@@ -684,28 +695,33 @@ test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge 
           seen.lookup = { tools: body.tools.map((t) => t.function.name).sort(), system };
           return reply(body.messages.at(-1).role === 'tool' ? say('Found: ' + (JSON.stringify(body.messages.at(-1).content).includes('Tea result') ? 'Tea result' : 'nothing')) : use('bot_web_search', { query: 'quick', provider: 'searxng', status: 'Looking' }));
         }
-        if (system.includes('background helper session')) {
-          // The helper: no tools, the same model, and told what the main session is in the middle of.
-          seen.helper.push({ model: body.model, tools: (body.tools ?? []).length, prompt: JSON.stringify(body.messages.at(-1).content) });
-          return reply(say('Still searching, one sec.'));
-        }
+        if (system.includes('background helper session')) { seen.helper++; return reply(say('Still searching, one sec.')); }
         const lastAssistant = body.messages.findLastIndex((m) => m.role === 'assistant');
         const tail = JSON.stringify(body.messages.slice(lastAssistant + 1));
         // The always-on prompt carries the rule: one quick ack before real work.
         seen.rule ||= system.includes('send one short ack with your first tool call');
-        // The user's message, steered in: Pi hands it over once the call ahead of it is done, and it asks for the ack itself.
-        if (tail.includes('how long')) { seen.steered = true; seen.ack = tail.includes('This arrived while you were working. Show you saw it before you go on'); }
-        // The runner adds no message of its own to say so.
+        // The user's message, steered in, asks for the ack itself; the runner adds no message of its own to say so.
+        if (tail.includes('how long')) seen.ack = tail.includes('This arrived while you were working. Show you saw it before you go on');
         if (tail.includes("hasn't heard from you yet")) seen.nudge = true;
+        const tools = (body.tools ?? []).map((t) => t.function.name);
         if (tail.includes('Your helper finished')) { seen.result = tail; return reply(say('[silent]')); }
         if (tail.includes('PING')) return reply(say('pong'));
-        // Its message was held to show it what the helper already said; it sends its own after all.
-        if (tail.includes('Not sent yet')) { seen.held = tail.includes('Still searching, one sec.'); return reply(use('send_message', { text: 'all done' })); }
+        // The search stopped holding the turn: its job number, and both of the user's messages, in one request.
+        if (tail.includes('carries on in the background as job 1')) {
+          seen.started = tail;
+          seen.together = tail.includes('how long?') && tail.includes('and coffee?');
+          // The tool for the board is declared from this request on, without being asked for.
+          seen.jobsTool = tools.includes('jobs');
+          return reply(use('send_message', { text: 'Still searching, coffee right after.' }));
+        }
+        const answered = body.messages.at(-1).role === 'tool' ? body.messages[lastAssistant]?.tool_calls?.[0]?.function?.name : undefined;
+        // It told them, then notes what they asked for behind the job, and ends its turn.
+        if (answered === 'send_message') return reply(JSON.stringify(body.messages).includes('Job 1 finished') ? say('[silent]') : use('jobs', { action: 'follow_up', text: 'Look up coffee' }));
+        if (answered === 'jobs') return reply(say(''));
+        // The result wakes it, with what was queued behind it and what was said since.
+        if (tail.includes('Job 1 finished')) { seen.woke = tail; return reply(use('send_message', { text: 'all done' })); }
         if (tail.includes('HANG')) return reply(use('bot_web_search', { query: 'hang', provider: 'searxng', status: 'Looking into it' }));
         if (tail.includes('Loaded bot_web_search')) return reply(use('bot_web_search', { query: 'tea', provider: 'searxng', status: 'Finding tea sources' }));
-        if (tail.includes('Tea result')) {
-          return reply(use('send_message', { text: 'all done' }));
-        }
         if (tail.includes('SEARCH')) return reply(use('load_tools', { names: ['bot_web_search'] }));
         if (body.messages.at(-1).role === 'tool') return reply(say('[silent]'));
         seen.unexpected = tail.slice(0, 300);
@@ -715,6 +731,7 @@ test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge 
       const db = await import('./server/bots/db.ts');
       const svc = await import('./server/bots/service.ts');
       const runner = await import('./server/bots/runner.ts');
+      const jobs = await import('./server/bots/jobs.ts');
       svc.updateSettings({ defaultModel: 'mock/m', searxng: ['http://127.0.0.1:' + server.port], onboarding: 'done' });
       const alpha = svc.createBot({ name: 'Alpha' });
       runner.startBots();
@@ -722,27 +739,34 @@ test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge 
       const post = (text) => svc.postMessage(own, { id: crypto.randomUUID(), author: 'me', at: Date.now(), text });
       const said = () => db.messages(own, 50).filter((r) => !r.message.event).map((r) => r.message.text);
       const events = () => db.messages(own, 50).flatMap((r) => r.message.event ? [r.message.event.text] : []);
-      const until = async (check, ms = 30000) => { const end = Date.now() + ms; while (Date.now() < end && !check()) await Bun.sleep(50); a.ok(check(), String(check) + ' ' + JSON.stringify({ said: said(), events: events(), status: svc.getStatus(alpha.bot.id) })); };
+      const until = async (check, ms = 30000) => { const end = Date.now() + ms; while (Date.now() < end && !check()) await Bun.sleep(50); a.ok(check(), String(check) + ' ' + JSON.stringify({ said: said(), events: events(), status: svc.getStatus(alpha.bot.id), seen })); };
 
       post('SEARCH tea');
       await until(() => svc.getStatus(alpha.bot.id)?.activity === 'Finding tea sources');
+      const wrote = Date.now();
       post('how long?');
-      // The helper's reply lands while the search is still out.
-      await until(() => said().includes('Still searching, one sec.'));
+      post('and coffee?');
+      // The bot's own answer lands while the search is still out: the call was freed about three seconds in.
+      await until(() => said().includes('Still searching, coffee right after.'));
+      a.ok(Date.now() - wrote < 10_000, String(Date.now() - wrote));
       a.ok(!said().includes('all done'));
+      a.equal(seen.together, true);
+      a.equal(seen.jobsTool, true);
+      a.equal(seen.helper, 0);
+      // Its turn over, it's free, and its status says what it's waiting on.
+      await until(() => svc.getStatus(alpha.bot.id)?.jobs === 1);
+      a.equal(svc.getStatus(alpha.bot.id).activity, 'Waiting on: Finding tea sources');
+      a.deepEqual(jobs.runningJobs(alpha.bot.id)[0].followUps, ['Look up coffee']);
       await until(() => said().includes('all done'));
-      a.deepEqual(said(), ['SEARCH tea', 'how long?', 'Still searching, one sec.', 'all done']);
-      // The model got their new message with the tool's result, asking for a quick ack; the runner steered nothing of its own.
-      a.equal(seen.held, true);
-      await until(() => seen.steered);
+      a.deepEqual(said(), ['SEARCH tea', 'how long?', 'and coffee?', 'Still searching, coffee right after.', 'all done']);
+      a.match(seen.woke, /Job 1 finished after \\d+s: bot_web_search “tea”, which you started for “Finding tea sources”/);
+      a.match(seen.woke, /Tea result/);
+      a.match(seen.woke, /Queued behind it[^]*1\\. Look up coffee/);
       a.equal(seen.ack, true);
       a.equal(seen.rule, true);
       a.equal(seen.nudge, false);
       a.equal(seen.unexpected, undefined);
-      a.equal(seen.helper.length, 1);
-      a.deepEqual([seen.helper[0].model, seen.helper[0].tools], ['m', 0]);
-      a.match(seen.helper[0].prompt, /Finding tea sources/);
-      await until(() => !runner.busy(alpha.bot.id));
+      await until(() => !runner.busy(alpha.bot.id) && !svc.getStatus(alpha.bot.id));
 
       // A search that never comes back: stop ends the run now, not when the tool would have.
       post('HANG');

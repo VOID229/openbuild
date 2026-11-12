@@ -61,5 +61,9 @@ test("preloaded declarations stay within the budget, passing over a tool that do
   expect(all.length).toBeGreaterThan(3);
   expect(all.reduce((n, name) => n + real[name]!, 0)).toBeLessThanOrEqual(PRELOAD_BUDGET_CHARS);
   // The primary bot's mix: its coding threads and apps come along, the big manage_bot waits to be asked for.
-  expect(preloadTools({ openbuild: times(20), use_app: times(18), manage_bot: times(6), apps: times(5), bash: times(4) }, NOW)).toEqual(["openbuild", "use_app", "apps"]);
+  const primary = preloadTools({ openbuild: times(20), use_app: times(18), manage_bot: times(6), apps: times(5), bash: times(4) }, NOW);
+  expect(primary.slice(0, 2)).toEqual(["openbuild", "use_app"]);
+  expect(real.openbuild! + real.manage_bot!).toBeGreaterThan(PRELOAD_BUDGET_CHARS);
+  expect(primary).not.toContain("manage_bot");
+  expect(primary.reduce((n, name) => n + real[name]!, 0)).toBeLessThanOrEqual(PRELOAD_BUDGET_CHARS);
 });

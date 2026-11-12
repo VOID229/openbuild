@@ -28,6 +28,8 @@ Context windows come from one model listing per extension set, cached for 10 min
 when Pi forgets its models, so a fresh per-conversation mind doesn't cost a second Pi start. The
 runner explicitly approves its managed bot working directory so Pi 1.5 loads these settings. It
 does not change global Pi settings or credentials. Settings are generated when a process starts.
+The same file sets `steeringMode: "all"`, so every message that arrived while a tool ran reaches
+the turn in one model call instead of one each (`docs/openbots-async-jobs.md`).
 The real-Pi test verifies effective settings, including a model override, without an inference.
 
 Transcript delivery fingerprints use the full message object and conversation id, not truncated
@@ -158,20 +160,20 @@ Measured read-only on a copy of every lane session written after #234 went live
 output only, no model call). "Recorded" is what happened; "replayed" walks the same turns under
 the new rule, assuming the bots would have made the same tool calls, starting from no usage history:
 
-| 28 sessions, 13 bots, 400 turns, 1,519 model requests | Recorded | Replayed |
+| 30 sessions, 13 bots, 409 turns, 1,626 model requests | Recorded | Replayed |
 | --- | ---: | ---: |
-| Requests that only loaded a tool | 158 (10.4%) | 30 (2.2%) |
-| Turns that had to load first | 149 (37.2%) | 30 (7.5%) |
-| Prompt tokens spent on those requests | 9,904,847 | 1,177,358 |
-| Times a restarted Pi dropped loaded tools | 131 (408 tools) | 0 |
-| Uncached prompt tokens right after a drop | 3,978,234 | 0 |
-| Tool declarations per request (tokens, chars / 4.28) | 1,931 | 2,698 |
-| Share of declaring all 26 tools (7,545 tokens) | 25.6% | 35.8% |
+| Requests that only loaded a tool | 163 (10.0%) | 31 (2.1%) |
+| Turns that had to load first | 154 (37.7%) | 31 (7.6%) |
+| Prompt tokens spent on those requests | 10,196,491 | 1,081,709 |
+| Times a restarted Pi dropped loaded tools | 133 (416 tools) | 0 |
+| Uncached prompt tokens right after a drop | 4,062,020 | 0 |
+| Tool declarations per request (tokens, chars / 4.28) | 2,047 | 2,822 |
+| Share of declaring all 27 tools (8,255 tokens) | 24.8% | 34.2% |
 
-So a request carries about 770 more tokens of declarations (cached after the first), and about
-8.7M prompt tokens of load requests and 4.0M uncached tokens after drops go, over these two days.
-`bun scripts/bot-prompt-size.ts --tools` prints what a request declares with the core alone (1,184
-tokens) and with typical preloads (1,868 to 2,662), against all tools (7,545).
+So a request carries about 775 more tokens of declarations (cached after the first), and about
+9.1M prompt tokens of load requests and 4.1M uncached tokens after drops go, over these two days.
+`bun scripts/bot-prompt-size.ts --tools` prints what a request declares with the core alone (1,251
+tokens) and with typical preloads (2,018 to 2,718), against all tools (8,255).
 
 ## Turn metrics (2026-11-12)
 

@@ -1,43 +1,54 @@
-// What a bot does of its own accord, sampled many times: unhurried, never a spin, and a hop only
-// for the bigger, lively avatars. tests/botMascots.test.ts watches the same in a real Chrome.
+// What a bot does of its own accord, sampled many times: brisk, always on the ground (never a hop
+// or a spin), and idle, mostly staring and looking around. tests/botMascots.test.ts watches the same
+// in a real Chrome.
 import { expect, test } from "bun:test";
-import { nextBeat, nextIdle } from "../src/components/bots/BotAvatar";
+import { nextBeat, nextIdle, type Step } from "../src/components/bots/BotAvatar";
 
 const RUNS = 5000;
-const moves = (lively: boolean) => {
-  const seen = new Set<string>();
-  for (let i = 0; i < RUNS; i++) for (const [what] of nextBeat(lively)) if (typeof what === "string" && what !== "blink") seen.add(what);
-  return seen;
-};
+const sample = (fn: () => Step[]) => Array.from({ length: RUNS }, fn);
+const poseOf = (what: Step[0]) => (what !== null && typeof what === "object" && "x" in what ? what : undefined);
+/** The moves in some routines: everything named that isn't a blink. */
+const moves = (routines: Step[][]) => new Set(routines.flatMap((r) => r.map(([what]) => what)).filter((w): w is Extract<Step[0], string> => typeof w === "string" && !w.startsWith("blink")));
+const faces = (routines: Step[][]) => routines.flatMap((r) => r.map(([what]) => what)).filter((w) => w !== null && typeof w === "object" && "flash" in w);
 
-test("at work, a bot never spins, and only a lively one hops", () => {
-  expect([...moves(false)].sort()).toEqual(["nod", "squish", "wiggle"]);
-  const lively = moves(true);
-  expect(lively.has("spin")).toBe(false);
-  expect(lively.has("hop")).toBe(true);
+test("at work, a bot never hops or spins, lively or not", () => {
+  for (const lively of [false, true]) expect([...moves(sample(() => nextBeat(lively)))].sort()).toEqual(["nod", "squish", "wiggle"]);
 });
 
-test("at work, every pose is held long enough to read", () => {
-  for (let i = 0; i < RUNS; i++)
-    for (const [what, ms] of nextBeat(true)) expect(ms).toBeGreaterThanOrEqual(typeof what === "object" ? 200 : 260);
+test("at work, it's brisk, but every pose is held long enough to read", () => {
+  const routines = sample(() => nextBeat(true));
+  for (const r of routines) for (const [what, ms] of r) expect(ms).toBeGreaterThanOrEqual(poseOf(what) ? 200 : 260);
+  // A whole routine is over within a few seconds.
+  expect(Math.max(...routines.map((r) => r.reduce((n, [, ms]) => n + ms, 0)))).toBeLessThan(3200);
 });
 
-test("idle, a bot mostly blinks and glances, seldom twice in a row, and never spins", () => {
+test("idle, a bot mostly stares and looks around, with the odd blink", () => {
+  let stares = 0;
+  let looks = 0;
   let blinks = 0;
-  let doubles = 0;
-  const actions = new Set<string>();
-  for (let i = 0; i < RUNS; i++) {
-    const quiet = nextIdle(false);
-    expect("action" in quiet || "flash" in quiet).toBe(false);
-    const what = nextIdle(true);
-    if ("blink" in what) {
-      blinks++;
-      if (what.blink) doubles++;
-    }
-    if ("action" in what) actions.add(what.action);
+  for (const r of sample(() => nextIdle(false))) {
+    const poses = r.map(([what, ms]) => [poseOf(what), ms] as const).filter(([p]) => p);
+    if (poses.some(([p, ms]) => p!.x === 0 && p!.eyes === "wide" && ms >= 1500)) stares++;
+    else if (poses.some(([p]) => p!.x !== 0)) looks++;
+    else if (r.some(([what]) => what === "blink" || what === "blink2")) blinks++;
+    // Every look ends back straight ahead.
+    if (poses.length) expect(poses.at(-1)![0]).toEqual({ x: 0, y: 0 });
   }
-  expect(blinks / RUNS).toBeGreaterThan(0.4);
-  expect(doubles / blinks).toBeLessThan(0.2);
-  expect(actions.has("spin")).toBe(false);
-  expect(actions.has("nod")).toBe(true);
+  expect((stares + looks) / RUNS).toBeGreaterThan(0.6);
+  expect(stares / RUNS).toBeGreaterThan(0.15);
+  expect(blinks / RUNS).toBeGreaterThan(0.1);
+  expect(stares + looks + blinks).toBe(RUNS);
+});
+
+test("idle, only a lively bot moves or pulls a face, and never a hop or a spin", () => {
+  const quiet = sample(() => nextIdle(false));
+  expect(moves(quiet).size).toBe(0);
+  expect(faces(quiet).length).toBe(0);
+  const lively = sample(() => nextIdle(true));
+  expect([...moves(lively)].sort()).toEqual(["nod", "squish", "wiggle"]);
+  expect(faces(lively).length).toBeGreaterThan(0);
+});
+
+test("idle and following the pointer, a bot never takes its eyes off it", () => {
+  for (const r of sample(() => nextIdle(true, true))) for (const [what] of r) expect(poseOf(what)).toBeUndefined();
 });

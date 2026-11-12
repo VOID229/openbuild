@@ -62,8 +62,8 @@ test("core tools are declared from the start with their full schemas; the rest w
   }
   expect(tool("send_message").parameters.required).toEqual(["text"]);
   expect(Object.keys(tool("send_message").parameters.properties)).toEqual(["text", "machine", "conversation", "reply_to", "images", "attach_screenshot"]);
-  expect(tool("memory").parameters.required).toEqual(["action", "status"]);
-  expect(tool("search").parameters.required).toEqual(["query", "status"]);
+  expect(tool("memory").parameters.required).toEqual(["status", "action"]);
+  expect(tool("search").parameters.required).toEqual(["status", "query"]);
   expect(tool("react").parameters.required).toEqual(["message", "emoji"]);
   // load_tools is quick: no status line of its own.
   expect(tool("load_tools").parameters).toEqual({ type: "object", properties: { names: { type: "array", items: { type: "string" }, description: "Tool names from the list." } }, required: ["names"] });
@@ -82,7 +82,7 @@ test("loading a tool declares its real schema, and it can be called right after"
   const original = ALL.find((t) => t.name === "routine");
   const now = declared().find((t) => t.name === "routine");
   expect(JSON.stringify({ d: now.description, p: now.parameters })).toBe(JSON.stringify({ d: original.description, p: original.parameters }));
-  expect(now.parameters.required).toEqual(["action", "status"]);
+  expect(now.parameters.required).toEqual(["status", "action"]);
   expect(declared().map((t) => t.name)).toContain("openbuild");
   // Loading one already loaded is harmless.
   expect((await tool("load_tools").execute("t", { names: ["routine"] })).details.loaded).toEqual(["routine"]);
@@ -205,7 +205,7 @@ test("a bot's usual tools are declared from the start of a session, with nothing
     const fresh = fakePi(allowed);
     withPreload("bash,use_app,teleport,send_message", () => fresh.emit("session_start", { reason: "startup" }, { sessionManager: { getBranch: () => [] } }));
     expect(fresh.declared().map((t) => t.name).sort()).toEqual([...CORE_TOOLS, "bash", "use_app"].sort());
-    expect(fresh.tool("bash").parameters.required).toEqual(["command", "status"]);
+    expect([...fresh.tool("bash").parameters.required].sort()).toEqual(["command", "status"]);
     // A session that's resumed: what it had loaded, and the usual tools with it. Nothing it had is taken away.
     const resumed = fakePi(allowed);
     const entries = [loadout([...CORE_TOOLS]), said, loadout(["routine"]), said];

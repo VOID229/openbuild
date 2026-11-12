@@ -4,6 +4,8 @@
 
 :root {
   --bot-eye: #161616;
+  --bot-eye-top: #030303;
+  --bot-eye-bottom: #2e2f33;
   --bot-outline: rgba(0, 0, 0, 0.14);
 }
 
@@ -32,8 +34,23 @@
   stroke-width: 2.2;
 }
 
+/* The eyes' fill is a gradient of their own (BotAvatar's Body): near-black up top, lifting a little
+   toward the bottom, so they read deep rather than flat. Nothing inside them: no glint, no pupil. */
 .bot-eye-fill {
-  fill: var(--bot-eye);
+  fill: var(--eye-fill, var(--bot-eye));
+}
+
+.bot-eye-smile {
+  stroke: var(--eye-fill, var(--bot-eye));
+  stroke-linejoin: round;
+}
+
+.bot-eye-stop-top {
+  stop-color: var(--bot-eye-top);
+}
+
+.bot-eye-stop-bottom {
+  stop-color: var(--bot-eye-bottom);
 }
 
 .bot-eye-line {
@@ -43,34 +60,30 @@
   stroke-linejoin: round;
 }
 
-.bot-glint {
-  fill: #fff;
-  opacity: 0.85;
-}
-
-/* Eyes close a little below their middle, as lids come down, and open again a touch slower than they
-   shut: a blink's speed is set per blink (--blink), so no two are quite alike. */
+/* Eyes close a little below their middle, as lids come down. A blink snaps shut (its speed set per
+   blink, --blink, so no two are quite alike) and opens a touch slower; a new expression pops in. */
 .bot-eye {
   transform-box: fill-box;
   transform-origin: 50% 62%;
   transition:
-    transform 210ms cubic-bezier(0.25, 0.7, 0.35, 1),
+    transform 150ms cubic-bezier(0.2, 0.8, 0.3, 1),
     opacity 120ms ease-out;
-  animation: bot-eye-in 260ms var(--ease);
+  animation: bot-eye-in 200ms cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 
+/* A squint is a narrow slit, not half an eye. */
 .bot-eye-squint {
-  transform: scaleY(0.5);
+  transform: scale(1.06, 0.36);
 }
 
 .bot[data-blink] .bot-eye {
-  transform: scaleY(0.08);
-  transition: transform var(--blink, 140ms) cubic-bezier(0.55, 0, 0.75, 0.45);
+  transform: scaleY(0.06);
+  transition: transform var(--blink, 90ms) cubic-bezier(0.55, 0, 0.8, 0.4);
 }
 
 @keyframes bot-eye-in {
   from {
-    transform: scale(0.6);
+    transform: scale(0.55);
   }
 }
 
@@ -101,6 +114,7 @@
 }
 
 .bot[data-asleep] .bot-look,
+.bot[data-asleep] .bot-head,
 .bot[data-asleep] .bot-turn,
 .bot[data-asleep] .bot-tilt,
 .bot[data-asleep] .bot-light {
@@ -205,14 +219,14 @@
   }
 }
 
-/* Breathing, for a bot that's alive: slow, rising a little and filling out, a few breaths to a cycle
-   and no two quite alike, so it never looks wound up. Asleep, it's shallower and slower still, with
-   a sigh among them. On the bot's own box, where Chrome runs it on the compositor; the long cycle
-   keeps the main thread out of it too, as it's told each time a cycle comes round. --bob-delay
-   starts each bot somewhere else in it. */
+/* Breathing, for a bot that's alive: a few breaths to a cycle and no two quite alike, filling out
+   upward from where it sits, never lifting off. Asleep, it's shallower and much slower, with a sigh
+   among them. On the bot's own box, where Chrome runs it on the compositor; the long cycle keeps the
+   main thread out of it too, as it's told each time a cycle comes round. --bob-delay starts each bot
+   somewhere else in it. */
 .bot-alive {
-  transform-origin: 50% 90%;
-  animation: bot-bob 19s ease-in-out infinite;
+  transform-origin: 50% 92%;
+  animation: bot-bob 11.4s ease-in-out infinite;
   animation-delay: var(--bob-delay, 0s);
 }
 
@@ -230,16 +244,16 @@
     transform: none;
   }
   11.58% {
-    transform: translateY(-2%) scale(0.982, 1.026);
+    transform: scale(0.976, 1.034);
   }
   36.32% {
-    transform: translateY(-1.6%) scale(0.986, 1.02);
+    transform: scale(0.982, 1.026);
   }
   61.58% {
-    transform: translateY(-2.3%) scale(0.98, 1.03);
+    transform: scale(0.972, 1.04);
   }
   86.84% {
-    transform: translateY(-1.8%) scale(0.984, 1.022);
+    transform: scale(0.98, 1.03);
   }
 }
 
@@ -252,65 +266,60 @@
     transform: scale(1.012, 0.986);
   }
   10.21% {
-    transform: translateY(-0.6%) scale(0.992, 1.018);
+    transform: scale(0.992, 1.02);
   }
   34.41% {
-    transform: translateY(-0.5%) scale(0.994, 1.015);
+    transform: scale(0.994, 1.016);
   }
   59.33% {
-    transform: translateY(-0.9%) scale(0.988, 1.026);
+    transform: scale(0.988, 1.03);
   }
   84.75% {
-    transform: translateY(-0.6%) scale(0.992, 1.017);
+    transform: scale(0.992, 1.019);
   }
 }
 
-/* Where the eyes look: a glance or thought (--look-*), eased on a short, calm transition. A busy bot
-   also turns its head (--turn-*): the face slides further than the eyes alone would and narrows, as
-   if seen at an angle. */
+/* Where a pose faces. The eyes flick there first, in a quick saccade (--look-*). The head follows a
+   beat later, the face sliding across and narrowing as if seen at an angle (--turn-*), and the body
+   last, shifting and leaning into it, overshooting a little as it settles. */
 .bot-look {
+  transform: translate(calc(var(--look-x, 0) * 1px), calc(var(--look-y, 0) * 1px));
+  transition: transform 120ms cubic-bezier(0.2, 0.85, 0.25, 1);
+}
+
+.bot-head {
   transform-box: fill-box;
   transform-origin: center;
-  transform: translate(calc((var(--look-x, 0) + var(--turn-x, 0) * 7.5) * 1px), calc((var(--look-y, 0) + var(--turn-y, 0) * 4.5) * 1px))
-    scaleX(calc(1 - var(--turn-a, 0) * 0.2));
-  transition: transform 420ms cubic-bezier(0.3, 0.7, 0.3, 1);
-}
-
-/* Following the pointer (--track-*): sprung frame by frame in BotAvatar, so no transition of its own. */
-.bot-track {
-  transform: translate(calc(var(--track-x, 0) * 1px), calc(var(--track-y, 0) * 1px));
-}
-
-/* A busy bot turns its head with a little give at the end, unhurried. */
-.bot[data-busy] .bot-look {
-  transition: transform 700ms cubic-bezier(0.32, 1.2, 0.45, 1);
+  transform: translate(calc(var(--turn-x, 0) * 7px), calc(var(--turn-y, 0) * 4.5px)) scaleX(calc(1 - var(--turn-a, 0) * 0.18));
+  transition: transform 340ms cubic-bezier(0.3, 1.3, 0.5, 1) 40ms;
 }
 
 /* The eye on the side it turns toward is further away, so smaller; the other comes closer. */
 .bot-eye-side {
   transform-box: fill-box;
   transform-origin: center;
-  transition: transform 700ms cubic-bezier(0.32, 1.2, 0.45, 1);
+  transition: transform 340ms cubic-bezier(0.3, 1.3, 0.5, 1) 40ms;
 }
 
 .bot-eye-left {
-  transform: scale(calc(1 + var(--turn-x, 0) * 0.1));
+  transform: scale(calc(1 + (var(--turn-x, 0) + var(--steer-x, 0)) * 0.12));
 }
 
 .bot-eye-right {
-  transform: scale(calc(1 - var(--turn-x, 0) * 0.18));
+  transform: scale(calc(1 - (var(--turn-x, 0) + var(--steer-x, 0)) * 0.18));
 }
 
-/* The body leans into the turn and the light slides the other way, which sells the roundness. */
+/* The body shifts and leans into the turn (settling a little to look down, never lifting to look up)
+   and the light slides the other way, which sells the roundness. */
 .bot-turn,
 .bot-tilt {
   transform-box: fill-box;
-  transform-origin: 50% 85%;
-  transition: transform 760ms cubic-bezier(0.32, 1.15, 0.45, 1);
+  transform-origin: 50% 88%;
+  transition: transform 440ms cubic-bezier(0.3, 1.25, 0.5, 1) 70ms;
 }
 
 .bot-turn {
-  transform: translate(calc(var(--turn-x, 0) * 2px), calc(var(--turn-y, 0) * 1.4px)) scaleX(calc(1 - var(--turn-a, 0) * 0.05));
+  transform: translate(calc(var(--turn-x, 0) * 2.4px), calc(max(var(--turn-y, 0), 0) * 1.6px)) scaleX(calc(1 - var(--turn-a, 0) * 0.06));
 }
 
 .bot-tilt {
@@ -319,20 +328,47 @@
 
 .bot-light {
   transform: translate(calc(var(--turn-x, 0) * -12px), calc(var(--turn-y, 0) * -8px));
-  transition: transform 820ms cubic-bezier(0.32, 1.1, 0.45, 1);
+  transition: transform 480ms cubic-bezier(0.3, 1.2, 0.5, 1) 70ms;
 }
 
-/* Eyes opened wide or narrowed, eased so it reads as an expression rather than a blink. */
-.bot[data-busy]:not([data-blink]) .bot-eye {
-  transition-duration: 320ms;
+/* Following the pointer, sprung frame by frame in BotAvatar, so none of these has a transition: the
+   eyes on a quick spring (--track-*), and the whole body after them on a slower one (--steer-*,
+   -1…1). The face slides over and narrows, the body shifts and leans toward the pointer, stretching
+   a little to look up and settling to look down (never lifting off), and the light slides the other
+   way. Between them the eyes travel TRACK_REACH across the body, no further. */
+.bot-track {
+  transform: translate(calc(var(--track-x, 0) * 0.62px), calc(var(--track-y, 0) * 0.62px));
 }
 
+.bot-steer-face {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translate(calc(var(--steer-x, 0) * 4px), calc(var(--steer-y, 0) * 3px)) scaleX(calc(1 - var(--steer-a, 0) * 0.14));
+}
+
+.bot-steer {
+  transform-box: fill-box;
+  transform-origin: 50% 92%;
+  transform: translate(calc(var(--steer-x, 0) * 3px), calc(max(var(--steer-y, 0), 0) * 1.2px)) rotate(calc(var(--steer-x, 0) * 6deg))
+    scale(calc(1 - var(--steer-a, 0) * 0.03), calc(1 - var(--steer-y, 0) * 0.05));
+}
+
+.bot-steer-light {
+  transform: translate(calc(var(--steer-x, 0) * -10px), calc(var(--steer-y, 0) * -7px));
+}
+
+/* Steered frame by frame, the eyes' sizes follow the body at once rather than on a transition. */
+.bot[data-steering] .bot-eye-side {
+  transition: none;
+}
+
+/* Eyes opened wide or narrowed to a slit, eased so it reads as an expression rather than a blink. */
 .bot[data-eyes="wide"]:not([data-blink]) .bot-eye {
-  transform: scale(1.14, 1.24);
+  transform: scale(1.16, 1.2);
 }
 
 .bot[data-eyes="squint"]:not([data-blink]) .bot-eye {
-  transform: scale(1.08, 0.52);
+  transform: scale(1.1, 0.36);
 }
 
 .bot-act {
@@ -340,52 +376,27 @@
   transform-origin: 50% 90%;
 }
 
-/* The moves: soft and unhurried, each settling with a small follow-through rather than a bounce. */
-.bot[data-action="hop"] .bot-act {
-  animation: bot-hop 820ms cubic-bezier(0.3, 0.7, 0.4, 1);
-}
-
+/* The moves: quick and punchy, each settling with a short follow-through. All on the ground: nothing hops. */
 .bot[data-action="spin"] .bot-act {
   transform-origin: 50% 50%;
-  animation: bot-spin 1100ms cubic-bezier(0.5, -0.15, 0.3, 1.1);
+  animation: bot-spin 760ms cubic-bezier(0.55, -0.2, 0.3, 1.15);
 }
 
 .bot[data-action="wiggle"] .bot-act {
-  transform-origin: 50% 80%;
-  animation: bot-wiggle 980ms ease-in-out;
+  transform-origin: 50% 85%;
+  animation: bot-wiggle 600ms cubic-bezier(0.35, 0, 0.4, 1);
 }
 
 .bot[data-action="squish"] .bot-act {
-  animation: bot-squish 780ms cubic-bezier(0.3, 0.7, 0.4, 1);
+  animation: bot-squish 520ms cubic-bezier(0.3, 0.7, 0.4, 1);
 }
 
 .bot[data-action="nod"] .bot-act {
-  animation: bot-nod 900ms ease-in-out;
+  animation: bot-nod 560ms cubic-bezier(0.4, 0, 0.3, 1);
 }
 
 .bot[data-action="stretch"] .bot-act {
-  animation: bot-stretch 1000ms ease-in-out;
-}
-
-@keyframes bot-hop {
-  0% {
-    transform: none;
-  }
-  20% {
-    transform: scale(1.05, 0.93);
-  }
-  48% {
-    transform: translateY(-10px) scale(0.96, 1.05);
-  }
-  74% {
-    transform: translateY(0) scale(1.05, 0.95);
-  }
-  88% {
-    transform: scale(0.99, 1.01);
-  }
-  100% {
-    transform: none;
-  }
+  animation: bot-stretch 680ms cubic-bezier(0.4, 0, 0.3, 1);
 }
 
 @keyframes bot-spin {
@@ -395,54 +406,54 @@
 }
 
 @keyframes bot-wiggle {
-  22% {
-    transform: rotate(-8deg);
+  18% {
+    transform: rotate(-12deg);
   }
-  48% {
-    transform: rotate(6deg);
+  40% {
+    transform: rotate(10deg);
   }
-  72% {
-    transform: rotate(-3deg);
+  62% {
+    transform: rotate(-6deg);
   }
-  90% {
-    transform: rotate(1deg);
+  82% {
+    transform: rotate(2.5deg);
   }
 }
 
 @keyframes bot-squish {
-  32% {
-    transform: scale(1.1, 0.88);
+  26% {
+    transform: scale(1.16, 0.84);
   }
-  62% {
-    transform: scale(0.95, 1.06);
+  54% {
+    transform: scale(0.92, 1.1);
   }
-  82% {
-    transform: scale(1.02, 0.98);
+  78% {
+    transform: scale(1.04, 0.97);
   }
 }
 
 @keyframes bot-nod {
-  30% {
-    transform: translateY(5px) rotate(4deg);
+  28% {
+    transform: translateY(6px) rotate(5deg);
   }
-  58% {
-    transform: translateY(-1px) rotate(-1deg);
+  56% {
+    transform: rotate(-2deg);
   }
   78% {
-    transform: translateY(1.5px);
+    transform: translateY(1.5px) rotate(0.5deg);
   }
 }
 
 /* Waking: up out of the slump, taller for a moment, and settled. */
 @keyframes bot-stretch {
   0% {
-    transform: scale(1.03, 0.95);
+    transform: scale(1.05, 0.9);
   }
   40% {
-    transform: translateY(-3px) scale(0.95, 1.08);
+    transform: scale(0.92, 1.12);
   }
   70% {
-    transform: scale(1.02, 0.98);
+    transform: scale(1.03, 0.97);
   }
   100% {
     transform: none;
@@ -538,6 +549,7 @@
     animation: none !important;
   }
   .bot .bot-look,
+  .bot .bot-head,
   .bot .bot-eye,
   .bot .bot-lid,
   .bot-eye-side,
@@ -2302,10 +2314,17 @@
 }
 
 /* The words are painted by the shimmer's moving gradient (styles.css, .shimmer), so they set no colour
-   of their own: one here would sit on top of the highlight and hide it. */
+   of their own: one here would sit on top of the highlight and hide it. Each new status swaps in at
+   once, with no slide or fade from nothing: the step it names may only last a moment. */
 .bm-working-text {
   font-size: 14px;
-  animation: shimmer 1.6s linear infinite, bm-working-in 240ms ease-out both;
+  animation: shimmer 1.6s linear infinite, bm-working-swap 110ms ease-out both;
+}
+
+@keyframes bm-working-swap {
+  from {
+    opacity: 0.35;
+  }
 }
 
 @keyframes bm-working-in {

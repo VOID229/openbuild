@@ -1,0 +1,29 @@
+// Bots on their own, for tests/botAvatarLife.test.ts to watch in Chrome: one in every mood, held
+// still, and a row of awake ones, idle and busy, big and small, living their lives.
+import "../../../src/styles.css";
+import "../../../src/bots.css";
+import { createRoot } from "react-dom/client";
+import { BotAvatar } from "../../../src/components/bots/BotAvatar";
+import type { BotLook, Mood } from "../../../src/lib/bots/looks";
+
+const moods: Mood[] = ["idle", "happy", "thinking", "sleepy", "surprised", "love", "wink", "squint"];
+const looks: BotLook[] = [{ shape: "orb", color: "green" }, { shape: "puff", color: "white" }, { shape: "bean", color: "pink" }];
+createRoot(document.getElementById("root")!).render(
+  <>
+    <div className="row" id="moods">
+      {moods.map((mood) => (
+        <span className="cell" key={mood} data-mood={mood}>
+          <BotAvatar look={looks[0]!} size={96} mood={mood} alive={false} />
+        </span>
+      ))}
+    </div>
+    <div className="row" id="life">
+      {looks.flatMap((look) => [
+        <span className="cell" key={`${look.shape}-idle`} data-size={96}><BotAvatar look={look} size={96} lively /></span>,
+        <span className="cell" key={`${look.shape}-busy`} data-size={96}><BotAvatar look={look} size={96} lively busy /></span>,
+        <span className="cell" key={`${look.shape}-small`} data-size={28}><BotAvatar look={look} size={28} /></span>,
+        <span className="cell" key={`${look.shape}-small-busy`} data-size={28}><BotAvatar look={look} size={28} busy /></span>,
+      ])}
+    </div>
+  </>,
+);

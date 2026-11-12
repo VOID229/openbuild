@@ -6,8 +6,7 @@ import { untrustedData } from "./transcriptData";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { appById } from "../../shared/apps";
-import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, type BotMessage } from "../../shared/bots";
+import { redactSecrets, BOT_EFFORTS, botModelChain, emptyUpdate, saysSilent, conversationTitle, eventDetail, eventText, isBotEffort, MODEL_SIGN_IN, mentionName, modelUnavailable, reactionId, pollVotesVisible, replyBubbles, roleLine, shownReplyError, workingPhrase, type BotMessage } from "../../shared/bots";
 import { procListeners } from "../computers/index";
 import { PiError, PiTimeoutError, PiProcess, type PiRecord } from "../pi/rpc";
 import { agentDir, piBin } from "../pi/install";
@@ -24,9 +23,11 @@ import type { BotStatus, PiSetup } from "../../shared/bots";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
 
 import { cancelJobs, JobCancelled, nearestEffort, runHelper, startJob } from "./helpers";
+import { board as jobBoard, cancelAll as cancelCalls, DETACHABLE, forget as forgetJobs, hurry, recover as recoverJobs, setJobHooks, waitingLine } from "./jobs";
 import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
 import { BOT_TOOLS, noteToolUse, preloadTools } from "./toolPreload";
 import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
+import { follow, liveActivity, newLive, ownStatus, type Live, type Step } from "./steps";
 
 const IDLE = 20 * 60 * 1000;
 
@@ -64,7 +65,12 @@ interface Mind {
    * group turn it hasn't acted on yet ("deciding", until it types or uses a tool: BotStatus.deciding).
    */
   quiet: false | "reaction" | "sent" | "deciding";
+  /** The status line as last shown (BotStatus.activity): the live step, or plain working words between steps. */
   activity: string;
+  /** The turn's steps as Pi reports them (steps.ts): what `activity` is read from. */
+  live?: Live;
+  /** What the status last said, so a record that changes nothing sends nothing. */
+  said?: string;
   /** The OpenBuild thread its current openbuild call is about (BotStatus.thread). */
   thread?: string;
   /** Between handing Pi the prompt and it settling: a message now can be steered into the turn. */
@@ -77,8 +83,15 @@ interface Mind {
   steered?: Wake[];
   /** The turn answers a message of the user's: they're waiting on it, so what it says isn't held to being news. */
   waitingUser?: boolean;
-  /** The tool call it's inside right now, other than writing to the chat. */
-  tool?: { name: string; since: number };
+  /** The tool call it's inside right now, other than writing to the chat (the newest, when several run at once), and the status line it wrote for it. */
+  tool?: { name: string; since: number; activity: string; label?: string };
+  /** The user's messages steered into this turn that Pi hasn't handed the model yet: it's waited on (see waitedOn). */
+  unread?: number;
+  /** Pi has announced this attempt's prompt: a user message after it is a steer being handed over. */
+  prompted?: boolean;
+  /** The turn has read the transcript and hasn't sent Pi the prompt yet: what arrives now is steered in right behind it (`held`). */
+  starting?: boolean;
+  held?: Wake[];
   /** Messages a helper session wrote for the bot during this turn, which the turn itself hasn't seen. */
   helperSaid?: Set<string>;
   /** A wake nobody is waiting on (a note, a check-in, a reaction): what it says has to be news. */
@@ -151,6 +164,15 @@ export function wake(botId: string, item: Wake) {
   const group = db.getConversation(conversationId ?? "")?.kind === "group";
   // Inside a long tool call it can't answer yet: a helper says so, and the message goes on to the turn as ever.
   sideReply(botId, item);
+  // Whatever call holds its turn stops holding it sooner: the bot reads this once the call returns (jobs.ts).
+  if (waitsOnBot(botId, item) && pumping.has(botId)) hurry(botId, conversationId === getFocus(botId) ? "here" : "elsewhere");
+  const joins = group ? item.kind === "messages" && !!item.messageIds?.length && !waitsBehind(botId, conversationId!) : !item.messageIds && (item.kind === "messages" || item.kind === "reaction");
+  // The turn in this chat has read the transcript and is still setting Pi up for the prompt: queued
+  // now, this would wait out the whole turn. It's steered in right behind the prompt.
+  if (joins && mind?.starting && conversationId === getFocus(botId) && pumping.has(botId) && !halted.has(botId) && !mind.proc.exited) {
+    (mind.held ??= []).push(item);
+    return;
+  }
   // A user request routed to this bot in the group it's working in joins the turn, scoped to that request alone.
   if (group && item.kind === "messages" && item.messageIds?.length && mind && steerableIn(botId, mind, conversationId!) && !waitsBehind(botId, conversationId!)) {
     steerAssigned(botId, mind, item);
@@ -171,8 +193,11 @@ export function wake(botId: string, item: Wake) {
       mind.waitingUser = true;
       show(botId, mind);
     }
+    const asked = item.kind === "messages";
+    if (asked) mind.unread = (mind.unread ?? 0) + 1;
     // The turn's end moves the cursor, so a steer that failed before this one isn't skipped past.
     steerSafely(mind, { type: "steer", message: text, ...(images.length ? { images } : {}) }, (disposition) => {
+      if (asked && disposition !== "queued") mind.unread = Math.max(0, (mind.unread ?? 0) - 1);
       if (disposition === "queued") (mind.queuedSteers ??= []).push({ item, conversationId, from, keys });
       if (disposition) return;
       // Not delivered: the turn's end leaves these unread, so the next turn picks them up.
@@ -182,6 +207,34 @@ export function wake(botId: string, item: Wake) {
     return;
   }
   enqueue(botId, item);
+}
+
+/** A message of the user's that this bot is the one to answer: they're waiting on it. */
+function waitsOnBot(botId: string, item: Wake): boolean {
+  if (item.kind !== "messages" || !item.conversationId) return false;
+  return db.getConversation(item.conversationId)?.kind === "direct" || (!!item.messageIds?.length && (!item.lead || item.lead === botId));
+}
+
+/**
+ * Whether someone is waiting on a bot that's inside a turn: a message of theirs steered in that Pi
+ * hasn't handed the model yet ("here"), or one queued for it, in this chat or in another.
+ */
+function waitedOn(botId: string): "here" | "elsewhere" | undefined {
+  if (!pumping.has(botId)) return undefined;
+  if (minds.get(botId)?.unread) return "here";
+  const queued: Wake[] = (queue.get(botId) ?? []).filter((j: Wake) => waitsOnBot(botId, j));
+  if (!queued.length) return undefined;
+  const focus = getFocus(botId);
+  return queued.some((j) => j.conversationId === focus) ? "here" : "elsewhere";
+}
+
+/** What a turn held back until its prompt went out goes in now: steered, or queued when there's no turn to join. */
+function unhold(botId: string, mind: Mind, steer: boolean) {
+  mind.starting = false;
+  for (const item of mind.held?.splice(0) ?? []) {
+    if (steer) wake(botId, item);
+    else enqueue(botId, item);
+  }
 }
 
 function steerableIn(botId: string, mind: Mind, conversationId: string): boolean {
@@ -223,10 +276,13 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
     }).slice(-IMAGE_LIMIT);
     // Still deciding whether the group's messages are its to answer: this one is decided on with them.
     if (mind.quiet !== "deciding") mind.quiet = false;
-    if (!item.lead || item.lead === botId) mind.waitingUser = true;
+    const asked = !item.lead || item.lead === botId;
+    if (asked) mind.waitingUser = true;
+    if (asked) mind.unread = (mind.unread ?? 0) + 1;
     show(botId, mind);
     // A steer Pi is slow to answer is waited out, and the turn holds on to Pi until it is.
     return new Promise((resolve) => steerSafely(mind, { type: "steer", message: steerNote(conversationId, botId, ids, item.lead), ...(images.length ? { images } : {}) }, (disposition) => {
+      if (asked && disposition !== "queued") mind.unread = Math.max(0, (mind.unread ?? 0) - 1);
       resolve(disposition);
       record(disposition);
     }));
@@ -259,6 +315,9 @@ export function waitingIn(botId: string): string[] {
 }
 
 function setStatus(botId: string, next: BotStatus) {
+  // Between turns with jobs still running, its status says which: it's free, and this is what it's waiting on.
+  const on = next.state === "idle" ? waitingLine(botId) : undefined;
+  if (on) return svc.setStatus(botId, { state: "working", activity: on.activity, conversationId: on.conversationId, jobs: on.jobs, since: on.since });
   const waiting = next.state === "idle" ? [] : waitingIn(botId);
   const undecided = undecidedIn(waiting);
   // A message waiting in the chat it's working in isn't quiet work: the chat shows it busy until it gets there.
@@ -292,6 +351,7 @@ async function pump(botId: string) {
 
 export function stop(botId: string) {
   cancelJobs(botId);
+  forgetJobs(botId);
   for (const [key, mind] of [...minds]) if (key === botId || key.startsWith(`${botId}~`)) stopMind(key, mind);
   queue.delete(botId);
 }
@@ -307,12 +367,16 @@ const halted = new Set<string>();
  */
 export function halt(botId: string, conversationId?: string): boolean {
   let stopped = cancelJobs(botId) > 0;
+  // Its tool calls too: the ones running in the background, and the one holding its turn.
+  stopped = cancelCalls(botId) > 0 || stopped;
   const waiting: Wake[] = queue.get(botId) ?? [];
   const keep = conversationId ? waiting.filter((j) => j.conversationId !== conversationId) : [];
   if (keep.length !== waiting.length) {
     stopped = true;
     queue.set(botId, keep);
   }
+  // What a starting turn is holding for that conversation waits like the rest, and goes with it.
+  for (const [key, mind] of minds) if ((key === botId || key.startsWith(`${botId}~`)) && mind.held) mind.held = mind.held.filter((j: Wake) => !!conversationId && j.conversationId !== conversationId);
   if (pumping.has(botId)) {
     stopped = true;
     halted.add(botId);
@@ -395,7 +459,9 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
 
   // Bot-only project settings; shared auth and extension discovery remain unchanged.
   mkdirSync(join(workDir(botId, lane), ".pi"), { recursive: true, mode: 0o700 });
-  writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models) }), { mode: 0o600 });
+  // Pi's default hands a turn one queued message per model call. Every message that arrived while a
+  // tool ran goes in together instead, right after the tools return.
+  writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models), steeringMode: "all" }), { mode: 0o600 });
   const token = mintToken(botId, lane);
   // The tools this bot keeps reaching for are declared from the start, so a usual turn loads nothing
   // (extension.ts adds them to what the session had loaded). A chat that only chats has none.
@@ -405,7 +471,7 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
     workDir(botId, lane),
     { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId, OPENBOTS_PRELOAD: preload.join(",") },
   );
-  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking", fresh: true, preloaded: preload.length };
+  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: workingPhrase(), fresh: true, preloaded: preload.length };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(key, mind);
   return mind;
@@ -586,9 +652,45 @@ export async function applyEffort(proc: Pick<PiProcess, "send">, botId: string) 
 /** Tools that put words in the chat: while they're being written, the bot is typing. */
 const WRITING = new Set(["send_message", "question", "poll"]);
 
+const saying = (mind: Mind, activity: string) => JSON.stringify([activity, mind.quiet, mind.thread ?? ""]);
+
 function show(botId: string, mind: Mind, activity?: string) {
   if (activity) mind.activity = activity;
+  mind.said = saying(mind, mind.activity);
   setStatus(botId, { state: "working", activity: mind.activity, conversationId: getFocus(botId), quiet: !!mind.quiet || undefined, deciding: mind.quiet === "deciding" || undefined, thread: mind.thread, since: Date.now() });
+}
+
+/** A reaction shows on its message, and a group turn still making up its mind shows nothing: neither is a step in the status. */
+const counts = (mind: Mind) => (step: Step) => step.tool !== "react" && !(DECIDING_TOOLS.has(step.tool) && mind.quiet === "deciding");
+/** A step that is work, not words for the chat. */
+const works = (step: Step) => !WRITING.has(step.tool) && step.tool !== "react";
+
+/**
+ * Its words are on their way to the chat: a message it's writing or sending (the chat shows it typing),
+ * or text it's streaming. Not text after a message already went out, which is never posted, nor a
+ * [silent] in the making.
+ */
+function writing(mind: Mind, live: Live): boolean {
+  if (mind.typing) return true;
+  const text = (mind.draft ?? "").trim().toLowerCase();
+  return live.streaming && !mind.sent && !!text && !"[silent]".startsWith(text) && !saysSilent(text);
+}
+
+/**
+ * Bring the status up to where the turn is (steps.ts). A step starting or ending always shows, the
+ * moment it does. Anything else (the model writing a call, text streaming, Pi compacting) shows only
+ * when it changes what the status says, so a stream of deltas sends one status, not hundreds.
+ */
+function refresh(botId: string, mind: Mind, boundary = false) {
+  const live = (mind.live ??= newLive());
+  const running = live.steps.findLast((s) => s.state === "running" && works(s));
+  mind.tool = running ? { name: running.tool, since: running.since, activity: running.activity, label: ownStatus((running.args as { status?: unknown } | undefined)?.status) } : undefined;
+  mind.thread = live.steps.map((s) => (s.state === "running" ? threadOf(s.tool, s.args) : undefined)).findLast(Boolean);
+  // Between turns nothing is its to show: a record that trails in must not put the bot back to work.
+  if (!mind.busy) return;
+  const activity = liveActivity(live, { writing: writing(mind, live), counts: counts(mind) });
+  if (!boundary && (saying(mind, activity) === mind.said || svc.getStatus(botId)?.state !== "working")) return;
+  show(botId, mind, activity);
 }
 
 /** Tools a bot uses to make up its mind, not to act: a group turn on them is still deciding. */
@@ -625,6 +727,11 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     mind.onSettled?.();
   }
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
+  // Pi announces each message it hands the model: after the prompt's own, that's a steer being read.
+  if (record.type === "message_start" && record.message?.role === "user") {
+    if (!mind.prompted) mind.prompted = true;
+    else if (mind.unread) mind.unread--;
+  }
   const wrote = successfulMessageTool(record);
   if (wrote) mind.meter?.reply();
   mind.sent ||= wrote;
@@ -635,42 +742,38 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (unloadedResult(ended, BOT_TOOLS.catalog)) mind.meter?.unloaded();
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
-  if (record.type === "tool_execution_start") {
-    mind.meter?.tool(tool, record.args);
+  if (record.type === "tool_execution_start") mind.meter?.tool(tool, record.args);
+  const live = (mind.live ??= newLive());
+  const { began, started, ended: finished } = follow(live, record);
+  if (started) {
     mind.draft = "";
     const conversationId = getFocus(botId);
     if (conversationId) svc.setDraft(undefined, { conversationId, botId });
-    mind.thread = threadOf(tool, record.args);
     // A reaction is an action too, but one the chat already shows on the message: the mascot only stirs.
     if (!DECIDING_TOOLS.has(tool)) decided(mind, tool === "react" ? "reaction" : false);
     if (WRITING.has(tool)) setTyping(botId, mind, true);
-    else if (tool === "react") show(botId, mind);
-    else if (DECIDING_TOOLS.has(tool) && mind.quiet === "deciding") mind.tool = { name: tool, since: Date.now() };
-    else {
+    else if (works(started) && !(DECIDING_TOOLS.has(tool) && mind.quiet === "deciding")) {
       setTyping(botId, mind, false);
       // Work after a message is still work: the chat shows it, as the sidebar does.
       if (mind.quiet === "sent") mind.quiet = false;
-      show(botId, mind, activityFor(tool, record.args));
-      mind.tool = { name: tool, since: Date.now() };
     }
   }
-  if (record.type === "tool_execution_end" && mind.tool?.name === tool) mind.tool = undefined;
-  if (record.type === "tool_execution_end" && mind.thread) {
-    // Done with the thread: its mascot goes back to sleep.
-    mind.thread = undefined;
-    show(botId, mind);
-  }
-  if (record.type === "tool_execution_end" && WRITING.has(tool)) {
+  if (finished && WRITING.has(tool)) {
     // Sent. Whatever it does next stays out of the chat until it types again or picks up real work.
-    setTyping(botId, mind, false);
-    mind.quiet = "sent";
-    show(botId, mind, "Thinking");
+    // Another bubble already written is the first; work running beside it, or called with it and up next, the second.
+    const more = live.steps.some((s) => WRITING.has(s.tool));
+    setTyping(botId, mind, more);
+    if (!more && !live.steps.some((s) => works(s) && counts(mind)(s))) mind.quiet = "sent";
   }
-  const ev = record.type === "message_update" ? record.assistantMessageEvent : undefined;
-  if (ev?.type === "toolcall_start" && WRITING.has(String(ev.toolName ?? ""))) {
+  // The model has started writing a call: the status says so now, not once the whole call is written and running.
+  if (began && WRITING.has(began.tool)) {
     decided(mind);
     setTyping(botId, mind, true);
+  } else if (began && counts(mind)(began)) {
+    decided(mind);
+    if (mind.quiet === "sent") mind.quiet = false;
   }
+  const ev = record.type === "message_update" ? record.assistantMessageEvent : undefined;
   const delta = ev?.type === "text_delta" ? String(ev.delta ?? "") : "";
   if (delta) {
     mind.acted = true;
@@ -690,6 +793,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
       mind.meter?.reply();
     }
   }
+  refresh(botId, mind, !!(started || finished));
 }
 
 /**
@@ -725,6 +829,8 @@ function sideReply(botId: string, item: Wake) {
   const mind = minds.get(botId);
   const tool = mind?.tool;
   if (!mind || !tool || !pumping.has(botId) || !mind.shown || mind.proc.exited || halted.has(botId)) return;
+  // One of its own calls stops holding the turn once someone is waiting (jobs.ts), and the bot answers itself.
+  if (DETACHABLE.has(tool.name)) return;
   if (!SLOW_TOOLS.has(tool.name) && Date.now() - tool.since < LONG_TOOL_MS) return;
   const named = item.messageIds?.length ? db.getMessage(item.messageIds.at(-1)!) : undefined;
   const asked = item.messageIds?.length ? (named?.conversationId === conversationId ? named : undefined) : db.messages(conversationId, 8).findLast((r) => r.message.author === "me" && !r.message.event);
@@ -738,7 +844,7 @@ function sideReply(botId: string, item: Wake) {
   const elsewhere = getFocus(botId) !== conversationId;
   const lines = db.messages(conversationId, 8).map(line(c, db.listBots(), user, botId, item.messageIds));
   const prompt = [
-    `You are ${name}, one of ${user}'s bots in OpenBots${bot.role ? ` (${bot.role})` : ""}. Your main session is busy${elsewhere ? " in another chat" : " in this chat"}: for the last ${Math.max(1, Math.round((Date.now() - tool.since) / 1000))} seconds it has been “${mind.activity}” (its ${tool.name} tool), and it can't read or answer anything until that returns.`,
+    `You are ${name}, one of ${user}'s bots in OpenBots${bot.role ? ` (${bot.role})` : ""}. Your main session is busy${elsewhere ? " in another chat" : " in this chat"}: for the last ${Math.max(1, Math.round((Date.now() - tool.since) / 1000))} seconds it has been “${tool.activity}” (its ${tool.name} tool), and it can't read or answer anything until that returns.`,
     `${user} just wrote to you. The chat's latest lines, oldest first:`,
     lines.join("\n"),
     `Write ${name}'s reply to their newest message now, in one or two short plain sentences, as a person texting. Answer it if these lines are enough. Otherwise say what you're in the middle of and that you'll get to it. Promise nothing else, don't say any work is done, and don't make anything up. If it needs no reply, answer exactly [silent].`,
@@ -779,57 +885,7 @@ export function modelError(message: unknown): string {
 
 export { redactSecrets } from "../../shared/bots";
 
-const base = (path: unknown) => String(path ?? "").split("/").filter(Boolean).pop()?.slice(0, 40);
-
-/** The status the bot wrote for this call: one short line, or nothing usable. */
-function ownStatus(value: unknown) {
-  const line = typeof value === "string" ? value.split("\n")[0]!.replace(/\s+/g, " ").trim().replace(/[.…]+$/, "") : "";
-  if (!line) return undefined;
-  const short = line.length > 50 ? `${line.slice(0, 49).trimEnd()}…` : line;
-  return short[0]!.toUpperCase() + short.slice(1);
-}
-
-export function activityFor(tool: string, args: unknown): string {
-  const a = args && typeof args === "object" ? (args as Record<string, unknown>) : {};
-  const own = ownStatus(a.status);
-  if (own) return own;
-  if (tool === "bash") return "Running a command";
-  if (tool === "openbuild") return a.action === "start" ? "Starting a thread" : a.action === "merge" ? "Merging a pull request" : "Checking on threads";
-  if (tool === "process") return a.action === "start" ? "Starting a program" : "Checking on a program";
-  if (tool === "browser") {
-    if (a.action === "open") {
-      const host = (() => {
-        try {
-          return new URL(String(a.url)).hostname.replace(/^www\./, "");
-        } catch {
-          return "";
-        }
-      })();
-      return host ? `Opening ${host}` : "Opening a page";
-    }
-    if (a.action === "screenshot") return "Taking a screenshot";
-    if (a.action === "type") return "Filling something in";
-    if (a.action === "click") return "Clicking around";
-    return "Browsing";
-  }
-  if (tool === "read") return base(a.path) ? `Reading ${base(a.path)}` : "Reading a file";
-  if (tool === "write") return base(a.path) ? `Writing ${base(a.path)}` : "Writing a file";
-  if (tool === "edit") return base(a.path) ? `Editing ${base(a.path)}` : "Editing a file";
-  if (tool === "vote_poll") return "Voting in the poll";
-  if (tool === "html_render") return a.title ? `Drawing ${ownStatus(a.title)}` : "Drawing a page";
-  if (tool === "todo") return "Updating the to-do list";
-  if (tool === "load_tools") return "Getting tools ready";
-  if (tool === "memory") return a.action === "forget" ? "Forgetting something" : "Making a note";
-  if (tool === "search") return a.what === "messages" ? "Looking back through chats" : "Thinking back";
-  if (tool === "bot_web_search") return "Searching the web";
-  if (tool === "apps") return a.action === "skill" ? "Reading up on how to do it" : "Looking through apps";
-  if (tool === "use_app") return `Using ${appById(String(a.app ?? ""))?.name ?? "an app"}`;
-  if (tool === "routine") return "Sorting out a routine";
-  if (tool === "ask_bot") return "Asking another bot";
-  if (tool === "side_chat") return a.action === "close" ? "Wrapping up a side chat" : "Talking it over with the others";
-  if (tool === "manage_bot") return "Tending to the other bots";
-  return "Thinking";
-}
+export { activityFor } from "./steps";
 
 const activeAssignments = new Map<string, Wake[]>();
 
@@ -876,7 +932,7 @@ async function runTurn(botId: string, all: Wake[]) {
   const meter = new TurnMeter({ bot: botId, trigger: jobs.find((j) => j.kind === "messages")?.kind ?? jobs[0]!.kind, friend: lane !== "main", waiting: waitingUser, since: Math.min(began, ...asked), tools: BOT_TOOLS }, began);
   meters.set(botId, meter);
   let outcome: TurnOutcome | undefined;
-  setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || deciding || undefined, deciding: deciding || undefined, since: Date.now() });
+  setStatus(botId, { state: "working", conversationId, activity: workingPhrase(), quiet: quiet || deciding || undefined, deciding: deciding || undefined, since: Date.now() });
   let mind: Mind | undefined;
   try {
     mind = await ensureMind(botId, lane);
@@ -890,13 +946,20 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.quiet = deciding ? "deciding" : quiet && "reaction";
     mind.aborting = undefined;
     mind.tool = undefined;
+    // Nothing of an earlier turn shows, and the status already says what this one starts on.
+    mind.live = newLive();
+    mind.activity = workingPhrase();
+    mind.said = saying(mind, mind.activity);
     mind.waitingUser = waitingUser;
+    mind.unread = 0;
+    mind.held = undefined;
     // A note, a check-in or a reaction: nobody asked, so only news is worth a message (routines were asked for).
     mind.background = jobs.every((j) => j.kind === "note" || j.kind === "heartbeat" || j.kind === "reaction");
     // The transcript is read now, so anything later is the next steer's or turn's to show.
     const shown = new Map<string, number>();
     for (const job of jobs) if (job.conversationId) shown.set(job.conversationId, db.latestSeq(job.conversationId));
     mind.shown = shown;
+    mind.starting = true;
     const delivered = readDeliveries(mind.sessionPath!);
     const candidates = new Set<string>();
     const rendered = render(jobs, botId, delivered, candidates);
@@ -928,7 +991,13 @@ async function runTurn(botId: string, all: Wake[]) {
       m.error = undefined;
       m.draft = "";
       m.typing = false;
-      m.activity = "Thinking";
+      // Each attempt starts with no step of its own; a later one says it's on another model until that one gets going.
+      m.live = newLive();
+      m.tool = undefined;
+      m.thread = undefined;
+      if (index) show(botId, m, "Trying another model");
+      else m.said = saying(m, (m.activity = workingPhrase()));
+      m.prompted = false;
       if (index) {
         // Between attempts nothing joins the turn, and every steer begun in the last one settles first:
         // one Pi took late would otherwise land in this attempt unrecorded.
@@ -963,7 +1032,10 @@ async function runTurn(botId: string, all: Wake[]) {
       if (halted.has(botId)) return void (unsent = true);
       m.steerable = true;
       // Pi refusing the prompt (no key for this model, say) ran nothing. One that went unanswered may still be running, so it isn't tried again.
-      const accepted = await promptSafely(m, { type: "prompt", message, ...(images.length ? { images } : {}) }).catch((err) => {
+      const sending = promptSafely(m, { type: "prompt", message, ...(images.length ? { images } : {}) });
+      // The prompt is on its way to Pi: what arrived since the transcript was read follows it in.
+      unhold(botId, m, true);
+      const accepted = await sending.catch((err) => {
         throw err instanceof PiTimeoutError || m.needsRecovery ? err : untouched(err);
       });
       if (halted.has(botId)) {
@@ -1050,7 +1122,13 @@ async function runTurn(botId: string, all: Wake[]) {
     if (mind) await release(botId, mind, key).catch((err) => console.error("[bots] couldn't release Pi:", err));
     halted.delete(botId);
     if (mind) {
+      // Never got as far as a prompt: what it held gets a turn of its own.
+      unhold(botId, mind, false);
+      mind.unread = 0;
       mind.tool = undefined;
+      mind.live = undefined;
+      mind.thread = undefined;
+      mind.said = undefined;
       mind.helperSaid = undefined;
       mind.waitingUser = false;
       mind.background = false;
@@ -1230,6 +1308,9 @@ export function render(jobs: Wake[], botId: string, delivered?: Set<string>, can
     }
     if (job.text && job.kind !== "messages") parts.push(job.text);
   }
+  // What it has running in the background rides with the prompt, like the clock: never in a friend's chat.
+  const here = jobs.find((j) => j.conversationId)?.conversationId;
+  if (laneOf(here) === "main") parts.push(jobBoard(botId, here));
   // The clock rides with each prompt: in the system prompt it would re-send the whole context every turn.
   parts.push(`The time is ${new Date().toString()}.`);
   // A reaction steered in says what to do with it itself (service.REACT_BACK).
@@ -1432,6 +1513,22 @@ function markSeen(botId: string, shown: Map<string, number>, assigned?: Set<stri
   }
 }
 
+/** The status line the bot wrote for the call it's inside, for the job that call may become. */
+export function toolLabel(botId: string, tool: string): string | undefined {
+  // Told apart by step, not by the newest tool alone: another call may be running beside it.
+  const step = minds.get(botId)?.live?.steps.findLast((s: Step) => s.state === "running" && s.tool === tool);
+  return step ? ownStatus((step.args as { status?: unknown } | undefined)?.status) : undefined;
+}
+
+/** A bot's job board changed. Between turns its status is the board's to say; a turn's, or an error, stays as it is. */
+export function jobsChanged(botId: string) {
+  const now = svc.getStatus(botId);
+  if (pumping.has(botId) || (now && !now.jobs)) return;
+  setStatus(botId, { state: "idle" });
+}
+
+export { waitedOn };
+
 /** What Pi still needs before bots can run on it: to be installed, then a provider with models. */
 export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
   if (!piBin()) return { need: "missing" };
@@ -1442,6 +1539,9 @@ export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
 export function startBots() {
   listen();
   svc.setHooks({ wake, stop, pendingAssignments, unseen, userWoke, halt, background });
+  setJobHooks({ waiting: waitedOn, label: toolLabel, changed: jobsChanged });
+  // Jobs that were running when the server last went down have no result coming: their bots are told.
+  recoverJobs();
   svc.setPiCheck(piSetup);
   // Pi installed, or a provider signed in: a welcome waiting on it can go ahead.
   hot.openbotsModelsWatch?.();

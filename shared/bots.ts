@@ -78,7 +78,10 @@ export interface ComputerConfig {
 
 export interface BotStatus {
   state: "idle" | "working" | "error";
-  /** What it's doing right now, as a short phrase ("browsing example.com"). */
+  /**
+   * What it's doing right now, as a short phrase: the live step ("Opening example.com", the status the
+   * bot wrote for a tool call, "Writing a reply"), or plain working words between steps (WORKING_PHRASES).
+   */
   activity?: string;
   /** The conversation it's working in. */
   conversationId?: string;
@@ -99,7 +102,33 @@ export interface BotStatus {
   error?: string;
   /** The error is the provider's (every fallback's, say): kept whole, but not for the chat to show. */
   provider?: boolean;
+  /**
+   * Between turns, with this many tool calls still running in the background: `activity` names what
+   * it's waiting on, in the conversation they were started from. It's free to take a message anywhere.
+   */
+  jobs?: number;
   since?: number;
+}
+
+/**
+ * What a working bot's status says while no step of its own is live: the model is working out what to
+ * do next, between a turn's start and its first step or from one step to the next. Plain working
+ * words, and never a bare "Thinking". The runner moves on to the next one each time a step ends, so
+ * the line changes the moment the step is over.
+ */
+export const WORKING_PHRASES = ["Working on it", "Getting it done", "Making progress", "Sorting it out", "Keeping at it"] as const;
+export const workingPhrase = (n = 0): string => WORKING_PHRASES[((Math.trunc(n) % WORKING_PHRASES.length) + WORKING_PHRASES.length) % WORKING_PHRASES.length]!;
+
+/** The status while a bot's words are on their way to the chat: text it's streaming, or a message it's sending. */
+export const WRITING_REPLY = "Writing a reply";
+
+/**
+ * The line a working bot's status shows. One with no activity, or the "Thinking" a paired device's
+ * older server still sends, reads as plain work.
+ */
+export function statusLine(status: Pick<BotStatus, "activity"> | undefined): string {
+  const activity = status?.activity?.trim();
+  return !activity || /^thinking(?:\.{3}|…)?$/i.test(activity) ? workingPhrase() : activity;
 }
 
 export type BotProjectScope = "all" | "choose" | "exclude";

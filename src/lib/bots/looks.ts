@@ -141,7 +141,7 @@ export const SHAPES: Shape[] = [
     id: "flower",
     label: "Flower",
     path: smooth(polar((t) => 33 + 8.5 * Math.cos(6 * t) + w(6, 1)(t), { n: 96, rotate: 4 })),
-    face: { x: 53, y: 49, gap: 13 },
+    face: { x: 53, y: 49, gap: 13, reach: 0.88 },
   },
   {
     id: "drop",
@@ -170,7 +170,7 @@ export const SHAPES: Shape[] = [
     id: "pebble",
     label: "Pebble",
     path: roundedPolygon(regular(3, 47, -24, 48, 54), 17),
-    face: { x: 54, y: 50, gap: 13, reach: 0.5 },
+    face: { x: 54, y: 50, gap: 13, reach: 0.42 },
   },
   {
     id: "gem",
@@ -247,8 +247,8 @@ export const COLOR_BY_ID = new Map(COLORS.map((c) => [c.id, c]));
 
 /** An expression a bot can hold or flash. */
 export type Mood = "idle" | "happy" | "thinking" | "sleepy" | "surprised" | "love" | "wink" | "squint";
-/** A one-off move. A stretch is waking up from a doze. */
-export type Action = "hop" | "spin" | "wiggle" | "squish" | "nod" | "stretch";
+/** A one-off move, always on the ground (never a hop). A stretch is waking up from a doze. */
+export type Action = "spin" | "wiggle" | "squish" | "nod" | "stretch";
 
 export interface BotLook {
   shape: string;
