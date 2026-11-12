@@ -2241,12 +2241,42 @@
   margin-bottom: 0;
 }
 
-/* The words are painted by the shimmer's moving gradient (styles.css, .shimmer), so they set no colour
-   of their own: one here would sit on top of the highlight and hide it. Each new status swaps in at
-   once, with no slide or fade from nothing: the step it names may only last a moment. */
+/* The live step, here and under the name in a phone's header: the words sit a step dimmer and a soft
+   band of full-strength text sweeps them left to right, then rests a beat. The sidebar's working
+   titles do the same (styles.css, .history-title-glow); this one runs a little faster. The gradient
+   paints the words, so they set no colour of their own: one would sit on top and hide the band. */
+.bm-working-text,
+.bots-head-sub.bots-head-sub-live {
+  background: linear-gradient(90deg, var(--bots-glow-rest) 40%, var(--text) 50%, var(--bots-glow-rest) 60%);
+  background-size: 300% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: bots-glow 1.5s infinite;
+}
+
+/* Each new status swaps in at once, with no slide or fade from nothing: the step it names may only
+   last a moment. */
 .bm-working-text {
+  --bots-glow-rest: var(--text-3);
   font-size: 14px;
-  animation: shimmer 1.6s linear infinite, bm-working-swap 110ms ease-out both;
+  animation: bots-glow 1.5s infinite, bm-working-swap 110ms ease-out both;
+}
+
+.bots-head-sub-live {
+  --bots-glow-rest: var(--text-2);
+}
+
+@keyframes bots-glow {
+  from {
+    background-position: 100% 0;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+  }
+  77%,
+  to {
+    background-position: 0% 0;
+  }
 }
 
 @keyframes bm-working-swap {
@@ -4207,6 +4237,7 @@ a.bots-btn.bots-btn-primary {
   .bm-typing i,
   .bm-working,
   .bm-working-text,
+  .bots-head-sub.bots-head-sub-live,
   .bots-row-typing,
   .bots-sidebar-inner,
   .bots-rail-inner,
