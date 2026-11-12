@@ -94,7 +94,8 @@ test('a busy group recipient is steered its request whether mentioned, replied t
     // Only the request itself: not the transcript, not the turn's own request or earlier steers.
     for (const other of ['START', 'MENTION', 'REPLY', 'FOLLOW', 'PRIMARY'].filter(t => !text.includes(t))) a.ok(!steer.message.includes(other), mode + ' leaked ' + other);
     a.ok(!steer.message.includes('[silent]'), mode);
-    a.match(steer.message, /otherwise carry on/);
+    // Its to answer: it shows the user it landed, once, and carries on.
+    a.ok(steer.message.endsWith('\\n' + runner.STEER_ACK), mode);
     a.deepEqual(steer.images, images, mode);
     await until(() => db.getMessage(message.id).message.seenBy?.includes(alpha.bot.id));
   }
@@ -109,6 +110,9 @@ test('a busy group recipient is steered its request whether mentioned, replied t
   }
   a.ok(lineFor(of(beta.bot)[0].message, 'FOLLOW')?.includes('[asked of several bots; Alpha answers it.'), of(beta.bot)[0].message);
   a.ok(lineFor(steersOf(beta.bot)[0].message, 'PRIMARY')?.includes('[asked of several bots; Alpha answers it.'), steersOf(beta.bot)[0].message);
+  // Alpha answers that one, so Beta isn't asked for an ack of its own.
+  a.ok(!steersOf(beta.bot)[0].message.includes(runner.STEER_ACK));
+  a.match(steersOf(beta.bot)[0].message, /otherwise carry on\\.$/);
   of(beta.bot)[0].finish('[silent]');
   of(alpha.bot)[0].finish('DONE');
   await until(() => !runner.busy(alpha.bot.id) && !runner.busy(beta.bot.id));

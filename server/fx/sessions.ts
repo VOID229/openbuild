@@ -12,6 +12,7 @@
 import { join } from "node:path";
 import type { Effort, PiChatRequest, StreamEvent, Usage } from "../../shared/types";
 import * as storage from "../storage";
+import { unsupportedSteer } from "../steerErrors";
 import { clip, contentOf, unified } from "../acpContent";
 import { AcpProcess, FxError, type AcpMessage } from "./acp";
 import { elicit, elicitationMethods, QUESTION_NOTE, type QuestionReply } from "./questions";
@@ -49,9 +50,9 @@ export const canSteer = (id: string) => !!live.get(id)?.steering?.accepting;
 export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
   const l = live.get(id), turn = l?.steering;
   if (!l || !turn?.accepting || l.proc.exited) throw new FxError("fx isn't working on this thread");
-  if (!l.supportsSteering) throw new FxError("This fx version does not advertise ACP steering; update fx first");
-  if (images?.length) throw new FxError("fx ACP steering supports text only; send images as a queued follow-up");
-  if (!message.trim() || new TextEncoder().encode(message).length > 65536) throw new FxError("fx steering requires nonempty text of at most 64 KiB");
+  if (!l.supportsSteering) throw unsupportedSteer(new FxError("This fx version does not advertise ACP steering; update fx first"));
+  if (images?.length) throw unsupportedSteer(new FxError("fx ACP steering supports text only; send images as a queued follow-up"));
+  if (!message.trim() || new TextEncoder().encode(message).length > 65536) throw unsupportedSteer(new FxError("fx steering requires nonempty text of at most 64 KiB"));
   const old = turn.items.get(steerId);
   if (old) { if (old.text !== message) throw new FxError("Steering ID was reused with different input"); return { handled: false }; }
   const item: FxSteer = { id: steerId, text: message, delivered: false };

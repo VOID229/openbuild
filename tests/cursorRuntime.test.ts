@@ -175,6 +175,7 @@ test("Cursor injects queued steering through a native tool hook and resumes with
   for (let i = 0; i < 300 && !canSteer(req.threadId); i++) await Bun.sleep(10);
   expect(canSteer(req.threadId)).toBe(true);
   await expect(steer(req.threadId,"image","image",[{data:"aA==",mimeType:"image/png"}])).rejects.toThrow("image attachments");
+  await expect(steer(req.threadId,"image","image",[{data:"aA==",mimeType:"image/png"}])).rejects.toMatchObject({code:"steer_unsupported"});
   await steer(req.threadId,"s1","new direction");
   await steer(req.threadId,"s2","also this");
   writeFileSync(vars.FAKE_RELEASE, "go");
