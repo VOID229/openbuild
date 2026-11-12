@@ -3,7 +3,8 @@
 // Every child gets tests/subprocess-preload.ts: Bun 1.3.8 can stall while it loads typebox's large
 // module graph asynchronously in a fresh eval process, and the stalled child then waits for bun:test
 // to SIGTERM it at the deadline (exit 143). stdout and stderr are both read while the child runs, so
-// a chatty child never blocks on a full pipe either.
+// a chatty child never blocks on a full pipe either. A child that ends that way logs how long it ran
+// and the tail of its stderr, to tell a stall from slow work.
 import { join } from "node:path";
 
 export const ROOT = join(import.meta.dir, "..");
@@ -32,21 +33,37 @@ function childEnv(env: Env | undefined, replace: boolean | undefined): Record<st
   );
 }
 
+/** Each child from startScript: its script, and when it started. */
+const launches = new WeakMap<object, { script: string; started: number }>();
+
+/** Diagnostic only: a child SIGTERMed (exit 143) says how long it ran and what it last wrote to stderr. */
+function reportTerminated(script: string, result: ScriptResult, started: number | undefined) {
+  if (result.code !== 143 && result.signal !== "SIGTERM") return;
+  const ran = started === undefined ? "unknown time" : `${((performance.now() - started) / 1000).toFixed(1)} s`;
+  const tail = result.stderr.trimEnd().split("\n").slice(-20).join("\n") || "(empty)";
+  console.error(`[spawnScript] child ended with exit 143 (SIGTERM) after ${ran}: ${script.trim().split("\n")[0]?.slice(0, 120)}\n--- stderr tail ---\n${tail}\n---`);
+}
+
 /** Starts the script with piped output; `env` adds to (or with `replaceEnv`, replaces) process.env. */
 export function startScript(script: string, env?: Env, options: ScriptOptions = {}) {
-  return Bun.spawn(scriptCommand(script), {
+  const child = Bun.spawn(scriptCommand(script), {
     cwd: options.cwd ?? ROOT,
     env: childEnv(env, options.replaceEnv),
     stdin: options.stdin ?? "ignore",
     stdout: "pipe",
     stderr: "pipe",
   });
+  launches.set(child, { script, started: performance.now() });
+  return child;
 }
 
 /** Waits for a child from startScript, draining stdout and stderr together. */
 export async function finished(child: ReturnType<typeof startScript>): Promise<ScriptResult> {
   const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
-  return { code, stdout, stderr, signal: child.signalCode };
+  const result = { code, stdout, stderr, signal: child.signalCode };
+  const launch = launches.get(child);
+  reportTerminated(launch?.script ?? "", result, launch?.started);
+  return result;
 }
 
 /** Runs the script to its end; `env` adds to (or with `replaceEnv`, replaces) process.env. */
@@ -56,11 +73,14 @@ export function spawnScript(script: string, env?: Env, options?: ScriptOptions):
 
 /** spawnScript, blocking. */
 export function spawnScriptSync(script: string, env?: Env, options: Omit<ScriptOptions, "stdin"> = {}): ScriptResult {
+  const started = performance.now();
   const child = Bun.spawnSync(scriptCommand(script), {
     cwd: options.cwd ?? ROOT,
     env: childEnv(env, options.replaceEnv),
     stdout: "pipe",
     stderr: "pipe",
   });
-  return { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString(), signal: child.signalCode ?? null };
+  const result = { code: child.exitCode, stdout: child.stdout.toString(), stderr: child.stderr.toString(), signal: child.signalCode ?? null };
+  reportTerminated(script, result, started);
+  return result;
 }
