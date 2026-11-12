@@ -10,8 +10,8 @@
 // how every still bot in the app is seen.
 //
 // The body is turned by the browser, in perspective. The face on it is worked out here and painted
-// flat inside the body's outline, which cuts it off: an eye that slides to the edge goes round it out
-// of sight, as it would on something round, rather than hanging off the side.
+// flat inside the body's outline. An eye never comes nearer its edge than MARGIN: where a turn would
+// take it nearer, it goes no further while the body turns on under it.
 import type { Shape } from "./looks";
 
 /** An open eye's size in the 100-unit box, before the shape's own scale: a tall pill. */
@@ -50,6 +50,53 @@ export const FAR = 0.12;
 export const SOFT = 0.3;
 /** How much of an eye, about its middle, has to stay on the body: its ends may slip under the edge. */
 export const CORE = 0.75;
+/**
+ * How near the body's edge an eye ever comes, in the 100-unit box: the same for every shape. Turned
+ * further, the eyes stop there and the body turns on under them, so the edge never cuts one.
+ */
+export const MARGIN = 4;
+
+/**
+ * Every form an eye is drawn in (bots.css), for keeping it off the edge: its width and height as
+ * multiples of an open eye's; how far its middle sits below where an open eye's does, in open-eye
+ * heights; how round its corners are, top and bottom, as a share of its width (a pill's are half: CSS
+ * rounds them no further than fits); and how far a doze lowers the whole face, in the 100-unit box.
+ */
+export interface Drawn {
+  w: number;
+  h: number;
+  drop?: number;
+  top?: number;
+  bottom?: number;
+  nap?: number;
+}
+export const DRAWN = {
+  ...(Object.fromEntries(Object.entries(FORMS).map(([k, [w, h]]) => [k, { w, h }])) as Record<EyeForm, Drawn>),
+  /** Pleased: a thick arch, lifted a little, its feet squarer. */
+  happy: { w: 1.36, h: 0.54, drop: -0.08, bottom: 0.22 },
+  sleepy: { w: 1.25, h: 0.15 },
+  /** In love: a heart, about as wide as tall, its lobes filling out its top corners, its point a little low. */
+  love: { w: 1.28, h: 0.58, drop: 0.04, top: 0.15 },
+  /** Dozing: shut to a dash a little below the middle, and the face drooped (.bot-nap). */
+  asleep: { w: 1.2, h: 0.16, drop: 0.08, nap: 5 },
+} satisfies Record<string, Drawn>;
+export type EyeLook = keyof typeof DRAWN;
+
+/**
+ * The form a bot's eyes are drawn in, as bots.css decides it: hearts in love, a dash dozing, and
+ * otherwise what the mood or the pose asks, the later rule in the sheet winning where both do.
+ */
+export function eyeLook(mood: string | undefined, eyes: EyeForm | undefined, asleep = false): EyeLook {
+  if (mood === "love") return "love";
+  if (asleep) return "asleep";
+  const asked = new Set<EyeLook>([eyes ?? "open"]);
+  if (mood === "happy" || mood === "wink") asked.add("happy");
+  if (mood === "sleepy") asked.add("sleepy");
+  if (mood === "surprised") asked.add("round");
+  if (mood === "squint" || mood === "thinking") asked.add("squint");
+  return (["happy", "sleepy", "big", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
+}
+
 
 /** Where a bot faces and how it carries itself: x and y from -1 to 1 (right and down), the rest optional. */
 export interface Pose {
@@ -189,6 +236,110 @@ function eyePoints(shape: Shape, form: EyeForm): Point[] {
       for (const fx of Math.abs(fy) > 0.35 ? [-0.14, 0, 0.14] : Math.abs(fy) > 0.25 ? [-0.3, 0, 0.3] : [-0.42, -0.21, 0, 0.21, 0.42]) out.push([cx + w * fw * fx * CORE, cy + h * fh * fy * CORE]);
   }
   return out;
+}
+
+/**
+ * The outline of an eye as drawn in a form, about the middle of an open eye in the face's own plane:
+ * round its four rounded corners in turn (the sides run between them), so it's a convex polygon.
+ */
+const outlines = new Map<string, Point[]>();
+function eyeOutline(shape: Shape, look: EyeLook) {
+  const key = `${shape.id} ${look}`;
+  let out = outlines.get(key);
+  if (out) return out;
+  const { w: ew, h: eh } = eyesOf(shape);
+  const d: Drawn = DRAWN[look];
+  const [w, h, cy] = [ew * d.w, eh * d.h, eh * (d.drop ?? 0)];
+  // CSS shrinks corners that don't fit, all by the same share.
+  let [rt, rb] = [w * (d.top ?? 0.5), w * (d.bottom ?? 0.5)];
+  const fit = Math.min(1, h / (rt + rb), w / (2 * rt), w / (2 * Math.max(rb, 1e-9)));
+  [rt, rb] = [rt * fit, rb * fit];
+  out = [];
+  for (const [sx, sy, r, from] of [[1, -1, rt, -90], [1, 1, rb, 0], [-1, 1, rb, 90], [-1, -1, rt, 180]] as const)
+    for (let i = 0; i <= 6; i++) {
+      const t = rad(from + i * 15);
+      out.push([sx * (w / 2 - r) + r * Math.cos(t), cy + sy * (h / 2 - r) + r * Math.sin(t)]);
+    }
+  outlines.set(key, out);
+  return out;
+}
+
+/** A shape's edge as points no more than half a unit apart, for how near an eye comes to it. */
+const edges = new Map<string, Point[]>();
+function edgeOf(shape: Shape) {
+  let edge = edges.get(shape.id);
+  if (edge) return edge;
+  edge = [];
+  for (const part of outline(shape.path))
+    for (let i = 0; i < part.length; i++) {
+      const [[x0, y0], [x1, y1]] = [part[i]!, part[(i + 1) % part.length]!];
+      const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 0.5));
+      for (let k = 0; k < n; k++) edge.push([x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n]);
+    }
+  edges.set(shape.id, edge);
+  return edge;
+}
+
+/** How far a point is from a convex polygon (clockwise, as drawn on screen), 0 inside it. */
+function apart(poly: Point[], [x, y]: Point): number {
+  let least = Infinity;
+  let outside = false;
+  for (let i = 0; i < poly.length; i++) {
+    const [[x0, y0], [x1, y1]] = [poly[i]!, poly[(i + 1) % poly.length]!];
+    const [ex, ey] = [x1 - x0, y1 - y0];
+    if (ex * (y - y0) - ey * (x - x0) < 0) outside = true;
+    const t = Math.max(0, Math.min(1, ((x - x0) * ex + (y - y0) * ey) / (ex * ex + ey * ey || 1)));
+    least = Math.min(least, Math.hypot(x - x0 - ex * t, y - y0 - ey * t));
+  }
+  return outside ? least : 0;
+}
+
+/**
+ * Where an eye lands with the head turned that far and the eyes leading by (lx, ly): its middle on the
+ * body, and how the face is stretched there (a 2×2 matrix, a b c d as in CSS). Some of the narrowing a
+ * turn would give it (SOFT), and a little smaller the further it's turned away (FAR).
+ */
+function eyeAt(shape: Shape, side: number, yaw: number, pitch: number, lx: number, ly: number) {
+  const at = projector(yaw, pitch);
+  const [x, y] = [shape.face.x + (side * eyesOf(shape).gap) / 2, shape.face.y];
+  const [px, py] = at(x + lx, y + ly);
+  const [ax, ay] = at(x + lx + 1, y + ly);
+  const [bx, by] = at(x + lx, y + ly + 1);
+  const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
+  const far = 1 - FAR * m * m;
+  return { x, y, px, py, a: (1 + (ax - px - 1) * SOFT) * far, b: (ay - py) * SOFT * far, c: (bx - px) * SOFT * far, d: (1 + (by - py - 1) * SOFT) * far };
+}
+
+/**
+ * Whether both eyes, drawn in that form with the head turned that far, are on the body with `margin`
+ * to spare all round: no point of its edge is nearer either eye than that.
+ */
+export function eyesFit(shape: Shape, look: EyeLook, yaw: number, pitch: number, lx = 0, ly = 0, margin = MARGIN): boolean {
+  const nap = (DRAWN[look] as Drawn).nap ?? 0;
+  const edge = edgeOf(shape);
+  for (const side of [-1, 1]) {
+    const { px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, lx, ly);
+    if (!covers(shape, px, py + nap)) return false;
+    const eye = eyeOutline(shape, look).map(([ex, ey]): Point => [px + a * ex + c * ey, py + nap + b * ex + d * ey]);
+    // Only the edge near it can be too near.
+    const xs = eye.map((p) => p[0]);
+    const ys = eye.map((p) => p[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs) - margin, Math.max(...xs) + margin, Math.min(...ys) - margin, Math.max(...ys) + margin];
+    for (const p of edge) if (p[0] > x0 && p[0] < x1 && p[1] > y0 && p[1] < y1 && apart(eye, p) < margin) return false;
+  }
+  return true;
+}
+
+/** How far inside the edge an eye is at its nearest, to a tenth of a unit (negative: over it). */
+export function clearance(shape: Shape, look: EyeLook, yaw: number, pitch: number, lx = 0, ly = 0): number {
+  let [lo, hi] = [-3, 30];
+  if (!eyesFit(shape, look, yaw, pitch, lx, ly, lo)) return lo;
+  while (hi - lo > 0.1) {
+    const mid = (lo + hi) / 2;
+    if (eyesFit(shape, look, yaw, pitch, lx, ly, mid)) lo = mid;
+    else hi = mid;
+  }
+  return lo;
 }
 
 const DIRECTIONS = 36;
@@ -401,16 +552,19 @@ const n = (v: number, digits = 2) => {
 };
 
 /**
- * A rig as what to draw, for a shape on an avatar `size` px across: the whole bot (rolled, leant and
- * zoomed, about its middle), the body (turned part of the way, in perspective), and each eye where
- * the head's turn puts it on that body: slid across, narrowed a little, and smaller the further it has
- * turned away (FAR). The
- * eyes are worked out here (a flat transform each, `project` at the eye and how it stretches there)
- * rather than turned by the browser, so the body stays one layer with the face painted on it.
- * Straight ahead everything is "none". `back` is true while a turn right round shows the body's back,
- * the face out of sight.
+ * A rig as what to draw, for a shape on an avatar `size` px across, its eyes drawn in `look`: the
+ * whole bot (rolled, leant and zoomed, about its middle), the body (turned part of the way, in
+ * perspective), and each eye where the head's turn puts it on that body: slid across, narrowed a
+ * little, and smaller the further it has turned away (FAR). The eyes are worked out here (a flat
+ * transform each, `project` at the eye and how it stretches there) rather than turned by the browser,
+ * so the body stays one layer with the face painted on it. Straight ahead everything is "none".
+ * `back` is true while a turn right round shows the body's back, the face out of sight.
+ *
+ * The eyes never go nearer the edge than MARGIN: where the head's turn, a swing past, the eyes darting
+ * ahead or a nod would take them nearer, they go only as far along as they still fit, the body
+ * turning on under them. Anywhere else this draws them just as it always has.
  */
-export function frame(rig: Rig, shape: Shape, size: number): { whole: string; body: string; left: string; right: string; back: boolean } {
+export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "open"): { whole: string; body: string; left: string; right: string; back: boolean } {
   const u = size / 100;
   const rest = restOf(shape);
   // Leaning into a turn from where it rests, and settling a little to look down: never lifting to look up.
@@ -421,21 +575,24 @@ export function frame(rig: Rig, shape: Shape, size: number): { whole: string; bo
   const by = rig.bodyYaw.x * BODY_TURN + rig.spin;
   const bp = rig.bodyPitch.x * BODY_TURN;
   const body = by || bp ? `perspective(${n(PERSPECTIVE * u, 1)}px) rotateX(${n(-bp)}deg) rotateY(${n(by)}deg)` : "none";
-  const [yaw, pitch, lx, ly] = [rig.yaw.x, rig.pitch.x, rig.leadX.x, rig.leadY.x];
+  let [yaw, pitch, lx, ly] = [rig.yaw.x, rig.pitch.x, rig.leadX.x, rig.leadY.x];
   const facing = ((by % 360) + 360) % 360;
   const back = facing > 90 && facing < 270;
+  if (!eyesFit(shape, look, yaw, pitch, lx, ly)) {
+    // As far along toward where it is as they fit (nearer straight ahead, where they always do).
+    let [lo, hi] = [0, 1];
+    for (let i = 0; i < 7; i++) {
+      const mid = (lo + hi) / 2;
+      if (eyesFit(shape, look, yaw * mid, pitch * mid, lx * mid, ly * mid)) lo = mid;
+      else hi = mid;
+    }
+    [yaw, pitch, lx, ly] = [yaw * lo, pitch * lo, lx * lo, ly * lo];
+  }
   if (!yaw && !pitch && !lx && !ly) return { whole, body, left: "none", right: "none", back };
-  const at = projector(yaw, pitch);
   const eye = (side: number) => {
-    const [x, y] = [shape.face.x + (side * eyesOf(shape).gap) / 2, shape.face.y];
     // Where its middle lands (the eyes' lead is a slide within the face), and how the face is stretched there.
-    const [px, py] = at(x + lx, y + ly);
-    const [ax, ay] = at(x + lx + 1, y + ly);
-    const [bx, by2] = at(x + lx, y + ly + 1);
-    // Some of the narrowing a turn would give it (SOFT), and a little smaller the further it's turned away.
-    const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
-    const far = 1 - FAR * m * m;
-    return `matrix(${n((1 + (ax - px - 1) * SOFT) * far, 4)}, ${n((ay - py) * SOFT * far, 4)}, ${n((bx - px) * SOFT * far, 4)}, ${n((1 + (by2 - py - 1) * SOFT) * far, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
+    const { x, y, px, py, a, b, c, d } = eyeAt(shape, side, yaw, pitch, lx, ly);
+    return `matrix(${n(a, 4)}, ${n(b, 4)}, ${n(c, 4)}, ${n(d, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
   };
   return { whole, body, left: eye(-1), right: eye(1), back };
 }

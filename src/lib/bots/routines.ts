@@ -21,7 +21,7 @@ const BEATS: { weight: number; steps: () => Step[] }[] = [
   { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.8, 1), y: rand(-0.4, 0.35), roll: s * rand(12, 22) }, rand(700, 1200)], [AHEAD, rand(300, 520)]]; } },
   // Up and away at something, wide-eyed, the head thrown right back over the other shoulder.
   { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.6, 0.8), y: rand(-0.9, -0.7), roll: -s * rand(22, 30), eyes: "wide" }, rand(800, 1300)], [AHEAD, rand(320, 480)]]; } },
-  // Following something along the bottom, eyes wide and half under the edge, rolling over as it goes.
+  // Following something along the bottom, eyes wide and low on the face, rolling over as it goes.
   { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.75, y: 0.85, roll: -s * rand(16, 22), eyes: "wide" }, rand(600, 800)], [{ x: 0, y: 1, roll: -s * 4, eyes: "wide" }, rand(420, 560)], [{ x: s * 0.7, y: 0.85, roll: s * 6, eyes: "wide" }, rand(600, 800)], [AHEAD, 360]]; } },
   // Working it out: eyes narrowed to dashes, looking up a little, swaying slowly from side to side.
   { weight: 2, steps: () => { const s = side(); return [[{ x: -s * 0.1, y: -0.45, roll: -s * 12, eyes: "squint" }, rand(700, 900)], [{ x: s * 0.15, y: -0.4, roll: s * 14, eyes: "squint" }, rand(800, 1000)], [{ x: 0, y: -0.4, roll: 0, eyes: "squint" }, 420], [AHEAD, 320]]; } },

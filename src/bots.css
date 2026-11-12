@@ -47,8 +47,8 @@
   height: 100%;
 }
 
-/* The face is drawn on the body and cut off at its outline (.bot-skin), so an eye that slides to the
-   edge goes round it out of sight. */
+/* The face is drawn on the body and cut to its outline (.bot-skin). The eyes are kept off its edge
+   (MARGIN in lib/bots/rig.ts), so the cut never shows. */
 .bot-skin,
 .bot-nap {
   position: absolute;
@@ -3570,14 +3570,10 @@ button.bots-details-avatar:hover {
   height: 52px;
 }
 
+/* Smaller, drawn smaller as a whole: a bot's insides are laid out for the size it was given (the eyes'
+   size and place, how it turns), so squeezing its box would leave its eyes too big and over the edge. */
 .bots-look-editor .bots-shape .bot {
-  width: 34px !important;
-  height: 34px !important;
-}
-
-.bots-look-editor .bots-shape svg {
-  width: 34px;
-  height: 34px;
+  zoom: 0.85;
 }
 
 .bots-look-editor .bots-colors {
@@ -4262,10 +4258,8 @@ a.bots-btn.bots-btn-primary {
     height: 44px;
   }
 
-  .bots-dialog .bots-shape .bot,
-  .bots-dialog .bots-shape svg {
-    width: 34px !important;
-    height: 34px !important;
+  .bots-dialog .bots-shape .bot {
+    zoom: 0.85;
   }
 
   .bots-dialog .bots-colors {
@@ -4322,10 +4316,8 @@ a.bots-btn.bots-btn-primary {
     height: 40px;
   }
 
-  .bots-dialog .bots-shape .bot,
-  .bots-dialog .bots-shape svg {
-    width: 30px !important;
-    height: 30px !important;
+  .bots-dialog .bots-shape .bot {
+    zoom: 0.75;
   }
 
   .bots-dialog .bots-colors {

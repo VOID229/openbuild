@@ -5,7 +5,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { AHEAD, aimTarget, BODY_TURN, covers, EYE_H, EYE_W, eyesFor, eyesOf, FAR, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -372,3 +372,117 @@ test("a full turn takes the eyes well over, but keeps them off the body's edge",
     expect(rim).toBeGreaterThan(w);
   }
 });
+
+/**
+ * Whether a frame's eyes keep `need` clear of the rim, worked out afresh from what it draws: each eye's
+ * outline in that form (a stadium, as bots.css draws a pill; the boxier ones only reach further into
+ * its corners), put through the eye's matrix, and the body's own polygon there and further out. What's
+ * returned is what's too near.
+ */
+function tooNear(shape: (typeof SHAPES)[number], f: ReturnType<typeof frame>, look: EyeLook, need: number): string[] {
+  const body = outline(shape.path);
+  const { w: ew, h: eh, gap } = eyesOf(shape);
+  const d: Drawn = DRAWN[look];
+  const [w, h, drop] = [ew * d.w, eh * d.h, eh * (d.drop ?? 0)];
+  const r = Math.min(w, h) / 2;
+  const out: string[] = [];
+  for (const [side, t] of [[-1, f.left], [1, f.right]] as const) {
+    const [a, b, c, dd, e, ff] = t === "none" ? [1, 0, 0, 1, 0, 0] : t.slice(7, -1).split(", ").map(Number);
+    const [cx, cy] = [shape.face.x + (side * gap) / 2 + e!, shape.face.y + ff! + (d.nap ?? 0)];
+    for (let i = 0; i < 32; i++) {
+      // Round the stadium: along a straight side or round an end, and straight out from it there.
+      const s = (i / 32) * 2 * (w + h - 4 * r + Math.PI * r);
+      const sides = [h - 2 * r, Math.PI * r, h - 2 * r, Math.PI * r];
+      let [k, rest] = [0, s / 2];
+      while (rest > sides[k]! && k < 3) rest -= sides[k++]!;
+      const [px, py, nx, ny] =
+        k === 0 ? [w / 2, -h / 2 + r + rest, 1, 0]
+        : k === 2 ? [-w / 2, h / 2 - r - rest, -1, 0]
+        : (() => { const th = rest / r + (k === 1 ? 0 : Math.PI); const [ux, uy] = [Math.cos(th), Math.sin(th)]; return [(w / 2 - r) * Math.sign(ux || 1) * (Math.abs(ux) > 1e-9 ? 1 : 0) + r * ux, (k === 1 ? h / 2 - r : -(h / 2 - r)) + r * uy, ux, uy]; })();
+      for (const sign of [1, -1]) {
+        const [qx, qy] = [px, sign * py];
+        const [x, y] = [cx + a! * qx + c! * (qy + drop), cy + b! * qx + dd! * (qy + drop)];
+        // Out from the outline: the normal goes by the inverse transpose of the matrix.
+        const [mx, my] = [dd! * nx - b! * ny * sign, -c! * nx + a! * ny * sign];
+        const m = Math.hypot(mx, my);
+        // (Half a unit short of it: where the rig puts an eye only just in, it's right on the line.)
+        if ([0, need / 2, need - 0.5].some((k) => !inside(body, x + (mx / m) * k, y + (my / m) * k))) out.push(`${side} ${i}`);
+      }
+    }
+  }
+  return out;
+}
+
+const LOOKS = Object.keys(DRAWN) as EyeLook[];
+
+test("at rest, in any face it pulls, no shape's eyes come near the rim", () => {
+  const near: string[] = [];
+  for (const shape of SHAPES)
+    for (const look of ["open", "round", "squint", "happy", "sleepy", "love", "asleep"] as const) {
+      const f = frame(newRig(restOf(shape)), shape, 100, look);
+      if (tooNear(shape, f, look, MARGIN).length) near.push(`${shape.id} ${look}`);
+    }
+  expect(near).toEqual([]);
+});
+
+test("the guard only steps in where an eye would come near the rim: elsewhere a bot is drawn just as it was", () => {
+  // Most shapes rest with their eyes well clear, and are drawn there exactly as the turn puts them.
+  const untouched = SHAPES.filter((s) => {
+    const f = restFrame(s, 100);
+    const [, , , , x] = f.left.slice(7, -1).split(", ").map(Number);
+    return Math.abs(x! - (project(s.face.x - eyesOf(s).gap / 2, s.face.y, restOf(s).yaw, restOf(s).pitch)[0] - (s.face.x - eyesOf(s).gap / 2))) < 0.01;
+  });
+  expect(untouched.length).toBeGreaterThanOrEqual(11);
+  // And a turn only part of the way, nowhere near the edge, is the same with any face.
+  const rig = newRig(to(10, -5));
+  for (const shape of SHAPES) expect(frame(rig, shape, 100, "happy")).toEqual(frame(rig, shape, 100, "open"));
+});
+
+test("however it turns, swings past, nods or darts its eyes, no eye ever comes near the rim", () => {
+  const near = new Set<string>();
+  const check = (shape: (typeof SHAPES)[number], rig: Rig, look: EyeLook, what: string) => {
+    if (tooNear(shape, frame(rig, shape, 100, look), look, MARGIN).length) near.add(`${shape.id} ${look} ${what}`);
+  };
+  for (const shape of SHAPES)
+    for (const look of LOOKS) {
+      // Held anywhere, a fifth past a full turn each way, the eyes leading as far as they can either way.
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        for (const lead of [0, 1]) {
+          const rig = newRig(to(Math.cos(a) * YAW * 1.2, Math.sin(a) * PITCH * 1.2));
+          rig.leadX.x = Math.cos(a) * 4.5 * lead;
+          rig.leadY.x = Math.sin(a) * 4.5 * lead;
+          check(shape, rig, look, `held ${i} lead ${lead}`);
+        }
+      }
+    }
+  // On the move, frame by frame: looking hard over every way (springs swinging past, the eyes ahead),
+  // and a nod on top of it.
+  for (const shape of SHAPES)
+    for (const look of ["open", "big", "happy", "love"] as const)
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const rig = newRig(restOf(shape));
+        const target = poseTarget(shape, { x: Math.cos(a), y: Math.sin(a) }, look === "big");
+        for (let f = 0; f < 80; f++) {
+          if (f === 20) nod(rig);
+          step(rig, target, 1000 / 60, "pose");
+          if (f % 4 === 1) check(shape, rig, look, `turning ${i} frame ${f}`);
+        }
+      }
+  expect([...near]).toEqual([]);
+}, 60_000);
+
+test("the eyes' form for the edge is the one bots.css draws: hearts, a doze, then the later rule", () => {
+  expect(eyeLook("love", "big")).toBe("love");
+  expect(eyeLook("idle", undefined, true)).toBe("asleep");
+  expect(eyeLook("idle", undefined)).toBe("open");
+  expect(eyeLook("idle", "wide")).toBe("wide");
+  expect(eyeLook("thinking", undefined)).toBe("squint");
+  // The big eyes of a bot at work come after a squint in the sheet, and a pleased face after them.
+  expect(eyeLook("thinking", "big")).toBe("big");
+  expect(eyeLook("happy", "big")).toBe("happy");
+  expect(eyeLook("wink", undefined)).toBe("happy");
+  expect(eyeLook("surprised", "squint")).toBe("squint");
+});
+
