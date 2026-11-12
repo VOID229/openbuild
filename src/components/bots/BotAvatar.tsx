@@ -162,6 +162,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   }, [waiting]);
   // The dots: "in" while it's turned into them, "out" for the moment it takes to come back.
   const want = stayDots || brief;
+  const staying = useRef(stayDots);
+  staying.current = stayDots;
   const [dots, setDots] = useState<"in" | "out">();
   const dotsNow = useRef(dots);
   dotsNow.current = dots;
@@ -281,13 +283,17 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // none of it: just the breathing, in CSS.
   useEffect(() => {
     const el = ref.current;
-    // Three dots for a while: nothing of it shows, so nothing of it moves until it's back.
-    if (!(alive || busy) || dozing || stayDots || !el || calm()) return;
+    if (!(alive || busy) || dozing || !el || calm()) return;
     let timer: ReturnType<typeof setTimeout>;
     let steps: Step[] = [];
     const next = () => {
       if (offScreen(el)) {
         timer = setTimeout(next, 2000);
+        return;
+      }
+      // Three dots for a while: nothing of it shows, so nothing of it moves until it's back.
+      if (staying.current) {
+        timer = setTimeout(next, 300);
         return;
       }
       if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : [[null, rand(800, 2600)], ...nextIdle(lively, track)];
@@ -305,7 +311,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, track, dozing, stayDots]);
+  }, [alive, busy, lively, track, dozing]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
