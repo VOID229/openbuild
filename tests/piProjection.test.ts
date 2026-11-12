@@ -35,6 +35,10 @@ test("worker replay repairs offline output, completion and stale saves without r
       const signed = projectReply({...message,steerSenders:{s1:sender}},{...steering,status:'finished',endedAt:20});
       a.equal(signed.parts[0].sentBy,'manager'); a.equal(signed.steerSenders,undefined);
       a.equal(projectReply({...signed,status:'streaming',parts:[{type:'steer',id:'s1',text:'look'}]},{...steering,status:'finished',endedAt:20},signed).parts[0].sentByBot,'bot-1');
+      // The worker's log names the bot itself: a tab's save without the reply's record keeps it.
+      const named = {...steering,events:[{t:'steer',id:'s1',text:'look',...sender}]};
+      a.deepEqual(projectReply(message,named).parts[0],{type:'steer',id:'s1',text:'look',...sender});
+      a.deepEqual(projectReply({...message,status:'done',parts:[{type:'steer',id:'s1',text:'look'}]},{...named,status:'finished',endedAt:20}).parts[0],{type:'steer',id:'s1',text:'look',...sender});
       const pending = projectReply(message,snapshot);
       a.equal(pending.status,'streaming'); a.equal(pending.parts.at(-1).answer,undefined);
       a.equal(pending.parts[2].output,'/work'); a.equal(pending.parts[2].args.command,'pwd');

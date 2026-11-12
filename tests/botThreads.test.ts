@@ -897,6 +897,8 @@ test("what a harness won't take is queued, and sent as the next turn, one a turn
   expect(wakes.at(-1).text).toMatch(/1 more wait/);
   const chat = storage.getChat(threadId) as any;
   expect(chat.messages.filter((m: any) => m.role === "user").map((m: any) => m.content)).toEqual(["Go", "First"]);
+  // A queued message is the bot's, as its first was.
+  expect(chat.messages.at(-2)).toMatchObject({ content: "First", sentBy: "Juniper", sentByBot: bot.id });
 
   await endTurn(threadId);
   expect(admitted.length).toBe(3);
@@ -956,11 +958,13 @@ for (const harness of HARNESSES) {
     // What the composer's Steer sends: the profile-wrapped prompt, and what the user sees as display.
     const { withProfileContext } = await import("../src/lib/profile");
     expect(steers.length).toBe(1);
-    const [steeredThread, steerId, message, images, display] = steers[0];
+    const [steeredThread, steerId, message, images, display, sender] = steers[0];
     expect(steeredThread).toBe(threadId);
     expect(message).toBe(withProfileContext("Also check the tests", profile));
     expect(images).toBeUndefined();
     expect(display).toBe("Also check the tests");
+    // Its steer event names the bot, so the thread labels it as it's read, not after a reload.
+    expect(sender).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
     const reply = (storage.getChat(threadId) as any).messages.at(-1);
     expect(reply.steerSenders[steerId]).toEqual({ sentBy: "Juniper", sentByBot: bot.id });
     expect(svc.conversationView(svc.directId(bot.id)!)!.messages.at(-1)?.event).toMatchObject({ text: "Wrote a prompt in", threadId });
@@ -986,6 +990,8 @@ for (const harness of HARNESSES) {
     const note = wakes.at(-1).text;
     expect(note).toContain("finished its turn");
     expect(note).toContain("hadn't been read by its agent when that turn ended, so it went in as its next turn");
+    // Labeled as the bot's, as the steer would have been.
+    expect((storage.getChat(threadId) as any).messages.at(-2)).toMatchObject({ role: "user", content: "One more thing", sentBy: "Juniper", sentByBot: bot.id });
     // The next turn ends with nothing left over.
     await endTurn(threadId);
     expect(admitted.length).toBe(2);

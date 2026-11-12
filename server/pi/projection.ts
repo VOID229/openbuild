@@ -68,7 +68,8 @@ export function projectReply(message: Message, snapshot: PiSnapshot, previous?: 
       case "steer": {
         // The log has no files, and a tab that replayed it may have saved the steer without them.
         const attachments = steerFiles(message, event.id) ?? steerFiles(previous, event.id);
-        const sender = steerSender(message, event.id) ?? steerSender(previous, event.id);
+        // The event names the bot that sent it; logs from before that, the reply's own record.
+        const sender = (event.sentBy ? { sentBy: event.sentBy, ...(event.sentByBot ? { sentByBot: event.sentByBot } : {}) } : undefined) ?? steerSender(message, event.id) ?? steerSender(previous, event.id);
         // Logs from before steers carried their display text still hold the model's prompt.
         parts.push({ type: "steer", id: event.id, text: userVisiblePrompt(event.text), ...(attachments ? { attachments } : {}), ...sender });
         break;

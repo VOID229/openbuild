@@ -195,6 +195,19 @@ export interface WorkspaceEntry {
   dir: boolean;
 }
 
+/** The bot that sent a message (its name as shown, and its id), as a thread labels it "Sent by". */
+export interface BotSender {
+  sentBy: string;
+  sentByBot?: string;
+}
+
+/** A sender as it crosses a process boundary: just its two fields, or none. */
+export const botSender = (value: unknown): BotSender | undefined => {
+  const v = value as Partial<BotSender> | null | undefined;
+  if (typeof v?.sentBy !== "string" || !v.sentBy || v.sentBy.length > 200) return undefined;
+  return { sentBy: v.sentBy, ...(typeof v.sentByBot === "string" && v.sentByBot.length <= 200 ? { sentByBot: v.sentByBot } : {}) };
+};
+
 export interface WireMessage {
   role: "user" | "assistant";
   content: string;
@@ -684,8 +697,8 @@ export type StreamEvent =
   | { t: "ask"; id: string; method: "select" | "confirm" | "input" | "editor"; title: string; message?: string; options?: string[]; placeholder?: string; prefill?: string; other?: boolean; secret?: boolean; /** The agent's own ask-the-user tool. Anything else (a permission prompt, an extension's dialog) leaves this unset. */ question?: boolean }
   /** That question was answered (or cancelled, or timed out). */
   | { t: "asked"; id: string; answer?: string }
-  /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). */
-  | { t: "steer"; id?: string; text: string }
+  /** Pi read a message steered into the running turn (`id` as given when it was sent, if known). A bot's carries its name and id, as its user messages do. */
+  | { t: "steer"; id?: string; text: string; sentBy?: string; sentByBot?: string }
   /** Tokens and cost so far, after each of the reply's model requests. */
   | { t: "usage"; usage: Usage }
   | { t: "done"; finish?: string; usage?: Usage }

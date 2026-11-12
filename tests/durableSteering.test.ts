@@ -37,8 +37,10 @@ test("Durable shows what the user wrote for a steer while the model reads the fu
  try {
   const run=await runtime.startRun(request);
   await runtime.steer(request.threadId,"s1","[private context]\n\nnew direction",undefined,"new direction");
+  // A bot's steer names the bot on its event.
+  await runtime.steer(request.threadId,"s2","[private context]\n\nfrom a bot",undefined,"from a bot",{sentBy:"Dr Eggbot",sentByBot:"bot-1"});
   await until(()=>run.ended);
-  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"s1",text:"new direction"}]);
+  expect(run.events.filter(e=>e.t==="steer")).toEqual([{t:"steer",id:"s1",text:"new direction"},{t:"steer",id:"s2",text:"from a bot",sentBy:"Dr Eggbot",sentByBot:"bot-1"}]);
   expect(JSON.stringify(fake.inputs().at(-1))).toContain("[private context]");
  } finally {await runtime.close();rmSync(directory,{recursive:true,force:true});}
 });

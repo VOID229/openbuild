@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { readEvents } from "../../shared/replies";
-import type { PiChatRequest, ShellEvent, StreamEvent } from "../../shared/types";
+import type { BotSender, PiChatRequest, ShellEvent, StreamEvent } from "../../shared/types";
 import { outputTail } from "../../shared/shell";
 import { Run } from "../runs";
 import * as sessions from "./sessions";
@@ -57,6 +57,8 @@ export class PiWorkerRuntime {
   private threads = new Set<string>();
   /** What the user wrote for steers awaiting delivery. Runtimes echo the model's prompt, which must not reach the log. */
   private steerDisplays = new Map<string, string>();
+  /** The bot that sent each steer awaiting delivery, for its steer event: harnesses only echo the text. */
+  private steerSenders = new Map<string, BotSender>();
   private shellTails = new Map<string, ShellEvent[]>();
   constructor(readonly directory: string) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -225,7 +227,12 @@ export class PiWorkerRuntime {
         if (event.t === "end") continue;
         if (event.t === "steer") {
           event.text = (event.id && this.steerDisplays.get(event.id)) ?? userVisiblePrompt(event.text);
-          if (event.id) this.steerDisplays.delete(event.id);
+          const sender = event.id ? this.steerSenders.get(event.id) : undefined;
+          if (sender) Object.assign(event, sender);
+          if (event.id) {
+            this.steerDisplays.delete(event.id);
+            this.steerSenders.delete(event.id);
+          }
         }
         if (html) html.push(event); else run.push(event);
         if (event.t === "error") status = "error";
@@ -262,14 +269,19 @@ export class PiWorkerRuntime {
   answer(threadId: string, askId: string, reply: Parameters<typeof sessions.answer>[2]) {
     return hermes.hasAsk(threadId, askId) ? hermes.answer(threadId, askId, reply) : grok.hasAsk(threadId, askId) ? grok.answer(threadId, askId, reply) : cursor.hasAsk(threadId, askId) ? cursor.answer(threadId, askId, reply) : opencode.hasAsk(threadId, askId) ? opencode.answer(threadId, askId, reply) : claude.hasAsk(threadId, askId) ? claude.answer(threadId, askId, reply) : codex.hasAsk(threadId, askId) ? codex.answer(threadId, askId, reply) : fx.hasAsk(threadId, askId) ? fx.answer(threadId, askId, reply) : sessions.answer(threadId, askId, reply);
   }
-  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string) {
+  async steer(threadId: string, steerId: string, message: string, images?: PiChatRequest["images"], display?: string, sender?: BotSender) {
     if (display !== undefined) this.steerDisplays.set(steerId, display);
+    if (sender) this.steerSenders.set(steerId, sender);
+    const forget = () => {
+      this.steerDisplays.delete(steerId);
+      this.steerSenders.delete(steerId);
+    };
     try {
       const result = await this.deliverSteer(threadId, steerId, message, images);
-      if (result.handled) this.steerDisplays.delete(steerId);
+      if (result.handled) forget();
       return result;
     } catch (error) {
-      this.steerDisplays.delete(steerId);
+      forget();
       throw error;
     }
   }

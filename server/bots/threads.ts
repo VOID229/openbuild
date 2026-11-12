@@ -10,7 +10,7 @@ import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, type Bot, 
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { REMOTE_CONTROL, remoteControlPerThread } from "../../shared/remoteControl";
 import { readEvents } from "../../shared/replies";
-import { EFFORTS, isSpeedId, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime, type RuntimeAccount } from "../../shared/types";
+import { EFFORTS, isSpeedId, type BotSender, type Effort, type ModelInfo, type PermissionModes, type PiChatRequest, type PlanId, type StreamEvent, type ThreadRuntime, type RuntimeAccount } from "../../shared/types";
 import { withProfileContext } from "../../src/lib/profile";
 import type { Chat, Message, Profile } from "../../src/lib/types";
 import * as claudeInstall from "../claude/install";
@@ -815,6 +815,9 @@ const listedModelId = (chat: Chat, id: string) =>
 const permissionOf = (chat: Pick<Chat, "runtime" | "permission" | "cursorAllowAllTools">) =>
   isPermissionHarness(chat.runtime) ? (chat.permission ?? (chat.runtime === "cursor" && chat.cursorAllowAllTools ? "force" : undefined)) : undefined;
 
+/** A bot as a thread labels what it sent: "Sent by" its name. */
+const senderOf = (botId: string): BotSender => ({ sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId });
+
 /** Forwarded images as the thread shows them on a message. */
 const attachmentsOf = (images: NonNullable<PiChatRequest["images"]>) =>
   images.map((image) => ({ id: crypto.randomUUID(), name: "Image", mime: image.mimeType, dataUrl: `data:${image.mimeType};base64,${image.data}`, size: Buffer.from(image.data, "base64").length }));
@@ -823,7 +826,7 @@ const attachmentsOf = (images: NonNullable<PiChatRequest["images"]>) =>
 async function startTurn(botId: string, base: Chat, text: string, model: { id: string; name: string; effort: Effort; speed?: string }, images: NonNullable<PiChatRequest["images"]> = [], permission?: string): Promise<void> {
   const now = Date.now();
   const stream = { id: crypto.randomUUID(), via: serverId() };
-  const user: Message = { id: crypto.randomUUID(), role: "user", content: text, ...(images.length ? { attachments: attachmentsOf(images) } : {}), createdAt: now, sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId };
+  const user: Message = { id: crypto.randomUUID(), role: "user", content: text, ...(images.length ? { attachments: attachmentsOf(images) } : {}), createdAt: now, ...senderOf(botId) };
   const assistant: Message = { id: crypto.randomUUID(), role: "assistant", content: "", status: "streaming", model: { plan: (base.runtime ?? "pi") as PlanId, id: accountModelId(base, model.id), name: model.name, effort: model.effort, speed: model.speed }, stream, createdAt: now, startedAt: now };
   // A new mode is the thread's from this turn on, as the composer saves it.
   const chat: Chat = { ...base, ...(permission ? { permission, cursorAllowAllTools: undefined } : {}), updatedAt: now, archived: false, done: false, messages: [...base.messages, user, assistant] };
@@ -904,10 +907,9 @@ async function start(botId: string, p: Record<string, unknown>) {
  * The worker's log only has a steer's text: saved on the reply, its sender and images survive a
  * reload, as the composer saves a steer's files.
  */
-function noteSteer(threadId: string, streamId: string, steerId: string, botId: string, images: NonNullable<PiChatRequest["images"]>) {
+function noteSteer(threadId: string, streamId: string, steerId: string, sender: BotSender, images: NonNullable<PiChatRequest["images"]>) {
   const chat = storage.getChat(threadId) as Chat | undefined;
   if (!chat?.messages.some((m) => m.stream?.id === streamId)) return;
-  const sender = { sentBy: mentionName(db.getBot(botId)?.name ?? "A bot"), sentByBot: botId };
   storage.putChat({ ...chat, messages: chat.messages.map((m) => (m.stream?.id === streamId ? { ...m, steerSenders: { ...m.steerSenders, [steerId]: sender }, ...(images.length ? { steerFiles: { ...m.steerFiles, [steerId]: attachmentsOf(images) } } : {}) } : m)) } as never);
 }
 
@@ -925,12 +927,12 @@ type SteerAttempt = { steered: true; handled: boolean } | { steered: false; reas
  * is still running and its harness may yet take it; not when it never can (unsupported) or the turn
  * is over.
  */
-async function steerRunning(chat: Chat, runId: string, steerId: string, message: string, images: NonNullable<PiChatRequest["images"]>, display: string): Promise<SteerAttempt> {
+async function steerRunning(chat: Chat, runId: string, steerId: string, message: string, images: NonNullable<PiChatRequest["images"]>, display: string, sender: BotSender): Promise<SteerAttempt> {
   const harness = chat.runtime ?? "pi";
   const deadline = Date.now() + steerRetry.ms;
   for (;;) {
     try {
-      const { handled } = await steerThread(chat.id, steerId, message, images.length ? images : undefined, display);
+      const { handled } = await steerThread(chat.id, steerId, message, images.length ? images : undefined, display, sender);
       return { steered: true, handled: !!handled };
     } catch (err) {
       const why = (err as Error).message;
@@ -1056,12 +1058,14 @@ async function deliver(botId: string, p: Record<string, unknown>) {
       const chat = (await refresh(found.id)) ?? found;
       const profile = appSettings().profile;
       const steerId = crypto.randomUUID();
-      noteSteer(chat.id, run.id, steerId, botId, images);
+      // Who sent it, on the reply and on its steer event, so the thread labels it live and after a reload.
+      const sender = senderOf(botId);
+      noteSteer(chat.id, run.id, steerId, sender, images);
       // Tracked before it's handed over, so the turn's end can't miss it.
       saveSteered([...steeredList(), { id: steerId, botId, threadId: chat.id, runId: run.id, text, ...(images.length ? { images } : {}), steeredAt: Date.now() }]);
       handing.add(steerId);
       const untrack = () => saveSteered(steeredList().filter((s) => s.id !== steerId));
-      attempt = await steerRunning(chat, run.id, steerId, profile ? withProfileContext(text, profile) : text, images, text).catch((err) => {
+      attempt = await steerRunning(chat, run.id, steerId, profile ? withProfileContext(text, profile) : text, images, text, sender).catch((err) => {
         untrack();
         throw err;
       }).finally(() => handing.delete(steerId));
