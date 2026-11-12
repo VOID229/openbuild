@@ -2511,45 +2511,17 @@
   }
 }
 
-/* Writing a message: three small dots hopping through a quick, even wave. Bare dots, no bubble:
-   they start at the bubbles' edge, like an emoji-only message, and keep a bubble's height. */
+/* Writing a message: "Typing…" in the small working text, breathing gently, the same as the sidebar's
+   preview while a bot types. Bare words, no bubble: they start at the bubbles' edge and keep a
+   bubble's height, so the reply takes their place without the chat moving. */
 .bm-typing {
   display: flex;
   align-items: center;
-  gap: 4px;
   height: 34px;
   padding: 0 2px;
-}
-
-.bm-typing i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-2);
-  opacity: 0.3;
-  animation: bm-dot 1.2s var(--ease) infinite;
-}
-
-/* Negative delays: the wave is already moving on mount, no dot waits frozen for its first beat. */
-.bm-typing i:nth-child(1) {
-  animation-delay: -0.28s;
-}
-
-.bm-typing i:nth-child(2) {
-  animation-delay: -0.14s;
-}
-
-@keyframes bm-dot {
-  0%,
-  60%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.3;
-  }
-  30% {
-    transform: translateY(-2px);
-    opacity: 0.9;
-  }
+  font-size: 14px;
+  color: var(--text-2);
+  animation: bots-typing-text 1.4s ease-in-out infinite;
 }
 
 .bm-jump {
@@ -4465,7 +4437,7 @@ a.bots-btn.bots-btn-primary {
   .bm-recv,
   .bm-reaction,
   .bm-reaction-arrow,
-  .bm-typing i,
+  .bm-typing,
   .bm-working,
   .bm-working-text,
   .bots-head-sub.bots-head-sub-live,

@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
 import openbots from "../server/bots/extension";
 import { activityFor, COMPACTING, follow, liveActivity, newLive, partialArgs, RETRYING, type Live } from "../server/bots/steps";
 import type { PiRecord } from "../server/pi/rpc";
-import { statusLine, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
+import { statusLine, TYPING, WORKING_PHRASES, workingPhrase, WRITING_REPLY } from "../shared/bots";
 import { holdingLine, liveLine, workingLine } from "../src/lib/bots/activity";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
 
@@ -180,7 +180,7 @@ test("a half-written call gives up only the arguments that are complete, and onl
   expect(activityFor("bash", { status: "x".repeat(80) }).length).toBe(50);
 });
 
-test("the app shows one line everywhere: the live step, Writing a reply, or plain work, never Thinking", () => {
+test("the app shows one line everywhere: the live step, Typing…, or plain work, never Thinking", () => {
   const solo = { id: "solo", kind: "direct", botIds: ["egg"] } as Conversation;
   const working = (activity?: string, more: Partial<BotStatus> = {}): Record<string, BotStatus> => ({ egg: { state: "working", conversationId: "solo", activity, ...more } });
   // The chat's working row.
@@ -194,8 +194,8 @@ test("the app shows one line everywhere: the live step, Writing a reply, or plai
   // The header's line under the name.
   expect(liveLine(solo, working("Watching CI on #115"), [])).toBe("Watching CI on #115");
   expect(liveLine(solo, working("Thinking"), undefined)).toBe("Working on it");
-  expect(liveLine(solo, working("Watching CI on #115"), ["egg"])).toBe(WRITING_REPLY);
-  expect(liveLine(solo, {}, ["egg"])).toBe(WRITING_REPLY);
+  expect(liveLine(solo, working("Watching CI on #115"), ["egg"])).toBe("Typing…");
+  expect(liveLine(solo, {}, ["egg"])).toBe(TYPING);
   // Quiet work and work a group bot hasn't decided on say nothing; nor does an idle bot.
   expect(liveLine(solo, working("Making a note", { quiet: true }), [])).toBeUndefined();
   expect(liveLine(solo, working("Reading notes.md", { deciding: true }), [])).toBeUndefined();

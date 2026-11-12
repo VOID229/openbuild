@@ -4,7 +4,7 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import { statusLine, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
+import { statusLine, TYPING, WORKING_PHRASES } from "../../../shared/bots";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -55,7 +55,7 @@ export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, sta
 }
 
 /**
- * The bots with a working line in the chat: at work on it, not typing (the dots show that), and not
+ * The bots with a working line in the chat: at work on it, not typing ("Typing…" shows that), and not
  * quiet. Quiet work (a reaction it may let be, tidying up after a reply) only animates the mascot.
  */
 export function showWorking(conversationId: string, status: Statuses, typing: string[]): string[] {
@@ -82,11 +82,11 @@ export function workingLine(conversationId: string, botId: string, st: BotStatus
 
 /**
  * What a chat's bots are up to right now, in one line: under its name in the header. One of them
- * writing here says so, then the live step of one at work here, then one holding on. Undefined when
+ * typing here says so, then the live step of one at work here, then one holding on. Undefined when
  * there's nothing to say: quiet work shows only in the mascot.
  */
 export function liveLine(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: string[] | undefined): string | undefined {
-  if (typing?.length) return WRITING_REPLY;
+  if (typing?.length) return TYPING;
   const working = conversation.botIds.find((id) => workingHere(status[id], conversation.id) && !status[id]!.quiet);
   if (working) return statusLine(status[working]);
   const held = conversation.botIds.find((id) => holding(status[id], conversation.id));

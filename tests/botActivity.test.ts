@@ -32,7 +32,7 @@ test("quiet work in the solo chat animates its mascot everywhere, with no workin
 test("loud work, typing and holding on count as busy, and only holding says so from elsewhere", () => {
   expect(busyBots(solo, { egg: { state: "working", conversationId: "solo" } }, {})).toEqual(["egg"]);
   expect(showWorking("solo", { egg: { state: "working", conversationId: "solo" } }, [])).toEqual(["egg"]);
-  // Typing: the dots show it, not a working line.
+  // Typing: "Typing…" shows it, not a working line.
   expect(busyBots(solo, {}, { solo: ["egg"] })).toEqual(["egg"]);
   expect(showWorking("solo", { egg: { state: "working", conversationId: "solo" } }, ["egg"])).toEqual([]);
   // Finishing in the group with the solo chat's message next in line: the holding line, not "busy in".

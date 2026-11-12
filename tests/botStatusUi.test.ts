@@ -88,10 +88,13 @@ test("the chat's working row shows each step as its status arrives, and nothing 
     expect(document.querySelectorAll(".bm-working-text").length).toBe(1);
     expect(document.querySelector(".bm-working-text")).not.toBe(before);
   }
-  // Writing: the dots take over from the row.
+  // Writing: "Typing…" takes over from the row, in words where the dots used to be.
   await typing(true);
   expect(row()).toBeUndefined();
-  expect(document.querySelector(".bm-typing")).not.toBeNull();
+  const indicator = document.querySelector(".bm-typing")!;
+  expect(indicator.textContent).toBe("Typing…");
+  expect(indicator.getAttribute("aria-label")).toBe("Scout is typing");
+  expect(indicator.children.length).toBe(0);
   await typing(false);
   // Quiet work (after a message went out) shows no row, and an idle bot none either.
   await working("Sorting it out", { quiet: true });
@@ -114,7 +117,7 @@ test("a status with no line, or an older server's Thinking, reads as plain work:
   expect(document.body.textContent).not.toMatch(/thinking/i);
 });
 
-test("on a phone the header's line under the name is the live step, and Writing a reply while it types", async () => {
+test("on a phone the header's line under the name is the live step, and Typing… while it types", async () => {
   phone = true;
   await show();
   // Nothing going on: no live line (a direct chat has no member list to show either).
@@ -127,7 +130,7 @@ test("on a phone the header's line under the name is the live step, and Writing 
   // The same words as the chat's row beneath it.
   expect(row()).toBe("Watching CI on #115");
   await typing(true);
-  expect(head()).toBe("Writing a reply");
+  expect(head()).toBe("Typing…");
   await typing(false);
   expect(head()).toBe("Watching CI on #115");
   await working("Getting it done");
@@ -137,12 +140,12 @@ test("on a phone the header's line under the name is the live step, and Writing 
   expect(document.body.textContent).not.toMatch(/thinking|typing…/i);
 });
 
-test("the sidebar's preview says Writing a reply while a bot writes, then goes back to the last message", async () => {
+test("the sidebar's preview says Typing… while a bot types, then goes back to the last message", async () => {
   await show(BotsSidebar);
   const preview = () => document.querySelector(".bots-row-preview")!;
   expect(preview().textContent).toBe("You: check the build");
   await typing(true);
-  expect(preview().textContent).toBe("Writing a reply");
+  expect(preview().textContent).toBe("Typing…");
   expect(preview().classList.contains("bots-row-typing")).toBe(true);
   await typing(false);
   expect(preview().textContent).toBe("You: check the build");

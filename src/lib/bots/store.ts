@@ -106,7 +106,7 @@ interface BotsState {
 
   /** Bots typing right now, by conversation. */
   typing: Record<string, string[]>;
-  /** Text a bot is still writing, shown in place of the typing dots. */
+  /** Text a bot is still writing, shown in place of "Typing…". */
   drafts: LiveDraft[];
   /** The last reaction each bot was asked to show (BotAvatar's `pulse`). */
   pulses: Record<string, { key: number; mood?: Mood }>;
