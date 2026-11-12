@@ -4,7 +4,8 @@
 //
 // The thirteen outlines are traced: each is a list of radii from the middle of the box, evenly spaced
 // clockwise from the top, folded by the shape's own symmetry (a flower is one half-petal, twelve
-// times) and joined into one smooth closed curve. They all cover the same area, so no bot looks
+// times) and joined into one smooth closed curve. The square and the triangle are drawn rounder than
+// their tracings, to sit with the rest. They all cover the same area, so no bot looks
 // bigger than another, and each sits by the middle of its bounding box.
 
 export interface Face {
@@ -72,8 +73,8 @@ export const SHAPES: Shape[] = [
   {
     id: "square",
     label: "Square",
-    // A square with soft corners.
-    path: traced([31.9, 31.9, 32.1, 32.5, 33, 33.7, 34.5, 35.5, 36.8, 38.3, 40.2, 41.7, 42.3], 4),
+    // A square with round corners and a little give in its sides (a squircle), softer than traced.
+    path: traced([32.9, 33, 33.2, 33.5, 34, 34.6, 35.4, 36.2, 37, 37.8, 38.5, 39, 39.1], 4),
     face: { x: 50, y: 53.6, gap: 16.8 },
   },
   {
@@ -121,8 +122,8 @@ export const SHAPES: Shape[] = [
   {
     id: "wedge",
     label: "Wedge",
-    // A triangle with soft corners, wide at the base.
-    path: traced([36, 35.7, 35.3, 34.5, 33.5, 32.5, 31.5, 30.4, 29.5, 28.7, 28, 27.2, 26.7, 26.2, 26, 25.8, 25.7, 25.8, 25.9, 26.3, 26.7, 27.2, 28, 28.7, 29.8, 31, 32.4, 34.3, 36.4, 39.1, 42.1, 45.1, 47.8, 49.6, 50.5, 50, 48.8, 47.1, 45, 43.3, 41.6, 40.2, 39, 38, 37.3, 36.7, 36.3, 36.1, 36]),
+    // A triangle with round corners and gently curved sides, wide at the base: the traced one softened.
+    path: traced([34.7, 34.7, 34.4, 34, 33.6, 33, 32.3, 31.6, 30.9, 30.3, 29.7, 29.1, 28.7, 28.3, 28.1, 27.9, 27.9, 28.1, 28.4, 28.8, 29.4, 30.1, 31.1, 32.2, 33.5, 35, 36.6, 38.3, 40, 41.7, 43.1, 44.3, 45.1, 45.5, 45.5, 45.1, 44.3, 43.3, 42.1, 40.9, 39.7, 38.6, 37.6, 36.7, 36, 35.4, 35, 34.7, 34.7]),
     face: { x: 50, y: 57.2, gap: 19, scale: 1.06 },
   },
   {
