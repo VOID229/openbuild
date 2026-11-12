@@ -4,7 +4,8 @@
 // it. Left alone it breathes, stares straight out, blinks and looks around; at work it's brisk,
 // rocking, peering and leaning in. It can follow the pointer, turning and leaning toward it; a held
 // mood (thinking while typing, happy at a reaction) changes its eyes, and in a group the ones not at
-// work doze, a "zzz" floating up over them. Nothing ever hops, and nothing spins of its own accord.
+// work doze, a "zzz" floating up over them. Starting on something, before there's a step to show, it
+// turns into three dots for a moment and back. Nothing ever hops, and nothing spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
 import { aimTarget, atRest, eyesOf, frame, newRig, nod, poseTarget, REST, snap, step, type Pose } from "../../lib/bots/rig";
@@ -60,6 +61,11 @@ function offScreen(el: Element) {
   return !r.width || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
 }
 
+/** The longest a bot stays three dots, and how long it takes to come back from them, ms (see .bot-dots). */
+const DOTS_MAX = 2400;
+const DOTS_OUT = 300;
+/** How long a bot looks pleased after a reaction or finishing something, ms. */
+const PLEASED = 5200;
 /** How long a turn right round takes, ms. */
 const SPIN = 720;
 const easeInOut = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -104,13 +110,18 @@ export interface BotAvatarProps {
   asleep?: boolean;
   /** A little "zzz" floats up while it dozes. Only the sidebars turn it on: beside chat messages the shut eyes say enough. */
   zzz?: boolean;
+  /**
+   * Starting on something, with nothing to show of it yet: the body gathers into three dots, a wave
+   * running along them, and comes back as itself when there is (or after DOTS_MAX at the latest).
+   */
+  waiting?: boolean;
   /** Change it to make the bot react once: a swell and a happy face, or the given mood and move. */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
   className?: string;
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = false, waiting = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const shape = shapeOf(look);
   const color = colorOf(look);
@@ -133,6 +144,21 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     timers.current.add(t);
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
+
+  // The dots: "in" while it's turned into them, "out" for the moment it takes to come back.
+  const [dots, setDots] = useState<"in" | "out">();
+  useEffect(() => {
+    if (!waiting) return;
+    setDots("in");
+    const leave = () => {
+      clearTimeout(limit);
+      setDots((cur) => (cur === "in" ? "out" : cur));
+      setTimeout(() => setDots((cur) => (cur === "out" ? undefined : cur)), DOTS_OUT);
+    };
+    const limit = setTimeout(leave, DOTS_MAX);
+    // The way back plays out on its own: `back` is left to run.
+    return leave;
+  }, [waiting]);
 
   const shown = flash ?? mood;
   const dozing = !!asleep && !busy;
@@ -275,8 +301,9 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   useLayoutEffect(() => {
     if (pulseKey === undefined || pulseKey === lastPulse.current) return;
     lastPulse.current = pulseKey;
-    doAction(pulse?.action ?? "pop");
-    doFlash(pulse?.mood ?? "happy", 1300);
+    doAction(pulse?.action ?? "jelly");
+    // Pleased with itself, it stays that way a good while: the face of a bot that's done.
+    doFlash(pulse?.mood ?? "happy", pulse?.mood ? 1300 : PLEASED);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pulseKey]);
 
@@ -299,10 +326,11 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-busy={busy || undefined}
       data-asleep={sleeping ? "" : undefined}
       data-eyes={flash ? undefined : pose?.eyes}
+      data-dots={dots}
       role={label ? "img" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={{ width: size, height: size, "--u": `${size / 100}px`, "--bob-delay": delay, ...(blink ? { "--blink": `${blink}ms` } : {}) } as React.CSSProperties}
+      style={{ width: size, height: size, "--u": `${size / 100}px`, "--bot-color": color.hex, "--bob-delay": delay, ...(blink ? { "--blink": `${blink}ms` } : {}) } as React.CSSProperties}
       onPointerEnter={playful ? () => { doAction("nod"); doFlash("happy", 1100); } : undefined}
       onPointerDown={playful ? () => doAction("spin") : undefined}
       onAnimationEnd={(e) => {
@@ -337,6 +365,13 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
           </span>
         </span>
       </span>
+      {dots && (
+        <span className="bot-dots">
+          <i />
+          <i />
+          <i />
+        </span>
+      )}
       {asleep !== undefined && zzz && <Zzz size={size} />}
     </span>
   );

@@ -18,15 +18,21 @@ const BEATS: { weight: number; steps: () => Step[] }[] = [
   // A wide stare straight out, rocking from side to side as it works.
   { weight: 4, steps: () => { const s = side(); return [[{ x: 0, y: -0.04, roll: s * 10, eyes: "wide" }, rand(520, 760)], [{ x: 0, y: -0.04, roll: -s * 10, eyes: "wide" }, rand(520, 760)], [{ x: 0, y: 0, roll: s * 5, eyes: "wide" }, 420], [AHEAD, 280]]; } },
   // A hard look off to one side, the whole body rolling into it, and back.
-  { weight: 4, steps: () => { const s = side(); return [[{ x: s * rand(0.8, 1), y: rand(-0.4, 0.35), roll: s * rand(12, 22) }, rand(700, 1200)], [AHEAD, rand(300, 520)]]; } },
+  { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.8, 1), y: rand(-0.4, 0.35), roll: s * rand(12, 22) }, rand(700, 1200)], [AHEAD, rand(300, 520)]]; } },
+  // Up and away at something, wide-eyed, the head thrown right back over the other shoulder.
+  { weight: 3, steps: () => { const s = side(); return [[{ x: s * rand(0.6, 0.8), y: rand(-0.9, -0.7), roll: -s * rand(22, 30), eyes: "wide" }, rand(800, 1300)], [AHEAD, rand(320, 480)]]; } },
+  // Following something along the bottom, eyes wide and half under the edge, rolling over as it goes.
+  { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.75, y: 0.85, roll: -s * rand(16, 22), eyes: "wide" }, rand(600, 800)], [{ x: 0, y: 1, roll: -s * 4, eyes: "wide" }, rand(420, 560)], [{ x: s * 0.7, y: 0.85, roll: s * 6, eyes: "wide" }, rand(600, 800)], [AHEAD, 360]]; } },
+  // Working it out: eyes narrowed to dashes, looking up a little, swaying slowly from side to side.
+  { weight: 2, steps: () => { const s = side(); return [[{ x: -s * 0.1, y: -0.45, roll: -s * 12, eyes: "squint" }, rand(700, 900)], [{ x: s * 0.15, y: -0.4, roll: s * 14, eyes: "squint" }, rand(800, 1000)], [{ x: 0, y: -0.4, roll: 0, eyes: "squint" }, 420], [AHEAD, 320]]; } },
   // Reading: eyes narrowed, scanning along a line and the next, the head going with them.
   { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.9, y: 0.3, eyes: "squint" }, 400], [{ x: -s * 0.3, y: 0.32, eyes: "squint" }, 280], [{ x: s * 0.35, y: 0.32, eyes: "squint" }, 280], [{ x: s * 0.95, y: 0.36, eyes: "squint" }, 460], [AHEAD, 340]]; } },
   // Pondering: up and away, head cocked the other way, eyes narrowed.
   { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.7, y: -0.9, roll: -s * 13, eyes: "squint" }, rand(900, 1400)], ["blink", 260], [AHEAD, 340]]; } },
   // Curious: rolled right over to one side, eyes wide.
   { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.3, y: 0.05, roll: s * rand(26, 38), eyes: "wide" }, rand(800, 1300)], ["blink", 260], [AHEAD, 380]]; } },
-  // Leaning back from it for a better look, eyes gone round.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.45, y: 0.3, roll: s * 6, zoom: -0.14, eyes: "round" }, rand(900, 1400)], [{ x: -s * 0.4, y: 0.25, roll: -s * 6, zoom: -0.14, eyes: "round" }, rand(500, 800)], [AHEAD, 380]]; } },
+  // Leaning back from it a touch for a better look, eyes gone round.
+  { weight: 1, steps: () => { const s = side(); return [[{ x: s * 0.45, y: 0.3, roll: s * 6, zoom: -0.06, eyes: "round" }, rand(900, 1400)], [{ x: -s * 0.4, y: 0.25, roll: -s * 6, zoom: -0.06, eyes: "round" }, rand(500, 800)], [AHEAD, 380]]; } },
   // Peering at something low, then eyes wide at what it found.
   { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.4, y: 0.95, eyes: "squint" }, rand(800, 1200)], [{ x: s * 0.4, y: 0.9, zoom: 0.06, eyes: "wide" }, 460], [AHEAD, 340]]; } },
   // Leaning right in, wide-eyed and close.
@@ -58,7 +64,9 @@ const IDLE: { weight: number; looks?: true; lively?: true; steps: () => Step[] }
   // A stare: straight out, leaning in a touch, eyes wider, held without a blink.
   { weight: 3, looks: true, steps: () => [[{ x: 0, y: -0.05, zoom: 0.035, eyes: "wide" }, rand(1600, 3000)], [AHEAD, 200]] },
   // A look off somewhere, the whole body turning and leaning into it, and back.
-  { weight: 4, looks: true, steps: () => [[{ x: side() * rand(0.55, 1), y: rand(-0.6, 0.45) }, rand(800, 1600)], [AHEAD, 300]] },
+  { weight: 3, looks: true, steps: () => [[{ x: side() * rand(0.55, 1), y: rand(-0.6, 0.45) }, rand(800, 1600)], [AHEAD, 300]] },
+  // A long look up and away, the head rolled right back, held as if lost in it.
+  { weight: 2, looks: true, steps: () => { const s = side(); return [[{ x: s * rand(0.55, 0.8), y: rand(-0.85, -0.6), roll: -s * rand(18, 28) }, rand(1800, 3200)], [AHEAD, 340]]; } },
   // Looking around: a few looks this way and that, then straight out again.
   {
     weight: 3,
@@ -82,5 +90,5 @@ export function nextIdle(lively: boolean, tracking = false): Step[] {
   return open[0]!.steps();
 }
 
-/** Thinking (while typing): looking up and off to one side, head cocked. */
-export const THINKING: Pose = { x: 0.55, y: -0.8, roll: 8 };
+/** Thinking (while typing): looking up a little, head cocked, its eyes narrowed to dashes (in CSS). */
+export const THINKING: Pose = { x: 0.12, y: -0.5, roll: -10 };

@@ -168,7 +168,7 @@ export const SHAPES: Shape[] = [
     id: "pebble",
     label: "Pebble",
     path: roundedPolygon(regular(3, 47, -24, 48, 54), 17),
-    face: { x: 54, y: 50, gap: 13 },
+    face: { x: 54, y: 50, gap: 13, scale: 0.86 },
   },
   {
     id: "gem",
@@ -181,7 +181,7 @@ export const SHAPES: Shape[] = [
     label: "Burst",
     // A wobbly splat: eight soft points of uneven length.
     path: smooth(polar((t) => 31 + 9 * Math.cos(7 * t) + 2.5 * Math.sin(3 * t + 1) + w(8, 1)(t), { n: 112, rotate: -6 })),
-    face: { x: 52, y: 50, gap: 13 },
+    face: { x: 52, y: 50, gap: 13, scale: 0.86 },
   },
   {
     id: "jelly",
@@ -245,8 +245,8 @@ export const COLOR_BY_ID = new Map(COLORS.map((c) => [c.id, c]));
 
 /** An expression a bot can hold or flash. */
 export type Mood = "idle" | "happy" | "thinking" | "sleepy" | "surprised" | "love" | "wink" | "squint";
-/** A one-off move, always in place (never a hop): a turn right round, a rock from side to side, a swell, a nod. A stretch is waking up from a doze. */
-export type Action = "spin" | "wiggle" | "pop" | "nod" | "stretch";
+/** A one-off move, always in place (never a hop): a turn right round, a rock from side to side, a swell, a nod. A stretch is waking up from a doze, and a jelly is the wobble of a bot that's pleased: squashed wide, then tall, then settled. */
+export type Action = "spin" | "wiggle" | "pop" | "nod" | "stretch" | "jelly";
 
 export interface BotLook {
   shape: string;

@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { busyBots, elsewhere, showWorking } from "../src/lib/bots/activity";
+import { busyBots, elsewhere, showWorking, starting, STARTING_MS } from "../src/lib/bots/activity";
 import { useBots } from "../src/lib/bots/store";
 import { ConversationAvatar } from "../src/components/bots/common";
 import type { BotStatus, Conversation } from "../src/lib/bots/types";
@@ -50,4 +50,23 @@ test("a busy solo avatar fidgets, an idle one doesn't", () => {
   const render = (busy: boolean) => renderToStaticMarkup(createElement(ConversationAvatar, { conversation: solo, size: 26, busy, badge: false }));
   expect(render(true)).toContain("data-busy");
   expect(render(false)).not.toContain("data-busy");
+});
+
+test("a bot has just started for a moment: working, in the open, with no step to name yet", () => {
+  const now = 1_000_000;
+  const fresh: BotStatus = { state: "working", conversationId: "solo", activity: "Working on it", since: now - 200 };
+  expect(starting(fresh, now)).toBe(true);
+  expect(starting({ ...fresh, activity: undefined }, now)).toBe(true);
+  // A step to show, and the moment is over; so it is after a while with none.
+  expect(starting({ ...fresh, activity: "Reading a file" }, now)).toBe(false);
+  expect(starting(fresh, now + STARTING_MS)).toBe(false);
+  // Plain working words between later steps aren't a start.
+  expect(starting({ ...fresh, activity: "Making progress", since: now - 60_000 }, now)).toBe(false);
+  // Quiet work, deciding whether a message is its to answer, and no work at all never are.
+  expect(starting({ ...fresh, quiet: true }, now)).toBe(false);
+  expect(starting({ ...fresh, deciding: true }, now)).toBe(false);
+  expect(starting({ state: "idle" }, now)).toBe(false);
+  expect(starting(undefined, now)).toBe(false);
+  // This device's clock behind the server's: a start that looks ahead of now is still a start.
+  expect(starting({ ...fresh, since: now + 900 }, now)).toBe(true);
 });

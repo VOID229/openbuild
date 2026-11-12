@@ -35,13 +35,13 @@ const item = (kind: "tile" | "row", title: string) =>
 
 /**
  * In the page: how a bot stands, read off what its layers were given (null while it has nothing on
- * it). The head's turn is read from how far an eye has slid across the body (it stands 30 units off
- * it, drawn at 0.885 of its size).
+ * it). The head's turn is read from how far an eye has slid across the body (it stands 32 units off
+ * it, drawn at 0.877 of its size).
  */
 const STANCE = `((b) => {
   const of = (cls, re) => { const t = b.querySelector(cls).style.transform; return t === '' ? null : Number((re.exec(t) ?? [0, 0])[1]); };
   const slid = /matrix\\(([^)]+)\\)/.exec(b.querySelector('.bot-eye').style.transform)?.[1].split(',').map(Number);
-  const unit = b.getBoundingClientRect().width / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 26.5))) * 180 / Math.PI;
+  const unit = b.getBoundingClientRect().width / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 28.06))) * 180 / Math.PI;
   return { yaw: slid ? turn(slid[4]) : null, pitch: slid ? turn(slid[5]) : null, bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), lean: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/) };
 })`;
 
@@ -77,8 +77,8 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       await pointAt(page, find, "far", 12);
       await until(page, find, `tracking && yaw > ${YAW * 0.65}`);
       const right = (await mascots(page, find))[0]!;
-      // (Read off the nearer eye, which slides a little further than the head turns.)
-      expect(right.yaw!).toBeLessThan(YAW * 1.5);
+      // (Read off the nearer eye, which slides further than the head turns: the eyes sit well apart.)
+      expect(right.yaw!).toBeLessThan(YAW * 1.65);
       expect(right.pitch!).toBeGreaterThan(0);
       expect(right.pitch!).toBeLessThan(right.yaw! / 3);
       // No hop and no smile on the way in.

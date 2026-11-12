@@ -11,32 +11,38 @@
 import type { Shape } from "./looks";
 
 /** An open eye's size in the 100-unit box, before the shape's own scale: tall and deep. */
-export const EYE_W = 10;
-export const EYE_H = 23.4;
+export const EYE_W = 13;
+export const EYE_H = 27;
 /** The eyes lean with the body's resting pose. */
-export const EYE_TILT = -9;
+export const EYE_TILT = -4;
 
 /** The eyes' forms a pose can ask for, as multiples of an open eye's width and height. */
 export const FORMS = {
   open: [1, 1],
-  /** A stare: fatter and a little taller. */
-  wide: [1.26, 1.1],
+  /** A stare: a good deal fatter and a little taller, the eyes of a bot paying attention. */
+  wide: [1.2, 1.1],
   /** Startled, or peering at something far off: big and round. */
-  round: [1.36, 0.8],
-  /** Narrowed to a slit. */
-  squint: [1.2, 0.22],
+  round: [1.3, 0.8],
+  /** Narrowed to a dash, longer than an open eye is wide. */
+  squint: [1.3, 0.24],
 } as const satisfies Record<string, readonly [number, number]>;
 export type EyeForm = keyof typeof FORMS;
 
 /** How far the head turns at most, in degrees: side to side, and up or down. */
-export const YAW = 44;
-export const PITCH = 36;
+export const YAW = 46;
+export const PITCH = 42;
 /** How far the face stands off the body, in the 100-unit box: what makes it slide as the head turns. */
-export const DEPTH = 30;
+export const DEPTH = 32;
 /** The viewer's distance, in the same units: nearer would exaggerate the perspective. */
 export const PERSPECTIVE = 260;
 /** How much of the head's turn the body takes: it's one solid thing, but a soft one. */
 export const BODY_TURN = 0.42;
+/** How much smaller the eyes are at a full turn: turned away, the face is further off. */
+export const FAR = 0.24;
+/** How much of the turn's narrowing an eye takes: half, so it stays a pill at the edge and not a sliver. */
+export const SOFT = 0.5;
+/** How much of an eye, about its middle, has to stay on the body: its ends may slip under the edge. */
+export const CORE = 0.75;
 
 /** Where a bot faces and how it carries itself: x and y from -1 to 1 (right and down), the rest optional. */
 export interface Pose {
@@ -154,12 +160,13 @@ export function project(x: number, y: number, yaw: number, pitch: number): Point
 /** The eyes of a shape, as drawn: how big, and how far apart. */
 export function eyesOf(shape: Shape) {
   const scale = shape.face.scale ?? 1;
-  return { w: EYE_W * scale, h: EYE_H * scale, gap: shape.face.gap * 1.14 };
+  // Far enough apart that two wide eyes never touch, on a shape drawn with them close together too.
+  return { w: EYE_W * scale, h: EYE_H * scale, gap: Math.max(shape.face.gap * 1.3, EYE_W * scale * 1.5) };
 }
 
 /**
- * The points of both eyes that have to stay on the body, in the face's own plane: all but the very
- * ends of each. Swinging past where it's headed, an eye slips under the body's edge, which cuts it off.
+ * The points of both eyes that have to stay on the body, in the face's own plane: the middle of each
+ * (CORE of it). Looking hard over, the rest of an eye slips under the body's edge, which cuts it off.
  */
 function eyePoints(shape: Shape, form: EyeForm): Point[] {
   const { w, h, gap } = eyesOf(shape);
@@ -171,7 +178,7 @@ function eyePoints(shape: Shape, form: EyeForm): Point[] {
     // All over it: a lobed or spiky shape's notches reach in between a few points.
     for (const fy of [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
       for (const fx of Math.abs(fy) > 0.35 ? [-0.14, 0, 0.14] : Math.abs(fy) > 0.25 ? [-0.3, 0, 0.3] : [-0.42, -0.21, 0, 0.21, 0.42]) {
-        const [dx, dy] = [w * fw * fx, h * fh * fy];
+        const [dx, dy] = [w * fw * fx * CORE, h * fh * fy * CORE];
         out.push([cx + dx * c - dy * s, cy + dx * s + dy * c]);
       }
   }
@@ -362,7 +369,8 @@ const n = (v: number, digits = 2) => {
 /**
  * A rig as what to draw, for a shape on an avatar `size` px across: the whole bot (rolled, leant and
  * zoomed, about its middle), the body (turned part of the way, in perspective), and each eye where
- * the head's turn puts it on that body: slid across, narrowed, the nearer one a little bigger. The
+ * the head's turn puts it on that body: slid across, narrowed a little, and smaller the further it has
+ * turned away (FAR). The
  * eyes are worked out here (a flat transform each, `project` at the eye and how it stretches there)
  * rather than turned by the browser, so the body stays one layer with the face painted on it. At rest
  * everything is "none". `back` is true while a turn right round shows the body's back, the face out
@@ -388,7 +396,10 @@ export function frame(rig: Rig, shape: Shape, size: number): { whole: string; bo
     const [px, py] = project(x + lx, y + ly, yaw, pitch);
     const [ax, ay] = project(x + lx + 1, y + ly, yaw, pitch);
     const [bx, by2] = project(x + lx, y + ly + 1, yaw, pitch);
-    const [j11, j21, j12, j22] = [ax - px, ay - py, bx - px, by2 - py];
+    // Half the narrowing a turn would give it, and smaller all round the further it's turned away.
+    const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
+    const far = 1 - FAR * m * m;
+    const [j11, j21, j12, j22] = [(1 + (ax - px - 1) * SOFT) * far, (ay - py) * SOFT * far, (bx - px) * SOFT * far, (1 + (by2 - py - 1) * SOFT) * far];
     return `matrix(${n(j11 * c + j12 * s, 4)}, ${n(j21 * c + j22 * s, 4)}, ${n(-j11 * s + j12 * c, 4)}, ${n(-j21 * s + j22 * c, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
   };
   return { whole, body, left: eye(-1), right: eye(1), back };

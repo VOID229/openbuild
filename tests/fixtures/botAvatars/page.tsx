@@ -1,14 +1,22 @@
 // Bots on their own, for tests/botAvatarLife.test.ts to watch in Chrome: one in every mood, held
 // still; a row of awake ones, idle and busy, big and small, living their lives; one of every shape
-// that only follows the pointer; and a playful one to press.
+// that only follows the pointer; a playful one to press; and one that starts on something when
+// `wait(true)` is called, and has a step to show at `wait(false)`.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BotAvatar } from "../../../src/components/bots/BotAvatar";
 import { SHAPES, type BotLook, type Mood } from "../../../src/lib/bots/looks";
 
 const moods: Mood[] = ["idle", "happy", "thinking", "sleepy", "surprised", "love", "wink", "squint"];
 const looks: BotLook[] = [{ shape: "orb", color: "green" }, { shape: "puff", color: "white" }, { shape: "bean", color: "pink" }];
+function Starter() {
+  const [waiting, setWaiting] = useState(false);
+  (window as unknown as { wait: (on: boolean) => void }).wait = setWaiting;
+  return <BotAvatar look={looks[0]!} size={96} alive={false} waiting={waiting} />;
+}
+
 createRoot(document.getElementById("root")!).render(
   <>
     <div className="row" id="moods">
@@ -30,6 +38,9 @@ createRoot(document.getElementById("root")!).render(
       {SHAPES.map((s) => (
         <span className="cell" key={s.id} data-shape={s.id}><BotAvatar look={{ shape: s.id, color: "blue" }} size={64} alive={false} track /></span>
       ))}
+    </div>
+    <div className="row" id="dots">
+      <span className="cell"><Starter /></span>
     </div>
     <div className="row" id="play">
       <span className="cell"><BotAvatar look={looks[1]!} size={96} alive={false} playful /></span>

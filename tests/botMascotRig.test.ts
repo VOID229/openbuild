@@ -4,7 +4,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { aimTarget, atRest, BODY_TURN, covers, EYE_H, EYE_TILT, EYE_W, eyesOf, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, REST, roomOf, snap, step, turnTo, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { aimTarget, atRest, BODY_TURN, covers, EYE_H, EYE_TILT, EYE_W, eyesOf, FAR, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, REST, roomOf, snap, step, turnTo, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "orb")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -135,9 +135,9 @@ test("at rest a bot has no transforms at all, and turned, the body and each eye 
     expect(t).toMatch(/^matrix\(/);
     const [a, b, c, d, x, y] = eye(t);
     expect(x).toBeGreaterThan(8);
-    expect(x).toBeLessThan(18);
+    expect(x).toBeLessThan(20);
     expect(y).toBeGreaterThan(2);
-    expect(Math.hypot(a, b)).toBeLessThan(Math.hypot(c, d) * 0.93);
+    expect(Math.hypot(a, b)).toBeLessThan(Math.hypot(c, d) * 0.97);
     expect(b).toBeLessThan(0);
   }
   // Turned right, the left eye is the nearer one: a little bigger, and it has slid further.
@@ -241,8 +241,8 @@ test("however far over it looks, every shape keeps its eyes on its body", () => 
         // As far as it'll go that way: a full turn, held to the room the shape has.
         const [yaw, pitch] = turnTo(shape, Math.cos((a / 16) * Math.PI) * 3, Math.sin((a / 16) * Math.PI) * 3, form);
         for (const side of [-1, 1]) {
-          // Each eye's middle, and most of the way to each end of it.
-          for (const [dx, dy] of [[0, 0], [0, -h * fh * 0.36], [0, h * fh * 0.36], [-w * fw * 0.36, 0], [w * fw * 0.36, 0]] as const) {
+          // Each eye's middle, and well toward each end of it: only its ends may slip under the edge.
+          for (const [dx, dy] of [[0, 0], [0, -h * fh * 0.3], [0, h * fh * 0.3], [-w * fw * 0.3, 0], [w * fw * 0.3, 0]] as const) {
             const x = shape.face.x + (side * gap) / 2 + dx * Math.cos(tilt) - dy * Math.sin(tilt);
             const y = shape.face.y + dx * Math.sin(tilt) + dy * Math.cos(tilt);
             if (!inside(body, ...project(x, y, yaw, pitch))) misses.push(`${shape.id} ${form} ${a}`);
@@ -274,8 +274,29 @@ test("every shape can look around: a fair turn each way, and all the way where i
 
 test("the eyes are big and deep: tall pills, a fifth of the body's box and more", () => {
   expect(EYE_H).toBeGreaterThanOrEqual(20);
-  expect(EYE_H / EYE_W).toBeGreaterThan(2.2);
+  // Fat ones: about twice as tall as wide, and an eighth of the box across.
+  expect(EYE_H / EYE_W).toBeGreaterThan(2);
+  expect(EYE_W).toBeGreaterThanOrEqual(12);
   // A stare is bigger still, and a squint is a slit: well under half an open eye.
   expect(FORMS.wide[0] * FORMS.wide[1]).toBeGreaterThan(1.3);
   expect(FORMS.squint[1]).toBeLessThan(0.3);
+});
+
+test("turned away, the eyes are smaller all round, and keep half their width at the edge", () => {
+  const size = (yaw: number, pitch: number) => {
+    const rig = newRig();
+    snap(rig, to(yaw, pitch));
+    const [a, b, c, d] = frame(rig, orb, 100).left.slice(7, -1).split(", ").map(Number) as [number, number, number, number];
+    return [Math.hypot(a, b), Math.hypot(c, d)] as const;
+  };
+  const [w, h] = size(YAW, 0);
+  // A full turn to the side: shorter by FAR, and narrower still, but never the sliver a true turn gives.
+  expect(h).toBeGreaterThan(0.7);
+  expect(h).toBeLessThan(0.82);
+  expect(w).toBeLessThan(h);
+  expect(w).toBeGreaterThan(Math.cos((YAW * Math.PI) / 180) * (1 - FAR));
+  // Part of the way, it's in between; and looking down does the same to its height.
+  expect(size(YAW / 2, 0)[1]).toBeGreaterThan(h);
+  expect(size(YAW / 2, 0)[1]).toBeLessThan(1);
+  expect(size(0, PITCH)[1]).toBeLessThan(size(0, PITCH)[0]);
 });
