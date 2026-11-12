@@ -3,7 +3,7 @@
 // group's members, goal (with its tasks); the working threads either started from its chat; who's in a
 // side chat.
 import { Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { actingOn, runningThreads, threadActivity, threadBrands, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
@@ -91,28 +91,12 @@ function MoreItems<T extends string>({ items, value, pick }: { items: readonly T
  * the row stays short enough to show whole; More shows as the active tab while one of them is open.
  */
 function Tabs<T extends string>({ tabs, more = [], value, onChange }: { tabs: readonly Tab<T>[]; more?: readonly Tab<T>[]; value: T; onChange: (t: T) => void }) {
-  const row = useRef<HTMLDivElement>(null);
   const moreButton = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
   const inMore = more.some(([id]) => id === value);
-  // A row wider than the panel scrolls: the tab showing stays in view, as when a link opens Threads.
-  // Again when the row shows or changes size: hidden behind a thread open in the panel it has none.
-  useLayoutEffect(() => {
-    const el = row.current;
-    if (!el) return;
-    const reveal = () => {
-      const tab = el.querySelector<HTMLElement>('[aria-selected="true"]');
-      if (!tab || el.scrollWidth <= el.clientWidth) return;
-      if (tab.offsetLeft < el.scrollLeft) el.scrollLeft = tab.offsetLeft;
-      else if (tab.offsetLeft + tab.offsetWidth > el.scrollLeft + el.clientWidth) el.scrollLeft = tab.offsetLeft + tab.offsetWidth - el.clientWidth;
-    };
-    reveal();
-    const seen = new ResizeObserver(reveal);
-    seen.observe(el);
-    return () => seen.disconnect();
-  }, [value, tabs.length]);
+  // The row never scrolls: its tabs shrink to fit it (.bots-tabs).
   return (
-    <div ref={row} className="bots-tabs" role="tablist">
+    <div className="bots-tabs" role="tablist">
       {tabs.map(([id, label]) => (
         <button key={id} type="button" role="tab" aria-selected={value === id} className="bots-tab" onClick={() => onChange(id)}>
           {label}
@@ -281,7 +265,7 @@ export function Members({ conversation, bots }: { conversation: Conversation; bo
             {shared.members.map((m) => (
               <li key={m.id} className="bots-card-row bots-member">
                 <span className="bots-member-main">
-                  <BotAvatar look={m.look ?? { shape: "orb", color: "gray" }} size={28} alive={false} />
+                  <BotAvatar look={m.look ?? { shape: "blob", color: "gray" }} size={28} alive={false} />
                   <span className="bots-card-text">{m.name}</span>
                 </span>
               </li>

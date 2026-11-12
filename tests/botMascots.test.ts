@@ -119,6 +119,8 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
 
     // It stops: the eyes grow heavy and shut slowly, as the face drops and the body slumps, slower still.
     await Bun.sleep(1200);
+    // (Not in the middle of a blink, nor opening again after one: its eyes would be part shut already.)
+    await page.until(`!('blink' in (${boo}).dataset) && new DOMMatrix(getComputedStyle((${boo}).querySelector('.bot-eye-fill')).transform).d > 0.98`);
     await setWorking(page, ["moss"]);
     await page.settle();
     expect(await page.eval<boolean>(`'asleep' in (${boo}).dataset`)).toBe(true);
@@ -143,7 +145,13 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     const page = await open();
     await setWorking(page, []);
     // Let them nod off, the one that was at work coming to rest first.
-    await page.until("[...document.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].every((el) => !el.style.transform)");
+    const stance = "JSON.stringify([...document.querySelectorAll('.bot-whole, .bot-body, .bot-eye')].map((el) => el.style.transform))";
+    for (let last = ""; ; ) {
+      const now = await page.eval<string>(stance);
+      if (now === last) break;
+      last = now;
+      await Bun.sleep(250);
+    }
     await page.finish();
     const running = await page.eval<{ name: string; on: string }[]>(`document.getAnimations().filter((a) => a.playState === 'running').map((a) => ({ name: a.animationName ?? a.transitionProperty, on: a.effect.target.matches('.bot[data-asleep]') ? 'bot' : a.effect.target.matches('.bot[data-asleep] > .bot-zzz > span, .bot-huddle-box[data-dozing] > .bot-zzz > span') ? 'zzz' : '' }))`);
     expect(running.length).toBeGreaterThan(10);
@@ -173,7 +181,8 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     await Bun.sleep(500);
     const moving = () => page.eval<number>(`document.getAnimations().filter((a) => a.playState === 'running' && a.effect.target.closest('.bot')).length`);
     expect(await moving()).toBe(0);
-    expect(await page.eval<number>(`[...document.querySelectorAll('.bot')].filter((b) => b.dataset.action || b.dataset.eyes).length`)).toBe(0);
+    // (Its eyes are big, as a bot's at work are; no pose has changed them.)
+    expect(await page.eval<number>(`[...document.querySelectorAll('.bot')].filter((b) => b.dataset.action || (b.dataset.eyes ?? 'big') !== 'big').length`)).toBe(0);
     // Waking and nodding off are instant, without a stretch.
     await setWorking(page, ["moss", "boo"]);
     await page.settle();

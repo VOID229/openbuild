@@ -10,7 +10,7 @@ import { BotAvatar } from "../../../src/components/bots/BotAvatar";
 import { SHAPES, type BotLook, type Mood } from "../../../src/lib/bots/looks";
 
 const moods: Mood[] = ["idle", "happy", "thinking", "sleepy", "surprised", "love", "wink", "squint"];
-const looks: BotLook[] = [{ shape: "orb", color: "green" }, { shape: "puff", color: "white" }, { shape: "bean", color: "pink" }];
+const looks: BotLook[] = [{ shape: "blob", color: "green" }, { shape: "cloud", color: "white" }, { shape: "tablet", color: "pink" }];
 function Starter() {
   const [waiting, setWaiting] = useState(false);
   (window as unknown as { wait: (on: boolean) => void }).wait = setWaiting;

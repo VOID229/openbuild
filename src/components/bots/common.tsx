@@ -96,7 +96,7 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
   return text;
 }
 
-const MISSING = { shape: "orb", color: "gray" };
+const MISSING = { shape: "blob", color: "gray" };
 
 /** Whether a bot has just started on something and has no step to show yet (`starting`), for as long as that lasts. */
 export function useStarting(botId: string | undefined): boolean {

@@ -11,7 +11,7 @@ import { config } from "../../../src/lib/runtime";
 import type { Bot, Conversation } from "../../../src/lib/bots/types";
 
 const bot = (id: string, name: string, shape: string, color: string): Bot => ({ id, name, look: { shape, color }, instructions: "", memory: [], routines: [], createdAt: 1 });
-const bots = [bot("pip", "Pip", "puff", "white"), bot("manager", "Manager", "tile", "blue"), bot("tracer", "Tracer", "spark", "teal"), bot("scout", "Scout", "bean", "green")];
+const bots = [bot("pip", "Pip", "cloud", "white"), bot("manager", "Manager", "square", "blue"), bot("tracer", "Tracer", "sparkle", "teal"), bot("scout", "Scout", "tablet", "green")];
 const at = Date.now() - 60_000;
 const chat = (id: string, kind: "direct" | "group", botIds: string[], pinnedAt?: number): Conversation => ({
   id, kind, botIds, name: kind === "group" ? `Crew ${id}` : undefined, createdAt: at, updatedAt: at, pinnedAt, messages: [{ id: `${id}-m`, author: "me", at, text: "hello" }],
