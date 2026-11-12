@@ -602,13 +602,16 @@ test("send_message, models and check-ins against a real bots database", async ()
       a.equal(db.routineOwner(second.id), bot.id);
 
       // The chat shows typing only while a message is being written; other work shows as an activity.
-      const mind = { proc: { send: async () => ({}) }, token: '', busy: true, sent: false, draft: '', typing: false, quiet: false, activity: 'Thinking' };
+      const mind = { proc: { send: async () => ({}) }, token: '', busy: true, sent: false, draft: '', typing: false, quiet: false, activity: 'Working on it' };
       const typingNow = () => (svc.snapshot().typing[conversationId] ?? []).includes(bot.id);
       onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', delta: 'hmm' } });
       a.equal(typingNow(), false);
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'browser', args: { action: 'open', url: 'https://www.example.com/x' } });
       a.equal(svc.snapshot().status[bot.id].activity, 'Opening example.com');
       a.equal(typingNow(), false);
+      // The step is over the moment its tool ends: its line doesn't stay up while the model works out the next one.
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'browser', result: {} });
+      a.equal(svc.snapshot().status[bot.id].activity, 'Getting it done');
       onRecord(bot.id, mind, { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', toolName: 'send_message', contentIndex: 0 } });
       a.equal(typingNow(), true);
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });
@@ -631,6 +634,8 @@ test("send_message, models and check-ins against a real bots database", async ()
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'bash', args: { command: 'gh pr checks', status: 'Watching CI on #115' } });
       a.equal(svc.snapshot().status[bot.id].quiet, undefined);
       a.equal(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
+      onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'bash', result: {} });
+      a.notEqual(svc.snapshot().status[bot.id].activity, 'Watching CI on #115');
       onRecord(bot.id, mind, { type: 'tool_execution_start', toolName: 'send_message', args: {} });
       a.equal(typingNow(), true);
       onRecord(bot.id, mind, { type: 'tool_execution_end', toolName: 'send_message', result: {} });

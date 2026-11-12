@@ -109,12 +109,16 @@ export function loadedTools(entries: any[], catalog: Set<string>): Set<string> |
   if (!tools.has("load_tools")) return undefined;
   return new Set([...tools].filter((name) => catalog.has(name)));
 }
-const status = { type: "string", minLength: 1, description: "Required. A short custom status (a few words, at most 50 characters) the user sees while this runs. Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
+const status = { type: "string", minLength: 1, description: "Required, and written first, before the other arguments: the user sees it the moment you start writing this call, and while it runs. A short custom status (a few words, at most 50 characters). Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
 
-/** Require a custom status in a work tool's parameters. */
+/**
+ * Require a custom status in a work tool's parameters. It leads the schema, so the model writes it
+ * before anything else and the runner can show it while the rest of the call (a whole file's text,
+ * say) is still being written (steps.ts).
+ */
 function withStatus(name: string, parameters: object) {
   const schema = parameters as { properties?: Record<string, unknown>; required?: string[] };
-  return NO_STATUS.has(name) ? parameters : { ...schema, properties: { ...schema.properties, status }, required: [...(schema.required ?? []), "status"] };
+  return NO_STATUS.has(name) ? parameters : { ...schema, properties: { status, ...schema.properties }, required: ["status", ...(schema.required ?? [])] };
 }
 
 /** The tool's own parameters, without the status meant for the user. */
@@ -263,12 +267,13 @@ export default function openbots(pi: any) {
       {
         type: "object",
         properties: {
+          // The name leads: the status says "Drawing Weekly signups" while the page itself is still being written.
+          title: str("A short name for the page, e.g. \"Weekly signups\". Write it first: it shows as your status while you write the page."),
           html: str("A complete, self-contained HTML document."),
-          title: str("A short name for the page, e.g. \"Weekly signups\"."),
           height: { type: "integer", description: "Your best guess at its height in CSS pixels, until it has loaded; the frame then fits the page." },
           conversation: str("Short conversation id. The one you're in if omitted."),
         },
-        required: ["html", "title"],
+        required: ["title", "html"],
       },
       (p, signal) => call("html_render", p, signal),
     ),

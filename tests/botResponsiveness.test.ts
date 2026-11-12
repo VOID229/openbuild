@@ -624,7 +624,7 @@ test("ask_bot says it doesn't wait, background is a catalog tool, and a helper k
   const main = tools();
   expect(main.tool("ask_bot").description).toMatch(/doesn't wait/);
   expect(CATALOG_BRIEF.ask_bot).not.toMatch(/wait for/);
-  expect(main.tool("background").parameters.required).toEqual(["task", "status"]);
+  expect(main.tool("background").parameters.required).toEqual(["status", "task"]);
   expect(CATALOG_BRIEF.background).toBeTruthy();
   // A new main session puts catalog tools back out until they're loaded; a helper has nothing to load them with.
   expect(main.active()).not.toContain("bash");

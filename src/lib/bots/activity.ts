@@ -4,6 +4,7 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
+import { statusLine, WRITING_REPLY } from "../../../shared/bots";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -46,6 +47,35 @@ export function showWorking(conversationId: string, status: Statuses, typing: st
   return Object.entries(status)
     .filter(([id, st]) => !typing.includes(id) && (holding(st, conversationId) || (workingHere(st, conversationId) && !st!.quiet)))
     .map(([id]) => id);
+}
+
+/** What a bot says in a chat while it finishes replying in another. Stable per chat, so it doesn't flicker. */
+const HOLDING = ["Hold on a second", "Finishing up something", "One moment, wrapping something up", "Be right with you"];
+export function holdingLine(conversationId: string, botId: string): string {
+  let hash = 0;
+  for (const ch of conversationId + botId) hash = (hash * 31 + ch.charCodeAt(0)) | 0;
+  return HOLDING[Math.abs(hash) % HOLDING.length]!;
+}
+
+/**
+ * A bot's working line in a chat: the live step its status names, or that it's holding on while it
+ * finishes elsewhere. Never empty and never a bare "Thinking" (statusLine).
+ */
+export function workingLine(conversationId: string, botId: string, st: BotStatus | undefined): string {
+  return holding(st, conversationId) ? holdingLine(conversationId, botId) : statusLine(st);
+}
+
+/**
+ * What a chat's bots are up to right now, in one line: under its name in the header. One of them
+ * writing here says so, then the live step of one at work here, then one holding on. Undefined when
+ * there's nothing to say: quiet work shows only in the mascot.
+ */
+export function liveLine(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: string[] | undefined): string | undefined {
+  if (typing?.length) return WRITING_REPLY;
+  const working = conversation.botIds.find((id) => workingHere(status[id], conversation.id) && !status[id]!.quiet);
+  if (working) return statusLine(status[working]);
+  const held = conversation.botIds.find((id) => holding(status[id], conversation.id));
+  return held ? holdingLine(conversation.id, held) : undefined;
 }
 
 /**
