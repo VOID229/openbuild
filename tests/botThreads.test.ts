@@ -1245,3 +1245,93 @@ test("add_project checks where a path really lands: links, linked parents and th
     rmSync(inData, { recursive: true, force: true });
   }
 });
+
+const { threadContext, ago } = threads;
+const reply = (usage?: object, over: object = {}) => ({ id: crypto.randomUUID(), role: "assistant" as const, content: "ok", createdAt: 0, status: "done" as const, model: { plan: "pi" as const, id: "acme/one" }, ...(usage ? { usage } : {}), ...over });
+const asked = { id: "u", role: "user" as const, content: "Go", createdAt: 0 };
+
+test("a thread's context is what its harness measured, and unknown otherwise", () => {
+  const ctx = (messages: any[], runtime: any = "pi") => threadContext({ runtime, messages: [asked, ...messages] });
+  expect(ctx([reply({ contextTokens: 91_000, contextWindow: 200_000 })])).toEqual({ used_tokens: 91_000, window_tokens: 200_000, percent: 46, free_tokens: 109_000 });
+  // The numbers, and no verdict: the bot weighs them against the task.
+  expect(Object.keys(ctx([reply({ contextTokens: 172_000, contextWindow: 200_000 })])).sort()).toEqual(["free_tokens", "percent", "used_tokens", "window_tokens"]);
+  expect(ctx([reply({ contextTokens: 250_000, contextWindow: 200_000 })])).toMatchObject({ percent: 100, free_tokens: 0 });
+  // The latest measurement wins, and a reply still streaming without one doesn't hide it.
+  expect(ctx([reply({ contextTokens: 10_000, contextWindow: 200_000 }), reply({ contextTokens: 50_000, contextWindow: 200_000 }), reply(undefined, { status: "streaming" })]).used_tokens).toBe(50_000);
+  // A stopped Claude reply has no window of its own: the same model's earlier one had it.
+  expect(ctx([reply({ contextTokens: 10_000, contextWindow: 200_000 }), reply({ contextTokens: 30_000 }, { status: "stopped" })], "claude")).toMatchObject({ used_tokens: 30_000, window_tokens: 200_000, percent: 15 });
+  // No window at all: the tokens, and no percentage made up from a nominal limit.
+  const noWindow = ctx([reply({ contextTokens: 30_000 })], "codex");
+  expect(noWindow).toMatchObject({ used_tokens: 30_000 });
+  expect(noWindow.percent).toBeUndefined();
+  expect(noWindow.unknown).toMatch(/window size/);
+  // Just compacted: Pi knows the window but not what's in it.
+  const compacted = ctx([reply({ contextTokens: 190_000, contextWindow: 200_000 }), reply({ contextWindow: 200_000 })]);
+  expect(compacted).toMatchObject({ window_tokens: 200_000 });
+  expect(compacted.used_tokens).toBeUndefined();
+  expect(compacted.unknown).toMatch(/compacted/);
+  // Another model's numbers aren't this model's context.
+  expect(ctx([reply({ contextTokens: 190_000, contextWindow: 200_000 }), reply(undefined, { model: { plan: "pi", id: "acme/two" } })]).unknown).toMatch(/model changed/);
+  expect(ctx([reply(undefined, { status: "error" })]).unknown).toMatch(/didn't measure/);
+  // Harnesses that only count tokens spent, and threads with no reply yet.
+  expect(ctx([reply({ input: 5000, output: 200 })], "cursor")).toEqual({ unknown: "cursor doesn't report how full its context is." });
+  expect(ctx([reply(undefined, { status: "streaming" })]).unknown).toMatch(/No reply has measured it yet/);
+  expect(ctx([]).unknown).toMatch(/No reply has measured it yet/);
+});
+
+test("list, read and send show what a bot weighs before reusing a thread", async () => {
+  const started = await call("start", { project: project.name, prompt: "Go", title: "Measured", branch_name: "measured" });
+  const { threadId, stream } = admitted[0];
+  const listed = async () => (await call("list")).threads.find((t: any) => t.thread === started.thread);
+  expect((await call("read", { thread: threadId })).context).toEqual({ unknown: "No reply has measured it yet." });
+  expect((await listed()).context).toEqual({ unknown: "No reply has measured it yet." });
+  snapshots[0] = { ...snapshots[0], status: "done", endedAt: Date.now(), events: [{ t: "text", v: "Done" }, { t: "done", finish: "stop", usage: { contextTokens: 50_000, contextWindow: 200_000 } }] };
+  runs.get(stream.id)!.end();
+  await settle();
+  // A pull request that merged three days ago, on a thread last active then.
+  const then = Date.now() - 3 * 24 * 60 * 60_000;
+  snapshots[0].endedAt = then;
+  storage.putChat({ ...(storage.getChat(threadId) as any), updatedAt: then, pullRequest: { number: 7, url: "https://example.invalid/pull/7", state: "merged", checks: "passing", checkedAt: then } });
+  const facts = { title: "Measured", branch: "openbuild/measured", last_active: "3 days ago", context: { used_tokens: 50_000, window_tokens: 200_000, percent: 25, free_tokens: 150_000 } };
+  expect(await call("read", { thread: threadId })).toMatchObject({ ...facts, pull_request: { number: 7, state: "merged" } });
+  // send says where the thread stood, whatever its fill, so the next choice starts from facts.
+  const sent = await call("send", { thread: threadId, text: "More" });
+  expect(sent.sent).toBe(true);
+  expect(sent.thread).toEqual({ thread: started.thread, ...facts, pull_request: { number: 7, state: "merged", checks: "passing" } });
+  // list carries the same, with the thread active again.
+  expect(await listed()).toMatchObject({ ...facts, last_active: "just now", pull_request: { number: 7, state: "merged", checks: "passing" } });
+  // Steered into the working thread, the same.
+  const steered = await call("send", { thread: threadId, text: "One more" });
+  expect(steered.steered).toBe(true);
+  expect(steered.thread).toMatchObject({ thread: started.thread, title: "Measured", context: facts.context });
+});
+
+test("send shows the context even when nothing measured it", async () => {
+  const started = await call("start", { project: project.name, prompt: "Go", harness: "cursor" });
+  finish();
+  const sent = await call("send", { thread: started.thread, text: "More" });
+  expect(sent.thread.context).toEqual({ unknown: "cursor doesn't report how full its context is." });
+  expect(sent.thread.pull_request).toBeUndefined();
+});
+
+test("how recent a thread is reads as a person would say it", () => {
+  const now = 1_000_000_000_000;
+  const minute = 60_000;
+  expect([0, 59_000, minute, 5 * minute, 60 * minute, 23 * 60 * minute, 24 * 60 * minute, 9 * 24 * 60 * minute].map((d) => ago(now - d, now))).toEqual(["just now", "just now", "1 minute ago", "5 minutes ago", "1 hour ago", "23 hours ago", "1 day ago", "9 days ago"]);
+  expect(ago(now + minute, now)).toBe("just now");
+});
+
+test("the guide and the tool's description give a way to judge, with numbers as rough guides", async () => {
+  const text = guide(svc.fullBot(bot.id)!);
+  const source = await Bun.file(join(import.meta.dir, "../server/bots/extension.ts")).text();
+  const description = source.split("\n").find((line) => line.includes("Run coding agents in the user's OpenBuild"))!;
+  for (const words of [text, description]) {
+    // What to weigh: relatedness, size against room, help or distraction, and a finished pull request.
+    for (const factor of [/how related/i, /same files or feature/, /follow-up on its pull request/, /how big/i, /room left/, /distract/, /merged or closed/, /rough guides/, /unknown/]) expect(words).toMatch(factor);
+    // Where to look.
+    for (const field of ["title", "branch", "pull_request", "last_active", "context", "free_tokens", "send result"]) expect(words).toContain(field);
+    // No hard cut-offs.
+    expect(words).not.toMatch(/\d+% or more|under \d+%/i);
+  }
+  expect(text).toContain("decide for that task");
+});
