@@ -1,7 +1,8 @@
-// OpenBots' bots: a shape and a colour with two little eyes. Left alone they breathe, blink and
-// glance about; the bigger ones now and then nod, wiggle or squish. Eyes can follow the pointer, a
+// OpenBots' bots: a shape and a colour with two big, deep eyes. Left alone they breathe, stare
+// straight out, blink and look around, the head and body turning after the eyes; the bigger ones now
+// and then nod, wiggle or squish. Eyes can follow the pointer, the whole body leaning after them; a
 // held mood (thinking while typing, happy at a reaction) changes their expression, and in a group the
-// ones not at work doze, a "zzz" floating up over them.
+// ones not at work doze, a "zzz" floating up over them. Nothing ever hops: they stay on the ground.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood, type Shape } from "../../lib/bots/looks";
 import { cx } from "../../lib/ui";
@@ -34,8 +35,26 @@ function follow(fn: () => void) {
   return () => void followers.delete(fn);
 }
 
+/**
+ * Off screen (scrolled away, in a hidden pane, skipped by content-visibility, or in a hidden tab), a
+ * routine waits rather than spend frames there. Checked once a step: an IntersectionObserver would
+ * have Chrome restyle every frame of the breathing, which otherwise runs on the compositor.
+ */
+function offScreen(el: Element) {
+  if (document.hidden) return true;
+  if (typeof el.checkVisibility === "function" && !el.checkVisibility({ contentVisibilityAuto: true })) return true;
+  const r = el.getBoundingClientRect();
+  return !r.width || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
+}
+
+/** An open eye's size in the 100-unit box, before the shape's own scale: tall and deep. */
+export const EYE_W = 8.6;
+export const EYE_H = 18.4;
+/** Drawn a touch bigger than the shapes' own numbers, so they still read on a 28px avatar. */
+export const EYE_BOOST = 1.12;
+
 /** How far the eyes travel when looking, in the 100-unit box. */
-const REACH = 5;
+const REACH = 5.5;
 /** Further when following the pointer, which they do only while it's on their row. */
 export const TRACK_REACH = 11;
 
@@ -51,17 +70,19 @@ export function aimAt(dx: number, dy: number, width: number, reach = 1): [number
   return [(dx / dist) * k, (dy / dist) * 0.85 * k];
 }
 
-/** The eyes' springs: snappy with a hint of overshoot onto the pointer, unhurried and flat back home. */
-const LOCK = { stiffness: 30, damping: 0.75 };
-const RETURN = { stiffness: 18, damping: 1 };
+export type Spring = { stiffness: number; damping: number };
+/** The eyes' springs: quick onto the pointer with a hint of overshoot, unhurried and flat back home. */
+export const EYES: [lock: Spring, back: Spring] = [{ stiffness: 38, damping: 0.72 }, { stiffness: 20, damping: 1 }];
+/** The body's: it turns and leans after the eyes, slower and heavier, swaying a little past and back. */
+export const BODY: [lock: Spring, back: Spring] = [{ stiffness: 15, damping: 0.6 }, { stiffness: 11, damping: 0.9 }];
 export type Gaze = { x: number; y: number; vx: number; vy: number };
 
 /**
- * Moves the eyes `dt` ms along a spring toward (tx, ty). Starting from rest they ease in rather than
- * jump, and they settle onto it (true once there, so the frames can stop).
+ * Moves the eyes (or, with BODY, the body) `dt` ms along a spring toward (tx, ty). Starting from rest
+ * they ease in rather than jump, and they settle onto it (true once there, so the frames can stop).
  */
-export function gazeStep(g: Gaze, tx: number, ty: number, dt: number, locking: boolean): boolean {
-  const { stiffness: w, damping: z } = locking ? LOCK : RETURN;
+export function gazeStep(g: Gaze, tx: number, ty: number, dt: number, locking: boolean, springs = EYES): boolean {
+  const { stiffness: w, damping: z } = springs[locking ? 0 : 1];
   // A long frame (a busy main thread, a hidden tab) is taken in short steps, so the spring stays stable.
   for (let left = Math.min(dt, 100) / 1000; left > 0; left -= 1 / 240) {
     const h = Math.min(left, 1 / 240);
@@ -75,80 +96,119 @@ export function gazeStep(g: Gaze, tx: number, ty: number, dt: number, locking: b
   return true;
 }
 
-/** Where a busy bot faces (-1…1 each way, x right and y down), how it tilts, and how open its eyes are. */
+/**
+ * Where a bot faces (-1…1 each way, x right and y down), how it tilts, and how open its eyes are. The
+ * eyes get there first, in a quick flick; the head and then the body follow (see .bot-look in bots.css).
+ */
 type Pose = { x: number; y: number; tilt?: number; eyes?: "wide" | "squint" };
+/** One step of a routine, held for its ms: a pose, straight ahead again (null), a blink, a move or a face. */
+export type Step = [Pose | null | "blink" | "blink2" | Action | { flash: Mood }, number];
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const side = () => (Math.random() < 0.5 ? -1 : 1);
+const AHEAD: Pose = { x: 0, y: 0 };
 
 /**
- * A busy bot's little routines: poses held for a while, one after another. Each beat is a list of
- * [pose, ms] steps, plus optionally a blink or a move along the way. Unhurried: a pose is held long
- * enough to read as a thought, and the moves are small ones: never a spin, and a hop only for the
- * bigger, lively avatars.
+ * A busy bot's routines: poses one after another, plus a blink or a move along the way. Brisk: the
+ * eyes flick, the head snaps after them, and a look is held just long enough to read as a thought.
+ * The moves stay on the ground: never a hop, and never a spin.
  */
-const BEATS: { weight: number; steps: (lively: boolean) => [Pose | "blink" | Action, number][] }[] = [
-  // A look off to one side, then back.
-  { weight: 4, steps: () => { const s = side(); return [[{ x: s * rand(0.6, 1), y: rand(-0.3, 0.3) }, rand(1400, 2400)], [{ x: 0, y: 0 }, rand(500, 900)]]; } },
-  // Scanning across, like reading.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.8, y: 0.3, eyes: "squint" }, 750], [{ x: -s * 0.25, y: 0.35, eyes: "squint" }, 560], [{ x: s * 0.35, y: 0.3, eyes: "squint" }, 560], [{ x: s * 0.9, y: 0.35, eyes: "squint" }, 850], [{ x: 0, y: 0 }, 600]]; } },
-  // Pondering: up and away, eyes narrowed, head tilted.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.7, y: -0.8, tilt: s * 8, eyes: "squint" }, rand(1800, 2700)], ["blink", 320], [{ x: 0, y: 0 }, 600]]; } },
-  // Curious: a head tilt toward something, eyes wide.
-  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.5, y: 0.1, tilt: s * -14, eyes: "wide" }, rand(1500, 2200)], ["blink", 320], [{ x: 0, y: 0 }, 600]]; } },
-  // Peering closely at something low.
-  { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.35, y: 0.85, eyes: "squint" }, rand(1600, 2300)], [{ x: s * 0.35, y: 0.85, eyes: "wide" }, 700], [{ x: 0, y: 0 }, 600]]; } },
-  // Mulling it over: a look down and a slow nod.
-  { weight: 2, steps: () => [[{ x: 0, y: 0.55, eyes: "squint" }, 700], ["nod", 1100], [{ x: 0, y: 0 }, 600]] },
+const BEATS: { weight: number; steps: (lively: boolean) => Step[] }[] = [
+  // A sharp look off to one side, held, and back.
+  { weight: 4, steps: () => { const s = side(); return [[{ x: s * rand(0.7, 1), y: rand(-0.35, 0.35) }, rand(700, 1300)], [AHEAD, rand(300, 600)]]; } },
+  // Scanning across, like reading: the eyes jump along, the head following.
+  { weight: 3, steps: () => { const s = side(); return [[{ x: -s * 0.85, y: 0.3, eyes: "squint" }, 420], [{ x: -s * 0.3, y: 0.32, eyes: "squint" }, 300], [{ x: s * 0.3, y: 0.3, eyes: "squint" }, 300], [{ x: s * 0.9, y: 0.34, eyes: "squint" }, 480], [AHEAD, 360]]; } },
+  // Pondering: up and away, eyes narrowed, head cocked.
+  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.75, y: -0.85, tilt: s * 10, eyes: "squint" }, rand(900, 1500)], ["blink", 260], [AHEAD, 360]]; } },
+  // Curious: a sharp head tilt toward something, eyes wide.
+  { weight: 3, steps: () => { const s = side(); return [[{ x: s * 0.55, y: 0.1, tilt: s * -16, eyes: "wide" }, rand(800, 1300)], ["blink", 260], [AHEAD, 360]]; } },
+  // Peering at something low, then eyes wide at what it found.
+  { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.4, y: 0.9, eyes: "squint" }, rand(900, 1400)], [{ x: s * 0.4, y: 0.9, eyes: "wide" }, 420], [AHEAD, 360]]; } },
+  // A stare straight out, wide and unblinking.
+  { weight: 3, steps: () => [[{ x: 0, y: -0.05, eyes: "wide" }, rand(1100, 1900)], [AHEAD, 300]] },
+  // Mulling it over: a look down and a quick nod.
+  { weight: 2, steps: () => [[{ x: 0, y: 0.6, eyes: "squint" }, 420], ["nod", 640], [AHEAD, 360]] },
   // A double take.
-  { weight: 1, steps: () => { const s = side(); return [[{ x: s * 0.9, y: 0 }, 450], [{ x: 0, y: 0 }, 450], [{ x: s, y: -0.1, eyes: "wide" }, 1300], [{ x: 0, y: 0 }, 600]]; } },
-  // A bright idea: straight at you, eyes wide, a small hop (or a squish, where hopping would be a lot).
-  { weight: 1, steps: (lively) => [[{ x: 0, y: -0.15, eyes: "wide" }, 260], [lively ? "hop" : "squish", 950], [{ x: 0, y: 0, eyes: "wide" }, 700], [{ x: 0, y: 0 }, 400]] },
+  { weight: 2, steps: () => { const s = side(); return [[{ x: s * 0.9, y: 0 }, 260], [AHEAD, 240], [{ x: s, y: -0.1, eyes: "wide" }, 900], [AHEAD, 360]]; } },
+  // A bright idea: straight at you, eyes wide, with a squish.
+  { weight: 1, steps: () => [[{ x: 0, y: -0.2, eyes: "wide" }, 260], ["squish", 560], [{ x: 0, y: 0, eyes: "wide" }, 420], [AHEAD, 260]] },
   // Now and then, a little move.
-  { weight: 1, steps: () => [[{ x: 0, y: 0 }, 200], [pick(["wiggle", "squish"] as const), 1200]] },
+  { weight: 1, steps: () => [[AHEAD, 200], [pick(["wiggle", "squish"] as const), 700]] },
 ];
 const beatTotal = BEATS.reduce((n, b) => n + b.weight, 0);
-export function nextBeat(lively = false) {
+export function nextBeat(lively = false): Step[] {
   let r = Math.random() * beatTotal;
   for (const b of BEATS) if ((r -= b.weight) < 0) return b.steps(lively);
   return BEATS[0]!.steps(lively);
 }
 
-/** What an idle bot does next: mostly blink or glance, and for lively ones the odd small move or face. */
-export function nextIdle(lively: boolean): { blink: boolean } | { glance: true } | { action: Action } | { flash: Mood } {
-  const r = Math.random();
-  if (r < 0.5) return { blink: Math.random() < 0.12 };
-  if (r < 0.82) return { glance: true };
-  if (lively && r < 0.93) return { action: pick(["nod", "nod", "squish", "wiggle", "hop"] as const) };
-  if (lively) return { flash: pick(["happy", "wink", "squint"] as const) };
-  return { blink: false };
+/**
+ * An idle bot's routines, with a rest looking straight out between them: mostly staring and looking
+ * around, the odd blink, and for lively ones a small move or a face. `looks` marks the ones that take
+ * the eyes off ahead, which a bot following the pointer skips: its eyes are on the pointer.
+ */
+const IDLE: { weight: number; looks?: true; lively?: true; steps: () => Step[] }[] = [
+  // A blink, now and then twice.
+  { weight: 3, steps: () => [[Math.random() < 0.15 ? "blink2" : "blink", 300]] },
+  // A stare: straight out, eyes a touch wider, held without a blink.
+  { weight: 3, looks: true, steps: () => [[{ x: 0, y: -0.05, eyes: "wide" }, rand(1600, 3000)], [AHEAD, 200]] },
+  // A look off somewhere, the head and body turning after the eyes, and back.
+  { weight: 4, looks: true, steps: () => [[{ x: side() * rand(0.5, 1), y: rand(-0.6, 0.45) }, rand(700, 1500)], [AHEAD, 300]] },
+  // Looking around: a few quick looks this way and that, then straight out again.
+  {
+    weight: 3,
+    looks: true,
+    steps: () => {
+      let s = side();
+      const looks = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, (): Step => [{ x: (s = -s) * rand(0.45, 1), y: rand(-0.55, 0.4) }, rand(380, 900)]);
+      return [...looks, [AHEAD, 300]];
+    },
+  },
+  // A small move, or a face pulled.
+  { weight: 1, lively: true, steps: () => [[pick(["nod", "nod", "squish", "wiggle"] as const), 700]] },
+  { weight: 1, lively: true, steps: () => [[{ flash: pick(["happy", "wink", "surprised", "squint"] as const) }, 1200]] },
+];
+export function nextIdle(lively: boolean, tracking = false): Step[] {
+  const open = IDLE.filter((b) => (lively || !b.lively) && (!tracking || !b.looks));
+  let r = Math.random() * open.reduce((n, b) => n + b.weight, 0);
+  for (const b of open) if ((r -= b.weight) < 0) return b.steps();
+  return open[0]!.steps();
 }
 
-function Eye({ mood, x, scale, glint, side, lid }: { mood: Mood; x: number; scale: number; glint: boolean; side: "left" | "right"; lid: boolean }) {
+/** Thinking (while typing): looking up and off to one side, head cocked, one eye narrowed. */
+const THINKING: Pose = { x: 0.5, y: -0.75, tilt: 7 };
+
+function Eye({ mood, x, scale, side, lid }: { mood: Mood; x: number; scale: number; side: "left" | "right"; lid: boolean }) {
   const s = scale;
-  // Expressions drawn as strokes: arcs for happy and wink, a droopy line for sleepy.
-  const stroke = (d: string) => <path className="bot-eye-line" d={d} strokeWidth={4.4 * s} />;
+  const ew = EYE_W * s;
+  const eh = EYE_H * s;
+  const r = ew / 2;
+  const top = -eh / 2;
+  // Shut, drawn as a stroke: a lid's curve, sagging a little.
+  const shut = (sag: number, w = 4.6) => <path className="bot-eye-line" d={`M${-r - 0.2 * s} ${0.6 * s}Q0 ${sag * s} ${r + 0.2 * s} ${0.6 * s}`} strokeWidth={w * s} />;
   let eye: React.ReactNode;
-  if (mood === "happy" || (mood === "wink" && side === "left")) eye = stroke(`M${-4.2 * s} ${2 * s}Q0 ${-5.5 * s} ${4.2 * s} ${2 * s}`);
-  else if (mood === "sleepy") eye = stroke(`M${-4 * s} 0Q0 ${3.2 * s} ${4 * s} 0`);
-  else if (mood === "love")
-    eye = <path className="bot-eye-fill" d={`M0 ${5 * s}C${-9 * s} ${-1 * s} ${-4 * s} ${-8 * s} 0 ${-3 * s}C${4 * s} ${-8 * s} ${9 * s} ${-1 * s} 0 ${5 * s}Z`} />;
+  if (mood === "sleepy") eye = shut(3.6, 4.4);
+  else if (mood === "wink" && side === "left") eye = shut(4.4, 5);
+  else if (mood === "happy" || mood === "wink") {
+    // Smiling: still open and solid, the cheeks pushing the lower lid up into a gentle curve.
+    // Its lower corners softened (.bot-eye-smile), so it stays an eye and never comes to a point.
+    const bottom = top + eh * 0.7;
+    const lift = ew * 0.22;
+    eye = <path className="bot-eye-fill bot-eye-smile" d={`M${-r} ${bottom}V${top + r}A${r} ${r} 0 0 1 ${r} ${top + r}V${bottom}C${r * 0.45} ${bottom - lift} ${-r * 0.45} ${bottom - lift} ${-r} ${bottom}Z`} strokeWidth={1.4 * s} />;
+  } else if (mood === "love")
+    eye = <path className="bot-eye-fill" d={`M0 ${5.6 * s}C${-10 * s} ${-1.1 * s} ${-4.5 * s} ${-9 * s} 0 ${-3.4 * s}C${4.5 * s} ${-9 * s} ${10 * s} ${-1.1 * s} 0 ${5.6 * s}Z`} />;
   else {
-    const surprised = mood === "surprised";
-    const ew = (surprised ? 9.5 : 7.5) * s;
-    const eh = (surprised ? 11.5 : 16) * s;
-    eye = (
-      <>
-        <rect className="bot-eye-fill" x={-ew / 2} y={-eh / 2} width={ew} height={eh} rx={ew / 2} />
-        {glint && <circle className="bot-glint" cx={1.1 * s} cy={-eh / 2 + 3.4 * s} r={1.35 * s} />}
-      </>
-    );
+    // Open: a tall pill, or rounder and bigger still in surprise.
+    const w = mood === "surprised" ? ew * 1.25 : ew;
+    const h = mood === "surprised" ? eh * 0.8 : eh;
+    eye = <rect className="bot-eye-fill" x={-w / 2} y={-h / 2} width={w} height={h} rx={w / 2} />;
   }
   return (
     <g transform={`translate(${x} 0) rotate(-9)`}>
       <g className={`bot-eye-side bot-eye-${side}`}>
-      <g className={cx("bot-eye", mood === "squint" && "bot-eye-squint", mood === "thinking" && side === "left" && "bot-eye-squint")}>{eye}</g>
-      {/* Shut, for dozing: the open eye fades into it, so nodding off and waking are eased both ways. */}
-      {lid && <path className="bot-eye-line bot-lid" d={`M${-4.3 * s} ${1.6 * s}Q0 ${5 * s} ${4.3 * s} ${1.6 * s}`} strokeWidth={4 * s} />}
+        {/* Keyed by mood, so a new expression pops in rather than swapping flat (bot-eye-in). */}
+        <g key={mood} className={cx("bot-eye", mood === "squint" && "bot-eye-squint", mood === "thinking" && side === "left" && "bot-eye-squint")}>{eye}</g>
+        {/* Shut, for dozing: the open eye fades into it, so nodding off and waking are eased both ways. */}
+        {lid && <path className="bot-eye-line bot-lid" d={`M${-r} ${1.6 * s}Q0 ${5.2 * s} ${r} ${1.6 * s}`} strokeWidth={4.2 * s} />}
       </g>
     </g>
   );
@@ -161,14 +221,22 @@ function Body({ shape, color, clip }: { shape: Shape; color: string; clip: strin
         <clipPath id={clip}>
           <path d={shape.path} />
         </clipPath>
+        {/* The eyes' fill: near-black at the top, lifting a little toward the bottom, so they read deep. */}
+        <linearGradient id={`${clip}-eye`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" className="bot-eye-stop-top" />
+          <stop offset="1" className="bot-eye-stop-bottom" />
+        </linearGradient>
       </defs>
       <path className="bot-shape" d={shape.path} fill={color} />
       {/* A soft light from the upper left and a little shade underneath, inside the outline. */}
       <g clipPath={`url(#${clip})`} className="bot-shading">
-        {/* Moved inside the clip, so the light can slide as the bot turns without dragging the clip along. */}
-        <g className="bot-light">
-          <ellipse cx="34" cy="24" rx="30" ry="20" fill="#fff" opacity="0.16" />
-          <ellipse cx="62" cy="96" rx="46" ry="22" fill="#000" opacity="0.1" />
+        {/* Moved inside the clip, so the light can slide as the bot turns without dragging the clip along:
+            once as the pointer steers it, once as a pose turns it. */}
+        <g className="bot-steer-light">
+          <g className="bot-light">
+            <ellipse cx="34" cy="24" rx="30" ry="20" fill="#fff" opacity="0.16" />
+            <ellipse cx="62" cy="96" rx="46" ry="22" fill="#000" opacity="0.1" />
+          </g>
         </g>
       </g>
       {shape.extra && <path d={shape.extra.path} fill={shape.extra.fill} />}
@@ -181,11 +249,11 @@ export interface BotAvatarProps {
   size: number;
   /** A held expression, e.g. thinking while the bot types. */
   mood?: Mood;
-  /** Breathe, blink and glance on its own. */
+  /** Breathe, blink, stare and look around on its own. */
   alive?: boolean;
-  /** Also nod, wiggle and pull faces now and then, and hop when busy (the bigger avatars). */
+  /** Also nod, wiggle and pull faces now and then (the bigger avatars). */
   lively?: boolean;
-  /** Eyes follow the pointer. */
+  /** Eyes follow the pointer, and the body turns and leans after them. */
   track?: boolean;
   /** Nod and smile on hover, spin when pressed. */
   playful?: boolean;
@@ -198,7 +266,7 @@ export interface BotAvatarProps {
   asleep?: boolean;
   /** A little "zzz" floats up while it dozes. Only the sidebars turn it on: beside chat messages the shut eyes say enough. */
   zzz?: boolean;
-  /** Change it to make the bot react once: a hop and a happy face, or the given mood. */
+  /** Change it to make the bot react once: a squish and a happy face, or the given mood and move. */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
   className?: string;
   label?: string;
@@ -212,7 +280,6 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const ref = useRef<HTMLSpanElement>(null);
   /** How long the lids take to close, a little different every blink; unset when they're open. */
   const [blink, setBlink] = useState<number>();
-  const [glance, setGlance] = useState<[number, number]>();
   const [action, setAction] = useState<Action>();
   const [flash, setFlash] = useState<Mood>();
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
@@ -225,67 +292,55 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  // Lids down, held a moment, and up a touch slower (see .bot-eye): never the same blink twice.
+  // Lids snap down, held a moment, and up a touch slower (see .bot-eye): never the same blink twice.
   const doBlink = (twice = false) => {
-    const close = Math.round(rand(110, 170));
+    const close = Math.round(rand(70, 110));
     setBlink(close);
-    later(() => setBlink(undefined), close + rand(50, 130));
-    if (twice) later(() => doBlink(), rand(420, 560));
+    later(() => setBlink(undefined), close + rand(30, 80));
+    if (twice) later(() => doBlink(), rand(260, 360));
   };
   const doAction = (a: Action) => {
     if (calm()) return;
     setAction(undefined);
     requestAnimationFrame(() => setAction(a));
-    later(() => setAction((cur) => (cur === a ? undefined : cur)), 1400);
+    later(() => setAction((cur) => (cur === a ? undefined : cur)), 1000);
   };
   const doFlash = (m: Mood, ms = 1000) => {
     setFlash(m);
     later(() => setFlash((cur) => (cur === m ? undefined : cur)), ms);
   };
 
-  // Busy: one small routine after another, looking about and pulling faces, with blinks between.
+  // A life of its own, one routine after another: busy, brisk poses and faces with blinks between;
+  // idle, a rest staring straight out and then a stare, a look around, a blink or (lively) a move.
+  // Dozing, there's none of it: just the breathing, in CSS.
+  const dozing = !!asleep && !busy;
   useEffect(() => {
-    if (!busy || calm()) return;
+    const el = ref.current;
+    if (!(alive || busy) || dozing || !el || calm()) return;
     let timer: ReturnType<typeof setTimeout>;
-    let steps: ReturnType<typeof nextBeat> = [];
+    let steps: Step[] = [];
     const step = () => {
-      if (!steps.length) steps = Math.random() < 0.25 ? [["blink", rand(800, 1400)], ...nextBeat(lively)] : nextBeat(lively);
+      if (offScreen(el)) {
+        timer = setTimeout(step, 2000);
+        return;
+      }
+      if (!steps.length)
+        steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat(lively)] : nextBeat(lively)) : [[null, rand(800, 2600)], ...nextIdle(lively, track)];
       const [what, ms] = steps.shift()!;
-      if (what === "blink") doBlink(Math.random() < 0.15);
+      if (what === null) setPose(undefined);
+      else if (what === "blink" || what === "blink2") doBlink(what === "blink2");
       else if (typeof what === "string") doAction(what);
+      else if ("flash" in what) doFlash(what.flash, ms);
       else setPose(what);
       timer = setTimeout(step, ms);
     };
-    timer = setTimeout(step, 250);
+    timer = setTimeout(step, busy ? 200 : rand(300, 1500));
     return () => {
       clearTimeout(timer);
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [busy, lively]);
-
-  // Idle life, unhurried: mostly blinks and glances, and for lively ones the odd small move or face.
-  // Dozing, there's none of it: just the breathing, in CSS.
-  const dozing = !!asleep && !busy;
-  useEffect(() => {
-    if (!alive || busy || dozing || calm()) return;
-    let timer: ReturnType<typeof setTimeout>;
-    const next = (first = false) => {
-      timer = setTimeout(() => {
-        const what = nextIdle(lively);
-        if ("glance" in what && !track) {
-          setGlance([pick([-1, -0.6, 0.6, 1]) * REACH, pick([-0.6, 0, 0.4]) * REACH]);
-          later(() => setGlance(undefined), rand(1300, 2500));
-        } else if ("action" in what) doAction(what.action);
-        else if ("flash" in what) doFlash(what.flash, 1400);
-        else doBlink("blink" in what && what.blink);
-        next();
-      }, (first ? 900 : 3200) + Math.random() * 5200);
-    };
-    next(true);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, lively, track, busy, dozing]);
+  }, [alive, busy, lively, track, dozing]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
@@ -295,12 +350,14 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dozing]);
 
-  // Eyes that follow the pointer, written straight to the element so moving the mouse doesn't render.
-  // Aimed from the eyes themselves (shapes carry their faces off-centre), sprung onto the pointer on
-  // hover and back to looking ahead after, frame by frame. Where they are carries over, so hovering
-  // again on the way back picks up from there. A glance or thought (data-looking) wins: they let go.
+  // Eyes that follow the pointer, and the body after them, written straight to the element so moving
+  // the mouse doesn't render. Aimed from the eyes themselves (shapes carry their faces off-centre),
+  // sprung onto the pointer on hover and back to looking ahead after, frame by frame: the eyes on a
+  // quick spring (--track-*), the body turning and leaning on a slower, heavier one (--steer-*).
+  // Where they are carries over, so hovering again on the way back picks up from there. A pose (a
+  // look, a stare, a thought: data-looking) wins: they let go.
   const { x: faceX, y: faceY, reach = 1 } = shape.face;
-  const gaze = useRef({ g: { x: 0, y: 0, vx: 0, vy: 0 } as Gaze, on: false, frame: 0, last: 0 });
+  const gaze = useRef({ g: { x: 0, y: 0, vx: 0, vy: 0 } as Gaze, b: { x: 0, y: 0, vx: 0, vy: 0 } as Gaze, on: false, frame: 0, last: 0 });
   const kick = useRef(() => {});
   kick.current = () => {
     const el = ref.current;
@@ -315,13 +372,18 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       const r = el.getBoundingClientRect();
       if (s.on && r.width && !("looking" in el.dataset) && pointer.x >= 0)
         [tx, ty] = aimAt(pointer.x - (r.left + (faceX / 100) * r.width), pointer.y - (r.top + (faceY / 100) * r.height), r.width, reach);
-      const done = gazeStep(s.g, tx, ty, dt, s.on);
+      const eyes = gazeStep(s.g, tx, ty, dt, s.on);
+      const done = gazeStep(s.b, tx, ty, dt, s.on, BODY) && eyes;
       if (done && !s.on) {
-        el.style.removeProperty("--track-x");
-        el.style.removeProperty("--track-y");
+        for (const p of ["--track-x", "--track-y", "--steer-x", "--steer-y", "--steer-a"]) el.style.removeProperty(p);
+        delete el.dataset.steering;
       } else {
+        el.dataset.steering = "";
         el.style.setProperty("--track-x", s.g.x.toFixed(2));
         el.style.setProperty("--track-y", s.g.y.toFixed(2));
+        el.style.setProperty("--steer-x", (s.b.x / TRACK_REACH).toFixed(3));
+        el.style.setProperty("--steer-y", (s.b.y / TRACK_REACH).toFixed(3));
+        el.style.setProperty("--steer-a", Math.min(1, Math.abs(s.b.x / TRACK_REACH)).toFixed(3));
       }
       if (done) s.last = 0;
       else s.frame = requestAnimationFrame(tick);
@@ -350,7 +412,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   useLayoutEffect(() => {
     if (pulseKey === undefined || pulseKey === lastPulse.current) return;
     lastPulse.current = pulseKey;
-    doAction(pulse?.action ?? "hop");
+    doAction(pulse?.action ?? "squish");
     doFlash(pulse?.mood ?? "happy", 1300);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pulseKey]);
@@ -358,17 +420,19 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   const shown = flash ?? mood;
   // A reaction stirs a dozing bot for as long as its face shows, then it drifts off again.
   const sleeping = dozing && !flash;
-  const look2 = pose ? [pose.x * REACH, pose.y * REACH * 0.8] : glance ?? (shown === "thinking" ? [REACH * 0.7, -REACH * 0.75] : undefined);
-  // Following eyes let go of the pointer for a glance or thought, and take it up again after.
-  const looking = !!look2;
+  const held = pose ?? (shown === "thinking" ? THINKING : undefined);
+  // Following eyes let go of the pointer for a pose or thought, and take it up again after.
+  const looking = !!held;
   useEffect(() => {
     if (gaze.current.on) kick.current();
   }, [looking]);
-  // The head turning: the face slides and narrows, the body leans, the light moves the other way.
-  const turn: Record<string, string | number> = pose ? { "--turn-x": pose.x, "--turn-y": pose.y, "--turn-a": Math.abs(pose.x), "--tilt": `${pose.tilt ?? 0}deg` } : {};
+  // Where it faces: the eyes (--look-*), the head after them and the body last (--turn-*), leaning
+  // into it unless the pose cocks the head its own way.
+  const turn: Record<string, string | number> = held
+    ? { "--look-x": held.x * REACH, "--look-y": held.y * REACH * 0.8, "--turn-x": held.x, "--turn-y": held.y, "--turn-a": Math.abs(held.x), "--tilt": `${held.tilt ?? held.x * 5}deg` }
+    : {};
   const { face } = shape;
-  // A touch bigger than the shapes' own numbers, so they still read on a 28px avatar.
-  const eyeScale = (face.scale ?? 1) * 1.12;
+  const eyeScale = (face.scale ?? 1) * EYE_BOOST;
   const gap = face.gap * 1.1;
   return (
     <span
@@ -378,14 +442,14 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       data-mood={shown}
       data-blink={blink ? "" : undefined}
       data-action={action}
-      data-looking={look2 ? "" : undefined}
+      data-looking={held ? "" : undefined}
       data-busy={busy || undefined}
       data-asleep={sleeping ? "" : undefined}
       data-eyes={flash ? undefined : pose?.eyes}
       role={label ? "img" : undefined}
       aria-label={label}
       aria-hidden={label ? undefined : true}
-      style={{ width: size, height: size, "--bob-delay": `${-(clip.charCodeAt(clip.length - 2) % 9) * 2.1}s`, ...(blink ? { "--blink": `${blink}ms` } : {}), ...(look2 ? { "--look-x": look2[0], "--look-y": look2[1] } : {}), ...turn } as React.CSSProperties}
+      style={{ width: size, height: size, "--bob-delay": `${-(clip.charCodeAt(clip.length - 2) % 9) * 1.3}s`, "--eye-fill": `url(#bot${clip}-eye)`, ...(blink ? { "--blink": `${blink}ms` } : {}), ...turn } as React.CSSProperties}
       onPointerEnter={playful ? () => { doAction("nod"); doFlash("happy", 1100); } : undefined}
       onPointerDown={playful ? () => doAction("spin") : undefined}
       onAnimationEnd={(e) => {
@@ -394,15 +458,22 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     >
       <svg viewBox="0 0 100 100" width={size} height={size} overflow="visible">
         <g className="bot-act">
-          <g className="bot-tilt">
-            <g className="bot-turn">
-              <Body shape={shape} color={color.hex} clip={`bot${clip}`} />
-            </g>
-            <g className="bot-face" transform={`translate(${face.x} ${face.y})`}>
-              <g className="bot-look">
-                <g className="bot-track">
-                  <Eye mood={shown} x={-gap / 2} scale={eyeScale} glint={size >= 44} side="left" lid={asleep !== undefined} />
-                  <Eye mood={shown} x={gap / 2} scale={eyeScale} glint={size >= 44} side="right" lid={asleep !== undefined} />
+          {/* Leaning after the pointer (--steer-*), then turned and tilted by a pose (--turn-*). */}
+          <g className="bot-steer">
+            <g className="bot-tilt">
+              <g className="bot-turn">
+                <Body shape={shape} color={color.hex} clip={`bot${clip}`} />
+              </g>
+              <g className="bot-face" transform={`translate(${face.x} ${face.y})`}>
+                <g className="bot-head">
+                  <g className="bot-steer-face">
+                    <g className="bot-look">
+                      <g className="bot-track">
+                        <Eye mood={shown} x={-gap / 2} scale={eyeScale} side="left" lid={asleep !== undefined} />
+                        <Eye mood={shown} x={gap / 2} scale={eyeScale} side="right" lid={asleep !== undefined} />
+                      </g>
+                    </g>
+                  </g>
                 </g>
               </g>
             </g>

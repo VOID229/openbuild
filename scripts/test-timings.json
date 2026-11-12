@@ -1,6 +1,7 @@
 {
   "tests/botActivityUi.test.ts": 3.6,
   "tests/botAdvancedChrome.test.ts": 2.3,
+  "tests/botAvatarLife.test.ts": 18.0,
   "tests/botChatMascot.test.ts": 6.9,
   "tests/botChatScroll.test.ts": 23.5,
   "tests/botClaude.test.ts": 2.6,
