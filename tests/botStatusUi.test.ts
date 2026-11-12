@@ -46,7 +46,12 @@ const event = (e: Record<string, unknown>) => act(async () => { feed!.enqueue(en
 const status = (next: Record<string, unknown>) => event({ t: "status", botId: "scout", status: next });
 const working = (activity?: string, more: Record<string, unknown> = {}) => status({ state: "working", conversationId: "chat", ...(activity === undefined ? {} : { activity }), ...more });
 const typing = (on: boolean) => event({ t: "typing", conversationId: "chat", botIds: on ? ["scout"] : [] });
-const row = () => document.querySelector(".bm-working-text")?.textContent;
+/** The step the chat's working row shows: not one on its way out for the dots. */
+const row = () => document.querySelector(".bm-working-text:not([data-gone])")?.textContent;
+/** The working row's mascot is three dots, for plain work. */
+const dotted = () => !!document.querySelector('.bm-working[data-dots] .bot[data-dots="in"]');
+/** The header's line is three dots, for plain work. */
+const headDots = () => document.querySelector(".bots-head-dots");
 const head = () => document.querySelector(".bots-head-sub")?.textContent;
 
 async function show(view: any = BotsView, statuses: Record<string, unknown> = {}) {
@@ -73,24 +78,54 @@ afterEach(() => {
   enterWorkspace("away");
 });
 
-test("the chat's working row shows each step as its status arrives, and nothing of it once it's over", async () => {
+test("the chat's working row shows each step as its status arrives, three dots for plain work, and nothing once it's over", async () => {
   await show();
   expect(row()).toBeUndefined();
   await working("Working on it");
-  expect(row()).toBe("Working on it");
+  // Plain work: no words, only the mascot turned into three dots. The row still says it for a screen reader.
+  expect(row()).toBeUndefined();
+  expect(dotted()).toBe(true);
+  expect(document.querySelector(".bm-working-text")).toBeNull();
   expect(document.querySelector(".bm-working")!.getAttribute("aria-label")).toBe("Scout: Working on it");
-  // Each status replaces the last in the tick it arrives: the line is a new element, not a stale one fading out.
-  const steps = ["Running a command", "Checking why the build failed", "Getting it done", "Reading notes.md", "Making progress"];
-  for (const step of steps) {
+  // Each step replaces the last in the tick it arrives: the line is a new element, not a stale one
+  // fading out, and the dots are the mascot again at once.
+  for (const step of ["Running a command", "Checking why the build failed", "Reading notes.md"]) {
     const before = document.querySelector(".bm-working-text");
     await working(step);
     expect(row()).toBe(step);
+    expect(dotted()).toBe(false);
     expect(document.querySelectorAll(".bm-working-text").length).toBe(1);
     expect(document.querySelector(".bm-working-text")).not.toBe(before);
   }
+  // Plain words between steps: the last step stays a moment, then goes as the mascot turns into dots.
+  await working("Getting it done");
+  expect(row()).toBe("Reading notes.md");
+  expect(dotted()).toBe(false);
+  await frames(400);
+  expect(row()).toBeUndefined();
+  expect(dotted()).toBe(true);
+  expect(document.querySelector(".bm-working-text[data-gone]")!.getAttribute("aria-hidden")).toBe("true");
+  // A step that's over in a moment doesn't set the mascot going back and forth.
+  await working("Running the tests");
+  expect(row()).toBe("Running the tests");
+  expect(dotted()).toBe(false);
+  // It comes back in after the mascot, once it's itself again.
+  expect(document.querySelector(".bm-working-text")!.hasAttribute("data-back")).toBe(true);
+  await working("Making progress");
+  await working("Reading a file");
+  expect(row()).toBe("Reading a file");
+  expect(dotted()).toBe(false);
+  expect(document.querySelector(".bm-working-text")!.hasAttribute("data-back")).toBe(false);
+  // No generic words anywhere in the chat, whichever of them the status says.
+  for (const plain of ["Sorting it out", "Keeping at it", "Making progress"]) {
+    await working(plain);
+    await frames(400);
+    expect(dotted()).toBe(true);
+    expect(row()).toBeUndefined();
+  }
   // Writing: "Typing…" takes over from the row, in words where the dots used to be.
   await typing(true);
-  expect(row()).toBeUndefined();
+  expect(document.querySelector(".bm-working")).toBeNull();
   const indicator = document.querySelector(".bm-typing")!;
   expect(indicator.textContent).toBe("Typing…");
   expect(indicator.getAttribute("aria-label")).toBe("Scout is typing");
@@ -98,35 +133,48 @@ test("the chat's working row shows each step as its status arrives, and nothing 
   await typing(false);
   // Quiet work (after a message went out) shows no row, and an idle bot none either.
   await working("Sorting it out", { quiet: true });
-  expect(row()).toBeUndefined();
+  expect(document.querySelector(".bm-working")).toBeNull();
   await working("Running the tests");
   expect(row()).toBe("Running the tests");
   await status({ state: "idle" });
-  expect(row()).toBeUndefined();
+  expect(document.querySelector(".bm-working")).toBeNull();
 });
 
-test("a status with no line, or an older server's Thinking, reads as plain work: the app never says Thinking", async () => {
+test("a holding line is a step of its own: it keeps its words", async () => {
+  await show(BotsView, { scout: { state: "working", conversationId: "elsewhere", activity: "Running the tests", waiting: ["chat"] } });
+  expect(row()).toMatch(/^(Hold on a second|Finishing up something|One moment, wrapping something up|Be right with you)$/);
+  expect(dotted()).toBe(false);
+});
+
+test("a status with no line, or an older server's Thinking, reads as plain work: dots, and the app never says Thinking", async () => {
   await show(BotsView, { scout: { state: "working", conversationId: "chat", activity: "Thinking" } });
-  expect(row()).toBe("Working on it");
+  expect(dotted()).toBe(true);
+  expect(row()).toBeUndefined();
   await working();
-  expect(row()).toBe("Working on it");
+  expect(dotted()).toBe(true);
   await working("Thinking…");
-  expect(row()).toBe("Working on it");
+  expect(dotted()).toBe(true);
   await working("Reading notes.md");
   expect(row()).toBe("Reading notes.md");
   expect(document.body.textContent).not.toMatch(/thinking/i);
 });
 
-test("on a phone the header's line under the name is the live step, and Typing… while it types", async () => {
+test("on a phone the header's line under the name is the live step, three dots for plain work, and Typing… while it types", async () => {
   phone = true;
   await show();
   // Nothing going on: no live line (a direct chat has no member list to show either).
   expect(document.querySelector(".bots-head-sub-live")).toBeNull();
+  expect(headDots()).toBeNull();
   await working("Thinking");
-  expect(head()).toBe("Working on it");
-  expect(document.querySelector(".bots-head-sub")!.classList.contains("bots-head-sub-live")).toBe(true);
+  // Plain work: three dots and no words, named for a screen reader.
+  expect(headDots()!.children.length).toBe(3);
+  expect(headDots()!.textContent).toBe("");
+  expect(headDots()!.getAttribute("aria-label")).toBe("Working on it");
+  expect(document.querySelector(".bots-head-sub-live")).toBeNull();
   await working("Watching CI on #115");
+  expect(headDots()).toBeNull();
   expect(head()).toBe("Watching CI on #115");
+  expect(document.querySelector(".bots-head-sub")!.classList.contains("bots-head-sub-live")).toBe(true);
   // The same words as the chat's row beneath it.
   expect(row()).toBe("Watching CI on #115");
   await typing(true);
@@ -134,10 +182,12 @@ test("on a phone the header's line under the name is the live step, and Typing�
   await typing(false);
   expect(head()).toBe("Watching CI on #115");
   await working("Getting it done");
-  expect(head()).toBe("Getting it done");
+  expect(head()).toBe("");
+  expect(headDots()).not.toBeNull();
   await status({ state: "idle" });
   expect(document.querySelector(".bots-head-sub-live")).toBeNull();
-  expect(document.body.textContent).not.toMatch(/thinking|typing…/i);
+  expect(headDots()).toBeNull();
+  expect(document.body.textContent).not.toMatch(/thinking|typing…|getting it done|working on it/i);
 });
 
 test("the sidebar's preview says Typing… while a bot types, then goes back to the last message", async () => {

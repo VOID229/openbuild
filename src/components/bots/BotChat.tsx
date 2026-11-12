@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleD
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, liveLine, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
+import { elsewhere, liveLine, plainWork, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -46,7 +46,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, useStarting } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1119,9 +1119,51 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
   );
 }
 
-/** A working row's mascot: fidgeting, swelling at each new step, and three dots for the moment it has just started. */
-function WorkingMascot({ bot, size, activity }: { bot: Bot; size: number; activity: string }) {
-  return <BotAvatar look={bot.look} size={size} busy waiting={useStarting(bot.id)} pulse={{ key: activity, mood: "idle", action: "pop" }} />;
+/**
+ * How long plain working words have to stand before a working row turns into dots, ms: a step that's
+ * over in a moment doesn't set the mascot going back and forth.
+ */
+const DOTS_SETTLE = 350;
+
+/**
+ * A bot at work here: its mascot, fidgeting and swelling at each new step, and the step. While there's
+ * no step to name (plain working words) the mascot turns into three dots and the words go: the dots
+ * say it's working. The step it was on fades as it goes, and the next comes in once it's back.
+ */
+function WorkingRow({ bot, direct, activity }: { bot: Bot; direct: boolean; activity: string }) {
+  const plain = plainWork(activity);
+  // Plain words turn it into dots once they've stood a moment (straight away when the row opens on
+  // them); a step turns it back at once.
+  const [settled, setSettled] = useState(plain);
+  useEffect(() => {
+    if (!plain) return setSettled(false);
+    const t = setTimeout(() => setSettled(true), DOTS_SETTLE);
+    return () => clearTimeout(t);
+  }, [plain]);
+  const dots = plain && settled;
+  // The last step it named, kept on while plain words stand, and as it fades out for the dots.
+  const step = useRef<string>(undefined);
+  if (!plain) step.current = activity;
+  const text = plain ? step.current : activity;
+  // A step that comes in as the dots turn back waits for the mascot to be itself again.
+  const back = useRef<string>(undefined);
+  const was = useRef(dots);
+  if (was.current !== dots) {
+    if (!dots) back.current = text;
+    was.current = dots;
+  }
+  // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
+  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy dots={dots} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
+  return (
+    <div className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`} data-dots={dots || undefined}>
+      {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
+      {text && (
+        <span key={text} className="bm-working-text" data-gone={dots || undefined} data-back={(!dots && back.current === text) || undefined} aria-hidden={dots || undefined}>
+          {text}
+        </span>
+      )}
+    </div>
+  );
 }
 
 /** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
@@ -1131,18 +1173,8 @@ function Working({ conversationId, direct, botIds, bots }: { conversationId: str
     <>
       {botIds.map((id) => {
         const bot = bots.find((b) => b.id === id);
-        const activity = workingLine(conversationId, id, statuses[id]);
         if (!bot) return null;
-        // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
-        const avatar = <WorkingMascot bot={bot} size={direct ? 30 : 28} activity={activity} />;
-        return (
-          <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
-            {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
-            <span key={activity} className="bm-working-text">
-              {activity}
-            </span>
-          </div>
-        );
+        return <WorkingRow key={id} bot={bot} direct={direct} activity={workingLine(conversationId, id, statuses[id])} />;
       })}
     </>
   );
@@ -2440,7 +2472,16 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={36} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
               <span className="bots-head-text">
                 <span className="bots-head-name">{name}</span>
-                {sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{sub}</span>}
+                {activity && plainWork(activity) ? (
+                  // Plain work: the working row's three dots, small, in place of the words.
+                  <span className="bots-head-sub bots-head-dots" role="img" aria-label={activity}>
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                ) : (
+                  sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{sub}</span>
+                )}
               </span>
               {!remote && <HeadTasks conversation={conversation} mobile />}
             </>

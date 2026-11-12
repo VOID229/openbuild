@@ -19,6 +19,12 @@ export const holding = (st: BotStatus | undefined, conversationId: string) =>
  */
 export const visiblyWorking = (st: BotStatus | undefined) => st?.state === "working" && !st.deciding;
 
+/**
+ * Plain working words (WORKING_PHRASES): the model is working out what to do, with no step of its own
+ * to name. The chat's working row and the header's line show three dots for them, not the words.
+ */
+export const plainWork = (line: string | undefined) => !line?.trim() || (WORKING_PHRASES as readonly string[]).includes(line.trim());
+
 /** How long a bot's first moment of work lasts at most, ms: its mascot is three dots for it. */
 export const STARTING_MS = 1600;
 
@@ -29,7 +35,7 @@ export const STARTING_MS = 1600;
  * server's `since`: a start that looks to be in the future counts as just now.
  */
 export const starting = (st: BotStatus | undefined, now: number) =>
-  visiblyWorking(st) && !st!.quiet && !!st!.since && now - st!.since < STARTING_MS && (!st!.activity?.trim() || (WORKING_PHRASES as readonly string[]).includes(st!.activity.trim()));
+  visiblyWorking(st) && !st!.quiet && !!st!.since && now - st!.since < STARTING_MS && plainWork(st!.activity);
 
 /** Working in this chat, quietly or not. */
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
