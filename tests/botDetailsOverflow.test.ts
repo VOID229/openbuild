@@ -52,7 +52,8 @@ const scrolled = (page: Page) =>
 
 const open = async (chat: string, width: number, height: number, font?: string) => {
   const page = await Page.open(chrome!.ws, `${server!.url.href}?chat=${chat}${font ? `&font=${font}` : ""}`, width, height, "!!document.querySelector('.bots-view')");
-  await page.eval("document.fonts.ready.then(() => true)");
+  // The app's faces, loaded before anything is measured: one still loading measures in its fallback.
+  await page.eval(`Promise.all(['500 14px "Inter Variable"', '500 14px "Geist Mono Variable"'].map((f) => document.fonts.load(f))).then(() => true)`);
   await page.eval("openBotsDetails(), true");
   await page.until("!!document.querySelector('.bots-details-open .bots-tabs')");
   await page.finish(".bots-details");
@@ -131,6 +132,7 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
   test("with the mono font on a narrow phone, every tab still shows its whole label", async () => {
     const page = await open("dm", 320, 640, "mono");
     expect(await page.eval<string>("getComputedStyle(document.querySelector('.bots-tab')).fontFamily")).toContain("Geist Mono");
+    expect(await page.eval<boolean>(`document.fonts.check('500 14px "Geist Mono Variable"')`)).toBe(true);
     expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
     expect(await wide(page)).toEqual([]);
   }, 60_000);
