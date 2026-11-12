@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { PiChatRequest, StreamEvent } from "../../shared/types";
 import * as storage from "../storage";
+import { unsupportedSteer } from "../steerErrors";
 import { accountArgs } from "../runtimeAccounts";
 import { cursorBin, cursorEnv, modelSlug, permissionArgs } from "./install";
 import { CursorProtocol } from "./protocol";
@@ -39,7 +40,7 @@ export function answer(threadId: string, askId: string, reply: QuestionReply): b
 }
 export const canSteer = (id: string) => !!live.get(id)?.questions && live.get(id)?.proc?.exitCode === null;
 export async function steer(id: string, steerId: string, message: string, images?: PiChatRequest["images"]): Promise<{ handled: boolean }> {
-  if (images?.length) throw new Error("Cursor image attachments are not supported by this adapter");
+  if (images?.length) throw unsupportedSteer(new Error("Cursor steering takes text only: its image attachments are not supported by this adapter"));
   if (!canSteer(id)) throw new Error("Cursor isn't working on this thread");
   live.get(id)!.questions!.steer(steerId, message);
   return { handled: false };
