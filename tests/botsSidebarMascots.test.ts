@@ -1,7 +1,9 @@
 // The bots in OpenBots' sidebar, pointed at in a real Chrome. A bot's own chat, pinned (a tile) or
 // not (a row), only follows the pointer while it's on the row: its whole body turns toward it and
-// leans into it, with no hop or happy face on the way in and no spin when pressed. A group's huddle
-// doesn't react to the pointer at all, and keeps fidgeting only for the member at work.
+// leans into it, with no hop or happy face on the way in and no spin when pressed. A bot at work
+// doesn't follow it, carrying on with its work exactly as if it weren't there, and takes it up again
+// smoothly when it's done. A group's huddle doesn't react to the pointer at all, and keeps fidgeting
+// only for the member at work.
 // (That every shape keeps its eyes on its body while it does is tests/botAvatarLife.test.ts's.)
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { DEPTH, PITCH, YAW } from "../src/lib/bots/rig";
@@ -143,6 +145,73 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     expect(during.map((m) => m.busy)).toEqual([false, true]);
     for (const m of during) expect(m.tracking).toBe(false);
   });
+
+  test("a bot at work pays the pointer no mind: its routine plays on exactly as if it weren't there", async () => {
+    // Every change in what the bot at work is doing (the look its pose asks of its eyes, whether it's
+    // holding a pose, a blink, a move), and whether it ever followed the pointer, from its first drawing. With
+    // only it on the page and Math.random seeded, two loads live the same life.
+    const RECORD = `(() => {
+      const log = [];
+      let followed = false;
+      const note = () => {
+        const b = document.querySelector('.bot');
+        if (!b) return;
+        if ('tracking' in b.dataset) followed = true;
+        const now = [b.dataset.eyes ?? '-', 'looking' in b.dataset ? 'pose' : 'none', 'blink' in b.dataset ? 'blink' : 'open', b.dataset.action ?? '-'].join(' ');
+        if (log.at(-1) !== now) log.push(now);
+      };
+      new MutationObserver(note).observe(document, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-eyes', 'data-looking', 'data-blink', 'data-action', 'data-tracking'] });
+      window.record = () => ({ log, followed });
+    })()`;
+    const live = async (hover: boolean) => {
+      const page = await Page.open(chrome!.ws, `${server!.url.href}?only=row-worker&seed=11`, 1100, 800, "!!document.querySelector('.bots-row .bot')");
+      await page.send("Page.enable");
+      await page.send("Page.addScriptToEvaluateOnNewDocument", { source: RECORD });
+      await page.eval("window.beforeReload = true; location.reload()");
+      await page.until("!window.beforeReload && !!window.record && !!document.querySelector('.bots-row .bot')");
+      const find = item("row", "Worker");
+      expect((await mascots(page, find))[0]!.busy).toBe(true);
+      const started = performance.now();
+      // Hovered, the pointer goes all over the row and round the bot while it works.
+      if (hover) for (const [dx, dy] of [["far", 0], [-10, -12], ["far", 14], [12, -8], [-6, 10], ["far", -6], [8, 8], ["far", -12], [-12, 0]] as const) {
+        await pointAt(page, find, dx, dy);
+        await Bun.sleep(380);
+      }
+      await Bun.sleep(Math.max(0, 5000 - (performance.now() - started)));
+      return { page, find, ...(await page.eval<{ log: string[]; followed: boolean }>("window.record()")) };
+    };
+    const alone = await live(false);
+    const hovered = await live(true);
+    // It never followed the pointer, and did just what it did with no pointer there: the same poses,
+    // the same moves, in the same order (never dropped to wait on the pointer between them).
+    expect(hovered.followed).toBe(false);
+    expect(alone.followed).toBe(false);
+    expect(hovered.log.length).toBeGreaterThan(4);
+    const shared = Math.min(alone.log.length, hovered.log.length);
+    expect(shared).toBeGreaterThan(4);
+    expect(hovered.log.slice(0, shared)).toEqual(alone.log.slice(0, shared));
+    expect(hovered.log.slice(1).every((l) => l.includes("pose"))).toBe(true);
+
+    // Done working with the pointer still on it: now it follows, from wherever the routine left its
+    // eyes, easing over rather than jumping there.
+    const { page, find } = hovered;
+    await pointAt(page, find, "far", 0);
+    await page.eval(`(() => {
+      const eye = () => (/matrix\\(([^)]+)\\)/.exec(document.querySelector('.bot-eye-left').style.transform)?.[1] ?? '1,0,0,1,0,0').split(',').map(Number).slice(4);
+      const seen = [eye()];
+      const watch = () => { seen.push(eye()); if (seen.length < 50) requestAnimationFrame(watch); };
+      window.seen = seen;
+      bots.setState({ status: {} });
+      requestAnimationFrame(watch);
+    })()`);
+    await page.until("window.seen.length >= 50", 5000);
+    await until(page, find, `tracking && yaw > ${YAW * 0.5}`);
+    const seen = await page.eval<[number, number][]>("window.seen");
+    const size = await page.eval<number>(`(${find}).querySelector('.bot').offsetWidth`);
+    // No frame moves an eye more than a small step of its box: a jump straight to the pointer would.
+    const steps = seen.slice(1).map(([x, y], i) => Math.hypot(x - seen[i]![0], y - seen[i]![1]));
+    expect(Math.max(...steps)).toBeLessThan(size * 0.05);
+  }, 30_000);
 
   test("with reduced motion, nothing follows the pointer", async () => {
     const page = await open();

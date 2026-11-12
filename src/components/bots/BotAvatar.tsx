@@ -102,7 +102,10 @@ export interface BotAvatarProps {
   alive?: boolean;
   /** Also nod, rock and pull faces now and then (the bigger avatars). */
   lively?: boolean;
-  /** Follow the pointer: the whole body turns and leans toward it. */
+  /**
+   * Follow the pointer: the whole body turns and leans toward it. Not while it's busy: at work it
+   * pays the pointer no mind, and takes it up again, from wherever it's looking, once it stops.
+   */
   track?: boolean;
   /** Nod and smile on hover, turn right round when pressed. */
   playful?: boolean;
@@ -180,6 +183,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // A reaction stirs a dozing bot for as long as its face shows, then it drifts off again.
   const sleeping = dozing && !flash;
   const held = pose ?? (shown === "thinking" ? THINKING : undefined);
+  // At work, the pointer is no business of its: the working routine plays on as if it weren't there.
+  const following = track && !busy;
   // The form its eyes are drawn in, which says how near the edge they can go.
   const drawn = eyeLook(shown, flash ? undefined : eyesFor(pose, busy), sleeping);
 
@@ -249,10 +254,10 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   }, [drawn]);
 
   // Following the pointer, wherever it is; let go, it eases back to looking ahead. A pose wins: it
-  // looks where the pose says, and takes the pointer up again after.
+  // looks where the pose says, and takes the pointer up again after. At work it doesn't follow at all.
   useEffect(() => {
     const el = ref.current;
-    if (!track || !el || calm()) return;
+    if (!following || !el || calm()) return;
     const b = body.current!;
     b.tracking = true;
     el.dataset.tracking = "";
@@ -264,7 +269,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       delete el.dataset.tracking;
       animate(tick.current);
     };
-  }, [track]);
+  }, [following]);
 
   // Lids snap down, held a moment, and up a touch slower (see .bot-eye-fill): never the same blink twice.
   const doBlink = (twice = false) => {
@@ -307,7 +312,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
         timer = setTimeout(next, 300);
         return;
       }
-      if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : [[null, rand(800, 2600)], ...nextIdle(lively, track)];
+      if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
       const [what, ms] = steps.shift()!;
       if (what === null) setPose(undefined);
       else if (what === "blink" || what === "blink2") doBlink(what === "blink2");
@@ -322,7 +327,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, track, dozing]);
+  }, [alive, busy, lively, following, dozing]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
