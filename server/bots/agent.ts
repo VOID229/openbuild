@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -257,6 +257,10 @@ export function contextFor(botId: string): string {
 export const RESPONSIVE =
   "The user shouldn't wait in silence: before real work they asked for, and whenever they steer you mid-work, send one short ack with your first tool call, like \"Got it, switching to X\". At most one per user message, and none when the answer itself comes fast. When a reaction says enough (👍 to \"ok go\" or \"thanks\"), react instead of writing. When the user reacts to something of yours, react back so they know you saw it, most of all mid-work.";
 
+/** Questions the user has to answer are cards, not messages: a tap answers one, and it stays visible as unanswered. */
+export const ASKING =
+  "When you need the user to decide or tell you something before you can go on, ask with question, never in a message: one call per question, its choices as options (a suggested answer counts; they can always type their own). Several questions are several calls in one turn. Then stop until they're answered. A passing question, or one for another bot, stays a message.";
+
 /**
  * A bot's context as named system prompt sections, steadiest first. Pi re-sends a whole section
  * into the conversation whenever its text changes, so a new memory costs only the memory section,
@@ -278,6 +282,7 @@ export function contextSections(botId: string): Record<string, string> {
     RESPONSIVE,
     "A tool call that runs long doesn't hold you up: it carries on as a background job, you get its job number at once and its result wakes you later. Never wait on one or run it again; carry on, or end your turn. New messages can arrive while you work: read them and fold them in. With others in the chat, read what they just said first, and don't repeat what someone already said: react, add only what's different, or stay [silent]. If send_message holds your message because something new arrived, decide again from what it shows. To think something through with several bots without filling the chat, use side_chat; whoever opens it reports back.",
     "Every tool with a status parameter needs a short custom status (a few plain words, at most 50 characters) saying what this call does for the user, like Checking why the build failed, not a generic Running a command. It's the live activity line, not a chat message: write status first in the call, so it shows while you're still writing the rest.",
+    ASKING,
     "Messages show their short id in brackets, (replying to …) when they quote one, and the reactions on them numbered #1, #2… (→ #n answers another). To answer an older message, quote it with send_message reply_to; leave reply_to out for the newest. React with react; to react to a reaction, pass its number as to_reaction.",
     `When seeing beats reading (a chart, diagram, demo, mockup, small interactive tool or visual summary), put a self-contained HTML page in the chat with html_render, drawn in a sandboxed frame about ${BOT_HTML_WIDTH}px wide. Not for quick answers; don't restate the page in a message, only add what it doesn't say.`,
     "Direct and group chats each have a to-do list the user watches (in the chat's details, its progress in the header); it shows in your context. For work with several real steps, not quick things, lay them out with todo add, mark each doing as you start it and done as soon as it's finished, and remove ones that stop applying; updates need no message. In a group it's shared: take an item by marking it doing, and leave ones someone else is on. It's temporary: todo clear when the work changes direction or is dropped, or the user asks; adding steps after a finished list starts a new one, and a finished list clears by itself after a while.",
@@ -407,6 +412,8 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
   if (onlySilent(text) && bare) return { note: "Nothing was sent. [silent] is only for your final reply, never for send_message." };
   // A wake nobody is waiting on (a thread finished, a check-in) with nothing to tell isn't a message.
   if (bare && svc.backgroundTurn(botId, conversationId) && (emptyUpdate(text) || repeatsOwn(botId, conversationId, text))) return { sent: false, note: QUIET };
+  // Questions listed in a message come back once, to be asked as cards. The same text sent again is the bot's call, and goes out.
+  if (bare && asksUser(botId, conversationId, text)) return { sent: false, note: ASK_INSTEAD };
   // Someone wrote since this turn began (another bot answering the same thing, say): the bot sees it
   // before its message lands. Nothing is dropped: it sends again, changed or not, or decides not to.
   const fresh = svc.unseenSince(botId, conversationId);
@@ -423,6 +430,22 @@ export async function sendMessage(botId: string, p: Record<string, unknown>) {
     return deliver(botId, conversationId, text, images, p.reply_to);
   }
   return deliver(botId, conversationId, text, images, p.reply_to);
+}
+
+/** What send_message answers to a message that lists questions for the user. */
+export const ASK_INSTEAD = "Not sent: this lists questions or choices for the user. Ask with question instead: one call per question, its choices (or your suggested answer) as options, and say anything else in a short message first. If it isn't for the user to answer, send it again as it is.";
+
+const asked = new Map<string, string>();
+
+/** A message listing questions in a chat the user answers in, the first time the bot sends it. */
+function asksUser(botId: string, conversationId: string, text: string): boolean {
+  const c = db.getConversation(conversationId);
+  if (!c || c.friend || c.kind === "side" || !asksInList(text)) return false;
+  const key = `${botId}:${conversationId}`;
+  const again = asked.get(key) === plain(text);
+  if (again) asked.delete(key);
+  else asked.set(key, plain(text));
+  return !again;
 }
 
 /** What send_message answers on a wake with nothing new in it. */

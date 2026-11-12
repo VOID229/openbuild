@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnScript } from "./spawnScript";
+import { asksInList } from "../shared/bots";
 
 /** Runs a script against a bots database of its own, in a process of its own. */
 async function isolated(name: string, script: string) {
@@ -255,6 +256,54 @@ test("a bot's reaction wakes no bot, but the bot it reacted to sees it on its ne
     a.deepEqual(wakes, []);
     // Dr's next turn, whatever wakes it, shows the message again with the reaction under it.
     a.match(render(turn, dr, delivered), /\\[[0-9a-f]{8}\\] Dr Eggbot[^\\n]*: Yes, we just merged it\\.\\n  reactions: #1 👍 from Manager/);
+    process.exit(0);
+  `);
+});
+
+test("asksInList tells listed questions and choices from ordinary messages", () => {
+  // Several questions in a list, as a bot writes them when it has no card to ask with.
+  expect(asksInList("A few quick questions:\n\n1. What does the app do, in a sentence or two?\n2. Who uses it? Your team, or the public?\n3. How many people a day?")).toBe(true);
+  // One question with its choices under it.
+  expect(asksInList("Which database should it use?\n- Postgres\n- SQLite")).toBe(true);
+  expect(asksInList("Which one? 🙂\nA) Staging\nB) Production")).toBe(true);
+  // A question in a sentence, a list that asks nothing, and a list with a closing question are messages.
+  expect(asksInList("Want me to go ahead and merge it?")).toBe(false);
+  expect(asksInList("Done:\n- fixed the build\n- opened the PR")).toBe(false);
+  expect(asksInList("Here's what changed:\n1. The slider\n2. The city picker\nAnything else?")).toBe(false);
+  expect(asksInList("Staging or production?")).toBe(false);
+});
+
+test("send_message holds listed questions once so they're asked as cards, and the prompt says to", async () => {
+  await isolated("asking", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const runner = await import('./server/bots/runner.ts');
+    const { sendMessage, askUser, setFocus, contextSections, ASK_INSTEAD, ASKING } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    const chat = svc.directId(builder);
+    svc.setHooks({ wake() {}, stop() {}, pendingAssignments: () => [], unseen: runner.unseen });
+    setFocus(builder, chat);
+    a.ok(contextSections(builder).openbots.includes(ASKING));
+
+    const listed = 'Before I build anything:\\n\\n1. What does the app do, in a sentence or two?\\n2. Who uses it? Your team, or the public?';
+    const count = db.messages(chat, 50).length;
+    const held = await sendMessage(builder, { text: listed });
+    a.deepEqual([held.sent, held.note], [false, ASK_INSTEAD]);
+    a.equal(db.messages(chat, 50).length, count);
+    // The bot asks with cards instead; an ordinary message was never held.
+    a.ok((await sendMessage(builder, { text: 'A couple of quick questions first.' })).id);
+    const card = askUser(builder, { title: 'Who uses it?', options: ['My team', 'The public'] });
+    a.equal(db.getMessage(card.id).message.question.options.length, 2);
+    // The transcript says what's a card and whether it's been answered.
+    const lines = () => runner.render([{ kind: 'messages', conversationId: chat }], builder);
+    a.match(lines(), /\\(asked with question: “Who uses it\\?” \\[My team \\/ The public\\], not answered yet\\)/);
+    svc.answerQuestion(chat, card.id, 'B');
+    a.match(lines(), /answered: The public\\)/);
+
+    // Sent again unchanged, it's the bot's call: it goes out. The next time it's held again.
+    a.ok((await sendMessage(builder, { text: listed })).id);
+    a.equal((await sendMessage(builder, { text: listed })).sent, false);
     process.exit(0);
   `);
 });
