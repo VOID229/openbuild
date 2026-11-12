@@ -1129,9 +1129,11 @@ const DOTS_SETTLE = 350;
  * A bot at work here: its mascot, fidgeting and swelling at each new step, and the step. While there's
  * no step to name (plain working words) the mascot turns into three dots and the words go: the dots
  * say it's working. The step it was on fades as it goes, and the next comes in once it's back.
+ * Typing, it's the same row, so the mascot stays where it is: itself (never dots), thinking, beside
+ * "Typing…".
  */
-function WorkingRow({ bot, direct, activity }: { bot: Bot; direct: boolean; activity: string }) {
-  const plain = plainWork(activity);
+function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direct: boolean; activity: string; typing?: boolean }) {
+  const plain = !typing && plainWork(activity);
   // Plain words turn it into dots once they've stood a moment (straight away when the row opens on
   // them); a step turns it back at once.
   const [settled, setSettled] = useState(plain);
@@ -1143,8 +1145,8 @@ function WorkingRow({ bot, direct, activity }: { bot: Bot; direct: boolean; acti
   const dots = plain && settled;
   // The last step it named, kept on while plain words stand, and as it fades out for the dots.
   const step = useRef<string>(undefined);
-  if (!plain) step.current = activity;
-  const text = plain ? step.current : activity;
+  if (!plain && !typing) step.current = activity;
+  const text = typing ? TYPING : plain ? step.current : activity;
   // A step that comes in as the dots turn back waits for the mascot to be itself again.
   const back = useRef<string>(undefined);
   const was = useRef(dots);
@@ -1153,12 +1155,12 @@ function WorkingRow({ bot, direct, activity }: { bot: Bot; direct: boolean; acti
     was.current = dots;
   }
   // In groups the mascot sits in the avatar column, so the text starts where bubbles do.
-  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy dots={dots} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
+  const avatar = <BotAvatar look={bot.look} size={direct ? 30 : 28} busy dots={dots} mood={typing ? "thinking" : undefined} pulse={{ key: step.current ?? "", mood: "idle", action: "pop" }} />;
   return (
-    <div className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`} data-dots={dots || undefined}>
+    <div className="bm-working" role="status" aria-label={typing ? `${bot.name} is typing` : `${bot.name}: ${activity}`} data-dots={dots || undefined}>
       {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
       {text && (
-        <span key={text} className="bm-working-text" data-gone={dots || undefined} data-back={(!dots && back.current === text) || undefined} aria-hidden={dots || undefined}>
+        <span key={text} className={typing ? "bm-typing" : "bm-working-text"} data-gone={dots || undefined} data-back={(!dots && back.current === text) || undefined} aria-hidden={dots || undefined}>
           {text}
         </span>
       )}
@@ -1166,59 +1168,52 @@ function WorkingRow({ bot, direct, activity }: { bot: Bot; direct: boolean; acti
   );
 }
 
-/** Bots at work here but not writing yet: their mascot, fidgeting, and what they're up to. */
-function Working({ conversationId, direct, botIds, bots }: { conversationId: string; direct: boolean; botIds: string[]; bots: Bot[] }) {
+/**
+ * The bots live in the chat, one row each: at work here (their mascot and what they're up to), or
+ * typing (their mascot and "Typing…"). Going from one to the other is the same row, so the mascot
+ * never leaves; only the words it's writing, once there are some, take its place as a bubble.
+ */
+function Live({ conversation, working, typing, bots }: { conversation: Conversation; working: string[]; typing: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
+  const drafts = useBots((s) => s.drafts);
+  const direct = conversation.kind === "direct";
   return (
     <>
-      {botIds.map((id) => {
+      {[...working.filter((id) => !typing.includes(id)), ...typing].map((id) => {
         const bot = bots.find((b) => b.id === id);
         if (!bot) return null;
-        return <WorkingRow key={id} bot={bot} direct={direct} activity={workingLine(conversationId, id, statuses[id])} />;
+        const draft = typing.includes(id) ? drafts.find((d) => d.conversationId === conversation.id && d.botId === id)?.text : undefined;
+        if (draft) return <Draft key={id} conversation={conversation} bot={bot} bots={bots} text={draft} />;
+        return <WorkingRow key={id} bot={bot} direct={direct} typing={typing.includes(id)} activity={workingLine(conversation.id, id, statuses[id])} />;
       })}
     </>
   );
 }
 
-function Typing({ conversation, botIds, bots }: { conversation: Conversation; botIds: string[]; bots: Bot[] }) {
-  const drafts = useBots((s) => s.drafts);
+/** Words a bot is still writing, as a bubble of its own. */
+function Draft({ conversation, bot, bots, text }: { conversation: Conversation; bot: Bot; bots: Bot[]; text: string }) {
   return (
-    <>
-      {botIds.map((id) => {
-        const bot = bots.find((b) => b.id === id);
-        if (!bot) return null;
-        const draft = drafts.find((d) => d.conversationId === conversation.id && d.botId === id)?.text;
-        return (
-          // No name: names belong to sent messages. Same avatar column and row as those, so it lines up.
-          <div key={id} className="bm-group bm-theirs">
-            <div className="bm-group-row">
-              {conversation.kind !== "direct" && (
-                <span className="bm-avatar">
-                  <BotAvatar look={bot.look} size={28} mood="thinking" />
-                </span>
-              )}
-              <div className="bm-stack">
-                <div className="bm-row bm-recv" data-pos="single">
-                  <div className="bm-line">
-                    {draft ? (
-                      <div className="bm-bubble">
-                        <div className="bm-text">
-                          <RichText text={draft} bots={bots} everyone={everyoneIn(conversation, bots)} botId={id} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="bm-typing" role="status" aria-label={`${bot.name} is typing`}>
-                        {TYPING}
-                      </div>
-                    )}
-                  </div>
+    // No name: names belong to sent messages. Same avatar column and row as those, so it lines up.
+    <div className="bm-group bm-theirs">
+      <div className="bm-group-row">
+        {conversation.kind !== "direct" && (
+          <span className="bm-avatar">
+            <BotAvatar look={bot.look} size={28} mood="thinking" />
+          </span>
+        )}
+        <div className="bm-stack">
+          <div className="bm-row bm-recv" data-pos="single">
+            <div className="bm-line">
+              <div className="bm-bubble">
+                <div className="bm-text">
+                  <RichText text={text} bots={bots} everyone={everyoneIn(conversation, bots)} botId={bot.id} />
                 </div>
               </div>
             </div>
           </div>
-        );
-      })}
-    </>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1629,8 +1624,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
           );
         })}
         {setup && primary && <PiSetupNotice setup={setup} bot={primary} />}
-        <Working conversationId={conversation.id} direct={conversation.kind === "direct"} botIds={working} bots={bots} />
-        <Typing conversation={conversation} botIds={typing} bots={bots} />
+        <Live conversation={conversation} working={working} typing={typing} bots={bots} />
         <div ref={spacer} className="bm-slack" aria-hidden />
       </div>
       {away && (

@@ -1,5 +1,5 @@
-// A bot typing in an OpenBots chat, in a real Chrome: the chat says "Typing…" in words where the
-// three hopping dots used to be, breathing gently, and holds still for reduced motion. (The sidebar's
+// A bot typing in an OpenBots chat, in a real Chrome: its mascot stays, and beside it "Typing…" in
+// words where the three hopping dots used to be, breathing gently, holding still for reduced motion. (The sidebar's
 // preview and the header saying the same is tests/botStatusUi.test.ts's.)
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
@@ -24,22 +24,28 @@ const open = async () => {
   return page;
 };
 
-type Shown = { text: string; children: number; label: string | null; height: number; animation: string; color: string; size: string };
+type Shown = { text: string; children: number; label: string | null; mascot: boolean; beside: boolean; animation: string; color: string; size: string };
 const shown = (page: Page) =>
   page.eval<Shown>(`(() => {
-    const el = document.querySelector('.bm-typing');
-    const css = getComputedStyle(el);
-    return { text: el.textContent, children: el.children.length, label: el.getAttribute('aria-label'), height: el.getBoundingClientRect().height,
+    const el = document.querySelector('.bm-typing'), row = el.closest('.bm-working'), bot = row?.querySelector('.bot');
+    const css = getComputedStyle(el), a = bot?.getBoundingClientRect(), t = el.getBoundingClientRect();
+    return { text: el.textContent, children: el.children.length, label: row?.getAttribute('aria-label') ?? null, mascot: !!bot && !bot.querySelector('.bot-dots'),
+      beside: !!a && t.left >= a.right && Math.abs((t.top + t.bottom) / 2 - (a.top + a.bottom) / 2) < 4,
       animation: css.animationName, color: css.color, size: css.fontSize };
   })()`);
 
 describe.skipIf(!browser)("a bot typing", () => {
-  test("reads Typing… in words that breathe, and the reply takes their place", async () => {
+  test("keeps the mascot, with Typing… in words that breathe beside it, and the reply takes their place", async () => {
     const page = await open();
+    // At work first: the mascot that's typing next is this one, kept where it is.
+    await page.eval(`bots.setState((s) => ({ status: { ...s.status, manager: { state: "working", conversationId: "a", activity: "Reading notes.md", since: Date.now() - 60000 } } }))`);
+    await page.until("!!document.querySelector('.bm-working .bot')");
+    await page.eval("void (window.mascot = document.querySelector('.bm-working .bot'))");
     await page.eval(`bots.setState((s) => ({ typing: { ...s.typing, a: ["manager"] } }))`);
     await page.until("!!document.querySelector('.bm-typing')");
+    expect(await page.eval<boolean>("document.querySelector('.bm-working .bot') === window.mascot")).toBe(true);
     const typing = await shown(page);
-    expect(typing).toMatchObject({ text: "Typing…", children: 0, label: "manager is typing", height: 34, animation: "bots-typing-text", size: "14px" });
+    expect(typing).toMatchObject({ text: "Typing…", children: 0, label: "manager is typing", mascot: true, beside: true, animation: "bots-typing-text", size: "14px" });
     // Its words are the app's secondary text, as the sidebar's preview is while a bot types.
     expect(typing.color).toBe(await page.eval<string>("(() => { const s = document.body.appendChild(document.createElement('span')); s.style.color = 'var(--text-2)'; const c = getComputedStyle(s).color; s.remove(); return c; })()"));
     // The words it's writing replace "Typing…" in a bubble.

@@ -2687,17 +2687,17 @@
   }
 }
 
-/* Writing a message: "Typing…" in the small working text, breathing gently, the same as the sidebar's
-   preview while a bot types. Bare words, no bubble: they start at the bubbles' edge and keep a
-   bubble's height, so the reply takes their place without the chat moving. */
+/* Writing a message: the working row's mascot stays, thinking, and beside it "Typing…" in the small
+   secondary text, breathing gently, the same as the sidebar's preview while a bot types. */
 .bm-typing {
-  display: flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 2px;
   font-size: 14px;
   color: var(--text-2);
   animation: bots-typing-text 1.4s ease-in-out infinite;
+}
+
+/* Typing straight after the dots: the words wait for the mascot to be itself again. */
+.bm-typing[data-back] {
+  animation: bots-typing-text 1.4s ease-in-out infinite, bm-working-back 300ms cubic-bezier(0.2, 0.8, 0.3, 1) 320ms backwards;
 }
 
 .bm-jump {
@@ -4637,7 +4637,8 @@ a.bots-btn.bots-btn-primary {
 
   /* The step goes and comes back at once; the dots hold still, the middle one bright. */
   .bm-working-text[data-gone],
-  .bm-working-text[data-back] {
+  .bm-working-text[data-back],
+  .bm-typing[data-back] {
     animation: none;
   }
 

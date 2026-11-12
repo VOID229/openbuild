@@ -123,13 +123,23 @@ test("the chat's working row shows each step as its status arrives, three dots f
     expect(dotted()).toBe(true);
     expect(row()).toBeUndefined();
   }
-  // Writing: "Typing…" takes over from the row, in words where the dots used to be.
+  // Writing: the same row, so the same mascot, back as itself and thinking, with "Typing…" beside it.
+  const mascot = document.querySelector(".bm-working .bot");
   await typing(true);
-  expect(document.querySelector(".bm-working")).toBeNull();
-  const indicator = document.querySelector(".bm-typing")!;
+  expect(document.querySelectorAll(".bm-working").length).toBe(1);
+  expect(document.querySelector(".bm-working .bot")).toBe(mascot);
+  expect(dotted()).toBe(false);
+  expect(mascot!.getAttribute("data-mood")).toBe("thinking");
+  expect(row()).toBeUndefined();
+  const indicator = document.querySelector(".bm-working .bm-typing")!;
   expect(indicator.textContent).toBe("Typing…");
-  expect(indicator.getAttribute("aria-label")).toBe("Scout is typing");
   expect(indicator.children.length).toBe(0);
+  expect(document.querySelector(".bm-working")!.getAttribute("aria-label")).toBe("Scout is typing");
+  // Its words, once there are some, take the row's place as a bubble.
+  await act(async () => useBots.setState({ drafts: [{ conversationId: "chat", botId: "scout", text: "Here's the plan" }] }));
+  expect(document.querySelector(".bm-working")).toBeNull();
+  expect([...document.querySelectorAll(".bm-bubble")].some((b) => b.textContent === "Here's the plan")).toBe(true);
+  await act(async () => useBots.setState({ drafts: [] }));
   await typing(false);
   // Quiet work (after a message went out) shows no row, and an idle bot none either.
   await working("Sorting it out", { quiet: true });
