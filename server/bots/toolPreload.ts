@@ -5,7 +5,10 @@
 // keeps most of what loading on demand saves. Everything else still loads by name, and stays loaded.
 //
 // No database here: the runner keeps each bot's usage (db.toolUsage) and hands it in.
-import openbots, { CATALOG_BRIEF } from "./extension";
+import openbots, { CATALOG_BRIEF, CORE_TOOLS } from "./extension";
+
+/** OpenBots' own tools by name, for what counts them (turnMetrics.ts). */
+export const BOT_TOOLS = { core: new Set<string>(CORE_TOOLS), catalog: new Set<string>(Object.keys(CATALOG_BRIEF)) };
 
 /** Per catalog tool, when the bot's recent turns used it: one time per turn, oldest first. */
 export type ToolUsage = Record<string, number[]>;

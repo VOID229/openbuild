@@ -6,8 +6,14 @@
 // before it.
 //
 // Numbers, enums and the names of OpenBots' own tools only: no text, no arguments, no names of the
-// user's, no conversation ids. No database or runner imports: tests and the script use it as is.
-import { CATALOG_BRIEF, CORE_TOOLS } from "./extension";
+// user's, no conversation ids. No imports at all: tests and the script use it as is, and the runner
+// hands it the tool names (toolPreload.ts BOT_TOOLS).
+
+/** OpenBots' own tools: the core every request declares, and the catalog a bot loads from. */
+export interface ToolNames {
+  core: ReadonlySet<string>;
+  catalog: ReadonlySet<string>;
+}
 
 export type TurnTrigger = "messages" | "routine" | "heartbeat" | "note" | "reaction";
 /** How a turn ended: it wrote to the chat, chose not to, was stopped, failed, or never reached the model. */
@@ -67,12 +73,11 @@ export interface TurnRecord {
   tools?: string[];
 }
 
-const OWN_TOOLS = new Set<string>([...CORE_TOOLS, ...Object.keys(CATALOG_BRIEF)]);
 const USAGE_KEYS = ["input", "output", "cacheRead", "cacheWrite"] as const;
 
 /** The result of a call to a tool that wasn't loaded: Pi's own wording, or what extension.ts makes of it. */
-export function unloadedResult(message: { role?: string; isError?: boolean; toolName?: string; content?: unknown } | undefined): boolean {
-  if (message?.role !== "toolResult" || !message.isError || !message.toolName || !(message.toolName in CATALOG_BRIEF)) return false;
+export function unloadedResult(message: { role?: string; isError?: boolean; toolName?: string; content?: unknown } | undefined, catalog: ReadonlySet<string>): boolean {
+  if (message?.role !== "toolResult" || !message.isError || !message.toolName || !catalog.has(message.toolName)) return false;
   const text = Array.isArray(message.content) ? String((message.content[0] as { text?: unknown } | undefined)?.text ?? "") : "";
   return text === `Tool ${message.toolName} not found` || text.startsWith(`${message.toolName} wasn't loaded`);
 }
@@ -81,10 +86,12 @@ export class TurnMeter {
   private readonly record: TurnRecord;
   private readonly since: number;
   private readonly used = new Set<string>();
+  private readonly names: ToolNames;
   private prompted = false;
 
   /** `since` is when the message that woke the bot arrived; `now` when its turn starts. */
-  constructor(init: { bot: string; trigger: TurnTrigger; friend?: boolean; waiting: boolean; since: number }, now = Date.now()) {
+  constructor(init: { bot: string; trigger: TurnTrigger; friend?: boolean; waiting: boolean; since: number; tools: ToolNames }, now = Date.now()) {
+    this.names = init.tools;
     this.since = Math.min(init.since, now);
     this.record = {
       bot: init.bot, turn: crypto.randomUUID(), at: now, source: "assistant-message-usage", measured: false, excludesCompactionUsage: true,
@@ -130,8 +137,8 @@ export class TurnMeter {
   tool(name: string, args: unknown, now = Date.now()) {
     this.record.toolCalls = (this.record.toolCalls ?? 0) + 1;
     this.record.toolMs ??= this.elapsed(now);
-    this.record.firstTool ??= OWN_TOOLS.has(name) ? name : "other";
-    if (name in CATALOG_BRIEF) this.used.add(name);
+    this.record.firstTool ??= this.names.core.has(name) || this.names.catalog.has(name) ? name : "other";
+    if (this.names.catalog.has(name)) this.used.add(name);
     if (name !== "load_tools") return;
     this.record.loads = (this.record.loads ?? 0) + 1;
     const names = args && typeof args === "object" ? (args as { names?: unknown }).names : undefined;

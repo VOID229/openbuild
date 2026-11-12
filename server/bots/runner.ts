@@ -25,7 +25,7 @@ import { OWNER, parseFriendAuthor } from "../../shared/friends";
 
 import { cancelJobs, JobCancelled, nearestEffort, runHelper, startJob } from "./helpers";
 import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
-import { noteToolUse, preloadTools } from "./toolPreload";
+import { BOT_TOOLS, noteToolUse, preloadTools } from "./toolPreload";
 import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
 
 const IDLE = 20 * 60 * 1000;
@@ -632,7 +632,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
   if (ended?.role === "assistant") mind.meter?.request(ended.usage, ended.stopReason === "error");
-  if (unloadedResult(ended)) mind.meter?.unloaded();
+  if (unloadedResult(ended, BOT_TOOLS.catalog)) mind.meter?.unloaded();
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
@@ -873,7 +873,7 @@ async function runTurn(botId: string, all: Wake[]) {
   // Timed from the message being answered: the user's when they're waiting, else whatever woke the bot.
   const began = Date.now();
   const asked = jobs.filter((j) => !waitingUser || j.kind === "messages").map((j) => wokeAt.get(j) ?? began);
-  const meter = new TurnMeter({ bot: botId, trigger: jobs.find((j) => j.kind === "messages")?.kind ?? jobs[0]!.kind, friend: lane !== "main", waiting: waitingUser, since: Math.min(began, ...asked) }, began);
+  const meter = new TurnMeter({ bot: botId, trigger: jobs.find((j) => j.kind === "messages")?.kind ?? jobs[0]!.kind, friend: lane !== "main", waiting: waitingUser, since: Math.min(began, ...asked), tools: BOT_TOOLS }, began);
   meters.set(botId, meter);
   let outcome: TurnOutcome | undefined;
   setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || deciding || undefined, deciding: deciding || undefined, since: Date.now() });

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { parseWhen } from "../scripts/bot-turn-metrics";
 import { declaredSizes, readSession, report } from "../scripts/bot-tool-loads";
 import { CORE_TOOLS } from "../server/bots/extension";
-import { declarationSizes } from "../server/bots/toolPreload";
+import { BOT_TOOLS, declarationSizes } from "../server/bots/toolPreload";
 import { filterTurns, formatTable, parseTurns, percentile, spread, summarizeTurns, summaryRows, TurnMeter, unloadedResult, type TurnRecord } from "../server/bots/turnMetrics";
 import { unexpectedStderr } from "./botStderr";
 import { spawnScript } from "./spawnScript";
@@ -14,7 +14,7 @@ const T0 = Date.UTC(2026, 10, 12, 10);
 
 test("a turn is measured from the user's message: requests, waits, tokens and tool loads", () => {
   // The message arrived 400 ms before the bot was free to take it.
-  const meter = new TurnMeter({ bot: "bot-1", trigger: "messages", waiting: true, since: T0 }, T0 + 400);
+  const meter = new TurnMeter({ bot: "bot-1", trigger: "messages", waiting: true, since: T0, tools: BOT_TOOLS }, T0 + 400);
   meter.pi(true, 2);
   meter.status(T0 + 410);
   meter.status(T0 + 9000);
@@ -49,7 +49,7 @@ test("a turn is measured from the user's message: requests, waits, tokens and to
 });
 
 test("how a turn ended is told from what happened, unless the runner says", () => {
-  const start = () => new TurnMeter({ bot: "b", trigger: "heartbeat", friend: true, waiting: false, since: T0 + 50 }, T0);
+  const start = () => new TurnMeter({ bot: "b", trigger: "heartbeat", friend: true, waiting: false, since: T0 + 50, tools: BOT_TOOLS }, T0);
   // Nothing was shown to the model: there was nothing to say.
   const skipped = start().finish(undefined, T0 + 5);
   expect([skipped.outcome, skipped.calls, skipped.measured, skipped.friend, skipped.queuedMs, skipped.promptMs, skipped.replyMs, skipped.tools]).toEqual(["skipped", 0, false, true, 0, undefined, undefined, undefined]);
@@ -72,15 +72,19 @@ test("how a turn ended is told from what happened, unless the runner says", () =
 
 test("a call to a tool that wasn't loaded is told from any other failed call", () => {
   const result = (toolName: string, text: string, isError = true) => ({ role: "toolResult", toolName, isError, content: [{ type: "text", text }] });
-  expect(unloadedResult(result("todo", "Tool todo not found"))).toBe(true);
-  expect(unloadedResult(result("todo", "todo wasn't loaded, so that call didn't run. It's loaded now: call it again."))).toBe(true);
-  expect(unloadedResult(result("todo", "Error: no such item"))).toBe(false);
-  expect(unloadedResult(result("todo", "Tool todo not found", false))).toBe(false);
+  const unloaded = (message: Parameters<typeof unloadedResult>[0]) => unloadedResult(message, BOT_TOOLS.catalog);
+  expect(unloaded(result("todo", "Tool todo not found"))).toBe(true);
+  expect(unloaded(result("todo", "todo wasn't loaded, so that call didn't run. It's loaded now: call it again."))).toBe(true);
+  expect(unloaded(result("todo", "Error: no such item"))).toBe(false);
+  expect(unloaded(result("todo", "Tool todo not found", false))).toBe(false);
   // Not one of ours to load.
-  expect(unloadedResult(result("made_up", "Tool made_up not found"))).toBe(false);
-  expect(unloadedResult(result("send_message", "Tool send_message not found"))).toBe(false);
-  expect(unloadedResult({ role: "assistant", content: [] })).toBe(false);
-  expect(unloadedResult(undefined)).toBe(false);
+  expect(unloaded(result("made_up", "Tool made_up not found"))).toBe(false);
+  expect(unloaded(result("send_message", "Tool send_message not found"))).toBe(false);
+  expect(unloaded({ role: "assistant", content: [] })).toBe(false);
+  expect(unloaded(undefined)).toBe(false);
+  // The names the runner counts by are the extension's own.
+  expect([...BOT_TOOLS.core].sort()).toEqual([...CORE_TOOLS].sort());
+  expect(BOT_TOOLS.catalog.has("bash") && !BOT_TOOLS.catalog.has("send_message")).toBe(true);
 });
 
 const turn = (over: Partial<TurnRecord>): TurnRecord => ({ bot: "aaaa-1", turn: crypto.randomUUID(), at: T0, source: "assistant-message-usage", measured: true, excludesCompactionUsage: true, v: 2, trigger: "messages", waiting: true, outcome: "replied", calls: 2, failedCalls: 0, input: 100, cacheRead: 800, cacheWrite: 100, output: 50, toolCalls: 1, loads: 0, loaded: 0, unloadedCalls: 0, piStarted: false, preloaded: 0, queuedMs: 10, promptMs: 30, statusMs: 10, toolMs: 1000, replyMs: 2000, doneMs: 3000, ...over });
