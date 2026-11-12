@@ -477,8 +477,10 @@ function StashAction({ text, images }: { text: string; images: string[] }) {
 function QuestionCard({ conversation, message }: { conversation: Conversation; message: BotMessage }) {
   const q = message.question!;
   const [own, setOwn] = useState("");
+  // Answered here, or closed from the coding thread whose question it passed on.
+  const settled = q.answer !== undefined || !!q.closed;
   const answer = (key: string, text: string, label: string) => {
-    if (q.answer) return;
+    if (settled) return;
     const st = useBots.getState();
     st.patchMessage(conversation.id, message.id, (m) => ({ question: { ...m.question!, answer: key } }));
     st.post(conversation.id, { author: "me", text, replyTo: message.id });
@@ -493,8 +495,8 @@ function QuestionCard({ conversation, message }: { conversation: Conversation; m
           <button
             key={o.key}
             type="button"
-            className={cx("bm-option", q.answer === o.key && "bm-option-on", q.answer && q.answer !== o.key && "bm-option-off")}
-            disabled={!!q.answer}
+            className={cx("bm-option", q.answer === o.key && "bm-option-on", settled && q.answer !== o.key && "bm-option-off")}
+            disabled={settled}
             onClick={() => answer(o.key, `${o.key}: ${o.label}`, o.label)}
           >
             <span className="bm-option-key">{q.answer === o.key ? <Check size={13} strokeWidth={3} /> : o.key}</span>
@@ -510,7 +512,8 @@ function QuestionCard({ conversation, message }: { conversation: Conversation; m
           </div>
         )}
       </div>
-      {!q.answer && (
+      {q.closed && <div className="bm-question-closed">{q.closed === "answered" ? "Answered in the thread" : "The thread stopped waiting on this"}</div>}
+      {!settled && (
         <form
           className="bm-own"
           onSubmit={(e) => {

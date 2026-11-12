@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -511,6 +511,12 @@ export function askUser(botId: string, p: Record<string, unknown>) {
   const offer = (p.offer === "team" || p.offer === "developer") && requireBot(botId).primary && conversationId === svc.directId(botId) ? p.offer : undefined;
   if (offer === "team" && svc.developerAnswer()?.kind === "no") throw new svc.BotsError("The user said they don't write code, so the starter team isn't for them. Don't offer it.");
   const options = offer === "team" ? ["Set up the team", "Not now"] : offer === "developer" ? ["Yes, I write code", "No, not really"] : asStrings(p.options).slice(0, 8);
+  // Passing on a coding thread's question: linked, so the card closes if it's answered in the thread first.
+  if (!offer && (p.thread || p.thread_question)) return threads.cardTarget(botId, p.thread, p.thread_question).then((thread) => postQuestion(botId, conversationId, title, p, options, undefined, thread));
+  return postQuestion(botId, conversationId, title, p, options, offer);
+}
+
+function postQuestion(botId: string, conversationId: string, title: string, p: Record<string, unknown>, options: string[], offer: Question["offer"], thread?: Question["thread"]) {
   const message: BotMessage = {
     id: crypto.randomUUID(),
     author: botId,
@@ -521,10 +527,12 @@ export function askUser(botId: string, p: Record<string, unknown>) {
       hint: typeof p.hint === "string" ? p.hint.slice(0, 200) : undefined,
       options: options.map((label, i) => ({ key: String.fromCharCode(65 + i), label })),
       offer,
+      ...(thread ? { thread } : {}),
     },
   };
   svc.postMessage(conversationId, message);
-  return { id: message.id, note: "The user answers in the chat. Don't invent their answer; stop here and wait." };
+  if (thread) threads.linkCard({ threadId: thread.id, ask: thread.ask, conversationId, messageId: message.id });
+  return { id: message.id, note: `The user answers in the chat.${thread ? " If they answer in the thread instead, the card closes and you'll be told." : ""} Don't invent their answer; stop here and wait.` };
 }
 
 /** A card in the chat for the user to connect an app with. Connecting is theirs to do. */

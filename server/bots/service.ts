@@ -1410,6 +1410,7 @@ export function answerQuestion(conversationId: string, messageId: string, key: s
   const row = db.getMessage(messageId);
   const question = row?.conversationId === conversationId ? row.message.question : undefined;
   if (!row || !question) throw new BotsError("That message isn't a question.", 404);
+  if (question.closed) throw new BotsError("That question was settled in its thread.", 409);
   const patched = patchMessage(conversationId, messageId, { question: { ...question, answer: key.slice(0, 2000) } });
   // The first-run offers are the app's, not the bot's: taking the team makes it here, once, and whether they code is kept for the bot's context.
   const primary = !question.answer && !!db.getBot(row.message.author)?.primary;
