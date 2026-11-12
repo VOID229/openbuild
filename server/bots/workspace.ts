@@ -16,6 +16,7 @@
 // the pairing credentials only, never a current host.
 import { SERVER_HEADER } from "../computers/api";
 import * as devices from "../devices";
+import { forwardBody } from "../forwardFile";
 import { attachedFile, receiveFile, botFile, botRoutes, botsStream, deleteMine, markRead, olderMessages, patchMine, postMine, snapshotResponse, stopWork } from "./routes";
 import * as svc from "./service";
 
@@ -242,13 +243,10 @@ async function via(req: Bun.BunRequest<"/api/workspace/via/:host/*">, server: Bu
       const value = res.headers.get(name);
       if (value) out.set(name, value);
     }
-    // A file (never compressed on the way): its length lets a player seek.
-    const length = res.headers.get("accept-ranges") && res.headers.get("content-length");
-    if (length) out.set("content-length", length);
     if (!streaming || !res.ok || !res.body) {
       req.signal.removeEventListener("abort", abort);
       if (res.status === 401) return Response.json({ error: `${host.name} no longer trusts this pairing. Pair it again.`, reason: "revoked" }, { status: 401, headers: out });
-      return new Response(res.body, { status: res.status, headers: out });
+      return forwardBody(res, out);
     }
     let set = viaStreams.get(hostId);
     if (!set) viaStreams.set(hostId, (set = new Set()));

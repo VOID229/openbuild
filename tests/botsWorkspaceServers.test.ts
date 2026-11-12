@@ -2,6 +2,8 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { ATTACHMENT_CHUNK } from "../shared/attachments";
+import { HELD_FILE_BYTES } from "../server/forwardFile";
 import { serverLog } from "./serverLog";
 import { spawnScriptSync } from "./spawnScript";
 
@@ -207,7 +209,12 @@ async function upload(put: (query: string, body: BodyInit) => Promise<Response>,
 }
 const raw = (bytes: Uint8Array) => bytes as unknown as BodyInit;
 const octets = { "content-type": "application/octet-stream" };
-const clip = () => crypto.getRandomValues(new Uint8Array(50_000));
+const clip = (size = 50_000) => {
+  const bytes = new Uint8Array(size);
+  // getRandomValues fills at most 64 KiB at a time.
+  for (let at = 0; at < size; at += 65_536) crypto.getRandomValues(bytes.subarray(at, at + 65_536));
+  return bytes;
+};
 
 test("a file attached for bots goes up in pieces through the viewer, into each bot's home, and comes back by range", async () => {
   const bytes = clip();
@@ -240,6 +247,7 @@ test("a file attached for bots goes up in pieces through the viewer, into each b
   const part = await via(at, { headers: { range: "bytes=100-199" } });
   expect(part.status).toBe(206);
   expect(part.headers.get("content-range")).toBe(`bytes 100-199/${bytes.length}`);
+  expect(part.headers.get("content-length")).toBe("100");
   expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.subarray(100, 200));
 
   // A file that never finished can't be attached, and one for a chat that doesn't exist isn't kept.
@@ -261,6 +269,18 @@ test("a file for a thread on a paired device goes up through the proxy, onto tha
   expect(part.status).toBe(206);
   expect(part.headers.get("content-length")).toBe("10");
   expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.subarray(bytes.length - 10));
+  // Bun.serve can't send a length with a body that streams, so one too big to hold comes through
+  // without it, in full, and its range still names the file's size.
+  const big = clip(HELD_FILE_BYTES + 100_000);
+  const large = crypto.randomUUID();
+  await upload((q, body) => device(`/api/attachments/${large}?${q}`, { method: "PUT", headers: octets, body }), "film.mp4", big, ATTACHMENT_CHUNK);
+  const rest = await device(`/api/attachments/${large}`, { headers: { range: "bytes=50000-" } });
+  expect(rest.status).toBe(206);
+  expect(rest.headers.get("content-range")).toBe(`bytes 50000-${big.length - 1}/${big.length}`);
+  expect(new Uint8Array(await rest.arrayBuffer())).toEqual(big.subarray(50_000));
+  const seek = await device(`/api/attachments/${large}`, { headers: { range: "bytes=4000000-4000099" } });
+  expect(seek.headers.get("content-length")).toBe("100");
+  expect(new Uint8Array(await seek.arrayBuffer())).toEqual(big.subarray(4_000_000, 4_000_100));
 
   // The same route on this server itself, for a thread that runs here.
   const here = crypto.randomUUID();

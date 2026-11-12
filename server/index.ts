@@ -49,6 +49,7 @@ import { githubToken } from "./github/auth";
 import { githubRoutes } from "./github/routes";
 import * as friends from "./friends";
 import { friendRoutes } from "./friends/routes";
+import { forwardBody } from "./forwardFile";
 
 const refreshChats = createChatRefresh(async () => {
   const snapshots = await piWorker.snapshots();
@@ -220,10 +221,7 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
         const value = res.headers.get(name);
         if (value) out.set(name, value);
       }
-      // A file (never compressed on the way): its length lets a player seek and a download show progress.
-      const length = res.headers.get("accept-ranges") && res.headers.get("content-length");
-      if (length) out.set("content-length", length);
-      return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+      return await forwardBody(res, out);
     } catch (err) {
       clearTimeout(deadline);
       req.signal.removeEventListener("abort", abort);
