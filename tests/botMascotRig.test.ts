@@ -5,7 +5,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { AHEAD, aimTarget, BODY_TURN, covers, EYE_H, EYE_W, eyesFor, eyesOf, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { AHEAD, aimTarget, BODY_TURN, covers, EYE_H, EYE_W, eyesFor, eyesOf, FORMS, frame, inside, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -297,6 +297,25 @@ test("every shape can look around: a fair turn each way, and all the way where i
   // A turn never asks for more than the shape has, and a small one is left alone.
   expect(turnTo(orb, 0.3, 0)).toEqual([0.3 * YAW, 0]);
   expect(turnTo(orb, 0, 0)).toEqual([0, 0]);
+});
+
+test("a shape's turn limits are worked out ahead of its first look, a form at a time as there's a moment", () => {
+  // A shape nothing has looked at yet.
+  const shape = { ...SHAPES.find((s) => s.id === "star")!, id: "star-not-seen-yet" };
+  const waiting: (() => void)[] = [];
+  warm(shape, (step) => waiting.push(step));
+  // Nothing is worked out until there's a moment, and then one form of eye a turn.
+  let turns = 0;
+  for (; waiting.length; turns++) {
+    expect(waiting.length).toBe(1);
+    waiting.shift()!();
+  }
+  expect(turns).toBe(Object.keys(FORMS).length);
+  // All there now, the same as worked out on the spot for the shape it's a copy of.
+  for (const form of Object.keys(FORMS) as (keyof typeof FORMS)[]) expect(roomOf(shape, form)).toEqual(roomOf(SHAPES.find((s) => s.id === "star")!, form));
+  // And nothing left to do for it.
+  warm(shape, (step) => waiting.push(step));
+  expect(waiting.length).toBe(0);
 });
 
 test("the eyes are tall pills, and at work they're big: a quarter of the face between them", () => {

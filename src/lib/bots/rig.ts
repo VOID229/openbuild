@@ -209,7 +209,8 @@ function reach(shape: Shape, form: EyeForm, angle: number): number {
 }
 
 /**
- * That, for each of 36 directions round the clock. Worked out once for each shape and form of eye.
+ * That, for each of 36 directions round the clock. Worked out once for each shape and form of eye
+ * (ahead of its first look, when the page has had a moment: see `warm`).
  */
 export function roomOf(shape: Shape, form: EyeForm = "open"): number[] {
   const key = `${shape.id} ${form}`;
@@ -424,6 +425,21 @@ export function frame(rig: Rig, shape: Shape, size: number): { whole: string; bo
     return `matrix(${n(ax - px, 4)}, ${n(ay - py, 4)}, ${n(bx - px, 4)}, ${n(by2 - py, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
   };
   return { whole, body, left: eye(-1), right: eye(1), back };
+}
+
+/**
+ * Works out, one at a time, what a shape's first looks would otherwise stop to work out: how far it
+ * can turn with its eyes in each form. `later` runs each step when there's time to spare.
+ */
+export function warm(shape: Shape, later: (step: () => void) => void) {
+  const forms = (Object.keys(FORMS) as EyeForm[]).filter((form) => !rooms.has(`${shape.id} ${form}`));
+  const next = () => {
+    const form = forms.shift();
+    if (!form) return;
+    roomOf(shape, form);
+    if (forms.length) later(next);
+  };
+  if (forms.length) later(next);
 }
 
 const rested = new Map<string, ReturnType<typeof frame>>();

@@ -8,7 +8,7 @@
 // work doze, a "zzz" floating up over them. Nothing ever hops, and nothing spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
-import { aimTarget, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, type Pose } from "../../lib/bots/rig";
+import { aimTarget, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type Pose } from "../../lib/bots/rig";
 import { nextBeat, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
@@ -60,6 +60,9 @@ function offScreen(el: Element) {
   const r = el.getBoundingClientRect();
   return !r.width || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
 }
+
+/** When the page has a moment to spare (or soon enough anyway). */
+const whenIdle = (step: () => void) => void (typeof requestIdleCallback === "function" ? requestIdleCallback(step, { timeout: 3000 }) : setTimeout(step, 300));
 
 /** How long a turn right round takes, ms. */
 const SPIN = 720;
@@ -184,6 +187,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     write();
   };
   useEffect(() => () => void moving.delete(tick.current), []);
+  // How far this shape can turn is worked out ahead, in idle time, so its first look doesn't wait for it.
+  useEffect(() => warm(shape, whenIdle), [shape]);
   // A new pose or thought, a new shape or size: on its way there. The first time, it's simply there.
   const mounted = useRef(false);
   useLayoutEffect(() => {
