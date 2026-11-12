@@ -5,7 +5,8 @@
 // to SIGTERM it at the deadline (exit 143). stdout and stderr are both read while the child runs, so
 // a chatty child never blocks on a full pipe either. A child that ends that way logs how long it ran
 // and the tail of its stderr, to tell a stall from slow work. The preload marks on that stderr how
-// far the child got (OPENBUILD_PRELOAD_TRACE); the marks are left out of the stderr a test sees.
+// far the child got (OPENBUILD_PRELOAD_TRACE), the script's own start included; the marks are left
+// out of the stderr a test sees.
 import { join } from "node:path";
 
 export const ROOT = join(import.meta.dir, "..");
@@ -34,6 +35,12 @@ function childEnv(env: Env | undefined, replace: boolean | undefined): Record<st
   );
 }
 
+/**
+ * The script as a traced child runs it: a mark from the preload as its body's first statement. On
+ * its first line, so line numbers in the script's errors stay as written.
+ */
+const traced = (script: string) => `globalThis.__openbuildPreloadMark?.("script started: its static imports loaded");${script}`;
+
 /** One mark from tests/subprocess-preload.ts, up to and with its newline. */
 const PRELOAD_MARK = /\[subprocess-preload\][^\n]*\n/g;
 
@@ -56,7 +63,7 @@ function reportTerminated(script: string, result: ScriptResult, started: number 
 
 /** Starts the script with piped output; `env` adds to (or with `replaceEnv`, replaces) process.env. */
 export function startScript(script: string, env?: Env, options: ScriptOptions = {}) {
-  const child = Bun.spawn(scriptCommand(script), {
+  const child = Bun.spawn(scriptCommand(traced(script)), {
     cwd: options.cwd ?? ROOT,
     env: childEnv(env, options.replaceEnv),
     stdin: options.stdin ?? "ignore",
@@ -82,7 +89,7 @@ export function spawnScript(script: string, env?: Env, options?: ScriptOptions):
 /** spawnScript, blocking. */
 export function spawnScriptSync(script: string, env?: Env, options: Omit<ScriptOptions, "stdin"> = {}): ScriptResult {
   const started = performance.now();
-  const child = Bun.spawnSync(scriptCommand(script), {
+  const child = Bun.spawnSync(scriptCommand(traced(script)), {
     cwd: options.cwd ?? ROOT,
     env: childEnv(env, options.replaceEnv),
     stdout: "pipe",
