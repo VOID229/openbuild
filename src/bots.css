@@ -47,7 +47,7 @@
   height: 100%;
 }
 
-/* The face is drawn on the body and cut to its outline (.bot-skin). The eyes are kept well inside it
+/* The face is drawn on the body and cut to its outline (.bot-skin). The eyes are kept off its edge
    (MARGIN in lib/bots/rig.ts), so the cut never shows. */
 .bot-skin,
 .bot-nap {

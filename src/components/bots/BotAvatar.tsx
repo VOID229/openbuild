@@ -244,7 +244,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [held, shape, size]);
 
-  // A new face can't go as near the edge: drawn again where the eyes fit (a still bot's eyes always do).
+  // A new face may not go as near the edge: drawn again, its eyes kept off it.
   const lastLook = useRef(drawn);
   useLayoutEffect(() => {
     if (lastLook.current === drawn) return;

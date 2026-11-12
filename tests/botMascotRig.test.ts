@@ -5,7 +5,7 @@
 // tests/botsSidebarMascots.test.ts and tests/botAvatarLife.test.ts watch the same in a real Chrome.
 import { expect, test } from "bun:test";
 import { SHAPES } from "../src/lib/bots/looks";
-import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, REST_MARGIN, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
+import { AHEAD, aimTarget, BODY_TURN, covers, DRAWN, type Drawn, EYE_H, EYE_W, eyeLook, eyesFor, eyesOf, FAR, FORMS, frame, inside, MARGIN, newRig, nod, outline, PITCH, poseTarget, project, restFrame, RESTING, restOf, roomOf, snap, step, turnTo, warm, YAW, type EyeLook, type Mode, type Rig, type Target } from "../src/lib/bots/rig";
 
 const orb = SHAPES.find((s) => s.id === "blob")!;
 const to = (yaw: number, pitch = 0, roll = 0, zoom = 0): Target => ({ yaw, pitch, roll, zoom });
@@ -151,11 +151,10 @@ test("facing straight out a bot is drawn as its shape is, and turned, the body a
 test("at rest a bot is turned up and away and rolled over, the same for every shape that has the room", () => {
   for (const shape of SHAPES) {
     const rest = restOf(shape);
-    // Up and to our right, as far as RESTING asks or the shape allows (a sparkle's middle is narrow, so
-    // only a little way), and rolled the other way.
-    expect(rest.yaw).toBeGreaterThan(4);
+    // Up and to our right, as far as RESTING asks or the shape allows, and rolled the other way.
+    expect(rest.yaw).toBeGreaterThan(8);
     expect(rest.yaw).toBeLessThanOrEqual(RESTING.x * YAW + 1e-9);
-    expect(rest.pitch).toBeLessThan(-1.5);
+    expect(rest.pitch).toBeLessThan(-3);
     expect(rest.roll).toBe(RESTING.roll);
     expect(rest.roll).toBeLessThan(-15);
     expect(rest.zoom).toBe(0);
@@ -166,14 +165,13 @@ test("at rest a bot is turned up and away and rolled over, the same for every sh
     expect(f.body).toMatch(/^perspective\(260\.0px\) rotateX\(\d/);
     for (const t of [f.left, f.right]) {
       const [, , , , x, y] = t.slice(7, -1).split(", ").map(Number);
-      expect(x!).toBeGreaterThan(2);
-      expect(y!).toBeLessThan(-0.5);
+      expect(x!).toBeGreaterThan(3);
+      expect(y!).toBeLessThan(-1);
     }
     expect(restFrame(shape, 100)).toBe(f);
   }
-  // Most of them have all the room it asks for, and all but a few nearly all of it.
-  expect(SHAPES.filter((s) => Math.abs(restOf(s).yaw - RESTING.x * YAW) < 1e-9).length).toBeGreaterThanOrEqual(8);
-  expect(SHAPES.filter((s) => restOf(s).yaw > RESTING.x * YAW * 0.7).length).toBeGreaterThanOrEqual(10);
+  // Most of them have all the room it asks for.
+  expect(SHAPES.filter((s) => Math.abs(restOf(s).yaw - RESTING.x * YAW) < 1e-9).length).toBeGreaterThanOrEqual(9);
 });
 
 test("an eye is drawn where the turn puts it on the body: the same place `project` says", () => {
@@ -271,7 +269,7 @@ test("however far over it looks, every shape keeps its eyes on its body", () => 
         // As far as it'll go that way: a full turn, held to the room the shape has.
         const [yaw, pitch] = turnTo(shape, Math.cos((a / 16) * Math.PI) * 3, Math.sin((a / 16) * Math.PI) * 3, form);
         for (const side of [-1, 1]) {
-          // Each eye's middle, and well toward each end of it (all of it is kept in: see the tests below).
+          // Each eye's middle, and well toward each end of it: only its ends may slip under the edge.
           for (const [dx, dy] of [[0, 0], [0, -h * fh * 0.28], [0, h * fh * 0.28], [-w * fw * 0.28, 0], [w * fw * 0.28, 0]] as const) {
             const [x, y] = [shape.face.x + (side * gap) / 2 + dx, shape.face.y + dy];
             if (!inside(body, ...project(x, y, yaw, pitch))) misses.push(`${shape.id} ${form} ${a}`);
@@ -417,16 +415,27 @@ function tooNear(shape: (typeof SHAPES)[number], f: ReturnType<typeof frame>, lo
 
 const LOOKS = Object.keys(DRAWN) as EyeLook[];
 
-test("at rest, whatever face it pulls, a bot's eyes sit well inside its body: REST_MARGIN from the rim", () => {
+test("at rest, in any face it pulls, no shape's eyes come near the rim", () => {
   const near: string[] = [];
   for (const shape of SHAPES)
     for (const look of ["open", "round", "squint", "happy", "sleepy", "love", "asleep"] as const) {
       const f = frame(newRig(restOf(shape)), shape, 100, look);
-      if (tooNear(shape, f, look, REST_MARGIN).length) near.push(`${shape.id} ${look}`);
-      // And at rest a face never has to be pulled in: it's drawn the same as with its eyes open.
-      expect(f).toEqual(restFrame(shape, 100));
+      if (tooNear(shape, f, look, MARGIN).length) near.push(`${shape.id} ${look}`);
     }
   expect(near).toEqual([]);
+});
+
+test("the guard only steps in where an eye would come near the rim: elsewhere a bot is drawn just as it was", () => {
+  // Most shapes rest with their eyes well clear, and are drawn there exactly as the turn puts them.
+  const untouched = SHAPES.filter((s) => {
+    const f = restFrame(s, 100);
+    const [, , , , x] = f.left.slice(7, -1).split(", ").map(Number);
+    return Math.abs(x! - (project(s.face.x - eyesOf(s).gap / 2, s.face.y, restOf(s).yaw, restOf(s).pitch)[0] - (s.face.x - eyesOf(s).gap / 2))) < 0.01;
+  });
+  expect(untouched.length).toBeGreaterThanOrEqual(11);
+  // And a turn only part of the way, nowhere near the edge, is the same with any face.
+  const rig = newRig(to(10, -5));
+  for (const shape of SHAPES) expect(frame(rig, shape, 100, "happy")).toEqual(frame(rig, shape, 100, "open"));
 });
 
 test("however it turns, swings past, nods or darts its eyes, no eye ever comes near the rim", () => {

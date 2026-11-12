@@ -10,9 +10,8 @@
 // how every still bot in the app is seen.
 //
 // The body is turned by the browser, in perspective. The face on it is worked out here and painted
-// flat inside the body's outline. However far a bot turns, its eyes stay well inside that outline
-// (MARGIN, and REST_MARGIN at rest), whatever form they're drawn in: a shape turns only as far as that
-// allows, and on the way, where a spring swings past, the eyes go no further.
+// flat inside the body's outline. An eye never comes nearer its edge than MARGIN: where a turn would
+// take it nearer, it goes no further while the body turns on under it.
 import type { Shape } from "./looks";
 
 /** An open eye's size in the 100-unit box, before the shape's own scale: a tall pill. */
@@ -49,19 +48,16 @@ export const BODY_TURN = 0.42;
 export const FAR = 0.12;
 /** How much of the turn's narrowing an eye takes: under a third, so it stays a full pill turned away. */
 export const SOFT = 0.3;
+/** How much of an eye, about its middle, has to stay on the body: its ends may slip under the edge. */
+export const CORE = 0.75;
 /**
- * How far inside the body's edge an eye always stays, every bit of it, in the 100-unit box: well clear,
- * so it never touches the rim, let alone goes under it.
+ * How near the body's edge an eye ever comes, in the 100-unit box: the same for every shape. Turned
+ * further, the eyes stop there and the body turns on under them, so the edge never cuts one.
  */
-export const MARGIN = 5;
-/**
- * At rest, which is how a bot is seen most (in a list, in the picker), the eyes sit further in still:
- * each shape rests turned as far as this allows, whatever face it pulls.
- */
-export const REST_MARGIN = 7;
+export const MARGIN = 4;
 
 /**
- * Every form an eye is drawn in (bots.css), for keeping it clear of the edge: its width and height as
+ * Every form an eye is drawn in (bots.css), for keeping it off the edge: its width and height as
  * multiples of an open eye's; how far its middle sits below where an open eye's does, in open-eye
  * heights; how round its corners are, top and bottom, as a share of its width (a pill's are half: CSS
  * rounds them no further than fits); and how far a doze lowers the whole face, in the 100-unit box.
@@ -100,6 +96,7 @@ export function eyeLook(mood: string | undefined, eyes: EyeForm | undefined, asl
   if (mood === "squint" || mood === "thinking") asked.add("squint");
   return (["happy", "sleepy", "big", "squint", "round", "wide"] as const).find((k) => asked.has(k)) ?? "open";
 }
+
 
 /** Where a bot faces and how it carries itself: x and y from -1 to 1 (right and down), the rest optional. */
 export interface Pose {
@@ -225,6 +222,23 @@ export function eyesOf(shape: Shape) {
 }
 
 /**
+ * The points of both eyes that have to stay on the body, in the face's own plane: the middle of each
+ * (CORE of it). Looking hard over, the rest of an eye slips under the body's edge, which cuts it off.
+ */
+function eyePoints(shape: Shape, form: EyeForm): Point[] {
+  const { w, h, gap } = eyesOf(shape);
+  const [fw, fh] = FORMS[form];
+  const out: Point[] = [];
+  for (const side of [-1, 1]) {
+    const [cx, cy] = [shape.face.x + (side * gap) / 2, shape.face.y];
+    // All over it: a lobed or spiky shape's notches reach in between a few points.
+    for (const fy of [-0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4])
+      for (const fx of Math.abs(fy) > 0.35 ? [-0.14, 0, 0.14] : Math.abs(fy) > 0.25 ? [-0.3, 0, 0.3] : [-0.42, -0.21, 0, 0.21, 0.42]) out.push([cx + w * fw * fx * CORE, cy + h * fh * fy * CORE]);
+  }
+  return out;
+}
+
+/**
  * The outline of an eye as drawn in a form, about the middle of an open eye in the face's own plane:
  * round its four rounded corners in turn (the sides run between them), so it's a convex polygon.
  */
@@ -333,10 +347,14 @@ const rooms = new Map<string, number[]>();
 
 /**
  * How far a shape's head can turn one way (`angle` round the clock in radians, 0 = right, clockwise)
- * with its eyes still `margin` inside its body: the share of a full turn it has room for, from the outline itself.
+ * with its eyes still on its body: the share of a full turn it has room for, from the outline itself.
  */
-function reach(shape: Shape, look: EyeLook, angle: number, margin = MARGIN): number {
-  const fits = (m: number) => eyesFit(shape, look, Math.cos(angle) * YAW * m, Math.sin(angle) * PITCH * m, 0, 0, margin);
+function reach(shape: Shape, form: EyeForm, angle: number): number {
+  const points = eyePoints(shape, form);
+  const fits = (m: number) => {
+    const at = projector(Math.cos(angle) * YAW * m, Math.sin(angle) * PITCH * m);
+    return points.every(([x, y]) => covers(shape, ...at(x, y)));
+  };
   // Out from straight ahead a step at a time to the first turn that doesn't fit (a spiky shape can
   // fit again further on, in the next point along: that's no use), then closer in on it.
   let [lo, hi] = [0, 0];
@@ -354,7 +372,7 @@ function reach(shape: Shape, look: EyeLook, angle: number, margin = MARGIN): num
  * That, for each of 36 directions round the clock. Worked out once for each shape and form of eye
  * (ahead of its first look, when the page has had a moment: see `warm`).
  */
-export function roomOf(shape: Shape, form: EyeLook = "open"): number[] {
+export function roomOf(shape: Shape, form: EyeForm = "open"): number[] {
   const key = `${shape.id} ${form}`;
   let room = rooms.get(key);
   if (!room) rooms.set(key, (room = Array.from({ length: DIRECTIONS }, (_, i) => reach(shape, form, (i / DIRECTIONS) * Math.PI * 2))));
@@ -372,7 +390,7 @@ export interface Target {
 export const AHEAD: Target = { yaw: 0, pitch: 0, roll: 0, zoom: 0 };
 
 /** A turn toward (x, y), -1 to 1 each way, held to what the shape has room for in that direction. */
-export function turnTo(shape: Shape, x: number, y: number, form: EyeLook = "open"): [yaw: number, pitch: number] {
+export function turnTo(shape: Shape, x: number, y: number, form: EyeForm = "open"): [yaw: number, pitch: number] {
   const m = Math.hypot(x, y);
   if (!m) return [0, 0];
   const room = roomOf(shape, form);
@@ -402,18 +420,13 @@ export function eyesFor(pose: Pose | undefined, atWork: boolean): Exclude<EyeFor
 /** How a bot rests: turned up and away to its left (our right), rolled over the other way. */
 export const RESTING = { x: 0.6, y: -0.3, roll: -21 } satisfies Pose;
 const rests = new Map<string, Target>();
-/** The faces a still bot can pull: any but the poses' stare and the big eyes of a bot at work. */
-const STILL: EyeLook[] = ["open", "round", "squint", "happy", "sleepy", "love", "asleep"];
-/**
- * Where a shape comes to rest: RESTING, as far as it can turn with REST_MARGIN to spare round its eyes
- * whatever face it pulls.
- */
+/** Where a shape comes to rest: RESTING, as far as it has the room to turn. */
 export function restOf(shape: Shape): Target {
   let rest = rests.get(shape.id);
   if (!rest) {
     // Its room that one way only: this is on the way to a bot's first drawing.
     const m = Math.hypot(RESTING.x, RESTING.y);
-    const k = Math.min(m, ...STILL.map((look) => reach(shape, look, Math.atan2(RESTING.y, RESTING.x), REST_MARGIN))) / m;
+    const k = Math.min(m, reach(shape, "open", Math.atan2(RESTING.y, RESTING.x))) / m;
     rests.set(shape.id, (rest = { yaw: RESTING.x * k * YAW, pitch: RESTING.y * k * PITCH, roll: RESTING.roll, zoom: 0 }));
   }
   return rest;
@@ -547,9 +560,9 @@ const n = (v: number, digits = 2) => {
  * so the body stays one layer with the face painted on it. Straight ahead everything is "none".
  * `back` is true while a turn right round shows the body's back, the face out of sight.
  *
- * The eyes never go nearer the edge than MARGIN. A turn is held to that already (`roomOf`), but on the
- * way the head can swing past, the eyes dart ahead, a nod dips it or the face changes: then the eyes
- * go only as far along as they still fit, the body turning on under them.
+ * The eyes never go nearer the edge than MARGIN: where the head's turn, a swing past, the eyes darting
+ * ahead or a nod would take them nearer, they go only as far along as they still fit, the body
+ * turning on under them. Anywhere else this draws them just as it always has.
  */
 export function frame(rig: Rig, shape: Shape, size: number, look: EyeLook = "open"): { whole: string; body: string; left: string; right: string; back: boolean } {
   const u = size / 100;
@@ -600,10 +613,7 @@ export function warm(shape: Shape, later: (step: () => void) => void) {
 }
 
 const rested = new Map<string, ReturnType<typeof frame>>();
-/**
- * How a shape is drawn at rest, at a size: what a still bot shows, with nothing run to put it there.
- * (At rest the eyes fit whatever face a still bot pulls, so it's the same for all of them.)
- */
+/** How a shape is drawn at rest, at a size: what a still bot shows, with nothing run to put it there. */
 export function restFrame(shape: Shape, size: number) {
   const key = `${shape.id} ${size}`;
   let at = rested.get(key);
