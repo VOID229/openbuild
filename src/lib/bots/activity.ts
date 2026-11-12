@@ -4,7 +4,7 @@ import { providerName } from "../models";
 import { runtimeName } from "../runtimes";
 import type { ThreadRuntime } from "../../../shared/types";
 import type { Chat } from "../types";
-import { statusLine, WORKING_PHRASES, WRITING_REPLY } from "../../../shared/bots";
+import { statusLine, TYPING, WORKING_PHRASES } from "../../../shared/bots";
 import type { BotStatus, Conversation } from "./types";
 
 type Statuses = Record<string, BotStatus | undefined>;
@@ -19,6 +19,12 @@ export const holding = (st: BotStatus | undefined, conversationId: string) =>
  */
 export const visiblyWorking = (st: BotStatus | undefined) => st?.state === "working" && !st.deciding;
 
+/**
+ * Plain working words (WORKING_PHRASES): the model is working out what to do, with no step of its own
+ * to name. The chat's working row and the header's line show three dots for them, not the words.
+ */
+export const plainWork = (line: string | undefined) => !line?.trim() || (WORKING_PHRASES as readonly string[]).includes(line.trim());
+
 /** How long a bot's first moment of work lasts at most, ms: its mascot is three dots for it. */
 export const STARTING_MS = 1600;
 
@@ -29,7 +35,7 @@ export const STARTING_MS = 1600;
  * server's `since`: a start that looks to be in the future counts as just now.
  */
 export const starting = (st: BotStatus | undefined, now: number) =>
-  visiblyWorking(st) && !st!.quiet && !!st!.since && now - st!.since < STARTING_MS && (!st!.activity?.trim() || (WORKING_PHRASES as readonly string[]).includes(st!.activity.trim()));
+  visiblyWorking(st) && !st!.quiet && !!st!.since && now - st!.since < STARTING_MS && plainWork(st!.activity);
 
 /** Working in this chat, quietly or not. */
 export const workingHere = (st: BotStatus | undefined, conversationId: string) => visiblyWorking(st) && st!.conversationId === conversationId;
@@ -55,7 +61,7 @@ export function elsewhere(conversation: Pick<Conversation, "id" | "botIds">, sta
 }
 
 /**
- * The bots with a working line in the chat: at work on it, not typing (the dots show that), and not
+ * The bots with a working line in the chat: at work on it, not typing ("Typing…" shows that), and not
  * quiet. Quiet work (a reaction it may let be, tidying up after a reply) only animates the mascot.
  */
 export function showWorking(conversationId: string, status: Statuses, typing: string[]): string[] {
@@ -82,11 +88,11 @@ export function workingLine(conversationId: string, botId: string, st: BotStatus
 
 /**
  * What a chat's bots are up to right now, in one line: under its name in the header. One of them
- * writing here says so, then the live step of one at work here, then one holding on. Undefined when
+ * typing here says so, then the live step of one at work here, then one holding on. Undefined when
  * there's nothing to say: quiet work shows only in the mascot.
  */
 export function liveLine(conversation: Pick<Conversation, "id" | "botIds">, status: Statuses, typing: string[] | undefined): string | undefined {
-  if (typing?.length) return WRITING_REPLY;
+  if (typing?.length) return TYPING;
   const working = conversation.botIds.find((id) => workingHere(status[id], conversation.id) && !status[id]!.quiet);
   if (working) return statusLine(status[working]);
   const held = conversation.botIds.find((id) => holding(status[id], conversation.id));

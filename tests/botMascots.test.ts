@@ -121,6 +121,8 @@ describe.skipIf(!browser)("bots dozing in a group", () => {
     await Bun.sleep(1200);
     // (Not in the middle of a blink, nor opening again after one: its eyes would be part shut already.)
     await page.until(`!('blink' in (${boo}).dataset) && new DOMMatrix(getComputedStyle((${boo}).querySelector('.bot-eye-fill')).transform).d > 0.98`);
+    // (Nor still waking: a slump that starts while it's still coming up only turns that round.)
+    await page.until(`!(${boo}).getAnimations({ subtree: true }).some((a) => a instanceof CSSTransition && ['bot-doze', 'bot-nap'].some((c) => a.effect.target.classList.contains(c)))`);
     await setWorking(page, ["moss"]);
     await page.settle();
     expect(await page.eval<boolean>(`'asleep' in (${boo}).dataset`)).toBe(true);

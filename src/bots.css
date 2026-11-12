@@ -400,16 +400,30 @@
   }
 }
 
-/* Starting on something, with nothing to show of it yet, a bot turns into three dots: the body
-   gathers into the middle one as its eyes slide off to the side, two more come out from behind it,
-   and a wave runs along them (middle, right, left). When there's something to show it comes back the
-   other way, its eyes sliding in from the other side. BotAvatar sets data-dots ("in", then "out" for
-   the moment the way back takes) and only then are the dots in the page. Each dot's place and swell
-   are its own `translate` and `scale`, so the animations never fight over one transform. */
+/* Starting on something, with nothing to show of it yet, a bot turns into three dots, and in a chat's
+   working row it stays three dots while there's nothing to name. BotAvatar sets data-dots ("in", then
+   "out" for the moment the way back takes) and only then are the dots in the page.
+
+   It's one morph, not a swap: the dots sit behind the body in its colour, so the two always make one
+   outline. On the way in the eyes squeeze shut, the body gathers itself (a squash) and draws in with a
+   twist while the middle dot swells behind it, so the outline rounds off into a ball; the ball
+   tightens into a dot, squashing as the other two bud off it and spring out to the sides; then a wave
+   runs along them, middle first. On the way back the two are drawn into the middle, which takes them in
+   and swells into the ball again; the body grows out of it, its corners coming out of the ball as it
+   unwinds and settles, and the eyes open last, from shut. Only transforms and opacity move, so it all
+   runs on the compositor. Each dot's place and swell are its own `translate` and `scale`, so the
+   animations never fight over one transform. */
 .bot-dots {
   position: absolute;
   inset: 0;
+  /* Its own layer, so the middle dot's z-index orders it among the dots and not over the body. */
+  z-index: 0;
   pointer-events: none;
+}
+
+/* In front of the dots, so it's over them while the two make one outline. */
+.bot-act {
+  position: relative;
 }
 
 .bot-dots i {
@@ -423,69 +437,119 @@
   background: var(--bot-color);
   opacity: 0.5;
   translate: calc(var(--u) * var(--dx)) 0;
-  /* What it starts from (and goes back to): behind the middle, small; the middle one, the whole body. */
-  --from: 0.5;
   animation:
-    bot-dot-in 240ms cubic-bezier(0.3, 1.2, 0.5, 1) backwards,
+    bot-dot-bud 380ms linear 330ms backwards,
     bot-dot-wave 1000ms ease-in-out var(--turn) infinite;
 }
 
 .bot-dots i:nth-child(1) {
   --dx: -33;
-  --turn: 900ms;
+  --turn: 1360ms;
 }
 
+/* The middle one is the ball the body becomes, in front of the two that come out of it. */
 .bot-dots i:nth-child(2) {
   --dx: 0;
-  --turn: 240ms;
-  --from: 3.2;
+  --turn: 700ms;
+  z-index: 1;
+  animation:
+    bot-dot-gather 700ms linear backwards,
+    bot-dot-wave 1000ms ease-in-out var(--turn) infinite;
 }
 
 .bot-dots i:nth-child(3) {
   --dx: 33;
-  --turn: 570ms;
+  --turn: 1030ms;
 }
 
 .bot[data-color="white"] .bot-dots i {
   box-shadow: 0 0 0 calc(var(--u) * 1.1) var(--bot-outline);
 }
 
-.bot[data-dots="out"] .bot-dots i {
-  animation: bot-dot-out 200ms cubic-bezier(0.5, 0, 0.8, 0.5) forwards;
-}
-
 .bot[data-dots="in"] .bot-act {
-  animation: bot-to-dots 200ms cubic-bezier(0.5, 0, 0.8, 0.5) forwards;
+  animation: bot-to-dots 460ms linear forwards;
 }
 
 .bot[data-dots="in"] .bot-eyes {
-  animation: bot-eyes-off 170ms ease-in forwards;
+  animation: bot-eyes-shut 200ms cubic-bezier(0.5, 0, 0.75, 0) forwards;
+}
+
+.bot[data-dots="out"] .bot-dots i {
+  animation: bot-dot-merge 230ms cubic-bezier(0.55, 0, 0.8, 0.3) forwards;
+}
+
+.bot[data-dots="out"] .bot-dots i:nth-child(2) {
+  animation: bot-dot-swell 560ms linear forwards;
 }
 
 .bot[data-dots="out"] .bot-act {
-  animation: bot-from-dots 300ms cubic-bezier(0.3, 1.3, 0.5, 1) backwards;
+  animation: bot-from-dots 560ms linear backwards;
 }
 
 .bot[data-dots="out"] .bot-eyes {
-  animation: bot-eyes-on 300ms cubic-bezier(0.2, 0.8, 0.3, 1) backwards;
+  animation: bot-eyes-open 560ms linear backwards;
 }
 
-@keyframes bot-dot-in {
-  from {
-    translate: 0 0;
-    scale: var(--from);
-    opacity: 0.2;
+/* The body: gathers itself, then draws in with a twist, into the ball that's swelling behind it. */
+@keyframes bot-to-dots {
+  0% {
+    transform: none;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.5, 1);
   }
-}
-
-@keyframes bot-dot-out {
-  to {
-    translate: 0 0;
-    scale: var(--from);
+  20% {
+    transform: scale(1.07, 0.92);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.75, 0.35);
+  }
+  72% {
+    transform: scale(0.4) rotate(-10deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.34) rotate(-12deg);
     opacity: 0;
   }
 }
 
+/* The middle dot on the way in: small behind the body, it swells as the body draws in until the outline
+   is a ball, then tightens to a dot, squashing as the other two bud off it, and settles. */
+@keyframes bot-dot-gather {
+  0% {
+    scale: 0.8;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1);
+  }
+  46% {
+    scale: 3;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.55, 0, 0.6, 1);
+  }
+  78% {
+    scale: 1.14 0.86;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1);
+  }
+  90% {
+    scale: 0.96 1.04;
+  }
+}
+
+/* The two on the sides: out from behind the middle one, a little past their place, and back to it. */
+@keyframes bot-dot-bud {
+  0% {
+    translate: 0 0;
+    scale: 0.7;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
+  }
+  62% {
+    translate: calc(var(--u) * var(--dx) * 1.12) 0;
+    scale: 1.06 0.92;
+    opacity: 0.8;
+    animation-timing-function: cubic-bezier(0.4, 0, 0.4, 1);
+  }
+}
+
+/* Its turn: the bright one, a little bigger. */
 @keyframes bot-dot-wave {
   0%,
   52%,
@@ -500,29 +564,81 @@
   }
 }
 
-@keyframes bot-to-dots {
+/* The way back. The two on the sides are drawn into the middle one, faster as they go. */
+@keyframes bot-dot-merge {
   to {
-    transform: scale(0.4);
-    opacity: 0;
+    translate: 0 0;
+    scale: 0.7;
+    opacity: 1;
   }
 }
 
+/* The middle one takes them in (a squash), swells into the ball, and shrinks behind the body growing out of it. */
+@keyframes bot-dot-swell {
+  0% {
+    animation-timing-function: cubic-bezier(0.4, 0, 0.6, 1);
+  }
+  24% {
+    scale: 1.24 0.84;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.35, 0, 0.35, 1);
+  }
+  58% {
+    scale: 2.8;
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.5, 0, 0.7, 1);
+  }
+  100% {
+    scale: 0.8;
+    opacity: 1;
+  }
+}
+
+/* The body: hidden in the ball until it fills it, then out of it, unwinding, a little past its size and settled. */
 @keyframes bot-from-dots {
-  from {
-    transform: scale(0.4);
+  0%,
+  48% {
+    transform: scale(0.34) rotate(12deg);
     opacity: 0;
   }
-}
-
-@keyframes bot-eyes-off {
-  to {
-    transform: translateX(calc(var(--u) * -26)) scaleX(0.3);
+  50% {
+    transform: scale(0.35) rotate(11deg);
+    opacity: 1;
+    animation-timing-function: cubic-bezier(0.25, 0.8, 0.4, 1);
+  }
+  86% {
+    transform: scale(1.05, 0.96) rotate(-1deg);
+    animation-timing-function: cubic-bezier(0.4, 0, 0.5, 1);
+  }
+  100% {
+    transform: none;
+    opacity: 1;
   }
 }
 
-@keyframes bot-eyes-on {
-  from {
-    transform: translateX(calc(var(--u) * 26)) scaleX(0.3);
+/* The eyes go first on the way in: squeezed shut, and gone. */
+@keyframes bot-eyes-shut {
+  45% {
+    transform: scale(1.1, 0.12);
+  }
+  to {
+    transform: scale(0, 0.08);
+  }
+}
+
+/* And come last on the way back: a shut line once the body is out, opening as it settles. */
+@keyframes bot-eyes-open {
+  0%,
+  62% {
+    transform: scale(0, 0.08);
+    animation-timing-function: cubic-bezier(0.3, 0, 0.3, 1);
+  }
+  82% {
+    transform: scale(1.08, 0.12);
+    animation-timing-function: cubic-bezier(0.3, 1.3, 0.5, 1);
+  }
+  100% {
+    transform: none;
   }
 }
 
@@ -664,6 +780,9 @@
   }
   .bot[data-dots="in"] .bot-act {
     opacity: 0;
+  }
+  .bot .bot-eyes {
+    animation: none !important;
   }
   .bot .bot-eye-fill::after {
     animation: none !important;
@@ -2498,6 +2617,63 @@
   }
 }
 
+/* Plain work: the step it was on goes as the mascot turns into dots, fading and drifting in toward
+   it as it gathers itself, and the next comes in once the mascot is itself again. */
+.bm-working-text[data-gone] {
+  opacity: 0;
+  translate: -8px 0;
+  animation: bots-glow 1.5s infinite, bm-working-gone 150ms cubic-bezier(0.5, 0, 0.75, 0) both;
+}
+
+.bm-working-text[data-back] {
+  animation: bots-glow 1.5s infinite, bm-working-back 300ms cubic-bezier(0.2, 0.8, 0.3, 1) 320ms both;
+}
+
+@keyframes bm-working-gone {
+  from {
+    opacity: 1;
+    translate: 0 0;
+  }
+}
+
+@keyframes bm-working-back {
+  from {
+    opacity: 0;
+    translate: -8px 0;
+  }
+}
+
+/* Plain work under the name on a phone: the working row's three dots, small and in the line's colour,
+   with the same wave running along them, middle first. */
+.bots-head-dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 1.3em;
+  padding-left: 1px;
+}
+
+.bots-head-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text-2);
+  opacity: 0.5;
+  animation: bot-dot-wave 1000ms ease-in-out var(--turn) infinite;
+}
+
+.bots-head-dots i:nth-child(1) {
+  --turn: 660ms;
+}
+
+.bots-head-dots i:nth-child(2) {
+  --turn: 0ms;
+}
+
+.bots-head-dots i:nth-child(3) {
+  --turn: 330ms;
+}
+
 @keyframes bm-working-swap {
   from {
     opacity: 0.35;
@@ -2511,45 +2687,17 @@
   }
 }
 
-/* Writing a message: three small dots hopping through a quick, even wave. Bare dots, no bubble:
-   they start at the bubbles' edge, like an emoji-only message, and keep a bubble's height. */
+/* Writing a message: the working row's mascot stays, thinking, and beside it "Typing…" in the small
+   secondary text, breathing gently, the same as the sidebar's preview while a bot types. */
 .bm-typing {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 34px;
-  padding: 0 2px;
+  font-size: 14px;
+  color: var(--text-2);
+  animation: bots-typing-text 1.4s ease-in-out infinite;
 }
 
-.bm-typing i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--text-2);
-  opacity: 0.3;
-  animation: bm-dot 1.2s var(--ease) infinite;
-}
-
-/* Negative delays: the wave is already moving on mount, no dot waits frozen for its first beat. */
-.bm-typing i:nth-child(1) {
-  animation-delay: -0.28s;
-}
-
-.bm-typing i:nth-child(2) {
-  animation-delay: -0.14s;
-}
-
-@keyframes bm-dot {
-  0%,
-  60%,
-  100% {
-    transform: translateY(0);
-    opacity: 0.3;
-  }
-  30% {
-    transform: translateY(-2px);
-    opacity: 0.9;
-  }
+/* Typing straight after the dots: the words wait for the mascot to be itself again. */
+.bm-typing[data-back] {
+  animation: bots-typing-text 1.4s ease-in-out infinite, bm-working-back 300ms cubic-bezier(0.2, 0.8, 0.3, 1) 320ms backwards;
 }
 
 .bm-jump {
@@ -4473,10 +4621,11 @@ a.bots-btn.bots-btn-primary {
   .bm-recv,
   .bm-reaction,
   .bm-reaction-arrow,
-  .bm-typing i,
+  .bm-typing,
   .bm-working,
   .bm-working-text,
   .bots-head-sub.bots-head-sub-live,
+  .bots-head-dots i,
   .bots-row-typing,
   .bots-sidebar-inner,
   .bots-rail-inner,
@@ -4492,6 +4641,17 @@ a.bots-btn.bots-btn-primary {
   .bots-hello,
   .bm-profile[data-state="open"] {
     animation: none;
+  }
+
+  /* The step goes and comes back at once; the dots hold still, the middle one bright. */
+  .bm-working-text[data-gone],
+  .bm-working-text[data-back],
+  .bm-typing[data-back] {
+    animation: none;
+  }
+
+  .bots-head-dots i:nth-child(2) {
+    opacity: 1;
   }
 
   .bm-events-chevron,

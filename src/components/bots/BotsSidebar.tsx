@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 import { conversationName, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { useWorkspace } from "../../lib/bots/workspace";
 import type { Conversation } from "../../lib/bots/types";
-import { WRITING_REPLY } from "../../../shared/bots";
+import { TYPING } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
 import { useStore } from "../../lib/store";
 import { backToBotsList, isPhone, openBotsChat, useLongPress } from "../../lib/gestures";
@@ -113,7 +113,7 @@ function PeekCard({ peek }: { peek?: PeekState }) {
           {tag && <span className="bots-peek-tag"> · {tag}</span>}
         </span>
       </span>
-      <span className="bots-peek-preview">{typing ? WRITING_REPLY : previewOf(conversation, bots)}</span>
+      <span className="bots-peek-preview">{typing ? TYPING : previewOf(conversation, bots)}</span>
     </div>,
     document.body,
   );
@@ -188,7 +188,7 @@ const Row = memo(function Row({ conversation, active, onMenu, peek, avatar = 34 
             <span className="bots-row-title">{title}</span>
             {tag && <span className="bots-row-tag">· {tag}</span>}
           </span>
-          <span className={cx("bots-row-preview", typing && "bots-row-typing")}>{typing ? WRITING_REPLY : previewOf(conversation, bots)}</span>
+          <span className={cx("bots-row-preview", typing && "bots-row-typing")}>{typing ? TYPING : previewOf(conversation, bots)}</span>
         </span>
         <span className="bots-row-side">
           <span className="bots-row-time">{shortTime(conversation.updatedAt)}</span>

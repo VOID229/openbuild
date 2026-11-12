@@ -122,6 +122,9 @@ export const workingPhrase = (n = 0): string => WORKING_PHRASES[((Math.trunc(n) 
 /** The status while a bot's words are on their way to the chat: text it's streaming, or a message it's sending. */
 export const WRITING_REPLY = "Writing a reply";
 
+/** What a chat shows while a bot is typing a message into it: in the chat, its header and the sidebar's preview. */
+export const TYPING = "Typing…";
+
 /**
  * The line a working bot's status shows. One with no activity, or the "Thinking" a paired device's
  * older server still sends, reads as plain work.

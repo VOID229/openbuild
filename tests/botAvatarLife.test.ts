@@ -270,6 +270,108 @@ describe.skipIf(!browser)("a bot on its own", () => {
     expect((await read()).body).toBe(1);
   }, 30_000);
 
+  /**
+   * In the page: the held bot's morph, frame by frame. Every animation on it is paused and set to each
+   * time in turn, and what shows read off: how big the body is and whether it shows, and the middle
+   * dot's. Sizes are in units of the 100-unit box: the body's reach from its middle, the dot's radius.
+   */
+  const MORPH = `((to) => {
+    const b = document.querySelector('#held .bot'), u = b.offsetWidth / 100;
+    const anims = b.getAnimations({ subtree: true });
+    anims.forEach((a) => a.pause());
+    const scaleOf = (v) => (v === 'none' ? [1, 1] : v.split(' ').map(Number).concat(Number(v.split(' ')[0])).slice(0, 2));
+    const frames = [];
+    for (let t = 0; t <= to; t += 8) {
+      anims.forEach((a) => (a.currentTime = t));
+      const act = getComputedStyle(b.querySelector('.bot-act')), m = new DOMMatrix(act.transform);
+      const mid = b.querySelector('.bot-dots i:nth-child(2)'), ms = mid ? getComputedStyle(mid) : null;
+      const eyes = new DOMMatrix(getComputedStyle(b.querySelector('.bot-eyes')).transform);
+      frames.push({
+        t,
+        body: Number(act.opacity) >= 0.45 ? Math.hypot(m.a, m.b) * 50 : 0,
+        dot: ms && Number(ms.opacity) >= 0.45 ? Math.max(...scaleOf(ms.scale)) * 10.5 : 0,
+        eyes: Math.hypot(eyes.a, eyes.b),
+      });
+    }
+    anims.forEach((a) => a.play());
+    return { frames, props: [...new Set(anims.flatMap((a) => a.effect.getKeyframes().flatMap((k) => Object.keys(k))))].filter((k) => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort() };
+  })`;
+  type Morph = { frames: { t: number; body: number; dot: number; eyes: number }[]; props: string[] };
+  /** The outline, frame by frame: whichever of the body and the ball reaches further. */
+  const outline = (m: Morph) => m.frames.map((f) => Math.max(f.body, f.dot));
+
+  test("into dots and back is one morph: the outline never vanishes or jumps, the eyes go first and come last, and only compositor properties move", async () => {
+    const page = await open();
+    await page.eval("hold(true)");
+    await page.until("document.querySelector('#held .bot').dataset.dots === 'in'");
+    const into = await page.eval<Morph>(`${MORPH}(700)`);
+    // Transforms and opacity only (with the dots' own translate and scale): nothing that lays out or paints.
+    for (const prop of into.props) expect(["opacity", "scale", "transform", "translate"]).toContain(prop);
+    const inLine = outline(into);
+    // Always something there, the body or the ball it becomes, and never a jump from one frame to the next.
+    expect(Math.min(...inLine)).toBeGreaterThan(9);
+    for (let i = 1; i < inLine.length; i++) expect(Math.abs(inLine[i]! - inLine[i - 1]!)).toBeLessThan(6);
+    // A hand-off, not a swap: for a while the body and the ball both show, as one outline.
+    expect(into.frames.filter((f) => f.body > 0 && f.dot > 0).length).toBeGreaterThan(10);
+    // The body gathers itself first (a squash, a little bigger), and is gone at the end.
+    expect(Math.max(...into.frames.slice(0, 15).map((f) => f.body))).toBeGreaterThan(50);
+    expect(into.frames.at(-1)!.body).toBe(0);
+    // The eyes are shut and gone before the body is half its size.
+    const halfIn = into.frames.find((f) => f.body > 0 && f.body < 25)!;
+    expect(into.frames.find((f) => f.t === halfIn.t)!.eyes).toBeLessThan(0.05);
+    // Held, it stays dots: well past the most a start would keep them, and nothing of its life runs meanwhile.
+    await page.eval(`(window.lived = 0, new MutationObserver((r) => (window.lived += r.filter((m) => ['data-looking', 'data-action', 'data-blink', 'data-eyes'].includes(m.attributeName)).length)).observe(document.querySelector('#held .bot'), { attributes: true }))`);
+    await Bun.sleep(3000);
+    expect(await page.eval<string>("document.querySelector('#held .bot').dataset.dots")).toBe("in");
+    expect(await page.eval<number>("window.lived")).toBe(0);
+    // Back: the two side dots are drawn in, the ball swells, the body grows out of it, the eyes open last.
+    await page.eval("hold(false)");
+    await page.until("document.querySelector('#held .bot').dataset.dots === 'out'");
+    const back = await page.eval<Morph>(`${MORPH}(560)`);
+    for (const prop of back.props) expect(["opacity", "scale", "transform", "translate"]).toContain(prop);
+    const backLine = outline(back);
+    expect(Math.min(...backLine)).toBeGreaterThan(9);
+    for (let i = 1; i < backLine.length; i++) expect(Math.abs(backLine[i]! - backLine[i - 1]!)).toBeLessThan(6);
+    expect(back.frames.filter((f) => f.body > 0 && f.dot > 0).length).toBeGreaterThan(10);
+    expect(back.frames.at(-1)!.body).toBeCloseTo(50, 0);
+    const bodyBack = back.frames.find((f) => f.body > 0)!;
+    expect(bodyBack.eyes).toBeLessThan(0.05);
+    expect(back.frames.at(-1)!.eyes).toBeCloseTo(1, 1);
+    // Then it's itself, the dots out of the page, and its life takes up again.
+    await page.until("!document.querySelector('#held .bot-dots') && !('dots' in document.querySelector('#held .bot').dataset)");
+    await page.until("window.lived > 0", 5000);
+  }, 40_000);
+
+  test("every shape morphs into dots and back without a gap or a jump", async () => {
+    const page = await open();
+    const { SHAPES } = await import("../src/lib/bots/looks");
+    for (const shape of SHAPES.map((s) => s.id)) {
+      await page.eval(`holdShape(${JSON.stringify(shape)})`);
+      await page.eval("hold(true)");
+      await page.until("document.querySelector('#held .bot').dataset.dots === 'in'");
+      const line = outline(await page.eval<Morph>(`${MORPH}(700)`));
+      expect(Math.min(...line)).toBeGreaterThan(9);
+      for (let i = 1; i < line.length; i++) expect(Math.abs(line[i]! - line[i - 1]!)).toBeLessThan(6);
+      await page.eval("hold(false)");
+      await page.until("!document.querySelector('#held .bot-dots')");
+    }
+  }, 60_000);
+
+  test("with reduced motion it's dots, or itself, at once: the middle dot bright and nothing moving", async () => {
+    const page = await open();
+    await page.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+    await page.eval("hold(true)");
+    // (The app's reduced motion makes every transition 1ms: it's over by the next frame.)
+    await page.until("document.querySelector('#held .bot').dataset.dots === 'in' && getComputedStyle(document.querySelector('#held .bot-act')).opacity === '0'", 1000);
+    const now = await page.eval<{ running: number; body: string; dots: string[] }>(`(() => {
+      const b = document.querySelector('#held .bot');
+      return { running: b.getAnimations({ subtree: true }).length, body: getComputedStyle(b.querySelector('.bot-act')).opacity, dots: [...b.querySelectorAll('.bot-dots i')].map((d) => getComputedStyle(d).opacity) };
+    })()`);
+    expect(now).toEqual({ running: 0, body: "0", dots: ["0.5", "1", "0.5"] });
+    await page.eval("hold(false)");
+    await page.until("getComputedStyle(document.querySelector('#held .bot-act')).opacity === '1' && !document.querySelector('#held .bot-dots')", 1000);
+  }, 20_000);
+
   test("out of view, awake bots spend no frames", async () => {
     const page = await open();
     await page.eval("document.body.style.paddingTop = '3000px'");
