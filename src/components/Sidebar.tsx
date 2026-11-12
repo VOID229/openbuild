@@ -228,8 +228,8 @@ function RowTitle({ title, titling, working }: { title: string; titling: boolean
 }
 
 /** A working thread's title: a band of light crosses it in the first part of each cycle, then it rests. */
-const GLOW_MS = 2600;
-const GLOW_SWEEP = 0.55;
+const GLOW_MS = 2200;
+const GLOW_SWEEP = 0.77;
 
 type RowMotion = "close" | "snooze" | "open";
 
