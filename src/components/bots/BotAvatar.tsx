@@ -10,7 +10,7 @@
 // long as there's nothing to name. Nothing ever hops, and nothing spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
-import { aimTarget, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type Pose } from "../../lib/bots/rig";
+import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type EyeLook, type Pose } from "../../lib/bots/rig";
 import { nextBeat, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
@@ -180,16 +180,18 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   // A reaction stirs a dozing bot for as long as its face shows, then it drifts off again.
   const sleeping = dozing && !flash;
   const held = pose ?? (shown === "thinking" ? THINKING : undefined);
+  // The form its eyes are drawn in, which says how near the edge they can go.
+  const drawn = eyeLook(shown, flash ? undefined : eyesFor(pose, busy), sleeping);
 
   // The body: springs toward wherever it's facing (a pose, the pointer, or back to rest), stepped
   // frame by frame while anything moves and written straight to the layers, so none of it renders.
   // It's drawn at rest to begin with (`rest`, below), with nothing run to put it there.
-  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; shape: typeof shape; size: number; busy: boolean }>(undefined);
-  body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, pose: held, shape, size, busy };
-  Object.assign(body.current, { pose: held, shape, size, busy });
+  const body = useRef<{ rig: ReturnType<typeof newRig>; tracking: boolean; last: number; spun: number; pose?: Pose; shape: typeof shape; size: number; busy: boolean; look: EyeLook }>(undefined);
+  body.current ??= { rig: newRig(restOf(shape)), tracking: false, last: 0, spun: 0, pose: held, shape, size, busy, look: drawn };
+  Object.assign(body.current, { pose: held, shape, size, busy, look: drawn });
   const write = () => {
     const b = body.current!;
-    const f = frame(b.rig, b.shape, b.size);
+    const f = frame(b.rig, b.shape, b.size, b.look);
     for (const [el, t] of [[wholeRef.current, f.whole], [bodyRef.current, f.body], [leftRef.current, f.left], [rightRef.current, f.right]] as const) if (el) el.style.transform = t;
     if (skinRef.current) skinRef.current.style.visibility = f.back ? "hidden" : "";
   };
@@ -236,6 +238,15 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
     write();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [held, shape, size]);
+
+  // A new face can't go as near the edge: drawn again where the eyes fit (a still bot's eyes always do).
+  const lastLook = useRef(drawn);
+  useLayoutEffect(() => {
+    if (lastLook.current === drawn) return;
+    lastLook.current = drawn;
+    write();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawn]);
 
   // Following the pointer, wherever it is; let go, it eases back to looking ahead. A pose wins: it
   // looks where the pose says, and takes the pointer up again after.
