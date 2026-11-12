@@ -34,14 +34,15 @@ const item = (kind: "tile" | "row", title: string) =>
     : `[...document.querySelectorAll('.bots-row-main')].find((r) => r.querySelector('.bots-row-title')?.textContent === ${JSON.stringify(title)})`;
 
 /**
- * In the page: how a bot stands, read off what its layers were given (null while it has nothing on
- * it). The head's turn is read from how far an eye has slid across the body (it stands 30 units off
- * it, drawn at 0.885 of its size).
+ * In the page: how a bot stands, read off what its layers were given. The head's turn is read from
+ * how far the eyes have slid across the body (the face stands 30 units off it), near enough.
  */
 const STANCE = `((b) => {
   const of = (cls, re) => { const t = b.querySelector(cls).style.transform; return t === '' ? null : Number((re.exec(t) ?? [0, 0])[1]); };
-  const slid = /matrix\\(([^)]+)\\)/.exec(b.querySelector('.bot-eye').style.transform)?.[1].split(',').map(Number);
-  const unit = b.getBoundingClientRect().width / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 26.5))) * 180 / Math.PI;
+  // (Both eyes, averaged: the nearer one slides further than the other.)
+  const eyes = [...b.querySelectorAll('.bot-eye')].map((e) => /matrix\\(([^)]+)\\)/.exec(e.style.transform)?.[1].split(',').map(Number));
+  const slid = eyes.every(Boolean) ? [0, 0, 0, 0, (eyes[0][4] + eyes[1][4]) / 2, (eyes[0][5] + eyes[1][5]) / 2] : undefined;
+  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 31))) * 180 / Math.PI;
   return { yaw: slid ? turn(slid[4]) : null, pitch: slid ? turn(slid[5]) : null, bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), lean: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/) };
 })`;
 
@@ -71,14 +72,18 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     test(`a bot's ${kind === "tile" ? "pinned tile" : "row"} follows the pointer with its eyes, and only that`, async () => {
       const page = await open();
       const find = item(kind, title);
-      expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, lean: null, tracking: false });
+      // At rest: turned up and away, rolled over the other way, and not following anything.
+      const rest = (await mascots(page, find))[0]!;
+      expect(rest.tracking).toBe(false);
+      expect(rest.yaw!).toBeGreaterThan(10);
+      expect(rest.pitch!).toBeLessThan(0);
+      expect(rest.lean!).toBeLessThan(-15);
 
       // Off to the right of the avatar, a little below: the head turns right over that way, and a little down.
       await pointAt(page, find, "far", 12);
       await until(page, find, `tracking && yaw > ${YAW * 0.65}`);
       const right = (await mascots(page, find))[0]!;
-      // (Read off the nearer eye, which slides a little further than the head turns.)
-      expect(right.yaw!).toBeLessThan(YAW * 1.5);
+      expect(right.yaw!).toBeLessThan(YAW * 1.3);
       expect(right.pitch!).toBeGreaterThan(0);
       expect(right.pitch!).toBeLessThan(right.yaw! / 3);
       // No hop and no smile on the way in.
@@ -108,10 +113,10 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       expect((await mascots(page, find))[0]!.action).toBeNull();
       await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
 
-      // Off the item: it stops following and eases back to looking ahead, with nothing left on it.
+      // Off the item: it stops following and eases back to rest, exactly as it was.
       await away(page);
-      await until(page, find, "yaw === null && bodyYaw === null && lean === null");
-      expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, pitch: null, bodyYaw: null, lean: null, tracking: false, action: null });
+      await until(page, find, `!tracking && lean === ${rest.lean} && bodyYaw === ${rest.bodyYaw} && Math.abs(yaw - ${rest.yaw}) < 1e-6`);
+      expect((await mascots(page, find))[0]).toEqual(rest);
     });
   }
 
@@ -147,7 +152,8 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     await page.until("!window.beforeReload && document.querySelectorAll('.bots-row, .bots-tile').length >= 5");
     await page.settle();
     const find = item("row", "Manager");
+    const rest = (await mascots(page, find))[0]!;
     await pointAt(page, find, "far", 12);
-    expect((await mascots(page, find))[0]).toMatchObject({ yaw: null, lean: null, tracking: false, action: null });
+    expect((await mascots(page, find))[0]).toEqual({ ...rest, tracking: false, action: null });
   });
 });

@@ -164,7 +164,7 @@ function GroupEditor({ group, onDelete }: { group: Conversation; onDelete: (conv
   const st = useBots.getState();
   const [name, setName] = useState(group.name ?? "");
   useEffect(() => setName(group.name ?? ""), [group.name]);
-  const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "orb", color: "gray" });
+  const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "blob", color: "gray" });
   const working = useBusyBots(group);
   const saveName = () => {
     const next = name.trim();
@@ -234,7 +234,7 @@ function BotRow({ bot }: { bot: Bot }) {
 }
 
 function GroupRow({ group, bots }: { group: Conversation; bots: Bot[] }) {
-  const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "orb", color: "gray" });
+  const looks = group.botIds.map((id) => bots.find((b) => b.id === id)?.look ?? { shape: "blob", color: "gray" });
   const names = group.botIds.map((id) => bots.find((b) => b.id === id)?.name.split(" · ")[0]).filter(Boolean);
   const working = useBusyBots(group);
   return (

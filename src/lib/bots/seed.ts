@@ -36,11 +36,11 @@ export function seedBots(): { bots: Bot[]; conversations: Conversation[] } {
   // Today's messages run up to a few minutes ago, whatever the time is now.
   const today = (minutesAgo: number) => now - minutesAgo * MIN;
 
-  const pip = bot("Pip", "puff", "white", "You're the user's general helper. Keep answers short and friendly, and hand work to the other bots when it's theirs.", {
+  const pip = bot("Pip", "cloud", "white", "You're the user's general helper. Keep answers short and friendly, and hand work to the other bots when it's theirs.", {
     primary: true,
     memory: [{ id: uid(), kind: "profile", text: "Prefers short answers, no bullet lists unless asked", at: now - 2 * 24 * 60 * MIN }],
   });
-  const juniper = bot("Juniper · notes", "tile", "blue", "Look after the user's notes: reading list, reminders, the odd to-do. Write things down before saying they're done.", {
+  const juniper = bot("Juniper · notes", "square", "blue", "Look after the user's notes: reading list, reminders, the odd to-do. Write things down before saying they're done.", {
     memory: [
       { id: uid(), kind: "profile", text: "Reading list lives in Notes/Reading.md", at: at(1, 18, 5) },
       { id: uid(), kind: "journal", text: "Waters the plants every other evening", at: today(30) },
@@ -50,15 +50,15 @@ export function seedBots(): { bots: Bot[]; conversations: Conversation[] } {
       { id: uid(), title: "Tidy up the week's notes", schedule: "Sundays at 10:00", enabled: false },
     ],
   });
-  const scout = bot("Scout · research", "spark", "teal", "Find things out: prices, options, sources. Say where each number came from.");
-  const tally = bot("Tally", "bean", "green", "Keep track of money: budgets, subscriptions, splitting costs. Round to whole euros.", {
+  const scout = bot("Scout · research", "sparkle", "teal", "Find things out: prices, options, sources. Say where each number came from.");
+  const tally = bot("Tally", "tablet", "green", "Keep track of money: budgets, subscriptions, splitting costs. Round to whole euros.", {
     routines: [{ id: uid(), title: "Subscriptions check", schedule: "1st of each month at 09:00", enabled: true }],
   });
   const quill = bot("Quill", "flower", "pink", "Help with writing: tighten drafts, suggest titles, keep the user's voice.");
-  const ember = bot("Ember", "orb", "orange", "A running coach. Plan easy weeks after hard ones and check in after each run.", {
+  const ember = bot("Ember", "blob", "orange", "A running coach. Plan easy weeks after hard ones and check in after each run.", {
     routines: [{ id: uid(), title: "Morning run check-in", schedule: "Weekdays at 07:30", enabled: true }],
   });
-  const rook = bot("Rook", "gem", "purple", "Review code changes the user shares. Point out real bugs first, style last.");
+  const rook = bot("Rook", "house", "purple", "Review code changes the user shares. Point out real bugs first, style last.");
 
   const conversations: Conversation[] = [];
   const add = (c: Omit<Conversation, "id" | "createdAt" | "updatedAt">) => {

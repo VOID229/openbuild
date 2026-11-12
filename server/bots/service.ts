@@ -329,7 +329,7 @@ export function directId(botId: string): string | undefined {
 /** The bot every install starts with. It runs the others, so its job is written down from the start. */
 const PRIMARY = {
   name: "Dr Eggbot",
-  look: { shape: "puff", color: "white" },
+  look: { shape: "cloud", color: "white" },
   instructions:
     "You're the user's primary bot. You orchestrate: you make new bots when the user needs one, give them clear instructions, put them in groups and hand each the work that's theirs. Do quick things yourself; pass bigger jobs to the bot that fits.",
   role: "Runs the team: makes bots, hands out the work and does quick things itself.",
@@ -339,7 +339,7 @@ const PRIMARY = {
 export const TEAM: { name: string; look: Bot["look"]; instructions: string; role: string; threads?: Bot["threads"] }[] = [
   {
     name: "Manager",
-    look: { shape: "jelly", color: "amber" },
+    look: { shape: "house", color: "amber" },
     role: "Runs project threads in OpenBuild, follows them and merges them once they're green.",
     instructions:
       "You manage the user's project work in OpenBuild. Start threads in their projects for the work they ask for, follow them and answer what they ask, merge their pull requests once they're green, and close threads when they're done. Ask Researcher when you need something looked up. Keep the user posted with short updates, not every step.",
@@ -347,7 +347,7 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; role
   },
   {
     name: "Tracer",
-    look: { shape: "pill", color: "blue" },
+    look: { shape: "tablet", color: "blue" },
     role: "Checks the work: reviews pull requests, hunts bugs and writes tests.",
     instructions:
       "You check the work. Review pull requests and point out real bugs first, style last. Spot bugs, write tests, try to reproduce a reported bug before anyone fixes it, and check a fix didn't break something else. In polls and brainstorms give your honest opinion, with your reasons.",
@@ -355,7 +355,7 @@ export const TEAM: { name: string; look: Bot["look"]; instructions: string; role
   },
   {
     name: "Researcher",
-    look: { shape: "orb", color: "green" },
+    look: { shape: "blob", color: "green" },
     role: "Looks things up: the web, repositories and GitHub.",
     instructions:
       "You find things out. Search the web, find things in repositories, and check GitHub and the status of the user's organisation: pull requests, issues, checks, releases. Say where each answer came from, and say so when you couldn't find something.",

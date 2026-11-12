@@ -8,7 +8,7 @@ import { BotAvatar } from "../../../src/components/bots/BotAvatar";
 import { SHAPES, type BotLook, type Mood } from "../../../src/lib/bots/looks";
 
 const moods: Mood[] = ["idle", "happy", "thinking", "sleepy", "surprised", "love", "wink", "squint"];
-const looks: BotLook[] = [{ shape: "orb", color: "green" }, { shape: "puff", color: "white" }, { shape: "bean", color: "pink" }];
+const looks: BotLook[] = [{ shape: "blob", color: "green" }, { shape: "cloud", color: "white" }, { shape: "tablet", color: "pink" }];
 createRoot(document.getElementById("root")!).render(
   <>
     <div className="row" id="moods">

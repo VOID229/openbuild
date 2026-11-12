@@ -96,7 +96,7 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
   return text;
 }
 
-const MISSING = { shape: "orb", color: "gray" };
+const MISSING = { shape: "blob", color: "gray" };
 
 /** A conversation's picture: the bot, or a huddle of the group's or side chat's bots. */
 export const ConversationAvatar = memo(function ConversationAvatar({

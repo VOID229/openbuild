@@ -2,7 +2,7 @@
 // colour picker here is also the details panel's avatar editor.
 import { Check, Plus, Trash, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { COLORS, SHAPES, randomLook, type BotLook } from "../../lib/bots/looks";
+import { COLORS, SHAPES, randomLook, shapeOf, type BotLook } from "../../lib/bots/looks";
 import { useBots } from "../../lib/bots/store";
 import { uid } from "../../lib/id";
 import { makePoll, POLL_OPTIONS, ROLE_MAX } from "../../../shared/bots";
@@ -20,10 +20,10 @@ export function LookPicker({ look, onChange }: { look: BotLook; onChange: (look:
             key={s.id}
             type="button"
             role="radio"
-            aria-checked={look.shape === s.id}
+            aria-checked={shapeOf(look).id === s.id}
             aria-label={s.label}
             data-tooltip={s.label}
-            className={cx("bots-shape", look.shape === s.id && "bots-shape-on")}
+            className={cx("bots-shape", shapeOf(look).id === s.id && "bots-shape-on")}
             onClick={() => onChange({ ...look, shape: s.id })}
           >
             <BotAvatar look={{ shape: s.id, color: look.color }} size={40} alive={false} />
