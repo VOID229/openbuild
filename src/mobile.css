@@ -752,11 +752,6 @@
     color: var(--text-3);
   }
 
-  .bots-head-sub-live {
-    color: var(--text-2);
-    animation: bots-typing-text 1.4s ease-in-out infinite;
-  }
-
   /* A problem floats under the bar, instead of pushing the whole conversation down. */
   .bots-sync-status {
     position: absolute;

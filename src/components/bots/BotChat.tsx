@@ -1138,7 +1138,7 @@ function Working({ conversationId, direct, botIds, bots }: { conversationId: str
         return (
           <div key={id} className="bm-working" role="status" aria-label={`${bot.name}: ${activity}`}>
             {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
-            <span key={activity} className="bm-working-text shimmer">
+            <span key={activity} className="bm-working-text">
               {activity}
             </span>
           </div>
