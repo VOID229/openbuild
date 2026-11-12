@@ -1416,6 +1416,21 @@
   }
 }
 
+/* A narrow phone: tighter tabs, so their labels still fit whole (past that they end in an ellipsis). */
+@media (max-width: 374px) {
+  .bots-tabs {
+    gap: 2px;
+  }
+
+  .bots-tab {
+    padding: 0 5px;
+  }
+
+  .bots-tab::after {
+    inset: auto 5px 0;
+  }
+}
+
 /* One button at the end of the composer, as in OpenBots: a mic until there's something to send. On the
    narrowest phones the mic gives way entirely (see styles.css), so send stays put there. */
 @media (min-width: 375px) and (max-width: 768px) {
