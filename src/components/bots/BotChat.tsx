@@ -26,8 +26,10 @@ import { useFieldDictation } from "../../lib/useFieldDictation";
 import { Avatar, IconButton, Popover, Sheet } from "../primitives";
 import { StashTray } from "../StashTray";
 import { uid } from "../../lib/id";
-import { AttachmentError, uploadFile } from "../../lib/files";
-import { FileChip } from "../FileChip";
+import { AttachmentError, formatBytes } from "../../lib/files";
+import { holdFile, uploadHeld } from "../../lib/localFiles";
+import { MAX_ATTACHMENT_BYTES } from "../../../shared/attachments";
+import { FileChip, SentFileChip } from "../FileChip";
 import { botStashOf, imageFiles, pasteBotStash, stashAction, type Stashed } from "../../lib/stash";
 import { SHORTCUT_EVENT, type ShortcutEventDetail } from "../../lib/shortcuts";
 import { botDraftKey, draftsReady, getBotDraft, onRemoteDraft, saveBotDraft } from "../../lib/drafts";
@@ -824,7 +826,7 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           {!!m.files?.length && (
             <div className="bm-files">
               {m.files.map((f) => (
-                <FileChip key={f.id} className="bm-file" name={f.name} mime={f.mime} size={f.size} href={filesAt ? workspacePath(filesAt, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${encodeURIComponent(f.id)}`) : undefined} />
+                <SentFileChip key={f.id} className="bm-file" file={f} href={filesAt ? workspacePath(filesAt, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${encodeURIComponent(f.id)}`) : undefined} />
               ))}
             </div>
           )}
@@ -2005,7 +2007,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const { images } = sent;
     const body = sent.text.trim();
     if (!body && !images.length) return;
-    if (uploading.current.length) return setNotice("Still uploading. It sends once the files are there.");
     const pictures = images.filter((item) => !parseFileRef(item));
     const files = images.flatMap((item) => parseFileRef(item) ?? []);
     box.current = { text: "", images: [] };
@@ -2016,12 +2017,22 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
     const again = unsent.get(key)?.find((u) => u.text === body && sameImages(u.images, images));
     if (again) unsent.set(key, unsent.get(key)!.filter((u) => u !== again));
     const id = again?.id ?? uid();
+    // The message shows at once with its files uploading; it reaches the bots when they're there.
+    let failed: string | undefined;
+    const uploads = !files.some((f) => f.local) ? undefined : async () => {
+      try {
+        for (const f of files) if (f.local) await uploadHeld(f, workspacePath(workspace, `/api/bots/conversations/${encodeURIComponent(conversationId)}/files/${encodeURIComponent(f.id)}`));
+      } catch (err) {
+        failed = err instanceof AttachmentError ? err.message : `Couldn't upload a file. It's back in the box to send again.`;
+        throw err;
+      }
+    };
     flying.current = [...flying.current, sent];
     setText("");
     setImages([]);
     setMention(undefined);
     onReply(undefined);
-    void useBots.getState().post(conversationId, { id, author: "me", text: body, images: pictures.length ? pictures : undefined, files: files.length ? files : undefined, replyTo: quoting }).then((acknowledged) => {
+    void useBots.getState().post(conversationId, { id, author: "me", text: body, images: pictures.length ? pictures : undefined, files: files.length ? files : undefined, replyTo: quoting }, uploads).then((acknowledged) => {
       flying.current = flying.current.filter((f) => f !== sent);
       // Not confirmed, but the workspace's own snapshot shows it arrived after all.
       const m = acknowledged ?? useBots.getState().conversations.find((c) => c.id === conversationId)?.messages.find((x) => x.id === id);
@@ -2049,36 +2060,26 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
       });
       setImages((now) => withUnsent({ text: "", images }, { text: "", images: now }).images);
       if (quoting && !replyRef.current) onReply(quoting);
-      setNotice("Not sent. It's back in the box to send again.");
+      setNotice(failed ?? "Not sent. It's back in the box to send again.");
       // The caret stays in what was being typed, or goes to the end of the message put back.
       requestAnimationFrame(() => {
         if (caret && document.activeElement === caret.el) caret.el.setSelectionRange(caret.start + shift, caret.end + shift);
       });
     });
   };
-  // Files on their way to the workspace's server. Each joins the others in `images` once it's there.
-  const [uploads, setUploads] = useState<{ id: string; name: string; mime: string; size: number; sent: number; stop: AbortController }[]>([]);
-  const uploading = useRef(uploads);
-  uploading.current = uploads;
-  useEffect(() => () => uploading.current.forEach((u) => u.stop.abort()), []);
-  /** Add what was picked, dropped or pasted: a picture goes in the message, anything else to the bots' computers. */
+  /** Add what was picked, dropped or pasted: a picture goes in the message; anything else waits here and goes to the bots' computers when the message is sent. */
   const attach = (list: File[]) => {
     const pictures = list.filter((f) => /^image\/(png|jpeg|webp|gif)$/.test(f.type));
     const others = list.filter((f) => !pictures.includes(f)).slice(0, MAX_BOT_FILES);
     if (pictures.length) void Promise.all(pictures.slice(0, 4).map((f) => shrink(f))).then((urls) => setImages((cur) => capAttached([...cur, ...urls])), (err: Error) => setNotice(err.message));
-    for (const f of others) {
-      const entry = { id: uid(), name: f.name || "file", mime: f.type || "application/octet-stream", size: f.size, sent: 0, stop: new AbortController() };
-      setUploads((all) => [...all, entry]);
-      const url = workspacePath(workspace, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${entry.id}`);
-      uploadFile(f, url, (sent) => setUploads((all) => all.map((u) => (u.id === entry.id ? { ...u, sent } : u))), entry.stop.signal)
-        .then(
-          (saved) => setImages((cur) => capAttached([...cur, fileRef(saved)])),
-          (err) => {
-            if ((err as Error).name !== "AbortError") setNotice(err instanceof AttachmentError ? err.message : `Couldn't upload ${f.name}.`);
-          },
-        )
-        .finally(() => setUploads((all) => all.filter((u) => u.id !== entry.id)));
-    }
+    const large = others.find((f) => f.size > MAX_ATTACHMENT_BYTES);
+    if (large) setNotice(`${large.name} is larger than ${formatBytes(MAX_ATTACHMENT_BYTES)}.`);
+    const kept = others.filter((f) => f.size <= MAX_ATTACHMENT_BYTES).map((f) => {
+      const file = { id: uid(), name: f.name || "file", mime: f.type || "application/octet-stream", size: f.size, local: true };
+      holdFile(file.id, f);
+      return fileRef(file);
+    });
+    if (kept.length) setImages((cur) => capAttached([...cur, ...kept]));
   };
   const pasteStashed = (item: Stashed) => {
     dictation.cancel();
@@ -2221,7 +2222,7 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
           </div>
         )}
         {notice && <div className="bots-composer-notice">{notice}</div>}
-        {images.length + uploads.length > 0 && (
+        {images.length > 0 && (
           <div className="bots-composer-images">
             {images.map((src, i) => {
               const attached = parseFileRef(src);
@@ -2243,14 +2244,6 @@ function Composer({ conversation, replyTo, onReply }: { conversation: Conversati
                 </span>
               );
             })}
-            {uploads.map((u) => (
-              <span key={u.id} className="bots-composer-file bots-composer-uploading">
-                <FileChip name={u.name} mime={u.mime} size={u.size} progress={u.sent} />
-                <button type="button" className="bots-composer-image-remove" aria-label={`Cancel ${u.name}`} onClick={() => u.stop.abort()}>
-                  <X size={12} />
-                </button>
-              </span>
-            ))}
           </div>
         )}
         <div className="bots-composer-row">

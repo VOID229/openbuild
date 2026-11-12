@@ -2871,11 +2871,6 @@
   animation: bm-pop var(--med) var(--ease-out) both;
 }
 
-.bots-composer-uploading .attachment-file {
-  overflow: hidden;
-  border-radius: inherit;
-}
-
 .bots-composer-image-open {
   display: block;
   width: 100%;

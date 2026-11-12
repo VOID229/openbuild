@@ -406,16 +406,18 @@ export interface BotFile {
   name: string;
   mime: string;
   size: number;
+  /** Still in the sender's browser: attached but not sent, or uploading as its message goes out. Never stored. */
+  local?: boolean;
 }
 
 /** A file waiting in a composer, among its pictures (data URLs): the same list holds both. */
 const FILE_REF = "obfile:";
-export const fileRef = (f: BotFile) => FILE_REF + JSON.stringify({ id: f.id, name: f.name, mime: f.mime, size: f.size });
+export const fileRef = (f: BotFile) => FILE_REF + JSON.stringify({ id: f.id, name: f.name, mime: f.mime, size: f.size, ...(f.local ? { local: true } : {}) });
 export function parseFileRef(item: string): BotFile | undefined {
   if (!item.startsWith(FILE_REF)) return undefined;
   try {
     const f = JSON.parse(item.slice(FILE_REF.length));
-    return typeof f?.id === "string" && typeof f.name === "string" ? { id: f.id, name: f.name, mime: String(f.mime ?? ""), size: Number(f.size) || 0 } : undefined;
+    return typeof f?.id === "string" && typeof f.name === "string" ? { id: f.id, name: f.name, mime: String(f.mime ?? ""), size: Number(f.size) || 0, ...(f.local ? { local: true } : {}) } : undefined;
   } catch {
     return undefined;
   }

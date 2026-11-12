@@ -92,42 +92,71 @@ for (const kind of ["direct", "group"] as const) {
       expect((await page.posts()).map((p) => p.text)).toEqual(["hello there"]);
     }, 60_000);
 
-    test("a dropped video goes up in pieces, waits as a chip, and is sent as a file the message links to", async () => {
+    test("a dropped video only waits in the box; sending shows the message at once, uploads it in pieces, then posts it", async () => {
       const page = await open();
-      await page.set("ok", true);
-      // 9 MB: three pieces. A picture in the same drop still goes inside the message.
+      await page.set("ok", false);
+      // 9 MB: three pieces, once it's sent.
       await page.eval(`(() => {
         const data = new DataTransfer();
         data.items.add(new File([new Uint8Array(9 * 1024 * 1024)], "talk.mp4", { type: "video/mp4" }));
         document.querySelector(".bots-composer").dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
         return true;
       })()`);
-      await page.until("!!document.querySelector('.bots-composer-uploading')");
-      expect(await page.eval<string>("document.querySelector('.bots-composer-uploading .attachment-meta').textContent")).toContain("Uploading");
-      // Not sent while it's still going up.
+      await page.until("!!document.querySelector('.bots-composer-file')");
+      expect(await page.eval<string>("document.querySelector('.bots-composer-file .attachment-meta').textContent")).toBe("9.0 MB");
       await page.type("see this");
-      await page.eval(`(document.querySelector(".bots-composer").requestSubmit(), true)`);
-      await page.until("!!document.querySelector('.bots-composer-notice')");
-      expect(await page.notice()).toContain("Still uploading");
+      await page.settle();
+      // Attached, and nothing has left the browser.
+      expect(await page.eval<number>("workspace.pieces.length")).toBe(0);
+
+      await page.set("ok", true);
+      const first = await page.enter();
+      expect(first.value).toBe("");
+      expect(first.rows.at(-1)).toMatchObject({ text: "see this", sending: true });
+      await page.until("!!document.querySelector('.bm-mine .bm-file') && workspace.held.length > 0");
+      // The message's chip is the progress; it isn't a link until the file is there.
+      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file .attachment-meta').textContent")).toContain("Uploading");
+      expect(await page.eval<string | null>("document.querySelector('.bm-mine .bm-file').getAttribute('href')")).toBeNull();
       expect(await page.posts()).toEqual([]);
       for (let i = 0; i < 3; i++) {
         await page.until("workspace.held.length > 0");
         await page.release();
       }
-      await page.until("!document.querySelector('.bots-composer-uploading') && !!document.querySelector('.bots-composer-file')");
+      // Whole: now the message itself goes.
+      await page.until("workspace.posts.length === 1");
+      await page.release();
+      await page.until("!rows().at(-1).sending");
       const pieces = await page.eval<{ id: string; name: string; offset: number; bytes: number }[]>("workspace.pieces");
       expect(pieces.map((p) => [p.offset, p.bytes])).toEqual([[0, 4 * 1024 * 1024], [4 * 1024 * 1024, 4 * 1024 * 1024], [8 * 1024 * 1024, 1024 * 1024]]);
-      expect(await page.eval<string>("document.querySelector('.bots-composer-file .attachment-meta').textContent")).toBe("9.0 MB");
-      await page.set("ok", false);
-      await page.eval(`(document.querySelector(".bots-composer").requestSubmit(), true)`);
-      await page.until("workspace.posts.length === 1 && !document.querySelector('.bots-composer-file')");
       const [post] = await page.posts();
       expect(post).toMatchObject({ text: "see this", files: [{ id: pieces[0]!.id, name: "talk.mp4", mime: "video/mp4", size: 9 * 1024 * 1024 }] });
+      expect((post!.files![0] as { local?: boolean }).local).toBeUndefined();
       expect(post!.images).toBeUndefined();
-      // In the conversation it's a chip that opens the file from the workspace.
-      await page.until("!!document.querySelector('.bm-mine .bm-file')");
-      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file').getAttribute('href')")).toBe(`/api/workspace/to/srv/api/bots/conversations/chat/files/${pieces[0]!.id}`);
-      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file .attachment-name').textContent")).toBe("talk.mp4");
+      await page.until(`document.querySelector('.bm-mine .bm-file')?.getAttribute('href') === "/api/workspace/to/srv/api/bots/conversations/chat/files/${pieces[0]!.id}"`);
+      expect(await page.eval<string>("document.querySelector('.bm-mine .bm-file .attachment-meta').textContent")).toBe("9.0 MB");
+    }, 60_000);
+
+    test("a file that can't be uploaded takes its message back into the box, file and all", async () => {
+      const page = await open();
+      await page.eval(`(() => {
+        workspace.refuseFiles = true;
+        const data = new DataTransfer();
+        data.items.add(new File([new Uint8Array(1000)], "notes.zip", { type: "application/zip" }));
+        document.querySelector(".bots-composer").dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+        return true;
+      })()`);
+      await page.until("!!document.querySelector('.bots-composer-file')");
+      await page.type("with a zip");
+      await page.enter();
+      await page.until(`document.querySelector('${FIELD}').value === "with a zip" && !!document.querySelector('.bots-composer-file')`);
+      expect(await page.notice()).toContain("notes.zip");
+      expect(await page.posts()).toEqual([]);
+      expect((await page.rows()).some((r) => r.text === "with a zip")).toBe(false);
+      // Still held: the same send goes through once the workspace takes files again.
+      await page.eval("(workspace.refuseFiles = false, true)");
+      await page.enter();
+      await page.until("workspace.posts.length === 1");
+      expect((await page.posts())[0]).toMatchObject({ text: "with a zip", files: [{ name: "notes.zip", size: 1000 }] });
     }, 60_000);
 
     test("a refused send comes back ahead of what was typed since, with the caret where it was", async () => {

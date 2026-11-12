@@ -159,6 +159,8 @@ export type Attachment = {
   path?: string;
   /** Which machine has it: a paired device's id, absent for this server. */
   deviceId?: string;
+  /** Not uploaded yet: the browser it was attached in holds it (src/lib/localFiles.ts) until its message is sent. */
+  local?: boolean;
   /** Picked from the composer's "@" menu: the text already names it, so no chip is shown. */
   mention?: boolean;
 };

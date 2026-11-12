@@ -145,7 +145,8 @@ interface BotsState {
    * Add a message (the user's or a bot's) and bump the conversation. It shows at once; the promise
    * settles when the workspace has it. Sending one again with its `id` can't make a second.
    */
-  post: (conversationId: string, message: Omit<BotMessage, "id" | "at"> & { id?: string; at?: number }) => Promise<BotMessage | undefined>;
+  /** `prepare` runs once the message shows, before it's sent (its files going up); if it throws, the message is taken back and nothing is sent. */
+  post: (conversationId: string, message: Omit<BotMessage, "id" | "at"> & { id?: string; at?: number }, prepare?: () => Promise<void>) => Promise<BotMessage | undefined>;
   patchMessage: (conversationId: string, messageId: string, patch: (m: BotMessage) => Partial<BotMessage>) => void;
   deleteMessage: (conversationId: string, messageId: string) => void;
   /** Add or take back a reaction. */
@@ -342,8 +343,8 @@ export const useBots = create<BotsState>()(
     },
     toggleFolded: (name) => set((s) => ({ folded: s.folded.includes(name) ? s.folded.filter((f) => f !== name) : [...s.folded, name] })),
 
-    post: async (conversationId, message) => {
-      const full: BotMessage = { ...message, id: message.id ?? uid(), at: message.at ?? Date.now() };
+    post: async (conversationId, message, prepare) => {
+      let full: BotMessage = { ...message, id: message.id ?? uid(), at: message.at ?? Date.now() };
       set((s) => ({
         sending: [...s.sending, full.id],
         conversations: mapConversation(s.conversations, conversationId, (c) => ({
@@ -355,6 +356,20 @@ export const useBots = create<BotsState>()(
           hidden: message.author !== "me" ? false : c.hidden,
         })),
       }));
+      if (prepare) {
+        try {
+          await prepare();
+        } catch {
+          const id = full.id;
+          set((s) => ({ sending: s.sending.filter((x) => x !== id), conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.filter((m) => m.id !== id) })) }));
+          return undefined;
+        }
+        // The files are on the workspace's server now: the message says so, here and in what's sent.
+        if (full.files) {
+          const sent = (full = { ...full, files: full.files.map(({ local: _, ...f }) => f) });
+          set((s) => ({ conversations: mapConversation(s.conversations, conversationId, (c) => ({ ...c, messages: c.messages.map((m) => (m.id === sent.id ? sent : m)) })) }));
+        }
+      }
       const acknowledged = await send("POST", `/api/bots/conversations/${encodeURIComponent(conversationId)}/messages`, full, {
         label: full.text.trim() ? `Message “${full.text.trim().slice(0, 60)}${full.text.trim().length > 60 ? "…" : ""}”` : "Message",
         check: { kind: "post", conversationId, messageId: full.id },

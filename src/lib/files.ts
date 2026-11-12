@@ -41,7 +41,8 @@ export class AttachmentError extends Error {}
 /**
  * A file that travels inside the message: a picture the model looks at, a PDF, or text inlined into
  * the prompt. Undefined for everything else (video, audio, archives, large or binary files), which
- * is uploaded to the machine the agent runs on instead (`uploadFile`).
+ * is held by the browser until its message is sent, then uploaded to the machine the agent runs on
+ * (src/lib/localFiles.ts).
  */
 export async function readAttachment(file: File): Promise<Attachment | undefined> {
   const base = { id: uid(), name: file.name || "pasted-image.png", size: file.size };
@@ -98,12 +99,3 @@ export async function uploadFile(file: File, url: string, onProgress?: (sent: nu
 
 /** Where a stored file is fetched from, to save it or play it. */
 export const attachmentUrl = (a: Pick<Attachment, "id" | "deviceId">) => apiUrl(a.deviceId, `/api/attachments/${encodeURIComponent(a.id)}`);
-
-/** Copy a stored file to the machine a thread runs on (absent = this server). */
-export async function moveAttachment(a: Attachment, to: string | undefined): Promise<Attachment> {
-  const res = await fetch(`/api/attachments/${encodeURIComponent(a.id)}/copy`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ from: a.deviceId, to }) });
-  if (!res.ok) throw new AttachmentError(((await res.json().catch(() => undefined)) as { error?: string } | undefined)?.error ?? `Couldn't move ${a.name}.`);
-  const file = (await res.json()) as StoredFile;
-  const { deviceId: _, ...rest } = a;
-  return { ...rest, path: file.path, ...(to ? { deviceId: to } : {}) };
-}

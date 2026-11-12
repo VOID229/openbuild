@@ -9,9 +9,10 @@ import { compactThread } from "../lib/pi";
 import { useFieldDictation } from "../lib/useFieldDictation";
 import { draftsReady, getDraft, NEW_CHAT, onRemoteDraft, saveDraft } from "../lib/drafts";
 import { rememberDraftSelection, restoreDraftSelection } from "../lib/draftSelection";
-import { AttachmentError, attachmentUrl, moveAttachment, readAttachment, uploadFile } from "../lib/files";
+import { AttachmentError, attachmentUrl, formatBytes, readAttachment } from "../lib/files";
+import { heldFile, holdFile } from "../lib/localFiles";
+import { MAX_ATTACHMENT_BYTES } from "../../shared/attachments";
 import { FileChip } from "./FileChip";
-import { apiUrl } from "../lib/devices";
 import { cachedEntries, loadEntries, matchEntries, readMentionFile } from "../lib/fileMentions";
 import { runShell, shellCommand } from "../lib/shell";
 import { enqueue, moveQueued, queueOf, removeQueued, setEditingQueued, updateQueued, useEditingQueued, useQueueOf, useSteeringOf, type Queued } from "../lib/queue";
@@ -451,34 +452,26 @@ export function Composer({ variant, chatId, streaming }: Props) {
   // What's attached right now, including images added earlier in the same paste that haven't rendered yet.
   const attached = useRef(files);
   attached.current = files;
-  // Files on their way to the machine the thread runs on. They join `files` once they're there.
-  const [uploads, setUploads] = useState<{ id: string; name: string; mime: string; size: number; sent: number; stop: AbortController }[]>([]);
-  const uploading = useRef(uploads);
-  uploading.current = uploads;
-  // Leaving the composer drops what was still going up: nothing would be left to attach it to.
-  useEffect(() => () => uploading.current.forEach((u) => u.stop.abort()), []);
-  const upload = async (file: File) => {
-    const entry = { id: uid(), name: file.name || "file", mime: file.type || "application/octet-stream", size: file.size, sent: 0, stop: new AbortController() };
-    const device = deviceNow.current;
-    setUploads((all) => [...all, entry]);
-    try {
-      const saved = await uploadFile(file, apiUrl(device, `/api/attachments/${entry.id}`), (sent) => setUploads((all) => all.map((u) => (u.id === entry.id ? { ...u, sent } : u))), entry.stop.signal);
-      const a: Attachment = { id: saved.id, name: saved.name, mime: saved.mime, dataUrl: "", size: saved.size, path: saved.path, ...(device ? { deviceId: device } : {}) };
-      attached.current = [...attached.current, a];
-      setFiles((f) => [...f, a]);
-    } finally {
-      setUploads((all) => all.filter((u) => u.id !== entry.id));
-    }
-  };
+  // Files this browser no longer holds (attached on another device, or too large to outlast a reload).
+  const [missing, setMissing] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    void Promise.all(files.filter((f) => f.local).map(async (f) => ((await heldFile(f.id)) ? undefined : f.id))).then((ids) => live && setMissing(ids.filter((id): id is string => !!id)));
+    return () => {
+      live = false;
+    };
+  }, [files]);
   const addFiles = async (list: FileList | File[]) => {
     for (const file of Array.from(list)) {
       try {
         const a = await readAttachment(file);
         if (!a) {
-          // Not awaited: several large files go up side by side, and the box stays usable meanwhile.
-          void upload(file).catch((err) => {
-            if ((err as Error).name !== "AbortError") setNotice(err instanceof AttachmentError ? err.message : `Couldn't upload ${file.name}.`);
-          });
+          // Anything else waits here, untouched, and goes to the agent's machine when the message is sent.
+          if (file.size > MAX_ATTACHMENT_BYTES) throw new AttachmentError(`${file.name} is larger than ${formatBytes(MAX_ATTACHMENT_BYTES)}.`);
+          const kept: Attachment = { id: uid(), name: file.name || "file", mime: file.type || "application/octet-stream", dataUrl: "", size: file.size, local: true };
+          holdFile(kept.id, file);
+          attached.current = [...attached.current, kept];
+          setFiles((f) => [...f, kept]);
           continue;
         }
         // The same image twice is checked only against what's attached now, so a removed image can come back.
@@ -504,29 +497,6 @@ export function Composer({ variant, chatId, streaming }: Props) {
   // "@" mentions scan where this thread works (its workspace), or the home screen's project.
   const mentionCwd = workspace?.cwd ?? homeProject?.path;
   const mentionDevice = workspace ? workspace.deviceId : prefDevice;
-  const deviceNow = useRef(mentionDevice);
-  deviceNow.current = mentionDevice;
-  // A file uploaded for one machine, with the thread now set to start on another (the project was
-  // switched, or a stash was pasted here): it's copied over, since the agent reads it from its own disk.
-  const [moving, setMoving] = useState(0);
-  const moved = useRef(new Set<string>());
-  useEffect(() => {
-    for (const f of files) {
-      const key = `${f.id}:${mentionDevice ?? ""}`;
-      if (!f.path || (f.deviceId ?? "") === (mentionDevice ?? "") || moved.current.has(key)) continue;
-      moved.current.add(key);
-      setMoving((n) => n + 1);
-      moveAttachment(f, mentionDevice)
-        .then(
-          (next) => setFiles((all) => all.map((x) => (x.id === f.id && x.deviceId === f.deviceId ? next : x))),
-          (err: Error) => {
-            setFiles((all) => all.filter((x) => x.id !== f.id));
-            setNotice(err.message);
-          },
-        )
-        .finally(() => setMoving((n) => n - 1));
-    }
-  }, [files, mentionDevice]);
   const [mentionEntries, setMentionEntries] = useState<WorkspaceEntry[]>(() => cachedEntries(mentionCwd, mentionDevice) ?? []);
   useEffect(() => {
     let live = true;
@@ -752,7 +722,8 @@ export function Composer({ variant, chatId, streaming }: Props) {
   const submit = (line = text.trim(), background = false) => {
     if (editing) return finishEdit(true);
     if (!line && !files.length) return;
-    if (uploads.length || moving) return setNotice(uploads.length ? "Still uploading. It sends once the files are there." : "Still moving the files to that machine.");
+    const gone = files.find((f) => missing.includes(f.id));
+    if (gone) return setNotice(`${gone.name} isn't on this device anymore. Remove it, or attach it again.`);
     dictation.cancel();
     const leave = () => {
       if (background) useStore.getState().newChat();
@@ -935,7 +906,7 @@ export function Composer({ variant, chatId, streaming }: Props) {
           void addFiles(e.dataTransfer.files);
         }}
       >
-        {chipFiles.length + uploads.length > 0 && (
+        {chipFiles.length > 0 && (
           <div className="attachments">
             {chipFiles.map((f) => (
               <div key={f.id} className="attachment" title={f.name}>
@@ -949,17 +920,9 @@ export function Composer({ variant, chatId, streaming }: Props) {
                     <img src={f.dataUrl} alt="" />
                   </button>
                 ) : (
-                  <FileChip name={f.name} mime={f.mime} size={f.size} href={f.path ? attachmentUrl(f) : undefined} />
+                  <FileChip name={f.name} mime={f.mime} size={f.size} href={f.path ? attachmentUrl(f) : undefined} note={missing.includes(f.id) ? "Not on this device" : undefined} />
                 )}
                 <button type="button" className="attachment-remove" aria-label={`Remove ${f.name}`} onClick={() => setFiles((all) => all.filter((x) => x.id !== f.id))}>
-                  <X size={12} strokeWidth={2.5} />
-                </button>
-              </div>
-            ))}
-            {uploads.map((u) => (
-              <div key={u.id} className="attachment attachment-uploading" title={u.name}>
-                <FileChip name={u.name} mime={u.mime} size={u.size} progress={u.sent} />
-                <button type="button" className="attachment-remove" aria-label={`Cancel ${u.name}`} onClick={() => u.stop.abort()}>
                   <X size={12} strokeWidth={2.5} />
                 </button>
               </div>

@@ -30,6 +30,8 @@ type Mode = "ok" | "refuse" | "lost";
 const workspace = {
   mode: "ok" as Mode,
   hold: false,
+  /** Whether a file's pieces are turned away. */
+  refuseFiles: false,
   /** Every message POST, in order, with the id it carried. */
   posts: [] as { id: string; text: string; images?: string[]; files?: BotMessage["files"] }[],
   /** Every piece of a file PUT, in order: which file, where in it, and how many bytes. */
@@ -57,6 +59,7 @@ window.fetch = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
   if (rest === "/api/bots/stream") return new Response(new ReadableStream(), { headers });
   const file = /^\/api\/bots\/conversations\/chat\/files\/([^/]+)$/.exec(rest);
   if (method === "PUT" && file) {
+    if (workspace.refuseFiles) return Response.json({ error: "No room for files." }, { status: 413, headers });
     const q = new URL(String(input), location.href).searchParams;
     const bytes = (init.body as Blob).size;
     workspace.pieces.push({ id: file[1]!, name: q.get("name")!, offset: Number(q.get("offset")), bytes });

@@ -249,7 +249,7 @@ test("a file attached for bots goes up in pieces through the viewer, into each b
   expect((await via(`/api/bots/conversations/nope/files/${crypto.randomUUID()}?name=x&offset=0&total=1`, { method: "PUT", headers: octets, body: raw(new Uint8Array(1)) })).status).toBe(404);
 }, 30_000);
 
-test("a file for a thread on a paired device goes up through the proxy, and one on the wrong machine is copied across", async () => {
+test("a file for a thread on a paired device goes up through the proxy, onto that device's disk", async () => {
   const device = (path: string, init?: RequestInit) => fetch(`${viewerBase()}/api/devices/${hostId}${path}`, init);
   const bytes = clip();
   const id = crypto.randomUUID();
@@ -262,20 +262,12 @@ test("a file for a thread on a paired device goes up through the proxy, and one 
   expect(part.headers.get("content-length")).toBe("10");
   expect(new Uint8Array(await part.arrayBuffer())).toEqual(bytes.subarray(bytes.length - 10));
 
-  // Uploaded to this server, then the thread turned out to start on the device (and back again).
+  // The same route on this server itself, for a thread that runs here.
   const here = crypto.randomUUID();
   const local = await upload((q, body) => fetch(`${viewerBase()}/api/attachments/${here}?${q}`, { method: "PUT", headers: octets, body }), "notes.zip", bytes, 50_000);
   expect(local.path).toBe(join(viewerData, "attachments", here, "notes.zip"));
-  const over = await fetch(`${viewerBase()}/api/attachments/${here}/copy`, { method: "POST", ...json({ to: hostId }) });
-  expect(over.status).toBe(200);
-  expect(((await over.json()) as any).path).toBe(join(hostData, "attachments", here, "notes.zip"));
-  expect(new Uint8Array(readFileSync(join(hostData, "attachments", here, "notes.zip")))).toEqual(bytes);
-  const back = await fetch(`${viewerBase()}/api/attachments/${id}/copy`, { method: "POST", ...json({ from: hostId }) });
-  expect(back.status).toBe(200);
-  expect(new Uint8Array(readFileSync(join(viewerData, "attachments", id, "song.mp3")))).toEqual(bytes);
 
-  // The device can't have this server copy files around for it, and a piece has to fit its file.
-  expect((await device(`/api/attachments/${here}/copy`, { method: "POST", ...json({}) })).status).toBe(403);
+  // A piece has to fit its file, and an id is never a path.
   expect((await fetch(`${viewerBase()}/api/attachments/${crypto.randomUUID()}?name=x&offset=5&total=3`, { method: "PUT", headers: octets, body: raw(new Uint8Array(2)) })).status).toBe(400);
   expect((await fetch(`${viewerBase()}/api/attachments/..%2Fescape?name=x&offset=0&total=1`, { method: "PUT", headers: octets, body: raw(new Uint8Array(1)) })).status).toBe(400);
 }, 30_000);

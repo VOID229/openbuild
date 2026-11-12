@@ -8,6 +8,9 @@ import { readChatProjection } from "./chatSync";
 import { autoName, autoNameWorktree } from "./naming";
 import { attachedFileNote, isPicture } from "../../shared/attachments";
 import { digestModel, findModel, isAuto, routePrompt } from "./models";
+import { uploadHeld } from "./localFiles";
+import { apiUrl } from "./devices";
+import { updateQueued } from "./queue";
 import { clearQueue, consumeSteer, stageSteer, steeringOf, editingQueued, moveQueued, queueOf, queuesLoaded, queuesReady, requeue, setSteering, shiftQueue, type Queued } from "./queue";
 import { uid } from "./id";
 import { prepareWorkspace, steerThread } from "./pi";
@@ -149,9 +152,16 @@ export const canSteer = (runtime: string | undefined) => runtime === "pi" || run
  */
 export async function steerQueued(chatId: string, id: string) {
   const run = running.get(chatId);
-  const item = queueOf(chatId).find((q) => q.id === id);
+  let item = queueOf(chatId).find((q) => q.id === id);
   const st = useStore.getState();
   const chat = st.chats.find((c) => c.id === chatId);
+  // Steering sends it now, so its files go up now. If they can't, it stays queued for the next turn.
+  if (run && item?.files.some((a) => a.local)) {
+    const files = await uploadLocal(item.files, chat?.workspace?.deviceId).catch(() => undefined);
+    if (!files || running.get(chatId) !== run || !queueOf(chatId).some((q) => q.id === id)) return;
+    updateQueued(chatId, id, { text: item.text, files });
+    item = queueOf(chatId).find((q) => q.id === id);
+  }
   const msg = chat?.messages.find((m) => m.id === run?.messageId);
   const runtime = chat?.runtime ?? "pi";
   if (!run || !item || !canSteer(runtime) || msg?.model?.plan !== runtime) return;
@@ -431,6 +441,26 @@ export async function newWorkspace(chat: Chat, signal?: AbortSignal): Promise<Wo
   }
 }
 
+/**
+ * A message is going out: upload the files it carries that this browser still holds, to the machine
+ * its turn runs on. Answers with the files as they are there (unchanged when nothing was held).
+ */
+async function uploadLocal(files: Attachment[], deviceId: string | undefined, signal?: AbortSignal): Promise<Attachment[]> {
+  if (!files.some((a) => a.local)) return files;
+  // One after another: a failure names its file, and a phone's uplink isn't split between them.
+  const out: Attachment[] = [];
+  for (const a of files) {
+    if (!a.local) {
+      out.push(a);
+      continue;
+    }
+    const saved = await uploadHeld(a, apiUrl(deviceId, `/api/attachments/${encodeURIComponent(a.id)}`), signal);
+    const { local: _, ...rest } = a;
+    out.push({ ...rest, mime: saved.mime, size: saved.size, path: saved.path, ...(deviceId ? { deviceId } : {}) });
+  }
+  return out;
+}
+
 /** The text sent to Pi for a user message: text files inlined, unsupported files noted. */
 function piMessage(m: Message, input: string[]): { message: string; images: PiChatRequest["images"] } {
   const files = m.attachments ?? [];
@@ -438,7 +468,7 @@ function piMessage(m: Message, input: string[]): { message: string; images: PiCh
   // A file kept on the agent's machine is named by its path there; the agent opens it with its own tools.
   const notes = files
     .filter((a) => a.text == null && !images.includes(a))
-    .map((a) => (a.path ? attachedFileNote(a, a.path) : `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`));
+    .map((a) => (a.path ? attachedFileNote(a, a.path) : a.local ? `[Attached file "${a.name}" wasn't uploaded]` : `[Attached file "${a.name}" omitted: Pi can't read ${a.mime} files here]`));
   const texts = files.filter((a) => a.text != null).map((a) => `<file name="${a.name}">\n${a.text}\n</file>`);
   return {
     message: withProfileContext([...texts, ...notes, m.content].filter(Boolean).join("\n\n") || " ", useStore.getState().settings.profile),
@@ -582,20 +612,31 @@ async function generate(chatId: string, messageId: string, resume = false) {
       }
     } else startedWorkspace.delete(chatId);
     ctrl.signal.throwIfAborted();
+    // Files the prompt carries that are still in this browser go to that machine first; the message
+    // shows them uploading meanwhile. A failure ends the turn, and retrying it tries them again.
+    let turn = chat;
+    const promptAt = resume ? -1 : chat.messages.slice(0, index).findLastIndex((m) => m.role === "user");
+    const prompt = chat.messages[promptAt];
+    if (prompt?.attachments?.some((a) => a.local)) {
+      const attachments = await uploadLocal(prompt.attachments, workspace?.deviceId ?? plannedDevice, ctrl.signal);
+      if (!isCurrent()) return;
+      useStore.getState().patchMessage(chatId, prompt.id, { attachments }, true);
+      turn = { ...chat, messages: chat.messages.map((m) => (m === prompt ? { ...m, attachments } : m)) };
+    }
     // Durable admission is keyed by the reply's stream id, so posting the same request again picks up
     // its turn (or starts it, if the server restarted before admitting it). Pi replies are reattached.
     const repost = resume && chat.runtime === "durable" && !!workspace && !!model;
     const request = resume && !repost
       ? undefined
       : pi
-        ? piRequest(chat, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), supportedSpeed(model!.speeds, msg.model.speed), workspace!)
+        ? piRequest(turn, index, model!, msg.model.effort ?? effortFor(st.settings, chat, msg.model), supportedSpeed(model!.speeds, msg.model.speed), workspace!)
         : {
           plan,
           model: model!.id,
           effort: msg.model.effort ?? effortFor(st.settings, chat, msg.model),
           system: systemPrompt(st.settings, model!, !!search),
           sessionId: chatId,
-          messages: toWire(chat.messages.slice(0, index), model!.input),
+          messages: toWire(turn.messages.slice(0, index), model!.input),
           search,
           digest: search ? searchDigest(st.settings, st.detection) : undefined,
         };

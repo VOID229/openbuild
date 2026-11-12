@@ -2901,16 +2901,13 @@ select.input {
   color: var(--text-2);
 }
 
-.attachment-uploading {
-  overflow: hidden;
-}
-
-.attachment-uploading .attachment-remove {
-  top: 4px;
-  right: 4px;
-}
-
 /* How much of the file is on the other side: a line along the chip's bottom edge. */
+.attachment-file:has(.attachment-progress) {
+  position: relative;
+  overflow: hidden;
+  border-radius: inherit;
+}
+
 .attachment-progress {
   position: absolute;
   left: 0;

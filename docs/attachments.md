@@ -13,6 +13,18 @@ Any file can be attached to a message, in a thread (Build) and in an OpenBots ch
 
 Uploaded files are up to 4 GB each (`shared/attachments.ts`).
 
+## Attaching uploads nothing
+
+Attaching a file only shows its chip. The browser holds the file itself (`src/lib/localFiles.ts`):
+in memory, and for files up to 200 MB also in IndexedDB so a reload still has it. A larger file lasts
+as long as the page. A draft synced to another device shows the chip as "Not on this device" and
+can't be sent from there. Held files nobody sent are dropped after 14 days.
+
+The upload happens when the message is actually sent: the message shows at once with the chip as its
+progress, and the turn starts once the file is there. A queued message uploads when its turn comes
+(or when it's steered), so deleting or editing it first leaves nothing behind. If the upload fails,
+a thread's reply shows the error and Retry tries again; a bot message comes back into the box.
+
 ## Uploading
 
 The browser sends a file in 4 MB pieces: `PUT /api/attachments/<id>?name=…&type=…&offset=…&total=…`,
@@ -33,10 +45,6 @@ prompt gets one line per file:
 [Attached file "talk.mp4" (video/mp4, 9.0 MB) is saved at /…/attachments/<id>/talk.mp4. Open it with your tools when you need it.]
 ```
 
-If the thread ends up starting on another machine than the file was uploaded to (the project was
-switched on the home screen, or a stash was pasted elsewhere), the composer has this server copy it
-across first: `POST /api/attachments/<id>/copy { from?, to? }` (a device id, absent = this server).
-
 ## Bots
 
 Files go to the workspace's server: `PUT /api/bots/conversations/<id>/files/<file id>`, also allowed
@@ -51,4 +59,4 @@ workspace's server.
 
 ## Not done yet
 
-Stored files are never deleted: removing a chip, a message or a chat leaves the file on disk.
+Files of sent messages are never deleted: removing the message or its chat leaves the file on disk.

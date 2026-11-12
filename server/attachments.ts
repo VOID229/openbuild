@@ -4,16 +4,13 @@
 // on the way holds more than a piece in memory, and a piece that failed is simply sent again. Each
 // file is kept on the machine whose agent will read it, in a folder of its own under the data
 // directory, and the prompt names that path. A paired device has the same routes, reached through
-// /api/devices/<id>/…; a file that ended up on the wrong machine is copied across by this server.
+// /api/devices/<id>/…. The browser uploads when the message is sent, so it knows which machine that is.
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync, writeSync, ftruncateSync } from "node:fs";
 import { extname, join } from "node:path";
 import { ATTACHMENT_CHUNK, MAX_ATTACHMENT_BYTES, type StoredFile } from "../shared/attachments";
 import { dataDir } from "./paths";
 
 type Api = <R extends Request, A extends unknown[]>(handler: (req: R, ...rest: A) => Response | Promise<Response>) => (req: R, ...rest: A) => Response | Promise<Response>;
-/** A request to a paired device's own API (`path` starts with /api/), with its token added. */
-export type ToDevice = (deviceId: string, path: string, init?: { method?: string; headers?: Record<string, string>; body?: Uint8Array }) => Promise<Response>;
-
 export class AttachmentError extends Error {
   constructor(message: string, readonly status = 400) {
     super(message);
@@ -164,58 +161,7 @@ export function receiveBytes(url: string, id: string, bytes: Uint8Array): Respon
   }
 }
 
-const errorOf = async (res: Response) => ((await res.json().catch(() => undefined)) as { error?: string } | undefined)?.error ?? `HTTP ${res.status}`;
-
-/** Copy a file from one machine to another (absent = this server), piece by piece. Answers as the copy. */
-async function copy(id: string, from: string | undefined, to: string | undefined, toDevice: ToDevice): Promise<StoredFile> {
-  if ((from ?? "") === (to ?? "")) throw new AttachmentError("It's already there.");
-  let source: StoredFile & { done: boolean };
-  let body: ReadableStream<Uint8Array>;
-  if (from) {
-    const meta = await toDevice(from, `/api/attachments/${id}/meta`);
-    if (!meta.ok) throw new AttachmentError(await errorOf(meta), meta.status);
-    source = await meta.json();
-    const res = await toDevice(from, `/api/attachments/${id}`);
-    if (!res.ok || !res.body) throw new AttachmentError(await errorOf(res), res.status);
-    body = res.body;
-  } else {
-    const here = stored(id);
-    if (!here) throw new AttachmentError("No such file", 404);
-    source = here;
-    body = Bun.file(here.path).stream();
-  }
-  if (!source.done) throw new AttachmentError("That file hasn't finished uploading.", 409);
-  let offset = 0;
-  let last: StoredFile | undefined;
-  const put = async (bytes: Uint8Array) => {
-    const at = { name: source.name, mime: source.mime, offset, total: source.size };
-    if (to) {
-      const q = new URLSearchParams({ name: at.name, type: at.mime, offset: String(offset), total: String(at.total) });
-      const res = await toDevice(to, `/api/attachments/${id}?${q}`, { method: "PUT", headers: { "content-type": "application/octet-stream" }, body: bytes });
-      if (!res.ok) throw new AttachmentError(await errorOf(res), res.status);
-      last = await res.json();
-    } else last = writeChunk(id, at, bytes);
-    offset += bytes.byteLength;
-  };
-  let pending: Uint8Array[] = [];
-  let held = 0;
-  const flush = async () => {
-    await put(Buffer.concat(pending, held));
-    pending = [];
-    held = 0;
-  };
-  for await (const piece of body as unknown as AsyncIterable<Uint8Array>) {
-    pending.push(piece);
-    held += piece.byteLength;
-    if (held >= ATTACHMENT_CHUNK) await flush();
-  }
-  // An empty file still has to exist on the other side.
-  if (held || !last) await flush();
-  if (offset !== source.size) throw new AttachmentError("The copy came up short.", 502);
-  return last!;
-}
-
-export function attachmentRoutes(api: Api, toDevice: ToDevice) {
+export function attachmentRoutes(api: Api) {
   return {
     "/api/attachments/:id": {
       PUT: api((req: Bun.BunRequest<"/api/attachments/:id">) => receive(req, req.params.id)),
@@ -223,27 +169,6 @@ export function attachmentRoutes(api: Api, toDevice: ToDevice) {
       DELETE: api((req: Bun.BunRequest<"/api/attachments/:id">) => {
         remove(req.params.id);
         return Response.json({ ok: true });
-      }),
-    },
-    "/api/attachments/:id/meta": {
-      GET: api((req: Bun.BunRequest<"/api/attachments/:id/meta">) => {
-        const file = stored(req.params.id);
-        return file ? Response.json(file) : bad("No such file", 404);
-      }),
-    },
-    // This server's own session only (not in a paired device's list): it is the one holding both ends.
-    "/api/attachments/:id/copy": {
-      POST: api(async (req: Bun.BunRequest<"/api/attachments/:id/copy">, server: Bun.Server<unknown>) => {
-        server.timeout(req, 0);
-        const body = (await req.json().catch(() => undefined)) as { from?: unknown; to?: unknown } | undefined;
-        const side = (v: unknown) => (typeof v === "string" && v ? v : undefined);
-        if (!isAttachmentId(req.params.id)) return bad("Bad file id.");
-        try {
-          return Response.json(await copy(req.params.id, side(body?.from), side(body?.to), toDevice));
-        } catch (err) {
-          if (err instanceof AttachmentError) return bad(err.message, err.status);
-          return bad(`Couldn't copy the file: ${(err as Error).message}`, 502);
-        }
       }),
     },
   };

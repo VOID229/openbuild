@@ -5,7 +5,7 @@ import { SEARCH_PROVIDERS, type Attachment } from "../../shared/types";
 import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { regenerate } from "../lib/chat";
 import { attachmentUrl } from "../lib/files";
-import { FileChip } from "./FileChip";
+import { SentFileChip } from "./FileChip";
 import { addStash } from "../lib/stash";
 import { useStore } from "../lib/store";
 import type { Message, Part, SearchCall, SteerPart, ThoughtPart, ToolPart } from "../lib/types";
@@ -196,7 +196,7 @@ function Attachments({ files, chatId }: { files: Attachment[]; chatId: string })
             <img src={a.dataUrl} alt={a.name} />
           </button>
         ) : (
-          <FileChip key={a.id} className="msg-file" name={a.name} mime={a.mime} size={a.size} href={a.path ? attachmentUrl(a) : undefined} />
+          <SentFileChip key={a.id} className="msg-file" file={a} href={a.path ? attachmentUrl(a) : undefined} />
         ),
       )}
     </div>

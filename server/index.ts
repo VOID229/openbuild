@@ -21,7 +21,7 @@ import { SEARCH_PROVIDERS, type ChatRequest, type KeyEdit, type KeyInventory } f
 import { bad, handleChat, handleModels, handleSearchCheck, isKey, isPlan, isSearchProvider, readJson } from "./handlers";
 import { piRoutes } from "./pi/routes";
 import { terminalRoutes } from "./terminals";
-import { attachmentRoutes, type ToDevice } from "./attachments";
+import { attachmentRoutes } from "./attachments";
 import { usageRoutes } from "./usage/routes";
 import { loadPlugins, pluginRoutes } from "./plugins";
 import { discoverSessions } from "./pi/discovery";
@@ -115,7 +115,7 @@ const devicePathAllowed = (path: string) =>
   /^\/api\/chat\/runs\//.test(path) ||
   /^\/api\/(projects|fs|workspaces)(\/|$)/.test(path) ||
   // Files attached to a message for a thread that runs here: kept, read back and removed, by id.
-  /^\/api\/attachments\/[^/]+(\/meta)?$/.test(path) ||
+  /^\/api\/attachments\/[^/]+$/.test(path) ||
   /^\/api\/pi\/(status|models|prices|commands|problems|complete|chat)(\/|$)/.test(path) ||
   /^\/api\/(fx|codex|cursor|claude|opencode|grok|hermes)\/(status|models)(\/|$)/.test(path) ||
   /^\/api\/claude\/permissions(\/|$)/.test(path) ||
@@ -232,10 +232,6 @@ async function proxyDevice(req: Request, id: string): Promise<Response> {
   }
   return bad(`Couldn't reach ${device.name}: ${lastError}`, 502);
 }
-
-/** This server's own request to a paired device, as the proxy would send a browser's. */
-const toDevice: ToDevice = (deviceId, path, init = {}) =>
-  proxyDevice(new Request(`http://localhost/api/devices/${encodeURIComponent(deviceId)}${path}`, { method: init.method ?? "GET", headers: init.headers, body: init.body as BodyInit | undefined }), deviceId);
 
 const proxyRoute = async (req: Bun.BunRequest<"/api/devices/:id/*">, server: Bun.Server<unknown>) => {
   // Replies and shell output stream for as long as they run.
@@ -680,7 +676,7 @@ function serve(port: number, hostname: string) {
 
       ...terminalRoutes(api),
 
-      ...attachmentRoutes(api, toDevice),
+      ...attachmentRoutes(api),
 
       ...usageRoutes(api),
 
