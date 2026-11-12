@@ -25,13 +25,20 @@ import { OWNER, parseFriendAuthor } from "../../shared/friends";
 
 import { cancelJobs, JobCancelled, nearestEffort, runHelper, startJob } from "./helpers";
 import { laneDirectory, sessionGeneration, deliveryIdentity, compactionPolicy, readDeliveries, saveDeliveries } from "./sessionPolicy";
+import { noteToolUse, preloadTools } from "./toolPreload";
+import { TurnMeter, unloadedResult, type TurnOutcome } from "./turnMetrics";
 
 const IDLE = 20 * 60 * 1000;
 
 interface Mind {
   proc: PiProcess;
   sessionPath?: string;
-  usage?: Record<string, number>;
+  /** The turn it's in, measured (turnMetrics.ts). */
+  meter?: TurnMeter;
+  /** Started for the turn that's about to run: no turn has used it yet. */
+  fresh?: boolean;
+  /** Catalog tools it was started with (toolPreload.ts). */
+  preloaded?: number;
   contextKeys?: Set<string>;
   token: string;
   /** The extensions it started with. */
@@ -139,7 +146,13 @@ export function busy(botId: string): boolean {
   return pumping.has(botId) || (queue.get(botId)?.length ?? 0) > 0;
 }
 
+/** When each wake reached the runner: what a turn's waiting times are counted from. */
+const wokeAt = new WeakMap<Wake, number>();
+/** The turn each bot is in, for what happens to it outside its Pi's records (its status). */
+const meters = new Map<string, TurnMeter>();
+
 export function wake(botId: string, item: Wake) {
+  if (!wokeAt.has(item)) wokeAt.set(item, Date.now());
   const mind = minds.get(mindKey(botId, laneOf(item.conversationId)));
   // Only a message in the conversation it's working in joins the current turn. Everything else gets a
   // turn of its own, so a routine actually runs and its replies land in its own conversation.
@@ -232,6 +245,7 @@ function steerAssigned(botId: string, mind: Mind, item: Wake) {
 }
 
 function enqueue(botId: string, item: Wake) {
+  if (!wokeAt.has(item)) wokeAt.set(item, Date.now());
   const list = queue.get(botId) ?? [];
   list.push(item);
   queue.set(botId, list);
@@ -260,6 +274,8 @@ function setStatus(botId: string, next: BotStatus) {
   // In a group, the bot is still to decide whether that one is its to answer too.
   const owed = !!next.quiet && !next.deciding && (queue.get(botId) ?? []).some((j: Wake) => j.kind === "messages" && j.conversationId === next.conversationId);
   svc.setStatus(botId, { ...next, quiet: owed ? undefined : next.quiet, waiting: waiting.length ? waiting : undefined, undecided: undecided.length ? undecided : undefined });
+  // The chat shows it at work: the first the user sees of this turn.
+  if (next.state === "working" && (!next.quiet || owed)) meters.get(botId)?.status();
 }
 
 async function pump(botId: string) {
@@ -360,6 +376,12 @@ function windowsFor(flags: string[], cwd: string) {
   return models;
 }
 
+/** The catalog tools a lane's Pi starts with: the bot's usual ones (toolPreload.ts), or none where it can only chat. */
+export function preloadFor(botId: string, lane = "main"): string[] {
+  const friend = friendOf(lane);
+  return friend && !allowsTools(friend) ? [] : preloadTools(db.toolUsage(botId));
+}
+
 async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   const key = mindKey(botId, lane);
   let existing = minds.get(key);
@@ -385,12 +407,15 @@ async function ensureMind(botId: string, lane = "main"): Promise<Mind> {
   mkdirSync(join(workDir(botId, lane), ".pi"), { recursive: true, mode: 0o700 });
   writeFileSync(join(workDir(botId, lane), ".pi", "settings.json"), JSON.stringify({ compaction: compactionPolicy(models) }), { mode: 0o600 });
   const token = mintToken(botId, lane);
+  // The tools this bot keeps reaching for are declared from the start, so a usual turn loads nothing
+  // (extension.ts adds them to what the session had loaded). A chat that only chats has none.
+  const preload = preloadFor(botId, lane);
   const proc = new PiProcess(
     ["--approve", "--session-dir", path, "--session-id", sessionId(botId, lane), ...flags],
     workDir(botId, lane),
-    { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId },
+    { OPENBOTS_SOCKET: agentSocketPath(), OPENBOTS_TOKEN: token, OPENBOTS_BOT: botId, OPENBOTS_PRELOAD: preload.join(",") },
   );
-  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking" };
+  const mind: Mind = { proc, token, sessionPath: path, loaded: JSON.stringify(flags), busy: true, sent: false, draft: "", typing: false, quiet: false, activity: "Thinking", fresh: true, preloaded: preload.length };
   proc.on((record) => onRecord(botId, mind, record));
   minds.set(key, mind);
   return mind;
@@ -593,6 +618,7 @@ export function threadOf(tool: string, args: unknown): string | undefined {
 function setTyping(botId: string, mind: Mind, on: boolean) {
   if (mind.typing === on) return;
   mind.typing = on;
+  if (on) mind.meter?.status();
   const conversationId = getFocus(botId);
   if (conversationId) svc.setTyping(conversationId, botId, on);
 }
@@ -609,21 +635,19 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
     mind.onSettled?.();
   }
   if (record.type === "process_exit") mind.onExit?.(new PiError(String(record.message ?? "Pi exited")));
-  mind.sent ||= successfulMessageTool(record);
+  const wrote = successfulMessageTool(record);
+  if (wrote) mind.meter?.reply();
+  mind.sent ||= wrote;
   if (mind.sent) clearTimeout(mind.ackTimer);
   if (record.type === "tool_execution_start") mind.acted = true;
   if (mind.acted) commit(mind);
   const ended = record.type === "message_end" ? record.message : undefined;
-  if (ended?.role === "assistant" && mind.usage && ended.usage) {
-    for (const key of ["input", "output", "cacheRead", "cacheWrite"]) {
-      const value = ended.usage[key];
-      if (typeof value === "number" && Number.isFinite(value) && value >= 0) mind.usage[key] = (mind.usage[key] ?? 0) + value;
-    }
-    mind.usage.calls = (mind.usage.calls ?? 0) + 1;
-  }
+  if (ended?.role === "assistant") mind.meter?.request(ended.usage, ended.stopReason === "error");
+  if (unloadedResult(ended)) mind.meter?.unloaded();
   if (ended?.role === "assistant") mind.error = ended.stopReason === "error" ? modelError(ended.errorMessage) : ended.stopReason === "aborted" ? mind.error : undefined;
   const tool = String(record.toolName ?? "");
   if (record.type === "tool_execution_start") {
+    mind.meter?.tool(tool, record.args);
     mind.draft = "";
     const conversationId = getFocus(botId);
     if (conversationId) svc.setDraft(undefined, { conversationId, botId });
@@ -677,6 +701,7 @@ export function onRecord(botId: string, mind: Mind, record: PiRecord) {
       decided(mind);
       setTyping(botId, mind, true);
       svc.setDraft({ conversationId, botId, text: text.slice(-4000) }, { conversationId, botId });
+      mind.meter?.reply();
     }
   }
 }
@@ -897,6 +922,16 @@ async function runTurn(botId: string, all: Wake[]) {
   // A stop is for the turn it was said to: one left over from between turns isn't this one's.
   halted.delete(botId);
   setFocus(botId, conversationId);
+  // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
+  // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
+  const direct = db.getConversation(conversationId ?? "")?.kind === "direct";
+  const waitingUser = jobs.some((j) => j.kind === "messages" && (direct || (!!j.messageIds?.length && (!j.lead || j.lead === botId))));
+  // Timed from the message being answered: the user's when they're waiting, else whatever woke the bot.
+  const began = Date.now();
+  const asked = jobs.filter((j) => !waitingUser || j.kind === "messages").map((j) => wokeAt.get(j) ?? began);
+  const meter = new TurnMeter({ bot: botId, trigger: jobs.find((j) => j.kind === "messages")?.kind ?? jobs[0]!.kind, friend: lane !== "main", waiting: waitingUser, since: Math.min(began, ...asked) }, began);
+  meters.set(botId, meter);
+  let outcome: TurnOutcome | undefined;
   setStatus(botId, { state: "working", conversationId, activity: "Thinking", quiet: quiet || deciding || undefined, deciding: deciding || undefined, since: Date.now() });
   let mind: Mind | undefined;
   try {
@@ -904,17 +939,16 @@ async function runTurn(botId: string, all: Wake[]) {
     mind.busy = true;
     // A turn cut off mid-call doesn't leave the next one on that thread.
     mind.thread = undefined;
-    mind.usage = {};
+    mind.meter = meter;
+    meter.pi(!!mind.fresh, mind.preloaded ?? 0);
+    mind.fresh = false;
     rmSync(join(mind.sessionPath!, "settled"), { force: true });
     mind.quiet = deciding ? "deciding" : quiet && "reaction";
     mind.aborting = undefined;
     mind.tool = undefined;
     mind.nudged = false;
     mind.willWrite = false;
-    // Someone is waiting when the turn answers the user: their own chat, or a request of theirs in a
-    // group that's this bot's to answer. The others asked with it are only deciding whether to add anything.
-    const direct = db.getConversation(conversationId ?? "")?.kind === "direct";
-    mind.waitingUser = jobs.some((j) => j.kind === "messages" && (direct || (!!j.messageIds?.length && (!j.lead || j.lead === botId))));
+    mind.waitingUser = waitingUser;
     mind.waitingSince = Date.now();
     // A note, a check-in or a reaction: nobody asked, so only news is worth a message (routines were asked for).
     mind.background = jobs.every((j) => j.kind === "note" || j.kind === "heartbeat" || j.kind === "reaction");
@@ -997,6 +1031,7 @@ async function runTurn(botId: string, all: Wake[]) {
         if (!m.proc.exited) await recoverPrompt(m).catch(() => retire(key, m));
         return;
       }
+      meter.prompt();
       if ((accepted as { disposition?: string })?.disposition === "handled" || settled) {
         if (!settled) return void (handled = true, commit(m));
       } else await waitSettled(m);
@@ -1010,6 +1045,7 @@ async function runTurn(botId: string, all: Wake[]) {
         if (conversationId) {
           for (const part of plainReply(m, m.draft)) {
             svc.postMessage(conversationId, { id: crypto.randomUUID(), author: botId, at: Date.now(), text: part.slice(0, 8000) });
+            meter.reply();
           }
         }
         // Otherwise the reply just never shows up, and the chat looks like it lost the message.
@@ -1034,6 +1070,7 @@ async function runTurn(botId: string, all: Wake[]) {
     const message = err instanceof Error ? err.message : String(err);
     // The user stopped it: a Pi that had to be closed to make it stop isn't a failed reply.
     if (halted.has(botId)) {
+      outcome = "stopped";
       setStatus(botId, { state: "idle" });
       if (mind?.proc.exited) {
         revokeToken(mind.token);
@@ -1041,6 +1078,7 @@ async function runTurn(botId: string, all: Wake[]) {
       }
       return;
     }
+    outcome = "error";
     // Store redacted diagnostics so both the status and the chat explain the failure.
     const provider = err instanceof ProviderError;
     setStatus(botId, { state: "error", error: redactSecrets(message), provider: provider || undefined, since: Date.now() });
@@ -1057,9 +1095,15 @@ async function runTurn(botId: string, all: Wake[]) {
       if (minds.get(key) === mind) minds.delete(key);
     }
   } finally {
-    if (mind?.usage) {
-      try { appendFileSync(join(botsDir(), "usage.jsonl"), JSON.stringify({ bot: botId, turn: crypto.randomUUID(), at: Date.now(), source: "assistant-message-usage", measured: !!mind.usage.calls, excludesCompactionUsage: true, ...mind.usage }) + "\n", { mode: 0o600 }); } catch { /* Telemetry must not disrupt delivery. */ }
-      mind.usage = undefined;
+    meters.delete(botId);
+    if (mind?.meter === meter) {
+      mind.meter = undefined;
+      try {
+        const record = meter.finish(outcome ?? (halted.has(botId) ? "stopped" : undefined));
+        appendFileSync(join(botsDir(), "usage.jsonl"), JSON.stringify(record) + "\n", { mode: 0o600 });
+        // What the bot's own turns reach for decides what its next Pi starts with. A friend's chat has its own tools.
+        if (record.calls && lane === "main" && db.getBot(botId)) db.setToolUsage(botId, noteToolUse(db.toolUsage(botId), meter.tools()));
+      } catch { /* Telemetry must not disrupt delivery. */ }
     }
     // Already done once the reply went through; after a failure it's what keeps late work out of the next turn.
     if (mind) await release(botId, mind, key).catch((err) => console.error("[bots] couldn't release Pi:", err));
