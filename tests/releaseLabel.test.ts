@@ -29,8 +29,10 @@ const open = async (phone = false, before?: (page: Page) => Promise<unknown>) =>
   await before?.(page);
   await page.send("Page.navigate", { url: server!.url.href });
   await page.until(`!!${LABEL}`, 15_000);
-  // A phone starts with the list put away: slide it on, as its menu button would.
+  // A phone starts with the list put away: slide it on, as its menu button would. Only once the store
+  // has hydrated, since hydrating closes it again on a phone.
   if (phone) {
+    await page.eval("store.persist.hasHydrated() || new Promise((resolve) => { const off = store.persist.onFinishHydration(() => { off(); resolve(true); }); })");
     await page.eval("store.setState({ botsSidebarOpen: true })");
     await page.until("!!document.querySelector('.bots-sidebar.sidebar-open')");
   }
