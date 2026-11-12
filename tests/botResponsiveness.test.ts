@@ -61,7 +61,6 @@ async function run(name: string, body: string) {
       const post = (where, author, text) => svc.postMessage(where, { id: crypto.randomUUID(), author, text, at: Date.now() });
       const of = (bot) => prompts.filter(p => p.bot === bot.id);
       const steersOf = (bot) => steers.filter(s => s.bot === bot.id).map(s => s.message);
-      const nudges = (bot) => steersOf(bot).filter(m => m === runner.ACK_NUDGE).length;
       const did = (bot, type) => commands.filter(c => c.bot === bot.id && c.type === type).length;
       const said = (id) => db.messages(id, 80).filter(r => !r.message.event).map(r => r.message.text);
       const events = (id) => db.messages(id, 80).flatMap(r => r.message.event ? [r.message.event.text] : []);
@@ -90,90 +89,82 @@ async function run(name: string, body: string) {
 
 // ------------------------------------------------------------------ 1. a word before slow work
 
-test("a turn answering the user is nudged to acknowledge them before a slow tool, once", () => run("ack-slow", `
+test("the system prompt asks for one quick ack before real work, a reaction when that says enough, and one back to the user's", () => run("ack-prompt", `
+  const rules = agent.contextSections(alpha.bot.id).openbots.split('\\n\\n');
+  const ack = rules.filter(r => r.includes('Got it, switching to X'));
+  a.deepEqual(ack, [agent.RESPONSIVE]);
+  // Before real work and when steered mid-work, with the first tool call so it costs no model call of its own.
+  a.match(ack[0], /before real work they asked for, and whenever they steer you mid-work, send one short ack with your first tool call/);
+  // Not overdone.
+  a.match(ack[0], /At most one per user message, and none when the answer itself comes fast\\./);
+  // A reaction instead of a sentence, and a reaction back to the user's.
+  a.match(ack[0], /When a reaction says enough \\(👍 to "ok go" or "thanks"\\), react instead of writing\\./);
+  a.match(ack[0], /When the user reacts to something of yours, react back so they know you saw it, most of all mid-work\\./);
+  // Short: one paragraph of the always-on prompt.
+  a.ok(ack[0].length < 450, String(ack[0].length));
+  // Nothing in the prompt says a reaction can be let be any more.
+  a.doesNotMatch(agent.contextFor(alpha.bot.id), /owe a reply to every message or reaction|doesn't need an answer/);
+  a.match(agent.contextFor(alpha.bot.id), /You don't owe every message a reply: with nothing to add, end your turn with the plain reply \\[silent\\]\\./);
+`), 30_000);
+
+test("the runner steers no late nudge of its own into a turn that keeps the user waiting", () => run("ack-no-nudge", `
+  a.equal(runner.ACK_NUDGE, undefined);
   post(own, 'me', 'build the thing');
   await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
-  a.equal(nudges(alpha.bot), 0);
+  // A slow tool with nothing said yet used to get "the user is waiting" at once.
   toolStart(alpha.bot, 'bash', { command: 'make' });
-  await until(() => nudges(alpha.bot) === 1);
-  toolEnd(alpha.bot, 'bash');
-  toolStart(alpha.bot, 'browser', { action: 'open' });
   await settle();
-  a.equal(nudges(alpha.bot), 1);
-  a.equal(steersOf(alpha.bot).length, 1);
-  // Left unread when the turn ends, the nudge is cleared out of Pi and starts nothing.
+  toolEnd(alpha.bot, 'bash');
+  toolStart(alpha.bot, 'search', { query: 'decision' });
+  await settle();
+  a.deepEqual(steersOf(alpha.bot), []);
+  // Nothing of the runner's sits in Pi's queue, so there's nothing to clear when the turn ends.
   const cleared = did(alpha.bot, 'clear_queue');
   of(alpha.bot)[0].finish('done');
   await until(() => !runner.busy(alpha.bot.id));
   await settle();
-  a.equal(did(alpha.bot, 'clear_queue'), cleared + 1);
+  a.equal(did(alpha.bot, 'clear_queue'), cleared);
   a.equal(of(alpha.bot).length, 1);
   a.deepEqual(said(own), ['build the thing', 'done']);
 `), 30_000);
 
-test("a quick tool is nudged only once the user has waited about three seconds", () => run("ack-wait", `
-  a.equal(runner.ACK_AFTER_MS, 3000);
-  post(own, 'me', 'what did we decide?');
+test("a message steered into a working turn asks for one quick ack, and a reaction steered in for one back", () => run("ack-steer", `
+  post(own, 'me', 'run the build');
   await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
-  toolStart(alpha.bot, 'search', { query: 'decision' });
-  await Bun.sleep(1500);
-  a.equal(nudges(alpha.bot), 0);
-  await until(() => nudges(alpha.bot) === 1);
-  of(alpha.bot)[0].finish('');
-  await until(() => !runner.busy(alpha.bot.id));
-`), 30_000);
-
-test("a quick tool that returns in time, a turn that already wrote, and one about to write get no nudge", () => run("ack-none", `
-  post(own, 'me', 'one');
-  await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
-  // In and out well inside three seconds: the timer finds no tool running.
-  toolStart(alpha.bot, 'memory', { action: 'write' });
-  toolEnd(alpha.bot, 'memory');
-  await Bun.sleep(3300);
-  a.equal(nudges(alpha.bot), 0);
-  // It wrote first: the user has heard from it.
+  // The turn's own prompt says how to reply; the ack before real work is the system prompt's.
+  a.match(of(alpha.bot)[0].message, /Use send_message to reply/);
+  a.doesNotMatch(of(alpha.bot)[0].message, /arrived while you were working/);
   await send(alpha.bot, 'On it.');
-  toolStart(alpha.bot, 'bash', { command: 'make' });
-  await settle();
-  a.equal(nudges(alpha.bot), 0);
+  const mine = db.messages(own, 5).at(-1).message;
+
+  // They steer it mid-work: the message itself says to show it landed, once, and carry on.
+  post(own, 'me', 'use release mode');
+  await until(() => steersOf(alpha.bot).length === 1);
+  const steer = steersOf(alpha.bot)[0];
+  a.match(steer, /use release mode/);
+  a.ok(steer.endsWith('This arrived while you were working. ' + runner.STEER_ACK), steer);
+  a.match(runner.STEER_ACK, /one short send_message \\(the answer if that's quick, otherwise what you'll do now, like "Got it, switching to X"\\), or just a reaction when that says enough\\. Then fold it in and carry on\\./);
+  // Mid-work it isn't told how to end a turn.
+  a.doesNotMatch(steer, /\\[silent\\]|Use send_message to reply/);
+
+  // They react to its message mid-work: it's told to react back, not that it can let it be.
+  svc.toggleReaction(own, mine.id, '👍', 'me');
+  await until(() => steersOf(alpha.bot).length === 2);
+  const reacted = steersOf(alpha.bot)[1];
+  a.match(reacted, /reacted 👍 to your message \\[\\w{8}\\]: “On it\\.”\\. That's reaction #1 there\\. React back to it with react's to_reaction so they know you saw it, and write only if it calls for words\\. Mid-work, carry on after\\./);
+  a.ok(reacted.includes(svc.REACT_BACK));
+  a.doesNotMatch(reacted, /doesn't need an answer|if you like|arrived while you were working|Use send_message to reply/);
   of(alpha.bot)[0].finish('');
   await until(() => !runner.busy(alpha.bot.id));
 
-  // The same step already holds a message for the chat, behind the slow tool.
-  post(own, 'me', 'two');
-  await until(() => of(alpha.bot).length === 2 && minds.get(alpha.bot.id).steerable);
-  runner.onRecord(alpha.bot.id, minds.get(alpha.bot.id), { type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', toolName: 'send_message' } });
-  toolStart(alpha.bot, 'bash', { command: 'make' });
-  await settle();
-  a.equal(nudges(alpha.bot), 0);
-  of(alpha.bot)[1].finish('');
+  // A reaction while it's idle gets a turn of its own, with the same ask.
+  svc.toggleReaction(own, mine.id, '🎉', 'me');
+  await until(() => of(alpha.bot).length === 2);
+  a.ok(of(alpha.bot)[1].message.includes('reacted 🎉 to your message'));
+  a.ok(of(alpha.bot)[1].message.includes(svc.REACT_BACK));
+  of(alpha.bot)[1].finish('[silent]');
   await until(() => !runner.busy(alpha.bot.id));
-`), 30_000);
-
-test("a wake nobody is waiting on is never nudged, nor a turn the user's own message is queued for", () => run("ack-background", `
-  runner.wake(alpha.bot.id, { kind: 'note', conversationId: own, text: 'A thread finished.' });
-  await until(() => of(alpha.bot).length === 1 && minds.get(alpha.bot.id).steerable);
-  toolStart(alpha.bot, 'bash', { command: 'gh pr checks' });
-  await settle();
-  a.equal(nudges(alpha.bot), 0);
-  toolEnd(alpha.bot, 'bash');
-  of(alpha.bot)[0].finish('[silent]');
-  await until(() => !runner.busy(alpha.bot.id));
-
-  runner.wake(alpha.bot.id, { kind: 'heartbeat', conversationId: own, text: 'Check in.' });
-  await until(() => of(alpha.bot).length === 2 && minds.get(alpha.bot.id).steerable);
-  toolStart(alpha.bot, 'memory', {});
-  toolEnd(alpha.bot, 'memory');
-  // The user writes while it's at it: now someone is waiting.
-  post(own, 'me', 'are you there?');
-  await until(() => steersOf(alpha.bot).some(m => m.includes('are you there?')));
-  // Their message is itself waiting in Pi's queue, and gets them an answer: a nudge behind it would only cost a model call.
-  toolStart(alpha.bot, 'bash', { command: 'ls' });
-  await settle();
-  a.equal(nudges(alpha.bot), 0);
-  toolEnd(alpha.bot, 'bash');
-  of(alpha.bot)[1].finish('');
-  await until(() => !runner.busy(alpha.bot.id));
+  a.deepEqual(said(own), ['run the build', 'On it.', 'use release mode']);
 `), 30_000);
 
 // ------------------------------------------------------------------ 2. helper sessions
@@ -317,7 +308,7 @@ test("a message that arrives during a long tool gets a quick helper reply, and s
   a.equal(db.messages(own, 5).at(-1).message.author, alpha.bot.id);
   a.ok(h.closed);
   // No extra steer for it: the main turn is shown what was said for it when it next writes there, once.
-  a.deepEqual(steersOf(alpha.bot).filter(m => m !== runner.ACK_NUDGE).length, 3);
+  a.equal(steersOf(alpha.bot).length, 3);
   toolEnd(alpha.bot, 'bash');
   const held = await agent.sendMessage(alpha.bot.id, { text: 'Still building.' });
   a.equal(held.sent, false);
@@ -665,7 +656,7 @@ const pi = piBin();
 
 // Real Pi and the real extension against a fake model and a slow search: the nudge reaches the model
 // with the slow tool's result, a real helper session answers meanwhile, and stop really ends the run.
-test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow tool, and stop aborts it", async () => {
+test.skipIf(!pi)("on a real Pi: a steered message asks for an ack with no nudge of the runner's, a helper replies during a slow tool, and stop aborts it", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openbuild-responsive-pi-"));
   try {
     const agentDir = join(dir, "agent");
@@ -677,7 +668,7 @@ test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow 
       const sse = (delta, finish) => 'data: ' + JSON.stringify({ id: 'c', object: 'chat.completion.chunk', created: 1, model: 'm', choices: [{ index: 0, delta, finish_reason: finish ?? null }] }) + '\\n\\n';
       const say = (text) => sse({ role: 'assistant', content: text }) + sse({}, 'stop') + 'data: [DONE]\\n\\n';
       const use = (name, args) => sse({ role: 'assistant', tool_calls: [{ index: 0, id: 'call_' + name + Math.random().toString(36).slice(2, 8), type: 'function', function: { name, arguments: JSON.stringify(args) } }] }) + sse({}, 'tool_calls') + 'data: [DONE]\\n\\n';
-      const seen = { nudge: false, steered: false, held: false, helper: [], hung: false, unexpected: undefined, lookup: undefined, result: undefined };
+      const seen = { rule: false, nudge: false, steered: false, ack: false, held: false, helper: [], hung: false, unexpected: undefined, lookup: undefined, result: undefined };
       const server = Bun.serve({ port: 0, hostname: '127.0.0.1', idleTimeout: 120, async fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === '/search') {
@@ -700,10 +691,12 @@ test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow 
         }
         const lastAssistant = body.messages.findLastIndex((m) => m.role === 'assistant');
         const tail = JSON.stringify(body.messages.slice(lastAssistant + 1));
-        // The user's message, steered in: Pi hands it over once the call ahead of it is done.
-        if (tail.includes('how long')) seen.steered = true;
-        // The nudge rides in with a tool's result (the slow search's, or an earlier one's on a slow machine).
-        if (tail.includes("hasn't heard from you yet")) seen.nudge = body.messages.at(-2)?.role === 'tool' || body.messages.at(-1)?.role === 'user';
+        // The always-on prompt carries the rule: one quick ack before real work.
+        seen.rule ||= system.includes('send one short ack with your first tool call');
+        // The user's message, steered in: Pi hands it over once the call ahead of it is done, and it asks for the ack itself.
+        if (tail.includes('how long')) { seen.steered = true; seen.ack = tail.includes('This arrived while you were working. Show you saw it before you go on'); }
+        // The runner adds no message of its own to say so.
+        if (tail.includes("hasn't heard from you yet")) seen.nudge = true;
         if (tail.includes('Your helper finished')) { seen.result = tail; return reply(say('[silent]')); }
         if (tail.includes('PING')) return reply(say('pong'));
         // Its message was held to show it what the helper already said; it sends its own after all.
@@ -739,10 +732,12 @@ test.skipIf(!pi)("on a real Pi: the nudge lands, a helper replies during a slow 
       a.ok(!said().includes('all done'));
       await until(() => said().includes('all done'));
       a.deepEqual(said(), ['SEARCH tea', 'how long?', 'Still searching, one sec.', 'all done']);
-      // The model was told to acknowledge the user, and got their new message, with the tool's result.
-      a.equal(seen.nudge, true);
+      // The model got their new message with the tool's result, asking for a quick ack; the runner steered nothing of its own.
       a.equal(seen.held, true);
       await until(() => seen.steered);
+      a.equal(seen.ack, true);
+      a.equal(seen.rule, true);
+      a.equal(seen.nudge, false);
       a.equal(seen.unexpected, undefined);
       a.equal(seen.helper.length, 1);
       a.deepEqual([seen.helper[0].model, seen.helper[0].tools], ['m', 0]);

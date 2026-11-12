@@ -54,8 +54,7 @@ test.skipIf(!pi)("bots talk to each other and search using only what OpenBots sh
             a.ok(t.function.parameters.required.includes('status'), JSON.stringify(t));
           }
         }
-        // The runner's nudge to acknowledge the user can ride in with a tool's result when the machine is slow: the model carries on from the result.
-        const last = body.messages.findLast((m) => !(m.role === 'user' && JSON.stringify(m.content).includes("hasn't heard from you yet")));
+        const last = body.messages.at(-1);
         const text = JSON.stringify(last.content);
         let out;
         // Only the core tools are declared until the bot loads more, and then they are, in the same turn.
