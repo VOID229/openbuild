@@ -3,6 +3,7 @@
 // that every shape keeps its eyes on its body however far it turns, and that awake bots out of view
 // spend no frames.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { DEPTH } from "../src/lib/bots/rig";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
 let chrome: Awaited<ReturnType<typeof launchChrome>> | undefined;
@@ -28,14 +29,14 @@ const open = async () => {
 
 /**
  * In the page: how a bot stands, read off what its layers were given. The head's turn is read from
- * how far the eyes have slid across the body (the face stands 32 units off it), near enough.
+ * how far the eyes have slid across the body (the face stands DEPTH units off it), near enough.
  */
 const STANCE = `((b) => {
   const of = (cls, re) => Number((re.exec(b.querySelector(cls).style.transform) ?? [0, 0])[1]);
   // (Both eyes, averaged: the nearer one slides further than the other.)
   const eyes = [...b.querySelectorAll('.bot-eye')].map((e) => (/matrix\\(([^)]+)\\)/.exec(e.style.transform)?.[1] ?? '1,0,0,1,0,0').split(',').map(Number));
   const slid = [0, 0, 0, 0, (eyes[0][4] + eyes[1][4]) / 2, (eyes[0][5] + eyes[1][5]) / 2];
-  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / 33))) * 180 / Math.PI;
+  const unit = b.offsetWidth / 100, turn = (px) => Math.asin(Math.max(-1, Math.min(1, px / unit / ${DEPTH + 1}))) * 180 / Math.PI;
   return { yaw: turn(slid[4]), pitch: turn(slid[5]), bodyYaw: of('.bot-body', /rotateY\\((-?[\\d.]+)deg\\)/), roll: of('.bot-whole', /rotate\\((-?[\\d.]+)deg\\)/), zoom: of('.bot-whole', /scale\\((-?[\\d.]+)\\)/) || 1 };
 })`;
 

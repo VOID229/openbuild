@@ -337,7 +337,7 @@ test("the eyes are tall pills, and at work they're big: a quarter of the face be
   expect(Math.abs(poseTarget(wedge, { x: 1, y: 0 }, true).yaw)).toBeLessThanOrEqual(Math.abs(poseTarget(wedge, { x: 1, y: 0 }).yaw));
 });
 
-test("turned away, the eyes are smaller all round, and keep half their width at the edge", () => {
+test("turned away, the eyes are a little smaller all round, and keep most of their width", () => {
   const size = (yaw: number, pitch: number) => {
     const rig = newRig();
     snap(rig, to(yaw, pitch));
@@ -345,13 +345,30 @@ test("turned away, the eyes are smaller all round, and keep half their width at 
     return [Math.hypot(a, b), Math.hypot(c, d)] as const;
   };
   const [w, h] = size(YAW, 0);
-  // A full turn to the side: shorter by FAR, and narrower still, but never the sliver a true turn gives.
-  expect(h).toBeGreaterThan(0.7);
-  expect(h).toBeLessThan(0.82);
+  // A full turn to the side: shorter by FAR, and narrower still, but by far less than a true turn would.
+  expect(h).toBeGreaterThan(0.85);
+  expect(h).toBeLessThan(0.92);
   expect(w).toBeLessThan(h);
+  expect(w).toBeGreaterThan(0.75);
   expect(w).toBeGreaterThan(Math.cos((YAW * Math.PI) / 180) * (1 - FAR));
   // Part of the way, it's in between; and looking down does the same to its height.
   expect(size(YAW / 2, 0)[1]).toBeGreaterThan(h);
   expect(size(YAW / 2, 0)[1]).toBeLessThan(1);
   expect(size(0, PITCH)[1]).toBeLessThan(size(0, PITCH)[0]);
+});
+
+test("a full turn takes the eyes well over, but keeps them off the body's edge", () => {
+  const rig = newRig();
+  for (const side of [1, -1]) {
+    snap(rig, to(side * YAW));
+    const f = frame(rig, orb, 100);
+    const { w, gap } = eyesOf(orb);
+    // The eye on the side it's turned to: slid a good way, and still more than its own width inside the rim.
+    const far = side === 1 ? f.right : f.left;
+    const slid = Number(far.slice(7, -1).split(", ")[4]);
+    expect(Math.abs(slid)).toBeGreaterThan(8);
+    expect(Math.sign(slid)).toBe(side);
+    const rim = 35.8 - Math.abs(orb.face.x + (side * gap) / 2 + slid - 50);
+    expect(rim).toBeGreaterThan(w);
+  }
 });

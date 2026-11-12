@@ -35,16 +35,19 @@ export type EyeForm = keyof typeof FORMS;
 /** How far the head turns at most, in degrees: side to side, and up or down. */
 export const YAW = 46;
 export const PITCH = 42;
-/** How far the face stands off the body, in the 100-unit box: what makes it slide as the head turns. */
-export const DEPTH = 32;
+/**
+ * How far the face stands off the body, in the 100-unit box: what makes it slide as the head turns.
+ * Shallow, so a full turn takes the eyes a good way over but not out to the edge.
+ */
+export const DEPTH = 20;
 /** The viewer's distance, in the same units: nearer would exaggerate the perspective. */
 export const PERSPECTIVE = 260;
 /** How much of the head's turn the body takes: it's one solid thing, but a soft one. */
 export const BODY_TURN = 0.42;
-/** How much smaller the eyes are at a full turn: turned away, the face is further off. */
-export const FAR = 0.24;
-/** How much of the turn's narrowing an eye takes: half, so it stays a pill at the edge and not a sliver. */
-export const SOFT = 0.5;
+/** How much smaller the eyes are at a full turn: turned away, the face is further off, but only a little. */
+export const FAR = 0.12;
+/** How much of the turn's narrowing an eye takes: under a third, so it stays a full pill turned away. */
+export const SOFT = 0.3;
 /** How much of an eye, about its middle, has to stay on the body: its ends may slip under the edge. */
 export const CORE = 0.75;
 
@@ -429,7 +432,7 @@ export function frame(rig: Rig, shape: Shape, size: number): { whole: string; bo
     const [px, py] = at(x + lx, y + ly);
     const [ax, ay] = at(x + lx + 1, y + ly);
     const [bx, by2] = at(x + lx, y + ly + 1);
-    // Half the narrowing a turn would give it, and smaller all round the further it's turned away.
+    // Some of the narrowing a turn would give it (SOFT), and a little smaller the further it's turned away.
     const m = Math.min(1, Math.hypot(yaw / YAW, pitch / PITCH));
     const far = 1 - FAR * m * m;
     return `matrix(${n((1 + (ax - px - 1) * SOFT) * far, 4)}, ${n((ay - py) * SOFT * far, 4)}, ${n((bx - px) * SOFT * far, 4)}, ${n((1 + (by2 - py - 1) * SOFT) * far, 4)}, ${n((px - x) * u)}, ${n((py - y) * u)})`;
