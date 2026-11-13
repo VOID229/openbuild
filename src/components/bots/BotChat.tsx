@@ -10,11 +10,12 @@ import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
 import type { Bot, BotMessage, Conversation, Reaction } from "../../lib/bots/types";
-import { capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, TYPING } from "../../../shared/bots";
+import { capAttached, fileRef, parseFileRef, MAX_BOT_FILES, authoredEventText, eventDetail, eventText, findTags, matchMentionBots, mentionBroadcastAt, mentionName, pollVotesVisible, pollWaitingOn, reactionId, routineSet, TYPING } from "../../../shared/bots";
 import { RELOAD_THREADS } from "../../lib/pulls";
 import { threadPath } from "../../lib/routes";
 import { useStore } from "../../lib/store";
 import { accountName } from "../../lib/models";
+import { clock } from "../../lib/clock";
 import { PULL_REF_RE, conversationRepo, pullRefHref, pullRefUrl } from "../../lib/bots/pullRefs";
 import { useShallow } from "zustand/react/shallow";
 import { closeBotsLayer, holdLayout, openBotsDetails, useBubbleTouch } from "../../lib/gestures";
@@ -219,11 +220,15 @@ function ConversationLink({ id, children }: { id: string; children: React.ReactN
 }
 
 /**
- * A routine line's words ("set a routine"), opening the bot's Routines in the details panel. A group or
- * side chat's panel has none, so it goes to the bot's own chat first.
+ * A routine line's words ("set routine"), opening the Routines in the details panel. In a group the bot
+ * is in, that's the group's own, where the routine reports; a side chat's panel has none, so from there
+ * it goes to the bot's own chat first.
  */
 function RoutinesLink({ bot, children }: { bot: Bot; children: React.ReactNode }) {
-  const thread = useBots((s) => directOf(s.conversations, bot.id)?.id);
+  const thread = useBots((s) => {
+    const here = s.conversations.find((c) => c.id === s.activeId);
+    return here?.kind === "group" && here.botIds.includes(bot.id) ? here.id : directOf(s.conversations, bot.id)?.id;
+  });
   if (!thread) return <>{children}</>;
   return (
     <button type="button" className="link bm-conversation-link" onClick={(e) => {
@@ -1674,6 +1679,9 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
   );
 });
 
+/** "Weekdays at 9:00" → "weekdays at 9:00", to read on in a sentence; an acronym keeps its capitals. */
+const lowerFirst = (text: string) => (/^\p{Lu}\p{Ll}/u.test(text) ? text.charAt(0).toLowerCase() + text.slice(1) : text);
+
 /** One activity line: who did what, and what it was about. */
 const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, index, times = 1 }: { message: BotMessage; bots: Bot[]; fresh: boolean; hidden?: boolean; index?: number; times?: number }) {
   const event = m.event!;
@@ -1694,13 +1702,15 @@ const EventLine = memo(function EventLine({ message: m, bots, fresh, hidden, ind
   const switchedTo = eventText(event).replace(/^Switched to /, "") + (event.kind === "model" && detail ? ` (${accountName(detail)})` : "");
   // A change of settings ("Juniper's model: A → B") names its bot by id too, so a rename shows up on old lines.
   const changed = event.kind === "changed" && eventBot ? settingsChange(event.text) : undefined;
+  // A routine being set says when it was, what it's called and when it runs, all in its words.
+  const set = authored ? routineSet(event) : undefined;
   return (
     // A long one (an error's whole path, say) shows a few lines on a phone; tapping it shows the rest.
     <div className={cx("bm-event", fresh && "bm-recv")} data-id={m.id} hidden={hidden} style={index === undefined ? undefined : ({ "--i": index } as React.CSSProperties)} onClick={(e) => e.currentTarget.classList.toggle("bm-event-open")}>
       <span className="bm-event-text">
-        {authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
+        {set ? <>At {clock(m.at)}, <BotLink bot={author!} /> <RoutinesLink bot={author!}>{set.followUp ? "set a follow-up" : "set routine"}</RoutinesLink> “<WithBotLinks text={set.title} bots={bots} />” for {lowerFirst(set.schedule)}</> : authored ? <><BotLink bot={author!} /> {event.kind === "routine" ? <RoutinesLink bot={author!}>{authored}</RoutinesLink> : authored}</> : huddled ? <><WithBotLinks text={eventText(event)} bots={bots} /> · <ConversationLink id={huddled}>Read along</ConversationLink></> : messaged ? <MessageActivity event={event} other={messaged} /> : switcher ? <><BotLink bot={switcher} /> switched to {switchedTo}</> : changed ? <><BotLink bot={eventBot!} />'s {changed}</> : <WithBotLinks text={eventText(event)} bots={bots} />}
       </span>
-      {event.kind !== "model" && detail && (
+      {event.kind !== "model" && !set && detail && (
         <span className="bm-event-detail">
           {event.threadId || event.kind === "thread" ? <EventThread event={event} /> : eventBot ? <BotLink bot={eventBot} /> : <WithBotLinks text={detail} bots={bots} />}
         </span>

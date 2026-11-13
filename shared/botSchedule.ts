@@ -290,3 +290,21 @@ export function formatRun(t: number, now = Date.now()): string {
   if (days > 1 && days < 7) return `${new Date(t).toLocaleDateString([], { weekday: "short" })} ${time}`;
   return `${new Date(t).toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
+
+/**
+ * How long until a run, counting down to the second: "in 42s", "in 4m 05s", "in 3h 12m 05s",
+ * "in 2d 4h 12m". Undefined once it's due.
+ */
+export function countdown(ms: number): string | undefined {
+  if (ms <= 0) return undefined;
+  const s = Math.ceil(ms / 1000);
+  const days = Math.floor(s / 86_400);
+  const hours = Math.floor((s % 86_400) / 3600);
+  const minutes = Math.floor((s % 3600) / 60);
+  const seconds = s % 60;
+  const two = (n: number) => String(n).padStart(2, "0");
+  if (days) return `in ${days}d ${hours}h ${minutes}m`;
+  if (hours) return `in ${hours}h ${two(minutes)}m ${two(seconds)}s`;
+  if (minutes) return `in ${minutes}m ${two(seconds)}s`;
+  return `in ${seconds}s`;
+}

@@ -1,7 +1,7 @@
 // The real OpenBots pane with a chat's details open, for tests/botDetailsOverflow.test.ts to measure in
 // Chrome: a primary bot (Dr Eggbot, the white puff) with words too long to wrap in its role,
-// instructions, routines, tasks and model, and a group of two with a long name and goal. The server is
-// faked: the models bots run on, and nothing else.
+// instructions, routines (one reporting to the group), tasks and model, and a group of two with a long
+// name, goal and routine. The server is faked: the models bots run on, and nothing else.
 import "../../../src/styles.css";
 import "../../../src/bots.css";
 import "../../../src/mobile.css";
@@ -34,7 +34,9 @@ const bots = [
     model: models[1]!.id,
     fallbackModels: [models[0]!.id],
     routines: [
-      { id: "r1", title: `Morning check on ${long}`, schedule: "every weekday at 9am", enabled: true, task: `Read ${long} and report` },
+      { id: "r1", title: `Morning check on ${long}`, schedule: "every weekday at 9am", enabled: true, task: `Read ${long} and report`, nextRunAt: at + 3 * 86_400_000 },
+      // Reporting to the group: under it in the bot's Routines, and in the group's own with its mascot.
+      { id: "r3", title: `Evening check on ${long}`, schedule: `every weekday at 6pm, ${long}`, enabled: true, conversationId: "crew", nextRunAt: at + 3_600_000 },
       { id: "r2", title: "Weekly review", schedule: "every Friday", enabled: false },
     ],
   }),

@@ -1077,7 +1077,8 @@
   }
 
   .bots-routine-when,
-  .bots-routine-task {
+  .bots-routine-task,
+  .bots-routine-next {
     font-size: 13.5px;
   }
 

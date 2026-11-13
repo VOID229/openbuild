@@ -30,6 +30,7 @@ const { useStore } = await import("../src/lib/store");
 const { enterWorkspace, switchWorkspace, useBots } = await import("../src/lib/bots/store");
 const { useWorkspace } = await import("../src/lib/bots/workspace");
 const { BotsView } = await import("../src/components/bots/BotsView");
+const { clock: clockAt } = await import("../src/lib/clock");
 
 let root: ReturnType<typeof createRoot>;
 const frames = (ms = 40) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
@@ -125,12 +126,25 @@ test("routines, other bot events and older saved wording read naturally after th
     event("e9", "scout", { kind: "thread", text: "Wrote to a thread", detail: "Fix the build", threadId: "t1" }),
     event("e10", "scout", { kind: "thread", text: "Answered a thread's question", detail: "Which branch? → main", threadId: "t1" }),
   ]);
+  // Setting one says when it was set, what it's called and when it runs, in its own words.
   expect(["e1", "e2", "e3", "e4", "e5", "e6", "e7", "e8", "e9", "e10", "e11"].map((id) => lead(id).textContent)).toEqual([
-    "Scout set a routine", "Scout set a routine", "Scout ran a routine", "Scout set a follow-up", "Scout followed up",
+    `At ${clockAt(1)}, Scout set routine “Standup” for weekdays at 9:00`, `At ${clockAt(2)}, Scout set routine “Standup” for weekdays at 9:00`, "Scout ran a routine",
+    `At ${clockAt(4)}, Scout set a follow-up “Check CI” for in 2 hours`, "Scout followed up",
     "Scout made a new bot", "Scout added", "Scout couldn't reply", "Scout wrote a prompt in", "Scout answered a thread's question", "Scout ran a routine",
   ]);
-  expect(line("e1").querySelector(".bm-event-detail")!.textContent).toContain("Standup · Weekdays at 9:00");
+  for (const id of ["e1", "e2", "e4"]) expect(line(id).querySelector(".bm-event-detail")).toBeNull();
+  expect(line("e3").querySelector(".bm-event-detail")!.textContent).toBe("Standup");
   expect(line("e6").querySelector(".bm-event-detail")!.textContent).toBe("Juniper");
+});
+
+test("a routine line set at a quarter to one says so, with the time first", async () => {
+  const at = new Date(2026, 10, 13, 12, 45).getTime();
+  clock = at + 60_000;
+  await show([{ id: "e1", author: "scout", at, text: "", event: { kind: "routine", text: "Set a follow-up", detail: "Check the deploy · in 5 minutes" } }]);
+  expect(lead("e1").textContent).toBe(`At ${clockAt(at)}, Scout set a follow-up “Check the deploy” for in 5 minutes`);
+  expect(lead("e1").textContent).toMatch(/^At 12:45/);
+  // The bot's name links to it, and the words to its routines.
+  expect([...lead("e1").querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Scout", "set a follow-up"]);
 });
 
 test("a routine line opens its bot's Routines in the details panel, from its own chat or a group", async () => {
@@ -138,7 +152,7 @@ test("a routine line opens its bot's Routines in the details panel, from its own
   await show([event("e1", "scout", { kind: "routine", text: "Set a routine", detail: "Standup · Weekdays at 9:00" })], [{ ...scout, routines: [routine] }, juniper]);
   const tab = () => document.querySelector(".bots-details [role='tab'][aria-selected='true']")?.textContent;
   const open = async (id: string) => {
-    const link = [...lead(id).querySelectorAll("button")].find((b) => b.textContent === "set a routine")!;
+    const link = [...lead(id).querySelectorAll("button")].find((b) => b.textContent === "set routine")!;
     await act(async () => link.click());
     await frames();
   };
@@ -158,7 +172,7 @@ test("a routine line opens its bot's Routines in the details panel, from its own
   await act(async () => row().querySelector<HTMLElement>(".bots-routine-action")!.click());
   expect(row().querySelector(".bots-routine-task")).toBeNull();
 
-  // A group's panel has no routines, so the line goes to the bot's own chat for them.
+  // In a group, the line opens the group's own Routines, where the routine reports.
   await act(async () => useBots.setState((s) => ({
     detailsOpen: false,
     conversations: [...s.conversations, { id: "group", kind: "group" as const, botIds: ["scout", "juniper"], createdAt: 1, updatedAt: 1, messages: [event("e2", "scout", { kind: "routine", text: "Set a routine", detail: "Standup · Weekdays at 9:00" }) as any] }],
@@ -166,6 +180,18 @@ test("a routine line opens its bot's Routines in the details panel, from its own
   })));
   await frames();
   await open("e2");
+  expect(useBots.getState().activeId).toBe("group");
+  expect(useBots.getState().detailsOpen).toBe(true);
+  expect(tab()).toBe("Routines");
+
+  // A side chat's panel has none, so from there the line goes to the bot's own chat for them.
+  await act(async () => useBots.setState((s) => ({
+    detailsOpen: false,
+    conversations: [...s.conversations, { id: "side", kind: "side" as const, botIds: ["scout", "juniper"], createdAt: 1, updatedAt: 1, messages: [event("e3", "scout", { kind: "routine", text: "Set a routine", detail: "Standup · Weekdays at 9:00" }) as any] }],
+    activeId: "side",
+  })));
+  await frames();
+  await open("e3");
   expect(useBots.getState().activeId).toBe("chat");
   expect(useBots.getState().detailsOpen).toBe(true);
   expect(tab()).toBe("Routines");
@@ -296,7 +322,7 @@ test("activity lines in a row fold into one quiet toggle, opened on a click; an 
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   for (const id of ["e2", "e3", "e4"]) expect(line(id).hidden).toBe(true);
   // Their words are still there, for finding a line by id or reading it.
-  expect(lead("e2").textContent).toBe("Scout set a follow-up");
+  expect(lead("e2").textContent).toBe(`At ${clockAt(2)}, Scout set a follow-up “Check CI” for in 10 minutes`);
   // An error, and a line on its own between messages, show as they are.
   expect(line("e5").hidden).toBe(false);
   expect(line("e5").closest(".bm-events")).toBeNull();
