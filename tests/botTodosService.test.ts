@@ -275,6 +275,8 @@ test("done items don't pile up: a list still going drops the ones finished a whi
     todo(pip.bot.id, { action: 'add', items: Array.from({ length: TODO_LIMIT }, (_, i) => 'Item ' + (i + 1)) });
     list = db.todos(pip.conversationId);
     todo(pip.bot.id, { action: 'done', item: list[1].id.slice(0, 6) });
+    // Finished later, not just further up the list.
+    await Bun.sleep(5);
     todo(pip.bot.id, { action: 'done', item: list[0].id.slice(0, 6) });
     todo(pip.bot.id, { action: 'add', items: ['One more'] });
     list = db.todos(pip.conversationId);
