@@ -15,7 +15,7 @@ const looks: BotLook[] = [{ shape: "blob", color: "green" }, { shape: "cloud", c
 function Starter() {
   const [waiting, setWaiting] = useState(false);
   (window as unknown as { wait: (on: boolean) => void }).wait = setWaiting;
-  return <BotAvatar look={looks[0]!} size={96} alive={false} waiting={waiting} />;
+  return <BotAvatar look={looks[0]!} size={96} alive={false} dots={waiting} />;
 }
 function Holder() {
   const [on, setOn] = useState(false);

@@ -1,8 +1,8 @@
 // Pieces the OpenBots sidebar, chat and details panel share.
 import { Star } from "lucide-react";
-import { memo, useEffect, useState, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { busyBots, starting, STARTING_MS } from "../../lib/bots/activity";
+import { busyBots, plainPhase, plainPhaseEnds, typingAnywhere, type PlainPhase } from "../../lib/bots/activity";
 import type { Mood } from "../../lib/bots/looks";
 import { conversationName, useBots } from "../../lib/bots/store";
 import type { Bot, BotMessage, Conversation } from "../../lib/bots/types";
@@ -98,20 +98,31 @@ export function previewOf(c: Conversation, bots: Bot[]): ReactNode {
 }
 
 const MISSING = { shape: "blob", color: "gray" };
+const NO_DOTS: boolean[] = [];
 
-/** Whether a bot has just started on something and has no step to show yet (`starting`), for as long as that lasts. */
-export function useStarting(botId: string | undefined): boolean {
-  const now = Date.now();
-  const on = useBots((s) => !!botId && starting(s.status[botId], Date.now()));
-  const since = useBots((s) => (botId ? s.status[botId]?.since : undefined));
+/**
+ * Where each of these bots is with plain words (activity.ts, plainPhase): the one source the chat's
+ * working row, its header and the sidebar read, so a bot is three dots in all of them or none. Looks
+ * again by itself when a phase is over, since nothing in the store changes then.
+ */
+export function usePlainPhases(botIds: readonly string[]): (PlainPhase | undefined)[] {
+  const read = (s: ReturnType<typeof useBots.getState>, now: number) => botIds.map((id) => plainPhase(s.status[id], s.shown[id], typingAnywhere(s.typing, id), now) ?? "").join(",");
+  const key = useBots((s) => read(s, Date.now()));
+  const ends = useBots((s) => Math.min(Infinity, ...botIds.map((id) => plainPhaseEnds(s.status[id], s.shown[id], typingAnywhere(s.typing, id), Date.now()) ?? Infinity)));
   const [, again] = useState(0);
-  // Nothing in the store changes when the moment is over: look again then.
   useEffect(() => {
-    if (!on || !since) return;
-    const t = setTimeout(() => again((n) => n + 1), Math.max(0, Math.min(STARTING_MS, since + STARTING_MS - Date.now())) + 20);
+    if (!Number.isFinite(ends)) return;
+    const t = setTimeout(() => again((n) => n + 1), Math.max(0, ends - Date.now()) + 20);
     return () => clearTimeout(t);
-  }, [on, since]);
-  return on && !!since && now - since < STARTING_MS;
+  }, [ends, key]);
+  // The same array while nothing changes, so the memoized mascots it's handed to don't redraw.
+  return useMemo(() => key.split(",").map((phase) => (phase || undefined) as PlainPhase | undefined).slice(0, botIds.length), [key, botIds.length]);
+}
+
+/** Whether each of these bots shows as three dots right now (usePlainPhases). */
+export function useDots(botIds: readonly string[]): boolean[] {
+  const phases = usePlainPhases(botIds);
+  return useMemo(() => phases.map((phase) => phase === "dots"), [phases]);
 }
 
 /** Who a side chat is between, as a sentence names them: "Pip and Manager", "Pip, Manager and Scout". */
@@ -179,16 +190,16 @@ export const ConversationAvatar = memo(function ConversationAvatar({
 }) {
   const bots = useBots((s) => s.bots);
   const pulses = useBots((s) => s.pulses);
-  // A bot's own mascot is three dots for the moment it has started and has no step to show yet.
-  const starting = useStarting(conversation.kind === "direct" ? conversation.botIds[0] : undefined);
-  const waiting = starting && !still;
+  // Three dots exactly when the chat's working row and header show them (useDots); never held still.
+  const shared = useDots(conversation.botIds);
+  const dots = still ? NO_DOTS : shared;
   if (still) [alive, busy, track, working] = [false, false, false, undefined];
   const members = conversation.botIds.map((id) => bots.find((b) => b.id === id));
   if (conversation.kind === "direct") {
     const bot = members[0];
     return (
       <span className="bots-avatar-wrap">
-        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} waiting={waiting} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
+        <BotAvatar look={bot?.look ?? MISSING} size={size} alive={alive} lively={lively} track={track} busy={busy} mood={mood} dots={dots[0]} pulse={bot && !still ? pulses[bot.id] : undefined} label={bot?.name} />
         {badge && bot?.primary && (
           <span className="bots-primary-badge" role="img" aria-label="Primary bot" style={{ "--badge": `${Math.max(14, Math.round(size * 0.3))}px` } as React.CSSProperties}>
             <Star fill="currentColor" strokeWidth={0} />
@@ -199,15 +210,15 @@ export const ConversationAvatar = memo(function ConversationAvatar({
   }
   const looks = members.map((b) => b?.look ?? MISSING);
   const active = working && conversation.botIds.map((id) => working.includes(id));
-  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} />;
+  if (lineup) return <BotLineup looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} />;
   if (conversation.kind === "side")
     return (
       <span className="bots-avatar-wrap bots-avatar-side">
-        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} pair />
+        <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} zzz={zzz} pair />
         {badge && <DmMark size={size} />}
       </span>
     );
-  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} track={track} zzz={zzz} />;
+  return <BotHuddle looks={looks} size={size} alive={alive} busy={busy} active={active} dots={dots} track={track} zzz={zzz} />;
 });
 
 export { conversationName };

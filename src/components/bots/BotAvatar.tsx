@@ -5,9 +5,9 @@
 // out, blinks and looks around; at work it faces you, eyes grown big, brisk, rocking, peering and
 // leaning in. It can follow the pointer, turning and leaning toward it; a held
 // mood (thinking while typing, happy at a reaction) changes its eyes, and in a group the ones not at
-// work doze, a "zzz" floating up over them. Starting on something, before there's a step to show, it
-// turns into three dots for a moment and back, and in a chat's working row it stays three dots for as
-// long as there's nothing to name. Nothing ever hops, and nothing spins of its own accord.
+// work doze, a "zzz" floating up over them. At work with nothing at all to say what on, it can turn
+// into three dots for a moment and back (`dots`, which activity.ts decides). Nothing ever hops, and
+// nothing spins of its own accord.
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
 import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type EyeLook, type Pose } from "../../lib/bots/rig";
@@ -63,8 +63,7 @@ function offScreen(el: Element) {
   return !r.width || r.bottom < 0 || r.right < 0 || r.top > innerHeight || r.left > innerWidth;
 }
 
-/** The longest a bot stays three dots when it's only `waiting`, and how long it takes to come back from them, ms (see .bot-dots). */
-const DOTS_MAX = 2400;
+/** How long a bot takes to come back from three dots, ms (see .bot-dots). */
 const DOTS_OUT = 560;
 /** How long a bot looks pleased after a reaction or finishing something, ms. */
 const PLEASED = 5200;
@@ -126,11 +125,11 @@ export interface BotAvatarProps {
   /** A little "zzz" floats up while it dozes. Only the sidebars turn it on: beside chat messages the shut eyes say enough. */
   zzz?: boolean;
   /**
-   * Starting on something, with nothing to show of it yet: the body gathers into three dots, a wave
-   * running along them, and comes back as itself when there is (or after DOTS_MAX at the latest).
+   * At work with nothing to say what on: the body gathers into three dots, a wave running along them,
+   * for as long as it's set, and comes back as itself after. Its life holds still meanwhile, out of
+   * sight. When a bot is dots, and for how long, is activity.ts's to say (plainPhase), for every place
+   * it shows alike.
    */
-  waiting?: boolean;
-  /** Three dots, as `waiting`, but for as long as it's set: its life holds still meanwhile, out of sight. */
   dots?: boolean;
   /** Change it to make the bot react once: a swell and a happy face, or the given mood and move. */
   pulse?: { key: string | number; mood?: Mood; action?: Action };
@@ -138,7 +137,7 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, asleep, zzz = false, waiting = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, asleep, zzz = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
   const lively = wantLively && !plain;
   const playful = wantPlayful && !plain;
@@ -164,16 +163,8 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   };
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  // Waiting: three dots for a moment, DOTS_MAX at the most.
-  const [brief, setBrief] = useState(false);
-  useEffect(() => {
-    if (!waiting) return setBrief(false);
-    setBrief(true);
-    const limit = setTimeout(() => setBrief(false), DOTS_MAX);
-    return () => clearTimeout(limit);
-  }, [waiting]);
   // The dots: "in" while it's turned into them, "out" for the moment it takes to come back.
-  const want = stayDots || brief;
+  const want = stayDots;
   const staying = useRef(stayDots);
   staying.current = stayDots;
   const [dots, setDots] = useState<"in" | "out">();
@@ -461,7 +452,7 @@ export const HUDDLE_SEAT_MIN = 32;
  * is awake and `alive` and `busy` go for all of them. `pair` seats two members side by side rather than
  * on the diagonal: a side chat between two bots, which mustn't read as a group.
  */
-export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
+export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, busy, active, dots, track, me, zzz = false, pair = false }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; track?: boolean; me?: React.ReactNode; zzz?: boolean; pair?: boolean }) {
   const seats = me ? 3 : 4;
   const over = looks.length > seats;
   const seated = over && size >= HUDDLE_SEAT_MIN;
@@ -489,7 +480,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
     // A touch smaller than its seat when it has neighbours: the shapes reach wide (a sparkle's arms,
     // a wedge's corners), and seated side by side they'd touch each other and the count.
     const s = (layout[n + (me ? 1 : 0)]?.[2] ?? 0.5) * (count > 1 ? 0.92 : 1);
-    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} track={track} />]);
+    items.push([i, <BotAvatar look={looks[i]!} size={Math.round(size * s)} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} dots={dots?.[i]} track={track} />]);
   });
   // One "zzz" for the huddle, over its corner, rather than one each on members too small to read it.
   const dozing = !!active && members.some((i) => !active[i]);
@@ -529,7 +520,7 @@ export const BotHuddle = memo(function BotHuddle({ looks, size, alive = true, bu
  * (the chat's header at rest). Up to `max` show, those at work first as in a huddle, and the rest as a
  * count after them ("+2" after four). `active` picks who is at work, as in BotHuddle; the rest doze, without a "zzz" each.
  */
-export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; track?: boolean; max?: number }) {
+export const BotLineup = memo(function BotLineup({ looks, size, alive = true, busy, active, dots, track, max = 4 }: { looks: BotLook[]; size: number; alive?: boolean; busy?: boolean; active?: boolean[]; dots?: boolean[]; track?: boolean; max?: number }) {
   const room = max;
   const order = looks.map((_, i) => i);
   const members = (active ? [...order.filter((i) => active[i]), ...order.filter((i) => !active[i])] : order).slice(0, room).sort((a, b) => a - b);
@@ -537,7 +528,7 @@ export const BotLineup = memo(function BotLineup({ looks, size, alive = true, bu
   return (
     <span className="bot-lineup" aria-hidden>
       {members.map((i) => (
-        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} track={track} />
+        <BotAvatar key={i} look={looks[i]!} size={size} alive={active ? active[i] || alive : alive} busy={active ? active[i] : busy} asleep={active && !active[i]} zzz={false} dots={dots?.[i]} track={track} />
       ))}
       {extra > 0 && <span className="bot-lineup-more">+{extra}</span>}
     </span>

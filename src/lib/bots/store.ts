@@ -16,6 +16,7 @@ import { createStore, get as cacheGet, set as cacheSet } from "../kv";
 import type { BotLook, Mood } from "./looks";
 import { botModels } from "../pi";
 import { useStore } from "../store";
+import { trackShown, type Shown } from "./activity";
 import type { Author, Bot, BotMessage, BotsEvent, Conversation, Draft as LiveDraft, PiSetup, Routine } from "./types";
 import { castVote, cleanRole, marksUnread, toggleReactionIn, type BotHarnessSettings, type BotsHello } from "../../../shared/bots";
 import type { FriendSummary } from "../../../shared/friends";
@@ -71,6 +72,12 @@ interface BotsState {
   /** The user's messages shown before their workspace has confirmed them, by id. */
   sending: string[];
   status: Record<string, Extract<BotsEvent, { t: "status" }>["status"]>;
+  /**
+   * What each working bot shows, kept across its status updates (activity.ts, trackShown): its last
+   * line of its own, and since when it's been on plain words. Kept in step with `status` however that
+   * changes; the chat, its header and the sidebar all read it, so they show a bot the same way.
+   */
+  shown: Record<string, Shown>;
   /** The stream hasn't been lost. Only a failed connection clears it, so opening OpenBots doesn't flash "Reconnecting". */
   connected: boolean;
   /** The server's state has arrived. Until then an empty list means "not known yet", not "no bots". */
@@ -195,6 +202,7 @@ export const useBots = create<BotsState>()(
     pending: 0,
     sending: [],
     status: {},
+    shown: {},
     connected: true,
     loaded: false,
     clearError: () => set({ error: undefined }),
@@ -427,6 +435,14 @@ export const useBots = create<BotsState>()(
     },
   }),
 );
+
+// `shown` follows `status` wherever that's set from (an event, a snapshot, a workspace switch), in the
+// same update, before anything renders from it.
+useBots.subscribe((state, prev) => {
+  if (state.status === prev.status) return;
+  const shown = trackShown(state.shown, state.status, Date.now());
+  if (shown !== state.shown) useBots.setState({ shown });
+});
 
 /** A conversation's name: the group's, the bot's, or both bots' for a side chat. */
 export function conversationName(c: Conversation, bots: Bot[]): string {
@@ -779,6 +795,7 @@ function enter(id: string): Visit {
     connected: true,
     setup: undefined,
     status: {},
+    shown: {},
     typing: {},
     drafts: [],
     pulses: {},

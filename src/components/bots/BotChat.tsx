@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Bookmark, Check, ChevronLeft, ChevronRight, CircleD
 import { createPortal } from "react-dom";
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { noticeAnswer, noticeReaction, respond } from "../../lib/bots/engine";
-import { elsewhere, liveLine, plainWork, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
+import { elsewhere, liveBot, liveLine, showWorking, stoppable, threadOpensIn, workingLine } from "../../lib/bots/activity";
 import { colorOf } from "../../lib/bots/looks";
 import { conversationName, directOf, useBots, useRemoteWorkspace } from "../../lib/bots/store";
 import { isLocalWorkspace, workspacePath } from "../../lib/bots/workspace";
@@ -47,7 +47,7 @@ import { BotProfileHover } from "./BotProfileCard";
 const FRIEND_LOOK = { shape: "blob", color: "gray" };
 import { PollDialog } from "./BotDialogs";
 import { PiSetupNotice } from "./PiSetupNotice";
-import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots } from "./common";
+import { authorName, ConversationAvatar, dividerTime, messageLine, messageText, useBusyBots, usePlainPhases } from "./common";
 
 const QUICK = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 const MORE = ["🎉", "🙏", "👀", "💯", "✅", "🤔", "😍", "👏", "🙌", "😅", "🤯", "💡", "🚀", "⭐", "😎", "🥲", "🫡", "👋", "❌", "➕", "🤝", "😴", "🍕", "☕"];
@@ -1159,33 +1159,22 @@ function MessageMenu({ held, conversation, readonly, onClose, onReply }: { held?
 }
 
 /**
- * How long plain working words have to stand before a working row turns into dots, ms: a step that's
- * over in a moment doesn't set the mascot going back and forth.
- */
-const DOTS_SETTLE = 350;
-
-/**
- * A bot at work here: its mascot, fidgeting and swelling at each new step, and the step. While there's
- * no step to name (plain working words) the mascot turns into three dots and the words go: the dots
- * say it's working. The step it was on fades as it goes, and the next comes in once it's back.
- * Typing, it's the same row, so the mascot stays where it is: itself (never dots), thinking, beside
- * "Typing…".
+ * A bot at work here: its mascot, fidgeting and swelling at each new step, and what it's on: the line
+ * its status names, kept from its last step while it works out the next (activity.ts, shownLine).
+ * Only with nothing at all to name does the mascot turn into three dots, for a moment, as it does in
+ * the sidebar and the header at the same time (usePlainPhases); then it's back with plain words. The
+ * step it was on fades as it goes, and the next comes in once it's back. Typing, it's the same row,
+ * so the mascot stays where it is: itself (never dots), thinking, beside "Typing…".
  */
 function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direct: boolean; activity: string; typing?: boolean }) {
-  const plain = !typing && plainWork(activity);
-  // Plain words turn it into dots once they've stood a moment (straight away when the row opens on
-  // them); a step turns it back at once.
-  const [settled, setSettled] = useState(plain);
-  useEffect(() => {
-    if (!plain) return setSettled(false);
-    const t = setTimeout(() => setSettled(true), DOTS_SETTLE);
-    return () => clearTimeout(t);
-  }, [plain]);
-  const dots = plain && settled;
-  // The last step it named, kept on while plain words stand, and as it fades out for the dots.
+  const [phase] = usePlainPhases([bot.id]);
+  const dots = !typing && phase === "dots";
+  // On its way into the dots, or in them: no words. After, the plain words it's on.
+  const hushed = !typing && (phase === "settling" || phase === "dots");
+  // The last line it named, kept on as it fades out for the dots.
   const step = useRef<string>(undefined);
-  if (!plain && !typing) step.current = activity;
-  const text = typing ? TYPING : plain ? step.current : activity;
+  if (!hushed && !typing) step.current = activity;
+  const text = typing ? TYPING : hushed ? step.current : activity;
   // A step that comes in as the dots turn back waits for the mascot to be itself again.
   const back = useRef<string>(undefined);
   const was = useRef(dots);
@@ -1199,7 +1188,7 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
     <div className="bm-working" role="status" aria-label={typing ? `${bot.name} is typing` : `${bot.name}: ${activity}`} data-dots={dots || undefined}>
       {direct ? avatar : <span className="bm-avatar">{avatar}</span>}
       {text && (
-        <span key={text} className={typing ? "bm-typing" : "bm-working-text"} data-gone={dots || undefined} data-back={(!dots && back.current === text) || undefined} aria-hidden={dots || undefined}>
+        <span key={text} className={typing ? "bm-typing" : "bm-working-text"} data-gone={hushed || undefined} data-back={(!dots && back.current === text) || undefined} aria-hidden={hushed || undefined}>
           {text}
         </span>
       )}
@@ -1214,6 +1203,7 @@ function WorkingRow({ bot, direct, activity, typing = false }: { bot: Bot; direc
  */
 function Live({ conversation, working, typing, bots }: { conversation: Conversation; working: string[]; typing: string[]; bots: Bot[] }) {
   const statuses = useBots((s) => s.status);
+  const shown = useBots((s) => s.shown);
   const drafts = useBots((s) => s.drafts);
   const direct = conversation.kind === "direct";
   return (
@@ -1223,7 +1213,7 @@ function Live({ conversation, working, typing, bots }: { conversation: Conversat
         if (!bot) return null;
         const draft = typing.includes(id) ? drafts.find((d) => d.conversationId === conversation.id && d.botId === id)?.text : undefined;
         if (draft) return <Draft key={id} conversation={conversation} bot={bot} bots={bots} text={draft} />;
-        return <WorkingRow key={id} bot={bot} direct={direct} typing={typing.includes(id)} activity={workingLine(conversation.id, id, statuses[id])} />;
+        return <WorkingRow key={id} bot={bot} direct={direct} typing={typing.includes(id)} activity={workingLine(conversation.id, id, statuses[id], shown[id])} />;
       })}
     </>
   );
@@ -2452,7 +2442,10 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
   const typing = useBots((s) => (s.typing[conversation.id]?.length ?? 0) > 0);
   // What the other side is up to, under the name on a phone, where there's a bar for it: the live
   // step, or that it's writing. The same line the chat's working row and the sidebar read from.
-  const activity = useBots((s) => liveLine(conversation, s.status, s.typing[conversation.id]));
+  const activity = useBots((s) => liveLine(conversation, s.status, s.typing[conversation.id], s.shown));
+  // Three dots in place of the words exactly while that bot's mascot is three dots, here and in the sidebar.
+  const lineBot = useBots((s) => (s.typing[conversation.id]?.length ? undefined : liveBot(conversation, s.status)));
+  const [linePhase] = usePlainPhases(lineBot ? [lineBot] : []);
   // Its mascot fidgets while it's busy, here or elsewhere, as the sidebar's does; a group's others doze.
   const working = useBusyBots(conversation);
   const busy = working.length > 0;
@@ -2494,15 +2487,15 @@ export function BotChat({ conversation }: { conversation: Conversation }) {
               <ConversationAvatar conversation={conversation} size={36} busy={busy} working={working} mood={typing ? "thinking" : undefined} badge={false} />
               <span className="bots-head-text">
                 <span className="bots-head-name">{name}</span>
-                {activity && plainWork(activity) ? (
-                  // Plain work: the working row's three dots, small, in place of the words.
+                {activity && linePhase === "dots" ? (
+                  // Nothing to name: the working row's three dots, small, in place of the words.
                   <span className="bots-head-sub bots-head-dots" role="img" aria-label={activity}>
                     <i />
                     <i />
                     <i />
                   </span>
                 ) : (
-                  sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{sub}</span>
+                  sub && <span className={cx("bots-head-sub", activity && "bots-head-sub-live")}>{linePhase === "settling" ? "" : sub}</span>
                 )}
               </span>
               {!remote && <HeadTasks conversation={conversation} mobile />}
