@@ -278,7 +278,7 @@ export interface StoredMessage {
   message: BotMessage;
 }
 
-const searchable = (m: BotMessage) => [m.text, m.html?.title, m.question?.title, ...(m.question?.options.map((o) => o.label) ?? []), ...(m.poll?.options.map((o) => o.label) ?? []), m.plan?.title, ...(m.plan?.steps.map((s) => s.text) ?? [])].filter(Boolean).join("\n");
+const searchable = (m: BotMessage) => [m.text, m.html?.title, ...(m.question?.steps ?? (m.question ? [m.question] : [])).flatMap((q) => [q.title, ...q.options.map((o) => o.label)]), ...(m.poll?.options.map((o) => o.label) ?? []), m.plan?.title, ...(m.plan?.steps.map((s) => s.text) ?? [])].filter(Boolean).join("\n");
 
 export function addMessage(conversationId: string, m: BotMessage): number {
   let seq = 0;

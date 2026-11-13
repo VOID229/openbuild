@@ -1467,6 +1467,15 @@ function questionBody(q: Question, shared: boolean): string {
   const options = q.options.map((o) => o.label).join(" / ");
   // In a shared chat the friend can answer too, in their own words.
   const typed = (text: string) => (shared ? untrustedData(text) : text);
+  // Several questions in one card: answers show only once it's submitted, all of them together.
+  if (q.steps) {
+    const each = q.steps.map((s, i) => {
+      const choices = s.options.map((o) => o.label).join(" / ");
+      const answer = !q.submitted || s.answer === undefined ? "" : ` → ${s.options.find((o) => o.key === s.answer)?.label ?? typed(s.answer)}`;
+      return `${i + 1}. “${s.title}”${choices ? ` [${choices}]` : ""}${answer}`;
+    });
+    return `(asked with question, ${q.steps.length} in one card: ${each.join("; ")}, ${q.submitted ? "answered" : "not answered yet"})`;
+  }
   const shown = q.answer === undefined ? undefined : (q.options.find((o) => o.key === q.answer)?.label ?? typed(q.answer));
   const answer = q.closed === "gone" ? "closed: its thread stopped waiting on it" : q.closed ? `closed: answered in its thread${shown === undefined ? "" : `: ${shown}`}` : shown === undefined ? "not answered yet" : `answered: ${shown}`;
   return `(asked with question: “${q.title}”${options ? ` [${options}]` : ""}, ${answer})`;

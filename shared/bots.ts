@@ -255,12 +255,32 @@ export function toggleReactionIn(list: Reaction[], emoji: string, by: Author, to
   return { next: list.filter((r) => !gone.has(reactionId(r))) };
 }
 
+/** How many questions one card steps through. */
+export const QUESTION_STEPS = 5;
+
+/** One question of a card that asks several. */
+export interface QuestionStep {
+  title: string;
+  hint?: string;
+  options: { key: string; label: string }[];
+  /** The key of the option the user picked, or what they typed instead. Theirs alone until the card is submitted. */
+  answer?: string;
+}
+
 export interface Question {
   title: string;
   hint?: string;
   options: { key: string; label: string }[];
   /** The key of the option the user picked, or what they typed instead. */
   answer?: string;
+  /**
+   * Every question of a card that asks several (two to {@link QUESTION_STEPS}), the first one
+   * included: title, hint and options above repeat it. The user steps through them, and the
+   * answers count only once the card is submitted.
+   */
+  steps?: QuestionStep[];
+  /** A card of several questions was submitted: its answers are final, and the bot has them. */
+  submitted?: boolean;
   /** A first-run question the server sets the choices of and acts on itself: "developer" asks whether the user writes code, "team" makes the starter team when taken. */
   offer?: "team" | "developer";
   /** The coding thread's question this card passes on, so the card closes when it's settled in the thread. */
@@ -271,6 +291,12 @@ export interface Question {
    */
   closed?: "answered" | "gone";
 }
+
+/** An answer as the user reads it: the picked option's label, or what they typed. */
+export const answerLabel = (q: Pick<QuestionStep, "options" | "answer">): string | undefined => (q.answer === undefined ? undefined : (q.options.find((o) => o.key === q.answer)?.label ?? q.answer));
+
+/** A submitted card's answers as the one message that delivers them: each under its number, paired with its question. */
+export const answersText = (steps: QuestionStep[]): string => steps.map((s, i) => `${i + 1}. ${s.title} → ${answerLabel(s) ?? ""}`).join("\n");
 
 /** Up to A–J. */
 export const POLL_OPTIONS = 10;
