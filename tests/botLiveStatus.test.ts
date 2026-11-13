@@ -69,9 +69,9 @@ async function run(name: string, body: string) {
 
 test("a turn's status follows each step as it starts and ends, and is never Thinking", () => run("steps", `
   post(own, 'me', 'update my notes');
-  // At work from the moment the message lands, before Pi has even been asked: plain words, not Thinking.
+  // At work from the moment the message lands, before Pi has even been asked: on the message, not Thinking.
   a.equal(status()?.state, 'working');
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   await until(() => prompts.length === 1 && mind.steerable);
   sent.length = 0;
   feed({ type: 'agent_start' });
@@ -79,7 +79,7 @@ test("a turn's status follows each step as it starts and ends, and is never Thin
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'thinking_start', contentIndex: 0 });
   update({ type: 'thinking_delta', contentIndex: 0, delta: 'They want the notes file changed.' });
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   // The model reasoning changes nothing the status says, so nothing is sent for it.
   a.deepEqual(sent, []);
 
@@ -101,24 +101,27 @@ test("a turn's status follows each step as it starts and ends, and is never Thin
   a.equal(line(), 'Updating your notes');
   a.equal(status().quiet, undefined);
 
-  // The tool ends: its line is gone in the same tick, replaced by plain work while the model decides what's next.
+  // The tool ends: its line stays while the model decides what's next, rather than plain words (or dots).
   end('write', 'c1');
-  a.equal(line(), 'Getting it done');
+  a.equal(line(), 'Updating your notes');
   feed({ type: 'turn_end' });
   feed({ type: 'turn_start' });
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'thinking_delta', contentIndex: 0, delta: 'Now check it.' });
-  a.equal(line(), 'Getting it done');
+  a.equal(line(), 'Updating your notes');
+  // A heading in its reasoning says what it's on now.
+  update({ type: 'thinking_delta', contentIndex: 0, delta: '\\n\\n**Double-checking the notes**\\n\\nRead it back.' });
+  a.equal(line(), 'Double-checking the notes');
 
   // A tool with no line of its own says what it reads; an unknown one is named.
   start('read', 'c2', { path: '/home/x/notes.md' });
   a.equal(line(), 'Reading notes.md');
   end('read', 'c2');
-  a.equal(line(), 'Making progress');
+  a.equal(line(), 'Reading notes.md');
   start('linear_create_issue', 'c3', {});
   a.equal(line(), 'Using linear create issue');
   end('linear_create_issue', 'c3');
-  a.equal(line(), 'Sorting it out');
+  a.equal(line(), 'Using linear create issue');
 
   // A page is named in the status while its HTML is still being written.
   update({ type: 'toolcall_start', contentIndex: 0, id: 'c4', toolName: 'html_render' });
@@ -126,29 +129,29 @@ test("a turn's status follows each step as it starts and ends, and is never Thin
   update({ type: 'toolcall_delta', contentIndex: 0, delta: '{"title":"Weekly signups","html":"<!doctype html><title>' });
   a.equal(line(), 'Drawing Weekly signups');
   feed({ type: 'message_end', message: { role: 'assistant', stopReason: 'aborted' } });
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Drawing Weekly signups');
 
   // Pi's own waits are steps too.
   feed({ type: 'compaction_start', reason: 'threshold' });
   a.equal(line(), 'Summarizing the conversation so far');
   feed({ type: 'compaction_end', reason: 'threshold' });
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Drawing Weekly signups');
   feed({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: '529 overloaded' });
   a.equal(line(), 'Trying again');
   feed({ type: 'auto_retry_end', success: true, attempt: 2 });
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Drawing Weekly signups');
 
-  // Nothing sent in the whole turn ever said Thinking, or nothing.
+  // Nothing sent in the whole turn ever said Thinking, or nothing, or plain words.
   await over(prompts[0]);
   a.equal(status(), undefined);
-  for (const s of sent) if (s.state === 'working') a.ok(s.activity && !/thinking/i.test(s.activity), JSON.stringify(s));
+  for (const s of sent) if (s.state === 'working') a.ok(s.activity && !/thinking/i.test(s.activity) && !plain(s.activity), JSON.stringify(s));
 `), 30_000);
 
 test("text streaming reads Writing a reply; a [silent] in the making and text after a sent message don't", () => run("writing", `
   const first = await turn();
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'text_start', contentIndex: 0 });
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   update({ type: 'text_delta', contentIndex: 0, delta: 'Sure, ' });
   a.equal(line(), 'Writing a reply');
   update({ type: 'text_delta', contentIndex: 0, delta: 'here is what I found.' });
@@ -172,7 +175,7 @@ test("text streaming reads Writing a reply; a [silent] in the making and text af
   a.equal(line(), 'Checking why the build failed');
   start('bash', 'b1', { status: 'Checking why the build failed', command: 'bun run build' });
   end('bash', 'b1');
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Checking why the build failed');
 
   // Writing a message with its tool: the chat shows it typing, and the status says the same.
   update({ type: 'toolcall_start', contentIndex: 0, id: 's1', toolName: 'send_message' });
@@ -184,12 +187,13 @@ test("text streaming reads Writing a reply; a [silent] in the making and text af
   // Sent: typing stops with it, and what's left of the turn stays out of the chat.
   a.equal(typing(), false);
   a.equal(status().quiet, true);
-  a.ok(plain(line()), line());
+  // Quiet from here, and "Writing a reply" is over with the message: back to what it was on.
+  a.equal(line(), 'Checking why the build failed');
   // The closing [silent] isn't a reply, nor is anything else after a message went out.
   feed({ type: 'message_start', message: { role: 'assistant', content: [] } });
   update({ type: 'text_delta', contentIndex: 0, delta: '[sil' });
   update({ type: 'text_delta', contentIndex: 0, delta: 'ent]' });
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Checking why the build failed');
   await over(second);
 
   // A turn that only ever says [silent] never claims to be writing.
@@ -219,7 +223,7 @@ test("tools side by side each keep their line until their own end, and a sent me
   a.equal(line(), 'Building the app');
   a.equal(mind.tool.name, 'bash');
   end('bash', 'p1');
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Building the app');
   a.equal(mind.tool, undefined);
 
   // A message sent beside work that's still going: the work keeps its line.
@@ -234,7 +238,7 @@ test("tools side by side each keep their line until their own end, and a sent me
   a.equal(status().thread, '1a2b3c4d');
   end('openbuild', 'p3');
   a.equal(status().thread, undefined);
-  a.ok(plain(line()), line());
+  a.equal(line(), 'Reading the fix thread');
   // Two bubbles written in one response: it's typing until the last one is out.
   update({ type: 'toolcall_start', contentIndex: 0, id: 'm1', toolName: 'send_message' });
   update({ type: 'toolcall_start', contentIndex: 1, id: 'm2', toolName: 'send_message' });
@@ -263,9 +267,9 @@ test("a record that trails in after the turn doesn't put the bot back to work, a
   a.deepEqual(sent, []);
   // The next turn shows nothing of the last one.
   const second = await turn();
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   update({ type: 'thinking_delta', contentIndex: 0, delta: 'hm' });
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   a.equal(mind.tool, undefined);
   await over(second);
 `), 30_000);
@@ -309,10 +313,10 @@ test("a fallback taking over says so, until that model gets going", () => run("f
   post(own, 'me', 'hello');
   await until(() => prompts.length === 1 && mind.steerable);
   a.equal(on, 'spare/two');
-  a.deepEqual(sent.map((s) => s.activity), ['Working on it', 'Trying another model']);
+  a.deepEqual(sent.map((s) => s.activity), ['Reading your message', 'Trying another model']);
   // Its first sign of life puts the line back on the work itself.
   update({ type: 'thinking_delta', contentIndex: 0, delta: 'ok' });
-  a.equal(line(), 'Working on it');
+  a.equal(line(), 'Reading your message');
   start('read', 'f1', { path: 'a.md' });
   a.equal(line(), 'Reading a.md');
   await over(prompts[0]);

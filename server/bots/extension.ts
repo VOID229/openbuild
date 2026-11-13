@@ -128,7 +128,7 @@ export function startingTools(active: string[], catalog: string[], wanted: Set<s
   const kept = active.filter((name) => !inCatalog.has(name) || want(name));
   return [...kept, ...catalog.filter((name) => want(name) && !kept.includes(name))];
 }
-const status = { type: "string", minLength: 1, description: "Required, and written first, before the other arguments: the user sees it the moment you start writing this call, and while it runs. A short custom status (a few words, at most 50 characters). Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”." };
+const status = { type: "string", minLength: 1, description: "Required, and written first, before the other arguments: the user sees it the moment you start writing this call, and while it runs. A short custom status (a few words, at most 50 characters). Say what this specific call is for in plain terms, e.g. “Updating your school.md” or “Figuring out why the build broke”, never a generic “Working on it”. It stays up until your next call, so name the task, not the mechanics." };
 
 /**
  * Require a custom status in a work tool's parameters. It leads the schema, so the model writes it

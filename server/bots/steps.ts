@@ -2,8 +2,11 @@
 // call: it starts showing the moment the model begins writing the call (its own status line as soon
 // as that argument is written), stays while the tool runs, and is gone the moment the tool ends.
 // Tools from one response can run side by side, so steps are told apart by Pi's call id, never by
-// tool name. Between steps the status is plain working words (shared/bots.ts, WORKING_PHRASES), or
-// "Writing a reply" while the model streams text. The runner (runner.ts) turns this into BotStatus.
+// tool name. Between steps the status keeps saying what the bot is about: the heading of the model's
+// reasoning when it writes one, else the last step it named, else what the turn started on (a message
+// to read, a routine). Plain working words (shared/bots.ts, WORKING_PHRASES) are only for a turn with
+// none of those, and "Writing a reply" shows while the model streams text. The runner (runner.ts)
+// turns this into BotStatus.
 import { appById } from "../../shared/apps";
 import { workingPhrase, WRITING_REPLY } from "../../shared/bots";
 import type { PiRecord } from "../pi/rpc";
@@ -31,12 +34,31 @@ export interface Live {
   streaming: boolean;
   /** Pi is busy with something of its own before the next model call. */
   pause?: "compaction" | "retry";
-  /** Which plain phrase the gaps between steps are on, and whether the status is on one now. */
+  /** Which plain phrase the status is on when there's nothing more to say, and whether it's on one now. */
   phrase: number;
   plain: boolean;
+  /** What the turn started on ("Reading your message"): the line until the bot names a step of its own. */
+  start?: string;
+  /** The model's reasoning so far in this response (its tail), and the heading it's under right now. */
+  thinking: string;
+  thought?: string;
+  /** The last line this turn named, kept while the model works out its next step. */
+  last?: string;
 }
 
-export const newLive = (): Live => ({ steps: [], streaming: false, phrase: 0, plain: true });
+export const newLive = (start?: string): Live => ({ steps: [], streaming: false, phrase: 0, plain: true, start, thinking: "" });
+
+/**
+ * What a turn says it's doing before the bot names a step: what woke it, which it's reading and
+ * working out what to do about. Messages come first: they're what someone is waiting on.
+ */
+export function startLine(kinds: string[], direct: boolean): string {
+  if (kinds.includes("messages")) return direct ? "Reading your message" : "Reading the new messages";
+  if (kinds.includes("routine")) return "Getting started on a routine";
+  if (kinds.includes("note")) return "Reading a note";
+  if (kinds.includes("heartbeat")) return "Checking in on things";
+  return "Looking at a reaction";
+}
 
 export const COMPACTING = "Summarizing the conversation so far";
 export const RETRYING = "Trying again";
@@ -173,6 +195,24 @@ export function partialArgs(json: string): Record<string, string> {
   return out;
 }
 
+/** How much of a response's reasoning is kept to look for its heading in. */
+const THINKING_TAIL = 4000;
+
+/**
+ * The heading the model's reasoning is under right now: the last line of its own in bold
+ * ("**Checking the CI logs**"), as some models head each part of their reasoning. Undefined when it
+ * writes none. One still being written isn't taken, nor bold words inside a sentence.
+ */
+export function heading(thinking: string): string | undefined {
+  let found: string | undefined;
+  for (const m of thinking.matchAll(/(?:^|\n)[ \t]*\*\*([^*\n]{3,80})\*\*[ \t]*(?=\n|$)/g)) found = m[1];
+  const line = found && ownStatus(found);
+  return line && /[a-z]/i.test(line) ? line : undefined;
+}
+
+/** Steps whose line stays up once they're over, while the model works out what's next: work, not words for the chat or a tool being loaded. */
+const KEPT = (step: Step) => !["send_message", "question", "poll", "react", "load_tools"].includes(step.tool);
+
 const blank = (tool: string, id: string, state: Step["state"], now: number, args?: unknown, contentIndex?: number): Step => ({ id, tool, activity: activityFor(tool, args), state, since: now, args, json: "", contentIndex });
 
 /**
@@ -187,9 +227,16 @@ export function follow(live: Live, record: PiRecord, now = Date.now()): { began?
     const index = typeof ev.contentIndex === "number" ? ev.contentIndex : undefined;
     const writing = () => live.steps.findLast((s) => s.state === "writing" && s.contentIndex === index);
     if (ev.type === "text_start" || ev.type === "text_delta") live.streaming = true;
-    else if (ev.type === "thinking_start" || ev.type === "thinking_delta") live.streaming = false;
-    else if (ev.type === "toolcall_start") {
+    else if (ev.type === "thinking_start" || ev.type === "thinking_delta") {
       live.streaming = false;
+      if (ev.type === "thinking_start") live.thinking = "";
+      else if (typeof ev.delta === "string" && ev.delta) {
+        live.thinking = (live.thinking + ev.delta).slice(-THINKING_TAIL);
+        live.thought = heading(live.thinking) ?? live.thought;
+      }
+    } else if (ev.type === "toolcall_start") {
+      live.streaming = false;
+      live.thought = undefined;
       const tool = String(ev.toolName ?? "");
       if (!tool) return {};
       const step = blank(tool, String(ev.id || `call:${index ?? live.steps.length}`), "writing", now, undefined, index);
@@ -221,6 +268,8 @@ export function follow(live: Live, record: PiRecord, now = Date.now()): { began?
     live.steps = [];
     live.streaming = false;
     live.pause = undefined;
+    live.thinking = "";
+    live.thought = undefined;
     return {};
   }
   if (type === "message_end" && record.message?.role === "assistant") {
@@ -284,13 +333,18 @@ export function follow(live: Live, record: PiRecord, now = Date.now()): { began?
 /**
  * The status line for where things stand: the newest step still running, else the newest call being
  * written, else what Pi is busy with, else "Writing a reply" while its words are on their way to the
- * chat (`writing`), else plain working words. `counts` leaves out steps the chat shows some other way.
- * Each time the line falls back from something specific, the plain words move on to the next phrase.
+ * chat (`writing`). Between those, it keeps saying what the bot is about: the heading of its reasoning,
+ * else the last step it named this turn, else what the turn started on. Plain working words only when
+ * there's none of that. `counts` leaves out steps the chat shows some other way.
  */
 export function liveActivity(live: Live, opts: { writing?: boolean; counts?: (step: Step) => boolean } = {}): string {
   const steps = opts.counts ? live.steps.filter(opts.counts) : live.steps;
   const step = steps.findLast((s) => s.state === "running" && s.activity) ?? steps.findLast((s) => s.activity);
-  const specific = step?.activity || (live.pause === "compaction" ? COMPACTING : live.pause === "retry" ? RETRYING : opts.writing ? WRITING_REPLY : "");
+  // A heading is the newest thing it named until a step comes along; the step is newer from then on.
+  if (step?.activity) live.thought = undefined;
+  if (step?.activity && KEPT(step)) live.last = step.activity;
+  else if (live.thought) live.last = live.thought;
+  const specific = step?.activity || (live.pause === "compaction" ? COMPACTING : live.pause === "retry" ? RETRYING : opts.writing ? WRITING_REPLY : "") || live.last || live.start;
   if (specific) {
     live.plain = false;
     return specific;
