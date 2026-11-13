@@ -118,6 +118,9 @@ export function ChatView({ chat }: { chat: Chat }) {
   const anchors = useRef<Anchor[]>([]);
   // Attached: following the bottom. Any manual scroll up detaches; scrolling all the way down reattaches.
   const stick = useRef(true);
+  /** Whether the view sat at the very bottom when it last came to rest: a send from there follows the
+   *  thread down even when something (a disclosure opened) had detached it; from anywhere else it doesn't. */
+  const atEnd = useRef(true);
   const lastTop = useRef(0);
   // Where holding the view last put it, so its scroll event isn't taken for the reader's.
   const moved = useRef(-1);
@@ -245,6 +248,7 @@ export function ChatView({ chat }: { chat: Chat }) {
       setAtBottom(gap(el) < 72);
     } else el.scrollTop = el.scrollHeight;
     lastTop.current = el.scrollTop;
+    atEnd.current = stick.current;
   }, [chat.id]);
 
   // Opened from a search result: bring the matching message into view and highlight the matched words.
@@ -261,13 +265,14 @@ export function ChatView({ chat }: { chat: Chat }) {
     return highlightWords(scroller.current!, searchFocus.words);
   }, [searchFocus]);
 
-  // With auto scroll on, sending a message reattaches and brings it into view.
+  // Sending a message (or a queued one going out) follows it down only from the bottom: a reader who
+  // scrolled up stays exactly where they are, and the reply comes in below them. Before the resize
+  // observer sees the new message, so a reattached view goes down with it.
   const prevUsers = useRef(userCount);
-  useEffect(() => {
-    if (autoScroll && userCount > prevUsers.current) {
+  useLayoutEffect(() => {
+    if (autoScroll && userCount > prevUsers.current && atEnd.current) {
       stick.current = true;
       setSlack(0);
-      glide();
     }
     prevUsers.current = userCount;
   }, [userCount]);
@@ -282,8 +287,10 @@ export function ChatView({ chat }: { chat: Chat }) {
       if (!view) return;
       // New output fills the room first.
       trimSlack(view);
-      if (!following()) hold();
-      else if (view.querySelector("[data-fold]")) {
+      if (!following()) {
+        hold();
+        atEnd.current = gap(view) <= 2 && !slack.current;
+      } else if (view.querySelector("[data-fold]")) {
         // A fold moving (a finished reply folding its work) keeps the bottom pinned exactly, before
         // it paints, rather than gliding a frame behind.
         cancelAnimationFrame(glideFrame.current);
@@ -326,6 +333,7 @@ export function ChatView({ chat }: { chat: Chat }) {
     else if (delta < 0) detach();
     if (!ours && !wasFollowing && !following()) scrolled(delta);
     trimSlack(el);
+    atEnd.current = following() || (g <= 2 && !slack.current);
     setAtBottom(g < 72 || (autoScroll && stick.current));
     remember();
   };
