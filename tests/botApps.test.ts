@@ -223,3 +223,130 @@ test("an app connects, works, refreshes, signs out and disconnects against a rea
     await rm(dir, { recursive: true, force: true });
   }
 }, 60_000);
+
+test("the primary hears when the user connects, signs in to, signs out of or disconnects an app, and who relies on it", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openbots-apps-notices-"));
+  const fake = Bun.spawn([process.execPath, join(import.meta.dir, "fakeMcpServer.ts")], { stdout: "pipe", stderr: "inherit" });
+  try {
+    const { value } = await fake.stdout.getReader().read();
+    const origin = new TextDecoder().decode(value).trim();
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "-e",
+        `
+        const { default: assert } = await import("node:assert/strict");
+        const apps = await import("./server/bots/apps.ts");
+        const svc = await import("./server/bots/service.ts");
+        const github = await import("./server/github/auth.ts");
+        const origin = process.env.FAKE;
+        const control = (body) => fetch(origin + "/control", { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+        const base = { by: "Test", description: "A test.", category: "code", docs: "https://example.com" };
+        apps.addAppForTests({ ...base, id: "fake", name: "Fake", connection: { kind: "oauth", url: origin + "/mcp" } });
+        apps.addAppForTests({ ...base, id: "fake-open", name: "Open", connection: { kind: "open", url: origin + "/open" } });
+        apps.addAppForTests({ ...base, id: "fake-gh", name: "Hub", githubAuth: true, connection: { kind: "token", url: origin + "/open", headers: { Authorization: "Bearer {token}" } }, fields: [{ id: "token", label: "Token", secret: true }] });
+
+        const wakes = [];
+        svc.setHooks({ wake: (id, w) => wakes.push({ id, ...w }), stop() {} });
+        svc.updateSettings({ user: { name: "Outis" } });
+        const boss = svc.createBot({ name: "Boss" }).bot;
+        const tracer = svc.createBot({ name: "Tracer", role: "Triages the Fake issues every morning." }).bot;
+        const scout = svc.createBot({ name: "Scout" }).bot;
+        const quiet = svc.createBot({ name: "Quiet", instructions: "Keep notes. Nothing about fakes." }).bot;
+        svc.saveRoutine(scout.id, { id: crypto.randomUUID(), title: "Morning sweep", schedule: "every day at 9", task: "Read new tickets in fake and sum them up.", enabled: true });
+        svc.saveRoutine(quiet.id, { id: crypto.randomUUID(), title: "Off", schedule: "every day at 9", task: "Check Fake.", enabled: false });
+        assert.equal(svc.fullBot(boss.id).primary, true);
+        const take = () => wakes.splice(0);
+        const told = () => {
+          const all = take();
+          assert.equal(all.length, 1, JSON.stringify(all));
+          assert.equal(all[0].id, boss.id);
+          assert.equal(all[0].kind, "note");
+          assert.equal(all[0].conversationId, svc.directId(boss.id));
+          return all[0].text;
+        };
+        const signIn = async () => {
+          const { authorize } = await apps.connect("fake", { origin: "http://localhost:9" });
+          // Starting a sign-in changes nothing the bots can use yet.
+          assert.deepEqual(take(), []);
+          const back = await fetch(authorize, { redirect: "manual" });
+          return new URL(back.headers.get("location")).searchParams;
+        };
+
+        // Connected through its sign-in: which app, and who already names it.
+        assert.equal((await apps.finish(await signIn())).error, undefined);
+        let text = told();
+        assert.match(text, /^Outis connected Fake \\(fake\\), so every bot can use it now\\./);
+        assert.match(text, /Where it's known, these rely on it:\\n- Bots whose instructions or role mention it: Tracer \\(\\w{8}\\)\\.\\n- Scout's routine “Morning sweep” \\(every day at 9\\) mentions it\\./);
+        assert.doesNotMatch(text, /Quiet|Off/);
+        assert.match(text, /needs no reply/);
+
+        // A bot using it is noted; a sign-in that lapses on its own isn't the user's doing, so nobody is told.
+        await apps.useApp({ app: "fake", tool: "whoami" }, quiet.id);
+        await control({ revoke: true });
+        await assert.rejects(apps.useApp({ app: "fake", tool: "echo", arguments: { text: "x" } }, quiet.id), /signed out/);
+        assert.equal(apps.storedApps().fake.status, "needs-auth");
+        assert.deepEqual(take(), []);
+
+        // Signing back in.
+        assert.equal((await apps.finish(await signIn())).error, undefined);
+        text = told();
+        assert.match(text, /^Outis signed back in to Fake \\(fake\\), so bots can use it again\\./);
+        assert.match(text, /- Bots that used it in the last 30 days: Quiet \\(\\w{8}\\)\\./);
+        assert.match(text, /- Bots whose instructions or role mention it: Tracer/);
+
+        // Signing in again while it works is said too; a refused sign-in that leaves it working isn't.
+        assert.equal((await apps.finish(await signIn())).error, undefined);
+        assert.match(told(), /^Outis signed in to Fake \\(fake\\) again; it's still connected\\./);
+        const refused = await signIn();
+        refused.set("error", "access_denied");
+        assert.equal((await apps.finish(refused)).error, "Access was denied.");
+        assert.deepEqual(take(), []);
+
+        // An app with nothing to sign in to, connected and disconnected.
+        await apps.connect("fake-open", { origin: "http://localhost:9" });
+        text = told();
+        assert.match(text, /^Outis connected Open \\(fake-open\\), so every bot can use it now\\./);
+        assert.doesNotMatch(text, /rely on it/);
+        await apps.disconnect("fake-open");
+        text = told();
+        assert.match(text, /^Outis disconnected Open \\(fake-open\\): bots can't use it anymore\\./);
+        assert.match(text, /Work that needs it will fail until it's back/);
+        // Disconnecting what isn't connected changes nothing for the bots.
+        await apps.disconnect("fake-open");
+        assert.deepEqual(take(), []);
+
+        // Signing out of GitHub signs out the app that uses it: the user's doing, so the primary hears.
+        github.onGithubChange(apps.githubChanged);
+        await apps.connect("fake-gh", { origin: "http://localhost:9", fields: { token: "ghp_pasted" } });
+        assert.equal(apps.storedApps()["fake-gh"].status, "connected", apps.storedApps()["fake-gh"].error);
+        assert.match(told(), /^Outis connected Hub \\(fake-gh\\)/);
+        await github.disconnect();
+        assert.equal(apps.storedApps()["fake-gh"].status, "needs-auth");
+        text = told();
+        assert.match(text, /^Outis signed out of Hub \\(fake-gh\\) \\(it uses OpenBuild's GitHub sign-in\\): it's still listed, but bots can't use it until they sign in again\\./);
+
+        // Disconnecting Fake, with who relies on it.
+        await apps.disconnect("fake");
+        text = told();
+        assert.match(text, /^Outis disconnected Fake \\(fake\\)/);
+        assert.match(text, /Quiet \\(\\w{8}\\)/);
+        assert.match(text, /Scout's routine “Morning sweep”/);
+
+        process.exit(0);
+      `,
+      ],
+      {
+        cwd: join(import.meta.dir, ".."),
+        env: { ...process.env, FAKE: origin, OPENCHAT_DATA_DIR: join(dir, "data"), OPENCHAT_SECRETS: "file", OPENCHAT_SECRETS_FILE: join(dir, "secrets.json"), PI_CODING_AGENT_DIR: join(dir, "pi") },
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const [code, err] = await Promise.all([child.exited, new Response(child.stderr).text()]);
+    if (code !== 0) throw new Error(err);
+  } finally {
+    fake.kill();
+    await rm(dir, { recursive: true, force: true });
+  }
+}, 60_000);

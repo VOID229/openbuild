@@ -7,6 +7,7 @@ import { isReadTool } from "../../shared/github";
 import { GITHUB_SCOPE } from "../../shared/types";
 import { choosePat, githubToken } from "../github/auth";
 import * as vault from "../vault";
+import { firstName } from "../../shared/bots";
 import * as db from "./db";
 import { beginSignIn, callTool, close, finishSignIn, getOwnClient, getSecrets, listTools, NeedsSignIn, saveOwnClient, saveSecrets, type OwnClient, type ToolInfo, type ToolOutput } from "./mcp";
 import { installSkills, readSkill, removeSkills, type InstalledSkill } from "./skills";
@@ -30,8 +31,10 @@ interface Flow {
   appId: string;
   redirect: string;
   at: number;
+  /** What the app was to the bots before this sign-in began, for telling the primary how it ended. */
+  was?: Reach;
 }
-const kept = globalThis as { openbotsAppFlows?: Map<string, Flow>; openbotsExtraApps?: CatalogApp[] };
+const kept = globalThis as { openbotsAppFlows?: Map<string, Flow>; openbotsExtraApps?: CatalogApp[]; openbotsAppsChanging?: Set<string> };
 const flows = (kept.openbotsAppFlows ??= new Map());
 const FLOW_TTL = 15 * 60_000;
 
@@ -144,8 +147,23 @@ export interface ConnectInput {
  */
 export async function connect(id: string, input: ConnectInput): Promise<{ authorize?: string; app?: AppView }> {
   const app = need(id);
-  const c = app.connection;
   const before = storedApps()[id];
+  const was = reachOf(before);
+  changing.add(id);
+  let result: Awaited<ReturnType<typeof connecting>> | undefined;
+  try {
+    return (result = await connecting(app, before, input));
+  } finally {
+    changing.delete(id);
+    // A sign-in that's only begun changes nothing yet: finish tells how it ends. Keys or settings
+    // saved and checked are connecting it again, even when it already was.
+    if (!result?.authorize) tellChange(app, was, "connect", !!result);
+  }
+}
+
+async function connecting(app: CatalogApp, before: StoredApp | undefined, input: ConnectInput): Promise<{ authorize?: string; app?: AppView }> {
+  const id = app.id;
+  const c = app.connection;
   const { values, secrets } = readFields(app, input.fields, before?.fields);
   await close(id);
 
@@ -174,7 +192,7 @@ export async function connect(id: string, input: ConnectInput): Promise<{ author
       throw new svc.BotsError(`Couldn't start signing in to ${app.name}: ${message(err)}`, 502);
     }
     for (const [key, flow] of flows) if (flow.appId === id || Date.now() - flow.at > FLOW_TTL) flows.delete(key);
-    flows.set(state, { appId: id, redirect, at: Date.now() });
+    flows.set(state, { appId: id, redirect, at: Date.now(), was: reachOf(before) });
     update(id, { status: before?.status === "connected" ? "connected" : "connecting", error: undefined, fields: values });
     return { authorize };
   }
@@ -204,24 +222,38 @@ export async function finish(params: URLSearchParams): Promise<{ app?: CatalogAp
   if (!flow || Date.now() - flow.at > FLOW_TTL) return { error: "This sign-in has expired or was already used. Connect the app again from OpenBots." };
   const app = catalogApp(flow.appId);
   if (!app) return { error: "That app isn't in the catalog anymore." };
+  const was = flow.was ?? reachOf(storedApps()[app.id]);
+  changing.add(app.id);
+  let error: string | undefined;
+  try {
+    error = await signedIn(app, flow, params);
+    return { app, error };
+  } finally {
+    changing.delete(app.id);
+    tellChange(app, was, "sign-in", error === undefined);
+  }
+}
+
+/** The rest of a sign-in the service sent the user back from. Returns what went wrong, if anything. */
+async function signedIn(app: CatalogApp, flow: Flow, params: URLSearchParams): Promise<string | undefined> {
   const refused = params.get("error");
   if (refused) {
     const why = params.get("error_description") || (refused === "access_denied" ? "Access was denied." : refused);
     const was = storedApps()[app.id];
     if (was?.status !== "connected") update(app.id, { status: "error", error: why });
-    return { app, error: why };
+    return why;
   }
   const code = params.get("code");
-  if (!code) return { app, error: "The sign-in came back without a code." };
+  if (!code) return "The sign-in came back without a code.";
   try {
     const c = app.connection;
     await finishSignIn(app, storedApps()[app.id]?.fields ?? {}, flow.redirect, code, c.kind === "client" ? await clientFor(c.client) : undefined);
   } catch (err) {
     update(app.id, { status: "error", error: message(err) });
-    return { app, error: message(err) };
+    return message(err);
   }
   const result = await check(app.id);
-  return { app, error: result.status === "connected" ? undefined : result.error };
+  return result.status === "connected" ? undefined : (result.error ?? "It isn't connected.");
 }
 
 /** The address a sign-in ended on, pasted by a user whose browser couldn't bring it back here. */
@@ -257,9 +289,12 @@ async function target(app: CatalogApp) {
 /** OpenBuild's GitHub credential changed (connected, disconnected, another one picked): reconnect the apps that use it. */
 export async function githubChanged() {
   for (const [id, s] of Object.entries(storedApps())) {
-    if (!catalogApp(id)?.githubAuth) continue;
+    const app = catalogApp(id);
+    if (!app?.githubAuth) continue;
     await close(id);
     if (s.status === "connected" || s.status === "needs-auth" || s.status === "error") await check(id);
+    // Connecting the app itself can pick a GitHub credential: that connect tells the primary, once.
+    if (!changing.has(id)) tellChange(app, reachOf(s), "github", true);
   }
 }
 
@@ -292,12 +327,91 @@ async function refreshSkills(app: CatalogApp) {
 }
 
 export async function disconnect(id: string) {
-  need(id);
+  const app = need(id);
+  const was = reachOf(storedApps()[id]);
   await close(id);
   for (const [key, flow] of flows) if (flow.appId === id) flows.delete(key);
   removeSkills(id);
   await saveSecrets(id, () => undefined);
   patch(id, undefined);
+  tellChange(app, was, "disconnect", false);
+}
+
+// ------------------------------------------------------------------ telling the primary
+
+/** What an app is to the bots: connected, signed out (listed, but unusable), or not there. */
+type Reach = "on" | "signed-out" | "off";
+const reachOf = (s: StoredApp | undefined): Reach => (s?.status === "connected" ? "on" : s?.status === "needs-auth" ? "signed-out" : "off");
+
+/** Apps the user is connecting or signing in to right now: the GitHub change that can set off is told by that, once. */
+const changing = (kept.openbotsAppsChanging ??= new Set<string>());
+
+/** When each bot last called each app's tools: which bots rely on an app, as far as that's known. */
+const USERS = "app-users";
+const RECENT_USE = 30 * 24 * 60 * 60_000;
+const appUsers = () => db.getValue<Record<string, Record<string, number>>>(USERS) ?? {};
+
+function noteUse(appId: string, botId: string) {
+  const all = appUsers();
+  all[appId] = { ...all[appId], [botId]: Date.now() };
+  db.setValue(USERS, all);
+}
+
+const mentions = (app: CatalogApp, text: string | undefined) => {
+  const words = [app.name, app.id].map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return !!text && new RegExp(`(^|[^\\p{L}\\p{N}])(${words.join("|")})($|[^\\p{L}\\p{N}])`, "iu").test(text);
+};
+
+/** Which bots and routines rely on an app, where that's known: who used it lately, and who names it. */
+function reliance(app: CatalogApp): string[] {
+  const bots = db.listBots();
+  const label = (b: db.StoredBot) => `${b.name} (${b.id.slice(0, 8)})`;
+  const used = appUsers()[app.id] ?? {};
+  const lines: string[] = [];
+  const users = bots.filter((b) => Date.now() - (used[b.id] ?? 0) < RECENT_USE);
+  if (users.length) lines.push(`- Bots that used it in the last 30 days: ${users.map(label).join(", ")}.`);
+  const named = bots.filter((b) => !users.includes(b) && (mentions(app, b.instructions) || mentions(app, b.role)));
+  if (named.length) lines.push(`- Bots whose instructions or role mention it: ${named.map(label).join(", ")}.`);
+  for (const b of bots) {
+    for (const r of db.routines(b.id)) {
+      if (r.enabled && (mentions(app, r.title) || mentions(app, r.task))) lines.push(`- ${firstName(b.name)}'s routine “${r.title.slice(0, 120)}” (${r.schedule}) mentions it.`);
+    }
+  }
+  return lines;
+}
+
+/**
+ * Tell the primary what the user just did to an app, if it changed what the bots can use. `renewed`:
+ * the user connected or signed in to it again while it was connected, which is worth saying too.
+ */
+function tellChange(app: CatalogApp, was: Reach, how: "connect" | "sign-in" | "disconnect" | "github", renewed: boolean) {
+  const s = storedApps()[app.id];
+  const now = how === "disconnect" ? "off" : reachOf(s);
+  const name = `${app.name} (${app.id})`;
+  let what: string;
+  let lost = false;
+  if (now === "on") {
+    if (was === "on" && !renewed) return;
+    what = was === "on"
+      ? how === "github" ? `changed the GitHub sign-in ${name} uses; it's still connected` : how === "sign-in" ? `signed in to ${name} again; it's still connected` : `connected ${name} again, with new settings or keys; it's still connected`
+      : was === "signed-out" ? `signed back in to ${name}, so bots can use it again` : `connected ${name}, so every bot can use it now`;
+  } else if (was === "off" || was === now) {
+    return;
+  } else {
+    lost = true;
+    what = now === "signed-out"
+      ? `signed out of ${name}${how === "github" ? " (it uses OpenBuild's GitHub sign-in)" : ""}: it's still listed, but bots can't use it until they sign in again`
+      : how === "disconnect" ? `disconnected ${name}: bots can't use it anymore` : `changed ${name}'s connection, and it can't be reached now${s?.error ? ` (${s.error.slice(0, 200)})` : ""}: bots can't use it until that's fixed`;
+  }
+  const user = svc.getSettings().user?.name || "The user";
+  const relied = reliance(app);
+  svc.tellPrimary([
+    `${user} ${what}.`,
+    relied.length ? `Where it's known, these rely on it:\n${relied.join("\n")}` : "",
+    lost
+      ? "Work that needs it will fail until it's back: adjust or pause what can't run without it, and tell the user if something they count on depends on it. If nothing does, stay [silent]."
+      : "That's just so you know: it needs no reply. If something was waiting on it, pick it back up; otherwise stay [silent].",
+  ].filter(Boolean).join("\n\n"));
 }
 
 /** Forget the user's own OAuth app for a service. Apps signed in through it stay signed in until their tokens lapse. */
@@ -398,10 +512,11 @@ export async function appsTool(p: Record<string, unknown>): Promise<unknown> {
 }
 
 /** Call one of an app's tools for a bot. */
-export async function useApp(p: Record<string, unknown>): Promise<ToolOutput> {
+export async function useApp(p: Record<string, unknown>, botId?: string): Promise<ToolOutput> {
   const { app, s } = connectedApp(p.app);
   const tool = String(p.tool ?? "").trim();
   if (!tool) throw new svc.BotsError("Say which tool.");
+  if (botId) noteUse(app.id, botId);
   // OpenBuild's read-only rule, enforced here whatever the token could do on GitHub.
   if (app.githubAuth && s.fields?.access !== "write" && !isReadTool(tool, s.tools?.find((t) => t.name === tool))) {
     throw new svc.BotsError(`${app.name} is read-only in OpenBuild, so ${tool} wasn't run. The user can allow writing in Marketplace → ${app.name}.`, 403);

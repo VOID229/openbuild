@@ -143,7 +143,7 @@ async function handle(botId: string, method: string, p: Record<string, unknown>,
     case "apps":
       return p.action === "connect" ? offerApp(botId, p) : apps.appsTool(p);
     case "use_app":
-      return apps.useApp(p);
+      return apps.useApp(p, botId);
     case "routine":
       return routine(botId, p);
     case "ask_bot":
