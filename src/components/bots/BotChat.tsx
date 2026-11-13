@@ -1492,6 +1492,10 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
   /** Attached: keep to the bottom as things arrive. Any scroll up by the user detaches, and from then on
    *  only they move the view; scrolling all the way back down attaches it again. */
   const stick = useRef(left?.stick ?? true);
+  /** Whether the view sat at the very bottom when it last came to rest: a send from there follows the
+   *  chat down even when something (a run folding) had detached it; from anywhere else it doesn't. */
+  const atEnd = useRef(left?.stick ?? true);
+  const rested = (el: HTMLElement) => void (atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 2 && !slack.current);
   /** Where the chat last moved the view itself, so that scroll isn't taken for the user's. */
   const moved = useRef(-1);
   const lastTop = useRef(0);
@@ -1595,15 +1599,16 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Follow new messages while at the bottom, and always after the user's own. New bubbles animate
-  // in, so the jump itself can be instant. Scrolled up, what's in view stays there, whatever comes in
-  // above it (older messages, a snapshot from the server) or below. Opened again, it's where it was left.
+  // Follow new messages while at the bottom. New bubbles animate in, so the jump itself can be instant.
+  // Scrolled up, what's in view stays there, whatever comes in above it (older messages, a snapshot
+  // from the server) or below, the user's own messages too: sending never moves a view that was read
+  // up from the bottom. Opened again, it's where it was left.
   const count = conversation.messages.length + typing.length + draftCount + working.length;
   const opened = useRef(false);
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    if (last?.author === "me" && last.id !== lastSeen.current) stick.current = true;
+    if (last?.author === "me" && last.id !== lastSeen.current && atEnd.current) stick.current = true;
     lastSeen.current = last?.id;
     if (!opened.current) {
       // Hidden from the start, it's opened once it's shown.
@@ -1615,6 +1620,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
     if (stick.current) followBottom(el);
     // Held from here on by what's now in view, so the resize observer's first look doesn't undo it.
     remember();
+    rested(el);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [count, conversation.messages]);
   // Content that changes afterwards (an image loading, a reaction, "Seen", the reply bar shrinking the
@@ -1643,6 +1649,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
       // you could see above it, as it does in any messaging app. A desktop window resized keeps its top.
       else if (changed && resized && !coarse.matches) remember();
       else restore();
+      rested(el);
     });
     observer.observe(inner.current);
     observer.observe(el);
@@ -1717,6 +1724,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
         // The room kept after a fold goes as the reader moves up, a pixel for a pixel: never all at once.
         trimSlack();
         remember();
+        rested(el);
         setAway(gap > 400);
       }}
     >

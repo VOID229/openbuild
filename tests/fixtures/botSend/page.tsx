@@ -15,7 +15,9 @@ const kind = new URLSearchParams(location.search).get("kind") === "group" ? "gro
 const bot = (id: string, name: string, color: string): Bot => ({ id, name, look: { shape: "ghost", color }, instructions: "", memory: [], routines: [], createdAt: 1 });
 const bots = [bot("manager", "manager", "orange"), bot("helper", "helper", "blue")];
 const start = Date.now() - 60_000;
-const stored: BotMessage[] = Array.from({ length: 30 }, (_, i) => ({ id: `m${i}`, author: i % 2 ? "manager" : "me", at: start + i * 1000, text: `${i}. Some earlier message.` }));
+// `?n=`: how many messages the chat starts with, for a test that needs room to scroll up in.
+const count = Number(new URLSearchParams(location.search).get("n") ?? 30);
+const stored: BotMessage[] = Array.from({ length: count }, (_, i) => ({ id: `m${i}`, author: i % 2 ? "manager" : "me", at: start + i * 1000, text: `${i}. Some earlier message.` }));
 const conversation = (): Conversation => ({
   id: "chat",
   kind,
@@ -44,7 +46,7 @@ const workspace = {
   /** The chat's saved draft, as a reload would find it. */
   draft: () => getBotDraft("srv", "chat", true)?.text ?? "",
 };
-(window as any).workspace = workspace;
+Object.assign(window, { workspace, bots: useBots });
 
 const headers = { "x-openbuild-server": "srv" };
 const real = window.fetch.bind(window);
