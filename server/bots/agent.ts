@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { COLOR_BY_ID, SHAPE_BY_ID } from "../../src/lib/bots/looks";
-import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
+import { asksInList, BOT_EFFORTS, conversationTitle, emptyUpdate, fallbackMode, fitWords, HELPER_TOOLS, firstName, onlySilent, isStepStatus, mentionName, makePoll, reactionId, QUESTION_STEPS, ROLE_MAX, roleLine, todoProgress, unavailableModels, type Bot, type BotMessage, type MemoryItem, type Proactivity, type Question, type QuestionStep, type TodoChange, type TodoItem } from "../../shared/bots";
 import { BOT_HTML_WIDTH, HTML_RENDER_MAX_HEIGHT, HTML_RENDER_MAX_TITLE, HTML_RENDER_MIN_HEIGHT, htmlProblem } from "../../shared/htmlRender";
 import { SEARCH_ORDER, SEARCH_PROVIDERS, type SearchProviderId } from "../../shared/types";
 import { providerGuide, searchToolkit, toolName } from "../search";
@@ -505,12 +505,17 @@ function react(botId: string, p: Record<string, unknown>) {
 
 const lettered = (labels: string[]) => labels.map((label, i) => ({ key: String.fromCharCode(65 + i), label }));
 
+/** How long a question card's title and hint may be. Past that they end at a word, with an ellipsis. */
+export const QUESTION_TITLE_MAX = 300;
+export const QUESTION_HINT_MAX = 1000;
+
 /** One question as the tool gives it: a title, an optional hint, and its choices. */
 function askedStep(raw: unknown): QuestionStep {
   const p = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : { title: raw };
-  const title = String(p.title ?? p.question ?? "").trim().slice(0, 300);
+  const title = fitWords(String(p.title ?? p.question ?? ""), QUESTION_TITLE_MAX);
   if (!title) throw new svc.BotsError("Write the question.");
-  return { title, hint: typeof p.hint === "string" ? p.hint.slice(0, 200) : undefined, options: lettered(asStrings(p.options).slice(0, 8)) };
+  const hint = typeof p.hint === "string" ? fitWords(p.hint, QUESTION_HINT_MAX) : "";
+  return { title, hint: hint || undefined, options: lettered(asStrings(p.options).slice(0, 8)) };
 }
 
 export function askUser(botId: string, p: Record<string, unknown>) {

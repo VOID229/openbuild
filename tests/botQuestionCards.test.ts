@@ -121,3 +121,32 @@ test("a card of several questions keeps answers as they're given and tells the b
     process.exit(0);
   `);
 }, 30_000);
+
+test("a card keeps the whole hint a bot writes, and one past any sensible length ends at a word, never mid-word", async () => {
+  await isolated("hints", `
+    import { strict as a } from 'node:assert';
+    import * as db from './server/bots/db.ts';
+    const svc = await import('./server/bots/service.ts');
+    const { askUser, setFocus, QUESTION_HINT_MAX } = await import('./server/bots/agent.ts');
+    const builder = svc.createBot({ name: 'Builder' }).bot.id;
+    setFocus(builder, svc.directId(builder));
+    const stored = id => db.getMessage(id).message.question;
+
+    // Past 200 characters, as bots write them: once cut at "…a failure neve", with no ellipsis.
+    const hint = 'The checks run on every push, and a red one blocks the merge until it passes again. Turning on the nightly run as well means a flaky test is caught before a release goes out, so a failure never reaches the users unnoticed.';
+    a.ok(hint.length > 200);
+    const one = askUser(builder, { title: 'Turn on the nightly run?', hint, options: ['Yes', 'No'] });
+    a.equal(stored(one.id).hint, hint);
+    // The same in a card of several.
+    const many = askUser(builder, { questions: [{ title: 'Nightly?', hint }, { title: 'Weekly?', hint: 'Short.' }] });
+    a.deepEqual(stored(many.id).steps.map(s => s.hint), [hint, 'Short.']);
+
+    // A hint past any sensible length still ends at a word, and says it was cut.
+    const huge = askUser(builder, { title: 'Too much?', hint: 'word '.repeat(400) }).id;
+    a.ok(stored(huge).hint.length <= QUESTION_HINT_MAX);
+    a.match(stored(huge).hint, /word…$/);
+    // An empty hint is no hint.
+    a.equal(stored(askUser(builder, { title: 'None?', hint: '   ' }).id).hint, undefined);
+    process.exit(0);
+  `);
+}, 30_000);

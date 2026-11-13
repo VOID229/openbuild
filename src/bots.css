@@ -3003,11 +3003,13 @@
   line-height: 1.4;
 }
 
+/* The whole hint, however long: it wraps, and a long unbroken word (a path, a URL) breaks to fit. */
 .bm-question-hint {
   margin-top: 2px;
   font-size: 13px;
   line-height: 1.45;
   color: var(--text-2);
+  overflow-wrap: anywhere;
 }
 
 .bm-options {

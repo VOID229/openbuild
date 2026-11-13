@@ -6,7 +6,7 @@
 // Only this server's own threads, and not Durable ones: their turns are admitted differently.
 import { homedir } from "node:os";
 import { resolve, sep } from "node:path";
-import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, waitingOnThreads, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
+import { coversProject, firstName, mentionName, PERMISSION_HARNESSES, threadAbout, waitingOnThreads, type Bot, type BotThreadAccess, type PermissionHarness } from "../../shared/bots";
 import { mergeReadiness } from "../../shared/pullReadiness";
 import { REMOTE_CONTROL, remoteControlPerThread } from "../../shared/remoteControl";
 import { readEvents } from "../../shared/replies";
@@ -326,15 +326,32 @@ const hot = globalThis as { openbotsFollowing?: Set<string> };
 const following = (hot.openbotsFollowing ??= new Set<string>());
 
 /**
+ * A bot's few words for what each thread does (start and send's `about`), by thread id: what its
+ * status names the thread by while it waits on it, in place of the title. Kept past the turn, so a
+ * later send needn't repeat them; only the newest {@link ABOUTS_KEPT} threads'.
+ */
+const ABOUTS = "thread-abouts";
+const ABOUTS_KEPT = 200;
+const abouts = () => db.getValue<Record<string, string>>(ABOUTS) ?? {};
+function noteAbout(threadId: string, raw: unknown) {
+  const about = threadAbout(raw);
+  if (!about) return;
+  const { [threadId]: _, ...rest } = abouts();
+  db.setValue(ABOUTS, Object.fromEntries([...Object.entries(rest), [threadId, about]].slice(-ABOUTS_KEPT)));
+}
+
+/**
  * What a bot between turns is waiting on of OpenBuild, for its status: the threads it started or
- * wrote to whose runs it's still following (they're working), newest last, each once. The status
- * shows in the conversation it was in with the newest.
+ * wrote to whose runs it's still following (they're working), newest last, each once, by its few
+ * words for what each does or else by title. The status shows in the conversation it was in with the
+ * newest.
  */
 export function threadWait(botId: string): { activity: string; conversationId?: string; threads: number } | undefined {
   const mine = watches().filter((w) => w.botId === botId);
   const threads = [...new Map(mine.map((w) => [w.threadId, w])).values()];
-  const titles = threads.map((w) => (storage.getChat(w.threadId) as Chat | undefined)?.title ?? "");
-  const activity = waitingOnThreads(titles);
+  const named = abouts();
+  const names = threads.map((w) => named[w.threadId] ?? (storage.getChat(w.threadId) as Chat | undefined)?.title ?? "");
+  const activity = waitingOnThreads(names);
   return activity ? { activity, conversationId: mine.at(-1)?.conversationId, threads: threads.length } : undefined;
 }
 
@@ -909,6 +926,8 @@ async function start(botId: string, p: Record<string, unknown>) {
   // Which bot started it and where, so that conversation can list it while it works (BotDetails).
   const conversation = getFocus(botId) ?? svc.directId(botId);
   const chat: Chat = { id: crypto.randomUUID(), title, titleSource: "auto", ...(conversation ? { startedBy: { bot: botId, conversation } } : {}), runtime, ...(account ? { runtimeAccount: account } : {}), ...(permission ? { permission } : {}), ...(remoteControl ? { remoteControl } : {}), workspace, createdAt: now, updatedAt: now, messages: [] };
+  // Before the turn starts, so the status names it by these words from the first moment it waits.
+  noteAbout(chat.id, p.about);
   await startTurn(botId, chat, prompt, { id: model.id, name: model.name, effort, speed }, images);
   record(botId, "Started a thread", `${title} · ${runtime}`, chat.id);
   return {
@@ -1056,6 +1075,7 @@ async function deliver(botId: string, p: Record<string, unknown>) {
   const text = typeof p.text === "string" ? p.text.trim() : "";
   if (!text) throw refuse("Say what to send, in text.");
   const images = forwardedImages(botId, p.image_messages);
+  noteAbout(found.id, p.about);
   const running = await pendingRuns(found.id);
   const bot = firstName(db.getBot(botId)?.name ?? "A bot");
   if (running.length) {
@@ -1387,7 +1407,7 @@ export function guide(bot: Pick<Bot, "threads" | "primary">): string {
   const access = bot.threads;
   if (!access?.enabled) return "";
   return [
-    "You can run coding agents in the user's OpenBuild with the openbuild tool. Each thread is an agent working in one of the projects you've been given, and the user can see and join any of them. Start with action options. Its accounts list contains extra logins: pass an account id or name as harness to inspect its models or start a thread with it. Prefer a worktree unless asked otherwise, and give new threads a short title and branch_name.",
+    "You can run coding agents in the user's OpenBuild with the openbuild tool. Each thread is an agent working in one of the projects you've been given, and the user can see and join any of them. Start with action options. Its accounts list contains extra logins: pass an account id or name as harness to inspect its models or start a thread with it. Prefer a worktree unless asked otherwise, and give new threads a short title, branch_name and about (two to five words your status reads as “Waiting on <about>”, like “the bot-deleted notice”).",
     access.others ? "You can control any thread in your projects, including ones the user or other bots started: read a thread before you step into one that isn't yours." : "You can see every thread in your projects, but only control the ones you started: tell the user about anything another thread needs.",
     "When a thread you started or wrote to asks something or finishes, you'll get a note. A thread waits for an answer forever, so don't leave it hanging: answer it if you know what the user would want, and otherwise ask the user and pass on what they say. To ask them with the question tool, give it the thread and thread_question (the question's id), so the card closes if they answer in the thread instead. When the user or another bot answers one of its questions before you do, you'll be told what they answered: don't answer it or ask about it again.",
     `${access.choosePermission ? "You choose each thread's permission mode, so pick the least it needs." : "Threads you start use the permission mode the user set for that harness."} ${access.approve ? "You can answer permission prompts: read what's being asked before you allow it." : "Permission prompts are the user's to answer: when one comes up, tell them."} ${access.merge ? "You can merge pull requests once every check passes." : "Merging is the user's call: tell them when a pull request is ready."}`,
