@@ -19,9 +19,10 @@ afterAll(async () => {
 
 const open = async (width: number, height: number) => {
   const page = await Page.open(chrome!.ws, server!.url.href, width, height, "!!document.querySelector('.bots-messages')");
-  // Headless Chrome reports hover: none, which hides the hover actions, and CDP can't emulate it:
-  // show them as the (hover: hover) rule would, so the real button is there to click, and drop the sync badge that floats over the top of a short window.
-  await page.eval(`document.head.append(Object.assign(document.createElement("style"), { textContent: ".bm-actions { display: flex !important; } .bots-sync-status { display: none !important; }" }))`);
+  // Headless Chrome reports hover: none, which hides the hover actions: style the page for a mouse,
+  // so the real button is there to click, and drop the sync badge that floats over the top of a short window.
+  await page.emulateHover();
+  await page.eval(`document.head.append(Object.assign(document.createElement("style"), { textContent: ".bots-sync-status { display: none !important; }" }))`);
   await page.eval(`bots.getState().select("a")`);
   await page.until(`document.querySelector('[data-id="a-39"]') !== null`);
   await page.settle();
@@ -33,14 +34,14 @@ const anchorBox = (page: Page, id: string) =>
   page.eval<{ x: number; y: number; width: number; height: number }>(`(() => { const r = document.querySelector('[data-id="${id}"] button[aria-label="React"]').getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
 
 /**
- * Opens the picker as a person does: scroll the message `id` to `at` (a y in the window, or the
+ * Opens the picker as a person does: scroll the message `id`'s bubble to `at` (a y in the window, or the
  * block to scroll to), hover it so its actions show, and click React. Returns the anchor's box.
  */
 const react = async (page: Page, id: string, at: ScrollLogicalPosition | number = "center") => {
   if (typeof at === "number") {
     await page.eval(`(() => {
       const el = document.querySelector('.bots-messages');
-      const r = document.querySelector('[data-id="${id}"]').getBoundingClientRect();
+      const r = document.querySelector('[data-id="${id}"] .bm-bubble').getBoundingClientRect();
       el.scrollTop += r.top + r.height / 2 - ${at};
     })()`);
   } else await page.eval(`document.querySelector('[data-id="${id}"]').scrollIntoView({ block: ${JSON.stringify(at)} })`);

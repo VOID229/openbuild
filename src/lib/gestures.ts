@@ -94,9 +94,17 @@ export const replyDrag = (dx: number) => {
 /** While a finger rests on a bubble, the browser mustn't start selecting the text around it (or the whole page). */
 const noSelect = (e: Event) => e.preventDefault();
 
+/** Whether `from`, or what holds it inside `row`, scrolls sideways: the finger's sideways drag is then its. */
+function inSidewaysScroller(from: EventTarget, row: Element) {
+  for (let el = from instanceof Element ? from : null; el && el !== row; el = el.parentElement) {
+    if (el.scrollWidth > el.clientWidth && /auto|scroll/.test(getComputedStyle(el).overflowX)) return true;
+  }
+  return false;
+}
+
 /** A chat bubble under a finger: hold for actions, swipe left to reply, tap twice to love it. */
 export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () => void; onReply?: () => void; onDoubleTap?: () => void }) {
-  const press = useRef<{ x: number; y: number; moved: "no" | "swipe" | "scroll"; over: boolean }>(undefined);
+  const press = useRef<{ x: number; y: number; moved: "no" | "swipe" | "scroll"; over: boolean; strip: boolean }>(undefined);
   const hold = useRef<ReturnType<typeof setTimeout>>(undefined);
   const held = useRef(false);
   const lastTap = useRef(0);
@@ -116,7 +124,7 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
       const t = e.touches[0]!;
       row.current = e.currentTarget;
       held.current = false;
-      press.current = { x: t.clientX, y: t.clientY, moved: "no", over: false };
+      press.current = { x: t.clientX, y: t.clientY, moved: "no", over: false, strip: inSidewaysScroller(e.target, e.currentTarget) };
       document.addEventListener("selectstart", noSelect);
       hold.current = setTimeout(() => {
         if (press.current?.moved !== "no" || !onHold) return;
@@ -136,7 +144,7 @@ export function useBubbleTouch({ onHold, onReply, onDoubleTap }: { onHold?: () =
       if (p.moved === "no") {
         if (Math.hypot(dx, dy) <= SLOP) return;
         clearTimeout(hold.current);
-        p.moved = dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.2 && onReply ? "swipe" : "scroll";
+        p.moved = dx < 0 && Math.abs(dx) > Math.abs(dy) * 1.2 && onReply && !p.strip ? "swipe" : "scroll";
         if (p.moved === "swipe") row.current?.setAttribute("data-swiping", "");
       }
       if (p.moved !== "swipe") return;
