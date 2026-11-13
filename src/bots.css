@@ -1835,15 +1835,31 @@
   align-items: flex-end;
 }
 
-.bm-line {
+/* As wide as its bubble or its line of reactions, whichever is wider, so that line can start at the
+   bubble's own left edge. */
+.bm-body {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
   max-width: 100%;
 }
 
-.bm-mine .bm-line {
-  flex-direction: row-reverse;
+.bm-mine .bm-body {
+  align-items: flex-end;
+}
+
+.bm-body > .bm-foot {
+  align-self: stretch;
+}
+
+/* The bubble alone sets the line's width: its actions float beside it, so the reactions under it
+   line up with the bubble and not with them. */
+.bm-line {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .bm-bubble {
@@ -2059,15 +2075,42 @@
   object-fit: cover;
 }
 
-/* Hover actions: react, reply, more. */
+/* Hover actions: react, reply, more. They float beside the bubble, centred on it; their padding
+   bridges the gap to it, so the pointer can cross over without losing hover. */
 .bm-actions {
+  position: absolute;
+  top: 50%;
+  left: 100%;
   display: flex;
-  flex: none;
   gap: 0;
-  padding: 0 2px;
+  padding: 0 2px 0 6px;
   opacity: 0;
   pointer-events: none;
+  transform: translateY(-50%);
   transition: opacity var(--fast) var(--ease);
+}
+
+.bm-mine .bm-actions {
+  right: 100%;
+  left: auto;
+  padding: 0 6px 0 2px;
+}
+
+/* Room kept beside the bubble for them, so a wide bubble leaves them space in the conversation. */
+@media (hover: hover) {
+  .bm-body:has(> .bm-line > .bm-actions) {
+    --bm-actions-w: calc(3 * 28px + 8px);
+    margin-right: var(--bm-actions-w);
+  }
+
+  .bm-body:has(> .bm-line > .bm-actions > :nth-child(4)) {
+    --bm-actions-w: calc(4 * 28px + 8px);
+  }
+
+  .bm-mine .bm-body:has(> .bm-line > .bm-actions) {
+    margin-right: 0;
+    margin-left: var(--bm-actions-w);
+  }
 }
 
 .bm-line:hover .bm-actions,
@@ -2090,20 +2133,87 @@
   }
 }
 
-/* Reactions sit just under their bubble, lined up with its edge, so they read as its own and never
-   as the start of the next message. */
-.bm-reactions {
+/* What a bubble gathered sits in one line under it: its reactions from the bubble's left edge, and on
+   the user's last message "Seen by" at its right. The line is always there and one chip high, under
+   every bubble, so a reaction coming or going never changes a message's height or moves the chat. It
+   never wraps: wider than the bubble it grows past it on the side away from the conversation's edge,
+   and past the room there is, the reactions scroll sideways within it. */
+.bm-foot {
+  --bm-chip-h: 24px;
   position: relative;
   z-index: 1;
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 4px 0 2px 6px;
+  align-items: center;
+  gap: 12px;
+  height: var(--bm-chip-h);
+  margin: 2px 6px 0;
 }
 
-.bm-reactions-mine {
-  justify-content: flex-end;
-  margin: 4px 6px 2px 0;
+/* The scrolling strip reaches a little above the line, so a reply button over a pill's corner isn't
+   cut off; that margin lets clicks through to the bubble. */
+.bm-reactions {
+  display: flex;
+  align-self: flex-end;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: calc(var(--bm-chip-h) + 8px);
+  padding: 8px 6px 0 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+
+.bm-reactions::-webkit-scrollbar {
+  display: none;
+}
+
+/* Reactions scrolled out of sight fade at the strip's edge rather than end in a hard cut. Driven by
+   the strip's own scrolling, so a strip that fits has no fade at all. */
+@property --bm-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --bm-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@supports (animation-timeline: scroll()) {
+  .bm-reactions {
+    mask-image: linear-gradient(to right, transparent, #000 var(--bm-fade-start), #000 calc(100% - var(--bm-fade-end)), transparent);
+    animation: bm-reactions-fade linear both;
+    animation-timeline: scroll(self inline);
+  }
+}
+
+@keyframes bm-reactions-fade {
+  0% {
+    --bm-fade-start: 0px;
+    --bm-fade-end: 24px;
+  }
+
+  8% {
+    --bm-fade-start: 24px;
+  }
+
+  92% {
+    --bm-fade-end: 24px;
+  }
+
+  100% {
+    --bm-fade-start: 24px;
+    --bm-fade-end: 0px;
+  }
+}
+
+.bm-reactions > * {
+  pointer-events: auto;
 }
 
 /* A reaction and the chain answering it stay together, each answer hooked back to the one before. */
@@ -2113,9 +2223,10 @@
   align-items: center;
 }
 
-.bm-reaction-thread {
-  flex-wrap: wrap;
-  row-gap: 4px;
+.bm-reaction-thread,
+.bm-reaction-link,
+.bm-reaction {
+  flex: none;
 }
 
 .bm-reaction-arrow {
@@ -2129,7 +2240,7 @@
   animation: bm-pop var(--med) var(--ease-out) both;
 }
 
-/* The button is the pill and the mascots of the bots that reacted, so both toggle it and show who. */
+/* The button is the pill: the emoji, how many reacted, and the mascots of the bots among them. */
 .bm-reaction {
   display: inline-flex;
   animation: bm-pop var(--med) var(--ease-out) both;
@@ -2139,12 +2250,13 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
+  height: var(--bm-chip-h, 24px);
   padding: 0 8px;
   border-radius: 12px;
   border: 1px solid var(--border);
   background: var(--surface);
   font-size: 13px;
+  white-space: nowrap;
   transition: border-color var(--fast) var(--ease), background-color var(--fast) var(--ease);
 }
 
@@ -2155,34 +2267,32 @@
   }
 }
 
-/* The reacting bots sit just past the pill's lower right corner, overlapping each other. A ring in
-   the page's colour, traced around each shape, keeps them apart from each other and the pill. */
+/* The reacting bots, side by side at the pill's end: never piled on each other or hanging off it. */
+.bm-reaction-pill:has(.bm-reaction-mascots) {
+  padding-right: 6px;
+}
+
 .bm-reaction-mascots {
   display: flex;
-  align-self: flex-end;
-  margin: 0 0 -10px -6px;
+  align-items: center;
+  gap: 2px;
+  margin-left: 1px;
 }
 
 .bm-reaction-mascots .bot {
-  filter: drop-shadow(1.5px 0 0 var(--bg)) drop-shadow(-1.5px 0 0 var(--bg)) drop-shadow(0 1.5px 0 var(--bg)) drop-shadow(0 -1.5px 0 var(--bg));
+  flex: none;
 }
 
-.bm-reaction-mascots .bot + .bot {
-  margin-left: -5px;
-}
-
-/* Answering a bot's reaction with one of the user's own: a tiny button just past the pill's upper
-   right corner, above the mascots and clear of them. It shows on hover or focus, and always on touch screens. */
+/* Answering a bot's reaction with one of the user's own: a tiny button just past the pill. It shows on
+   hover or focus, and always on touch screens. */
 .bm-reaction-reply {
   position: relative;
   display: grid;
   place-items: center;
   flex: none;
-  align-self: flex-start;
   width: 16px;
   height: 16px;
-  /* Over the room the mascots leave above themselves, past the pill's corner. */
-  margin: -5px 0 0 -8px;
+  margin-left: 2px;
   border-radius: 50%;
   border: 1px solid var(--border-strong);
   background: var(--surface);
@@ -2195,7 +2305,7 @@
 .bm-reaction-reply::after {
   content: "";
   position: absolute;
-  inset: -6px;
+  inset: -6px -4px;
 }
 
 .bm-reaction-link:hover .bm-reaction-reply,
@@ -2208,20 +2318,24 @@
   color: var(--text);
 }
 
+/* With a pointer, it waits over the pill's corner rather than keeping a gap for itself between chips. */
+@media (hover: hover) {
+  .bm-reaction-reply {
+    position: absolute;
+    top: -8px;
+    right: -6px;
+    margin: 0;
+  }
+
+  .bm-reaction-link {
+    position: relative;
+  }
+}
+
 @media (hover: none) {
   .bm-reaction-reply {
     opacity: 1;
   }
-}
-
-/* Room for the mascots below, so they don't reach the next message or a wrapped row of reactions. */
-.bm-reactions:has(.bm-reaction-mascots) {
-  row-gap: 12px;
-  padding-bottom: 10px;
-}
-
-.bm-reactions:has(.bm-reaction-mascots) .bm-reaction-thread {
-  row-gap: 12px;
 }
 
 .bm-reaction-emoji {
@@ -2276,14 +2390,28 @@
   white-space: nowrap;
 }
 
+/* At the end of the bubble's line, past its reactions: margin-left keeps it right even when alone. */
 .bm-seen {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+  animation: bots-fade var(--med) var(--ease) both;
+}
+
+.bm-seen-mascots {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin: 4px 8px 0;
-  font-size: 12px;
-  color: var(--text-3);
-  animation: bots-fade var(--med) var(--ease) both;
+}
+
+.bm-seen-more {
+  margin-left: 1px;
+  font-variant-numeric: tabular-nums;
 }
 
 @keyframes bots-fade {

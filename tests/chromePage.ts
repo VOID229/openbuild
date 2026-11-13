@@ -91,18 +91,19 @@ export class Page {
   }
   /**
    * Jumps every transition and animation under `selector` that ends to its end (ones that loop keep
-   * looping), for a test that reads where things come to rest, not how they get there.
+   * looping, and ones driven by scrolling rather than time stay where the scrolling has them), for a
+   * test that reads where things come to rest, not how they get there.
    */
   async finish(selector = "html") {
     // A transition only exists once the change that starts it has been styled.
     await this.settle();
-    await this.eval(`(() => { for (const a of document.querySelector(${JSON.stringify(selector)})?.getAnimations({ subtree: true }) ?? []) if (a.effect?.getComputedTiming().endTime !== Infinity) a.finish(); return true; })()`);
+    await this.eval(`(() => { for (const a of document.querySelector(${JSON.stringify(selector)})?.getAnimations({ subtree: true }) ?? []) if (a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity) a.finish(); return true; })()`);
     await this.settle();
   }
   /** Waits for those to end on their own, where the motion itself is part of the test. */
   async finished(selector = "html") {
     await this.settle();
-    await this.eval(`Promise.all((document.querySelector(${JSON.stringify(selector)})?.getAnimations({ subtree: true }) ?? []).filter((a) => a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => {}))).then(() => true)`);
+    await this.eval(`Promise.all((document.querySelector(${JSON.stringify(selector)})?.getAnimations({ subtree: true }) ?? []).filter((a) => a.timeline === document.timeline && a.effect?.getComputedTiming().endTime !== Infinity).map((a) => a.finished.catch(() => {}))).then(() => true)`);
     await this.settle();
   }
   /** A real mouse wheel over the middle of `selector`. */
@@ -123,6 +124,22 @@ export class Page {
       };
       requestAnimationFrame(tick);
     })`);
+  }
+  /**
+   * Styles the page as a screen with a mouse would get it. Headless Chrome reports hover: none, and
+   * CDP can't emulate hover, so every `(hover: hover)` rule in the page's sheets is made to apply and
+   * every `(hover: none)` one not to. Script reading matchMedia still sees hover: none.
+   */
+  async emulateHover() {
+    await this.eval(`(() => {
+      const visit = (rules) => { for (const r of rules) if (r.cssRules) {
+        if (r.media) r.media.mediaText = r.media.mediaText.replaceAll("(hover: hover)", "(min-width: 0px)").replaceAll("(hover: none)", "(max-width: 0px)");
+        visit(r.cssRules);
+      } };
+      for (const sheet of document.styleSheets) visit(sheet.cssRules);
+      return true;
+    })()`);
+    await this.settle();
   }
   /** A real click in the middle of `selector`. */
   async click(selector: string) {

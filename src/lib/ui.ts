@@ -15,7 +15,8 @@ export const canHover = () => window.matchMedia("(hover: hover)").matches;
  */
 function settleMotion() {
   for (const animation of document.getAnimations()) {
-    if (!(animation instanceof CSSAnimation || animation instanceof CSSTransition)) continue;
+    // Ones driven by scrolling (a reaction strip's edge fade) have no end to land on: they follow their scroller.
+    if (!(animation instanceof CSSAnimation || animation instanceof CSSTransition) || animation.timeline !== document.timeline) continue;
     const effect = animation.effect as KeyframeEffect | null;
     if (effect?.target?.closest(".app") && effect.getComputedTiming().iterations !== Infinity) animation.finish();
   }

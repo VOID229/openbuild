@@ -677,12 +677,15 @@ function ReactionArrow() {
   );
 }
 
+/** How many reacting bots a chip shows by name; its count says how many reacted in all. */
+const CHIP_MASCOTS = 3;
+
 function Reactions({ message, conversation, bots, mine, onPicker }: { message: BotMessage; conversation: Conversation; bots: Bot[]; mine: boolean; onPicker?: RowProps["onPicker"] }) {
   const threads = useMemo(() => reactionThreads(message.reactions ?? []), [message.reactions]);
   if (!threads.length) return null;
   const names = (by: string[]) => by.map((b) => authorName(b, bots)).join(", ");
   return (
-    <div className={cx("bm-reactions", mine && "bm-reactions-mine")}>
+    <div className="bm-reactions">
       {threads.map((thread) => (
         <span key={thread[0]!.group.key} className="bm-reaction-thread">
           {thread.map(({ group, parent }) => {
@@ -707,15 +710,15 @@ function Reactions({ message, conversation, bots, mine, onPicker }: { message: B
                   <span className="bm-reaction-pill">
                     <span className="bm-reaction-emoji">{emoji}</span>
                     {by.length > 1 && <span className="bm-reaction-count">{by.length}</span>}
+                    {/* Who reacted, side by side inside the chip, so each chip's bots read as its own. */}
+                    {reactors.length > 0 && (
+                      <span className="bm-reaction-mascots" aria-hidden="true">
+                        {reactors.slice(0, CHIP_MASCOTS).map((b) => (
+                          <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
+                        ))}
+                      </span>
+                    )}
                   </span>
-                  {/* Who reacted hangs off the pill's lower corner, part of the same button; the count says how many. */}
-                  {reactors.length > 0 && (
-                    <span className="bm-reaction-mascots" aria-hidden="true">
-                      {reactors.slice(0, 3).map((b) => (
-                        <BotAvatar key={b.id} look={b.look} size={14} alive={false} mood="happy" />
-                      ))}
-                    </span>
-                  )}
                 </button>
                 {onPicker && bot >= 0 && (
                   <button
@@ -734,6 +737,28 @@ function Reactions({ message, conversation, bots, mine, onPicker }: { message: B
           })}
         </span>
       ))}
+    </div>
+  );
+}
+
+/** How many of the bots that saw a message "Seen by" shows; the rest are a count. */
+const SEEN_MASCOTS = 5;
+
+/** Who has seen the user's last message: the bots' mascots in a group, or just "Seen" with one bot. */
+function Seen({ by, bots, group }: { by: string[]; bots: Bot[]; group: boolean }) {
+  if (!group) return <div className="bm-seen">Seen</div>;
+  const seen = by.map((id) => bots.find((b) => b.id === id)).filter((b): b is Bot => !!b);
+  const shown = seen.slice(0, SEEN_MASCOTS);
+  const rest = seen.slice(SEEN_MASCOTS);
+  return (
+    <div className="bm-seen" data-tooltip={seen.map((b) => b.name).join(", ")} data-tooltip-side="bottom">
+      Seen by
+      <span className="bm-seen-mascots" aria-hidden="true">
+        {shown.map((b) => (
+          <BotAvatar key={b.id} look={b.look} size={14} alive={false} />
+        ))}
+        {rest.length > 0 && <span className="bm-seen-more">+{rest.length}</span>}
+      </span>
     </div>
   );
 }
@@ -806,59 +831,65 @@ const MessageRow = memo(function MessageRow({ message: m, conversation, bots, po
           <span className="bm-quote-text">{messageLine(quoted)}</span>
         </button>
       )}
-      <div className="bm-line">
-        <div
-          ref={bubble}
-          className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card", m.html && "bm-page")}
-          onDoubleClick={readonly ? undefined : (e) => {
-            // Two taps also make a dblclick, but useBubbleTouch has already answered them.
-            if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
-            window.getSelection()?.removeAllRanges();
-            react("❤️");
-          }}
-        >
-          {!!m.images?.length && (
-            <div className="bm-images">
-              {m.images.map((src, i) => (
-                <button key={i} type="button" className="bm-image" onClick={() => openLightbox(m.images!.map((src, j) => ({ id: `${m.id}-${j}`, name: "Image", dataUrl: src })), `${m.id}-${i}`)}>
-                  <img src={src} alt="" />
-                </button>
-              ))}
-            </div>
-          )}
-          {!!m.files?.length && (
-            <div className="bm-files">
-              {m.files.map((f) => (
-                <SentFileChip key={f.id} className="bm-file" file={f} href={filesAt ? workspacePath(filesAt, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${encodeURIComponent(f.id)}`) : undefined} />
-              ))}
-            </div>
-          )}
-          {m.text && !m.question && !m.poll && !m.connect && (
-            <div className="bm-text">
-              <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
-            </div>
-          )}
-          {m.question && <QuestionCard conversation={conversation} message={m} />}
-          {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
-          {m.plan && <PlanCard message={m} bots={bots} />}
-          {m.html && <PageCard message={m} old={!!oldPage} />}
-          {m.connect && <ConnectCard appId={m.connect.app} />}
-        </div>
-        {!readonly && (
-          <div className="bm-actions">
-            <IconButton label="React" tooltip={false} className="bm-action" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => onPicker({ messageId: m.id, mine, what: "react" }, e.currentTarget)}>
-              <SmilePlus size={16} />
-            </IconButton>
-            <IconButton label="Reply" tooltip={false} className="bm-action" onClick={() => onReply(m.id)}>
-              <CornerUpLeft size={16} />
-            </IconButton>
-            {mine && !m.poll && (m.text.trim() || !!m.images?.length || !!m.files?.length) && <StashAction text={m.text} images={attachedOf(m)} />}
-            <CopyAction text={m.html ? m.html.html : m.text || messageText(m)} />
+      {/* The bubble, and under it what it gathered: reactions from its left edge, "Seen by" at its right. */}
+      <div className="bm-body">
+        <div className="bm-line">
+          <div
+            ref={bubble}
+            className={cx("bm-bubble", emojiOnly && "bm-emoji", card && "bm-card", m.html && "bm-page")}
+            onDoubleClick={readonly ? undefined : (e) => {
+              // Two taps also make a dblclick, but useBubbleTouch has already answered them.
+              if (Date.now() - lastDoubleTap.current < 600 || (e.target as Element).closest("button, a")) return;
+              window.getSelection()?.removeAllRanges();
+              react("❤️");
+            }}
+          >
+            {!!m.images?.length && (
+              <div className="bm-images">
+                {m.images.map((src, i) => (
+                  <button key={i} type="button" className="bm-image" onClick={() => openLightbox(m.images!.map((src, j) => ({ id: `${m.id}-${j}`, name: "Image", dataUrl: src })), `${m.id}-${i}`)}>
+                    <img src={src} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+            {!!m.files?.length && (
+              <div className="bm-files">
+                {m.files.map((f) => (
+                  <SentFileChip key={f.id} className="bm-file" file={f} href={filesAt ? workspacePath(filesAt, `/api/bots/conversations/${encodeURIComponent(conversation.id)}/files/${encodeURIComponent(f.id)}`) : undefined} />
+                ))}
+              </div>
+            )}
+            {m.text && !m.question && !m.poll && !m.connect && (
+              <div className="bm-text">
+                <RichText text={m.text} bots={bots} everyone={everyone} botId={m.author === "me" ? undefined : m.author} />
+              </div>
+            )}
+            {m.question && <QuestionCard conversation={conversation} message={m} />}
+            {m.poll && <PollCard conversation={conversation} message={m} bots={bots} />}
+            {m.plan && <PlanCard message={m} bots={bots} />}
+            {m.html && <PageCard message={m} old={!!oldPage} />}
+            {m.connect && <ConnectCard appId={m.connect.app} />}
           </div>
-        )}
+          {!readonly && (
+            <div className="bm-actions">
+              <IconButton label="React" tooltip={false} className="bm-action" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => onPicker({ messageId: m.id, mine, what: "react" }, e.currentTarget)}>
+                <SmilePlus size={16} />
+              </IconButton>
+              <IconButton label="Reply" tooltip={false} className="bm-action" onClick={() => onReply(m.id)}>
+                <CornerUpLeft size={16} />
+              </IconButton>
+              {mine && !m.poll && (m.text.trim() || !!m.images?.length || !!m.files?.length) && <StashAction text={m.text} images={attachedOf(m)} />}
+              <CopyAction text={m.html ? m.html.html : m.text || messageText(m)} />
+            </div>
+          )}
+        </div>
+        {/* Always there, one chip high, so reacting never changes the message's height or moves the chat. */}
+        <div className="bm-foot">
+          <Reactions message={m} conversation={conversation} bots={bots} mine={mine} onPicker={readonly ? undefined : onPicker} />
+          {seen}
+        </div>
       </div>
-      <Reactions message={m} conversation={conversation} bots={bots} mine={mine} onPicker={readonly ? undefined : onPicker} />
-      {seen}
     </div>
   );
 }, sameRow);
@@ -1601,23 +1632,7 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
                         onPicker={onPicker}
                         sending={mine && sending.includes(m.id)}
                         oldPage={oldPages.has(m.id)}
-                        seen={
-                          seenBy && (
-                            <div className="bm-seen">
-                              {group ? (
-                                <>
-                                  Seen by
-                                  {seenBy.map((id) => {
-                                    const r = bots.find((x) => x.id === id);
-                                    return r ? <BotAvatar key={id} look={r.look} size={14} alive={false} /> : null;
-                                  })}
-                                </>
-                              ) : (
-                                "Seen"
-                              )}
-                            </div>
-                          )
-                        }
+                        seen={seenBy && <Seen by={seenBy} bots={bots} group={group} />}
                       />
                     );
                   })}

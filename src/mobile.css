@@ -834,16 +834,11 @@
     font-size: 13px;
   }
 
-  .bm-reactions {
-    margin: 4px 0 2px 6px;
-  }
-
-  .bm-reactions-mine {
-    margin: 4px 6px 2px 0;
+  .bm-foot {
+    --bm-chip-h: 28px;
   }
 
   .bm-reaction-pill {
-    height: 28px;
     padding: 0 8px;
     border-radius: 14px;
   }

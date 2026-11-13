@@ -1,6 +1,6 @@
-// Reactions in a real Chrome: the mascots of the bots that reacted hang just below and right of the
-// emoji pill, not inside it, in a tidy overlapping row with room left for them; and a bot's reaction
-// can be answered with the user's own from a tiny button beside it.
+// Reactions in a real Chrome: the mascots of the bots that reacted sit inside the emoji's pill, side
+// by side after its count, never piled on each other; and a bot's reaction can be answered with the
+// user's own from a tiny button beside it.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { browser, launchChrome, Page, serveFixture } from "./chromePage";
 
@@ -51,35 +51,35 @@ const open = async (theme: "dark" | "light" = "dark") => {
 };
 
 describe.skipIf(!browser)("reactions from bots", () => {
-  test("show the reacting mascots below and right of the pill, overlapping, at most three", async () => {
+  test("show the reacting mascots inside the pill, side by side after the count, at most three", async () => {
     const page = await open();
     const thumbs = chip("b-59", "👍");
-    // The pill is the emoji and the count, nothing else.
+    // The pill reads as the emoji and the count; the mascots inside it have no text of their own.
     expect(await page.eval<unknown>(`${thumbs}.querySelector('.bm-reaction-pill').textContent`)).toBe("👍5");
-    expect(await page.eval<unknown>(`${thumbs}.querySelectorAll('.bm-reaction-pill .bot').length`)).toBe(0);
-    expect(await page.eval<unknown>(`${thumbs}.querySelectorAll('.bm-reaction-mascots .bot').length`)).toBe(3);
+    expect(await page.eval<unknown>(`${thumbs}.querySelectorAll('.bm-reaction-pill .bm-reaction-mascots .bot').length`)).toBe(3);
     const pill = await page.eval<Box>(box(`${thumbs}.querySelector('.bm-reaction-pill')`));
+    const count = await page.eval<Box>(box(`${thumbs}.querySelector('.bm-reaction-count')`));
     const mascots = await page.eval<Box[]>(`[...${thumbs}.querySelectorAll('.bm-reaction-mascots .bot')].map((b) => ${box("b")})`);
-    // Diagonally outside the pill: starting near its right end, and lower than its middle, reaching below it.
-    const first = mascots[0]!;
-    expect(first.left).toBeGreaterThan(pill.right - 10);
-    expect(first.left).toBeLessThan(pill.right + 2);
-    expect(first.top).toBeGreaterThan((pill.top + pill.bottom) / 2);
-    expect(first.bottom).toBeGreaterThan(pill.bottom + 6);
-    // One row, each overlapping the one before.
-    for (let i = 1; i < mascots.length; i++) {
-      expect(mascots[i]!.top).toBe(first.top);
-      expect(mascots[i]!.left).toBeGreaterThan(mascots[i - 1]!.left);
-      expect(mascots[i]!.left).toBeLessThan(mascots[i - 1]!.right);
+    // Inside the pill, after the count, centred on it.
+    for (const m of mascots) {
+      expect(m.left).toBeGreaterThanOrEqual(count.right);
+      expect(m.right).toBeLessThanOrEqual(pill.right);
+      expect(m.top).toBeGreaterThanOrEqual(pill.top);
+      expect(m.bottom).toBeLessThanOrEqual(pill.bottom);
+      expect(Math.abs((m.top + m.bottom) / 2 - (pill.top + pill.bottom) / 2)).toBeLessThanOrEqual(1);
     }
-    // A user's reaction alone has none, and no room is kept for them.
+    // One row, each clear of the one before rather than piled on it.
+    for (let i = 1; i < mascots.length; i++) {
+      expect(mascots[i]!.top).toBe(mascots[0]!.top);
+      expect(mascots[i]!.left).toBeGreaterThanOrEqual(mascots[i - 1]!.right);
+    }
+    // A user's reaction alone has none.
     expect(await page.eval<unknown>(`${chip("b-58", "❤️")}.querySelector('.bm-reaction-mascots')`)).toBeNull();
-    expect(await page.eval<unknown>(`getComputedStyle(document.querySelector('[data-id="b-58"] .bm-reactions')).paddingBottom`)).toBe("0px");
   }, 60_000);
 
-  test("keep room for the mascots, clear of the other chips and the next message", async () => {
+  test("keep each chip, its mascots and its reply button clear of the other chips and the next message", async () => {
     const page = await open();
-    // Per chip: its pill, its mascots (which may tuck under the pill's own rounded corner) and its reply button.
+    // Per chip: its pill, its mascots and its reply button.
     const chips = await page.eval<{ pill: Box; mascots: Box[]; reply: Box }[]>(`[...document.querySelectorAll('[data-id="b-59"] .bm-reaction-link')].map((l) => ({
       pill: ${box("l.querySelector('.bm-reaction-pill')")},
       mascots: [...l.querySelectorAll('.bm-reaction-mascots .bot')].map((b) => ${box("b")}),
@@ -115,16 +115,15 @@ describe.skipIf(!browser)("reactions from bots", () => {
     await page.until(`!${mine}`);
   }, 60_000);
 
-  test("ring each mascot in the page's own colour, in light and dark", async () => {
+  test("keep the mascots clear of the emoji and the count, in light and dark", async () => {
     for (const theme of ["dark", "light"] as const) {
       const page = await open(theme);
-      const { filter, bg } = await page.eval<{ filter: string; bg: string }>(`(() => {
-        const probe = document.body.appendChild(Object.assign(document.createElement("i"), { style: "color: var(--bg)" }));
-        const bg = getComputedStyle(probe).color;
-        probe.remove();
-        return { filter: getComputedStyle(document.querySelector('.bm-reaction-mascots .bot')).filter, bg };
-      })()`);
-      expect(filter).toContain(`drop-shadow(${bg}`);
+      for (const emoji of ["👍", "🔥"]) {
+        const parts = await page.eval<Box[]>(`[...${chip("b-59", emoji)}.querySelectorAll('.bm-reaction-emoji, .bm-reaction-count')].map((e) => ${box("e")})`);
+        const mascots = await page.eval<Box[]>(`[...${chip("b-59", emoji)}.querySelectorAll('.bm-reaction-mascots .bot')].map((b) => ${box("b")})`);
+        expect(mascots.length).toBeGreaterThan(0);
+        for (const m of mascots) for (const p of parts) expect(overlap(m, p)).toBe(false);
+      }
     }
   }, 60_000);
 
@@ -149,10 +148,10 @@ describe.skipIf(!browser)("answering a bot's reaction", () => {
     expect(await page.eval<unknown>(`!!document.querySelector('[data-id="b-58"] .bm-reaction-reply')`)).toBe(false);
     const reply = `${chip("b-59", "🔥")}.querySelector('.bm-reaction-reply')`;
     expect(await page.eval<unknown>(`${reply}.getAttribute('aria-label')`)).toBe("React to helper's 🔥");
-    // Tiny, and above the mascots rather than on them.
+    // Tiny, and beside the pill rather than on it or its mascots.
     const r = await page.eval<Box>(box(reply));
     expect(r.right - r.left).toBeLessThanOrEqual(16);
-    expect(r.bottom).toBeLessThanOrEqual(await page.eval<number>(`${chip("b-59", "🔥")}.querySelector('.bm-reaction-mascots').getBoundingClientRect().top`));
+    expect(r.left).toBeGreaterThanOrEqual(await page.eval<number>(`${chip("b-59", "🔥")}.querySelector('.bm-reaction-pill').getBoundingClientRect().right`));
     // Touch screens have no hover: it's always there to tap.
     expect(await page.eval<unknown>(`matchMedia("(hover: none)").matches && getComputedStyle(${reply}).opacity`)).toBe("1");
 
