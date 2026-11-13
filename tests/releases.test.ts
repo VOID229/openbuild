@@ -193,7 +193,7 @@ test("curl installer selects a stable tag under sh and bash and only replaces an
   try {
     const { mkdirSync, chmodSync } = require("node:fs");
     const bin = join(temp, "bin"); mkdirSync(bin);
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; esac\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in --version) echo 1.4.4;; *Bun.stdin*) echo 1.2.3;; esac\n');
     writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = ls-remote ] && exit 0\n[ "$1" = clone ] && [ "$2" = --branch ] && [ "$3" = 1.2.3 ] || exit 1\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     for (const shell of ["sh", "bash"]) {
@@ -218,7 +218,7 @@ test("curl installer removes a failed checkout so it can be retried", () => {
     const { mkdirSync, chmodSync, existsSync } = require("node:fs");
     const bin = join(temp, "bin"); mkdirSync(bin);
     const target = join(temp, "install");
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; install*) echo dependency failure; exit 1;; esac\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in --version) echo 1.4.4;; *Bun.stdin*) echo 1.2.3;; install*) echo dependency failure; exit 1;; esac\n');
     writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = ls-remote ] && exit 0\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     const result = Bun.spawnSync(["sh", join(import.meta.dir, "..", "install.sh")], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target }, stdout: "pipe", stderr: "pipe" });
@@ -236,7 +236,7 @@ test("curl installer restores the old install when a reinstall fails, and won't 
     const target = join(temp, "install");
     mkdirSync(join(target, ".git"), { recursive: true });
     writeFileSync(join(target, "keep"), "");
-    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in *Bun.stdin*) echo 1.2.3;; run\\ cli:install|"run cli:install") exit 1;; esac\n');
+    writeFileSync(join(bin, "bun"), '#!/bin/sh\ncase "$*" in --version) echo 1.4.4;; *Bun.stdin*) echo 1.2.3;; run\\ cli:install|"run cli:install") exit 1;; esac\n');
     writeFileSync(join(bin, "git"), '#!/bin/sh\n[ "$1" = clone ] || { [ -e "$OB_OLD" ] && echo https://github.com/VOID229/openbuild.git; exit 0; }\nfor target do :; done\nmkdir -p "$target/.git"\n');
     chmodSync(join(bin, "bun"), 0o755); chmodSync(join(bin, "git"), 0o755);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, OPENBUILD_INSTALL_DIR: target };
