@@ -11,7 +11,7 @@
 import { memo, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { colorOf, shapeOf, type Action, type BotLook, type Mood } from "../../lib/bots/looks";
 import { aimTarget, eyeLook, eyesFor, eyesOf, frame, newRig, nod, poseTarget, restFrame, restOf, snap, step, warm, type EyeLook, type Pose } from "../../lib/bots/rig";
-import { nextBeat, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
+import { nextBeat, nextBlink, nextIdle, THINKING, type Step } from "../../lib/bots/routines";
 import { cx } from "../../lib/ui";
 
 export type { Action, Mood };
@@ -109,6 +109,13 @@ export interface BotAvatarProps {
   track?: boolean;
   /** Nod and smile on hover, turn right round when pressed. */
   playful?: boolean;
+  /**
+   * Just itself: breathing, blinking now and then and (with `track`) following the pointer, and
+   * nothing more. No looks, stares, moves or faces of its own, none on hover or press, and no reaction
+   * to a pulse; it wins over `lively` and `playful`. The New bot dialog's preview, which shows only
+   * the shape being picked.
+   */
+  plain?: boolean;
   /** Busy at something: brisk, rocking and peering about. */
   busy?: boolean;
   /**
@@ -131,8 +138,10 @@ export interface BotAvatarProps {
   label?: string;
 }
 
-export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively = false, track = false, playful = false, busy = false, asleep, zzz = false, waiting = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
+export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", alive = true, lively: wantLively = false, track = false, playful: wantPlayful = false, plain = false, busy = false, asleep, zzz = false, waiting = false, dots: stayDots = false, pulse, className, label }: BotAvatarProps) {
   const [pose, setPose] = useState<Pose>();
+  const lively = wantLively && !plain;
+  const playful = wantPlayful && !plain;
   const shape = shapeOf(look);
   const color = colorOf(look);
   const ref = useRef<HTMLSpanElement>(null);
@@ -312,7 +321,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
         timer = setTimeout(next, 300);
         return;
       }
-      if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
+      if (!steps.length) steps = busy ? (Math.random() < 0.25 ? [["blink", rand(500, 900)], ...nextBeat()] : nextBeat()) : plain ? nextBlink() : [[null, rand(800, 2600)], ...nextIdle(lively, following)];
       const [what, ms] = steps.shift()!;
       if (what === null) setPose(undefined);
       else if (what === "blink" || what === "blink2") doBlink(what === "blink2");
@@ -327,7 +336,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
       setPose(undefined);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [alive, busy, lively, following, dozing]);
+  }, [alive, busy, lively, plain, following, dozing]);
 
   // Woken to work, it has a little stretch on the way up.
   const wasDozing = useRef(dozing);
@@ -342,6 +351,7 @@ export const BotAvatar = memo(function BotAvatar({ look, size, mood = "idle", al
   useLayoutEffect(() => {
     if (pulseKey === undefined || pulseKey === lastPulse.current) return;
     lastPulse.current = pulseKey;
+    if (plain) return;
     // Its way into or out of the dots is the move: one played over it would cut that short.
     if (!dotsNow.current && !stayDots) doAction(pulse?.action ?? "jelly");
     // Pleased with itself, it stays that way a good while: the face of a bot that's done.

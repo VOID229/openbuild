@@ -2,7 +2,7 @@
 // or a spin), and idle, mostly staring and looking around. tests/botMascots.test.ts watches the same
 // in a real Chrome.
 import { expect, test } from "bun:test";
-import { nextBeat, nextIdle, type Step } from "../src/lib/bots/routines";
+import { nextBeat, nextBlink, nextIdle, type Step } from "../src/lib/bots/routines";
 
 const RUNS = 5000;
 const sample = (fn: () => Step[]) => Array.from({ length: RUNS }, fn);
@@ -79,4 +79,16 @@ test("idle, only a lively bot moves or pulls a face, and never a hop or a spin",
 
 test("idle and following the pointer, a bot never takes its eyes off it", () => {
   for (const r of sample(() => nextIdle(true, true))) for (const [what] of r) expect(poseOf(what)).toBeUndefined();
+});
+
+test("plain, a bot only blinks: its eyes held open a natural while between, and no look, move or face", () => {
+  const plain = sample(nextBlink);
+  expect(moves(plain).size).toBe(0);
+  expect(faces(plain).length).toBe(0);
+  expect(poses(plain).length).toBe(0);
+  for (const r of plain) {
+    expect(r.map(([what]) => what)).toEqual([null, expect.stringMatching(/^blink2?$/)]);
+    expect(r[0]![1]).toBeGreaterThanOrEqual(2000);
+    expect(r[0]![1]).toBeLessThanOrEqual(5000);
+  }
 });

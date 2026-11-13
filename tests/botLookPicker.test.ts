@@ -1,6 +1,7 @@
 // The look pickers in a real Chrome: in the New bot dialog and the details panel's Look editor, on a
 // phone, a laptop and a tall screen, every shape's eyes sit inside it, clear of its rim; and so do
-// they in every face a still bot pulls. (That they do however a bot turns is
+// they in every face a still bot pulls. The dialog's preview is only the shape picked: it blinks and
+// follows the pointer, and pulls no tricks. (That they do however a bot turns is
 // tests/botMascotRig.test.ts's, in arithmetic.)
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { MARGIN } from "../src/lib/bots/rig";
@@ -94,6 +95,49 @@ describe.skipIf(!browser)("the look pickers", () => {
       expect(await tooNear(page, ".bots-shapes", CLEAR)).toEqual([]);
     });
   }
+
+  test("in the New bot dialog, the preview is just the shape picked: it blinks and follows the pointer, and pulls no tricks", async () => {
+    const page = await open("dialog", 1280, 800);
+    const hero = "document.querySelector('.bots-dialog-hero .bot')";
+    // Everything it does from here on: any move played, face pulled, pose taken or blink.
+    await page.eval(`(() => {
+      const b = ${hero}, seen = (window.seen = { actions: [], moods: [], looking: 0, blinks: 0, playful: b.classList.contains('bot-playful') });
+      new MutationObserver(() => {
+        if (b.dataset.action) seen.actions.push(b.dataset.action);
+        if (b.dataset.mood !== 'idle') seen.moods.push(b.dataset.mood);
+        if ('looking' in b.dataset) seen.looking++;
+        if ('blink' in b.dataset) seen.blinks++;
+      }).observe(b, { attributes: true });
+    })()`);
+    const [x, y, w] = await page.eval<[number, number, number]>(`(() => { const r = (${hero}).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2, r.width]; })()`);
+    const turnOf = `Number((/rotateY\\((-?[\\d.]+)deg\\)/.exec((${hero}).querySelector('.bot-body').style.transform) ?? [0, 0])[1])`;
+    const pointAt = (px: number, py: number) => page.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: px, y: py });
+    // Following the pointer: it turns toward wherever it is.
+    await pointAt(x - w * 3, y);
+    await page.until(`(${turnOf}) < -5`);
+    await pointAt(x + w * 3, y);
+    await page.until(`(${turnOf}) > 5`);
+    // Hovered and pressed: no nod, smile or turn right round.
+    await pointAt(x, y);
+    await page.send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1 });
+    await page.send("Input.dispatchMouseEvent", { type: "mouseReleased", x, y, button: "left", clickCount: 1 });
+    // A new shape and colour picked: it's simply that shape, with no reaction played over it.
+    await page.eval(`document.querySelector('.bots-shapes [aria-label="House"]').click()`);
+    await page.until(`(${hero}).querySelector('.bot-shape').getAttribute('d') === document.querySelector('.bots-shapes [aria-label="House"] .bot-shape').getAttribute('d')`);
+    await page.eval(`document.querySelector('.bots-colors [aria-label="Purple"]').click()`);
+    // Left alone a while (long enough for a lively bot to pull a face or two): it blinks, and does nothing else.
+    await pointAt(x + w * 3, y - w);
+    await page.eval("window.since = performance.now()");
+    await page.until("window.seen.blinks > 0 && performance.now() - window.since > 5000", 12_000);
+    const seen = await page.eval<{ actions: string[]; moods: string[]; looking: number; blinks: number; playful: boolean }>("window.seen");
+    expect(seen.actions).toEqual([]);
+    expect(seen.moods).toEqual([]);
+    expect(seen.looking).toBe(0);
+    expect(seen.playful).toBe(false);
+    expect(seen.blinks).toBeGreaterThan(0);
+    // Still following.
+    expect(await page.eval<number>(turnOf)).toBeGreaterThan(5);
+  }, 30_000);
 
   test("in every face a still bot pulls, every shape's eyes sit clear of its rim", async () => {
     const page = await open("gallery", 1100, 900, 13 * 7);
