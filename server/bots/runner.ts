@@ -17,7 +17,7 @@ import { botsDir } from "./db";
 import * as db from "./db";
 import { agentSocketPath, getFocus, listen, mintToken, revokeToken, setFocus, todoText } from "./agent";
 import * as svc from "./service";
-import { resumeWatches, threadWait } from "./threads";
+import { leftBy as leftThreads, resumeWatches, threadWait } from "./threads";
 import type { Wake } from "./service";
 import type { BotStatus, PiSetup } from "../../shared/bots";
 import { OWNER, parseFriendAuthor } from "../../shared/friends";
@@ -1606,7 +1606,7 @@ export async function piSetup(fresh: boolean): Promise<PiSetup | undefined> {
 
 export function startBots() {
   listen();
-  svc.setHooks({ wake, stop, pendingAssignments, unseen, userWoke, halt, background });
+  svc.setHooks({ wake, stop, pendingAssignments, unseen, userWoke, halt, background, leftThreads });
   setJobHooks({ waiting: waitedOn, label: toolLabel, changed: jobsChanged });
   // Jobs that were running when the server last went down have no result coming: their bots are told.
   recoverJobs();

@@ -4,7 +4,7 @@
 import { randomLook } from "../../src/lib/bots/looks";
 import { isSchedule, nextRun, parseSchedule } from "../../shared/botSchedule";
 import type { Author, Bot, BotMessage, BotStatus, BotThreadAccess, BotsEvent, BotsSettings, BotsSnapshot, Conversation, Draft, MemoryItem, MemoryKind, PiSetup, Poll, Routine, SideHuddle, TodoChange, TodoItem } from "../../shared/bots";
-import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
+import { applyTodo, todoExpired, betweenTurns, BOT_EFFORTS, castVote, cleanRole, conversationTitle, roleLine, DEFAULT_SETTINGS, fallbackMode, findTags, firstName, firstSentence, huddleLimit, isStopRequest, mentionName, isBotEffort, isBotId, marksUnread, MEMORY_KINDS, MEMORY_TEXT_MAX, PERMISSION_HARNESSES, PROFILE_MAX_BYTES, makePoll, pollWaitingOn, reactionId, toggleReactionIn, type QuestionStep } from "../../shared/bots";
 import type { FriendChat, FriendSummary } from "../../shared/friends";
 import { parseFriendAuthor } from "../../shared/friends";
 import { computerApi } from "../computers/api";
@@ -53,7 +53,14 @@ type Hooks = {
   halt?: (botId: string, conversationId?: string) => boolean;
   /** The bot's turn in this conversation is a wake nobody is waiting on: a note, a check-in or a reaction, with no message of the user's in it. */
   background?: (botId: string, conversationId: string) => boolean;
+  /** What a bot being deleted leaves in OpenBuild (threads.ts), for the primary's notice. */
+  leftThreads?: (botId: string) => Promise<ThreadsLeft>;
 };
+/** A deleted bot's open threads and the questions they wait on, one line each. */
+export interface ThreadsLeft {
+  threads: string[];
+  questions: string[];
+}
 /** What the friends module (server/friends/) hears about shared chats, so this file never imports it either. */
 type FriendHooks = {
   /** One of this side's messages in a shared chat, to pass on to the friend. */
@@ -834,10 +841,94 @@ export function settleChangeNotes(botId: string, shown: ChangeNote[]) {
   db.setValue(CHANGE_NOTES, list);
 }
 
-export async function deleteBot(id: string) {
+/**
+ * Wakes the primary in its own chat with a notice about something the user did, whether it's busy or
+ * idle. Nothing when there's no primary, or when the notice is about the primary itself (`about`).
+ */
+export function tellPrimary(text: string, about?: string) {
+  const primary = db.listBots().find((b) => b.primary);
+  const conversationId = primary && primary.id !== about ? directId(primary.id) : undefined;
+  if (primary && conversationId) hooks.wake(primary.id, { kind: "note", conversationId, text });
+}
+
+const quote = (text: string, max = 200) => `“${text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text}”`;
+
+/**
+ * What the primary is told when the user deletes a bot: who it was, and what it left that someone may
+ * need to pick up, with where each thing is. Read before the bot is torn down: its queue, its routines
+ * and the chats it's in go with it.
+ */
+async function departureNotice(bot: db.StoredBot): Promise<string> {
+  const user = settings().user?.name || "The user";
+  const bots = db.listBots();
+  const short = (id: string) => id.slice(0, 8);
+  const named = (c: db.StoredConversation) => `“${conversationTitle(c, bots)}” (${short(c.id)})`;
+  const chats = db.listConversations().filter((c) => c.botIds.includes(bot.id));
+  const groups = chats.filter((c) => c.kind === "group");
+  const nameOf = (id: string) => (id === "me" ? user : firstName(bots.find((b) => b.id === id)?.name ?? "A bot"));
+  const sections: string[] = [];
+  if (groups.length) sections.push(`Group chats it was in, which it has now left:\n${groups.map((c) => `- ${named(c)}`).join("\n")}`);
+
+  const left = await hooks.leftThreads?.(bot.id).catch((err): undefined => void console.error("[bots] Reading a deleted bot's threads failed:", err));
+  if (left?.threads.length) sections.push(`Open coding threads it started or was following, still in OpenBuild (openbuild action read, by the thread id in brackets, if you have the project):\n${left.threads.join("\n")}`);
+
+  const routines = db.routines(bot.id).filter((r) => r.enabled);
+  if (routines.length) {
+    const where = (r: Routine) => {
+      const c = r.conversationId ? db.getConversation(r.conversationId) : undefined;
+      return c && c.kind === "group" ? `, reporting in ${named(c)}` : "";
+    };
+    sections.push(`Routines it ran, deleted with it, so they won't run again (make them again with routine, yours or another bot's, if they still matter):\n${routines.map((r) => `- ${quote(r.title, 120)}${r.followUp ? " (a one-off follow-up)" : ""}: ${r.schedule}${r.task && r.task !== r.title ? `. ${quote(r.task, 300)}` : ""}${where(r)}`).join("\n")}`);
+  }
+
+  const handoffs: string[] = [];
+  for (const { conversationId, messageIds } of hooks.pendingAssignments?.(bot.id) ?? []) {
+    const c = db.getConversation(conversationId);
+    if (c?.kind !== "group") continue;
+    for (const id of messageIds) {
+      const row = db.getMessage(id);
+      if (row) handoffs.push(`- ${nameOf(row.message.author)}'s request [${short(id)}] in ${named(c)}, handed to it and not answered yet: ${quote(row.message.text || "(no text)")}`);
+    }
+  }
+  for (const c of chats.filter((c) => c.kind === "side")) {
+    const others = c.botIds.filter((b) => b !== bot.id).map(nameOf).join(", ");
+    if (c.huddle?.closedAt) continue;
+    if (c.huddle) {
+      handoffs.push(`- The side chat ${named(c)} with ${others}${c.huddle.by !== bot.id ? `, opened by ${nameOf(c.huddle.by)}` : ""}, was deleted with it, before it reported back.`);
+      continue;
+    }
+    // Another bot's question it hadn't answered: the asker is told when no answer comes.
+    const last = db.messages(c.id, 20).findLast((m) => !m.message.event);
+    if (last && last.message.author !== bot.id && last.message.author !== "me") handoffs.push(`- ${nameOf(last.message.author)} asked it ${quote(last.message.text)} in a side chat that was deleted with it, so no answer is coming.`);
+  }
+  if (handoffs.length) sections.push(`Work handed to it that it hadn't finished:\n${handoffs.join("\n")}`);
+
+  const questions = [...(left?.questions ?? [])];
+  for (const c of groups) {
+    for (const { message: m } of db.messages(c.id, 200)) {
+      if (m.author !== bot.id) continue;
+      if (m.question && m.question.answer === undefined && !m.question.closed) questions.push(`- Its question card [${short(m.id)}] ${quote(m.question.title)} in ${named(c)} is unanswered; an answer now reaches nobody.`);
+      if (m.poll && !m.poll.closedAt) questions.push(`- Its poll [${short(m.id)}] ${quote(m.poll.question)} in ${named(c)} is still open; nobody will act on the result.`);
+    }
+  }
+  if (questions.length) sections.push(`Questions still waiting on it, or that it was waiting on:\n${questions.join("\n")}`);
+
+  const role = roleLine(bot).replace(/[.!?…]+$/, "");
+  return [
+    `${user} deleted ${bot.name} (${short(bot.id)})${role ? `, whose role was: ${role}` : ", which had no role"}. It's gone for good: its own chat, its side chats, its memory and its routines went with it, so don't hand it work, ask it anything or count it on the team.`,
+    ...(sections.length ? ["What it left behind:", ...sections, "Pick up what still matters, yourself or by handing it to another bot, and tell the user about anything that's now dropped and they'd want to know. If nothing here needs anyone, stay [silent]."] : ["It left nothing open that needs picking up. That's just so you know: stay [silent]."]),
+  ].join("\n\n");
+}
+
+/**
+ * Delete a bot. `by` is who did: the user ("me") or the primary, through manage_bot. When it's the
+ * user, the primary is told what the bot left behind, since it's the one handing out the work.
+ */
+export async function deleteBot(id: string, { by }: { by?: Author } = {}) {
   const bot = db.getBot(id);
   if (!bot) throw new BotsError("No such bot.", 404);
   if (bot.primary) throw new BotsError("The primary bot can't be deleted. Make another one primary first.");
+  const notice = by === "me" ? await departureNotice(bot) : undefined;
   hooks.stop(id);
   await destroyComputers(id);
   for (const c of db.listConversations()) {
@@ -862,6 +953,7 @@ export async function deleteBot(id: string) {
   db.setValue(RENAME_NOTES, renameNotes().filter((n) => n.botId !== id));
   status.delete(id);
   emit({ t: "bot-deleted", id });
+  if (notice) tellPrimary(notice, id);
 }
 
 /**

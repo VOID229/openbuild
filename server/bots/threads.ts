@@ -552,6 +552,35 @@ function startFollowing(botId: string, threadId: string, runId: string) {
   void waitsChanged(botId).catch((err) => console.error("[bots] Updating a bot's status failed:", err));
 }
 
+/**
+ * What a bot being deleted leaves in OpenBuild, for the primary's notice: the open threads it started
+ * or was following, with what each is doing and waits on. Its messages queued for them aren't sent
+ * without it (drainNow can't act for a bot that's gone), so they're counted as dropped.
+ */
+export async function leftBy(botId: string): Promise<svc.ThreadsLeft> {
+  const unsent = queued().filter((q) => q.botId === botId);
+  const followed = new Set([...watches().filter((w) => w.botId === botId).map((w) => w.threadId), ...unsent.map((q) => q.threadId)]);
+  const open = (await storage.chatSummaries()).map((row) => row.chat).filter((c) => !c.archived && (c.startedBy?.bot === botId || followed.has(c.id)));
+  if (!open.length) return { threads: [], questions: [] };
+  const running = await pendingRuns().catch((): Awaited<ReturnType<typeof pendingRuns>> => []);
+  const threads: string[] = [];
+  const questions: string[] = [];
+  for (const chat of open) {
+    const runs = running.filter((run) => run.threadId === chat.id);
+    const waiting = runs.flatMap((run) => waitingAsks(run.events));
+    const dropped = unsent.filter((q) => q.threadId === chat.id).length;
+    const pr = chat.pullRequest;
+    const facts = [
+      `${chat.startedBy?.bot === botId ? "started by it" : "followed by it"}; ${runs.length ? "working" : "idle"}${waiting.length ? `, waiting on ${waiting.length === 1 ? "a question" : `${waiting.length} questions`}` : ""}`,
+      pr && `pull request #${pr.number} is ${pr.state}: ${pr.url}`,
+      dropped && `${dropped === 1 ? "a message" : `${dropped} messages`} it queued for the thread won't be sent`,
+    ].filter(Boolean);
+    threads.push(`- ${titleOf(chat.id)}${chat.workspace?.projectName ? ` in ${chat.workspace.projectName}` : ""}: ${facts.join("; ")}.`);
+    for (const ask of waiting) questions.push(`- Thread ${titleOf(chat.id)} is waiting on “${clip(ask.title, 200)}” (question ${ask.id}). Answer it with openbuild action answer, or ask the user.`);
+  }
+  return { threads, questions };
+}
+
 // ------------------------------------------------------------------ queued messages
 
 /**

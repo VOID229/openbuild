@@ -1341,3 +1341,51 @@ test("the guide and the tool's description give a way to judge, with numbers as 
   }
   expect(text).toContain("decide for that task");
 });
+
+test("a bot the user deletes leaves its open threads, what they wait on and its unsent messages to the primary", async () => {
+  expect(svc.fullBot(bot.id)!.primary).toBe(true);
+  const { bot: helper } = svc.createBot({ name: "Sorrel" });
+  svc.updateBot(helper.id, { threads: { enabled: true, projects: [project.id] } });
+  const as = (action: string, p: object = {}) => handle(helper.id, { action, ...p }) as Promise<any>;
+  // Working, and waiting on a question; with a message queued behind its turn.
+  await as("start", { project: project.name, prompt: "Fix the login", title: "Fix login" });
+  const working = admitted[0].threadId;
+  snapshots[0].events.push(ask({ id: "q1", title: "Which branch?" }));
+  expect((await as("send", { thread: working, text: "Then run the tests", effort: "high" })).queued).toBe(true);
+  // Idle, with a pull request.
+  await as("start", { project: project.name, prompt: "Write docs", title: "Docs" });
+  const idle = admitted[1].threadId;
+  snapshots[1].status = "done";
+  storage.putChat({ ...(storage.getChat(idle) as any), pullRequest: { number: 12, url: "https://example.com/pull/12", state: "open" } } as never);
+  // Closed: nothing left to pick up.
+  await as("start", { project: project.name, prompt: "Old work", title: "Old" });
+  const closed = admitted[2].threadId;
+  snapshots[2].status = "done";
+  storage.putChat({ ...(storage.getChat(closed) as any), archived: true } as never);
+  // Someone else's thread it isn't following.
+  const theirs = { id: crypto.randomUUID(), title: "Theirs", workspace: { projectId: project.id, projectName: project.name, cwd: repo }, createdAt: 1, updatedAt: 1, messages: [] };
+  storage.putChat(theirs as never);
+
+  const left = await threads.leftBy(helper.id);
+  const short = (id: string) => id.slice(0, 8);
+  expect(left.threads.sort()).toEqual([
+    `- “Docs” [${short(idle)}] in ${project.name}: started by it; idle; pull request #12 is open: https://example.com/pull/12.`,
+    `- “Fix login” [${short(working)}] in ${project.name}: started by it; working, waiting on a question; a message it queued for the thread won't be sent.`,
+  ]);
+  expect(left.questions).toEqual([`- Thread “Fix login” [${short(working)}] is waiting on “Which branch?” (question q1). Answer it with openbuild action answer, or ask the user.`]);
+
+  // Deleted by the user: the primary is woken with them.
+  const told: any[] = [];
+  svc.setHooks({ wake: (id, w) => told.push({ id, ...w }), stop() {}, leftThreads: threads.leftBy });
+  try {
+    await svc.deleteBot(helper.id, { by: "me" });
+  } finally {
+    svc.setHooks({ wake() {}, stop() {} });
+  }
+  expect(told).toHaveLength(1);
+  expect(told[0]).toMatchObject({ id: bot.id, kind: "note", conversationId: svc.directId(bot.id) });
+  expect(told[0].text).toContain(`Open coding threads it started or was following, still in OpenBuild (openbuild action read, by the thread id in brackets, if you have the project):\n`);
+  for (const line of [...left.threads, ...left.questions]) expect(told[0].text).toContain(line);
+  expect(told[0].text).not.toContain(short(closed));
+  expect(told[0].text).not.toContain(short(theirs.id));
+});

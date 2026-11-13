@@ -315,7 +315,7 @@ export function botRoutes(api: Api) {
       }),
       DELETE: api(async (req: Bun.BunRequest<"/api/bots/:id">) => {
         try {
-          await svc.deleteBot(req.params.id);
+          await svc.deleteBot(req.params.id, { by: "me" });
           return json({ ok: true });
         } catch (err) {
           return fail(err);

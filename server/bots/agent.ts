@@ -923,7 +923,7 @@ export function manage(botId: string, p: Record<string, unknown>) {
   const target = p.bot ? resolveBot(String(p.bot)) : botId;
   if (action === "delete") {
     if (!self.primary) throw new svc.BotsError("Only the primary bot can delete bots.");
-    return svc.deleteBot(target).then(() => ({ ok: true }));
+    return svc.deleteBot(target, { by: botId }).then(() => ({ ok: true }));
   }
   if (action === "update") {
     const patch: Partial<Bot> = {};
