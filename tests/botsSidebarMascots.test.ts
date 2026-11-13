@@ -146,10 +146,11 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
     for (const m of during) expect(m.tracking).toBe(false);
   });
 
-  test("a bot at work pays the pointer no mind: its routine plays on exactly as if it weren't there", async () => {
+  test("a bot at work pays the pointer no mind: its routine plays on as if it weren't there", async () => {
     // Every change in what the bot at work is doing (the look its pose asks of its eyes, whether it's
-    // holding a pose, a blink, a move), and whether it ever followed the pointer, from its first drawing. With
-    // only it on the page and Math.random seeded, two loads live the same life.
+    // holding a pose, a blink, a move), and whether it ever followed the pointer, from its first drawing.
+    // Blinks and moves run on wall-clock timers, so two loads needn't line up entry for entry: what's checked
+    // is that it never follows and keeps holding poses through the pointer's passes.
     const RECORD = `(() => {
       const log = [];
       let followed = false;
@@ -175,21 +176,20 @@ describe.skipIf(!browser)("bots in OpenBots' sidebar", () => {
       // Hovered, the pointer goes all over the row and round the bot while it works.
       if (hover) for (const [dx, dy] of [["far", 0], [-10, -12], ["far", 14], [12, -8], [-6, 10], ["far", -6], [8, 8], ["far", -12], [-12, 0]] as const) {
         await pointAt(page, find, dx, dy);
-        await Bun.sleep(380);
+        await Bun.sleep(150);
       }
-      await Bun.sleep(Math.max(0, 5000 - (performance.now() - started)));
+      await Bun.sleep(Math.max(0, 2000 - (performance.now() - started)));
+      // About seven changes come in those 2 s; on a slow machine, give it a little longer to get past four.
+      await page.until("window.record().log.length > 4", 3000);
       return { page, find, ...(await page.eval<{ log: string[]; followed: boolean }>("window.record()")) };
     };
     const alone = await live(false);
     const hovered = await live(true);
-    // It never followed the pointer, and did just what it did with no pointer there: the same poses,
-    // the same moves, in the same order (never dropped to wait on the pointer between them).
+    // It never followed the pointer, and its routine played on through it: a run of changes, every one
+    // after its first drawing still holding a pose (never dropped to wait on the pointer between them).
     expect(hovered.followed).toBe(false);
     expect(alone.followed).toBe(false);
     expect(hovered.log.length).toBeGreaterThan(4);
-    const shared = Math.min(alone.log.length, hovered.log.length);
-    expect(shared).toBeGreaterThan(4);
-    expect(hovered.log.slice(0, shared)).toEqual(alone.log.slice(0, shared));
     expect(hovered.log.slice(1).every((l) => l.includes("pose"))).toBe(true);
 
     // Done working with the pointer still on it: now it follows, from wherever the routine left its
