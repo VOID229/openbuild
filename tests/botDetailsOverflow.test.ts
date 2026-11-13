@@ -108,7 +108,8 @@ describe.skipIf(!browser)("the details panel never scrolls sideways", () => {
         seen.push(tab);
         expect({ tab, wide: await wide(page) }).toEqual({ tab, wide: [] });
       }
-      expect(seen).toEqual(["Members 2", "Goal", "Threads"]);
+      expect(seen).toEqual(["Members 2", "Goal", "Routines", "Threads"]);
+      expect(await page.eval<unknown>("[...document.querySelectorAll('.bots-details .bots-tab')].filter((t) => t.scrollWidth > t.clientWidth).map((t) => t.textContent)")).toEqual([]);
     }, 60_000);
 
     test(`on a ${device}: a sideways wheel or swipe over the panel moves nothing`, async () => {

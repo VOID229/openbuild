@@ -89,7 +89,7 @@ describe.skipIf(!browser)("a group's Threads tab", () => {
     const page = await open();
     await page.until(`document.querySelectorAll('.bots-details .bots-cards .bots-member').length === 2`);
     const tabs = await page.eval<string[]>(`[...document.querySelectorAll('.bots-details .bots-tab')].map((t) => t.textContent)`);
-    expect(tabs).toEqual(["Members 2", "Goal", "Threads"]);
+    expect(tabs).toEqual(["Members 2", "Goal", "Routines", "Threads"]);
     const listed = await rows(page);
     expect(listed.map((r) => [r.title, r.sub])).toEqual([
       ["Fix the flaky sidebar test", "manager · openbuild"],

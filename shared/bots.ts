@@ -907,6 +907,20 @@ export function authoredEventText(event: { kind: string; text: string; detail?: 
   return AUTHORED_PHRASES[text] ?? (/^\p{Lu}\p{Lu}/u.test(text) ? text : text.charAt(0).toLowerCase() + text.slice(1));
 }
 
+/**
+ * A routine or follow-up being set, from its activity line: what it's called and when it runs, as the
+ * line's detail put them ("Standup · Weekdays at 9:00"). Undefined for any other line, and for one ran.
+ */
+export function routineSet(event: { kind: string; text: string; detail?: string }): { title: string; schedule: string; followUp: boolean } | undefined {
+  if (event.kind !== "routine" || !event.detail) return;
+  const followUp = event.text === "Set a follow-up" || event.text === "Follow-up set";
+  // "Routine" was both, once; only setting one had a schedule after its title.
+  if (!followUp && event.text !== "Set a routine" && event.text !== "Routine") return;
+  const at = event.detail.lastIndexOf(" · ");
+  if (at <= 0) return;
+  return { title: event.detail.slice(0, at), schedule: event.detail.slice(at + 3), followUp };
+}
+
 /** The name an @mention uses: "Dr Eggbot · notes" → "Dr Eggbot". */
 export const mentionName = (name: string) => name.split(" · ")[0]!.trim();
 

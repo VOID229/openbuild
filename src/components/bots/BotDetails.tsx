@@ -1,14 +1,15 @@
 // OpenBots' details panel, beside the chat: a bot's look, name, instructions, routines and tasks, with its
 // model, computer and OpenBuild permissions under Advanced and its threads, both in the More menu; a
-// group's members, goal (with its tasks); the working threads either started from its chat; who's in a
+// group's members, goal (with its tasks) and routines; the working threads either started from its chat; who's in a
 // side chat.
-import { Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Trash, X } from "lucide-react";
+import { Check, ChevronLeft, Maximize2, Minus, Pencil, Plus, Timer, Trash, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { actingOn, runningThreads, threadActivity, threadBrands, threadMascot } from "../../lib/bots/activity";
 import type { BotLook } from "../../lib/bots/looks";
 import { clampThreadWidth, loadThreadWidth, saveThreadWidth, THREAD_DEFAULT, THREAD_MIN, threadMax } from "../../lib/bots/threadWidth";
 import { conversationName, directOf, useBots } from "../../lib/bots/store";
-import type { Bot, Conversation } from "../../lib/bots/types";
+import type { Bot, Conversation, Routine } from "../../lib/bots/types";
+import { countdown, formatRun } from "../../../shared/botSchedule";
 import { cleanRole, ROLE_MAX } from "../../../shared/bots";
 import { closeBotsLayer, isPhone } from "../../lib/gestures";
 import { useStore } from "../../lib/store";
@@ -192,33 +193,122 @@ export function Instructions({ value, placeholder, hint, onChange }: { value: st
   );
 }
 
+/**
+ * A bot's routines, under where each reports: its chat with you first, then each group (its mascots and
+ * name) or other chat. Kept to one list while they all report to its own chat.
+ */
 export function Routines({ bot }: { bot: Bot }) {
+  const conversations = useBots((s) => s.conversations);
+  const bots = useBots((s) => s.bots);
+  if (!bot.routines.length) return (
+    <div className="bots-pane">
+      <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
+    </div>
+  );
+  const direct = directOf(conversations, bot.id);
+  const where = (r: Routine) => (r.conversationId && r.conversationId !== direct?.id ? r.conversationId : "");
+  const order = (key: string) => (key ? (conversations.findIndex((c) => c.id === key) + 1 || conversations.length + 1) : 0);
+  const keys = [...new Set(bot.routines.map(where))].sort((a, b) => order(a) - order(b));
+  const list = (routines: Routine[]) => (
+    <ul className="bots-cards">
+      {routines.map((r) => (
+        <RoutineRow key={r.id} bot={bot} routine={r} />
+      ))}
+    </ul>
+  );
+  if (keys.length === 1 && !keys[0]) return <div className="bots-pane">{list(bot.routines)}</div>;
   return (
     <div className="bots-pane">
-      {bot.routines.length ? (
+      {keys.map((key) => {
+        const conversation = key ? conversations.find((c) => c.id === key) : direct;
+        const routines = bot.routines.filter((r) => where(r) === key);
+        return (
+          <section key={key || "direct"} className="bots-routine-group" aria-label={conversation ? conversationName(conversation, bots) : "A chat that's gone"}>
+            <div className="bots-routine-group-head">
+              {conversation && <ConversationAvatar conversation={conversation} size={18} alive={false} badge={false} lineup />}
+              <span className="bots-routine-group-name">{!key ? "Chat with you" : conversation ? conversationName(conversation, bots) : "A chat that's gone"}</span>
+              <span className="bots-routine-group-count">{routines.length}</span>
+            </div>
+            {list(routines)}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A group's routines: those its bots set to report here, each with its bot's mascot and name. */
+export function GroupRoutines({ conversation, bots }: { conversation: Conversation; bots: Bot[] }) {
+  const rows = bots
+    .flatMap((bot) => bot.routines.filter((r) => r.conversationId === conversation.id).map((routine) => ({ bot, routine })))
+    .sort((a, b) => (a.routine.createdAt ?? 0) - (b.routine.createdAt ?? 0));
+  return (
+    <div className="bots-pane">
+      {rows.length ? (
         <ul className="bots-cards">
-          {bot.routines.map((r) => (
-            <RoutineRow key={r.id} bot={bot} routine={r} />
+          {rows.map(({ bot, routine }) => (
+            <RoutineRow key={routine.id} bot={bot} routine={routine} owner />
           ))}
         </ul>
       ) : (
-        <p className="bots-hint">No routines yet. Ask {bot.name.split(" ·")[0]} in chat to set one up.</p>
+        <p className="bots-hint">No routines here yet. Ask a bot in the group to set one up, and it reports here.</p>
       )}
     </div>
   );
 }
 
-/** A routine, kept to one thin row: what it is and when, its switch, and Open (its task) and Delete under that. */
-function RoutineRow({ bot, routine: r }: { bot: Bot; routine: Bot["routines"][number] }) {
+/** Now, again on every second while `on`: for a countdown. */
+function useSeconds(on: boolean) {
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!on) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const step = () => {
+      setNow(Date.now());
+      timer = setTimeout(step, 1000 - (Date.now() % 1000) + 5);
+    };
+    step();
+    return () => clearTimeout(timer);
+  }, [on]);
+  return now;
+}
+
+/** When a routine runs next, counting down; paused, it says so. */
+function RoutineCountdown({ routine: r }: { routine: Routine }) {
+  const live = r.enabled && !!r.nextRunAt;
+  const now = useSeconds(live);
+  if (!r.enabled) return <span className="bots-routine-next bots-routine-paused">Paused</span>;
+  if (!r.nextRunAt) return null;
+  const left = countdown(r.nextRunAt - now);
+  return (
+    <span className="bots-routine-next" title={`Next run ${formatRun(r.nextRunAt, now)}`}>
+      <Timer size={12} strokeWidth={2} aria-hidden />
+      {left ? `Runs ${left}` : "Due now"}
+    </span>
+  );
+}
+
+/**
+ * A routine, kept to a thin row: what it is, when, and how long until it runs, its switch, and Open (its
+ * task) and Delete under that. `owner` shows whose it is, its mascot and name, among other bots'.
+ */
+function RoutineRow({ bot, routine: r, owner }: { bot: Bot; routine: Routine; owner?: boolean }) {
   const st = useBots.getState();
   const [open, setOpen] = useState(false);
   return (
-    <li className={cx("bots-card-row bots-routine", !r.enabled && "bots-routine-off")}>
+    <li className={cx("bots-card-row bots-routine", !r.enabled && "bots-routine-off")} data-bot={owner ? bot.id : undefined}>
+      {owner && (
+        <span className="bots-routine-owner">
+          <BotAvatar look={bot.look} size={28} alive={false} label={bot.name} />
+        </span>
+      )}
       <span className="bots-card-text">
         <span className="bots-routine-title" title={r.title}>{r.title}</span>
         <span className="bots-routine-when">
-          {r.schedule}{r.enabled ? "" : " · Paused"}
+          {owner && <><span className="bots-routine-bot">{bot.name}</span> · </>}
+          {r.schedule}
         </span>
+        <RoutineCountdown routine={r} />
         {open && r.task && <span className="bots-routine-task">{r.task}</span>}
       </span>
       <span className="bots-routine-side">
@@ -532,7 +622,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
     setThreadId(undefined);
   }
   // Asked for a tab: the header's task progress opens a bot's own Tasks, or the group's Goal, where its
-  // list is; a routine line in the chat opens the bot's Routines, from its own chat (EventLine); a link
+  // list is; a routine line in the chat opens the Routines, the bot's or the group's (EventLine); a link
   // in the chat to a thread still running opens that thread, under Threads.
   const asked = useBots((s) => s.detailsTab);
   const [askedKey, setAskedKey] = useState(asked?.key);
@@ -542,7 +632,7 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
       setTab("threads");
       setThreadId(asked.thread);
     } else if (asked.tab === "routines") {
-      if (conversation.kind === "direct") setTab("routines");
+      if (conversation.kind !== "side") setTab("routines");
     } else if (conversation.kind !== "side") setTab(conversation.kind === "direct" ? "tasks" : "goal");
   }
   const threadChat = useStore((s) => (threadId ? s.chats.find((c) => c.id === threadId) : undefined));
@@ -669,12 +759,14 @@ export function BotDetails({ conversation, open }: { conversation: Conversation;
                 tabs={[
                   ["members", `Members ${conversation.botIds.length}`],
                   ["goal", "Goal"],
+                  ["routines", "Routines"],
                   ["threads", "Threads"],
                 ]}
                 value={tab}
                 onChange={setTab}
               />
               {tab === "members" && <Members conversation={conversation} bots={bots} />}
+              {tab === "routines" && <GroupRoutines conversation={conversation} bots={bots} />}
               {tab === "threads" && <Threads threads={threads} bots={bots} open={openThread} />}
               {tab === "goal" && (
                 <>
