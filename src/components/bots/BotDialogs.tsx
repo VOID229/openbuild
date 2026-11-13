@@ -90,7 +90,6 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
   const [name, setName] = useState("");
   const [instructions, setInstructions] = useState("");
   const [role, setRole] = useState("");
-  const [changes, setChanges] = useState(0);
   const create = () => {
     if (!name.trim()) return;
     const id = useBots.getState().createBot({ name: name.trim(), look, instructions: instructions.trim(), role });
@@ -108,16 +107,11 @@ export function CreateBotDialog({ onClose, onCreated }: { onClose: () => void; o
         <DialogHead title="New bot" onClose={onClose} />
         <div className="bots-dialog-body">
           <div className="bots-dialog-hero">
-            <BotAvatar look={look} size={112} lively track playful pulse={changes ? { key: changes, action: changes % 3 === 0 ? "wiggle" : "pop" } : undefined} />
+            {/* Only the shape being picked, blinking and following the pointer: no tricks of its own. */}
+            <BotAvatar look={look} size={112} track plain />
           </div>
           <input className="input bots-name-input" value={name} maxLength={48} placeholder="Name your bot" aria-label="Name" autoFocus={!touch} onChange={(e) => setName(e.target.value)} />
-          <LookPicker
-            look={look}
-            onChange={(next) => {
-              setLook(next);
-              setChanges((n) => n + 1);
-            }}
-          />
+          <LookPicker look={look} onChange={setLook} />
           <label className="bots-field">
             <span className="bots-field-label">Role <span className="bots-field-optional">optional</span></span>
             <input className="input bots-role-input" value={role} maxLength={ROLE_MAX} placeholder="What this bot is for, in one line." onChange={(e) => setRole(e.target.value)} />

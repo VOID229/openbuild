@@ -90,5 +90,13 @@ export function nextIdle(lively: boolean, tracking = false): Step[] {
   return open[0]!.steps();
 }
 
+/**
+ * A plain bot's only routine: its eyes held open a natural while, then a blink (now and then two).
+ * Nothing else: no look, stare, move or face, so it stays just itself, blinking.
+ */
+export function nextBlink(): Step[] {
+  return [[null, rand(2000, 5000)], [Math.random() < 0.12 ? "blink2" : "blink", 300]];
+}
+
 /** Thinking (while typing): looking up a little, head cocked, its eyes narrowed to dashes (in CSS). */
 export const THINKING: Pose = { x: 0.12, y: -0.5, roll: -10 };
