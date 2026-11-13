@@ -1,12 +1,12 @@
 // The pi-claude-code bridge bots load (server/bots/claude-code) and Settings → Bots → Claude.
-import { expect, test } from "bun:test";
+import { expect, setSystemTime, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { budgetCacheMarkers, MAX_CACHE_MARKERS, rewriteInitialRequest } from "../server/bots/claude-code/claude-cli.ts";
 import claudeCodeExtension from "../server/bots/claude-code/index.ts";
 import type { NativeFrame } from "../server/bots/claude-code/native-types.ts";
-import { createClaudeCodeProvider } from "../server/bots/claude-code/provider.ts";
+import { createClaudeCodeProvider, KEEP_LOGIN_FAILED_CHECKS, KEEP_LOGIN_MS } from "../server/bots/claude-code/provider.ts";
 import { nativeToolUseId } from "../server/bots/claude-code/transcript.ts";
 import { allProfiles, providerId } from "../server/bots/claude.ts";
 import { spawnScript } from "./spawnScript";
@@ -164,6 +164,43 @@ test("a status check that fails to run keeps the login it last found; a logout s
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a login kept through failed status checks lapses after a few of them, or a few minutes", async () => {
+  const root = mkdtempSync(join(tmpdir(), "openbuild-claude-lapse-"));
+  try {
+    const command = join(root, "claude");
+    const mode = join(root, "mode");
+    writeFileSync(command, `#!/bin/sh\nif [ "$(cat "${mode}")" = ok ]; then echo '{"loggedIn":true,"subscriptionType":"max"}'; else exit 1; fi\n`);
+    chmodSync(command, 0o755);
+    const provider = createClaudeCodeProvider({ id: "claude-code", configDir: join(root, "config"), command });
+    const ctx = { env: async () => undefined, fileExists: async () => false };
+    const check = () => provider.auth.apiKey!.check!({ ctx, signal: new AbortController().signal } as any);
+
+    // A status check that keeps failing would keep the models listed, and a turn would fail at sign-in
+    // instead of moving to a fallback when its model is picked: only so many failures are covered.
+    writeFileSync(mode, "ok");
+    expect((await check())?.type).toBe("oauth");
+    writeFileSync(mode, "broken");
+    for (let i = 0; i < KEEP_LOGIN_FAILED_CHECKS; i++) expect((await check())?.type).toBe("oauth");
+    expect(await check()).toBeUndefined();
+    // The next one that finds the login starts over.
+    writeFileSync(mode, "ok");
+    expect((await check())?.type).toBe("oauth");
+
+    // And only for so long after the last good check.
+    writeFileSync(mode, "broken");
+    try {
+      setSystemTime(new Date(Date.now() + KEEP_LOGIN_MS - 1_000));
+      expect((await check())?.type).toBe("oauth");
+      setSystemTime(new Date(Date.now() + 2_000));
+      expect(await check()).toBeUndefined();
+    } finally {
+      setSystemTime();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test("the extension registers each provider once", () => {
   const registered: string[] = [];
