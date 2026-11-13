@@ -149,7 +149,8 @@ for (const kind of ["direct", "group"] as const) {
       expect(await page.gap()).toBeLessThan(1);
       await page.bots(REPLY(1));
       await page.bots(IDLE);
-      await page.settle();
+      // The reply opens its room over a moment, the chat going down with it.
+      await page.finished(".bots-messages");
       expect(await page.gap()).toBeLessThan(1);
     }, 60_000);
   });

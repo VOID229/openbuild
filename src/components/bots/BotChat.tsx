@@ -1471,6 +1471,41 @@ function putBack(scroller: HTMLElement, spot: Spot | undefined, edge: Edge) {
 /** How long rows out of view go on skipping rendering once the chat shows again: past the switch's motion. */
 const SKIP_AFTER_SHOWN_MS = 400;
 
+/** How long the room for something new from a bot takes to open, or the live rows' room to change, ms. */
+const GROW_MS = 320;
+const GROW_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
+
+/** Animates `el` from `from` px tall (its margins included, filled top down) to its own size, clipped as it opens. */
+function grow(el: HTMLElement, from = 0) {
+  const style = getComputedStyle(el);
+  const sizes = [parseFloat(style.marginTop) || 0, el.offsetHeight, parseFloat(style.marginBottom) || 0];
+  if (from >= sizes[0]! + sizes[1]! + sizes[2]!) return;
+  let left = from;
+  const start = sizes.map((size) => {
+    const part = Math.min(size, left);
+    left -= part;
+    return `${part}px`;
+  });
+  const end = sizes.map((size) => `${size}px`);
+  return clipWhile(el, el.animate([{ marginTop: start[0], height: start[1], marginBottom: start[2] }, { marginTop: end[0], height: end[1], marginBottom: end[2] }], { duration: GROW_MS, easing: GROW_EASE }));
+}
+
+/** Nothing spills out of `el` while `animation` changes its size. */
+function clipWhile(el: HTMLElement, animation: Animation) {
+  el.style.overflow = "clip";
+  const done = () => el.style.removeProperty("overflow");
+  animation.addEventListener("finish", done);
+  animation.addEventListener("cancel", done);
+  return animation;
+}
+
+/** What opens its room as it comes in, once the chat has been shown: a bot's new message, a new run of
+ *  its messages, a line of its activity, and the time over one after a pause. ("Seen" and reactions
+ *  take none: their line under each bubble is always there.) */
+const GROWS = ":scope > :is(.bm-group, .bm-event, .bm-events, .bm-divider), .bm-row";
+const fromBot = (item: Element | null): boolean =>
+  !!item && (item.matches(".bm-recv") || (item.matches(".bm-group") && !!item.querySelector(".bm-recv")) || (item.matches(".bm-divider") && fromBot(item.nextElementSibling)));
+
 /** `since`: messages after it are new, and animate in. */
 const Messages = memo(function Messages({ conversation, since, onReply }: { conversation: Conversation; since: number; onReply: (id: string) => void }) {
   const bots = useBots((s) => s.bots);
@@ -1504,6 +1539,15 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
   /** And the one at the top of the view, for opening the chat here again. */
   const top = useRef(left?.stick === false ? left.top : undefined);
   const [away, setAway] = useState(false);
+  /** The live rows at the end (bots at work, a bot's draft), and the room they keep: always one row's
+   *  worth, so a bot starting and stopping moves nothing. */
+  const live = useRef<HTMLDivElement>(null);
+  const liveRows = useRef<HTMLDivElement>(null);
+  /** How tall the live rows were last time the view was set, and the animation moving to a new height. */
+  const liveHeight = useRef(0);
+  const liveSlide = useRef<Animation>(undefined);
+  /** Everything that can open its room, once it's been seen, so only what's new does. */
+  const known = useRef(new WeakSet<Element>());
   const [loadingOlder, setLoadingOlder] = useState(false);
   const anchor = useRef<HTMLElement | null>(null);
   const [picker, setPicker] = useState<Picker>();
@@ -1605,9 +1649,48 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
   // up from the bottom. Opened again, it's where it was left.
   const count = conversation.messages.length + typing.length + draftCount + working.length;
   const opened = useRef(false);
+  /**
+   * The room for what's new from a bot opens over a moment instead of all at once, so the chat glides
+   * up (or, scrolled up, nothing in view moves). The live rows' room changes the same way, and the room
+   * a bot's draft or work row gives up goes straight to its message, so the hand-over moves nothing.
+   */
+  const makeRoom = (animate: boolean) => {
+    const rows = liveRows.current;
+    const box = live.current;
+    if (!inner.current || !rows || !box) return;
+    // Hidden (behind Build or a thread), nothing has a height: what came in meanwhile is just there.
+    if (!scroller.current?.clientHeight) {
+      for (const item of inner.current.querySelectorAll(GROWS)) known.current.add(item);
+      return;
+    }
+    const motion = animate && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const shown = liveSlide.current?.playState === "running" ? box.offsetHeight : liveHeight.current;
+    liveSlide.current?.cancel();
+    liveSlide.current = undefined;
+    const height = rows.offsetHeight;
+    liveHeight.current = height;
+    const fresh: HTMLElement[] = [];
+    for (const item of inner.current.querySelectorAll<HTMLElement>(GROWS)) {
+      if (known.current.has(item)) continue;
+      known.current.add(item);
+      if (!motion || box.contains(item) || !item.offsetParent) continue;
+      // Inside something opening already.
+      if (fresh.some((f) => f.contains(item))) continue;
+      if (fromBot(item)) fresh.push(item);
+    }
+    if (!motion) return;
+    // The room the live rows give up goes to the message nearest them, which opens from there.
+    const last = fresh.at(-1);
+    const handed = last ? Math.max(0, shown - height) : 0;
+    for (const item of fresh) grow(item, item === last ? handed : 0);
+    // Whatever's left, the live rows' own room takes in its stride.
+    const from = shown - handed;
+    if (Math.abs(from - height) >= 1) liveSlide.current = clipWhile(box, box.animate([{ height: `${from}px` }, { height: `${height}px` }], { duration: GROW_MS, easing: GROW_EASE }));
+  };
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
+    makeRoom(opened.current);
     if (last?.author === "me" && last.id !== lastSeen.current && atEnd.current) stick.current = true;
     lastSeen.current = last?.id;
     if (!opened.current) {
@@ -1640,6 +1723,8 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
     const observer = new ResizeObserver(() => {
       if (!el.clientHeight) return;
       laidOut = true;
+      // A draft growing as it's written: the live rows' room goes with it.
+      if (liveSlide.current?.playState !== "running" && liveRows.current) liveHeight.current = liveRows.current.offsetHeight;
       const changed = el.clientHeight !== height;
       const resized = window.innerHeight !== windowHeight;
       height = el.clientHeight;
@@ -1802,7 +1887,11 @@ const Messages = memo(function Messages({ conversation, since, onReply }: { conv
           );
         })}
         {setup && primary && <PiSetupNotice setup={setup} bot={primary} />}
-        <Live conversation={conversation} working={working} typing={typing} bots={bots} />
+        <div ref={live} className="bm-live">
+          <div ref={liveRows} className="bm-live-rows">
+            <Live conversation={conversation} working={working} typing={typing} bots={bots} />
+          </div>
+        </div>
         <div ref={spacer} className="bm-slack" aria-hidden />
       </div>
       {away && (

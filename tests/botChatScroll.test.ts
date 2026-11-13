@@ -119,7 +119,8 @@ describe.skipIf(!browser)("switching OpenBots chats", () => {
     const page = await open();
     // A reply quoting an old message, at the bottom; following the quote scrolls up to it.
     await arrive(page, "a", { replyTo: "a-3" });
-    await page.settle();
+    // Once its room has opened (a bot's message eases in).
+    await page.finished(".bots-messages");
     await page.click(".bm-row:last-of-type .bm-quote");
     await Bun.sleep(800);
     expect(await gap(page)).toBeGreaterThan(400);
@@ -195,7 +196,8 @@ describe.skipIf(!browser)("switching OpenBots chats", () => {
     // An image that loads well after the chat opened.
     imagesHeld = new Promise((r) => (releaseImages = r));
     await arrive(page, "b", { images: [`${server!.url.href}slow.png`] });
-    await page.settle();
+    // A bot's message opens its room over a moment, the chat following it down all the way.
+    await page.finished(".bots-messages");
     expect(await gap(page)).toBeLessThan(1);
     releaseImages();
     await page.until("[...document.querySelectorAll('.bm-image img')].every((i) => i.complete && i.naturalWidth > 0)");

@@ -729,11 +729,14 @@
     text-align: left;
   }
 
+  /* Two lines' room even when there's nothing under the name (a bot alone, at rest), so the name stays
+     where it is as its work comes and goes underneath. */
   .bots-head-text {
     display: flex;
     flex-direction: column;
     gap: 0;
     min-width: 0;
+    min-height: calc(16.5px * 1.2 + 12.5px * 1.3);
   }
 
   .bots-head-name {
@@ -772,6 +775,7 @@
   }
 
   .bots-messages-inner {
+    --bm-live-slot: 42px;
     padding: calc(var(--bots-head-h) + 6px) 0 10px;
   }
 

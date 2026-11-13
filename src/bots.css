@@ -1718,12 +1718,14 @@
 }
 
 .bots-messages-inner {
+  /* The room at the end kept for a bot at work (.bm-live-rows): one working row, margin and all. */
+  --bm-live-slot: 44px;
   display: flex;
   flex-direction: column;
   width: 100%;
   max-width: var(--bm-w);
   margin: 0 auto;
-  padding: 16px 0 24px;
+  padding: 16px 0 10px;
 }
 
 /* A group: one author's messages in a row, under their name (groups) with their face at the bottom. */
@@ -2755,6 +2757,15 @@
   40% {
     box-shadow: 0 0 0 2px var(--focus);
   }
+}
+
+/* The live rows at the end of the chat (bots at work, a bot's draft) always keep one working row's
+   room, so a bot starting or stopping moves nothing; BotChat eases any other change in their height,
+   and hands the room they give up to the message that replaces them. */
+.bm-live-rows {
+  display: flex;
+  flex-direction: column;
+  min-height: var(--bm-live-slot);
 }
 
 /* A bot at work: its mascot fidgeting beside what it's doing. */
